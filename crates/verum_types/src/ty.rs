@@ -2488,11 +2488,25 @@ impl Type {
     /// Get the free type variables in this type
     pub fn free_vars(&self) -> Set<TypeVar> {
         let mut vars = Set::new();
-        self.collect_free_vars(&mut vars);
+        self.collect_type_variables(&mut vars, false, None)
+            .expect("unbounded variable collection has no depth limit");
         vars
     }
 
-    fn collect_free_vars(&self, vars: &mut Set<TypeVar>) {
+    /// Shared exhaustive traversal for free-variable queries and fresh binder allocation.
+    fn collect_type_variables(
+        &self,
+        vars: &mut Set<TypeVar>,
+        include_bound: bool,
+        remaining_depth: Option<usize>,
+    ) -> Result<(), Text> {
+        let remaining_depth = remaining_depth
+            .map(|remaining| {
+                remaining.checked_sub(1).ok_or_else(|| {
+                    Text::from("type substitution exceeds its structural depth budget")
+                })
+            })
+            .transpose()?;
         match self {
             Type::Var(v) => {
                 vars.insert(*v);
@@ -2503,26 +2517,26 @@ impl Type {
                 ..
             } => {
                 for param in params {
-                    param.collect_free_vars(vars);
+                    param.collect_type_variables(vars, include_bound, remaining_depth)?;
                 }
-                return_type.collect_free_vars(vars);
+                return_type.collect_type_variables(vars, include_bound, remaining_depth)?;
             }
             Type::Tuple(types) => {
                 for ty in types {
-                    ty.collect_free_vars(vars);
+                    ty.collect_type_variables(vars, include_bound, remaining_depth)?;
                 }
             }
             Type::Array { element, .. } => {
-                element.collect_free_vars(vars);
+                element.collect_type_variables(vars, include_bound, remaining_depth)?;
             }
             Type::Record(fields) => {
                 for ty in fields.values() {
-                    ty.collect_free_vars(vars);
+                    ty.collect_type_variables(vars, include_bound, remaining_depth)?;
                 }
             }
             Type::Variant(variants) => {
                 for ty in variants.values() {
-                    ty.collect_free_vars(vars);
+                    ty.collect_type_variables(vars, include_bound, remaining_depth)?;
                 }
             }
             Type::Reference { inner, .. }
@@ -2531,17 +2545,21 @@ impl Type {
             | Type::Ownership { inner, .. }
             | Type::Pointer { inner, .. }
             | Type::VolatilePointer { inner, .. } => {
-                inner.collect_free_vars(vars);
+                inner.collect_type_variables(vars, include_bound, remaining_depth)?;
             }
             Type::Refined { base, .. } => {
                 // Note: We don't track free vars in predicates
                 // as they're value-level, not type-level
-                base.collect_free_vars(vars);
+                base.collect_type_variables(vars, include_bound, remaining_depth)?;
             }
             Type::Exists { var, body } => {
                 let mut body_vars = Set::new();
-                body.collect_free_vars(&mut body_vars);
-                body_vars.remove(var);
+                body.collect_type_variables(&mut body_vars, include_bound, remaining_depth)?;
+                if include_bound {
+                    body_vars.insert(*var);
+                } else {
+                    body_vars.remove(var);
+                }
                 for v in body_vars {
                     vars.insert(v);
                 }
@@ -2551,9 +2569,13 @@ impl Type {
                 body,
             } => {
                 let mut body_vars = Set::new();
-                body.collect_free_vars(&mut body_vars);
+                body.collect_type_variables(&mut body_vars, include_bound, remaining_depth)?;
                 for v in bound_vars {
-                    body_vars.remove(v);
+                    if include_bound {
+                        body_vars.insert(*v);
+                    } else {
+                        body_vars.remove(v);
+                    }
                 }
                 for v in body_vars {
                     vars.insert(v);
@@ -2561,36 +2583,36 @@ impl Type {
             }
             Type::Named { args, .. } => {
                 for arg in args {
-                    arg.collect_free_vars(vars);
+                    arg.collect_type_variables(vars, include_bound, remaining_depth)?;
                 }
             }
             Type::Generic { args, .. } => {
                 for arg in args {
-                    arg.collect_free_vars(vars);
+                    arg.collect_type_variables(vars, include_bound, remaining_depth)?;
                 }
             }
             Type::Meta { ty, .. } => {
                 // Meta parameters can contain type variables in their base type
-                ty.collect_free_vars(vars);
+                ty.collect_type_variables(vars, include_bound, remaining_depth)?;
             }
             Type::Future { output } => {
-                output.collect_free_vars(vars);
+                output.collect_type_variables(vars, include_bound, remaining_depth)?;
             }
             Type::Generator {
                 yield_ty,
                 return_ty,
             } => {
-                yield_ty.collect_free_vars(vars);
-                return_ty.collect_free_vars(vars);
+                yield_ty.collect_type_variables(vars, include_bound, remaining_depth)?;
+                return_ty.collect_type_variables(vars, include_bound, remaining_depth)?;
             }
             Type::Tensor { element, .. } => {
                 // Collect free vars from element type
                 // Shape dimensions are compile-time constants (no type vars)
-                element.collect_free_vars(vars);
+                element.collect_type_variables(vars, include_bound, remaining_depth)?;
             }
             Type::GenRef { inner } => {
                 // GenRef wraps a type, so collect from inner type
-                inner.collect_free_vars(vars);
+                inner.collect_type_variables(vars, include_bound, remaining_depth)?;
             }
             Type::TypeConstructor { .. } => {
                 // Type constructors don't contain type variables themselves
@@ -2598,19 +2620,19 @@ impl Type {
             }
             Type::TypeApp { constructor, args } => {
                 // Collect from both constructor and arguments
-                constructor.collect_free_vars(vars);
+                constructor.collect_type_variables(vars, include_bound, remaining_depth)?;
                 for arg in args {
-                    arg.collect_free_vars(vars);
+                    arg.collect_type_variables(vars, include_bound, remaining_depth)?;
                 }
             }
             Type::PathType { space, .. } => {
                 // Collect type vars from the space type
                 // CubicalTerm endpoints are value-level, no type vars
-                space.collect_free_vars(vars);
+                space.collect_type_variables(vars, include_bound, remaining_depth)?;
             }
             Type::Partial { element_type, .. } => {
                 // Collect type vars from the element type
-                element_type.collect_free_vars(vars);
+                element_type.collect_type_variables(vars, include_bound, remaining_depth)?;
             }
             Type::Interval => {
                 // Interval is a primitive type, no free vars
@@ -2632,11 +2654,11 @@ impl Type {
             // any of them from a method of `implement<T> List<T>` pinned that
             // block's `T` for every later method in the block.
             Type::Slice { element } => {
-                element.collect_free_vars(vars);
+                element.collect_type_variables(vars, include_bound, remaining_depth)?;
             }
             Type::ExtensibleRecord { fields, row_var } => {
                 for ty in fields.values() {
-                    ty.collect_free_vars(vars);
+                    ty.collect_type_variables(vars, include_bound, remaining_depth)?;
                 }
                 if let Some(row) = row_var {
                     vars.insert(*row);
@@ -2646,7 +2668,7 @@ impl Type {
                 // `bounds` are protocol NAMES; the associated-type bindings
                 // are real types and can mention variables.
                 for ty in bindings.values() {
-                    ty.collect_free_vars(vars);
+                    ty.collect_type_variables(vars, include_bound, remaining_depth)?;
                 }
             }
             Type::Pi {
@@ -2654,44 +2676,42 @@ impl Type {
                 return_type,
                 ..
             } => {
-                param_type.collect_free_vars(vars);
-                return_type.collect_free_vars(vars);
+                param_type.collect_type_variables(vars, include_bound, remaining_depth)?;
+                return_type.collect_type_variables(vars, include_bound, remaining_depth)?;
             }
             Type::Sigma {
-                fst_type,
-                snd_type,
-                ..
+                fst_type, snd_type, ..
             } => {
-                fst_type.collect_free_vars(vars);
-                snd_type.collect_free_vars(vars);
+                fst_type.collect_type_variables(vars, include_bound, remaining_depth)?;
+                snd_type.collect_type_variables(vars, include_bound, remaining_depth)?;
             }
             Type::Eq { ty, .. } => {
                 // The two sides are VALUE-level terms (`EqTerm`), same reason
                 // `Refined` skips its predicate; the carried type is not.
-                ty.collect_free_vars(vars);
+                ty.collect_type_variables(vars, include_bound, remaining_depth)?;
             }
             Type::Inductive {
                 params, indices, ..
             } => {
                 for (_, ty) in params.iter().chain(indices.iter()) {
-                    ty.collect_free_vars(vars);
+                    ty.collect_type_variables(vars, include_bound, remaining_depth)?;
                 }
             }
             Type::Coinductive { params, .. } => {
                 for (_, ty) in params.iter() {
-                    ty.collect_free_vars(vars);
+                    ty.collect_type_variables(vars, include_bound, remaining_depth)?;
                 }
             }
             Type::HigherInductive { params, .. } => {
                 for (_, ty) in params.iter() {
-                    ty.collect_free_vars(vars);
+                    ty.collect_type_variables(vars, include_bound, remaining_depth)?;
                 }
             }
             Type::Quantified { inner, .. } => {
-                inner.collect_free_vars(vars);
+                inner.collect_type_variables(vars, include_bound, remaining_depth)?;
             }
             Type::CapabilityRestricted { base, .. } => {
-                base.collect_free_vars(vars);
+                base.collect_type_variables(vars, include_bound, remaining_depth)?;
             }
 
             // ── Leaves: no component that could hold a type variable ─────────
@@ -2712,6 +2732,7 @@ impl Type {
             | Type::Prop
             | Type::Placeholder { .. } => {}
         }
+        Ok(())
     }
 
     /// Apply an already validated substitution at an internal invariant boundary.
@@ -2726,6 +2747,66 @@ impl Type {
     pub fn try_apply_subst(&self, subst: &Substitution) -> Result<Type, Text> {
         const MAX_SUBST_DEPTH: usize = 30;
         self.try_apply_subst_with_depth(subst, 0, MAX_SUBST_DEPTH)
+    }
+
+    /// Restrict a simultaneous substitution to a binder's scope. Only a free
+    /// variable actually replaced in this body can cause capture. Renaming is
+    /// added to the same substitution, so replacement ranges are not rewritten.
+    fn substitution_under_binders(
+        &self,
+        binders: &[TypeVar],
+        substitution: &Substitution,
+        remaining_depth: usize,
+    ) -> Result<(List<TypeVar>, Substitution), Text> {
+        let mut scoped = substitution.clone();
+        for binder in binders {
+            scoped.shift_remove(binder);
+        }
+        if binders.is_empty() || scoped.types.is_empty() {
+            return Ok((binders.iter().copied().collect(), scoped));
+        }
+        let mut free_body = Set::new();
+        self.collect_type_variables(&mut free_body, false, Some(remaining_depth))?;
+        let mut free_ranges = Set::new();
+        for (variable, replacement) in &scoped {
+            if free_body.contains(variable) {
+                replacement.collect_type_variables(
+                    &mut free_ranges,
+                    false,
+                    Some(remaining_depth),
+                )?;
+            }
+        }
+        if !binders.iter().any(|binder| free_ranges.contains(binder)) {
+            return Ok((binders.iter().copied().collect(), scoped));
+        }
+
+        // TypeVar::with_id/new can introduce IDs ahead of the fresh counter.
+        // Avoid nested bound IDs too; a fresh outer binder must not shadow them.
+        let mut occupied = Set::new();
+        self.collect_type_variables(&mut occupied, true, Some(remaining_depth))?;
+        occupied.extend(binders.iter().copied());
+        occupied.extend(substitution.keys().copied());
+        for replacement in substitution.values() {
+            replacement.collect_type_variables(&mut occupied, true, Some(remaining_depth))?;
+        }
+        let mut renamed = List::new();
+        for binder in binders {
+            let replacement = if free_ranges.contains(binder) {
+                let fresh = loop {
+                    let candidate = TypeVar::fresh();
+                    if occupied.insert(candidate) {
+                        break candidate;
+                    }
+                };
+                scoped.insert(*binder, Type::Var(fresh));
+                fresh
+            } else {
+                *binder
+            };
+            renamed.push(replacement);
+        }
+        Ok((renamed, scoped))
     }
 
     fn try_apply_subst_with_depth(&self, subst: &Substitution, depth: usize, max_depth: usize) -> Result<Type, Text> {
@@ -2832,20 +2913,20 @@ impl Type {
                     .collect::<Result<_, Text>>()?,
             },
             Type::Exists { var, body } => {
-                let mut subst = subst.clone();
-                subst.shift_remove(var);
+                let (vars, subst) = body.substitution_under_binders(
+                    std::slice::from_ref(var), subst, max_depth - next_depth,
+                )?;
                 Type::Exists {
-                    var: *var,
+                    var: vars[0],
                     body: Box::new(body.try_apply_subst_with_depth(&subst, next_depth, max_depth)?),
                 }
             }
             Type::Forall { vars, body } => {
-                let mut subst = subst.clone();
-                for v in vars {
-                    subst.shift_remove(v);
-                }
+                let (vars, subst) = body.substitution_under_binders(
+                    vars.as_slice(), subst, max_depth - next_depth,
+                )?;
                 Type::Forall {
-                    vars: vars.clone(),
+                    vars,
                     body: Box::new(body.try_apply_subst_with_depth(&subst, next_depth, max_depth)?),
                 }
             }
@@ -3133,7 +3214,7 @@ impl Type {
                     .collect::<Result<_, Text>>()?,
             },
 
-            // ExtensibleRecord - substitute into fields, keep row variable
+            // A variable-to-variable substitution also renames a row binder.
             Type::ExtensibleRecord { fields, row_var } => {
                 let new_fields = fields
                     .iter()
@@ -3141,7 +3222,10 @@ impl Type {
                     .collect::<Result<_, Text>>()?;
                 Type::ExtensibleRecord {
                     fields: new_fields,
-                    row_var: *row_var,
+                    row_var: row_var.map(|variable| match subst.get(&variable) {
+                        Some(Type::Var(replacement)) => *replacement,
+                        _ => variable,
+                    }),
                 }
             }
 
