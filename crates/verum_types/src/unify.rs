@@ -1899,16 +1899,23 @@ impl Unifier {
                 expected: t2.to_text(), actual: t1.to_text(), span,
             }),
 
-            // Never type (bottom type) unifies with any type
-            // This allows diverging control flow (return, break, continue) to work in any context
-            (Never, _) | (_, Never) => Ok(Substitution::new()),
+            // Equality is not bottom elimination. Diverging expressions may be
+            // checked against any expected type, but no inhabited type equals
+            // Never (including inside an invariant type argument).
+            (Never, Never) => Ok(Substitution::new()),
+            (Var(v), Never) | (Never, Var(v)) => self.bind_var(*v, &Never, span),
+            (Never, _) | (_, Never) => Err(TypeError::Mismatch {
+                expected: t2.to_text(), actual: t1.to_text(), span,
+            }),
 
             // Unknown type (top type) - any value can be assigned to unknown
             // Unknown is a supertype of all types, so T -> Unknown is valid
             // But Unknown -> T requires explicit narrowing (is-check)
             // In unification context, we allow it to avoid false positives
             // since the type checker handles narrowing elsewhere
-            (Unknown, other) | (other, Unknown) if !other.contains_capability_restriction() => Ok(Substitution::new()),
+            (Unknown, other) | (other, Unknown)
+                if !other.contains_capability_restriction()
+                    && !self.normalize_aliases(other).is_never() => Ok(Substitution::new()),
 
             // Same types
             (Unit, Unit)

@@ -1271,23 +1271,10 @@ impl Type {
         Type::Never
     }
 
-    /// Check if this type is the Never type (bottom type).
-    ///
-    /// Handles both Type::Never and Type::Named("Never") which can occur
-    /// when the Never type is imported from core.base.panic.
+    /// Recognize the primitive bottom type. Aliases require resolution by
+    /// their declaration owner; a nominal type's spelling is not evidence.
     pub fn is_never(&self) -> bool {
-        match self {
-            Type::Never => true,
-            Type::Named { path, args } if args.is_empty() => {
-                // Check if the path is just "Never"
-                if let Some(verum_ast::ty::PathSegment::Name(ident)) = path.segments.last() {
-                    ident.name.as_str() == "Never"
-                } else {
-                    false
-                }
-            }
-            _ => false,
-        }
+        matches!(self, Type::Never)
     }
 
     /// Returns the display name for primitive type variants.

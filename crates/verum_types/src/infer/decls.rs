@@ -8377,28 +8377,9 @@ impl TypeChecker {
         Some(format!("protocol `{}`, implementation `{}`", ta.as_str(), tb.as_str()))
     }
 
-    /// Check if a type represents the Never (bottom) type.
-    ///
-    /// The Never type can be represented in two ways:
-    /// 1. Type::Never - the primitive never type
-    /// 2. Type::Named { path: "Never", ... } - a named reference to Never
-    ///
-    /// This function handles both cases for proper subtyping behavior.
-    /// Type lattice: Never is bottom (subtype of all), Unknown is top (supertype of all)
+    /// Resolve declaration-owned aliases before recognizing bottom.
     pub(super) fn is_never_type(&self, ty: &Type) -> bool {
-        match ty {
-            Type::Never => true,
-            Type::Named { path, args } if args.is_empty() => {
-                // Check if the name is "Never"
-                if let Some(segment) = path.segments.last() {
-                    if let verum_ast::ty::PathSegment::Name(ident) = segment {
-                        return ident.name.as_str() == "Never";
-                    }
-                }
-                false
-            }
-            _ => false,
-        }
+        self.normalize_type(&self.unifier.apply(ty)).is_never()
     }
 
     /// Check if a type is a dependent type (has type indices).

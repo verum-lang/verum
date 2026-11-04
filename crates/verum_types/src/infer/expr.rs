@@ -1875,6 +1875,7 @@ impl TypeChecker {
                     // No `else`: falling through IS the second alternative,
                     // and it consumed nothing beyond the condition.
                     self.merge_if_alternatives(affine_then, None, &affine_at_if);
+                    self.unifier.unify(&Type::Unit, expected, expr.span)?;
                 }
 
                 Ok(InferResult::new(expected.clone()))
@@ -2480,8 +2481,7 @@ impl TypeChecker {
         // This enables: let x: Int = panic("...") and closure bodies that diverge.
         // Type lattice: Never is the bottom type, subtype of all types (Never <: T for all T)
         let resolved_result_ty = self.unifier.apply(&result.ty);
-        // Check for Never type (handles both Type::Never and Named("Never"))
-        if resolved_result_ty.is_never() {
+        if self.is_never_type(&resolved_result_ty) {
             return Ok(InferResult::new(expected.clone()));
         }
 
@@ -5388,11 +5388,18 @@ impl TypeChecker {
                         self.merge_if_alternatives(affine_then, affine_else, &affine_at_if);
                     }
 
-                    // Unify branch types
-                    let span = expr.span;
-                    self.unifier.unify(&then_result.ty, &else_result.ty, span)?;
-
-                    Ok(InferResult::new(then_result.ty))
+                    // Only reachable branches contribute a value to the join.
+                    // In particular a diverging first branch cannot conceal an
+                    // incompatible value produced by the other branch.
+                    let result_ty = if self.is_never_type(&then_result.ty) {
+                        else_result.ty
+                    } else if self.is_never_type(&else_result.ty) {
+                        then_result.ty
+                    } else {
+                        self.unifier.unify(&then_result.ty, &else_result.ty, expr.span)?;
+                        self.unifier.apply(&then_result.ty)
+                    };
+                    Ok(InferResult::new(result_ty))
     }
 
     /// Type-check a `while` loop.

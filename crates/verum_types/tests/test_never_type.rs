@@ -12,55 +12,57 @@
     useless_ptr_null_checks,
     unused_assignments
 )]
-//! Test for Never type unification
-//!
-//! This test verifies that the Never type (!) properly unifies with all types,
-//! which is necessary for early return, break, and continue statements.
+//! Bottom elimination is a subtype rule, not symmetric type equality.
 
 use verum_ast::span::Span;
 use verum_types::ty::Type;
 use verum_types::unify::Unifier;
+use verum_types::subtype::Subtyping;
 
 fn span() -> Span {
     Span::default()
 }
 
 #[test]
-fn test_never_unifies_with_int() {
+fn test_never_is_subtype_of_int_but_not_equal() {
     let mut unifier = Unifier::new();
     let never = Type::never();
     let int = Type::int();
 
-    // Never should unify with Int
+    // Equality cannot coerce bottom.
     let result = unifier.unify(&never, &int, span());
-    assert!(result.is_ok(), "Never should unify with Int");
+    assert!(result.is_err(), "bottom is not equal to Int");
+    assert!(Subtyping::new().is_subtype(&never, &int));
+    assert!(!Subtyping::new().is_subtype(&int, &never));
 
-    // Int should unify with Never
+    // The reverse equality cannot introduce bottom.
     let mut unifier2 = Unifier::new();
     let result2 = unifier2.unify(&int, &never, span());
-    assert!(result2.is_ok(), "Int should unify with Never");
+    assert!(result2.is_err(), "Int cannot manufacture bottom");
 }
 
 #[test]
-fn test_never_unifies_with_bool() {
+fn test_never_is_subtype_of_bool_but_not_equal() {
     let mut unifier = Unifier::new();
     let never = Type::never();
     let bool = Type::bool();
 
-    // Never should unify with Bool
+    // Bottom may be eliminated into Bool, without equating the types.
     let result = unifier.unify(&never, &bool, span());
-    assert!(result.is_ok(), "Never should unify with Bool");
+    assert!(result.is_err());
+    assert!(Subtyping::new().is_subtype(&never, &bool));
 }
 
 #[test]
-fn test_never_unifies_with_text() {
+fn test_never_is_subtype_of_text_but_not_equal() {
     let mut unifier = Unifier::new();
     let never = Type::never();
     let text = Type::text();
 
-    // Never should unify with Text
+    // Bottom may be eliminated into Text, without equating the types.
     let result = unifier.unify(&never, &text, span());
-    assert!(result.is_ok(), "Never should unify with Text");
+    assert!(result.is_err());
+    assert!(Subtyping::new().is_subtype(&never, &text));
 }
 
 #[test]
@@ -75,14 +77,15 @@ fn test_never_unifies_with_never() {
 }
 
 #[test]
-fn test_never_unifies_with_unit() {
+fn test_never_is_subtype_of_unit_but_not_equal() {
     let mut unifier = Unifier::new();
     let never = Type::never();
     let unit = Type::unit();
 
-    // Never should unify with Unit (important for if statements with no else)
+    // A diverging path coerces to Unit; a fallthrough Unit path is inhabited.
     let result = unifier.unify(&never, &unit, span());
-    assert!(result.is_ok(), "Never should unify with Unit");
+    assert!(result.is_err());
+    assert!(Subtyping::new().is_subtype(&never, &unit));
 }
 
 #[test]
