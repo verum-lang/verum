@@ -24,14 +24,17 @@ pub(crate) fn argument_satisfies_domain(
     let actual = domain(actual, known);
     if expected.base() != actual.base() { return false; }
     if let ValueTerm::Constant(value) = value {
-        let mut current = &expected;
-        while let Type::Refined { base, predicate } = current {
-            let mut evaluator = crate::const_eval::ConstEvaluator::new();
-            evaluator.bind(predicate.bound_variable(), value.clone());
-            if predicate.binds_subject("self") { evaluator.bind("self", value.clone()); }
-            if !matches!(evaluator.eval(&predicate.predicate),
-                Ok(verum_common::ConstValue::Bool(true))) { return false; }
-            current = base;
+        if !constant_in_carrier(value, actual.base()) { return false; }
+        for domain in [&actual, &expected] {
+            let mut current = domain;
+            while let Type::Refined { base, predicate } = current {
+                let mut evaluator = crate::const_eval::ConstEvaluator::new();
+                evaluator.bind(predicate.bound_variable(), value.clone());
+                if predicate.binds_subject("self") { evaluator.bind("self", value.clone()); }
+                if !matches!(evaluator.eval(&predicate.predicate),
+                    Ok(verum_common::ConstValue::Bool(true))) { return false; }
+                current = base;
+            }
         }
         true
     } else {
@@ -52,6 +55,51 @@ pub(crate) fn argument_satisfies_domain(
             required_domain = base;
         }
         true
+    }
+}
+
+/// A claimed carrier is not evidence about the payload. Integer ranges and
+/// primitive aliases come from the language's common numeric authority.
+fn constant_in_carrier(value: &verum_common::ConstValue, carrier: &Type) -> bool {
+    use verum_common::{ConstValue, well_known_types::type_names};
+    match (value, carrier) {
+        (ConstValue::Unit, Type::Unit)
+        | (ConstValue::Bool(_), Type::Bool)
+        | (ConstValue::Char(_), Type::Char)
+        | (ConstValue::Text(_), Type::Text)
+        | (ConstValue::Float(_), Type::Float) => return true,
+        _ => {},
+    }
+    let name = match carrier {
+        Type::Int => type_names::INT,
+        Type::Named { path, args } if args.is_empty() => {
+            let Some(name) = path.as_ident() else { return false; };
+            name.as_str()
+        }
+        _ => return false,
+    };
+    match value {
+        ConstValue::Int(value) if type_names::is_signed_integer_type(name) => {
+            match (type_names::integer_limit(name, "MIN"), type_names::integer_limit(name, "MAX")) {
+                (Some(min), Some(max)) => (min..=max).contains(value),
+                _ => false,
+            }
+        }
+        ConstValue::UInt(value) if type_names::is_unsigned_integer_type(name) => {
+            match type_names::numeric_bit_width(name) {
+                Some(128) => true,
+                Some(bits) if bits < 128 => *value < (1_u128 << bits),
+                _ => false,
+            }
+        }
+        ConstValue::Float(value) if type_names::is_float_type(name) => {
+            match type_names::numeric_bit_width(name) {
+                Some(64) => true,
+                Some(32) => (f64::from(*value as f32)).to_bits() == value.to_bits(),
+                _ => false,
+            }
+        }
+        _ => false,
     }
 }
 
