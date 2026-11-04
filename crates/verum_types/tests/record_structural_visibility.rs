@@ -429,6 +429,36 @@ macro_rules! conversion_controls {
             }
 
             #[test]
+            fn public_records_and_callback_contracts_compose_in_aggregate_conversions() {
+                for body in [
+                    "fn probe(value: (Open, fn() -> Int)) -> ({ body: Int, marker: Int }, fn() -> Int) { value }",
+                    "fn probe(value: fn() -> (Open, Int)) -> fn() -> ({ body: Int, marker: Int }, Int) { value }",
+                    "fn probe(value: Carrier<(Open, fn() -> Int)>) -> Carrier<({ body: Int, marker: Int }, fn() -> Int)> { value }",
+                    "fn probe(value: &{ packet: Open, callback: fn() -> Int }) -> &{ packet: { body: Int, marker: Int }, callback: fn() -> Int } { value }",
+                ] {
+                    assert_allowed($input, body);
+                }
+            }
+
+            #[test]
+            fn structural_conversion_cannot_strengthen_nested_callback_contracts() {
+                for body in [
+                    "fn probe(value: (Open, async fn() -> Int)) -> ({ body: Int, marker: Int }, fn() -> Int) { value }",
+                    "fn probe(value: Carrier<(Open, async fn() -> Int)>) -> Carrier<({ body: Int, marker: Int }, fn() -> Int)> { value }",
+                    "fn probe(value: &{ packet: Open, callback: async fn() -> Int }) -> &{ packet: { body: Int, marker: Int }, callback: fn() -> Int } { value }",
+                    "fn probe(value: &mut fn() -> Int) -> &mut async fn() -> Int { value }",
+                ] {
+                    for reverse in [false, true] {
+                        let errors = check($input, reverse, body);
+                        assert!(errors.mismatches.iter().any(|(actual, expected)|
+                            (actual.contains("async fn") && expected.contains("fn("))
+                                || (actual.contains("fn(") && expected.contains("async fn"))),
+                            "{:?}, reverse={reverse}: callback contract was lost: {body}\n{errors:?}", $input);
+                    }
+                }
+            }
+
+            #[test]
             fn explicit_private_to_structural_cast_remains_unsupported() {
                 assert_invalid_cast($input, "fn probe(value: Secret) -> Int { let fields = value as { body: Int, marker: Int }; fields.body }");
             }

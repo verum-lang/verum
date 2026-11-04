@@ -1,4 +1,4 @@
-//! Authorize record fields before nominal declarations become structural maps.
+//! Authorize declaration and callable contracts before value conversion.
 
 use super::TypeChecker;
 use crate::core_metadata::TypeDescriptorKind;
@@ -236,6 +236,10 @@ impl TypeChecker {
     /// map. Only aliases, projections and reference/ownership wrappers are
     /// transparent here; declarations remain available to the policy lookup.
     pub(super) fn record_conversion_head(&self, ty: &Type) -> Type {
+        self.value_conversion_head(ty, true)
+    }
+
+    fn value_conversion_head(&self, ty: &Type, dereference: bool) -> Type {
         let mut current = self.unifier.apply(ty);
         let mut visited: List<Type> = List::new();
         for _ in 0..64 {
@@ -252,7 +256,9 @@ impl TypeChecker {
                 Type::Reference { inner, .. }
                 | Type::CheckedReference { inner, .. }
                 | Type::UnsafeReference { inner, .. }
-                | Type::Ownership { inner, .. } => {
+                | Type::Ownership { inner, .. }
+                    if dereference =>
+                {
                     current = (**inner).clone();
                     continue;
                 }
@@ -285,27 +291,28 @@ impl TypeChecker {
         }
     }
 
-    /// A type conversion can expose fields or construct a nominal value even
-    /// when no field expression or record literal appears in the source.
-    /// Authorize that change before unification forgets the declaration.
-    pub(super) fn check_record_conversion_visibility(
+    /// A conversion may expose a nominal field or strengthen a nested callable
+    /// contract without a field expression or call in the source. Check both
+    /// obligations before unification; success here does not establish value
+    /// compatibility. The ordinary conversion relation still has to succeed.
+    pub(super) fn check_value_conversion_obligations(
         &self,
         actual: &Type,
         expected: &Type,
         span: Span,
     ) -> Result<()> {
-        self.check_record_conversion_inner(actual, expected, span, &mut List::new())
+        self.check_value_conversion_inner(actual, expected, span, &mut List::new())
     }
 
-    fn check_record_conversion_inner(
+    fn check_value_conversion_inner(
         &self,
         actual: &Type,
         expected: &Type,
         span: Span,
         visited: &mut List<(Type, Type)>,
     ) -> Result<()> {
-        let actual = self.record_conversion_head(actual);
-        let expected = self.record_conversion_head(expected);
+        let actual = self.value_conversion_head(actual, false);
+        let expected = self.value_conversion_head(expected, false);
         // Transferring the original nominal value grants no field access.
         if actual == expected || actual.is_never() {
             return Ok(());
@@ -317,7 +324,7 @@ impl TypeChecker {
         if visited.len() >= 64 {
             return Err(TypeError::OtherWithCode {
                 code: "E103".into(),
-                msg: "Record conversion visibility exceeds the supported nesting depth".into(),
+                msg: "Value conversion obligations exceed the supported nesting depth".into(),
             });
         }
         visited.push(pair);
@@ -330,7 +337,7 @@ impl TypeChecker {
             ) {
                 if from == to && from_args.len() == to_args.len() {
                     for (from, to) in from_args.iter().zip(to_args.iter()) {
-                        self.check_record_conversion_inner(from, to, span, visited)?;
+                        self.check_value_conversion_inner(from, to, span, visited)?;
                     }
                 }
                 // Different nominal declarations still use ordinary nominal
@@ -338,6 +345,45 @@ impl TypeChecker {
                 return Ok(());
             }
             match (&actual, &expected) {
+                (
+                    Type::Reference { inner: from, .. }
+                    | Type::CheckedReference { inner: from, .. }
+                    | Type::UnsafeReference { inner: from, .. }
+                    | Type::Ownership { inner: from, .. }
+                    | Type::Pointer { inner: from, .. }
+                    | Type::VolatilePointer { inner: from, .. },
+                    Type::Reference { inner: to, mutable }
+                    | Type::CheckedReference { inner: to, mutable }
+                    | Type::UnsafeReference { inner: to, mutable }
+                    | Type::Ownership { inner: to, mutable }
+                    | Type::Pointer { inner: to, mutable }
+                    | Type::VolatilePointer { inner: to, mutable },
+                ) => {
+                    self.check_value_conversion_inner(from, to, span, visited)?;
+                    if *mutable {
+                        // Writes through the converted reference travel in the
+                        // opposite direction. They must preserve contracts too.
+                        self.check_value_conversion_inner(to, from, span, visited)?;
+                    }
+                }
+                (
+                    Type::Reference { inner, .. }
+                    | Type::CheckedReference { inner, .. }
+                    | Type::UnsafeReference { inner, .. }
+                    | Type::Ownership { inner, .. },
+                    to,
+                ) => {
+                    self.check_value_conversion_inner(inner, to, span, visited)?;
+                }
+                (
+                    from,
+                    Type::Reference { inner, .. }
+                    | Type::CheckedReference { inner, .. }
+                    | Type::UnsafeReference { inner, .. }
+                    | Type::Ownership { inner, .. },
+                ) => {
+                    self.check_value_conversion_inner(from, inner, span, visited)?;
+                }
                 (Type::Named { .. } | Type::Generic { .. }, Type::Record(fields)) => {
                     for name in fields.keys() {
                         self.check_record_field_visibility(&actual, name.as_str(), span)?;
@@ -348,7 +394,7 @@ impl TypeChecker {
                     if let Some(from_fields) = self.resolve_to_record_type(&actual) {
                         for (name, to) in fields {
                             if let Some(from) = from_fields.get(name) {
-                                self.check_record_conversion_inner(from, to, span, visited)?;
+                                self.check_value_conversion_inner(from, to, span, visited)?;
                             }
                         }
                     }
@@ -356,26 +402,39 @@ impl TypeChecker {
                 (Type::Record(fields), Type::Named { .. } | Type::Generic { .. }) => {
                     self.check_record_construction_visibility(&expected, span)?;
                     if self.is_dependent_record(&expected) {
-                        return Err(TypeError::Other("dependent record requires its checked nominal constructor".into()));
+                        return Err(TypeError::Other(
+                            "dependent record requires its checked nominal constructor".into(),
+                        ));
                     }
                     if let Some(to_fields) = self.resolve_to_record_type(&expected) {
                         for (name, to) in &to_fields {
                             if let Some(from) = fields.get(name) {
-                                self.check_record_conversion_inner(from, to, span, visited)?;
+                                self.check_value_conversion_inner(from, to, span, visited)?;
                             }
                         }
                     }
                 }
-                (Type::Record(from_fields), Type::Record(to_fields)) => {
+                (
+                    Type::Record(from_fields)
+                    | Type::ExtensibleRecord {
+                        fields: from_fields,
+                        ..
+                    },
+                    Type::Record(to_fields)
+                    | Type::ExtensibleRecord {
+                        fields: to_fields, ..
+                    },
+                )
+                | (Type::Variant(from_fields), Type::Variant(to_fields)) => {
                     for (name, to) in to_fields {
                         if let Some(from) = from_fields.get(name) {
-                            self.check_record_conversion_inner(from, to, span, visited)?;
+                            self.check_value_conversion_inner(from, to, span, visited)?;
                         }
                     }
                 }
                 (Type::Tuple(from), Type::Tuple(to)) if from.len() == to.len() => {
                     for (from, to) in from.iter().zip(to.iter()) {
-                        self.check_record_conversion_inner(from, to, span, visited)?;
+                        self.check_value_conversion_inner(from, to, span, visited)?;
                     }
                 }
                 (
@@ -390,33 +449,81 @@ impl TypeChecker {
                         ..
                     },
                 ) if from_params.len() == to_params.len() => {
+                    self.check_callable_header(&actual, &expected, span)?;
                     // The converted callable receives values promised by the
                     // target signature; those flow into the original parameters.
                     for (from, to) in from_params.iter().zip(to_params.iter()) {
-                        self.check_record_conversion_inner(to, from, span, visited)?;
+                        self.check_value_conversion_inner(to, from, span, visited)?;
                     }
-                    self.check_record_conversion_inner(from_return, to_return, span, visited)?;
+                    self.check_value_conversion_inner(from_return, to_return, span, visited)?;
+                }
+                (Type::Future { output: from }, Type::Future { output: to })
+                | (Type::GenRef { inner: from }, Type::GenRef { inner: to })
+                | (Type::Tensor { element: from, .. }, Type::Tensor { element: to, .. })
+                | (Type::Quantified { inner: from, .. }, Type::Quantified { inner: to, .. }) => {
+                    self.check_value_conversion_inner(from, to, span, visited)?;
+                }
+                (
+                    Type::Generator {
+                        yield_ty: from_yield,
+                        return_ty: from_return,
+                    },
+                    Type::Generator {
+                        yield_ty: to_yield,
+                        return_ty: to_return,
+                    },
+                ) => {
+                    self.check_value_conversion_inner(from_yield, to_yield, span, visited)?;
+                    self.check_value_conversion_inner(from_return, to_return, span, visited)?;
+                }
+                (
+                    Type::TypeApp {
+                        constructor: from,
+                        args: from_args,
+                    },
+                    Type::TypeApp {
+                        constructor: to,
+                        args: to_args,
+                    },
+                ) => {
+                    self.check_value_conversion_inner(from, to, span, visited)?;
+                    for (from, to) in from_args.iter().zip(to_args) {
+                        self.check_value_conversion_inner(from, to, span, visited)?;
+                    }
+                }
+                (
+                    Type::Forall {
+                        vars: from_vars,
+                        body: from,
+                    },
+                    Type::Forall {
+                        vars: to_vars,
+                        body: to,
+                    },
+                ) if from_vars.len() == to_vars.len() => {
+                    let mut alpha = crate::Substitution::new();
+                    for (from, to) in from_vars.iter().zip(to_vars) {
+                        alpha.insert(*to, Type::Var(*from));
+                    }
+                    let to = to
+                        .try_apply_subst(&alpha)
+                        .map_err(|message| TypeError::UniverseBinding { message, span })?;
+                    self.check_value_conversion_inner(from, &to, span, visited)?;
                 }
                 (
                     Type::Array { element: from, .. } | Type::Slice { element: from },
                     Type::Array { element: to, .. } | Type::Slice { element: to },
                 ) => {
-                    self.check_record_conversion_inner(from, to, span, visited)?;
+                    self.check_value_conversion_inner(from, to, span, visited)?;
                 }
-                (
-                    Type::Array { element: from, .. } | Type::Slice { element: from },
-                    collection,
-                ) => {
+                (Type::Array { element: from, .. } | Type::Slice { element: from }, collection) => {
                     if let Some(to) = self.unifier.array_coercible_element(collection) {
-                        self.check_record_conversion_inner(from, to, span, visited)?;
+                        self.check_value_conversion_inner(from, to, span, visited)?;
                     }
                 }
-                (
-                    collection,
-                    Type::Array { element: to, .. } | Type::Slice { element: to },
-                ) => {
+                (collection, Type::Array { element: to, .. } | Type::Slice { element: to }) => {
                     if let Some(from) = self.unifier.array_coercible_element(collection) {
-                        self.check_record_conversion_inner(from, to, span, visited)?;
+                        self.check_value_conversion_inner(from, to, span, visited)?;
                     }
                 }
                 _ => {}

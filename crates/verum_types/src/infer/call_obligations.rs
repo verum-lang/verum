@@ -417,6 +417,59 @@ impl TypeChecker {
         Ok(())
     }
 
+    /// Check only the declared callable contract. Parameter and result value
+    /// conversions belong to the surrounding relation; this judgment cannot
+    /// authorize a structural coercion or infer a missing body footprint.
+    pub(super) fn check_callable_header(
+        &self,
+        actual: &Type,
+        bound: &Type,
+        span: Span,
+    ) -> Result<()> {
+        if let (
+            Type::Function {
+                property_requirement: actual_property_requirement,
+                type_params: actual_generics,
+                contexts: actual_contexts,
+                properties: actual_properties,
+                ..
+            },
+            Type::Function {
+                property_requirement: bound_property_requirement,
+                type_params: bound_generics,
+                contexts: bound_contexts,
+                properties: bound_properties,
+                ..
+            },
+        ) = (actual, bound)
+        {
+            let actual_contract = Type::Function {
+                property_requirement: actual_property_requirement.clone(),
+                params: List::new(),
+                return_type: Box::new(Type::Unit),
+                type_params: actual_generics.clone(),
+                contexts: actual_contexts.clone(),
+                properties: actual_properties.clone(),
+            };
+            let bound_contract = Type::Function {
+                property_requirement: bound_property_requirement.clone(),
+                params: List::new(),
+                return_type: Box::new(Type::Unit),
+                type_params: bound_generics.clone(),
+                contexts: bound_contexts.clone(),
+                properties: bound_properties.clone(),
+            };
+            if !self.subtyping.is_subtype(&actual_contract, &bound_contract) {
+                return Err(TypeError::Mismatch {
+                    expected: bound.to_text(),
+                    actual: actual.to_text(),
+                    span,
+                });
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn check_call_type_bound(
         &mut self,
         actual: &Type,
@@ -445,44 +498,19 @@ impl TypeChecker {
         let bound = self.normalize_type(&bound);
         if let (
             Type::Function {
-                property_requirement: actual_property_requirement,
                 params: actual_params,
                 return_type: actual_return,
-                type_params: actual_generics,
-                contexts: actual_contexts,
-                properties: actual_properties,
+                ..
             },
             Type::Function {
-                property_requirement: bound_property_requirement,
                 params: bound_params,
                 return_type: bound_return,
-                type_params: bound_generics,
-                contexts: bound_contexts,
-                properties: bound_properties,
+                ..
             },
         ) = (&actual, &bound)
         {
-            // Check the callable contract before variance-aware inference. Do
-            // not let structural unification erase contexts or properties.
-            let actual_contract = Type::Function {
-                property_requirement: actual_property_requirement.clone(),
-                params: List::new(),
-                return_type: Box::new(Type::Unit),
-                type_params: actual_generics.clone(),
-                contexts: actual_contexts.clone(),
-                properties: actual_properties.clone(),
-            };
-            let bound_contract = Type::Function {
-                property_requirement: bound_property_requirement.clone(),
-                params: List::new(),
-                return_type: Box::new(Type::Unit),
-                type_params: bound_generics.clone(),
-                contexts: bound_contexts.clone(),
-                properties: bound_properties.clone(),
-            };
-            if actual_params.len() != bound_params.len()
-                || !self.subtyping.is_subtype(&actual_contract, &bound_contract)
-            {
+            self.check_callable_header(&actual, &bound, span)?;
+            if actual_params.len() != bound_params.len() {
                 return Err(TypeError::Mismatch {
                     expected: bound.to_text(),
                     actual: actual.to_text(),

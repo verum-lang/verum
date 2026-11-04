@@ -2500,7 +2500,7 @@ impl TypeChecker {
                     let name = id.name.as_str();
                     if let Some(scheme) = self.ctx.env.lookup(name) {
                         let ty = scheme.instantiate();
-                        self.check_record_conversion_visibility(expected, &ty, expr.span)?;
+                        self.check_value_conversion_obligations(expected, &ty, expr.span)?;
                         self.unifier.unify(&ty, expected, expr.span)?;
                         return Ok(InferResult::new(ty));
                     }
@@ -2567,7 +2567,7 @@ impl TypeChecker {
                         if let Some(field_ty) =
                             fields.get(&verum_common::Text::from(field.name.as_str()))
                         {
-                            self.check_record_conversion_visibility(expected, field_ty, expr.span)?;
+                            self.check_value_conversion_obligations(expected, field_ty, expr.span)?;
                             self.unifier.unify(field_ty, expected, expr.span)?;
                             Ok(InferResult::new(field_ty.clone()))
                         } else {
@@ -2646,7 +2646,7 @@ impl TypeChecker {
                                 // Apply type parameter substitution to get concrete field type
                                 let resolved_ty =
                                     self.substitute_type_params(field_ty, &param_subst);
-                                self.check_record_conversion_visibility(
+                                self.check_value_conversion_obligations(
                                     expected,
                                     &resolved_ty,
                                     expr.span,
@@ -2670,7 +2670,7 @@ impl TypeChecker {
                         if let Some(Type::Record(fields)) = self.ctx.lookup_type(&struct_key) {
                             let field_name_key = verum_common::Text::from(field.name.as_str());
                             if let Some(field_ty) = fields.get(&field_name_key).cloned() {
-                                self.check_record_conversion_visibility(
+                                self.check_value_conversion_obligations(
                                     expected,
                                     &field_ty,
                                     expr.span,
@@ -2710,7 +2710,7 @@ impl TypeChecker {
                     Type::Tuple(types) => {
                         let idx = *index as usize;
                         if idx < types.len() {
-                            self.check_record_conversion_visibility(
+                            self.check_value_conversion_obligations(
                                 expected,
                                 &types[idx],
                                 expr.span,
@@ -2742,7 +2742,7 @@ impl TypeChecker {
 
                         if let Option::Some(Type::Tuple(types)) = found_tuple {
                             if idx < types.len() {
-                                self.check_record_conversion_visibility(
+                                self.check_value_conversion_obligations(
                                     expected,
                                     &types[idx],
                                     expr.span,
@@ -2810,7 +2810,7 @@ impl TypeChecker {
 
                             if let Some(inner_ty) = found_inner {
                                 if idx == 0 {
-                                    self.check_record_conversion_visibility(
+                                    self.check_value_conversion_obligations(
                                         expected,
                                         &inner_ty,
                                         expr.span,
@@ -2846,7 +2846,7 @@ impl TypeChecker {
                                 self.ctx.lookup_type(tuple_fields_key.as_str())
                             {
                                 if idx < types.len() {
-                                    self.check_record_conversion_visibility(
+                                    self.check_value_conversion_obligations(
                                         expected,
                                         &types[idx],
                                         expr.span,
@@ -2875,7 +2875,7 @@ impl TypeChecker {
 
                                 if let Option::Some(inner_ty) = found_inner {
                                     if idx == 0 {
-                                        self.check_record_conversion_visibility(
+                                        self.check_value_conversion_obligations(
                                             expected,
                                             inner_ty,
                                             expr.span,
@@ -2899,7 +2899,7 @@ impl TypeChecker {
                             // Also handle reference to bare tuple
                             let idx = *index as usize;
                             if idx < types.len() {
-                                self.check_record_conversion_visibility(
+                                self.check_value_conversion_obligations(
                                     expected,
                                     &types[idx],
                                     expr.span,
@@ -2973,7 +2973,7 @@ impl TypeChecker {
                         // Check the index has the appropriate type
                         self.check_expr(index, &resolution.key)?;
                         // Unify output with expected and return
-                        self.check_record_conversion_visibility(
+                        self.check_value_conversion_obligations(
                             expected,
                             &resolution.output,
                             expr.span,

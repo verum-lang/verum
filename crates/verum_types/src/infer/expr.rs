@@ -2506,7 +2506,7 @@ impl TypeChecker {
         self.check_integer_literal_fits(expr, expected)?;
 
         let result = self.synth_expr(expr)?;
-        self.check_record_conversion_visibility(&result.ty, expected, expr.span)?;
+        self.check_value_conversion_obligations(&result.ty, expected, expr.span)?;
         if std::env::var("VERUM_TRACE_QUALPATH").is_ok()
             && matches!(&expr.kind, ExprKind::MethodCall { .. })
         {
@@ -2524,19 +2524,6 @@ impl TypeChecker {
         let resolved_result_ty = self.unifier.apply(&result.ty);
         // Check for Never type (handles both Type::Never and Named("Never"))
         if resolved_result_ty.is_never() {
-            return Ok(InferResult::new(expected.clone()));
-        }
-
-        // Callable contracts are directional. Structural unification ignores
-        // computational properties, so it cannot authorize this conversion.
-        let actual_callable = self.normalize_type(&resolved_result_ty);
-        let expected_callable = self.normalize_type(&self.unifier.apply(expected));
-        if matches!(actual_callable, Type::Function { .. } | Type::Reference { .. }
-            | Type::CheckedReference { .. } | Type::UnsafeReference { .. } | Type::Pointer { .. }
-            | Type::Tuple(_) | Type::Array { .. } | Type::Slice { .. })
-            && std::mem::discriminant(&actual_callable) == std::mem::discriminant(&expected_callable)
-        {
-            self.check_call_type_bound(&actual_callable, &expected_callable, expr.span, 0)?;
             return Ok(InferResult::new(expected.clone()));
         }
 

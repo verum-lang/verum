@@ -285,3 +285,29 @@ fn constructing_a_function_shape_does_not_prove_its_body_properties() {
     };
     assert!(pure.satisfied_by(&property_requirement, properties.as_ref()));
 }
+
+#[test]
+fn aggregate_conversion_preserves_context_requirements() {
+    for wrapper in [
+        "(Int, {callback})",
+        "&{callback}",
+        "{ callback: {callback} }",
+    ] {
+        let contextual = wrapper.replace("{callback}", "(fn() -> Int using [Log])");
+        let plain = wrapper.replace("{callback}", "(fn() -> Int)");
+        let prelude = "context Log { fn note(message: Text); }";
+        let positive =
+            format!("{prelude} fn keep(value: {contextual}) -> ({contextual}) {{ value }}");
+        let errors = check(&positive);
+        assert!(errors.is_empty(), "{positive}: {errors:?}");
+        let negative = format!("{prelude} fn erase(value: {contextual}) -> ({plain}) {{ value }}");
+        let errors = check(&negative);
+        assert!(
+            errors
+                .iter()
+                .any(|error| (error.contains("Type mismatch") || error.contains("context mismatch"))
+                    && error.contains("Log")),
+            "{negative}: {errors:?}"
+        );
+    }
+}
