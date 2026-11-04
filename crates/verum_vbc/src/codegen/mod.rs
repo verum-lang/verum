@@ -13091,20 +13091,18 @@ impl VbcCodegen {
                 // pick is stable across runs (HashMap iteration order
                 // would otherwise leak Rust's per-process random hasher
                 // seed into bytecode-emission order).
-                let mut sorted_names: Vec<&String> = self.ctx.functions.keys().collect();
+                let mut sorted_names: Vec<&String> = self.ctx.functions.keys()
+                    .filter(|name| name.starts_with(&prefix_dot))
+                    .collect();
                 sorted_names.sort();
                 let mut to_register: Vec<(String, FunctionInfo)> = Vec::new();
                 for name in sorted_names {
-                    let info = &self.ctx.functions[name];
-                    let matches = name.starts_with(&prefix_dot);
-                    if matches {
-                        // Extract bare name (last segment after the last dot)
-                        if let Some(bare) = name.rsplit('.').next() {
-                            // Don't overwrite existing registrations
-                            if self.ctx.lookup_function(bare).is_none() {
-                                to_register.push((bare.to_string(), info.clone()));
-                            }
-                        }
+                    // Preserve existing bindings; only selected exports participate
+                    // in the deterministic order, regardless of registry size.
+                    if let Some(bare) = name.rsplit('.').next()
+                        && self.ctx.lookup_function(bare).is_none()
+                    {
+                        to_register.push((bare.to_string(), self.ctx.functions[name].clone()));
                     }
                 }
 
