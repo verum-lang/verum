@@ -521,6 +521,7 @@ impl<'a> SendSyncDerivation<'a> {
         }
 
         Maybe::Some(ProtocolImpl {
+            parameters: verum_common::List::new(),
             protocol: Path::single(Ident::new("Send", Span::default())),
             protocol_args: List::new(),
             for_type: ty.clone(),
@@ -544,6 +545,7 @@ impl<'a> SendSyncDerivation<'a> {
         }
 
         Maybe::Some(ProtocolImpl {
+            parameters: verum_common::List::new(),
             protocol: Path::single(Ident::new("Sync", Span::default())),
             protocol_args: List::new(),
             for_type: ty.clone(),
@@ -654,6 +656,7 @@ pub fn register_standard_send_sync_impls(checker: &mut ProtocolChecker) {
     // Helper to create implementation
     let make_impl = |for_type: Type, protocol: &str| -> ProtocolImpl {
         ProtocolImpl {
+            parameters: verum_common::List::new(),
             for_type,
             protocol: Path::single(Ident::new(protocol, Span::default())),
             protocol_args: List::new(),
@@ -718,13 +721,14 @@ pub fn register_standard_send_sync_impls(checker: &mut ProtocolChecker) {
 
     // 4. Register Shared<T>: Send + Sync where T: Send + Sync
     // Basic protocols with simple associated types (initial release) — 4.4 lines 12193-12211
+    let shared_item = crate::ty::TypeVar::fresh();
     let shared_ty = Type::Named {
         path: Path::single(Ident::new(WKT::Shared.as_str(), Span::default())),
-        args: vec![Type::Var(crate::ty::TypeVar::with_id(0))].into(),
+        args: vec![Type::Var(shared_item)].into(),
     };
 
     let mut shared_send_where = List::new();
-    let t_var = Type::Var(crate::ty::TypeVar::with_id(0));
+    let t_var = Type::Var(shared_item);
     let mut bounds = List::new();
     bounds.push(ProtocolBound {
         associated_types: Default::default(),
@@ -744,6 +748,9 @@ pub fn register_standard_send_sync_impls(checker: &mut ProtocolChecker) {
     });
 
     let _ = checker.register_impl(ProtocolImpl {
+        parameters: [crate::context::GenericBinder::Type(shared_item)]
+            .into_iter()
+            .collect(),
         for_type: shared_ty.clone(),
         protocol: Path::single(Ident::new("Send", Span::default())),
         protocol_args: List::new(),
@@ -758,6 +765,9 @@ pub fn register_standard_send_sync_impls(checker: &mut ProtocolChecker) {
     });
 
     let _ = checker.register_impl(ProtocolImpl {
+        parameters: [crate::context::GenericBinder::Type(shared_item)]
+            .into_iter()
+            .collect(),
         for_type: shared_ty,
         protocol: Path::single(Ident::new("Sync", Span::default())),
         protocol_args: List::new(),
@@ -773,9 +783,10 @@ pub fn register_standard_send_sync_impls(checker: &mut ProtocolChecker) {
 
     // 5. Register Mutex<T>: Send + Sync where T: Send
     // Basic protocols with simple associated types (initial release) — 4.5 lines 12428-12446
+    let mutex_item = crate::ty::TypeVar::fresh();
     let mutex_ty = Type::Named {
         path: Path::single(Ident::new("Mutex", Span::default())),
-        args: vec![Type::Var(crate::ty::TypeVar::with_id(0))].into(),
+        args: vec![Type::Var(mutex_item)].into(),
     };
 
     let mut mutex_where = List::new();
@@ -787,11 +798,14 @@ pub fn register_standard_send_sync_impls(checker: &mut ProtocolChecker) {
         is_negative: false,
     });
     mutex_where.push(crate::protocol::WhereClause {
-        ty: t_var.clone(),
+        ty: Type::Var(mutex_item),
         bounds: mutex_bounds,
     });
 
     let _ = checker.register_impl(ProtocolImpl {
+        parameters: [crate::context::GenericBinder::Type(mutex_item)]
+            .into_iter()
+            .collect(),
         for_type: mutex_ty.clone(),
         protocol: Path::single(Ident::new("Send", Span::default())),
         protocol_args: List::new(),
@@ -806,6 +820,9 @@ pub fn register_standard_send_sync_impls(checker: &mut ProtocolChecker) {
     });
 
     let _ = checker.register_impl(ProtocolImpl {
+        parameters: [crate::context::GenericBinder::Type(mutex_item)]
+            .into_iter()
+            .collect(),
         for_type: mutex_ty,
         protocol: Path::single(Ident::new("Sync", Span::default())),
         protocol_args: List::new(),

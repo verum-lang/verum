@@ -1137,6 +1137,9 @@ pub struct TypeDescriptor {
     /// Executable protocol method bodies are absent. VBC 2.31.
     #[serde(default)]
     pub source_declaration: Option<verum_ast::TypeDecl>,
+    /// Exact inherent implementation headers and signatures, once per block.
+    #[serde(default)]
+    pub source_inherent_implementations: verum_common::List<verum_ast::source_implementation::AssociatedImplementationSource>,
 }
 
 impl TypeDescriptor {
@@ -1146,6 +1149,16 @@ impl TypeDescriptor {
     pub(crate) fn register_implementation(&mut self, implementation: ProtocolImpl) {
         if !self.protocols.contains(&implementation) {
             self.protocols.push(implementation);
+        }
+    }
+
+    #[cfg(feature = "codegen")]
+    pub(crate) fn merge_implementations(&mut self, other: &Self) {
+        for implementation in &other.protocols { self.register_implementation(implementation.clone()); }
+        for source in &other.source_inherent_implementations {
+            if !self.source_inherent_implementations.contains(source) {
+                self.source_inherent_implementations.push(source.clone());
+            }
         }
     }
 
@@ -1212,6 +1225,7 @@ impl Default for TypeDescriptor {
             is_transparent_wrapper: false,
             declared_layout: None,
             source_declaration: None,
+            source_inherent_implementations: Default::default(),
         }
     }
 }

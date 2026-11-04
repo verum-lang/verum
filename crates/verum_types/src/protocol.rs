@@ -35,7 +35,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
-use crate::ty::{Type, TypeVar};
+use crate::ty::{Substitution, Type, TypeVar};
 use verum_ast::{
     span::Span,
     ty::{Ident, Path},
@@ -1080,6 +1080,9 @@ impl ProtocolBound {
 /// ```
 #[derive(Debug, Clone)]
 pub struct ProtocolImpl {
+    /// Declaration-owned type/value quantification. An absent value binder is
+    /// rigid even when it occurs free in an implementation head or result.
+    pub parameters: List<crate::context::GenericBinder>,
     /// The protocol being implemented
     pub protocol: Path,
     /// Type arguments to the protocol
@@ -1763,18 +1766,16 @@ struct ImplOverlapIndex {
 
 impl ImplOverlapIndex {
     fn nominal_head(target: &Type) -> Option<(List<Text>, usize)> {
-        let Type::Named { path, args } = target else {
-            return None;
+        let (segments, arity) = match target {
+            Type::Named { path, args }
+                if path.segments.iter().all(|segment| matches!(segment, verum_ast::ty::PathSegment::Name(_))) =>
+                (ProtocolChecker::nominal_path_components(path).map(Text::from).collect::<List<_>>(), args.len()),
+            Type::Generic { name, args } if !name.starts_with("::") =>
+                (ProtocolChecker::nominal_name_components(name.as_str()).map(Text::from).collect::<List<_>>(), args.len()),
+            _ => return None,
         };
-        let segments = path
-            .segments
-            .iter()
-            .map(|segment| match segment {
-                verum_ast::ty::PathSegment::Name(name) => Some(name.name.clone()),
-                _ => None,
-            })
-            .collect::<Option<List<Text>>>()?;
-        Some((segments, args.len()))
+        if segments.is_empty() || segments.iter().any(Text::is_empty) { return None; }
+        Some((segments, arity))
     }
 
     fn insert(&mut self, target: &Type, index: usize) {
@@ -3812,6 +3813,7 @@ impl ProtocolChecker {
         // Helper function to create a simple protocol implementation
         let make_impl = |for_type: Type, protocol: &str| -> ProtocolImpl {
             ProtocolImpl {
+                parameters: List::new(),
                 for_type,
                 protocol: Path::single(Ident::new(protocol, Span::default())),
                 protocol_args: List::new(),
@@ -3911,6 +3913,7 @@ impl ProtocolChecker {
         let make_bitwise_impl =
             |for_type: Type, protocol: &str, output_type: Type| -> ProtocolImpl {
                 ProtocolImpl {
+                    parameters: List::new(),
                     for_type,
                     protocol: Path::single(Ident::new(protocol, Span::default())),
                     protocol_args: List::new(),
@@ -3949,10 +3952,14 @@ impl ProtocolChecker {
 
         // Register Try protocol for Maybe<T>
         // Protocol-based Try resolution: ? operator uses Carrier protocol to convert between error types
+        let maybe_item = crate::ty::TypeVar::fresh();
         let maybe_try_impl = ProtocolImpl {
+            parameters: [crate::context::GenericBinder::Type(maybe_item)]
+                .into_iter()
+                .collect(),
             for_type: Type::Generic {
                 name: WKT::Maybe.as_str().into(),
-                args: List::from(vec![Type::Var(crate::ty::TypeVar::with_id(0))]),
+                args: List::from(vec![Type::Var(maybe_item)]),
             },
             protocol: Path::single(Ident::new("Try", Span::default())),
             protocol_args: List::new(),
@@ -3961,7 +3968,7 @@ impl ProtocolChecker {
             associated_types: ({
                 let mut assoc = Map::new();
                 // Output = T
-                assoc.insert("Output".into(), Type::Var(crate::ty::TypeVar::with_id(0)));
+                assoc.insert("Output".into(), Type::Var(maybe_item));
                 // Residual = Maybe<Never>
                 assoc.insert(
                     "Residual".into(),
@@ -3987,12 +3994,20 @@ impl ProtocolChecker {
         let _ = self.register_impl(maybe_try_impl);
 
         // Register Try protocol for Result<T, E>
+        let result_item = crate::ty::TypeVar::fresh();
+        let result_error = crate::ty::TypeVar::fresh();
         let result_try_impl = ProtocolImpl {
+            parameters: [
+                crate::context::GenericBinder::Type(result_item),
+                crate::context::GenericBinder::Type(result_error),
+            ]
+            .into_iter()
+            .collect(),
             for_type: Type::Generic {
                 name: WKT::Result.as_str().into(),
                 args: List::from(vec![
-                    Type::Var(crate::ty::TypeVar::with_id(0)), // T
-                    Type::Var(crate::ty::TypeVar::with_id(1)), // E
+                    Type::Var(result_item),  // T
+                    Type::Var(result_error), // E
                 ]),
             },
             protocol: Path::single(Ident::new("Try", Span::default())),
@@ -4002,7 +4017,7 @@ impl ProtocolChecker {
             associated_types: ({
                 let mut assoc = Map::new();
                 // Output = T
-                assoc.insert("Output".into(), Type::Var(crate::ty::TypeVar::with_id(0)));
+                assoc.insert("Output".into(), Type::Var(result_item));
                 // Residual = Result<Never, E>
                 assoc.insert(
                     "Residual".into(),
@@ -4013,7 +4028,7 @@ impl ProtocolChecker {
                                 name: "Never".into(),
                                 args: List::new(),
                             },
-                            Type::Var(crate::ty::TypeVar::with_id(1)), // E
+                            Type::Var(result_error), // E
                         ]),
                     },
                 );
@@ -4031,10 +4046,14 @@ impl ProtocolChecker {
         let _ = self.register_impl(result_try_impl);
 
         // Register Try protocol for IoResult<T> (alias for Result<T, IoError>)
+        let io_item = crate::ty::TypeVar::fresh();
         let io_result_try_impl = ProtocolImpl {
+            parameters: [crate::context::GenericBinder::Type(io_item)]
+                .into_iter()
+                .collect(),
             for_type: Type::Generic {
                 name: "IoResult".into(),
-                args: List::from(vec![Type::Var(crate::ty::TypeVar::with_id(0))]),
+                args: List::from(vec![Type::Var(io_item)]),
             },
             protocol: Path::single(Ident::new("Try", Span::default())),
             protocol_args: List::new(),
@@ -4043,7 +4062,7 @@ impl ProtocolChecker {
             associated_types: ({
                 let mut assoc = Map::new();
                 // Output = T
-                assoc.insert("Output".into(), Type::Var(crate::ty::TypeVar::with_id(0)));
+                assoc.insert("Output".into(), Type::Var(io_item));
                 // Residual = Result<Never, IoError>
                 assoc.insert(
                     "Residual".into(),
@@ -5394,6 +5413,7 @@ impl ProtocolChecker {
             candidates.iter().any(|index| {
                 self.impls.get(*index).is_some_and(|existing| {
                     self.paths_equal(&existing.protocol, &impl_.protocol)
+                        && existing.parameters == impl_.parameters
                         && existing.for_type == impl_.for_type
                         && existing.protocol_args == impl_.protocol_args
                         && existing.where_clauses == impl_.where_clauses
@@ -5751,7 +5771,7 @@ impl ProtocolChecker {
         &self,
         ty: &Type,
         protocol: &Path,
-    ) -> Maybe<(&ProtocolImpl, Map<Text, Type>)> {
+    ) -> Maybe<(&ProtocolImpl, Substitution)> {
         self.find_impl_matching(ty, protocol, None)
     }
 
@@ -5762,7 +5782,7 @@ impl ProtocolChecker {
         ty: &Type,
         protocol: &Path,
         args: &[Type],
-    ) -> Maybe<(&ProtocolImpl, Map<Text, Type>)> {
+    ) -> Maybe<(&ProtocolImpl, Substitution)> {
         self.find_impl_matching(ty, protocol, Some(args))
     }
 
@@ -5771,7 +5791,7 @@ impl ProtocolChecker {
         ty: &Type,
         protocol: &Path,
         args: Option<&[Type]>,
-    ) -> Maybe<(&ProtocolImpl, Map<Text, Type>)> {
+    ) -> Maybe<(&ProtocolImpl, Substitution)> {
         let type_key = self.make_type_key(ty);
         let protocol_key = self.make_protocol_key(protocol);
         let exact_key = args.map_or_else(
@@ -5795,9 +5815,10 @@ impl ProtocolChecker {
                 if exact_arguments
                     && self.paths_equal(&impl_.protocol, protocol)
                     && self.types_structurally_equal(&impl_.for_type, ty)
-                    && self.check_where_clauses_satisfied(&impl_.where_clauses, &Map::new())
+                    && let Some(substitution) =
+                        self.instantiate_applicable_implementation(impl_, ty, args)
                 {
-                    return Maybe::Some((impl_, Map::new()));
+                    return Maybe::Some((impl_, substitution));
                 }
             }
         }
@@ -5810,7 +5831,7 @@ impl ProtocolChecker {
         }
 
         // Stage 2: Try generic/conditional matching
-        let mut candidates: List<(usize, &ProtocolImpl, Map<Text, Type>)> = List::new();
+        let mut candidates: List<(usize, &ProtocolImpl, Substitution)> = List::new();
 
         for (idx, impl_) in self.impls.iter().enumerate() {
             if self.make_protocol_key(&impl_.protocol) != protocol_key
@@ -5826,23 +5847,9 @@ impl ProtocolChecker {
                 continue;
             }
 
-            if let Some(mut substitution) = self.try_match_type(&impl_.for_type, ty) {
-                if let Some(args) = args {
-                    if impl_.protocol_args.len() != args.len()
-                        || !impl_
-                            .protocol_args
-                            .iter()
-                            .zip(args)
-                            .all(|(pattern, actual)| {
-                                self.unify_types(pattern, actual, &mut substitution)
-                            })
-                    {
-                        continue;
-                    }
-                }
-                if self.check_where_clauses_satisfied(&impl_.where_clauses, &substitution) {
-                    candidates.push((idx, impl_, substitution));
-                }
+            if let Some(substitution) = self.instantiate_applicable_implementation(impl_, ty, args)
+            {
+                candidates.push((idx, impl_, substitution));
             }
         }
 
@@ -5906,8 +5913,12 @@ impl ProtocolChecker {
         // Look up associated type in implementation
         if let Some(assoc_ty) = impl_.ordinary_associated_type(assoc_name)? {
             // Apply the substitution to get the concrete associated type
-            let resolved_ty = self.apply_substitution(assoc_ty, &substitution);
-            return Ok(resolved_ty);
+            return assoc_ty.try_apply_subst(&substitution).map_err(|_| {
+                ProtocolError::BoundNotSatisfied {
+                    ty: ty.clone(),
+                    protocol: protocol.clone(),
+                }
+            });
         }
 
         // Check for default in protocol definition
@@ -5925,8 +5936,12 @@ impl ProtocolChecker {
             && let Maybe::Some(default_ty) = &assoc_type_def.default
         {
             // Apply substitution to the default as well
-            let resolved_ty = self.apply_substitution(default_ty, &substitution);
-            return Ok(resolved_ty);
+            return default_ty.try_apply_subst(&substitution).map_err(|_| {
+                ProtocolError::BoundNotSatisfied {
+                    ty: ty.clone(),
+                    protocol: protocol.clone(),
+                }
+            });
         }
 
         // No associated type found
@@ -6468,7 +6483,9 @@ impl ProtocolChecker {
         }
     }
 
-    /// Check if two paths are equal
+    fn nominal_name_components(name: &str) -> impl Iterator<Item = &str> { name.split('.') }
+
+    /// All nominal representations use the same full owner components.
     fn nominal_path_components(path: &Path) -> impl Iterator<Item = &str> {
         path.segments
             .iter()
@@ -6476,7 +6493,7 @@ impl ProtocolChecker {
                 verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.as_str()),
                 _ => None,
             })
-            .flat_map(|name| name.split('.'))
+            .flat_map(Self::nominal_name_components)
     }
 
     fn paths_equal(&self, p1: &Path, p2: &Path) -> bool {
@@ -6521,11 +6538,42 @@ impl ProtocolChecker {
         true
     }
 
+    /// Nominal constructor identity is independent of its source/archive
+    /// representation. The relation on arguments is supplied by the caller:
+    /// exact equality for evidence, possible unification for overlap checking.
+    fn compare_nominal_applications(
+        &self,
+        left: &Type,
+        right: &Type,
+        compare_arguments: impl Fn(&Type, &Type) -> bool,
+    ) -> Option<bool> {
+        let (same_constructor, left_args, right_args) = match (left, right) {
+            (Type::Named { path: left, args: la }, Type::Named { path: right, args: ra }) =>
+                (self.paths_equal(left, right), la, ra),
+            (Type::Generic { name: left, args: la }, Type::Generic { name: right, args: ra })
+                if !left.starts_with("::") && !right.starts_with("::") =>
+                (!left.is_empty() && left == right, la, ra),
+            (Type::Named { path, args: la }, Type::Generic { name, args: ra })
+            | (Type::Generic { name, args: la }, Type::Named { path, args: ra })
+                if !name.starts_with("::") =>
+                (!name.is_empty()
+                    && Self::nominal_name_components(name.as_str()).all(|component| !component.is_empty())
+                    && path.segments.iter().all(|segment| matches!(segment, verum_ast::ty::PathSegment::Name(_)))
+                    && Self::nominal_path_components(path).eq(Self::nominal_name_components(name.as_str())), la, ra),
+            _ => return None,
+        };
+        Some(same_constructor && left_args.len() == right_args.len()
+            && left_args.iter().zip(right_args).all(|(left, right)| compare_arguments(left, right)))
+    }
+
     /// Check if two types are structurally equal (for substitution consistency checking)
     pub(crate) fn types_structurally_equal(&self, ty1: &Type, ty2: &Type) -> bool {
         if ty1 == ty2 {
             return true;
         }
+        if let Some(equal) = self.compare_nominal_applications(ty1, ty2,
+            |left, right| self.types_structurally_equal(left, right))
+        { return equal; }
         match (ty1, ty2) {
             (Type::Named { path, args }, primitive) | (primitive, Type::Named { path, args })
                 if args.is_empty()
@@ -6544,14 +6592,6 @@ impl ProtocolChecker {
             (Type::Char, Type::Char) => true,
             (Type::Text, Type::Text) => true,
             (Type::Var(v1), Type::Var(v2)) => v1.id() == v2.id(),
-            (Type::Named { path: p1, args: a1 }, Type::Named { path: p2, args: a2 }) => {
-                self.paths_equal(p1, p2)
-                    && a1.len() == a2.len()
-                    && a1
-                        .iter()
-                        .zip(a2.iter())
-                        .all(|(t1, t2)| self.types_structurally_equal(t1, t2))
-            }
             (Type::Generic { name: n1, args: a1 }, Type::Generic { name: n2, args: a2 }) => {
                 n1 == n2
                     && a1.len() == a2.len()
@@ -6559,24 +6599,6 @@ impl ProtocolChecker {
                         .iter()
                         .zip(a2.iter())
                         .all(|(t1, t2)| self.types_structurally_equal(t1, t2))
-            }
-            (Type::Named { path, args: left }, Type::Generic { name, args: right })
-            | (Type::Generic { name, args: right }, Type::Named { path, args: left }) => {
-                // Source and archive producers use both representations of a
-                // nominal application. Identity is the complete declaring path;
-                // a projection, relative path or matching suffix is insufficient.
-                !name.starts_with("::")
-                    && !name.is_empty()
-                    && path
-                        .segments
-                        .iter()
-                        .all(|segment| matches!(segment, verum_ast::ty::PathSegment::Name(_)))
-                    && Self::nominal_path_components(path).eq(name.as_str().split('.'))
-                    && left.len() == right.len()
-                    && left
-                        .iter()
-                        .zip(right)
-                        .all(|(left, right)| self.types_structurally_equal(left, right))
             }
             (Type::Tuple(e1), Type::Tuple(e2)) => {
                 e1.len() == e2.len()
@@ -7073,7 +7095,7 @@ impl ProtocolChecker {
     /// - Implementations with more specific where clauses
     fn select_most_specific_impl(
         &self,
-        candidates: &List<(usize, &ProtocolImpl, Map<Text, Type>)>,
+        candidates: &List<(usize, &ProtocolImpl, Substitution)>,
         target_type: &Type,
     ) -> usize {
         if candidates.len() <= 1 {
@@ -7561,19 +7583,23 @@ impl ProtocolChecker {
         args: Option<&[Type]>,
         assoc_name: &Text,
     ) -> Result<Type, ProtocolError> {
-        let (impl_, _) = self.find_impl_matching(ty, protocol, args).ok_or_else(|| {
-            ProtocolError::NotImplemented {
-                ty: ty.clone(),
-                protocol: protocol.clone(),
-            }
-        })?;
+        let (impl_, substitution) =
+            self.find_impl_matching(ty, protocol, args).ok_or_else(|| {
+                ProtocolError::NotImplemented {
+                    ty: ty.clone(),
+                    protocol: protocol.clone(),
+                }
+            })?;
 
         // Argument bindings and receiver bindings belong to the same selected
         // declaration; an associated type must not come from another instance.
         if let Some(assoc_ty) = impl_.ordinary_associated_type(assoc_name)? {
-            return Ok(
-                self.substitute_impl_type_params_for_instantiation(assoc_ty, impl_, ty, args)
-            );
+            return assoc_ty.try_apply_subst(&substitution).map_err(|_| {
+                ProtocolError::BoundNotSatisfied {
+                    ty: ty.clone(),
+                    protocol: protocol.clone(),
+                }
+            });
         }
 
         // Associated type not explicitly specified - check for default
@@ -7630,7 +7656,7 @@ impl ProtocolChecker {
         method: &Text,
     ) -> Result<MethodResolution, ProtocolError> {
         // Find implementation
-        let impl_ = match self.find_impl(ty, protocol) {
+        let (impl_, substitution) = match self.find_impl_with_substitution(ty, protocol) {
             Option::Some(i) => i,
             Option::None => {
                 return Err(ProtocolError::NotImplemented {
@@ -7643,7 +7669,12 @@ impl ProtocolChecker {
         // Look up method in implementation
         if let Some(method_ty) = impl_.methods.get(method) {
             return Ok(MethodResolution {
-                ty: method_ty.clone(),
+                ty: method_ty.try_apply_subst(&substitution).map_err(|_| {
+                    ProtocolError::BoundNotSatisfied {
+                        ty: ty.clone(),
+                        protocol: protocol.clone(),
+                    }
+                })?,
                 is_default: false,
                 source: MethodSource::Explicit,
             });
@@ -7756,6 +7787,9 @@ impl ProtocolChecker {
                 for &idx in candidates {
                     if let Some(impl_) = self.impls.get(idx)
                         && self.types_structurally_equal(&impl_.for_type, ty)
+                        && self
+                            .instantiate_applicable_implementation(impl_, ty, None)
+                            .is_some()
                     {
                         exact.push((idx, impl_));
                     }
@@ -7767,18 +7801,13 @@ impl ProtocolChecker {
             impls.push(impl_);
         }
 
-        // If no exact match, try to find generic implementations
-        // For example, if looking for `Wrapper`, find `implement<T> ... for Wrapper<T>`
+        // Candidate heads can be nested (references, tuples, arrays). The
+        // shared matcher rejects disjoint heads and proves exact applicability;
+        // a rendered base-name key cannot decide whether a generic head matches.
         if impls.is_empty() {
-            // Extract base type name (without args)
-            let base_type_key = self.make_base_type_key(ty);
-
-            for impl_ in &self.impls {
-                let impl_base_key = self.make_base_type_key(&impl_.for_type);
-
-                if impl_base_key == base_type_key {
-                    // Found a generic implementation for this base type
-                    impls.push(impl_);
+            for implementation in &self.impls {
+                if self.instantiate_applicable_implementation(implementation, ty, None).is_some() {
+                    impls.push(implementation);
                 }
             }
         }
@@ -7801,89 +7830,17 @@ impl ProtocolChecker {
                 continue;
             }
 
-            // Check if this is a blanket implementation (for_type is a type variable or type param)
-            // CRITICAL FIX: For name-based detection (not Type::Var), require that where_clauses
-            // actually constrain the type parameter. This prevents concrete implementations like
-            // `implement Clone for Item` from being incorrectly treated as blanket impls that
-            // match any type (since "Item" looks like a type param name but is a concrete type).
-            let is_blanket = match &impl_.for_type {
-                Type::Var(_) => true,
-                Type::Named { path, args } if args.is_empty() => {
-                    // Named type without args might be a type parameter like S
-                    if let Some(ident) = path.as_ident() {
-                        let name: Text = ident.as_str().into();
-                        if self.looks_like_type_param(&name) {
-                            // CRITICAL: Only treat as blanket if where_clauses actually constrain this type param.
-                            // A true blanket impl like `implement<T: Clone> Clone for T` has where_clauses
-                            // referencing T. A concrete impl like `implement Clone for Item` has no such clauses.
-
-                            impl_.where_clauses.iter().any(|clause| {
-                                // Check if this where clause constrains the potential type parameter
-                                Self::type_mentions_name(&clause.ty, &name)
-                            })
-                        } else {
-                            false
-                        }
-                    } else {
-                        false
-                    }
-                }
-                _ => false,
-            };
-
-            if is_blanket {
-                // Try to match and check where clauses
-                if let Some(substitution) = self.try_match_type(&impl_.for_type, ty) {
-                    let satisfied =
-                        self.check_where_clauses_satisfied(&impl_.where_clauses, &substitution);
-                    if satisfied {
-                        impls.push(impl_);
-                    }
-                }
+            if matches!(&impl_.for_type, Type::Var(variable)
+                if impl_.parameters.contains(&crate::context::GenericBinder::Type(*variable)))
+                && self
+                    .instantiate_applicable_implementation(impl_, ty, None)
+                    .is_some()
+            {
+                impls.push(impl_);
             }
         }
 
         impls
-    }
-
-    /// Make a type key for just the base type name (without type arguments)
-    /// Used for matching generic implementations
-    fn make_base_type_key(&self, ty: &Type) -> Text {
-        use crate::ty::Type::*;
-        match ty {
-            Unit => "Unit".into(),
-            Never => "Never".into(),
-            Bool => WKT::Bool.as_str().into(),
-            Int => WKT::Int.as_str().into(),
-            Float => WKT::Float.as_str().into(),
-            Char => WKT::Char.as_str().into(),
-            Text => WKT::Text.as_str().into(),
-            Named { path, .. } => {
-                // Extract just the base type name without prefix
-                // This allows matching Named{Maybe} against Generic{Maybe}
-                let mut key = verum_common::Text::new();
-                key.push_str("base:");
-                for segment in &path.segments {
-                    if let verum_ast::ty::PathSegment::Name(ident) = segment {
-                        key.push_str(ident.name.as_str());
-                        key.push('.');
-                    }
-                }
-                // Don't include args - just the base type name
-                key
-            }
-            Generic { name, .. } => {
-                // Use same prefix as Named to allow cross-matching
-                let mut key = verum_common::Text::new();
-                key.push_str("base:");
-                key.push_str(name.as_str());
-                key.push('.'); // Add trailing dot to match Named format
-                // Don't include args
-                key
-            }
-            // For other types, fall back to full key
-            _ => self.make_type_key(ty),
-        }
     }
 
     // NOTE (T0117, register A25): a public `check_structural` "duck typing"
@@ -8288,21 +8245,16 @@ impl ProtocolChecker {
         let mut best_projection: Option<Type> = None;
 
         for impl_ in impls.iter() {
-            // Enumeration returns candidates, including generic heads with the
-            // same constructor. Neither a shared head nor a routing-key hit
-            // proves this receiver satisfies the implementation.
-            let Some(substitution) = self.try_match_type(&impl_.for_type, ty) else {
+            let Some(substitution) = self.instantiate_applicable_implementation(impl_, ty, None)
+            else {
                 continue;
             };
-            if !self.check_where_clauses_satisfied(&impl_.where_clauses, &substitution) {
-                continue;
-            }
             // Check if this implementation has the associated type explicitly defined
             if let Some(assignment) = impl_.associated_types.get(assoc_name) {
                 let Some(assoc_ty) = assignment.ordinary_body() else {
                     continue;
                 };
-                let substituted = self.substitute_impl_type_params(assoc_ty, impl_, ty);
+                let substituted = assoc_ty.try_apply_subst(&substitution).ok()?;
 
                 // Check if the substituted type is a projection (still needs resolution)
                 let is_projection = matches!(&substituted, Type::Generic { name, args } if name.as_str().starts_with("::") && args.len() == 1);
@@ -8352,233 +8304,6 @@ impl ProtocolChecker {
         }
 
         None
-    }
-
-    /// Substitute type parameters in an associated type based on the concrete type.
-    ///
-    /// For example:
-    /// - impl_for_type = `Iter<I>` (the impl's for_type with type params)
-    /// - concrete_ty = `Iter<IntoIter<[Int]>>` (the actual type we're querying)
-    /// - assoc_ty = `::Item[I]` (the associated type value, a projection on I)
-    /// - Result: `::Item[IntoIter<[Int]>]` (with I substituted)
-    fn substitute_impl_type_params(
-        &self,
-        assoc_ty: &Type,
-        impl_: &ProtocolImpl,
-        concrete_ty: &Type,
-    ) -> Type {
-        self.substitute_impl_type_params_for_instantiation(assoc_ty, impl_, concrete_ty, None)
-    }
-
-    fn substitute_impl_type_params_for_instantiation(
-        &self,
-        assoc_ty: &Type,
-        impl_: &ProtocolImpl,
-        concrete_ty: &Type,
-        protocol_args: Option<&[Type]>,
-    ) -> Type {
-        // Phase 1: Build initial substitution by matching impl for_type against concrete_ty
-        let mut substitution: Map<TypeVar, Type> = Map::new();
-        self.build_type_substitution(&impl_.for_type, concrete_ty, &mut substitution);
-        if let Some(args) = protocol_args {
-            for (pattern, actual) in impl_.protocol_args.iter().zip(args) {
-                self.build_type_substitution(pattern, actual, &mut substitution);
-            }
-        }
-
-        // Phase 2: Extract additional type bindings from function type bounds.
-        // For `implement<Fut: Future, F: fn(Fut.Output) -> T, T> Future for MapFuture<Fut, F>`:
-        //  Phase 1 gives us: {Fut → ReadyFuture<Int>, F → fn(Int) -> Bool}
-        //  Phase 2: The bound F → fn(Fut.Output) -> T, after substitution and projection
-        //  resolution, becomes fn(Int) -> T. Matching against fn(Int) -> Bool gives T = Bool.
-        if !impl_.type_param_fn_bounds.is_empty() {
-            for (bound_tv, bound_fn_type) in &impl_.type_param_fn_bounds {
-                if let Some(concrete_fn) = substitution.get(bound_tv).cloned() {
-                    // Apply current substitution to the bound pattern to resolve known vars
-                    // This also resolves projections like ::Output[ReadyFuture<Int>] → Int
-                    let resolved_bound = self.apply_type_substitution(bound_fn_type, &substitution);
-                    // Match the resolved bound against the concrete function type
-                    self.build_type_substitution(&resolved_bound, &concrete_fn, &mut substitution);
-                }
-            }
-        }
-
-        // Apply the substitution to the associated type
-        // An impl's OWN type variable must never escape into a caller's
-        // type. `Iterator for MappedIter<I, fn(I.Item) -> B>` declares
-        // `type Item = B`; when the receiver match cannot recover `B` — it
-        // sits in a function type's return position — `B` is left unbound
-        // and the impl's variable is handed back verbatim. Every query for
-        // `::Item of MappedIter<…>` then receives THE SAME variable, so the
-        // first call site binds it and every later one is measured against
-        // that binding: `expected 'Int', found 'Text'` at a second call with
-        // a different element type (T0997).
-        //
-        // Unbound impl variables are therefore freshened per query. Vars
-        // that came from the RECEIVER are left alone — they are the
-        // caller's, and rewriting them would sever the answer from the type
-        // it is an answer about.
-        if std::env::var("VERUM_TRACE_ASSOC").is_ok() {
-            eprintln!(
-                "[impl-bounds] for={} fn_bounds={} subst={}",
-                impl_.for_type.to_text(),
-                impl_.type_param_fn_bounds.len(),
-                substitution.len()
-            );
-        }
-        let mut receiver_vars = crate::dependent_helpers::collect_type_vars(concrete_ty);
-        if let Some(args) = protocol_args {
-            for arg in args {
-                receiver_vars.extend(crate::dependent_helpers::collect_type_vars(arg));
-            }
-        }
-        for tv in crate::dependent_helpers::collect_type_vars(assoc_ty) {
-            if !substitution.contains_key(&tv) && !receiver_vars.contains(&tv) {
-                substitution.insert(tv, Type::Var(crate::ty::TypeVar::fresh()));
-            }
-        }
-
-        self.apply_type_substitution(assoc_ty, &substitution)
-    }
-
-    /// Build a substitution by matching a pattern type against a concrete type.
-    fn build_type_substitution(
-        &self,
-        pattern: &Type,
-        concrete: &Type,
-        subst: &mut Map<TypeVar, Type>,
-    ) {
-        match (pattern, concrete) {
-            // Type variable in pattern - add to substitution
-            (Type::Var(tv), _) => {
-                subst.insert(*tv, concrete.clone());
-            }
-            // Named types - match args positionally
-            (
-                Type::Named {
-                    args: pattern_args, ..
-                },
-                Type::Named {
-                    args: concrete_args,
-                    ..
-                },
-            ) => {
-                for (p, c) in pattern_args.iter().zip(concrete_args.iter()) {
-                    self.build_type_substitution(p, c, subst);
-                }
-            }
-            // Generic types - match args positionally
-            (
-                Type::Generic {
-                    args: pattern_args, ..
-                },
-                Type::Generic {
-                    args: concrete_args,
-                    ..
-                },
-            ) => {
-                for (p, c) in pattern_args.iter().zip(concrete_args.iter()) {
-                    self.build_type_substitution(p, c, subst);
-                }
-            }
-            // Cross-matching: Generic pattern vs Named concrete (or vice versa)
-            // This handles the common case where impl blocks register for_type as Generic
-            // (e.g., Generic { name: "ListIter", args: [Var(T)] }) but the concrete type
-            // is Named (e.g., Named { path: "ListIter", args: [Int] }), or vice versa.
-            (
-                Type::Generic {
-                    name,
-                    args: pattern_args,
-                },
-                Type::Named {
-                    path,
-                    args: concrete_args,
-                },
-            ) => {
-                // Verify base names match before extracting substitutions
-                let named_name = path
-                    .segments
-                    .iter()
-                    .filter_map(|seg| {
-                        if let verum_ast::ty::PathSegment::Name(ident) = seg {
-                            Some(ident.name.as_str())
-                        } else {
-                            None
-                        }
-                    })
-                    .next_back()
-                    .unwrap_or("");
-                if name.as_str() == named_name {
-                    for (p, c) in pattern_args.iter().zip(concrete_args.iter()) {
-                        self.build_type_substitution(p, c, subst);
-                    }
-                }
-            }
-            (
-                Type::Named {
-                    path,
-                    args: pattern_args,
-                },
-                Type::Generic {
-                    name,
-                    args: concrete_args,
-                },
-            ) => {
-                let named_name = path
-                    .segments
-                    .iter()
-                    .filter_map(|seg| {
-                        if let verum_ast::ty::PathSegment::Name(ident) = seg {
-                            Some(ident.name.as_str())
-                        } else {
-                            None
-                        }
-                    })
-                    .next_back()
-                    .unwrap_or("");
-                if named_name == name.as_str() {
-                    for (p, c) in pattern_args.iter().zip(concrete_args.iter()) {
-                        self.build_type_substitution(p, c, subst);
-                    }
-                }
-            }
-            // Reference types - match inner
-            (Type::Reference { inner: p, .. }, Type::Reference { inner: c, .. }) => {
-                self.build_type_substitution(p, c, subst);
-            }
-            // Tuple types - match elements
-            (Type::Tuple(p_elems), Type::Tuple(c_elems)) => {
-                for (p, c) in p_elems.iter().zip(c_elems.iter()) {
-                    self.build_type_substitution(p, c, subst);
-                }
-            }
-            // Array types - match element
-            (Type::Array { element: p, .. }, Type::Array { element: c, .. }) => {
-                self.build_type_substitution(p, c, subst);
-            }
-            // Function types - match params and return type
-            (
-                Type::Function {
-                    params: p_params,
-                    return_type: p_ret,
-                    ..
-                },
-                Type::Function {
-                    params: c_params,
-                    return_type: c_ret,
-                    ..
-                },
-            ) => {
-                if p_params.len() == c_params.len() {
-                    for (p, c) in p_params.iter().zip(c_params.iter()) {
-                        self.build_type_substitution(p, c, subst);
-                    }
-                    self.build_type_substitution(p_ret, c_ret, subst);
-                }
-            }
-            // Other cases - no substitution needed
-            _ => {}
-        }
     }
 
     /// Apply a type substitution to a type.
@@ -10879,6 +10604,31 @@ impl ProtocolChecker {
         Ok(false)
     }
 
+    fn instantiated_implementation_method(
+        &self,
+        implementation: &ProtocolImpl,
+        receiver: &Type,
+        method: &Type,
+    ) -> Result<Option<Type>, ProtocolError> {
+        let Some(substitution) =
+            self.instantiate_applicable_implementation(implementation, receiver, None)
+        else {
+            return Ok(None);
+        };
+        let resolved = method.try_apply_subst(&substitution).map_err(|_| {
+            ProtocolError::BoundNotSatisfied {
+                ty: receiver.clone(),
+                protocol: implementation.protocol.clone(),
+            }
+        })?;
+        let receiver_binding = [(Text::from("Self"), receiver.clone())]
+            .into_iter()
+            .collect();
+        Ok(Some(
+            self.substitute_type_params(&resolved, &receiver_binding),
+        ))
+    }
+
     /// Lookup a method for a type, searching through protocol implementations
     ///
     /// This method searches for a method by name, first checking inherent methods
@@ -10900,59 +10650,11 @@ impl ProtocolChecker {
 
         for impl_ in impls.iter() {
             if let Some(method_ty) = impl_.methods.get(method_name) {
-                // CRITICAL FIX: Substitute Self and type parameters in the method type
-                // This enables T.default() pattern in generic protocol implementations.
-                //
-
-                // For a generic impl like `implement<T: Default> Default for Wrapper<T>`:
-                // - impl_.for_type = Wrapper<T> (with T as a TypeVar after inference)
-                // - method_ty might contain Self (e.g., fn default() -> Self)
-                // - lookup ty = Wrapper<Person> (concrete instantiation)
-                //
-
-                // We need to:
-                // 1. Unify impl_.for_type with ty to get bindings (T52 -> Person)
-                // 2. Substitute Self with impl_.for_type in method_ty
-                // 3. Substitute type parameter bindings (TypeVars) in the result
-
-                let mut result_ty = method_ty.clone();
-
-                // Step 1: Build substitution map by unifying for_type with lookup type
-                // This captures bindings like TypeVar(52) -> Person (stored as "T52" -> Person)
-                let mut subst_map = Map::new();
-                let _ = self.unify_types(&impl_.for_type, ty, &mut subst_map);
-
-                // Step 2: Add Self -> impl_.for_type mapping
-                // This allows replacing Self in method signatures
-                if std::env::var("VERUM_TRACE_SELFSUBST").is_ok() {
-                    // INSTRUMENT: which of the five `Self` bindings fires, and
-                    // with WHAT. R3 answers `PeekableIter<ISize>` where the
-                    // receiver is `Range<Int>`, so one of these maps `Self` to
-                    // something that is neither the receiver nor the impl target.
-                    eprintln!(
-                        "[selfsubst] site-10546 impl.for_type self={} recv={}",
-                        impl_.for_type.to_text(),
-                        ty.to_text()
-                    );
-                }
-                subst_map.insert(Text::from("Self"), impl_.for_type.clone());
-
-                // Step 3: Apply substitution
-                // This substitutes both Self and TypeVars like T52
-                result_ty = self.substitute_type_params(&result_ty, &subst_map);
-
-                // Step 4: Apply bindings again for any remaining type variables
-                // (e.g., if Self was Wrapper<T52> and T52 -> Person, we need another pass)
-                // The first pass already handles TypeVars in nested positions now,
-                // but an extra pass doesn't hurt for complex cases
-                if !subst_map.is_empty() {
-                    // Remove Self from map to avoid infinite substitution
-                    let mut type_param_map = subst_map.clone();
-                    type_param_map.remove(&Text::from("Self"));
-                    if !type_param_map.is_empty() {
-                        result_ty = self.substitute_type_params(&result_ty, &type_param_map);
-                    }
-                }
+                let Some(result_ty) =
+                    self.instantiated_implementation_method(impl_, ty, method_ty)?
+                else {
+                    continue;
+                };
 
                 return Ok(Maybe::Some(result_ty));
             }
@@ -10979,33 +10681,11 @@ impl ProtocolChecker {
 
         for impl_ in impls.iter() {
             if let Some(method_ty) = impl_.methods.get(method_name) {
-                let mut result_ty = method_ty.clone();
-
-                // Build substitution map by unifying for_type with lookup type
-                let mut subst_map = Map::new();
-                let _ = self.unify_types(&impl_.for_type, ty, &mut subst_map);
-                if std::env::var("VERUM_TRACE_SELFSUBST").is_ok() {
-                    // INSTRUMENT: which of the five `Self` bindings fires, and
-                    // with WHAT. R3 answers `PeekableIter<ISize>` where the
-                    // receiver is `Range<Int>`, so one of these maps `Self` to
-                    // something that is neither the receiver nor the impl target.
-                    eprintln!(
-                        "[selfsubst] site-10595 impl.for_type self={} recv={}",
-                        impl_.for_type.to_text(),
-                        ty.to_text()
-                    );
-                }
-                subst_map.insert(Text::from("Self"), impl_.for_type.clone());
-
-                // Apply substitution
-                result_ty = self.substitute_type_params(&result_ty, &subst_map);
-                if !subst_map.is_empty() {
-                    let mut type_param_map = subst_map.clone();
-                    type_param_map.remove(&Text::from("Self"));
-                    if !type_param_map.is_empty() {
-                        result_ty = self.substitute_type_params(&result_ty, &type_param_map);
-                    }
-                }
+                let Some(result_ty) =
+                    self.instantiated_implementation_method(impl_, ty, method_ty)?
+                else {
+                    continue;
+                };
 
                 // Find the protocol definition to get method-level type_param_names
                 let protocol_name = impl_
@@ -11159,63 +10839,13 @@ impl ProtocolChecker {
 
         let impls = self.get_implementations(ty);
 
-        // Fetch the protocol's method-level type-param names (if we
-        // can locate the protocol declaration). These names must be
-        // EXCLUDED from the impl-level substitution map — without
-        // this guard, a method declared as `fn map<B, F>` inherits an
-        // impl-level `F` binding and its method-local `F` parameter
-        // gets silently replaced, producing type errors like
-        // "expected Int, found fn(Int) -> Int".
-        let method_level_param_names: Option<List<Text>> = impls.iter().find_map(|impl_| {
-            let proto = self.lookup_protocol(&impl_.protocol)?;
-            proto
-                .methods
-                .get(method_name)
-                .map(|pm| pm.type_param_names.clone())
-        });
-
         for impl_ in impls.iter() {
             if let Some(method_ty) = impl_.methods.get(method_name) {
-                let mut result_ty = method_ty.clone();
-
-                // Build substitution map by unifying for_type with lookup type
-                let mut subst_map = Map::new();
-                let _ = self.unify_types(&impl_.for_type, ty, &mut subst_map);
-
-                // Prune method-level params from the subst_map. This
-                // is what stops method-scoped `F` from being captured
-                // by an impl-scoped `F` binding.
-                if let Some(ref method_names) = method_level_param_names {
-                    for name in method_names.iter() {
-                        subst_map.remove(name);
-                    }
-                }
-
-                // Add Self -> impl_.for_type mapping
-                if std::env::var("VERUM_TRACE_SELFSUBST").is_ok() {
-                    // INSTRUMENT: which of the five `Self` bindings fires, and
-                    // with WHAT. R3 answers `PeekableIter<ISize>` where the
-                    // receiver is `Range<Int>`, so one of these maps `Self` to
-                    // something that is neither the receiver nor the impl target.
-                    eprintln!(
-                        "[selfsubst] site-10772 impl.for_type self={} recv={}",
-                        impl_.for_type.to_text(),
-                        ty.to_text()
-                    );
-                }
-                subst_map.insert(Text::from("Self"), impl_.for_type.clone());
-
-                // Apply substitution
-                result_ty = self.substitute_type_params(&result_ty, &subst_map);
-
-                // Apply bindings again for any remaining type variables
-                if !subst_map.is_empty() {
-                    let mut type_param_map = subst_map.clone();
-                    type_param_map.remove(&Text::from("Self"));
-                    if !type_param_map.is_empty() {
-                        result_ty = self.substitute_type_params(&result_ty, &type_param_map);
-                    }
-                }
+                let Some(result_ty) =
+                    self.instantiated_implementation_method(impl_, ty, method_ty)?
+                else {
+                    continue;
+                };
 
                 results.push(result_ty);
             }
@@ -12265,6 +11895,9 @@ impl ProtocolChecker {
 
     /// Helper: Check if two types could unify (simple heuristic)
     fn types_could_unify(&self, ty1: &Type, ty2: &Type) -> bool {
+        if let Some(overlap) = self.compare_nominal_applications(ty1, ty2,
+            |left, right| self.types_could_unify(left, right))
+        { return overlap; }
         match (ty1, ty2) {
             (
                 Type::Meta {
@@ -12294,38 +11927,6 @@ impl ProtocolChecker {
             (Type::Float, Type::Float) => true,
             (Type::Char, Type::Char) => true,
             (Type::Text, Type::Text) => true,
-
-            // Named types: check constructor and arguments
-            (Type::Named { path: p1, args: a1 }, Type::Named { path: p2, args: a2 }) => {
-                // Declaration identity includes every owner segment, but not
-                // source locations. Comparing Debug text both allocated in
-                // this hot path and missed overlaps at different use sites.
-                let same_constructor = p1.segments.len() == p2.segments.len()
-                    && p1
-                        .segments
-                        .iter()
-                        .zip(p2.segments.iter())
-                        .all(|(left, right)| match (left, right) {
-                            (
-                                verum_ast::ty::PathSegment::Name(left),
-                                verum_ast::ty::PathSegment::Name(right),
-                            ) => left.name == right.name,
-                            _ => left == right,
-                        });
-                if !same_constructor {
-                    return false;
-                }
-
-                // Check if arguments have same arity
-                if a1.len() != a2.len() {
-                    return false;
-                }
-
-                // Check if all arguments could unify
-                a1.iter()
-                    .zip(a2.iter())
-                    .all(|(t1, t2)| self.types_could_unify(t1, t2))
-            }
 
             // Tuples: same length and all elements could unify
             (Type::Tuple(e1), Type::Tuple(e2)) => {
@@ -15033,6 +14634,7 @@ impl ProtocolDerivation {
         );
 
         Ok(ProtocolImpl {
+            parameters: List::new(),
             protocol: Path::single(Ident::new("Eq", Span::default())),
             protocol_args: List::new(),
             for_type: ty.clone(),
@@ -15113,6 +14715,7 @@ impl ProtocolDerivation {
         }
 
         Ok(ProtocolImpl {
+            parameters: List::new(),
             protocol: Path::single(Ident::new("Ord", Span::default())),
             protocol_args: List::new(),
             for_type: ty.clone(),
@@ -15166,6 +14769,7 @@ impl ProtocolDerivation {
         );
 
         Ok(ProtocolImpl {
+            parameters: List::new(),
             protocol: Path::single(Ident::new("Show", Span::default())),
             protocol_args: List::new(),
             for_type: ty.clone(),
@@ -15204,6 +14808,7 @@ impl ProtocolDerivation {
         );
 
         Ok(ProtocolImpl {
+            parameters: List::new(),
             protocol: Path::single(Ident::new("Clone", Span::default())),
             protocol_args: List::new(),
             for_type: ty.clone(),
@@ -15254,6 +14859,7 @@ impl ProtocolDerivation {
         );
 
         Ok(ProtocolImpl {
+            parameters: List::new(),
             protocol: Path::single(Ident::new("Hash", Span::default())),
             protocol_args: List::new(),
             for_type: ty.clone(),
@@ -15286,6 +14892,7 @@ impl ProtocolDerivation {
         );
 
         Ok(ProtocolImpl {
+            parameters: List::new(),
             protocol: Path::single(Ident::new("Default", Span::default())),
             protocol_args: List::new(),
             for_type: ty.clone(),
@@ -15517,6 +15124,7 @@ mod tests {
     /// Build `implement P<arg> for target`.
     fn impl_of(protocol: &str, arg: Option<Type>, target: Type) -> ProtocolImpl {
         ProtocolImpl {
+            parameters: List::new(),
             protocol: Path::single(Ident::new(protocol, Span::default())),
             protocol_args: arg.into_iter().collect(),
             for_type: target,
@@ -16137,6 +15745,7 @@ mod tests {
     #[test]
     fn test_specialization_none() {
         let impl_ = ProtocolImpl {
+            parameters: List::new(),
             protocol: Path::single(Ident::new("Display", Span::default())),
             protocol_args: List::new(),
             for_type: Type::Int,
@@ -16161,6 +15770,7 @@ mod tests {
         );
 
         let impl_ = ProtocolImpl {
+            parameters: List::new(),
             protocol: Path::single(Ident::new("Display", Span::default())),
             protocol_args: List::new(),
             for_type: Type::Int,
@@ -16219,6 +15829,7 @@ mod tests {
         let mut checker = ProtocolChecker::new_empty();
 
         let impl_ = ProtocolImpl {
+            parameters: List::new(),
             protocol: Path::single(Ident::new("Display", Span::default())),
             protocol_args: List::new(),
             for_type: Type::Int,
@@ -16567,6 +16178,7 @@ mod tests {
         );
 
         let impl_ = ProtocolImpl {
+            parameters: List::new(),
             protocol: Path::single(Ident::new("Show", Span::default())),
             protocol_args: List::new(),
             for_type: Type::Int,
@@ -16624,6 +16236,7 @@ mod tests {
 
         // Create an implementation missing the required method
         let impl_ = ProtocolImpl {
+            parameters: List::new(),
             protocol: Path::single(Ident::new("Eq", Span::default())),
             protocol_args: List::new(),
             for_type: Type::Int,
@@ -16702,6 +16315,7 @@ mod tests {
         );
 
         let impl_ = ProtocolImpl {
+            parameters: List::new(),
             protocol: Path::single(Ident::new("Iterator", Span::default())),
             protocol_args: List::new(),
             for_type: Type::Named {
@@ -16773,6 +16387,7 @@ mod tests {
         );
 
         let impl_ = ProtocolImpl {
+            parameters: List::new(),
             protocol: Path::single(Ident::new("ToText", Span::default())),
             protocol_args: List::new(),
             for_type: Type::Int,
@@ -16881,6 +16496,7 @@ mod tests {
         );
 
         let impl_ = ProtocolImpl {
+            parameters: List::new(),
             protocol: Path::single(Ident::new("Ord", Span::default())),
             protocol_args: List::new(),
             for_type: Type::Int,
@@ -16982,6 +16598,7 @@ mod tests {
         );
 
         let impl_ = ProtocolImpl {
+            parameters: List::new(),
             protocol: Path::single(Ident::new("Validator", Span::default())),
             protocol_args: List::new(),
             for_type: Type::Int,
@@ -17082,6 +16699,7 @@ mod tests {
         );
 
         let impl_ = ProtocolImpl {
+            parameters: List::new(),
             protocol: Path::single(Ident::new("Container", Span::default())),
             protocol_args: List::new(),
             for_type: Type::Named {
@@ -17189,6 +16807,7 @@ mod tests {
         let checker = ProtocolChecker::new_empty();
 
         let impl_ = ProtocolImpl {
+            parameters: List::new(),
             protocol: Path::single(Ident::new("NonExistent", Span::default())),
             protocol_args: List::new(),
             for_type: Type::Int,
@@ -17248,6 +16867,7 @@ mod tests {
 
         // Implementation without specifying Output (uses default)
         let impl_ = ProtocolImpl {
+            parameters: List::new(),
             protocol: Path::single(Ident::new("Processor", Span::default())),
             protocol_args: List::new(),
             for_type: Type::Int,
@@ -17311,6 +16931,7 @@ mod tests {
         );
 
         let eq_impl = ProtocolImpl {
+            parameters: List::new(),
             protocol: Path::single(Ident::new("Eq", Span::default())),
             protocol_args: List::new(),
             for_type: Type::Int,
@@ -17377,6 +16998,7 @@ mod tests {
         );
 
         let ord_impl = ProtocolImpl {
+            parameters: List::new(),
             protocol: Path::single(Ident::new("Ord", Span::default())),
             protocol_args: List::new(),
             for_type: Type::Int,
@@ -17439,6 +17061,7 @@ mod tests {
             Type::function(List::from(vec![Type::Int]), Type::Text),
         );
         let show_for_int = ProtocolImpl {
+            parameters: List::new(),
             protocol: Path::single(Ident::new("Show", Span::default())),
             protocol_args: List::new(),
             for_type: Type::Int,
@@ -17584,10 +17207,14 @@ mod tests {
             "CustomProto_InstanceSearchTest",
             Span::default(),
         ));
+        let parameter = crate::ty::TypeVar::fresh();
         let blanket = ProtocolImpl {
+            parameters: [crate::context::GenericBinder::Type(parameter)]
+                .into_iter()
+                .collect(),
             protocol: proto_path.clone(),
             protocol_args: List::new(),
-            for_type: Type::Var(crate::ty::TypeVar::fresh()),
+            for_type: Type::Var(parameter),
             where_clauses: List::new(),
             methods: Map::new(),
             associated_types: Map::new(),
@@ -17624,6 +17251,7 @@ mod tests {
         let mut checker = ProtocolChecker::new_empty();
         let proto_path = Path::single(Ident::new("CustomProto_ExactMatchTest", Span::default()));
         let concrete = ProtocolImpl {
+            parameters: List::new(),
             protocol: proto_path.clone(),
             protocol_args: List::new(),
             for_type: Type::Int,
@@ -17686,6 +17314,7 @@ mod tests {
         checker.register_type_crate("ForeignType".into(), "another_foreign_cog".into());
 
         ProtocolImpl {
+            parameters: List::new(),
             protocol: Path::single(Ident::new(proto_name, Span::default())),
             protocol_args: List::new(),
             for_type: Type::Named {
@@ -17836,6 +17465,7 @@ mod tests {
         let proto_path = Path::single(Ident::new("OverlapProto_Strict", Span::default()));
 
         let first = ProtocolImpl {
+            parameters: List::new(),
             protocol: proto_path.clone(),
             protocol_args: List::new(),
             for_type: Type::Int,
@@ -17871,6 +17501,7 @@ mod tests {
         let proto_path = Path::single(Ident::new("OverlapProto_Lenient", Span::default()));
 
         let first = ProtocolImpl {
+            parameters: List::new(),
             protocol: proto_path.clone(),
             protocol_args: List::new(),
             for_type: Type::Int,

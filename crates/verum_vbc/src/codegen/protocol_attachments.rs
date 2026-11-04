@@ -4,12 +4,29 @@ use super::{CodegenError, CodegenErrorKind, CodegenResult, VbcCodegen};
 use crate::types::{ProtocolImpl, TypeDescriptor, TypeId};
 use verum_ast::decl::ImplKind;
 
+#[derive(Clone, PartialEq)]
+pub(super) enum ImplementationAttachment {
+    Protocol(ProtocolImpl),
+    Inherent(verum_ast::source_implementation::AssociatedImplementationSource),
+}
+impl ImplementationAttachment {
+    pub(super) fn attach(self, target: &mut TypeDescriptor) {
+        match self {
+            Self::Protocol(source) => target.register_implementation(source),
+            Self::Inherent(source) => {
+                if !target.source_inherent_implementations.contains(&source) {
+                    target.source_inherent_implementations.push(source);
+                }
+            }
+        }
+    }
+}
 impl VbcCodegen {
-    pub(super) fn attach_declared_protocol_impl(
+    pub(super) fn attach_declared_implementation(
         &mut self,
         implementation: &ImplKind,
         name: &str,
-        fact: ProtocolImpl,
+        fact: ImplementationAttachment,
     ) -> CodegenResult<()> {
         if let Some(id) = self.implementation_nominal_id(implementation) {
             // Scalar aliases may share a runtime ID; their source spelling
@@ -24,13 +41,13 @@ impl VbcCodegen {
                                 == Some(name)))
             });
             if let Some(slot) = slot {
-                self.types[slot].register_implementation(fact);
+                fact.attach(&mut self.types[slot]);
                 return Ok(());
             }
             if self.source_generic_rosters.contains_key(&id) {
                 // The source header declares this ID. Preserve the complete
                 // record unchanged until its real descriptor is registered.
-                let pending = self.pending_protocol_attachments.entry(id).or_default();
+                let pending = self.pending_implementation_attachments.entry(id).or_default();
                 if !pending.contains(&fact) {
                     pending.push(fact);
                 }
@@ -40,17 +57,17 @@ impl VbcCodegen {
         self.attach_impl_to_undeclared_target(name, fact)
     }
 
-    pub(super) fn take_pending_protocol_attachments(&mut self, target: &mut TypeDescriptor) {
-        if let Some(facts) = self.pending_protocol_attachments.remove(&target.id) {
+    pub(super) fn take_pending_implementation_attachments(&mut self, target: &mut TypeDescriptor) {
+        if let Some(facts) = self.pending_implementation_attachments.remove(&target.id) {
             for fact in facts {
-                target.register_implementation(fact);
+                fact.attach(target);
             }
         }
     }
 
-    pub(super) fn check_pending_protocol_attachments(&self) -> CodegenResult<()> {
+    pub(super) fn check_pending_implementation_attachments(&self) -> CodegenResult<()> {
         let Some(id) = self
-            .pending_protocol_attachments
+            .pending_implementation_attachments
             .keys()
             .min_by_key(|id| id.0)
         else {

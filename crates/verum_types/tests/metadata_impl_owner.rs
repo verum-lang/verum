@@ -31,6 +31,54 @@ fn wrapper(owner: &str) -> TypeDescriptor {
         resource_discipline: ResourceDiscipline::Unrestricted,
     }
 }
+fn source_implementation(
+    owner: &str,
+    declaration: &str,
+) -> verum_ast::source_implementation::AssociatedImplementationSource {
+    // Each fixture is a distinct virtual source file; declaration spans retain that identity.
+    static FILE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
+    let file = verum_ast::FileId::new(FILE.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+    let ast = verum_fast_parser::FastParser::new()
+        .parse_module_str(declaration, file)
+        .expect("real implementation grammar");
+    let ItemKind::Impl(declaration) = &ast.items[0].kind else {
+        panic!("implementation")
+    };
+    verum_ast::source_implementation::AssociatedImplementationSource::new(owner.into(), declaration)
+        .expect("retained declaration-owned telescope")
+}
+fn protocol_type(metadata: &mut CoreMetadata, name: &str, header: &str, member: &str) {
+    let ast = Parser::new(header)
+        .parse_module()
+        .expect("real protocol grammar");
+    let ItemKind::Type(declaration) = &ast.items[0].kind else {
+        panic!("protocol")
+    };
+    let mut descriptor = wrapper("traits");
+    descriptor.name = name.into();
+    descriptor.source_declaration = Some(declaration.clone());
+    let protocol = metadata
+        .protocols
+        .get_mut(&Text::from(name))
+        .expect("protocol descriptor");
+    protocol.associated_types = [AssociatedTypeDescriptor {
+        name: member.into(),
+        bounds: List::new(),
+        default: None,
+    }]
+    .into_iter()
+    .collect();
+    descriptor.generic_params = protocol.generic_params.clone();
+    descriptor.kind = TypeDescriptorKind::Protocol {
+        super_protocols: List::new(),
+        associated_types: protocol.associated_types.clone(),
+        required_methods: List::new(),
+        default_methods: List::new(),
+    };
+    metadata
+        .types
+        .insert(format!("traits.{name}").into(), descriptor);
+}
 fn metadata(qualified: bool, reverse: bool) -> CoreMetadata {
     let mut metadata = CoreMetadata::default();
     let alpha = wrapper("alpha");
@@ -62,7 +110,10 @@ fn metadata(qualified: bool, reverse: bool) -> CoreMetadata {
         },
     );
     metadata.implementations.push(ImplementationDescriptor {
-        source_implementation: None,
+        source_implementation: Some(source_implementation(
+            "alpha",
+            "implement<T> traits.Deref for alpha.Wrapper<T> { type Target = T; }",
+        )),
         protocol: "Deref".into(),
         target_type: if qualified {
             "alpha.Wrapper"
@@ -76,6 +127,12 @@ fn metadata(qualified: bool, reverse: bool) -> CoreMetadata {
         methods: List::new(),
         protocol_args: List::new(),
     });
+    protocol_type(
+        &mut metadata,
+        "Deref",
+        "public type Deref is protocol { type Target; };",
+        "Target",
+    );
     serde_json::from_slice(&serde_json::to_vec(&metadata).unwrap()).unwrap()
 }
 fn checker(metadata: CoreMetadata, eager: bool) -> TypeChecker {
@@ -191,6 +248,10 @@ fn sibling_impls_keep_distinct_targets_in_both_load_orders() {
             let mut metadata = metadata(true, reverse);
             let mut other = metadata.implementations[0].clone();
             other.target_type = "beta.Wrapper".into();
+            other.source_implementation = Some(source_implementation(
+                "beta",
+                "implement<T> traits.Deref for beta.Wrapper<T> { type Target = Bool; }",
+            ));
             other
                 .associated_types
                 .insert("Target".into(), "Bool".into());
@@ -225,6 +286,10 @@ fn existing_primitive_target_spelling_is_retained() {
         primitive.kind = TypeDescriptorKind::Opaque;
         metadata.types.insert("Int".into(), primitive);
         metadata.implementations[0].target_type = "Int".into();
+        metadata.implementations[0].source_implementation = Some(source_implementation(
+            "core.primitives",
+            "implement traits.Deref for Int { type Target = Bool; }",
+        ));
         metadata.implementations[0]
             .associated_types
             .insert("Target".into(), "Bool".into());
@@ -250,6 +315,10 @@ fn unrelated_metadata_does_not_expand_target_lookup_work() {
         let key = Text::from(format!("{owner}.Wrapper"));
         metadata.types.insert(key.clone(), wrapper(&owner));
         let mut implementation = metadata.implementations[0].clone();
+        implementation.source_implementation = Some(source_implementation(
+            &owner,
+            &format!("implement<T> traits.Deref for {owner}.Wrapper<T> {{ type Target = Bool; }}"),
+        ));
         implementation.target_type = key;
         implementation
             .associated_types
@@ -325,11 +394,19 @@ fn replacing_metadata_reloads_completed_tails_and_rebuilds_positions() {
     let mut replacement = initial;
     let mut foreign = replacement.implementations[0].clone();
     foreign.target_type = "beta.Wrapper".into();
+    foreign.source_implementation = Some(source_implementation(
+        "beta",
+        "implement<T> traits.Deref for beta.Wrapper<T> { type Target = Bool; }",
+    ));
     foreign
         .associated_types
         .insert("Target".into(), "Bool".into());
     let mut added = replacement.implementations[0].clone();
     added.protocol = "Printable".into();
+    added.source_implementation = Some(source_implementation(
+        "alpha",
+        "implement<T> traits.Printable for alpha.Wrapper<T> { type Printed = Text; }",
+    ));
     added.associated_types = OrderedMap::from_iter([("Printed".into(), "Text".into())]);
     let mut protocol = replacement
         .protocols
@@ -338,6 +415,12 @@ fn replacing_metadata_reloads_completed_tails_and_rebuilds_positions() {
         .clone();
     protocol.name = "Printable".into();
     replacement.protocols.insert("Printable".into(), protocol);
+    protocol_type(
+        &mut replacement,
+        "Printable",
+        "public type Printable is protocol { type Printed; };",
+        "Printed",
+    );
     replacement.implementations =
         List::from_iter([foreign, added, replacement.implementations[0].clone()]);
     checker.set_core_metadata(Arc::new(replacement));
@@ -397,6 +480,20 @@ fn owner_bucket_keeps_protocol_instantiations_in_declaration_order() {
         second
             .associated_types
             .insert("Target".into(), "Bool".into());
+        metadata.implementations[0].source_implementation = Some(source_implementation(
+            "alpha",
+            "implement traits.Select<Int> for alpha.Wrapper { type Target = Text; }",
+        ));
+        second.source_implementation = Some(source_implementation(
+            "alpha",
+            "implement traits.Select<Bool> for alpha.Wrapper { type Target = Bool; }",
+        ));
+        protocol_type(
+            &mut metadata,
+            "Select",
+            "public type Select<Input> is protocol { type Target; };",
+            "Target",
+        );
         metadata.implementations.push(second);
         let mut checker = checker(metadata, eager);
         for name in ["export.Renamed", "Wrapper", "alpha.Wrapper"] {
@@ -462,4 +559,94 @@ fn metadata_setter_initializes_lookup_for_minimal_checker() {
         Some(verum_types::Type::Int)
     );
     assert_eq!(target(&checker, "beta.Wrapper"), None);
+}
+
+#[test]
+fn generic_metadata_without_owned_implementation_telescope_is_refused() {
+    for eager in [false, true] {
+        let mut metadata = metadata(false, false);
+        metadata.implementations[0].source_implementation = None;
+        let mut checker = checker(metadata, eager);
+        checker.ensure_stdlib_type_loaded(&"alpha.Wrapper".into(), &mut Default::default());
+        assert_eq!(target(&checker, "alpha.Wrapper"), None);
+        let errors = checker.take_deferred_errors();
+        assert!(
+            errors.iter().any(|error| error
+                .to_string()
+                .contains("implementation lacks its declaration-owned source telescope")),
+            "actual missing authority refusal, eager={eager}: {errors:?}"
+        );
+    }
+}
+
+#[test]
+fn foreign_source_receiver_cannot_supply_an_implementation_owner() {
+    for eager in [false, true] {
+        let mut metadata = metadata(false, false);
+        metadata.implementations[0].source_implementation = Some(source_implementation(
+            "beta",
+            "implement<T> traits.Deref for beta.Wrapper<T> { type Target = T; }",
+        ));
+        let mut checker = checker(metadata, eager);
+        checker.ensure_stdlib_type_loaded(&"alpha.Wrapper".into(), &mut Default::default());
+        assert_eq!(target(&checker, "alpha.Wrapper"), None);
+        let errors = checker.take_deferred_errors();
+        assert!(
+            errors.iter().any(|error| error.to_string().contains(
+                "source implementation differs from its metadata protocol or target owner"
+            )),
+            "actual owner refusal, eager={eager}: {errors:?}"
+        );
+    }
+}
+
+#[test]
+fn primitive_source_receiver_must_equal_the_declared_primitive() {
+    for eager in [false, true] {
+        let mut metadata = metadata(false, false);
+        let mut primitive = wrapper("core.primitives");
+        primitive.name = "Int".into();
+        primitive.generic_params = List::new();
+        primitive.kind = TypeDescriptorKind::Opaque;
+        metadata.types.insert("Int".into(), primitive);
+        metadata.implementations[0].target_type = "Int".into();
+        metadata.implementations[0].source_implementation = Some(source_implementation(
+            "core.primitives",
+            "implement traits.Deref for Bool { type Target = Bool; }",
+        ));
+        let mut checker = checker(metadata, eager);
+        checker.ensure_stdlib_type_loaded(&"Int".into(), &mut Default::default());
+        assert_eq!(
+            checker
+                .protocol_checker
+                .read()
+                .try_find_associated_type(&verum_types::Type::Int, &"Target".into()),
+            None
+        );
+        let errors = checker.take_deferred_errors();
+        assert!(
+            errors.iter().any(|error| error.to_string().contains(
+                "source implementation differs from its metadata protocol or target owner"
+            )),
+            "actual primitive owner refusal, eager={eager}: {errors:?}"
+        );
+    }
+}
+
+#[test]
+fn borrowed_receiver_retains_shape_at_nominal_metadata_attachment() {
+    for eager in [false, true] {
+        let mut metadata = metadata(false, false);
+        metadata.implementations[0].source_implementation = Some(source_implementation(
+            "alpha", "implement<T> traits.Deref for &alpha.Wrapper<T> { type Target = T; }"));
+        let mut checker = checker(metadata, eager);
+        checker.ensure_stdlib_type_loaded(&"alpha.Wrapper".into(), &mut Default::default());
+        let actual = verum_types::Type::Reference { mutable: false,
+            inner: Box::new(parse_descriptor_type_string("alpha.Wrapper<Int>").unwrap()) };
+        assert_eq!(checker.protocol_checker.read().try_find_associated_type(&actual, &"Target".into()),
+            Some(verum_types::Type::Int), "borrowed receiver eager={eager}");
+        assert_eq!(target(&checker, "alpha.Wrapper"), None,
+            "nominal attachment does not erase the actual reference receiver");
+        assert!(checker.take_deferred_errors().is_empty());
+    }
 }

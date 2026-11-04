@@ -76,6 +76,8 @@ mod cfg_selection;
 mod protocol_results;
 mod constructor_types;
 mod declaration_interface;
+mod callable_generic_rosters;
+mod callable_owner_rosters;
 mod field_visibility;
 
 #[cfg(test)]
@@ -1035,8 +1037,9 @@ pub struct VbcCodegen {
     /// Source binder headers, keyed by the declaration's final nominal identity.
     /// None is a known unsupported header; an empty roster is a nongeneric type.
     source_generic_rosters: HashMap<TypeId, Option<impl_generic_rosters::GenericRoster>>,
+    source_callable_rosters: Map<FunctionId, Option<impl_generic_rosters::GenericRoster>>,
     /// Complete implementation facts awaiting their already claimed source target.
-    pending_protocol_attachments: HashMap<TypeId, Vec<crate::types::ProtocolImpl>>,
+    pending_implementation_attachments: Map<TypeId, verum_common::List<protocol_attachments::ImplementationAttachment>>,
     /// Exact local declarations reached through a cyclic bootstrap dependency.
     /// Their IDs are final, but their imported field types are provisional.
     bootstrap_local_forwards: std::collections::HashSet<Text>,
@@ -2422,7 +2425,8 @@ impl VbcCodegen {
             type_field_layouts: std::collections::HashMap::new(),
             source_type_visibility: Default::default(),
             source_generic_rosters: Default::default(),
-            pending_protocol_attachments: Default::default(),
+            source_callable_rosters: Default::default(),
+            pending_implementation_attachments: Default::default(),
             bootstrap_local_forwards: Default::default(),
             type_name_claim_owner: std::collections::HashMap::new(),
             type_field_type_names: std::collections::HashMap::new(),
@@ -3472,7 +3476,7 @@ impl VbcCodegen {
         let declaration = std::sync::Arc::new(DeferredImplDeclaration {
             owner: self.ctx.current_source_module.clone(),
             type_generics, const_generics, ordered_generics,
-            ast_generics: implementation.generics.clone(),
+            ast_generics: self.implementation_source_parameters(implementation)?,
             where_clause: implementation.generic_where_clause.clone(),
         });
         // Collect all protocols to check (this protocol + all superprotocols
@@ -5885,7 +5889,7 @@ impl VbcCodegen {
                 // FN-BOUND-CARRY (T0701): arm the impl block's AST
                 // generics for the descriptor fill inside
                 // compile_function; cleared after the item loop.
-                let previous_generics = self.current_impl_ast_generics.replace(impl_decl.generics.clone());
+                let previous_generics = self.current_impl_ast_generics.replace(self.implementation_source_parameters(impl_decl)?);
                 let previous_where = std::mem::replace(&mut self.current_impl_where_clause, impl_decl.generic_where_clause.clone());
 
                 for impl_item in selected_items {
@@ -7159,7 +7163,7 @@ impl VbcCodegen {
     }
 
     fn push_declared_type(&mut self, mut ty: TypeDescriptor) {
-        self.take_pending_protocol_attachments(&mut ty);
+        self.take_pending_implementation_attachments(&mut ty);
         let complete_forward = self.type_declaration_identity(&ty).is_some_and(|owner| {
             self.type_by_id(ty.id)
                 .is_some_and(|prior| self.type_declaration_identity(prior).as_ref() == Some(&owner))
@@ -7204,6 +7208,7 @@ impl VbcCodegen {
     ) -> CodegenResult<()> {
         let mut owners = std::collections::BTreeSet::new();
         for descriptor in &module.types {
+            owners.extend(descriptor.source_inherent_implementations.iter().map(|source| source.origin_module()));
             if descriptor.source_declaration.is_some() {
                 owners.insert(descriptor.origin_module.and_then(|id| module.strings.get(id))
                     .unwrap_or(&module.name));
@@ -7226,6 +7231,7 @@ impl VbcCodegen {
         owners.extend(self.protocol_registry.values().filter(|protocol| !protocol.default_methods.is_empty())
             .map(|protocol| protocol.source_module.as_str()));
         for descriptor in &self.types {
+            owners.extend(descriptor.source_inherent_implementations.iter().map(|source| source.origin_module()));
             if descriptor.source_declaration.is_some() {
                 owners.insert(descriptor.origin_module.and_then(|id| self.ctx.strings.get(id.0 as usize))
                     .map(String::as_str).unwrap_or(&self.config.module_name));
@@ -7359,8 +7365,10 @@ impl VbcCodegen {
                     let mut declared_shape = existing.clone();
                     declared_shape.source_declaration = None;
                     declared_shape.protocols.clear();
+                    declared_shape.source_inherent_implementations.clear();
                     let mut incoming_shape = ty.clone();
                     incoming_shape.protocols.clear();
+                    incoming_shape.source_inherent_implementations.clear();
                     if declared_shape != incoming_shape {
                         if let Some(owner) = incoming_owner.as_ref() {
                             let field_difference = declared_shape.fields.iter().zip(&incoming_shape.fields)
@@ -7377,11 +7385,7 @@ impl VbcCodegen {
                         }
                         return;
                     }
-                    for implementation in ty.protocols {
-                        if !self.types[index].protocols.contains(&implementation) {
-                            self.types[index].protocols.push(implementation);
-                        }
-                    }
+                    self.types[index].merge_implementations(&ty);
                     return;
                 }
                 if existing.source_declaration.is_none()
@@ -7402,21 +7406,13 @@ impl VbcCodegen {
             let incoming_record = self.canonical_runtime_record_id(&ty) == Some(ty.id);
             let existing_record = self.canonical_runtime_record_id(&self.types[index]) == Some(ty.id);
             if existing_record && eligible && self.impl_only_scalar_carrier(&ty) {
-                for implementation in ty.protocols {
-                    if !self.types[index].protocols.contains(&implementation) {
-                        self.types[index].protocols.push(implementation);
-                    }
-                }
+                self.types[index].merge_implementations(&ty);
                 return;
             }
             if incoming_record && !self.ineligible_record_carriers.contains(&index)
                 && self.impl_only_scalar_carrier(&self.types[index])
             {
-                for implementation in &self.types[index].protocols {
-                    if !ty.protocols.contains(implementation) {
-                        ty.protocols.push(implementation.clone());
-                    }
-                }
+                ty.merge_implementations(&self.types[index]);
                 self.types[index] = ty;
                 self.ineligible_record_carriers.remove(&index);
                 return;
@@ -7441,11 +7437,7 @@ impl VbcCodegen {
                     && existing.kind == crate::types::TypeKind::Primitive
             }) {
                 if !eligible { self.ineligible_record_carriers.insert(index); }
-                for implementation in ty.protocols {
-                    if !self.types[index].protocols.contains(&implementation) {
-                        self.types[index].protocols.push(implementation);
-                    }
-                }
+                self.types[index].merge_implementations(&ty);
             } else {
                 if !eligible { self.ineligible_record_carriers.insert(self.types.len()); }
                 self.push_type_descriptor(ty);
@@ -7465,6 +7457,13 @@ impl VbcCodegen {
         // generic record fallback `{tag, payload...}` instead of
         // the proper `Constructor(payload...)` form.
         if let Some(idx) = self.type_index_of(ty.id) {
+            // Implementation declarations are additive even when the layout
+            // is unchanged. A coincident numeric ID alone is not ownership.
+            if let Some(owner) = self.type_declaration_identity(&ty)
+                && self.type_declaration_identity(&self.types[idx]).as_ref() == Some(&owner)
+            {
+                self.types[idx].merge_implementations(&ty);
+            }
             let existing = &self.types[idx];
             // UNIFIED-CROSS-MODULE-TYPE-IDENTITY (T0533) — the LINCHPIN. An
             // alias descriptor (`type IoError is StreamError;`) carries no
@@ -7493,18 +7492,9 @@ impl VbcCodegen {
             // attached `ProtocolImpl` (methods table AND the carried
             // associated-type bindings).  Preserve them: a structural
             // re-push refines SHAPE, it does not own the impl records.
-            // Only fires when the incoming has none — a descriptor
-            // arriving WITH protocols (import remap path) keeps its
-            // own.
-            let preserve_protocols = |slot: &mut crate::types::TypeDescriptor,
-                                      incoming: &mut crate::types::TypeDescriptor| {
-                if incoming.protocols.is_empty() && !slot.protocols.is_empty() {
-                    incoming.protocols = std::mem::take(&mut slot.protocols);
-                }
-            };
             if complete_forward || (existing_empty && new_richer) || semantic_enrichment {
                 let mut ty = ty;
-                preserve_protocols(&mut self.types[idx], &mut ty);
+                ty.merge_implementations(&self.types[idx]);
                 self.types[idx] = ty;
                 self.ineligible_record_carriers.remove(&idx);
             } else if !existing_empty {
@@ -7590,7 +7580,7 @@ impl VbcCodegen {
                 }
                 if richness(&ty) > richness(existing) {
                     let mut ty = ty;
-                    preserve_protocols(&mut self.types[idx], &mut ty);
+                    ty.merge_implementations(&self.types[idx]);
                     self.types[idx] = ty;
                     self.ineligible_record_carriers.remove(&idx);
                 }
@@ -9555,7 +9545,8 @@ impl VbcCodegen {
         self.types.clear();
         self.type_index.clear();
         self.source_generic_rosters.clear();
-        self.pending_protocol_attachments.clear();
+        self.source_callable_rosters.clear();
+        self.pending_implementation_attachments.clear();
         self.source_declaration_slots.clear();
         self.archive_data_sources.clear();
         self.ineligible_record_carriers.clear();
@@ -9912,7 +9903,7 @@ impl VbcCodegen {
     fn attach_impl_to_undeclared_target(
         &mut self,
         ty_name: &str,
-        impl_record: crate::types::ProtocolImpl,
+        impl_record: protocol_attachments::ImplementationAttachment,
     ) -> CodegenResult<()> {
         if let Some(canonical) = crate::types::TypeId::from_well_known_scalar_name(ty_name) {
             let name_sid = StringId(self.ctx.intern_string_raw(ty_name));
@@ -9921,7 +9912,7 @@ impl VbcCodegen {
                 .iter_mut()
                 .find(|t| t.name == name_sid && t.kind == crate::types::TypeKind::Primitive)
             {
-                carrier.register_implementation(impl_record);
+                impl_record.attach(carrier);
                 return Ok(());
             }
             let mut carrier = crate::types::TypeDescriptor {
@@ -9931,7 +9922,7 @@ impl VbcCodegen {
                 origin_module: self.current_origin_module_sid(),
                 ..Default::default()
             };
-            carrier.protocols.push(impl_record);
+            impl_record.attach(&mut carrier);
             // Through the one door, so `type_index` stays warm — the
             // comment on `push_type_descriptor` claims it is the ONLY
             // `self.types.push` in the crate, and this site was the
@@ -9957,6 +9948,16 @@ impl VbcCodegen {
     }
 
     fn collect_declarations(&mut self, item: &Item) -> CodegenResult<()> {
+        let previous = match &item.kind {
+            ItemKind::Impl(declaration) => Some(self.current_impl_ast_generics.replace(self.implementation_source_parameters(declaration)?)),
+            _ => None,
+        };
+        let result = self.collect_declarations_in_source_scope(item);
+        if let Some(previous) = previous { self.current_impl_ast_generics = previous; }
+        result
+    }
+
+    fn collect_declarations_in_source_scope(&mut self, item: &Item) -> CodegenResult<()> {
         let unsupported_universe = match &item.kind {
             ItemKind::Const(declaration) => Some((&declaration.name, &declaration.ty)),
             ItemKind::Static(declaration) => Some((&declaration.name, &declaration.ty)),
@@ -10125,6 +10126,15 @@ impl VbcCodegen {
                         }
                         _ => {}
                     }
+                }
+
+                if matches!(impl_decl.kind, verum_ast::decl::ImplKind::Inherent(_)) {
+                    let name = type_name.as_deref().ok_or_else(|| CodegenError::internal("inherent implementation has no declared target"))?;
+                    let source = verum_ast::source_implementation::AssociatedImplementationSource::new_with_items(
+                        self.lexical_type_scope().into(), impl_decl, &selected_items,
+                    ).map_err(|message| CodegenError::new(CodegenErrorKind::InvalidSourceSignature(message.into_string())))?;
+                    self.attach_declared_implementation(&impl_decl.kind, name,
+                        protocol_attachments::ImplementationAttachment::Inherent(source))?;
                 }
 
                 // Generate default protocol methods for protocol impls.
@@ -10539,14 +10549,13 @@ impl VbcCodegen {
                             // (T1068: 176 `implement P for <primitive>`
                             // blocks in `core/`, all absent from the shipped
                             // registry).
-                            let source_implementation = if crate::types::protocol_uses_associated_families(
-                                crate::types::ProtocolId(proto_type_id.0), |id| self.type_by_id(id),
-                            ) || selected_items.iter().any(|item| matches!(&item.kind,
-                                verum_ast::decl::ImplItemKind::Type { type_params, .. } if !type_params.is_empty())) {
-                                Some(verum_ast::source_implementation::AssociatedImplementationSource::new_with_items(
+                            // Every source implementation retains its actual owner telescope.
+                            // Nominal target arity cannot reconstruct implementation quantifiers.
+                            let source_implementation = Some(
+                                verum_ast::source_implementation::AssociatedImplementationSource::new_with_items(
                                     self.lexical_type_scope().into(), impl_decl, &selected_items,
-                                ).map_err(|message| CodegenError::new(CodegenErrorKind::InvalidSourceSignature(message.into_string())))?)
-                            } else { None };
+                                ).map_err(|message| CodegenError::new(CodegenErrorKind::InvalidSourceSignature(message.into_string())))?
+                            );
                             let impl_record = crate::types::ProtocolImpl {
                                 source_implementation,
                                 protocol: crate::types::ProtocolId(proto_type_id.0),
@@ -10561,8 +10570,8 @@ impl VbcCodegen {
                             // good id with NO descriptor behind it in this
                             // module.  Ask for the DESCRIPTOR, which is what
                             // actually carries the impl.
-                            self.attach_declared_protocol_impl(
-                                &impl_decl.kind, ty_name, impl_record,
+                            self.attach_declared_implementation(
+                                &impl_decl.kind, ty_name, protocol_attachments::ImplementationAttachment::Protocol(impl_record),
                             )?;
                         }
                     }
@@ -11198,7 +11207,7 @@ impl VbcCodegen {
     }
 
     fn register_function(&mut self, func: &FunctionDecl) -> CodegenResult<()> {
-        let shadowed = self.current_source_substitution.for_function(func);
+        let shadowed = self.callable_value_scope(func, None, &[])?;
         let outer = std::mem::replace(&mut self.current_source_substitution, shadowed);
         let result = self.register_function_in_source_scope(func);
         self.current_source_substitution = outer;
@@ -13829,7 +13838,7 @@ impl VbcCodegen {
         let mut next_id = dense.len() as u16;
         let mut shadow = HashMap::new();
         for p in &func.generics {
-            if let GenericParamKind::Type { name, .. } = &p.kind {
+            if let GenericParamKind::Type { name, .. } | GenericParamKind::Meta { name, .. } | GenericParamKind::Const { name, .. } = &p.kind {
                 let name = name.name.to_string();
                 if !dense.contains_key(&name) {
                     dense.insert(name, next_id);
@@ -13880,7 +13889,7 @@ impl VbcCodegen {
         shadow: &std::collections::HashMap<String, u16>,
     ) -> Vec<Option<crate::types::TypeParamId>> {
         func.generics.iter().filter(|p| !p.is_implicit).map(|p| {
-            if let verum_ast::ty::GenericParamKind::Type { name, .. } = &p.kind {
+            if let verum_ast::ty::GenericParamKind::Type { name, .. } | verum_ast::ty::GenericParamKind::Meta { name, .. } | verum_ast::ty::GenericParamKind::Const { name, .. } = &p.kind {
                 shadow.get(name.name.as_str()).or_else(|| dense.get(name.name.as_str()))
                     .copied().map(crate::types::TypeParamId)
             } else {
@@ -13906,6 +13915,19 @@ impl VbcCodegen {
     ///
     /// This allows static method calls like `List.new()` to be resolved.
     fn register_impl_function(
+        &mut self,
+        func: &FunctionDecl,
+        type_name: &str,
+        impl_generics: &[String],
+    ) -> CodegenResult<()> {
+        let scoped = self.callable_value_scope(func, Some(type_name), impl_generics)?;
+        let outer = std::mem::replace(&mut self.current_source_substitution, scoped);
+        let result = self.register_impl_function_in_source_scope(func, type_name, impl_generics);
+        self.current_source_substitution = outer;
+        result
+    }
+
+    fn register_impl_function_in_source_scope(
         &mut self,
         func: &FunctionDecl,
         type_name: &str,
@@ -15767,6 +15789,17 @@ impl VbcCodegen {
         &mut self,
         type_decl: &verum_ast::decl::TypeDecl,
     ) -> CodegenResult<()> {
+        let scoped = self.nominal_value_scope(type_decl)?;
+        let outer = std::mem::replace(&mut self.current_source_substitution, scoped);
+        let result = self.register_type_constructors_in_source_scope(type_decl);
+        self.current_source_substitution = outer;
+        result
+    }
+
+    fn register_type_constructors_in_source_scope(
+        &mut self,
+        type_decl: &verum_ast::decl::TypeDecl,
+    ) -> CodegenResult<()> {
         let type_name = type_decl.name.name.to_string();
 
         // T1108 — A UNIT'S OWN DECLARATION OWNS ITS BARE NAME.
@@ -16869,6 +16902,7 @@ impl VbcCodegen {
                     is_transparent_wrapper: false,
                     declared_layout: None,
                     source_declaration: None,
+                    source_inherent_implementations: Default::default(),
                 };
                 self.push_declared_type(type_desc);
             }
@@ -18358,6 +18392,13 @@ impl VbcCodegen {
                             return self.resolve_type_ref_in_scope(&projected, generic_param_map, preserve_refs,
                                 declaration_scope, array_count, self_type, values, nominal_defaults);
                         }
+                        if roster.as_ref().and_then(|parameters| parameters.get(index))
+                            .is_some_and(|parameter| parameter.value_parameter().is_some())
+                        {
+                            let expression = Self::declared_value_expression(argument).ok_or_else(|| CodegenError::with_span(
+                                CodegenErrorKind::InvalidSourceSignature("nominal value parameter received a type argument".into()), ty.span))?;
+                            return values.argument(&expression, generic_param_map);
+                        }
                         match argument {
                         verum_ast::ty::GenericArg::Type(inner) => self.resolve_type_ref_in_scope(
                             inner, generic_param_map, preserve_refs, declaration_scope, array_count, self_type, values, nominal_defaults),
@@ -18719,6 +18760,9 @@ impl VbcCodegen {
                 })
                 .unwrap_or_default();
             if let Some(&param_idx) = generic_param_map.get(&type_name) {
+                if values.contains(param_idx) {
+                    return Err(CodegenError::with_span(CodegenErrorKind::InvalidSourceSignature("value parameter cannot occupy a type slot".into()), ty.span));
+                }
                 return Ok(TypeRef::Generic(crate::types::TypeParamId(param_idx)));
             }
         }
@@ -19368,8 +19412,8 @@ impl VbcCodegen {
         func: &FunctionDecl,
         impl_type_name: Option<&String>,
     ) -> CodegenResult<()> {
+        let shadowed = self.callable_value_scope(func, impl_type_name.map(String::as_str), &self.ctx.generic_type_params_ordered)?;
         let outer_bounds = std::mem::take(&mut self.current_protocol_bounds);
-        let shadowed = self.current_source_substitution.for_function(func);
         let outer_substitution = std::mem::replace(&mut self.current_source_substitution, shadowed);
         let result = self.compile_function_body(func, impl_type_name);
         self.current_source_substitution = outer_substitution;
@@ -24805,8 +24849,9 @@ impl VbcCodegen {
 
     /// Builds the final VBC module.
     fn build_module(&mut self) -> CodegenResult<VbcModule> {
+        self.validate_emitted_value_calls()?;
         self.check_source_declaration_error()?;
-        self.check_pending_protocol_attachments()?;
+        self.check_pending_implementation_attachments()?;
         let mut declaration_owners: Map<TypeId, (Maybe<Text>, bool, bool)> = Map::new();
         for ty in &self.types {
             let identity = self.type_declaration_identity(ty);
@@ -26322,13 +26367,16 @@ impl VbcCodegen {
         // `AliasError.NonFiniteWeight` vs `Maybe.Some`).
         let bundle_key = module_prefix.filter(|p| !p.is_empty())
             .map(|p| format!("{}.{}", p, name_str));
-        // Idempotence: this exact qualified type was already imported
-        // (repeat archive merges) — nothing to do.
+        // Skip only an already represented declaration with no new implementation
+        // facts. Protocol records need normal identity remapping before merging.
         if scalar_id.is_none()
+            && ty.protocols.is_empty()
             && let Some(q) = qualified_key.as_deref()
             && let Some(&qid) = self.type_name_to_id.get(q)
             && self.type_by_id(qid).is_some_and(|existing| {
                 (canonical_id.is_none() || self.canonical_runtime_record_id(existing) == canonical_id)
+                    && ty.source_inherent_implementations.iter().all(|source|
+                        existing.source_inherent_implementations.contains(source))
                     && (ty.source_declaration.is_none()
                         || (existing.source_declaration.is_some()
                             && self.type_declaration_identity(existing).as_deref() == Some(q)))
@@ -26580,6 +26628,7 @@ impl VbcCodegen {
             is_transparent_wrapper: ty.is_transparent_wrapper,
             declared_layout: ty.declared_layout,
             source_declaration: ty.source_declaration.clone(),
+            source_inherent_implementations: ty.source_inherent_implementations.clone(),
         };
 
         // Restore the codegen-local newtype fast-cache from the
@@ -26987,6 +27036,7 @@ impl VbcCodegen {
                     is_transparent_wrapper: false,
                     declared_layout: ty.declared_layout,
                     source_declaration: None,
+                    source_inherent_implementations: Default::default(),
                 });
             }
         }
@@ -27418,6 +27468,8 @@ impl VbcCodegen {
             }
         }
         for (&local, source) in &signatures {
+            let roster = self.imported_callable_generic_roster(archive_module, source, &type_id_remap);
+            self.source_callable_rosters.insert(FunctionId(local), roster);
             self.ctx.semantic_fn_params.remove(&FunctionId(local));
             if let Some(params) = formal_parameters::remapped_parameters(source, &type_id_remap) {
                 self.ctx.semantic_fn_params.insert(FunctionId(local), params);

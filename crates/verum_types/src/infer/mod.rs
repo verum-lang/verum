@@ -1264,6 +1264,8 @@ pub struct TypeChecker {
     /// Successful exact target spellings for descriptor positions in the
     /// installed metadata. A different descriptor never inherits this evidence.
     metadata_impl_receipts: Map<usize, Set<Text>>,
+    metadata_inherent_receipts: Set<(Text, usize)>,
+    metadata_inherent_loading: Set<(Text, usize)>,
     /// Active source replays are not completed admission receipts.
     metadata_source_impl_loading: Set<usize>,
     /// Names whose always-run stdlib registration tail has already executed.
@@ -1649,6 +1651,7 @@ impl Drop for InferenceDepthGuard {
 // TypeChecker constructor, stdlib bootstrap, and factory methods
 // → see infer/core.rs in this module
 pub(crate) mod core;
+mod implementation_sources;
 
 // Module import/export and item-checking methods (check_item, check_module, check_import, …)
 // → see infer/modules.rs in this module

@@ -389,14 +389,8 @@ fn generic_source_target_keeps_reordered_parameter_bindings() {
         panic!("declared parameter variables required: {args:?}")
     };
     assert_ne!(left, right);
-    assert_eq!(
-        substitution.get(&Text::from(format!("T{}", right.id()))),
-        Some(&Type::Int)
-    );
-    assert_eq!(
-        substitution.get(&Text::from(format!("T{}", left.id()))),
-        Some(&Type::Bool)
-    );
+    assert_eq!(substitution.get(right), Some(&Type::Int));
+    assert_eq!(substitution.get(left), Some(&Type::Bool));
     assert_eq!(
         implementation
             .associated_types

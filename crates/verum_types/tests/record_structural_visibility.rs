@@ -136,7 +136,7 @@ fn with_collection_metadata(mut metadata: CoreMetadata) -> CoreMetadata {
     };
     metadata.type_declaration_order.push("core.structural_collection.Storage".into());
     metadata.types.insert("core.structural_collection.Storage".into(), storage.clone());
-    metadata.types.insert("Storage".into(), storage);
+    metadata.types.insert("Storage".into(), storage.clone());
     metadata.protocols.insert("ArrayCoercible".into(), ProtocolDescriptor {
         name: "ArrayCoercible".into(),
         module_path: "core.structural_collection".into(),
@@ -151,8 +151,24 @@ fn with_collection_metadata(mut metadata: CoreMetadata) -> CoreMetadata {
     // Use an explicit declaring target in the metadata carrier, preserving the
     // exact owner used by this mounted collection. The public constructor runs
     // the production marker scan; no unifier registration hook is used.
+    let source = FastParser::new().parse_module_str(
+        "public type ArrayCoercible is protocol {}; implement<T> ArrayCoercible for Storage<T> {}", FileId::new(0),
+    ).expect("actual collection implementation grammar");
+    let ItemKind::Type(protocol) = &source.items[0].kind else { panic!("protocol") };
+    let mut protocol_descriptor = storage;
+    protocol_descriptor.name = "ArrayCoercible".into();
+    protocol_descriptor.generic_params.clear();
+    protocol_descriptor.implements.clear();
+    protocol_descriptor.kind = TypeDescriptorKind::Protocol { super_protocols: List::new(), associated_types: List::new(), required_methods: List::new(), default_methods: List::new() };
+    protocol_descriptor.source_declaration = verum_ast::source_signature::source_type_declaration(protocol).expect("protocol declaration");
+    metadata.types.insert("core.structural_collection.ArrayCoercible".into(), protocol_descriptor.clone());
+    metadata.types.insert("ArrayCoercible".into(), protocol_descriptor);
+    let ItemKind::Impl(declaration) = &source.items[1].kind else { panic!("implementation") };
+    let source = verum_ast::source_implementation::AssociatedImplementationSource::new(
+        "core.structural_collection".into(), declaration,
+    ).expect("owned collection telescope");
     metadata.implementations.push(ImplementationDescriptor {
-        source_implementation: None,
+        source_implementation: Some(source),
         protocol: "ArrayCoercible".into(),
         target_type: "core.structural_collection.Storage".into(),
         generic_params: List::new(),

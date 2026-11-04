@@ -1,8 +1,8 @@
-//! A bounded, immutable source authority for an implementation's type families.
+//! A bounded, immutable source authority for an implementation's declaration.
 //! Equality and hashing use its canonical encoding; no unhashable AST field is
 //! omitted from identity. Decoding remains typed and validated before replay.
-use serde::{Deserialize, Deserializer, Serialize};
 use crate::decl::ImplDecl;
+use serde::{Deserialize, Deserializer, Serialize};
 use verum_common::Text;
 
 const MAX_BYTES: usize = 1024 * 1024;
@@ -26,16 +26,21 @@ fn parse(payload: &str) -> Result<ImplDecl, Text> {
 }
 
 impl AssociatedImplementationSource {
-    /// Capture the real implementation header and only its associated type
-    /// assignments. This is declaration evidence, not a conformance certificate.
+    /// Capture the real implementation header and declarations, removing method
+    /// bodies. Constants and proof obligations remain exact source; this is
+    /// declaration evidence, not a conformance or proof certificate.
     pub fn new(origin_module: Text, declaration: &ImplDecl) -> Result<Self, Text> {
-        let declaration =
-            crate::source_signature::source_associated_implementation(declaration)?;
+        let declaration = crate::source_signature::source_associated_implementation(declaration)?;
         Self::from_retained(origin_module, &declaration)
     }
 
-    pub fn new_with_items(origin_module: Text, declaration: &ImplDecl, items: &[&crate::decl::ImplItem]) -> Result<Self, Text> {
-        let retained = crate::source_signature::source_associated_implementation_items(declaration, items)?;
+    pub fn new_with_items(
+        origin_module: Text,
+        declaration: &ImplDecl,
+        items: &[&crate::decl::ImplItem],
+    ) -> Result<Self, Text> {
+        let retained =
+            crate::source_signature::source_associated_implementation_items(declaration, items)?;
         Self::from_retained(origin_module, &retained)
     }
 

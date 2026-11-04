@@ -160,6 +160,7 @@ pub fn archive_to_core_metadata(archive: &VbcArchive) -> Result<CoreMetadata, Te
         // the entry is absent, falling back to AST walks).
         module_reexports: OrderedMap::new(),
         declaration_type_bindings: OrderedMap::new(),
+        inherent_implementations: OrderedMap::new(),
         // Module-level statics are captured at archive precompile time
         // (T1088), from a source walk in `precompile.rs`. This
         // archive→metadata convert path has no source to walk, so it
@@ -213,6 +214,9 @@ pub fn archive_to_core_metadata(archive: &VbcArchive) -> Result<CoreMetadata, Te
                     && verum_vbc::types::protocol_uses_associated_families(implementation.protocol, |id| descriptors.get(&id).copied()) {
                     return Err("associated family implementation lacks its declaration-owned source telescope".into());
                 }
+                if implementation.source_implementation.is_none() {
+                    return Err("implementation lacks its declaration-owned source telescope; rebuild the archive".into());
+                }
             }
         }
         // Absence is evidence too: a copy without a declaration environment
@@ -230,6 +234,7 @@ pub fn archive_to_core_metadata(archive: &VbcArchive) -> Result<CoreMetadata, Te
         owners.extend(module.types.iter().flat_map(|ty| &ty.protocols)
             .filter_map(|implementation| implementation.source_implementation.as_ref())
             .map(|source| source.origin_module().to_owned()));
+        owners.extend(module.types.iter().flat_map(|ty| &ty.source_inherent_implementations).map(|source| source.origin_module().to_owned()));
         for owner in owners {
             let scope = module.declaration_type_bindings.get(&Text::from(owner.as_str()));
             if let Some(previous) = semantic_scopes.get(&owner) {
@@ -238,6 +243,17 @@ pub fn archive_to_core_metadata(archive: &VbcArchive) -> Result<CoreMetadata, Te
                 }
             } else {
                 semantic_scopes.insert(owner, scope.cloned());
+            }
+        }
+        for ty in &module.types {
+            if ty.source_inherent_implementations.is_empty() { continue; }
+            let name = module.strings.get(ty.name).ok_or_else(|| Text::from("inherent implementation target has no name"))?;
+            let owner = ty.origin_module.and_then(|id| module.strings.get(id)).unwrap_or(&entry.name);
+            let key: Text = if ty.canonical_scalar_type_id(name).is_some() { name.into() }
+                else { verum_vbc::module::qualify_module_name(owner, name).into() };
+            let target = meta.inherent_implementations.entry(key).or_default();
+            for source in &ty.source_inherent_implementations {
+                if !target.contains(source) { target.push(source.clone()); }
             }
         }
         for (owner, bindings) in &module.declaration_type_bindings {
@@ -320,7 +336,8 @@ pub fn archive_to_core_metadata(archive: &VbcArchive) -> Result<CoreMetadata, Te
     reconcile_type_declarations(&mut meta, &declarations);
     resolve_opaque_type_ids_in_alias_targets(&mut meta, &archive_type_names);
     attach_declared_methods(&mut meta);
-    if meta.implementations.iter().any(|implementation| implementation.source_implementation.is_some()) {
+    verum_types::core_metadata::validate_source_callable_owners(&meta)?;
+    if !meta.inherent_implementations.is_empty() || meta.implementations.iter().any(|implementation| implementation.source_implementation.is_some()) {
         let shared = std::sync::Arc::new(meta);
         verum_types::TypeChecker::validate_source_implementation_metadata(shared.clone())
             .map_err(|error| Text::from(format!("source implementation metadata: {error:?}")))?;

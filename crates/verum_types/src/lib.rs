@@ -227,6 +227,7 @@ pub mod references; // Deref protocol implementations for reference types
 pub mod refinement;
 pub mod refinement_diagnostics;
 pub mod refinement_entailment;
+pub(crate) mod value_parameter_domain;
 pub mod refinement_evidence; // Refinement types enhancement: flow-sensitive refinement propagation, evidence tracking for verified predicates — Flow-sensitive refinement propagation
 pub mod region_calculus; // Tofte-Talpin region calculus
 pub mod sdg; // Synthetic differential geometry

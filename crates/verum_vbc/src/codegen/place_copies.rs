@@ -247,7 +247,7 @@ impl VbcCodegen {
         let TypeRef::Function { params, return_type, .. } = info.callable_signature.as_ref()? else { return None; };
         if params.len() != usize::from(args.count) { return None; }
         let mut substitution = crate::mono::TypeSubstitution::empty();
-        self.bind_source_type_arguments(&info.explicit_type_param_ids, type_args, &mut substitution)?;
+        self.bind_source_type_arguments(info, type_args, &mut substitution)?;
         for (offset, formal) in params.iter().enumerate() {
             let argument = Reg(args.start.0.checked_add(u16::try_from(offset).ok()?)?);
             let Some(actual) = self.copy_argument_declaration(argument, start, index) else { continue; };
@@ -263,6 +263,24 @@ impl VbcCodegen {
                 (formal, actual)
             } else { (formal, &actual) };
             if !self.bind_source_declaration(formal, actual, &mut substitution) { return None; }
+        }
+        if let Instruction::CallG { type_args: witnesses, .. } = op
+            && let Some(roster) = self.callable_generic_roster(info)
+            && roster.iter().any(|parameter| parameter.value_parameter().is_some())
+        {
+            if info.type_param_ids.len() != witnesses.len() { return None; }
+            let arguments = info.type_param_ids.iter().zip(witnesses)
+                .map(|(id, witness)| (id.0, witness.clone())).collect();
+            self.validate_callable_value_bindings(info, &arguments).ok()?;
+            // A value witness is the exact scalar consumed by this selected
+            // call. Type-role ABI witnesses still cannot recover references or
+            // supply missing source declarations.
+            for parameter in roster.iter().filter(|parameter| parameter.value_parameter().is_some()) {
+                let id = parameter.witness_slot?;
+                if !self.bind_source_declaration(
+                    &TypeRef::Generic(id), arguments.get(&id.0)?, &mut substitution,
+                ) { return None; }
+            }
         }
         // Layout-only archive returns and unbound slots remain unknown. In
         // particular, CallG's ABI witnesses cannot reconstruct reference layers.

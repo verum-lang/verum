@@ -384,7 +384,7 @@ impl VbcCodegen {
             return None;
         };
         let mut bindings = TypeSubstitution::empty();
-        self.bind_source_type_arguments(&info.explicit_type_param_ids, explicit, &mut bindings)?;
+        self.bind_source_type_arguments(info, explicit, &mut bindings)?;
         if let Some(expected) = self.ctx.expected_value_type.as_ref()
             && !self.bind_source_declaration(return_type, expected, &mut bindings)
         {
@@ -403,6 +403,7 @@ impl VbcCodegen {
     /// arguments are caller witnesses even when none of them is concrete yet.
     pub(super) fn declared_argument_witnesses<'a>(
         &self, id: u32, count: usize, args: impl Iterator<Item = &'a Expr>,
+        captured: Option<&[Option<TypeRef>]>,
     ) -> Option<Vec<TypeRef>> {
         let info = self.ctx.lookup_function_by_id(crate::module::FunctionId(id))?;
         if info.type_param_ids.is_empty() {
@@ -431,12 +432,22 @@ impl VbcCodegen {
         for (index, arg) in args.enumerate() {
             let formal = parameter(index)?;
             if !formal.is_generic() { continue; }
-            let actual = if fully_bound(formal, &bindings) && matches!(
+            let actual = if let Some(actual) = captured.and_then(|arguments| arguments.get(index)).and_then(Option::as_ref) {
+                actual.clone()
+            } else if fully_bound(formal, &bindings) && matches!(
                 Self::normalized_place(arg).kind, ExprKind::Call { .. } | ExprKind::MethodCall { .. }
             ) {
                 self.source_expression_declaration(arg, Some(&bindings.apply(formal).ok()?), 0)?
             } else {
-                self.declared_expression_result(arg, None, 0, 0)?
+                self.declared_expression_result(arg, None, 0, 0).or_else(|| {
+                    // A literal binding a still-free formal has the language's
+                    // literal type. No register or rendered variable hint is evidence.
+                    matches!(Self::normalized_place(arg).kind, ExprKind::Literal(_))
+                        .then(|| self.infer_expr_type_name(arg)
+                            .or_else(|| Self::literal_default_type_name(arg))
+                            .and_then(|name| self.semantic_type_in_current_scope(&name)))
+                        .flatten()
+                })?
             };
             let (mut formal, mut actual) = (formal, &actual);
             if index == 0 && info.param_names.first().is_some_and(|name| name == "self") {
@@ -456,16 +467,16 @@ impl VbcCodegen {
     /// impl receiver can contribute additional parameters to its full roster.
     pub(super) fn bind_source_type_arguments(
         &self,
-        slots: &[Option<crate::types::TypeParamId>],
+        function: &FunctionInfo,
         arguments: &[verum_ast::ty::GenericArg],
         bindings: &mut TypeSubstitution,
     ) -> Option<()> {
+        let slots = &function.explicit_type_param_ids;
         if arguments.len() > slots.len() {
             return None;
         }
-        for (slot, argument) in slots.iter().zip(arguments) {
-            let verum_ast::ty::GenericArg::Type(argument) = argument else { return None; };
-            let actual = self.source_type_in_current_scope(argument)?;
+        for (index, (slot, argument)) in slots.iter().zip(arguments).enumerate() {
+            let Some(actual) = self.callable_argument_witness(function, index, argument, None).ok()? else { continue; };
             if !self.bind_source_declaration(&TypeRef::Generic((*slot)?), &actual, bindings) {
                 return None;
             }
@@ -551,7 +562,7 @@ impl VbcCodegen {
             return None;
         }
         let mut bindings = TypeSubstitution::empty();
-        self.bind_source_type_arguments(&function.explicit_type_param_ids, type_args, &mut bindings)?;
+        self.bind_source_type_arguments(function, type_args, &mut bindings)?;
         if let Some(expected) = expected {
             if !self.bind_source_declaration(return_type, expected, &mut bindings) {
                 return None;

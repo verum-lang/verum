@@ -68,6 +68,49 @@ impl TypeChecker {
         result
     }
 
+    /// A method signature and its body share the same source-owned level IDs.
+    /// Method-local kinds shadow owner names; implementation binders stay in
+    /// their existing type/value frame and do not become universe parameters.
+    pub(super) fn with_declared_callable_scope<T>(
+        &mut self,
+        function: &verum_ast::FunctionDecl,
+        operation: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> Result<T> {
+        let owner = self.decl_param_frames.last().cloned().unwrap_or_default();
+        self.push_decl_param_frame(owner);
+        let result = self.with_declared_universe_scope("function", &function.name.name, &function.generics, |checker| {
+            checker.validate_function_universes(function)?;
+            checker.with_declared_value_scope(&function.generics, |checker| {
+                for parameter in &function.generics {
+                    if let GenericParamKind::Meta { name, .. } | GenericParamKind::Const { name, .. } = &parameter.kind {
+                        let value = checker.ctx.lookup_type(&name.name).cloned().ok_or_else(||
+                            error_at("method value binder lacks its declaration-owned identity", parameter.span))?;
+                        checker.decl_param_frames.last_mut().expect("method declaration frame")
+                            .insert(name.name.clone(), value);
+                    }
+                }
+                operation(checker)
+            })
+        });
+        self.pop_decl_param_frame();
+        result
+    }
+
+    pub(super) fn declared_universe_parameter(&self, name: &verum_ast::Ident) -> Option<UniverseLevel> {
+        self.universe_parameters.lookup(&name.name).map(UniverseLevel::Variable)
+    }
+
+    /// A hole defers to the same universe unifier as implicit calls. A name is
+    /// accepted only from the lexical level scope, never from a type/value scope.
+    pub(super) fn explicit_universe_argument(
+        &mut self,
+        argument: &verum_ast::ty::GenericArg,
+    ) -> Result<Option<UniverseLevel>> {
+        argument.universe_for_declared_slot()
+            .map_err(|span| error_at("universe argument must be a declared level, an inference hole or a nonnegative representable integer", span))?
+            .as_ref().map(|level| self.ast_universe_level_to_internal(level)).transpose()
+    }
+
     pub(super) fn current_universe_parameters(&self) -> List<u32> {
         let mut parameters: List<_> = self.universe_parameters.frames.last()
             .map(|frame| frame.bindings.values().filter_map(|value| *value).collect())

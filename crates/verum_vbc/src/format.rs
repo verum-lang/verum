@@ -133,7 +133,9 @@ pub const VERSION_MAJOR: u16 = 2;
 /// Minor 38 preserves applied associated projection arguments and qualifiers.
 /// Minor 39 preserves the yielding property of eager callable types.
 /// Minor 40 retains declaration-owned associated-family implementations.
-pub const VERSION_MINOR: u16 = 40;
+/// Every concrete protocol implementation retains its exact source declaration.
+/// Protocol descriptors' super-protocol edges remain edges, not implementations.
+pub const VERSION_MINOR: u16 = 42;
 
 /// Minor-version floors for sections whose presence readers gate on.  The
 /// register-type-hints section has been written unconditionally since minor 2,

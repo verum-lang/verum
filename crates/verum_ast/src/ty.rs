@@ -817,6 +817,39 @@ pub enum GenericArg {
 }
 
 impl GenericArg {
+    /// Project syntax only after a declaration assigns this argument a universe
+    /// slot. Names remain unresolved: the consumer must prove lexical ownership.
+    /// An inference hole is distinct from an invalid or unbound argument.
+    pub fn universe_for_declared_slot(&self) -> Result<Option<UniverseLevelExpr>, Span> {
+        use crate::expr::ExprKind;
+        match self {
+            Self::Type(ty) => match &ty.kind {
+                TypeKind::Inferred => Ok(None),
+                TypeKind::Path(path) => path.as_ident().cloned()
+                    .map(|name| Some(UniverseLevelExpr::Variable(name))).ok_or(ty.span),
+                _ => Err(ty.span),
+            },
+            Self::Const(expression) => {
+                let mut inner = expression;
+                let mut remaining = 64usize;
+                while let ExprKind::Paren(nested) = &inner.kind {
+                    remaining = remaining.checked_sub(1).ok_or(expression.span)?;
+                    inner = nested;
+                }
+                if let ExprKind::Path(path) = &inner.kind {
+                    return path.as_ident().cloned()
+                        .map(|name| Some(UniverseLevelExpr::Variable(name))).ok_or(inner.span);
+                }
+                let value = crate::checked_const::evaluate_closed_integer(expression)
+                    .map_err(|_| expression.span)?;
+                u32::try_from(value).map(|level| Some(UniverseLevelExpr::Concrete(level)))
+                    .map_err(|_| expression.span)
+            },
+            Self::Lifetime(lifetime) => Err(lifetime.span),
+            Self::Binding(binding) => Err(binding.span),
+        }
+    }
+
     /// Interpret ambiguous bracket syntax only after the selected declaration
     /// proves that this argument occupies a type slot. Const/meta slots must
     /// keep the original expression. No identifier spelling selects a role.

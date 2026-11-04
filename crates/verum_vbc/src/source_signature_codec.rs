@@ -6,6 +6,7 @@ use verum_ast::{FunctionDecl, TypeDecl};
 use verum_common::Text;
 
 pub(crate) const MAX_SOURCE_SIGNATURE_BYTES: usize = 1024 * 1024;
+pub(crate) const MAX_INHERENT_IMPLEMENTATIONS: usize = 4096;
 
 fn encode_payload<T: Serialize + DeserializeOwned>(
     declaration: &T,

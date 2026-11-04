@@ -355,6 +355,7 @@ fn test_explicit_method_resolution() {
     );
 
     let impl_ = ProtocolImpl {
+        parameters: verum_common::List::new(),
         protocol: Path::single(Ident::new("Eq", Span::default())),
         protocol_args: vec![].into(),
         for_type: Type::Int,
@@ -400,6 +401,7 @@ fn test_default_method_resolution() {
     // Note: ne is NOT explicitly implemented
 
     let impl_ = ProtocolImpl {
+        parameters: verum_common::List::new(),
         protocol: Path::single(Ident::new("Eq", Span::default())),
         protocol_args: vec![].into(),
         for_type: Type::Int,
@@ -449,6 +451,7 @@ fn test_inherited_method_resolution() {
     // Note: lt, le are NOT explicitly implemented (use defaults)
 
     let impl_ = ProtocolImpl {
+        parameters: verum_common::List::new(),
         protocol: Path::single(Ident::new("Ord", Span::default())),
         protocol_args: vec![].into(),
         for_type: Type::Int,
@@ -614,6 +617,7 @@ fn test_protocol_satisfaction_explicit_impl() {
     );
 
     let impl_ = ProtocolImpl {
+        parameters: verum_common::List::new(),
         protocol: Path::single(Ident::new("Eq", Span::default())),
         protocol_args: vec![].into(),
         for_type: Type::Int,
@@ -656,6 +660,7 @@ fn test_protocol_satisfaction_via_inheritance() {
     );
 
     let impl_ = ProtocolImpl {
+        parameters: verum_common::List::new(),
         protocol: Path::single(Ident::new("Ord", Span::default())),
         protocol_args: vec![].into(),
         for_type: Type::Int,
@@ -703,6 +708,7 @@ fn test_vtable_generation_basic() {
     );
 
     let impl_ = ProtocolImpl {
+        parameters: verum_common::List::new(),
         protocol: Path::single(Ident::new("Eq", Span::default())),
         protocol_args: vec![].into(),
         for_type: Type::Int,
@@ -745,6 +751,7 @@ fn test_vtable_with_default_methods() {
     );
 
     let impl_ = ProtocolImpl {
+        parameters: verum_common::List::new(),
         protocol: Path::single(Ident::new("Eq", Span::default())),
         protocol_args: vec![].into(),
         for_type: Type::Int,
@@ -785,6 +792,7 @@ fn test_vtable_layout_info() {
     );
 
     let impl_ = ProtocolImpl {
+        parameters: verum_common::List::new(),
         protocol: Path::single(Ident::new("Eq", Span::default())),
         protocol_args: vec![].into(),
         for_type: Type::Int,
@@ -847,6 +855,7 @@ fn test_associated_type_in_implementation() {
     let for_type = Type::Int;
 
     let impl_ = ProtocolImpl {
+        parameters: verum_common::List::new(),
         protocol: Path::single(Ident::new("Iterator", Span::default())),
         protocol_args: vec![].into(),
         for_type: for_type.clone(),
@@ -881,6 +890,7 @@ fn test_missing_required_method_error() {
     let methods = Map::new(); // Empty - missing required 'eq'
 
     let impl_ = ProtocolImpl {
+        parameters: verum_common::List::new(),
         protocol: Path::single(Ident::new("Eq", Span::default())),
         protocol_args: vec![].into(),
         for_type: Type::Int,
@@ -968,6 +978,7 @@ fn test_vtable_performance_layout() {
     );
 
     let impl_ = ProtocolImpl {
+        parameters: verum_common::List::new(),
         protocol: Path::single(Ident::new("Ord", Span::default())),
         protocol_args: vec![].into(),
         for_type: Type::Int,

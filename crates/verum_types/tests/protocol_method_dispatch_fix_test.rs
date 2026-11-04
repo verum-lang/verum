@@ -55,6 +55,7 @@ fn test_protocol_impl_has_methods() {
     );
 
     let protocol_impl = ProtocolImpl {
+        parameters: verum_common::List::new(),
         protocol: path("Printable"),
         protocol_args: List::new(),
         for_type: point_type.clone(),
@@ -116,6 +117,7 @@ fn test_multiple_methods_in_impl() {
     );
 
     let protocol_impl = ProtocolImpl {
+        parameters: verum_common::List::new(),
         protocol: path("TestProtocol"),
         protocol_args: List::new(),
         for_type: test_type.clone(),
@@ -194,6 +196,7 @@ fn test_named_type_normalization() {
     );
 
     let protocol_impl = ProtocolImpl {
+        parameters: verum_common::List::new(),
         protocol: path("Printable"),
         protocol_args: List::new(),
         for_type: point_record_type.clone(),

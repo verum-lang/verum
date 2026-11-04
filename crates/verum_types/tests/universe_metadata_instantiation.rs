@@ -195,7 +195,7 @@ fn metadata_replays_callable_universe_bounds_at_actual_calls() {
     assert!(!errors.is_empty());
     for level in [1, 2] {
         let source = format!(
-            "fn use_it(f: fn() -> Type({level})) -> Type(1) {{ let alias: fn(fn() -> Type({level})) -> Type(1) = test.provider.retain; alias(f) }}"
+            "fn use_it(f: fn() -> Type({level})) -> Type(1) {{ let alias: async fn(fn() -> Type({level})) -> Type(1) = test.provider.retain; alias(f) }}"
         );
         let errors = check(decode_metadata(&bytes).unwrap(), &source, true, false);
         if level == 1 {
@@ -204,6 +204,16 @@ fn metadata_replays_callable_universe_bounds_at_actual_calls() {
             assert!(!errors.is_empty(), "metadata value lost its bound");
         }
     }
+    let strict = check(
+        decode_metadata(&bytes).unwrap(),
+        "fn use_it(f: fn() -> Type(1)) -> Type(1) { let alias: fn(fn() -> Type(1)) -> Type(1) = test.provider.retain; alias(f) }",
+        true,
+        false,
+    );
+    assert!(
+        strict.iter().any(|error| error.contains("async fn")),
+        "unknown imported body acquired a NonAsync guarantee: {strict:?}"
+    );
 }
 
 fn with_array_signature(source_ty: &str, abi_ty: &str) -> CoreMetadata {
@@ -270,14 +280,26 @@ fn matching_and_erased_dimensions_keep_the_checked_source_signature() {
     for eager in [false, true] {
         let ok = check(
             decode_metadata(&bytes).unwrap(),
+            "fn call(x: [Int; 2]) -> Int { test.provider.retain<_, 2>(x) }",
+            true,
+            eager,
+        );
+        let missing = check(
+            decode_metadata(&bytes).unwrap(),
             "fn call(x: [Int; 2]) -> Int { test.provider.retain(x) }",
             true,
             eager,
         );
+        assert!(
+            missing
+                .iter()
+                .any(|error| error.contains("call value argument does not establish")),
+            "unused declared N acquired a fabricated witness: {missing:?}"
+        );
         assert!(ok.is_empty(), "{ok:?}");
         let bad = check(
             decode_metadata(&bytes).unwrap(),
-            "fn call(x: [Int; 3]) -> Int { test.provider.retain(x) }",
+            "fn call(x: [Int; 3]) -> Int { test.provider.retain<_, 2>(x) }",
             true,
             eager,
         );

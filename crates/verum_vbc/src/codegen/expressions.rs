@@ -2068,10 +2068,9 @@ impl VbcCodegen {
                             type_ref: crate::types::TypeRef::Generic(param_id),
                         });
                     } else {
-                        // Not in the ordered numbering (registration path
-                        // that never populated it) — keep the legacy
-                        // placeholder.
-                        self.ctx.emit(Instruction::LoadNil { dst: dest });
+                        return Err(CodegenError::new(CodegenErrorKind::TypeInference(
+                            "value parameter has no declaration-owned runtime witness slot".into(),
+                        )));
                     }
                     return Ok(Some(dest));
                 }
@@ -8056,6 +8055,10 @@ impl VbcCodegen {
         // the pre-fix `!args.is_empty()` gate skipped the whole block
         // while the Call below claimed count=param_count, so the callee
         // read whatever registers happened to follow Reg(0).
+        // Capture semantic operand facts before ownership transfers consume their bindings.
+        // The final selected FunctionId binds these facts; the snapshot guesses no callee.
+        let generic_operand_declarations = (!func_info.type_param_ids.is_empty()).then(||
+            args.iter().map(|argument| self.declared_expression_result(argument, None, 0, 0)).collect::<Vec<_>>());
         let args_start = if !args.is_empty() || func_info.param_count > 0 {
             // Phase 1: Compile all argument expressions
             // For array element references, compile specially using ArrayToC marshalling
@@ -8436,7 +8439,7 @@ impl VbcCodegen {
                 count: call_arg_count as u8,
             };
             let type_args_inferred = if final_func_id != UNRESOLVED_FN_ID {
-                self.record_generic_instantiation(final_func_id, None, args).map(|call| call.arguments)
+                self.record_generic_instantiation_with_declarations(final_func_id, None, args, generic_operand_declarations.as_deref()).map(|call| call.arguments)
             } else {
                 None
             };
@@ -8566,6 +8569,12 @@ impl VbcCodegen {
         receiver: Option<&Expr>,
         args: &[Expr],
     ) -> Option<CallInstantiation> {
+        self.record_generic_instantiation_with_declarations(func_id, receiver, args, None)
+    }
+
+    fn record_generic_instantiation_with_declarations(
+        &mut self, func_id: u32, receiver: Option<&Expr>, args: &[Expr], captured: Option<&[Option<crate::types::TypeRef>]>,
+    ) -> Option<CallInstantiation> {
         let operands = receiver.into_iter().chain(args.iter());
         let count = args.len() + usize::from(receiver.is_some());
         // #44-B: type-arg DERIVATION always runs — the interpreter's
@@ -8575,11 +8584,17 @@ impl VbcCodegen {
         // devirtualize, still under reconstruction #3) stays behind
         // VERUM_ENABLE_MONO_AOT.
         let mono_seed = std::env::var_os("VERUM_ENABLE_MONO_AOT").is_some();
-        if let Some(declared) = self.declared_argument_witnesses(func_id, count, operands.clone()) {
+        if let Some(declared) = self.declared_argument_witnesses(func_id, count, operands.clone(), captured) {
             if mono_seed {
                 self.pending_specializations.push((func_id, declared.clone()));
             }
             return Some(CallInstantiation { arguments: declared, complete: true });
+        }
+        if self.ctx.lookup_function_by_id(crate::module::FunctionId(func_id))
+            .is_some_and(|function| self.callable_has_value_parameters(function)) {
+            // Positional/string heuristics cannot establish a value identity.
+            // Explicit arguments may still supply it through the shared binder.
+            return None;
         }
         if std::env::var_os("VERUM_TRACE_MONO").is_some() {
             let found = self
@@ -8965,9 +8980,6 @@ impl VbcCodegen {
     ) -> CodegenResult<Option<Vec<crate::types::TypeRef>>> {
         use crate::types::TypeRef;
         use verum_ast::ty::GenericArg;
-        if explicit.is_empty() {
-            return Ok(inferred);
-        }
         let ambiguous_array = explicit.iter().any(|argument| {
             matches!(argument,
             GenericArg::Const(expr) if matches!(expr.kind, verum_ast::ExprKind::Array(_)))
@@ -8984,12 +8996,14 @@ impl VbcCodegen {
             })
             .cloned()
         else {
-            return if ambiguous_array {
-                Err(missing_slots())
-            } else {
-                Ok(inferred)
-            };
+            return if explicit.is_empty() { Ok(inferred) } else { Err(missing_slots()) };
         };
+        if explicit.is_empty() {
+            let bindings = info.type_param_ids.iter().enumerate().filter_map(|(index, id)|
+                inferred.as_ref().and_then(|arguments| arguments.get(index)).map(|argument| (id.0, argument.clone()))).collect();
+            self.validate_callable_value_bindings(&info, &bindings)?;
+            return Ok(inferred);
+        }
         if ambiguous_array
             && (info.explicit_type_param_ids.is_empty()
                 || explicit.len() > info.explicit_type_param_ids.len()
@@ -9001,8 +9015,10 @@ impl VbcCodegen {
         {
             return Err(missing_slots());
         }
-        if info.explicit_type_param_ids.is_empty() || info.type_param_ids.is_empty() {
-            return Ok(inferred);
+        if info.explicit_type_param_ids.is_empty() || info.type_param_ids.is_empty() || explicit.len() > info.explicit_type_param_ids.len() {
+            return Err(CodegenError::new(CodegenErrorKind::TypeInference(
+                "explicit generic argument requires declaration-owned slot metadata".into(),
+            )));
         }
         let ret = self
             .functions
@@ -9031,29 +9047,21 @@ impl VbcCodegen {
                     .map(|arg| (id.0, arg.clone()))
             })
             .collect();
-        for (arg, id) in explicit.iter().zip(&info.explicit_type_param_ids) {
+        for (index, (arg, id)) in explicit.iter().zip(&info.explicit_type_param_ids).enumerate() {
             let Some(id) = id else {
+                if self.callable_argument_witness(&info, index, arg, None)?.is_some() {
+                    return Err(CodegenError::new(CodegenErrorKind::TypeInference("generic argument has no declared slot".into())));
+                }
                 continue;
             };
             let expected_slot = expected_bindings
                 .get(&u32::from(id.0))
                 .or_else(|| bindings.get(&id.0));
-            let projected = arg.type_for_declared_slot();
-            let value = projected
-                .as_ref()
-                .and_then(|ty| self.explicit_type_witness(ty, expected_slot));
-            if value.is_none()
-                && (matches!(arg, GenericArg::Const(_))
-                    || projected
-                        .as_ref()
-                        .is_some_and(Self::explicit_type_contains_array))
-            {
-                return Err(CodegenError::new(CodegenErrorKind::TypeInference(
-                    "explicit structural type requires a declared element and checked nonnegative array count".into(),
-                )));
-            }
-            bindings.insert(id.0, value.unwrap_or(TypeRef::Generic(*id)));
+            let value = self.callable_argument_witness(&info, index, arg, expected_slot)?
+                .ok_or_else(|| CodegenError::new(CodegenErrorKind::TypeInference("runtime generic slot received erased argument".into())))?;
+            bindings.insert(id.0, value);
         }
+        self.validate_callable_value_bindings(&info, &bindings)?;
         let result: Vec<TypeRef> = info
             .type_param_ids
             .iter()
@@ -9102,7 +9110,7 @@ impl VbcCodegen {
         false
     }
 
-    fn explicit_type_witness(
+    pub(super) fn explicit_type_witness(
         &self,
         ty: &verum_ast::ty::Type,
         expected: Option<&crate::types::TypeRef>,
@@ -9178,6 +9186,7 @@ impl VbcCodegen {
             }
             _ => {
                 let name = Self::extract_type_name_from_ast(ty);
+                if self.current_source_substitution.get_value(&name).is_some() { return None; }
                 if let Some(witness) = self.current_source_substitution.get(&name) {
                     return Some(witness.ty.clone());
                 }
@@ -9332,74 +9341,16 @@ impl VbcCodegen {
         }
     }
 
-    /// CONST-GENERIC-VALUE-CARRY-1 (task #19): derive positional generic
-    /// witnesses from an explicit TypeExpr's argument list
-    /// (`StackAllocator<256>` → `[ConstValue(256)]`,
-    /// `Pair<Int, 7>` → `[Concrete(Int), ConstValue(7)]`).
-    ///
-    /// Symbolic args (a const-param or type-param NAME in scope) map to
-    /// `Generic(idx)` over the shared ordered-params numbering so nested
-    /// generic bodies re-resolve them against their own frame witnesses at
-    /// CallG time.  Returns `None` unless at least one slot is concrete
-    /// (an all-placeholder vector carries no information).
+    /// Resolve the complete nominal application in the caller's lexical scope.
+    /// Owned symbolic values are evidence; unresolved slots are not placeholders.
     pub(super) fn type_expr_witness_args(
         &self,
         ty: &verum_ast::ty::Type,
     ) -> Option<Vec<crate::types::TypeRef>> {
-        use crate::types::{TypeParamId, TypeRef};
-        use verum_ast::ty::{GenericArg, TypeKind};
-        let TypeKind::Generic { args, .. } = &ty.kind else {
-            return None;
-        };
-        if args.is_empty() {
-            return None;
+        match self.source_type_in_current_scope(ty)? {
+            crate::types::TypeRef::Instantiated { args, .. } if !args.is_empty() => Some(args),
+            _ => None,
         }
-        let ordered_pos = |ordered: &[String], n: &str| {
-            ordered
-                .iter()
-                .position(|p| p == n)
-                .map(|idx| TypeRef::Generic(TypeParamId(idx as u16)))
-        };
-        let mut out: Vec<TypeRef> = Vec::with_capacity(args.len());
-        let mut any_concrete = false;
-        for (i, arg) in args.iter().enumerate() {
-            let tr: Option<TypeRef> = match arg {
-                GenericArg::Const(expr) => {
-                    VbcCodegen::render_const_generic_arg(expr).and_then(|s| {
-                        if let Ok(v) = s.parse::<i64>() {
-                            Some(TypeRef::ConstValue(v))
-                        } else {
-                            // Symbolic const-param name — witness chains
-                            // through the caller's own witness table.
-                            ordered_pos(&self.ctx.generic_type_params_ordered, &s)
-                        }
-                    })
-                }
-                GenericArg::Type(t) => {
-                    let name = VbcCodegen::extract_type_name_from_ast(t);
-                    if name.is_empty() {
-                        None
-                    } else {
-                        self.type_name_to_type_ref_mono(&name)
-                            .or_else(|| ordered_pos(&self.ctx.generic_type_params_ordered, &name))
-                    }
-                }
-                _ => None,
-            };
-            match tr {
-                Some(t) => {
-                    if !matches!(t, TypeRef::Generic(_)) {
-                        any_concrete = true;
-                    }
-                    out.push(t);
-                }
-                // Positional honesty: an unresolvable slot keeps its index
-                // as a placeholder — never collapse the vector (the
-                // consumer indexes by position).
-                None => out.push(TypeRef::Generic(TypeParamId(i as u16))),
-            }
-        }
-        if any_concrete { Some(out) } else { None }
     }
 
     /// Split a generic argument list on top-level commas, respecting `<>` nesting
@@ -14889,6 +14840,7 @@ impl VbcCodegen {
         // Deref chain. Re-evaluating the base duplicates side effects; retaining
         // the original wrapper instead corrupts it when the field is replaced.
         let mut field_writeback_target = None;
+        let receiver_start = self.ctx.instructions.len();
         let receiver_reg = match &receiver.kind {
             ExprKind::Field { expr: base, field } => {
                 self.ctx.stats.expressions_compiled += 1;
@@ -14899,6 +14851,9 @@ impl VbcCodegen {
             }
             _ => self.compile_expr(receiver)?,
         }.or_internal("method receiver has no value")?;
+        let receiver_result_declaration = self.declared_expression_result(
+            receiver, Some(receiver_reg), receiver_start, self.ctx.instructions.len(),
+        );
 
         // Raw-pointer method interception — when the receiver register is
         // tagged `raw_pointer` (set by `compile_cast` for `… as &unsafe T`,
@@ -16363,6 +16318,9 @@ impl VbcCodegen {
             resolvable_fid
         };
 
+        let generic_operand_declarations = resolvable_fid.and_then(|id| self.ctx.lookup_function_by_id(crate::module::FunctionId(id)))
+            .filter(|function| !function.type_param_ids.is_empty()).map(|_| std::iter::once(receiver_result_declaration.clone())
+                .chain(args.iter().map(|argument| self.declared_expression_result(argument, None, 0, 0))).collect::<Vec<_>>());
         // Compile arguments into consecutive registers (after receiver).
         // Phase 1: compile all arg expressions (may allocate non-consecutive regs)
         // Phase 2: allocate consecutive fresh regs and move values into them
@@ -16659,8 +16617,10 @@ impl VbcCodegen {
         // #44-B generic-witness derivation (hoisted above the devirt split
         // for CONST-GENERIC-VALUE-CARRY-1 — see the CallM-branch comment
         // below for the full derivation contract).
+        let value_generic_target = resolvable_fid.and_then(|id| self.ctx.lookup_function_by_id(crate::module::FunctionId(id)))
+            .is_some_and(|function| self.callable_has_value_parameters(function));
         let sidecar_args: Option<Vec<crate::types::TypeRef>> = resolvable_fid
-            .and_then(|fid| self.record_generic_instantiation(fid, Some(receiver), args))
+            .and_then(|fid| self.record_generic_instantiation_with_declarations(fid, Some(receiver), args, generic_operand_declarations.as_deref()))
             .filter(CallInstantiation::carries_evidence)
             .map(|call| call.arguments)
             // ARCHIVE-BLIND fallback: user-script codegen has no stdlib
@@ -16676,7 +16636,7 @@ impl VbcCodegen {
             // with extra fn-level generics get only the impl prefix; the
             // body's out-of-range LoadT(Generic) loads nil and keeps the
             // legacy fallback.
-            .or_else(|| self.derive_receiver_witnesses(receiver))
+            .or_else(|| (!value_generic_target).then(|| self.derive_receiver_witnesses(receiver)).flatten())
             .filter(|ta| !ta.is_empty());
 
         // T0701 (return-only method witnesses): a protocol method whose
@@ -16692,7 +16652,7 @@ impl VbcCodegen {
         // `current_return_type_name`; bind them and fill ONLY the
         // still-unbound slots of the sidecar vector (extending it to
         // the bound pid when the chains produced a shorter one).
-        let sidecar_args: Option<Vec<crate::types::TypeRef>> = {
+        let sidecar_args: Option<Vec<crate::types::TypeRef>> = if value_generic_target { sidecar_args } else {
             // Descriptor selection MUST match the runtime dispatch
             // target: `resolvable_fid` is a name-first lookup, so on
             // `range(0,10).partition(..)` it handed back

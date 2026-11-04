@@ -569,69 +569,7 @@ impl super::VbcCodegen {
     /// Publish only a supported, resolved source declaration; never a VarTypeKind
     /// or rendered bare-leaf guess. Opaque carrier fallbacks remain unknown.
     pub(super) fn publish_binding_type(&mut self, name: &str, ast: &verum_ast::Type) {
-        use verum_ast::ty::{GenericArg, TypeKind};
-        fn supported(ty: &verum_ast::Type, depth: usize) -> bool {
-            if depth > 64 {
-                return false;
-            }
-            match &ty.kind {
-                TypeKind::Int
-                | TypeKind::Float
-                | TypeKind::Bool
-                | TypeKind::Text
-                | TypeKind::Unit
-                | TypeKind::Char
-                | TypeKind::Path(_) => true,
-                TypeKind::Reference { inner, .. }
-                | TypeKind::CheckedReference { inner, .. }
-                | TypeKind::UnsafeReference { inner, .. }
-                | TypeKind::Slice(inner) => supported(inner, depth + 1),
-                TypeKind::Tuple(parts) => parts.iter().all(|p| supported(p, depth + 1)),
-                TypeKind::Function { params, return_type, contexts, calling_convention, .. }
-                    if contexts.requirements.is_empty() && calling_convention.is_none() => {
-                        params.iter().all(|p| supported(p, depth + 1))
-                            && supported(return_type, depth + 1)
-                    }
-                TypeKind::Generic { base, args } => {
-                    supported(base, depth + 1)
-                        && args
-                            .iter()
-                            .all(|a| matches!(a, GenericArg::Type(t) if supported(t, depth + 1)))
-                }
-                _ => false,
-            }
-        }
-        if !supported(ast, 0) {
-            return;
-        }
-        let Ok(ty) = self.resolve_signature_type_ref(ast, &self.ctx.current_generic_param_ids) else { return };
-        fn resolved(ty: &TypeRef, depth: usize) -> bool {
-            if depth > 64 {
-                return false;
-            }
-            match ty {
-                TypeRef::Generic(_) => true,
-                TypeRef::Concrete(id) => {
-                    *id != crate::types::TypeId::PTR && *id != crate::types::TypeId::RESERVED
-                }
-                TypeRef::Reference { inner, .. } | TypeRef::Slice(inner) => {
-                    resolved(inner, depth + 1)
-                }
-                TypeRef::Tuple(parts) => parts.iter().all(|t| resolved(t, depth + 1)),
-                TypeRef::Function { params, return_type, .. } => {
-                    params.iter().all(|p| resolved(p, depth + 1))
-                        && resolved(return_type, depth + 1)
-                }
-                TypeRef::Instantiated { base, args } => {
-                    *base != crate::types::TypeId::PTR
-                        && args.iter().all(|t| resolved(t, depth + 1))
-                }
-                _ => false,
-            }
-        }
-        if !resolved(&ty, 0) {
-            return;
-        }
+        let Some(ty) = self.source_type_in_current_scope(ast) else { return };
         let discipline = crate::resource_discipline::resource_discipline_with(&ty, |id| {
             self.type_index_of(id)
                 .and_then(|index| self.types.get(index))

@@ -277,8 +277,11 @@ fn universe_kind_bounds_are_detected_but_refused_until_formation_is_checked() {
 }
 
 #[test]
-fn methods_and_rank_two_universes_refuse_instead_of_losing_scopes() {
-    assert!(source_signature(&retained(), true).is_err());
+fn method_universes_retain_their_scope_and_rank_two_universes_refuse() {
+    let method = source_signature(&retained(), true).unwrap().unwrap();
+    validate_source_signature(&method, true).unwrap();
+    assert_eq!(method.generics, retained().generics);
+    assert_eq!(method.return_type, retained().return_type);
     let mut declaration = function();
     declaration.params.push(parameter(Type::new(
         TypeKind::Rank2Function {
@@ -497,7 +500,9 @@ fn protocol_carriers_strip_source_bodies_and_reject_bodies_on_decode() {
     }
     decl.body = Some(FunctionBody::Expr(expression.clone()));
     *default_impl = Some(FunctionBody::Expr(expression));
-    assert!(source_signature(decl, true).is_err());
+    let retained = source_signature(decl, true).unwrap().unwrap();
+    assert!(retained.body.is_none());
+    assert_eq!(retained.return_type, decl.return_type);
     let associated = ProtocolItem {
         kind: ProtocolItemKind::Type {
             name: ident("Item"),

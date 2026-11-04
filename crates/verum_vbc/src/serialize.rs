@@ -458,6 +458,18 @@ impl Serializer {
             encode_varint(bytes.len() as u64, &mut self.output);
             self.output.extend_from_slice(&bytes);
         }
+        if desc.source_inherent_implementations.len() > crate::source_signature_codec::MAX_INHERENT_IMPLEMENTATIONS {
+            return Err(VbcError::Serialization("too many inherent implementation declarations".into()));
+        }
+        encode_varint(desc.source_inherent_implementations.len() as u64, &mut self.output);
+        for source in &desc.source_inherent_implementations {
+            if !matches!(source.declaration().map_err(|error| VbcError::Serialization(error.to_string()))?.kind, verum_ast::decl::ImplKind::Inherent(_)) {
+                return Err(VbcError::Serialization("inherent carrier contains a protocol implementation".into()));
+            }
+            let bytes = crate::source_signature_codec::encode_implementation(source)?;
+            encode_varint(bytes.len() as u64, &mut self.output);
+            self.output.extend_from_slice(&bytes);
+        }
 
         Ok(())
     }

@@ -52,6 +52,7 @@ impl VbcCodegen {
         dense: &std::collections::HashMap<String, u16>,
         shadow: &std::collections::HashMap<String, u16>,
     ) -> CodegenResult<()> {
+        self.claim_callable_generic_roster(info.id, source, parent, dense, shadow)?;
         if !self.collecting_declaration_interface {
             return Ok(());
         }

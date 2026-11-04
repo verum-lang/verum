@@ -699,8 +699,10 @@ impl VbcCodegen {
                     .unwrap_or(&module.name);
                 self.retain_declaration_type_scope(module, owner)?;
             }
-            if let Some(info) = self.bootstrap_function(module, function.id.0) {
+            if let Some(info) = self.bootstrap_function(module, function.id.0).cloned() {
                 let id = info.id.0;
+                let roster = self.imported_callable_generic_roster(module, function, &maps[mi]);
+                self.source_callable_rosters.insert(FunctionId(id), roster);
                 // Forward registrations may have no source signature yet.
                 // The declaration interface owns the exact semantic result
                 // and parameters; ABI return types are not evidence.

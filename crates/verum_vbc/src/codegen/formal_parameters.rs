@@ -10,19 +10,23 @@ impl VbcCodegen {
     /// Resolve the target in the actual impl declaration, before any inherited
     /// method changes lexical scope. Method-local binders cannot define Self.
     pub(super) fn resolve_impl_receiver(
-        &self,
+        &mut self,
         target: &verum_ast::Type,
         dense: &std::collections::HashMap<String, u16>,
         impl_names: &[String],
     ) -> super::CodegenResult<super::ImplReceiverWitness> {
         let receiver_scope = dense.iter().filter(|(name, _)| impl_names.contains(name))
             .map(|(name, id)| (name.clone(), *id)).collect();
-        let ty = self.resolve_signature_type_ref(target, &receiver_scope)?;
-        let semantic = self.semantic_formal_type(
-            target, &receiver_scope,
-            &Self::ordered_generic_param_ids(&receiver_scope, &Default::default()),
-        ).as_ref() == Some(&ty);
-        Ok(super::ImplReceiverWitness { ty, semantic })
+        let value_scope = self.implementation_value_scope(target, &receiver_scope)?;
+        let previous = std::mem::replace(&mut self.current_source_substitution, value_scope);
+        let result = (|| {
+            let ty = self.resolve_signature_type_ref(target, &receiver_scope)?;
+            let semantic = self.semantic_formal_type(target, &receiver_scope,
+                &Self::ordered_generic_param_ids(&receiver_scope, &Default::default())).as_ref() == Some(&ty);
+            Ok(super::ImplReceiverWitness { ty, semantic })
+        })();
+        self.current_source_substitution = previous;
+        result
     }
 
     /// Registration must reject unresolved annotations even for declarations

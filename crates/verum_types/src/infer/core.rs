@@ -1007,6 +1007,8 @@ impl TypeChecker {
             metadata_names: std::cell::OnceCell::new(),
             metadata_impls_by_owner: Maybe::None,
             metadata_impl_receipts: Map::new(),
+            metadata_inherent_receipts: Set::new(),
+            metadata_inherent_loading: Set::new(),
             metadata_source_impl_loading: Set::new(),
             analysis_control: None,
             place_operands: Vec::new(),
@@ -1225,6 +1227,8 @@ impl TypeChecker {
         self.metadata_declaring_modules = std::cell::OnceCell::new();
         self.metadata_impls_by_owner = Maybe::None;
         self.metadata_impl_receipts.clear();
+        self.metadata_inherent_receipts.clear();
+        self.metadata_inherent_loading.clear();
         self.metadata_source_impl_loading.clear();
         self.stdlib_tail_registered.clear();
     }
@@ -2304,7 +2308,14 @@ impl TypeChecker {
             return None;
         }
         if desc.source_declaration.is_some() {
-            return self.register_metadata_source_type(&direct_key, &desc);
+            let loaded = self.register_metadata_source_type(&direct_key, &desc);
+            if loaded.is_some() {
+                // A mounted nominal declaration includes its methods and
+                // implementation obligations. Reuse the ordinary lazy drain;
+                // loading only the shape leaves associated projections inert.
+                self.ensure_stdlib_type_loaded_transitive(&owning_key);
+            }
+            return loaded;
         }
         self.register_metadata_record_shape(&desc);
 
@@ -2781,27 +2792,11 @@ impl TypeChecker {
                 verum_common::qualified_name::qualify_module_name(owner, &protocol.name).into()
             }))
             .ok_or_else(|| TypeError::Other("source implementation has no declared protocol owner".into()))?;
-        let target = metadata.types.get(&descriptor.target_type)
-            .map(Self::metadata_declaring_key)
+        let target_descriptor = metadata.types.get(&descriptor.target_type)
             .ok_or_else(|| TypeError::Other("source implementation has no declared target owner".into()))?;
-        let previous_owner = std::mem::replace(&mut self.current_module_path, source.origin_module().into());
-        let previous_signature_scope = std::mem::replace(&mut self.resolving_source_signature, true);
-        let previous_parameters = std::mem::take(&mut self.decl_param_frames);
-        // A lazy declaration must not capture the importing function's generic
-        // variables. Nominal declarations remain available by their owned keys.
-        let is_parameter = |ty: &Type| matches!(ty, Type::Var(_) | Type::TypeConstructor { .. });
-        let previous_bindings: Vec<_> = self.ctx.type_defs.iter()
-            .filter(|(_, ty)| is_parameter(ty)).map(|(name, ty)| (name.clone(), ty.clone())).collect();
-        for (name, _) in &previous_bindings { self.ctx.type_defs.remove(name); }
-        self.ctx.enter_scope();
-        let result = self.register_owned_impl_block(&declaration, &protocol, &target);
-        self.ctx.exit_scope();
-        self.ctx.type_defs.retain(|_, ty| !is_parameter(ty));
-        for (name, ty) in previous_bindings { self.ctx.type_defs.insert(name, ty); }
-        self.decl_param_frames = previous_parameters;
-        self.resolving_source_signature = previous_signature_scope;
-        self.current_module_path = previous_owner;
-        result
+        let target = Self::metadata_implementation_target(target_descriptor);
+        self.with_metadata_implementation_source(source, |checker|
+            checker.register_owned_impl_block(&declaration, &protocol, &target))
     }
 
     /// Check declaration-bearing implementations through the same lazy admission
@@ -2812,6 +2807,14 @@ impl TypeChecker {
     ) -> Result<()> {
         let mut checker = Self::new_with_core(metadata.clone());
         checker.register_primitives();
+        checker.set_universe_poly_enabled(true);
+        for owner in metadata.inherent_implementations.keys() {
+            let descriptor = Self::metadata_type_with_declaring_key(&metadata, owner)
+                .ok_or_else(|| TypeError::Other("inherent implementation has no target declaration".into()))?;
+            checker.ensure_stdlib_type_loaded_transitive(owner);
+            checker.register_metadata_inherent_sources(owner, descriptor)?;
+        }
+        if let Some(error) = checker.take_deferred_errors().into_iter().next() { return Err(error); }
         for (position, implementation) in metadata.implementations.iter().enumerate() {
             if implementation.source_implementation.is_none() { continue; }
             checker.register_stdlib_impls_for_target(&implementation.target_type);
@@ -2828,6 +2831,22 @@ impl TypeChecker {
             if !complete {
                 return Err(TypeError::Other("source implementation has no completed owner admission".into()));
             }
+        }
+        Ok(())
+    }
+
+    fn require_legacy_monomorphic_implementation(
+        descriptor: &crate::core_metadata::ImplementationDescriptor,
+        metadata: &crate::core_metadata::CoreMetadata,
+    ) -> Result<()> {
+        if metadata.version >= crate::core_metadata::CORE_METADATA_VERSION
+            || !descriptor.generic_params.is_empty()
+            || metadata.types.get(&descriptor.target_type)
+                .is_some_and(|target| !target.generic_params.is_empty())
+        {
+            return Err(TypeError::Other(
+                "implementation lacks its declaration-owned source telescope; rebuild the metadata archive".into(),
+            ));
         }
         Ok(())
     }
@@ -2859,6 +2878,12 @@ impl TypeChecker {
         // Alias spellings share a bucket only when their descriptors prove the
         // same declaring owner; no simple-name or suffix fallback participates.
         let candidates = index.get(&requested_owner).cloned().unwrap_or_default();
+        // The active outer walk owns this bucket's declaration order. A source
+        // header may resolve its own target again; do not publish later siblings
+        // ahead of the declaration currently being admitted.
+        if candidates.iter().any(|position| self.metadata_source_impl_loading.contains(position)) {
+            return proto_deps;
+        }
         for position in candidates {
             if self.check_analysis_control().is_err() {
                 return proto_deps;
@@ -2923,6 +2948,10 @@ impl TypeChecker {
             // ARGLESS for_type, so `try_find_associated_type` never
             // resolved an archive-loaded iterator's Item and closure
             // params stayed `Item<_>` (E103).
+            if let Err(error) = Self::require_legacy_monomorphic_implementation(impl_desc, &metadata) {
+                self.deferred_soundness_errors.push(error);
+                continue;
+            }
             let assoc_arg_count = metadata
                 .types
                 .get(&impl_desc.target_type)
@@ -2987,6 +3016,7 @@ impl TypeChecker {
             let protocol_args: List<Type> = Self::parse_impl_protocol_args(impl_desc);
 
             let protocol_impl = ProtocolImpl {
+                parameters: verum_common::List::new(),
                 protocol: Self::text_to_path(&impl_desc.protocol),
                 protocol_args,
                 // Args-ful shape (see the carry comment above) — the
@@ -3396,13 +3426,17 @@ impl TypeChecker {
     /// `ensure_stdlib_type_loaded` calls don't accumulate
     /// duplicates.
     pub(super) fn register_inherent_methods_from_metadata(
-        &self,
+        &mut self,
         type_name: &Text,
         type_desc: &crate::core_metadata::TypeDescriptor,
         metadata: &crate::core_metadata::CoreMetadata,
     ) -> Vec<Text> {
         let mut referenced: Vec<Text> = Vec::new();
         if type_desc.methods.is_empty() {
+            return referenced;
+        }
+        if let Err(error) = self.register_metadata_inherent_sources(type_name, type_desc) {
+            self.deferred_soundness_errors.push(error);
             return referenced;
         }
         let mut methods_guard = self.inherent_methods.write();
@@ -4316,6 +4350,8 @@ impl TypeChecker {
             metadata_names: std::cell::OnceCell::new(),
             metadata_impls_by_owner: Maybe::None,
             metadata_impl_receipts: Map::new(),
+            metadata_inherent_receipts: Set::new(),
+            metadata_inherent_loading: Set::new(),
             metadata_source_impl_loading: Set::new(),
             analysis_control: None,
             place_operands: Vec::new(),
@@ -4359,7 +4395,7 @@ impl TypeChecker {
     /// Stdlib bootstrap: dependency-ordered compilation of core .vr modules, type metadata extracted from parsed stdlib files
     pub fn load_stdlib_from_metadata(&mut self, metadata: &crate::core_metadata::CoreMetadata) {
         use crate::core_metadata::TypeDescriptorKind;
-        use crate::protocol::{Protocol, ProtocolImpl};
+        use crate::protocol::Protocol;
         use crate::ty::Type;
         use verum_common::span::Span;
 
@@ -4660,101 +4696,17 @@ impl TypeChecker {
             let _ = self.protocol_checker.write().register_protocol(protocol);
         }
 
-        // Register protocol implementations via protocol_checker
-        for impl_desc in metadata.implementations.iter() {
-            // Pillar-3 increment 1 (ARRAY-ITER-CONCRETIZE-1) — parse
-            // the carried bindings structurally and give `for_type`
-            // positional generic-var args, mirroring the LAZY path
-            // (`register_stdlib_impls_for_target`'s twin block above;
-            // see its comment for the full contract).  One shared
-            // interning scope links `for_type = SliceIter<Var_a>`
-            // with `Item = &Var_a` so the receiver's type args
-            // substitute through `build_type_substitution`.
-            let assoc_arg_count = metadata
-                .types
-                .get(&impl_desc.target_type)
-                .map(|td| td.generic_params.len())
-                .unwrap_or(0);
-            let ((for_type_registered, associated_types), _assoc_scope): (
-                (Type, verum_common::Map<verum_common::Text, Type>),
-                _,
-            ) = crate::infer::helpers::with_generic_var_scope_capture(|| {
-                let args: verum_common::List<Type> = (0..assoc_arg_count)
-                    .map(|i| {
-                        crate::infer::helpers::parse_descriptor_type_string(&format!(
-                            "__generic_{}",
-                            i
-                        ))
-                    })
-                    .collect();
-                let for_type = Type::Named {
-                    path: Self::text_to_path(&impl_desc.target_type),
-                    args,
-                };
-                let assoc: verum_common::Map<verum_common::Text, Type> = impl_desc
-                    .associated_types
-                    .iter()
-                    .map(|(name, type_text)| {
-                        (
-                            name.clone(),
-                            crate::infer::helpers::parse_descriptor_type_string(
-                                type_text.as_str(),
-                            ),
-                        )
-                    })
-                    .collect();
-                (for_type, assoc)
-            });
-
-            // Look up the protocol definition to get method types
-            // The protocol was registered in the previous loop, so we can look it up
-            let methods: verum_common::Map<verum_common::Text, Type> = {
-                let protocol_checker_guard = self.protocol_checker.read();
-                #[cfg(debug_assertions)]
-                if impl_desc.protocol.as_str() == "Ord" {
-                    // eprintln!("[DEBUG load_stdlib_impl] Looking up protocol 'Ord' for impl on '{}'", impl_desc.target_type);
-                    if let verum_common::Maybe::Some(protocol) =
-                        protocol_checker_guard.get_protocol(&impl_desc.protocol)
-                    {
-                        // eprintln!("[DEBUG load_stdlib_impl] Found protocol 'Ord' with {} methods", protocol.methods.len());
-                        for (name, method) in protocol.methods.iter() {
-                            // eprintln!("[DEBUG load_stdlib_impl] method '{}': {:?}", name, method.ty);
-                        }
-                    } else {
-                        // eprintln!("[DEBUG load_stdlib_impl] Protocol 'Ord' NOT FOUND!");
-                    }
-                }
-                if let verum_common::Maybe::Some(protocol) =
-                    protocol_checker_guard.get_protocol(&impl_desc.protocol)
-                {
-                    protocol
-                        .methods
-                        .iter()
-                        .map(|(name, method)| (name.clone(), method.ty.clone()))
-                        .collect()
-                } else {
-                    verum_common::Map::new()
-                }
-            };
-
-            let protocol_impl = ProtocolImpl {
-                protocol: Self::text_to_path(&impl_desc.protocol),
-                protocol_args: Self::parse_impl_protocol_args(impl_desc),
-                // Args-ful shape (see the carry comment above) —
-                // `get_implementations`' base-key fallback matches
-                // both arg-less and args-ful query shapes.
-                for_type: for_type_registered,
-                where_clauses: verum_common::List::new(),
-                methods,
-                associated_types: associated_types.into_iter().map(|(name, ty)| (name, crate::protocol::AssociatedTypeAssignment::ordinary(ty))).collect(),
-                associated_consts: verum_common::Map::new(),
-                specialization: verum_common::Maybe::None,
-                impl_crate: verum_common::Maybe::None,
-                span: Span::default(),
-                type_param_fn_bounds: verum_common::Map::new(),
-            };
-            // Ignore coherence errors during metadata loading.
-            self.register_metadata_impl(protocol_impl, &impl_desc.target_type, metadata, None);
+        // Eager and lazy consumers share source admission and its exact receipts.
+        // In particular, eager loading must not also reconstruct an implementation
+        // from runtime strings after admitting its declaration-owned telescope.
+        let mut admitted_owners = verum_common::Set::new();
+        for implementation in metadata.implementations.iter() {
+            let owner = metadata.types.get(&implementation.target_type)
+                .map(Self::metadata_declaring_key)
+                .unwrap_or_else(|| implementation.target_type.clone());
+            if admitted_owners.insert(owner) {
+                self.register_stdlib_impls_for_target(&implementation.target_type);
+            }
         }
 
         // Register inductive constructors for pattern matching

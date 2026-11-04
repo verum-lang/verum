@@ -23,7 +23,7 @@ pub use callable::validate_archive_callable_spelling;
 mod source_signature_wire;
 
 /// Current sidecar schema; bincode archives must be rebuilt when this changes.
-pub const CORE_METADATA_VERSION: u32 = 8;
+pub const CORE_METADATA_VERSION: u32 = 10;
 
 /// Framed sidecars reject stale schemas before decoding their AST payloads.
 pub const CORE_METADATA_MAGIC: &[u8; 8] = b"VRMETA\0\0";
@@ -82,8 +82,12 @@ pub fn decode_metadata(bytes: &[u8]) -> Result<CoreMetadata, verum_common::Text>
 
 fn validate_metadata_descriptors(metadata: &CoreMetadata) -> Result<(), Text> {
     callable::validate_archive_callables(metadata)?;
+    validate_source_callable_owners(metadata)?;
     validate_archive_array_extents(metadata)?;
     NominalSourceOwners::default().admit(metadata)?;
+    if metadata.implementations.iter().any(|implementation| implementation.source_implementation.is_none()) {
+        return Err("implementation lacks its declaration-owned source telescope; rebuild the metadata archive".into());
+    }
     for descriptor in metadata.functions.values() {
         if let Some(signature) = &descriptor.source_signature {
             verum_ast::source_signature::validate_source_signature(signature, descriptor.parent_type.is_some())?;
@@ -92,6 +96,40 @@ fn validate_metadata_descriptors(metadata: &CoreMetadata) -> Result<(), Text> {
             {
                 return Err("source signature does not belong to its metadata function descriptor".into());
             }
+        }
+    }
+    Ok(())
+}
+
+/// A retained method signature needs its lexical implementation header.
+/// Build the owner index once; admission never guesses quantifiers from a
+/// nominal type's arity or from runtime parameter spellings.
+pub fn validate_source_callable_owners(metadata: &CoreMetadata) -> Result<(), Text> {
+    let mut owners = verum_common::Set::new();
+    let mut record = |target: Text, source: &verum_ast::source_implementation::AssociatedImplementationSource| -> Result<(), Text> {
+        for item in source.declaration()?.items {
+            if let verum_ast::decl::ImplItemKind::Function(function) = item.kind {
+                owners.insert((target.clone(), function.name.name));
+            }
+        }
+        Ok(())
+    };
+    for (target, sources) in &metadata.inherent_implementations {
+        for source in sources { record(target.clone(), source)?; }
+    }
+    for implementation in &metadata.implementations {
+        if let Some(source) = &implementation.source_implementation {
+            let target = metadata.types.get(&implementation.target_type)
+                .map(nominal_declaring_key).unwrap_or_else(|| implementation.target_type.clone());
+            record(target, source)?;
+        }
+    }
+    for descriptor in metadata.functions.values() {
+        let (Some(signature), Some(parent)) = (&descriptor.source_signature, &descriptor.parent_type) else { continue; };
+        let target = metadata.types.get(parent).ok_or_else(|| Text::from("source method has no declared parent type"))?;
+        if matches!(target.kind, TypeDescriptorKind::Protocol { .. }) && target.source_declaration.is_some() { continue; }
+        if !owners.contains(&(nominal_declaring_key(target), signature.name.name.clone())) {
+            return Err("source method lacks its declaration-owned implementation header; rebuild the archive".into());
         }
     }
     Ok(())
@@ -221,6 +259,10 @@ pub struct CoreMetadata {
 
     /// Protocol implementations (impl Eq for Int, etc.)
     pub implementations: List<ImplementationDescriptor>,
+
+    /// Exact inherent declarations indexed by the target declaration owner.
+    #[serde(default)]
+    pub inherent_implementations: OrderedMap<Text, List<verum_ast::source_implementation::AssociatedImplementationSource>>,
 
     /// Module-level `static` declarations, keyed by qualified name
     /// (`core.mem.epoch.GLOBAL_EPOCH`) exactly as `functions` is.
@@ -871,7 +913,7 @@ pub struct FunctionDescriptor {
 /// Implementation descriptor (impl Protocol for Type)
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImplementationDescriptor {
-    /// Exact lexical authority for associated family assignments and their local parameters.
+    /// Exact lexical authority for the implementation header and retained declarations.
     #[serde(default)]
     pub source_implementation: Option<verum_ast::source_implementation::AssociatedImplementationSource>,
     /// Protocol being implemented

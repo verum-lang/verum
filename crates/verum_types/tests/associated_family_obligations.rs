@@ -283,6 +283,9 @@ fn actual_registered_specialization_must_preserve_universal_item() {
     let mut subst = verum_types::ty::Substitution::new();
     subst.insert(variable, Type::Int);
     let mut concrete = blanket.clone();
+    assert!(matches!(concrete.parameters.as_slice(), [verum_types::context::GenericBinder::Type(owner)] if *owner == variable));
+    // Specializing the only owned parameter produces a monomorphic declaration.
+    concrete.parameters.clear();
     concrete.for_type = concrete.for_type.try_apply_subst(&subst).unwrap();
     concrete.associated_types.insert(
         "Item".into(),

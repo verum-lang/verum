@@ -50,6 +50,7 @@ fn protocol() -> Protocol {
 }
 fn implementation(receiver: Type) -> ProtocolImpl {
     ProtocolImpl {
+        parameters: verum_common::List::new(),
         protocol: path("Evidence"),
         protocol_args: List::new(),
         for_type: receiver,
@@ -209,15 +210,18 @@ fn specialization_rechecks_value_queries_with_the_same_routing_key() {
 
 #[test]
 fn specialization_repeated_type_parameters_are_one_binding() {
-    let variable = Type::Var(TypeVar::fresh());
+    let owned = TypeVar::fresh();
+    let variable = Type::Var(owned);
     let pair = |first, second| Type::Named {
         path: path("Pair"),
         args: [first, second].into_iter().collect(),
     };
     let pattern = pair(variable.clone(), variable);
     let mut checker = checker();
+    let mut generic = implementation(pattern);
+    generic.parameters.push(verum_types::context::GenericBinder::Type(owned));
     checker
-        .register_impl(implementation(pattern))
+        .register_impl(generic)
         .expect("generic implementation");
     let mut selector = SpecializationSelector::new();
     let mut unifier = Unifier::new();

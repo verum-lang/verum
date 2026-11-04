@@ -1004,16 +1004,7 @@ impl<'a> Deserializer<'a> {
      match decode_u8(self.data, &mut self.offset)? {
          0 => None,
          1 => {
-             let length = decode_varint(self.data, &mut self.offset)?;
-             if length > crate::source_signature_codec::MAX_SOURCE_SIGNATURE_BYTES as u64 {
-                 return Err(VbcError::Deserialization("source implementation exceeds byte budget".into()));
-             }
-             let end = self.offset.checked_add(length as usize)
-                 .filter(|end| *end <= self.data.len())
-                 .ok_or_else(|| VbcError::Deserialization("truncated source implementation".into()))?;
-             let source = crate::source_signature_codec::decode_implementation(&self.data[self.offset..end])?;
-             self.offset = end;
-             Some(source)
+             Some(self.parse_source_implementation()?)
          }
          _ => return Err(VbcError::Deserialization("invalid source implementation presence tag".into())),
      }
@@ -1109,7 +1100,22 @@ impl<'a> Deserializer<'a> {
          _ => return Err(VbcError::Deserialization("invalid source type declaration presence tag".into())),
      }
  } else { None };
+ let mut source_inherent_implementations = verum_common::List::new();
+ if self.header.as_ref().is_some_and(|header| header.version_minor >= 42) {
+     let count = decode_varint(self.data, &mut self.offset)?;
+     if count > crate::source_signature_codec::MAX_INHERENT_IMPLEMENTATIONS as u64 {
+         return Err(VbcError::Deserialization("too many inherent implementation declarations".into()));
+     }
+     for _ in 0..count {
+         let source = self.parse_source_implementation()?;
+         if !matches!(source.declaration().map_err(|error| VbcError::Deserialization(error.to_string()))?.kind, verum_ast::decl::ImplKind::Inherent(_)) {
+             return Err(VbcError::Deserialization("inherent carrier contains a protocol implementation".into()));
+         }
+         source_inherent_implementations.push(source);
+     }
+ }
  Ok(TypeDescriptor {
+ source_inherent_implementations,
  source_declaration,
  declared_layout,
  resource_discipline,
@@ -1130,6 +1136,18 @@ impl<'a> Deserializer<'a> {
  origin_module,
  is_transparent_wrapper,
  })
+ }
+
+ fn parse_source_implementation(&mut self) -> VbcResult<verum_ast::source_implementation::AssociatedImplementationSource> {
+     let length = decode_varint(self.data, &mut self.offset)?;
+     if length > crate::source_signature_codec::MAX_SOURCE_SIGNATURE_BYTES as u64 {
+         return Err(VbcError::Deserialization("source implementation exceeds byte budget".into()));
+     }
+     let end = self.offset.checked_add(length as usize).filter(|end| *end <= self.data.len())
+         .ok_or_else(|| VbcError::Deserialization("truncated source implementation".into()))?;
+     let source = crate::source_signature_codec::decode_implementation(&self.data[self.offset..end])?;
+     self.offset = end;
+     Ok(source)
  }
 
  /// Parses a type parameter descriptor.

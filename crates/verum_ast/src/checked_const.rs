@@ -163,6 +163,29 @@ pub fn validate_i64_expression(expression: &Expr) -> Result<(), Span> {
 }
 
 
+/// Evaluate a closed arithmetic term using the shared checked scalar semantics.
+/// Validate every node before evaluation: a dead branch cannot conceal an
+/// unbound identifier or a call. No declaration resolver is available here.
+pub fn evaluate_closed_integer(expression: &Expr) -> Result<i64, EvalError<std::convert::Infallible>> {
+    validate_i64_expression(expression).map_err(EvalError::InvalidType)?;
+    let mut pending = List::from_single(expression);
+    let mut remaining = 4096usize;
+    while let Some(expression) = pending.pop() {
+        remaining = remaining.checked_sub(1).ok_or(EvalError::Limit(expression.span))?;
+        match &expression.kind {
+            ExprKind::Literal(literal) if matches!(literal.kind, LiteralKind::Int(_)) => {},
+            ExprKind::Paren(inner) | ExprKind::Unary { op: UnOp::Neg, expr: inner } => pending.push(inner),
+            ExprKind::Binary { op: BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Rem, left, right } => {
+                pending.push(left);
+                pending.push(right);
+            },
+            _ => return Err(EvalError::Unsupported(expression.span)),
+        }
+    }
+    evaluate(expression, 0, &mut |_, _| Ok(None))?.as_i64()
+        .ok_or(EvalError::InvalidType(expression.span))
+}
+
 /// Resolve only declaration-owned leaves. `depth` crosses resolver boundaries so
 /// a dependency chain cannot restart the recursion budget at every declaration.
 pub fn evaluate<E>(

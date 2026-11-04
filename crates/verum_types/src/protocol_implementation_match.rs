@@ -1,12 +1,38 @@
 //! One rigid implementation matcher shared by proof obligations and family applications.
 use super::{ProtocolChecker, ProtocolImpl};
 use crate::{
-    ty::{Substitution, Type, TypeVar},
+    ty::{Substitution, Type},
     unify::Unifier,
 };
 use verum_ast::Span;
 
 impl ProtocolChecker {
+    pub(crate) fn instantiate_applicable_implementation(
+        &self,
+        implementation: &ProtocolImpl,
+        ty: &Type,
+        args: Option<&[Type]>,
+    ) -> Option<Substitution> {
+        let CandidateMatch::Matched(substitution) =
+            self.match_implementation_candidate(implementation, ty, args, true)
+        else {
+            return None;
+        };
+        self.check_implementation_callable_bounds(implementation, &substitution)
+            .ok()?;
+        for clause in &implementation.where_clauses {
+            let subject = clause.ty.try_apply_subst(&substitution).ok()?;
+            let bounds = clause
+                .bounds
+                .iter()
+                .map(|bound| bound.try_apply_subst(&substitution))
+                .collect::<Result<verum_common::List<_>, _>>()
+                .ok()?;
+            self.check_bounds(&subject, &bounds).ok()?;
+        }
+        Some(substitution)
+    }
+
     pub(super) fn match_implementation_candidate(
         &self,
         implementation: &ProtocolImpl,
@@ -14,14 +40,28 @@ impl ProtocolChecker {
         args: Option<&[Type]>,
         rigid: bool,
     ) -> CandidateMatch {
+        // A declaration parameter is rigid until its own telescope instantiates
+        // it. An inference hole in a declared head has no such authority. A
+        // proof query likewise cannot choose its missing value from a candidate.
+        if implementation.for_type.has_value_inference()
+            || implementation
+                .protocol_args
+                .iter()
+                .any(Type::has_value_inference)
+            || (rigid
+                && (ty.has_value_inference()
+                    || args.is_some_and(|args| args.iter().any(Type::has_value_inference))))
+        {
+            return CandidateMatch::Unknown;
+        }
         if args.is_some_and(|args| implementation.protocol_args.len() != args.len())
-            || provably_disjoint(&implementation.for_type, ty)
+            || provably_disjoint(self, &implementation.for_type, ty)
             || args.is_some_and(|args| {
                 implementation
                     .protocol_args
                     .iter()
                     .zip(args)
-                    .any(|(a, b)| provably_disjoint(a, b))
+                    .any(|(a, b)| provably_disjoint(self, a, b))
             })
         {
             return CandidateMatch::Disjoint;
@@ -53,36 +93,103 @@ impl ProtocolChecker {
                 }
             }
         }
-        let fresh: Substitution = variables
-            .into_iter()
-            .map(|variable| (variable, Type::Var(TypeVar::fresh())))
-            .collect();
-        let mut matcher = Unifier::new();
-        if rigid {
-            let mut variables = ty.free_vars();
-            for arg in args.into_iter().flatten() {
-                variables.extend(arg.free_vars());
-            }
-            matcher.enter_rigid_scope(
-                variables
-                    .into_iter()
-                    .map(|var| (var, format!("parameter{}", var.id()).into(), false, None)),
-            );
+        for (variable, bound) in &implementation.type_param_fn_bounds {
+            variables.insert(*variable);
+            variables.extend(bound.free_vars());
         }
+        let fresh = crate::context::instantiate_binders(&implementation.parameters, &[]).ok()?;
+        // Free variables absent from the declared telescope are rigid captures,
+        // never implicit quantifiers. Only owned binders receive fresh holes.
+        variables.retain(|variable| !fresh.contains_key(variable));
+        if rigid {
+            variables.extend(ty.free_vars());
+            for argument in args.into_iter().flatten() {
+                variables.extend(argument.free_vars());
+            }
+        }
+        let mut matcher = Unifier::new();
+        matcher.enter_rigid_scope(variables.into_iter().map(|variable| {
+            (
+                variable,
+                format!("parameter{}", variable.id()).into(),
+                false,
+                None,
+            )
+        }));
         let pattern = implementation.for_type.try_apply_subst(&fresh).ok()?;
-        matcher.unify(&pattern, ty, Span::default()).ok()?;
+        if !self.types_structurally_equal(&pattern, ty) {
+            matcher.unify(&pattern, ty, Span::default()).ok()?;
+        }
         for (pattern, actual) in implementation
             .protocol_args
             .iter()
             .zip(args.into_iter().flatten())
         {
-            matcher
-                .unify(
-                    &pattern.try_apply_subst(&fresh).ok()?,
-                    actual,
+            let pattern = pattern.try_apply_subst(&fresh).ok()?;
+            if !self.types_structurally_equal(&pattern, actual) {
+                matcher.unify(&pattern, actual, Span::default()).ok()?;
+            }
+        }
+        // Callable owner bounds may determine variables absent from the head,
+        // for example F: fn(A) -> B. Infer their structural arguments once;
+        // check_implementation_callable_bounds still proves the full contract.
+        for (owner, bound) in &implementation.type_param_fn_bounds {
+            let actual = matcher
+                .try_apply(
+                    &Type::Var(*owner).try_apply_subst(&fresh).ok()?,
                     Span::default(),
                 )
                 .ok()?;
+            let required = bound.try_apply_subst(&fresh).ok()?;
+            let (
+                Type::Function {
+                    params: actual_params,
+                    return_type: actual_result,
+                    ..
+                },
+                Type::Function {
+                    params: required_params,
+                    return_type: required_result,
+                    ..
+                },
+            ) = (&actual, &required)
+            else {
+                return None;
+            };
+            if actual_params.len() != required_params.len() {
+                return None;
+            }
+            for (required, actual) in
+                required_params
+                    .iter()
+                    .zip(actual_params)
+                    .chain(std::iter::once((
+                        required_result.as_ref(),
+                        actual_result.as_ref(),
+                    )))
+            {
+                matcher.unify(required, actual, Span::default()).ok()?;
+            }
+        }
+        // Each value domain belongs to the declaration, not to the inferred
+        // argument. Keep it while applying the selected substitution.
+        for parameter in &implementation.parameters {
+            let crate::context::GenericBinder::Value(parameter) = parameter else {
+                continue;
+            };
+            let mut required = parameter.try_apply_subst(&fresh).ok()?;
+            let actual = matcher.try_apply(&required, Span::default()).ok()?;
+            let Type::Meta { ty, .. } = &mut required else {
+                return None;
+            };
+            **ty = matcher.try_apply(ty, Span::default()).ok()?;
+            if !crate::value_parameter_domain::argument_satisfies_domain(
+                &required,
+                &actual,
+                Type::clone,
+            ) {
+                return None;
+            }
         }
         // Unification also serves inference/coercion. A proof match additionally
         // requires exact equality after substitution, so coercions are not evidence.
@@ -106,9 +213,24 @@ impl ProtocolChecker {
                 return None;
             }
         }
+        let fresh_type_holes: verum_common::Set<_> =
+            fresh.values().flat_map(Type::free_vars).collect();
         let mut substitution = matcher.get_substitution().clone();
         for (variable, fresh_variable) in &fresh {
-            substitution.insert(
+            let argument = matcher.try_apply(fresh_variable, Span::default()).ok()?;
+            if argument
+                .free_vars()
+                .iter()
+                .any(|variable| fresh_type_holes.contains(variable))
+            {
+                // The head and declared callable equations did not determine
+                // this parameter. It cannot escape as an arbitrary output type.
+                return None;
+            }
+            substitution.insert(*variable, argument);
+        }
+        for (variable, fresh_variable) in &fresh.value_bindings {
+            substitution.value_bindings.insert(
                 *variable,
                 matcher.try_apply(fresh_variable, Span::default()).ok()?,
             );
@@ -124,34 +246,35 @@ pub(super) enum CandidateMatch {
     Unknown,
 }
 
-fn provably_disjoint(a: &Type, b: &Type) -> bool {
+fn provably_disjoint(checker: &ProtocolChecker, a: &Type, b: &Type) -> bool {
+    if checker.types_structurally_equal(a, b) {
+        return false;
+    }
     match (a, b) {
         (Type::Named { path: a, args: aa }, Type::Named { path: b, args: ba }) => {
-            let segments = |path: &verum_ast::Path| {
-                path.segments
+            !checker.paths_equal(a, b)
+                || aa.len() != ba.len()
+                || aa
                     .iter()
-                    .map(|segment| match segment {
-                        verum_ast::ty::PathSegment::Name(name) => Some(name.name.clone()),
-                        _ => None,
-                    })
-                    .collect::<Option<Vec<_>>>()
-            };
-            match (segments(a), segments(b)) {
-                (Some(a), Some(b)) if a != b => true,
-                _ => {
-                    aa.len() != ba.len() || aa.iter().zip(ba).any(|(a, b)| provably_disjoint(a, b))
-                }
-            }
+                    .zip(ba)
+                    .any(|(a, b)| provably_disjoint(checker, a, b))
         }
+
         (Type::Generic { name: a, args: aa }, Type::Generic { name: b, args: ba })
             if !a.starts_with("::") && !b.starts_with("::") =>
         {
             a != b
                 || aa.len() != ba.len()
-                || aa.iter().zip(ba).any(|(a, b)| provably_disjoint(a, b))
+                || aa
+                    .iter()
+                    .zip(ba)
+                    .any(|(a, b)| provably_disjoint(checker, a, b))
         }
         (Type::Tuple(a), Type::Tuple(b)) => {
-            a.len() != b.len() || a.iter().zip(b).any(|(a, b)| provably_disjoint(a, b))
+            a.len() != b.len()
+                || a.iter()
+                    .zip(b)
+                    .any(|(a, b)| provably_disjoint(checker, a, b))
         }
         (
             Type::Reference {
@@ -162,7 +285,7 @@ fn provably_disjoint(a: &Type, b: &Type) -> bool {
                 mutable: b,
                 inner: bi,
             },
-        ) => a != b || provably_disjoint(ai, bi),
+        ) => a != b || provably_disjoint(checker, ai, bi),
         (
             Type::Unit | Type::Bool | Type::Int | Type::Float | Type::Char | Type::Text,
             Type::Unit | Type::Bool | Type::Int | Type::Float | Type::Char | Type::Text,

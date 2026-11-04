@@ -98,10 +98,7 @@ impl TypeChecker {
                                 },
                             }
                         }
-                        GenericArg::Lifetime(lifetime) => {
-                            let lifetime_ty = Type::lifetime(lifetime.name.clone());
-                            type_args.push(lifetime_ty);
-                        }
+                        GenericArg::Lifetime(_) => {},
                         GenericArg::Binding(binding) => {
                             let arg_ty = self.ast_to_type_lenient(&binding.ty);
                             type_args.push(arg_ty);
@@ -306,9 +303,7 @@ impl TypeChecker {
                                 },
                             }
                         }
-                        GenericArg::Lifetime(lifetime) => {
-                            type_args.push(Type::lifetime(lifetime.name.clone()));
-                        }
+                        GenericArg::Lifetime(_) => {},
                         GenericArg::Binding(binding) => {
                             let arg_ty = self
                                 .ast_to_type(&binding.ty)
@@ -1537,7 +1532,7 @@ fn substitute_refinement_binder(
             return Ok(());
         };
         for (index, predicate) in refinements.iter() {
-            let Some(arg) = args.get(*index) else {
+            let Some(arg) = args.iter().filter(|argument| !matches!(argument, verum_ast::ty::GenericArg::Lifetime(_))).nth(*index) else {
                 continue;
             };
             // The argument as an EXPRESSION: a meta argument is written
@@ -1581,55 +1576,8 @@ fn substitute_refinement_binder(
     /// carry a domain that entails the declaration's domain. Failure to prove
     /// an obligation is never admission, including identical opaque predicates.
     pub(super) fn meta_argument_satisfies_domain(&self, parameter: &Type, argument: &Type) -> bool {
-        let (Type::Meta { ty: expected, refinement: required, .. },
-             Type::Meta { ty: actual, refinement: known, value, .. }) = (parameter, argument)
-        else { return false; };
-        let domain = |ty: &Type, predicate: &Option<crate::refinement::RefinementPredicate>| {
-            let ty = self.normalize_type(ty);
-            match predicate {
-                Some(predicate) => Type::refined(ty, predicate.clone()),
-                None => ty,
-            }
-        };
-        let expected = domain(expected, required);
-        if let crate::ty::ValueTerm::Constant(value) = value {
-            let mut current = &expected;
-            while let Type::Refined { base, predicate } = current {
-                let mut evaluator = crate::const_eval::ConstEvaluator::new();
-                evaluator.bind(predicate.bound_variable(), value.clone());
-                if predicate.binds_subject("self") {
-                    evaluator.bind("self", value.clone());
-                }
-                if !matches!(evaluator.eval(&predicate.predicate),
-                    Ok(verum_common::ConstValue::Bool(true)))
-                {
-                    return false;
-                }
-                current = base;
-            }
-            true
-        } else {
-            let actual = domain(actual, known);
-            let mut required_domain = &expected;
-            while let Type::Refined { base, predicate } = required_domain {
-                let mut known_domain = &actual;
-                let mut established = false;
-                while let Type::Refined { base, predicate: premise } = known_domain {
-                    established |= crate::refinement_entailment::entails(
-                        actual.base(), premise, expected.base(), predicate,
-                    );
-                    known_domain = base;
-                }
-                let unconstrained = crate::refinement::RefinementPredicate::trivial(predicate.span);
-                if !established && !crate::refinement_entailment::entails(
-                    actual.base(), &unconstrained, expected.base(), predicate,
-                ) {
-                    return false;
-                }
-                required_domain = base;
-            }
-            true
-        }
+        crate::value_parameter_domain::argument_satisfies_domain(parameter, argument,
+            |ty| self.normalize_type(ty))
     }
 
     fn ast_to_generic_type(&mut self, ast_ty: &verum_ast::ty::Type) -> Result<Type> {
@@ -1673,9 +1621,8 @@ fn substitute_refinement_binder(
                 // DEBUG: trace HKT TypeApp construction
 
                 // Separate type arguments and lifetime arguments
-                // Lifetimes are tracked separately for borrow checking
+                // Lifetime annotations have no semantic type argument slot.
                 let mut type_args: List<Type> = List::new();
-                let mut lifetime_args: List<verum_common::Text> = List::new();
 
                 if let Some(arguments) = elaborated {
                     type_args = arguments;
@@ -1709,27 +1656,9 @@ fn substitute_refinement_binder(
                                 }),
                             });
                         }
-                        GenericArg::Lifetime(lifetime) => {
-                            // Lifetime arguments: 'a, 'b, 'static
-                            // Subtyping: structural subtyping for records, refinement subtyping (T{P} <: T when P holds), protocol-based nominal subtyping — .2 - Lifetime parameters
-                            //
-
-                            // Verum has implicit lifetimes in most cases (like elision in Rust),
-                            // but explicit lifetimes can be specified for complex cases:
-                            // - &'a T for reference with named lifetime
-                            // - Struct<'a, T> for types parameterized by lifetime
-                            //
-
-                            // For now, we track lifetime names but don't enforce them
-                            // during type checking (CBGR handles memory safety)
-                            lifetime_args.push(lifetime.name.clone());
-
-                            // Create a phantom lifetime type for tracking
-                            // This allows the type system to preserve lifetime info
-                            // even though Verum uses CBGR instead of borrow checking
-                            let lifetime_ty = Type::lifetime(lifetime.name.clone());
-                            type_args.push(lifetime_ty);
-                        }
+                        // Lifetime annotations are erased by the language contract.
+                        // They never occupy a retained type/value argument slot.
+                        GenericArg::Lifetime(_) => {},
                         GenericArg::Binding(binding) => {
                             // Type bindings like Iterator<Item = T>
                             let arg_ty = self.ast_to_type(&binding.ty)?;
@@ -1903,7 +1832,7 @@ fn substitute_refinement_binder(
                 }
 
                 // Return the base type with arguments
-                // Lifetimes are embedded in type_args as Type::Lifetime
+                // Retained arguments match the declaration-owned parameter roster.
                 let result_type = match &base_ty {
                     Type::RecordField { .. } => return Err(TypeError::OtherWithCodeSpanned {
                         code: "E407".into(),
@@ -3104,6 +3033,8 @@ fn substitute_refinement_binder(
                             Some(GenericBinder::Value(value.clone()))
                         }, _ => None,
                     },
+                verum_ast::ty::GenericParamKind::Level { name } =>
+                    self.declared_universe_parameter(name).map(GenericBinder::Universe),
                 verum_ast::ty::GenericParamKind::Lifetime { .. } => Some(GenericBinder::ErasedLifetime),
                 _ => None,
             };
@@ -3184,7 +3115,16 @@ fn substitute_refinement_binder(
             });
         }
         for (argument, slot) in arguments.iter().zip(slots.iter()) {
-            if let Some(crate::context::GenericBinder::ErasedLifetime) = slot {
+            if let Some(crate::context::GenericBinder::Universe(expected)) = slot {
+                if let Some(provided) = self.explicit_universe_argument(argument)? {
+                    let inferred = self.unifier.unify(
+                        &Type::universe(expected.clone()), &Type::universe(provided), span,
+                    )?;
+                    use crate::ty::SubstitutionExt;
+                    combined = combined.compose(&inferred)
+                        .map_err(|message| TypeError::UniverseBinding { message, span })?;
+                }
+            } else if let Some(crate::context::GenericBinder::ErasedLifetime) = slot {
                 if !matches!(argument, verum_ast::ty::GenericArg::Lifetime(_)) {
                     return Err(TypeError::OtherWithCodeSpanned { code: "E405".into(),
                         msg: "lifetime parameter requires an explicit lifetime argument".into(), span });

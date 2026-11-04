@@ -117,7 +117,8 @@ fn type_id(module: &verum_vbc::module::VbcModule, name: &str) -> verum_vbc::type
 
 #[test]
 fn inferred_factory_results_carry_their_own_receiver_witnesses() {
-    let module = compile(r#"
+    let module = compile(
+        r#"
 type Cell<Item> is { value: Item };
 implement<Item> Cell<Item> {
     fn make(value: Item) -> Cell<Item> { Cell { value } }
@@ -129,10 +130,17 @@ fn probe() -> Int {
     let flag = Cell.make(true);
     if flag.second() { number.first() } else { 0 }
 }
-"#);
+"#,
+    );
     use verum_vbc::types::TypeId;
-    assert_eq!(call(&module, "Cell.first"), [TypeRef::Concrete(TypeId::INT)]);
-    assert_eq!(call(&module, "Cell.second"), [TypeRef::Concrete(TypeId::BOOL)]);
+    assert_eq!(
+        call(&module, "Cell.first"),
+        [TypeRef::Concrete(TypeId::INT)]
+    );
+    assert_eq!(
+        call(&module, "Cell.second"),
+        [TypeRef::Concrete(TypeId::BOOL)]
+    );
 }
 
 #[test]
@@ -188,8 +196,7 @@ fn probe() -> Int {
 
 #[test]
 fn unresolved_nested_hole_never_inherits_unrelated_outer_return() {
-    let module = compile(
-        r#"
+    let source = r#"
 type Factory<Item> is { value: Item };
 implement<Item> Factory<Item> { fn build<Output>(self) -> Output { Output.default() } }
 fn probe() -> Int {
@@ -197,11 +204,17 @@ fn probe() -> Int {
     let result = factory.build<List<_>>();
     7
 }
-"#,
-    );
-    assert_eq!(
-        call(&module, "Factory.build")[1],
-        TypeRef::Generic(verum_vbc::types::TypeParamId(1))
+"#;
+    let ast = Parser::new(source)
+        .parse_module()
+        .expect("negative grammar");
+    let error = VbcCodegen::with_config(CodegenConfig::new("method_witness_pins"))
+        .compile_module(&ast)
+        .expect_err("an unbound explicit type hole cannot become a runtime witness");
+    assert!(
+        matches!(error.kind, verum_vbc::codegen::CodegenErrorKind::TypeInference(ref message)
+        if message.contains("explicit structural type requires a declared type")),
+        "{error:?}"
     );
 }
 
@@ -355,7 +368,7 @@ fn probe() -> Int {
 }
 
 #[test]
-fn non_type_generic_slots_do_not_shift_explicit_type_arguments() {
+fn value_generic_slots_keep_their_own_runtime_witness() {
     let ast = Parser::new("fn sample<const Count: Int, Output>() -> Output { Output.default() }")
         .parse_module()
         .unwrap();
@@ -363,7 +376,13 @@ fn non_type_generic_slots_do_not_shift_explicit_type_arguments() {
         panic!()
     };
     let slots = VbcCodegen::declared_explicit_type_param_ids(func, &[], &[]);
-    assert_eq!(slots, vec![None, Some(verum_vbc::types::TypeParamId(0))]);
+    assert_eq!(
+        slots,
+        vec![
+            Some(verum_vbc::types::TypeParamId(0)),
+            Some(verum_vbc::types::TypeParamId(1))
+        ]
+    );
     let module = compile("fn sample<const Count: Int, Output>() -> Output { Output.default() }");
     assert_eq!(
         module
@@ -541,16 +560,32 @@ fn probe() -> Int {
 
 #[test]
 fn receiver_value_and_method_type_are_distinct_closure_witnesses() {
-    let produced = compile("type Cell<A, N: meta Int> is { value: A };
+    let produced = compile(
+        "type Cell<A, N: meta Int> is { value: A };
         implement<A, N: meta Int> Cell<A, N> {
             fn project<B>(&self, sample: B) -> Int { let read = || N; read() }
         }
-        fn probe() -> Int { let c: Cell<Bool, 19> = Cell { value: true }; c.project<Int>(7) }");
+        fn probe() -> Int { let c: Cell<Bool, 19> = Cell { value: true }; c.project<Int>(7) }",
+    );
     let bytes = verum_vbc::serialize::serialize_module(&produced).unwrap();
     let module = verum_vbc::deserialize::deserialize_module(&bytes).unwrap();
     let args = call(&module, "Cell.project");
-    assert_eq!(args, vec![TypeRef::Concrete(verum_vbc::types::TypeId::BOOL), TypeRef::ConstValue(19), TypeRef::Concrete(verum_vbc::types::TypeId::INT)]);
-    let entry = module.functions.iter().find(|f| module.get_string(f.name).unwrap().ends_with("probe")).unwrap().id;
-    let value = verum_vbc::interpreter::Interpreter::new(std::sync::Arc::new(module)).execute_function(entry).unwrap();
+    assert_eq!(
+        args,
+        vec![
+            TypeRef::Concrete(verum_vbc::types::TypeId::BOOL),
+            TypeRef::ConstValue(19),
+            TypeRef::Concrete(verum_vbc::types::TypeId::INT)
+        ]
+    );
+    let entry = module
+        .functions
+        .iter()
+        .find(|f| module.get_string(f.name).unwrap().ends_with("probe"))
+        .unwrap()
+        .id;
+    let value = verum_vbc::interpreter::Interpreter::new(std::sync::Arc::new(module))
+        .execute_function(entry)
+        .unwrap();
     assert_eq!(value.as_i64(), 19);
 }

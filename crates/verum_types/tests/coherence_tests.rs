@@ -36,6 +36,7 @@ use verum_types::ty::Type;
 fn make_impl(protocol: &str, for_type: Type, impl_crate: Option<&str>) -> ProtocolImpl {
     use verum_common::Maybe;
     ProtocolImpl {
+        parameters: for_type.free_vars().into_iter().map(verum_types::context::GenericBinder::Type).collect(),
         protocol: Path::single(Ident::new(protocol, Span::default())),
         protocol_args: vec![].into(),
         for_type,

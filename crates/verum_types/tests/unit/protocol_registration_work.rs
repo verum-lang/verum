@@ -6,6 +6,7 @@ use verum_common::span::FileId;
 
 fn implementation(protocol: &str, target: Type) -> ProtocolImpl {
     ProtocolImpl {
+        parameters: target.free_vars().into_iter().map(crate::context::GenericBinder::Type).collect(),
         protocol: Path::new(
             protocol
                 .split('.')
@@ -84,7 +85,9 @@ fn protocol_arguments_remain_overlap_candidates() {
     }
     assert_eq!(checker.registration_overlap_comparisons, 1);
     let mut generic = implementation("Selected", Type::Bool);
-    generic.protocol_args.push(Type::Var(TypeVar::with_id(17)));
+    let parameter = TypeVar::fresh();
+    generic.parameters.push(crate::context::GenericBinder::Type(parameter));
+    generic.protocol_args.push(Type::Var(parameter));
     assert!(matches!(
         checker.register_impl(generic),
         Err(CoherenceError::OverlappingImplementations { .. }),

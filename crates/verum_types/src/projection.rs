@@ -515,12 +515,14 @@ impl<'a> ProjectionResolver<'a> {
     /// concrete types.
     pub fn normalize(&self, ty: &Type) -> Result<Type, ProjectionError> {
         match ty {
-            Type::Generic { name, args } if name.starts_with("::") && args.len() > 1 => {
-                self.normalize(&Type::TypeApp {
-                    constructor: Box::new(Type::Generic { name: name.clone(), args: List::from_iter([args[0].clone()]) }),
+            Type::Generic { name, args } if name.starts_with("::") && args.len() > 1 => self
+                .normalize(&Type::TypeApp {
+                    constructor: Box::new(Type::Generic {
+                        name: name.clone(),
+                        args: List::from_iter([args[0].clone()]),
+                    }),
                     args: args.iter().skip(1).cloned().collect(),
-                })
-            }
+                }),
             // Check for projection syntax: "T.Item" or "T::Item"
             Type::Generic { name, args } if name.contains(".") || name.contains("::") => {
                 // Parse the projection path
@@ -667,19 +669,37 @@ impl<'a> ProjectionResolver<'a> {
             }
 
             Type::TypeApp { constructor, args } => {
-                if let Type::Generic { name, args: receiver } = constructor.as_ref()
-                    && name.starts_with("::") && receiver.len() == 1
+                if let Type::Generic {
+                    name,
+                    args: receiver,
+                } = constructor.as_ref()
+                    && name.starts_with("::")
+                    && receiver.len() == 1
                 {
                     let receiver = self.normalize(&receiver[0])?;
-                    let args: List<_> = args.iter().map(|argument| self.normalize(argument)).collect::<Result<_, _>>()?;
+                    let args: List<_> = args
+                        .iter()
+                        .map(|argument| self.normalize(argument))
+                        .collect::<Result<_, _>>()?;
                     let application = Type::TypeApp {
-                        constructor: Box::new(Type::Generic { name: name.clone(), args: List::from_iter([receiver.clone()]) }), args: args.clone(),
+                        constructor: Box::new(Type::Generic {
+                            name: name.clone(),
+                            args: List::from_iter([receiver.clone()]),
+                        }),
+                        args: args.clone(),
                     };
-                    if matches!(receiver, Type::Var(_)) { return Ok(application); }
-                    return self.protocol_checker.resolve_associated_family(&receiver, &name[2..].into(), &args, &[])
+                    if matches!(receiver, Type::Var(_)) {
+                        return Ok(application);
+                    }
+                    return self
+                        .protocol_checker
+                        .resolve_associated_family(&receiver, &name[2..].into(), &args, &[])
                         .map(|value| value.map(|value| value.result).unwrap_or(application))
                         .map_err(|reason| ProjectionError::NestedProjectionFailed {
-                            outer: receiver.to_text(), inner: name.clone(), reason, span: self.span,
+                            outer: receiver.to_text(),
+                            inner: name.clone(),
+                            reason,
+                            span: self.span,
                         });
                 }
                 let normalized_constructor = self.normalize(constructor)?;
@@ -841,18 +861,25 @@ mod tests {
         let _ = checker.register_protocol(iterator_proto);
 
         // Register List<T> as implementing Iterator with Item = T
+        let item = TypeVar::fresh();
         let list_impl = ProtocolImpl {
+            parameters: [crate::context::GenericBinder::Type(item)]
+                .into_iter()
+                .collect(),
             protocol: Path::single(Ident::new("Iterator", Span::dummy())),
             protocol_args: List::new(),
             for_type: Type::Generic {
                 name: "List".into(),
-                args: List::from(vec![Type::Var(TypeVar::with_id(0))]),
+                args: List::from(vec![Type::Var(item)]),
             },
             where_clauses: List::new(),
             methods: Map::new(),
             associated_types: {
                 let mut assoc = Map::new();
-                assoc.insert("Item".into(), crate::protocol::AssociatedTypeAssignment::ordinary(Type::Var(TypeVar::with_id(0))));
+                assoc.insert(
+                    "Item".into(),
+                    crate::protocol::AssociatedTypeAssignment::ordinary(Type::Var(item)),
+                );
                 assoc
             },
             associated_consts: Map::new(),

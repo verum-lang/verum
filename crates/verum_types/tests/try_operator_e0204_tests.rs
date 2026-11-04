@@ -80,6 +80,7 @@ fn register_from_impl(
 
     // Create the protocol implementation
     let impl_ = ProtocolImpl {
+        parameters: verum_common::List::new(),
         protocol: from_path,
         protocol_args: vec![source_type.clone()].into(), // From<source_type>
         for_type: target_type,

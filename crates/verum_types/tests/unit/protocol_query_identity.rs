@@ -13,6 +13,7 @@
         checker.set_coherence_mode(CoherenceMode::Off);
         checker
             .register_impl(ProtocolImpl {
+                parameters: verum_common::List::new(),
                 protocol: path(),
                 protocol_args: List::new(),
                 for_type: ty,
@@ -79,6 +80,7 @@
         );
         checker
             .register_impl(ProtocolImpl {
+                parameters: verum_common::List::new(),
                 protocol: path(),
                 protocol_args: List::new(),
                 for_type: second.clone(),

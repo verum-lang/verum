@@ -10,6 +10,12 @@ use verum_ast::{FunctionDecl, Type, TypeDecl, TypeKind, decl::ImplKind, ty::Gene
 #[derive(Debug, Clone)]
 pub(super) struct DeclaredGenericParameter {
     pub(super) name: String,
+    /// Runtime representation resolved in this declaration's own lexical scope.
+    /// None does not erase the source value role or authorize another carrier.
+    pub(super) value_carrier: Option<TypeRef>,
+    pub(super) witness_slot: Option<TypeParamId>,
+    /// Explicit source position for callable-local parameters only.
+    pub(super) explicit_slot: Option<usize>,
     /// The source declaration establishes kind, defaults and refinements before
     /// a nominal layout or semantic descriptor is complete.
     pub(super) source: Option<std::sync::Arc<verum_ast::ty::GenericParam>>,
@@ -355,9 +361,11 @@ impl VbcCodegen {
     }
 
     fn source_generic_roster(declaration: &TypeDecl) -> Option<GenericRoster> {
-        declaration
-            .generics
-            .iter()
+        Self::generic_roster(&declaration.generics)
+    }
+
+    pub(super) fn generic_roster(parameters: &[verum_ast::ty::GenericParam]) -> Option<GenericRoster> {
+        parameters.iter()
             .filter(|parameter| !matches!(parameter.kind, GenericParamKind::Lifetime { .. }))
             .map(|parameter| {
                 let name = match &parameter.kind {
@@ -369,6 +377,9 @@ impl VbcCodegen {
                     _ => return None,
                 };
                 Some(DeclaredGenericParameter {
+                    value_carrier: None,
+                    witness_slot: None,
+                    explicit_slot: None,
                     name: name.name.to_string(),
                     source: Some(std::sync::Arc::new(parameter.clone())),
                 })
@@ -398,6 +409,9 @@ impl VbcCodegen {
             .iter()
             .map(|parameter| {
                 Some(DeclaredGenericParameter {
+                    value_carrier: None,
+                    witness_slot: None,
+                    explicit_slot: None,
                     name: self.ctx.strings.get(parameter.name.0 as usize)?.clone(),
                     source: None,
                 })
@@ -416,7 +430,7 @@ impl VbcCodegen {
         self.implementation_type_nominal_id(target)
     }
 
-    fn implementation_type_nominal_id(&self, target: &Type) -> Option<TypeId> {
+    pub(super) fn implementation_type_nominal_id(&self, target: &Type) -> Option<TypeId> {
         match &target.kind {
             TypeKind::Generic { base, .. }
             | TypeKind::Reference { inner: base, .. }

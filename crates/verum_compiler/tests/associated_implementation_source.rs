@@ -132,7 +132,7 @@ fn decoded_carrier_refuses_an_executable_method_body() {
 }
 
 #[test]
-fn unsupported_associated_constants_and_proofs_are_not_silently_erased() {
+fn associated_constants_and_proof_obligations_are_retained_exactly() {
     for source in [
         "implement Family for Holder { type Item<T> = T; const SIZE: Int = 1; }",
         "implement Family for Holder { type Item<T> = T; proof law by trivial; }",
@@ -141,10 +141,11 @@ fn unsupported_associated_constants_and_proofs_are_not_silently_erased() {
         assert_eq!(
             declaration.items.len(),
             2,
-            "parser must retain the unsupported item"
+            "parser must retain the declared item"
         );
-        assert!(Carrier::new(OWNER.into(), &declaration).is_err());
-        assert!(decode_declaration(&declaration).is_err());
+        let retained = Carrier::new(OWNER.into(), &declaration).unwrap().declaration().unwrap();
+        assert_eq!(retained, declaration, "a carrier must not erase the obligation");
+        assert_eq!(decode_declaration(&declaration).unwrap().declaration().unwrap(), declaration);
     }
 }
 

@@ -106,9 +106,8 @@ pub(in super::super) fn handle_loadt(
     // consumed only the tag byte and silently desynced the stream.
     // Concrete/Instantiated load their head TypeId; Generic resolves
     // through the frame's CallG-delivered witness table, which is what
-    // gives `T.default()` a real receiver at Tier-0. An unresolvable
-    // Generic (no witness) loads nil — callers keep their legacy
-    // erased-T fallbacks.
+    // gives `T.default()` a real receiver at Tier-0. Missing witnesses
+    // are invalid bytecode, not a value or an erased-type fallback.
     let tr = super::bytecode_io::read_type_ref(state)?;
     let tr = state.resolve_generic_witness(&tr)?;
     // CONST-GENERIC-VALUE-CARRY-1 (task #19): a const-generic witness is a
@@ -117,7 +116,7 @@ pub(in super::super) fn handle_loadt(
     // frame witness table type params use; a `ConstValue(v)` entry
     // materializes the instantiation's integer (`StackAllocator<256>` →
     // 256).  A direct `ConstValue` payload (post-specialization) loads
-    // the literal.  No witness → nil (legacy erased fallback), unchanged.
+    // the literal. Missing generic identity is rejected below.
     if let crate::types::TypeRef::ConstValue(value) = tr {
         state.set_reg(dst, Value::from_i64(value));
         return Ok(DispatchResult::Continue);
@@ -138,14 +137,18 @@ pub(in super::super) fn handle_loadt(
                 dispatch_head(module, &result, depth + 1)
             }
             TypeRef::Function { .. } | TypeRef::Rank2Function { .. } | TypeRef::Tuple(_) => Ok(Some(crate::types::TypeId::UNIT)),
-            _ => Ok(None),
+            TypeRef::Generic(id) => Err(format!("unresolved generic witness slot {}", id.0)),
+            TypeRef::RecordFieldProjection { .. } => Err("unresolved dependent field witness".into()),
+            TypeRef::ConstValue(_) => Err("a value witness cannot be used as a type head".into()),
         }
     }
     let resolved = dispatch_head(&state.module, &tr, 0).map_err(|message|
         InterpreterError::InvalidBytecode { pc: state.pc() as usize, message })?;
     match resolved {
         Some(id) => state.set_reg(dst, Value::from_type(id)),
-        None => state.set_reg(dst, Value::nil()),
+        None => return Err(InterpreterError::InvalidBytecode {
+            pc: state.pc() as usize, message: "type load has no resolved witness".into(),
+        }),
     }
     Ok(DispatchResult::Continue)
 }

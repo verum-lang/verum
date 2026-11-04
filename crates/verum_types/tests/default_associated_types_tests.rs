@@ -120,6 +120,7 @@ fn test_default_associated_type_used() {
     };
 
     let impl_ = ProtocolImpl {
+        parameters: verum_common::List::new(),
         protocol: Path::single(Ident::new("Container", Span::default())),
         protocol_args: List::new(),
         for_type: my_type.clone(),
@@ -238,6 +239,7 @@ fn test_explicit_associated_type_overrides_default() {
     };
 
     let impl_ = ProtocolImpl {
+        parameters: verum_common::List::new(),
         protocol: Path::single(Ident::new("Container", Span::default())),
         protocol_args: List::new(),
         for_type: my_type.clone(),
@@ -324,6 +326,7 @@ fn test_missing_associated_type_no_default_error() {
     };
 
     let impl_ = ProtocolImpl {
+        parameters: verum_common::List::new(),
         protocol: Path::single(Ident::new("Container", Span::default())),
         protocol_args: List::new(),
         for_type: my_type.clone(),
@@ -391,6 +394,7 @@ fn test_default_type_validates_bounds() {
     // Implement Clone for Int
     let int_type = Type::int();
     let clone_impl = ProtocolImpl {
+        parameters: verum_common::List::new(),
         protocol: Path::single(Ident::new("Clone", Span::default())),
         protocol_args: List::new(),
         for_type: int_type.clone(),
@@ -454,6 +458,7 @@ fn test_default_type_validates_bounds() {
     };
 
     let impl_ = ProtocolImpl {
+        parameters: verum_common::List::new(),
         protocol: Path::single(Ident::new("Container", Span::default())),
         protocol_args: List::new(),
         for_type: my_type.clone(),

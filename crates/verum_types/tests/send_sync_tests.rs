@@ -296,7 +296,8 @@ fn test_unsafe_reference_is_send_sync() {
     let unsafe_fn_ref = Type::UnsafeReference {
         mutable: false,
         inner: Box::new(Type::Function {
-            property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
+            property_requirement:
+                verum_types::computational_properties::PropertyRequirement::Unrestricted,
             params: vec![Type::Int].into(),
             return_type: Box::new(Type::Bool),
             contexts: None,
@@ -353,7 +354,8 @@ fn test_functions_not_send_sync() {
 
     // fn(Int) -> Bool is NOT Send + NOT Sync
     let func = Type::Function {
-        property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
+        property_requirement:
+            verum_types::computational_properties::PropertyRequirement::Unrestricted,
         params: vec![Type::Int].into(),
         return_type: Box::new(Type::Bool),
         contexts: None,
@@ -371,7 +373,8 @@ fn test_functions_not_send_sync() {
 
     // fn() -> () is NOT Send + NOT Sync
     let nullary_func = Type::Function {
-        property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
+        property_requirement:
+            verum_types::computational_properties::PropertyRequirement::Unrestricted,
         params: List::new(),
         return_type: Box::new(Type::Unit),
         contexts: None,
@@ -671,22 +674,39 @@ fn test_shared_send_sync_registered() {
     // Shared<T> where T: Send + Sync
     let shared_ty = Type::Named {
         path: Path::single(Ident::new("Shared", Span::default())),
-        args: vec![Type::Var(TypeVar::with_id(0))].into(),
+        args: vec![Type::Int].into(),
     };
 
     let send_path = Path::single(Ident::new("Send", Span::default()));
     let sync_path = Path::single(Ident::new("Sync", Span::default()));
 
-    // Note: The actual Send/Sync implementation depends on where clauses
-    // being satisfied, but the implementation should be registered
+    // Int discharges the actual declaration-owned bounds.
     assert!(
         checker.find_impl(&shared_ty, &send_path).is_some(),
-        "Shared<T> should have Send implementation"
+        "Shared<Int> should have Send implementation"
     );
     assert!(
         checker.find_impl(&shared_ty, &sync_path).is_some(),
-        "Shared<T> should have Sync implementation"
+        "Shared<Int> should have Sync implementation"
     );
+    // An unbounded caller variable does not prove Send or Sync.
+    let Type::Named { path, .. } = shared_ty else {
+        unreachable!()
+    };
+    let unresolved = Type::Named {
+        path: path.clone(),
+        args: [Type::Var(TypeVar::fresh())].into_iter().collect(),
+    };
+    assert!(checker.find_impl(&unresolved, &send_path).is_none());
+    assert!(checker.find_impl(&unresolved, &sync_path).is_none());
+    let callable = Type::Named {
+        path,
+        args: [Type::function(List::new(), Type::Int)]
+            .into_iter()
+            .collect(),
+    };
+    assert!(checker.find_impl(&callable, &send_path).is_none());
+    assert!(checker.find_impl(&callable, &sync_path).is_none());
 }
 
 #[test]
@@ -696,7 +716,7 @@ fn test_mutex_send_sync_registered() {
     // Mutex<T> where T: Send
     let mutex_ty = Type::Named {
         path: Path::single(Ident::new("Mutex", Span::default())),
-        args: vec![Type::Var(TypeVar::with_id(0))].into(),
+        args: vec![Type::Int].into(),
     };
 
     let send_path = Path::single(Ident::new("Send", Span::default()));
@@ -704,12 +724,30 @@ fn test_mutex_send_sync_registered() {
 
     assert!(
         checker.find_impl(&mutex_ty, &send_path).is_some(),
-        "Mutex<T> should have Send implementation"
+        "Mutex<Int> should have Send implementation"
     );
     assert!(
         checker.find_impl(&mutex_ty, &sync_path).is_some(),
-        "Mutex<T> should have Sync implementation"
+        "Mutex<Int> should have Sync implementation"
     );
+    // An unbounded caller variable does not prove Send or Sync.
+    let Type::Named { path, .. } = mutex_ty else {
+        unreachable!()
+    };
+    let unresolved = Type::Named {
+        path: path.clone(),
+        args: [Type::Var(TypeVar::fresh())].into_iter().collect(),
+    };
+    assert!(checker.find_impl(&unresolved, &send_path).is_none());
+    assert!(checker.find_impl(&unresolved, &sync_path).is_none());
+    let callable = Type::Named {
+        path,
+        args: [Type::function(List::new(), Type::Int)]
+            .into_iter()
+            .collect(),
+    };
+    assert!(checker.find_impl(&callable, &send_path).is_none());
+    assert!(checker.find_impl(&callable, &sync_path).is_none());
 }
 
 // ==================== Protocol Registration ====================
@@ -830,7 +868,8 @@ fn test_not_send_container() {
         vec![
             Type::Int,
             Type::Function {
-                property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
+                property_requirement:
+                    verum_types::computational_properties::PropertyRequirement::Unrestricted,
                 params: vec![].into(),
                 return_type: Box::new(Type::Bool),
                 contexts: None,
@@ -986,8 +1025,7 @@ fn test_deeply_nested_performance() {
 
     // Median-of-5 with warmup: pins the depth scaling, not one cold
     // sample on a loaded runner.
-    let (duration, is_send) =
-        verum_test_support::median_elapsed(5, || derivation.is_send(&nested));
+    let (duration, is_send) = verum_test_support::median_elapsed(5, || derivation.is_send(&nested));
 
     assert!(is_send, "Deeply nested type should be Send");
     assert!(duration.as_millis() < 100, "Should check Send in < 100ms");
@@ -1014,7 +1052,8 @@ fn test_comprehensive_coverage() {
         ),
         (
             Type::Function {
-                property_requirement: verum_types::computational_properties::PropertyRequirement::Unrestricted,
+                property_requirement:
+                    verum_types::computational_properties::PropertyRequirement::Unrestricted,
                 params: vec![Type::Int].into(),
                 return_type: Box::new(Type::Bool),
                 contexts: None,

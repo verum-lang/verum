@@ -132,7 +132,7 @@ fn named_protocol_methods_check_the_declared_receiver_access() {
 }
 
 #[test]
-fn archived_dyn_methods_count_only_the_declared_value_parameters() {
+fn legacy_archived_dyn_methods_count_only_the_declared_value_parameters() {
     let owner = "provider";
     let key: Text = "provider.Counter".into();
     let mut data = metadata(owner, "public type Counter is protocol { fn read(&self, value: Int) -> Int; };");
@@ -150,6 +150,9 @@ fn archived_dyn_methods_count_only_the_declared_value_parameters() {
     fallback.name = "fallback".into();
     fallback.params = List::from_single(parameter("value", "Int"));
     let descriptor = data.types.get_mut(&key).unwrap();
+    // Exercise the legacy wire representation deliberately; fresh producers
+    // retain the complete protocol declaration.
+    descriptor.source_declaration = None;
     assert!(descriptor.source_declaration.is_none());
     descriptor.kind = TypeDescriptorKind::Protocol {
         super_protocols: List::new(), associated_types: List::new(),

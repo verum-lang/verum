@@ -19,6 +19,8 @@ pub(super) struct SourceTypeSubstitution {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum SourceBinding {
+    /// A declared compile-time level has no runtime witness.
+    Level,
     Type(ImplReceiverWitness),
     Value {
         witness: ImplReceiverWitness,
@@ -27,9 +29,10 @@ enum SourceBinding {
 }
 
 impl SourceBinding {
-    fn witness(&self) -> &ImplReceiverWitness {
+    fn witness(&self) -> Option<&ImplReceiverWitness> {
         match self {
-            Self::Type(witness) | Self::Value { witness, .. } => witness,
+            Self::Type(witness) | Self::Value { witness, .. } => Some(witness),
+            Self::Level => None,
         }
     }
 }
@@ -46,7 +49,11 @@ impl SourceTypeSubstitution {
     }
 
     pub(super) fn get(&self, name: &str) -> Option<&ImplReceiverWitness> {
-        self.bindings.get(name).map(SourceBinding::witness)
+        self.bindings.get(name).and_then(SourceBinding::witness)
+    }
+
+    pub(super) fn has_level(&self, name: &str) -> bool {
+        matches!(self.bindings.get(name), Some(SourceBinding::Level))
     }
 
     pub(super) fn insert(&mut self, name: String, witness: ImplReceiverWitness) {
@@ -59,8 +66,15 @@ impl SourceTypeSubstitution {
                 witness,
                 value_type,
             } => Some((witness, value_type)),
-            SourceBinding::Type(_) => None,
+            SourceBinding::Type(_) | SourceBinding::Level => None,
         }
+    }
+
+    pub(super) fn value_witness_domain(&self, witness: &TypeRef) -> Option<&TypeRef> {
+        self.bindings.values().find_map(|binding| match binding {
+            SourceBinding::Value { witness: owned, value_type } if owned.semantic && &owned.ty == witness => Some(value_type),
+            _ => None,
+        })
     }
 
     pub(super) fn insert_value(
@@ -81,8 +95,12 @@ impl SourceTypeSubstitution {
     /// Function-owned binders shadow only the corresponding lexical binding.
     /// Locally quantified type binders are handled by normal AST elaboration.
     pub(super) fn for_function(&self, function: &FunctionDecl) -> Self {
+        self.for_parameters(&function.generics)
+    }
+
+    pub(super) fn for_parameters(&self, parameters: &[verum_ast::ty::GenericParam]) -> Self {
         let mut result = self.clone();
-        for parameter in &function.generics {
+        for parameter in parameters {
             let name = match &parameter.kind {
                 GenericParamKind::Type { name, .. }
                 | GenericParamKind::Const { name, .. }
@@ -94,6 +112,9 @@ impl SourceTypeSubstitution {
                 GenericParamKind::Lifetime { .. } => continue,
             };
             result.bindings.remove(name.name.as_str());
+            if matches!(parameter.kind, GenericParamKind::Level { .. }) {
+                result.bindings.insert(name.name.to_string(), SourceBinding::Level);
+            }
         }
         result
     }
@@ -111,13 +132,19 @@ impl SourceTypeSubstitution {
         // a replacement; none can survive a simultaneous substitution.
         let mut reserved: BTreeSet<u16> = scope.values().copied().collect();
         for binding in self.bindings.values() {
-            reserve_indices(&binding.witness().ty, &mut reserved);
+            if let Some(witness) = binding.witness() {
+                reserve_indices(&witness.ty, &mut reserved);
+            }
         }
         let mut scope = scope.clone();
         let mut substitution = TypeSubstitution::empty();
         let mut values = SourceValueScope::default();
         let mut next = 0u32;
         for (name, binding) in &self.bindings {
+            let Some(witness) = binding.witness() else {
+                scope.remove(name);
+                continue;
+            };
             while u16::try_from(next).is_ok_and(|index| reserved.contains(&index)) {
                 next += 1;
             }
@@ -128,17 +155,10 @@ impl SourceTypeSubstitution {
             })?;
             next += 1;
             scope.insert(name.clone(), index);
-            substitution.bind(TypeParamId(index), binding.witness().ty.clone());
-            if let SourceBinding::Value {
-                witness:
-                    ImplReceiverWitness {
-                        ty: TypeRef::ConstValue(value),
-                        semantic: true,
-                    },
-                value_type: TypeRef::Concrete(TypeId::INT),
-            } = binding
-            {
-                values.0.insert(index, *value);
+            substitution.bind(TypeParamId(index), witness.ty.clone());
+            if let SourceBinding::Value { witness, value_type } = binding {
+                let value = match &witness.ty { TypeRef::ConstValue(value) if witness.semantic && *value_type == TypeRef::Concrete(TypeId::INT) => Some(*value), _ => None };
+                values.0.insert(index, value);
             }
         }
         substitution
@@ -152,9 +172,11 @@ impl SourceTypeSubstitution {
 /// Scalar facts are indexed by the elaborator's private binder IDs, not names.
 /// Lifting this environment alongside type binders prevents capture under rank2.
 #[derive(Default)]
-pub(super) struct SourceValueScope(BTreeMap<u16, i64>);
+pub(super) struct SourceValueScope(BTreeMap<u16, Option<i64>>);
 
 impl SourceValueScope {
+    pub(super) fn contains(&self, id: u16) -> bool { self.0.contains_key(&id) }
+
     pub(super) fn lifted(&self, count: u16, span: verum_ast::Span) -> CodegenResult<Self> {
         self.0
             .iter()
@@ -180,6 +202,9 @@ impl SourceValueScope {
             && let Some(name) = path.as_ident()
             && let Some(&id) = scope.get(name.name.as_str())
         {
+            if !self.contains(id) {
+                return Err(invalid("type parameter cannot occupy a value slot", expr.span));
+            }
             return Ok(TypeRef::Generic(TypeParamId(id)));
         }
         checked_scalar_expression(expr, &mut |leaf| {
@@ -190,7 +215,7 @@ impl SourceValueScope {
                 .as_ident()
                 .and_then(|name| scope.get(name.name.as_str()))
                 .and_then(|id| self.0.get(id))
-                .copied())
+                .copied().flatten())
         })
         .map(TypeRef::ConstValue)
     }
@@ -301,15 +326,15 @@ mod scalar_scope_tests {
 
     #[test]
     fn scalar_scope_lifting_checks_the_entire_index_space() {
-        let scope = SourceValueScope(BTreeMap::from([(u16::MAX, 73)]));
+        let scope = SourceValueScope(BTreeMap::from([(u16::MAX, Some(73))]));
         assert_eq!(
             scope.lifted(0, verum_ast::Span::default()).unwrap().0,
             scope.0
         );
         assert!(scope.lifted(1, verum_ast::Span::default()).is_err());
-        let scope = SourceValueScope(BTreeMap::from([(0, 73)]));
+        let scope = SourceValueScope(BTreeMap::from([(0, Some(73))]));
         let lifted = scope.lifted(1, verum_ast::Span::default()).unwrap();
-        assert_eq!(lifted.0.get(&1), Some(&73));
+        assert_eq!(lifted.0.get(&1), Some(&Some(73)));
         assert_eq!(
             lifted.0.get(&0),
             None,

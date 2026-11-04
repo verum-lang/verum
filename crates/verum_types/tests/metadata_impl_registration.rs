@@ -16,9 +16,54 @@ fn parameter() -> GenericParam {
     }
 }
 
+fn implementation_source(
+    file: u32,
+    source: &str,
+) -> verum_ast::source_implementation::AssociatedImplementationSource {
+    let ast = verum_fast_parser::FastParser::new()
+        .parse_module_str(source, verum_ast::FileId::new(file))
+        .unwrap();
+    let verum_ast::ItemKind::Impl(declaration) = &ast.items[0].kind else {
+        panic!("implementation")
+    };
+    verum_ast::source_implementation::AssociatedImplementationSource::new(
+        "owner".into(),
+        declaration,
+    )
+    .unwrap()
+}
+
+fn protocol_source(metadata: &mut CoreMetadata, name: &str, member: &str) {
+    let source = format!("public type {name} is protocol {{ type {member}; }};");
+    let ast = verum_fast_parser::Parser::new(&source)
+        .parse_module()
+        .unwrap();
+    let verum_ast::ItemKind::Type(declaration) = &ast.items[0].kind else {
+        panic!("protocol")
+    };
+    let mut descriptor = metadata.types.get(&Text::from("owner.Container")).unwrap().clone();
+    descriptor.name = name.into();
+    descriptor.generic_params = List::new();
+    descriptor.source_declaration = Some(declaration.clone());
+    descriptor.kind = TypeDescriptorKind::Protocol {
+        super_protocols: List::new(),
+        associated_types: metadata.protocols.get(&Text::from(name)).unwrap()
+            .associated_types
+            .clone(),
+        required_methods: List::new(),
+        default_methods: List::new(),
+    };
+    metadata
+        .types
+        .insert(format!("owner.{name}").into(), descriptor);
+}
+
 fn descriptor() -> ImplementationDescriptor {
     ImplementationDescriptor {
-        source_implementation: None,
+        source_implementation: Some(implementation_source(
+            1,
+            "implement<T> owner.Inspect for owner.Container<T> { type Item = T; }",
+        )),
         protocol: "Inspect".into(),
         target_type: "Container".into(),
         generic_params: List::from_iter([parameter()]),
@@ -75,6 +120,7 @@ fn metadata(implementations: List<ImplementationDescriptor>) -> CoreMetadata {
             decl_span: Maybe::None,
         },
     );
+    protocol_source(&mut metadata, "Inspect", "Item");
     metadata.implementations = implementations;
     metadata
 }
@@ -83,11 +129,16 @@ fn load(checker: &mut TypeChecker, name: &str) {
     checker.ensure_stdlib_type_loaded(&name.into(), &mut Default::default());
 }
 
-fn item(checker: &TypeChecker, owner: &str) -> Option<Type> {
-    checker.protocol_checker.read().try_find_associated_type(
-        &parse_descriptor_type_string(&format!("{owner}<Int>")).unwrap(),
-        &"Item".into(),
-    )
+fn item(checker: &mut TypeChecker, owner: &str) -> Option<Type> {
+    let source = format!("{owner}<Int>");
+    let annotation = verum_fast_parser::Parser::new(&source)
+        .parse_type()
+        .unwrap();
+    let receiver = checker.ast_to_type(&annotation).ok()?;
+    checker
+        .protocol_checker
+        .read()
+        .try_find_associated_type(&receiver, &"Item".into())
 }
 
 #[test]
@@ -97,9 +148,9 @@ fn exact_duplicate_generic_descriptors_are_registered_once() {
     load(&mut checker, "Container");
     assert_eq!(checker.metrics().metadata_impl_index_entries, 4096);
     assert_eq!(checker.metrics().metadata_impl_candidates, 1);
-    assert_eq!(item(&checker, "Container"), Some(Type::Int));
-    assert_eq!(item(&checker, "owner.Container"), Some(Type::Int));
-    assert_eq!(item(&checker, "foreign.Container"), None);
+    assert_eq!(item(&mut checker, "Container"), Some(Type::Int));
+    assert_eq!(item(&mut checker, "owner.Container"), Some(Type::Int));
+    assert_eq!(item(&mut checker, "foreign.Container"), None);
 }
 
 #[test]
@@ -121,14 +172,16 @@ fn admitted_descriptor_reuses_successful_aliases_without_rechecking_overlap() {
             .drain_coherence_warnings()
             .is_empty()
     );
-    assert_eq!(item(&checker, "owner.Container"), Some(Type::Int));
+    assert_eq!(item(&mut checker, "owner.Container"), Some(Type::Int));
 }
 
 #[test]
 fn rejected_alias_is_retried_without_readmitting_successful_aliases() {
     let mut checker =
         TypeChecker::new_with_core(Arc::new(metadata(List::from_iter([descriptor()]))));
-    let Type::Named { path: protocol, .. } = parse_descriptor_type_string("Inspect").unwrap() else {
+    load(&mut checker, "owner.Inspect");
+    let Type::Named { path: protocol, .. } = parse_descriptor_type_string("owner.Inspect").unwrap()
+    else {
         panic!("nominal protocol path");
     };
     // This concrete implementation conflicts with the archived generic owner.
@@ -137,12 +190,18 @@ fn rejected_alias_is_retried_without_readmitting_successful_aliases() {
         .protocol_checker
         .write()
         .register_impl(verum_types::protocol::ProtocolImpl {
+            parameters: List::new(),
             protocol,
             protocol_args: List::new(),
             for_type: parse_descriptor_type_string("owner.Container<Int>").unwrap(),
             where_clauses: List::new(),
             methods: Default::default(),
-            associated_types: [("Item".into(), verum_types::protocol::AssociatedTypeAssignment::ordinary(Type::Bool))].into_iter().collect(),
+            associated_types: [(
+                "Item".into(),
+                verum_types::protocol::AssociatedTypeAssignment::ordinary(Type::Bool),
+            )]
+            .into_iter()
+            .collect(),
             associated_consts: Default::default(),
             specialization: Maybe::None,
             impl_crate: Maybe::None,
@@ -179,8 +238,16 @@ fn rejected_alias_is_retried_without_readmitting_successful_aliases() {
 fn different_associated_assignments_reach_coherence_in_source_order() {
     let mut first = descriptor();
     first.associated_types.insert("Item".into(), "Text".into());
+    first.source_implementation = Some(implementation_source(
+        2,
+        "implement<T> owner.Inspect for owner.Container<T> { type Item = Text; }",
+    ));
     let mut second = first.clone();
     second.associated_types.insert("Item".into(), "Bool".into());
+    second.source_implementation = Some(implementation_source(
+        3,
+        "implement<T> owner.Inspect for owner.Container<T> { type Item = Bool; }",
+    ));
     let mut checker = TypeChecker::new_with_core(Arc::new(metadata(List::from_iter([
         first.clone(),
         first,
@@ -199,7 +266,7 @@ fn different_associated_assignments_reach_coherence_in_source_order() {
             .drain_coherence_warnings()
             .is_empty()
     );
-    assert_eq!(item(&checker, "owner.Container"), Some(Type::Text));
+    assert_eq!(item(&mut checker, "owner.Container"), Some(Type::Text));
 }
 
 #[test]
@@ -266,7 +333,12 @@ fn installing_new_metadata_invalidates_position_receipts() {
     protocol.name = "Measure".into();
     protocol.associated_types[0].name = "Measured".into();
     replacement.protocols.insert("Measure".into(), protocol);
+    protocol_source(&mut replacement, "Measure", "Measured");
     replacement.implementations[0].protocol = "Measure".into();
+    replacement.implementations[0].source_implementation = Some(implementation_source(
+        4,
+        "implement<T> owner.Measure for owner.Container<T> { type Measured = Text; }",
+    ));
     replacement.implementations[0].associated_types =
         OrderedMap::from_iter([("Measured".into(), "Text".into())]);
     checker.set_core_metadata(Arc::new(replacement));
@@ -289,9 +361,15 @@ fn prepared_snapshot_reuses_index_without_sharing_checker_admissions() {
     let mut first = TypeChecker::new_with_core_snapshot(snapshot.clone());
     let mut second = TypeChecker::new_with_core_snapshot(snapshot.clone());
     load(&mut first, "Container");
-    assert_eq!(item(&second, "Container"), None);
+    assert_eq!(
+        second.protocol_checker.read().try_find_associated_type(
+            &parse_descriptor_type_string("owner.Container<Int>").unwrap(),
+            &"Item".into()
+        ),
+        None
+    );
     load(&mut second, "Container");
-    assert_eq!(item(&second, "Container"), Some(Type::Int));
+    assert_eq!(item(&mut second, "Container"), Some(Type::Int));
     assert_eq!(first.metrics().metadata_impl_index_entries, 0);
     assert_eq!(second.metrics().metadata_impl_index_entries, 0);
     assert_eq!(first.metrics().metadata_impl_candidates, 1);

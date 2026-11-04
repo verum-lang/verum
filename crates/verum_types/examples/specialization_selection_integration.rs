@@ -13,6 +13,7 @@ use verum_types::unify::Unifier;
 
 fn implementation(target: Type, rank: usize) -> ProtocolImpl {
     ProtocolImpl {
+        parameters: target.free_vars().into_iter().map(verum_types::context::GenericBinder::Type).collect(),
         protocol: Path::single(Ident::new("Render", Span::default())),
         protocol_args: List::new(),
         for_type: target,

@@ -840,6 +840,7 @@ mod specialization_overlap {
 
     fn make_impl(protocol_name: &str, for_type: Type) -> ProtocolImpl {
         ProtocolImpl {
+            parameters: for_type.free_vars().into_iter().map(verum_types::context::GenericBinder::Type).collect(),
             protocol: Path::single(Ident::new(protocol_name, dummy_span())),
             protocol_args: List::new(),
             for_type,

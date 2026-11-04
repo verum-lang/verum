@@ -102,6 +102,7 @@ fn valid_impl() -> ProtocolImpl {
     assoc_types.insert("Item".into(), verum_types::protocol::AssociatedTypeAssignment::ordinary(Type::Int));
 
     ProtocolImpl {
+        parameters: verum_common::List::new(),
         protocol: iterator_path(),
         protocol_args: List::new(),
         for_type,

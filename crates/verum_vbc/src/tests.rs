@@ -171,6 +171,7 @@ fn test_roundtrip_type_descriptor() {
         is_transparent_wrapper: false,
         declared_layout: None,
         source_declaration: None,
+        source_inherent_implementations: Default::default(),
     };
 
     module.types.push(desc);
@@ -240,6 +241,7 @@ fn test_roundtrip_sum_type() {
         is_transparent_wrapper: false,
         declared_layout: None,
         source_declaration: None,
+        source_inherent_implementations: Default::default(),
     };
 
     module.types.push(desc);
@@ -758,6 +760,7 @@ fn test_roundtrip_all_type_kinds() {
             is_transparent_wrapper: false,
         declared_layout: None,
         source_declaration: None,
+        source_inherent_implementations: Default::default(),
         });
     }
     module.header.type_table_count = kinds.len() as u32;
@@ -799,6 +802,7 @@ fn test_roundtrip_all_visibility_levels() {
             is_transparent_wrapper: false,
         declared_layout: None,
         source_declaration: None,
+        source_inherent_implementations: Default::default(),
         });
     }
     module.header.type_table_count = visibilities.len() as u32;
@@ -981,6 +985,7 @@ fn test_roundtrip_empty_and_full_variants() {
         is_transparent_wrapper: false,
         declared_layout: None,
         source_declaration: None,
+        source_inherent_implementations: Default::default(),
     });
     module.header.type_table_count = 1;
 

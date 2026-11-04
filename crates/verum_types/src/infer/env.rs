@@ -598,6 +598,17 @@ impl TypeChecker {
         fd: &crate::core_metadata::FunctionDescriptor,
         metadata: &crate::core_metadata::CoreMetadata,
     ) -> Option<crate::context::TypeScheme> {
+        if let Some(owner) = Self::metadata_function_owner(fd, metadata) {
+            let key = Self::metadata_declaring_key(owner);
+            if metadata.inherent_implementations.contains_key(&key) {
+                self.register_inherent_methods_from_metadata(&key, owner, metadata);
+                let method = fd.name.as_str().rsplit('.').next().unwrap_or(fd.name.as_str());
+                if let Some(scheme) = self.inherent_methods.read().get(&key)
+                    .and_then(|methods| methods.get(&Text::from(format!("$static${}", method)))).cloned() {
+                    return Some(scheme);
+                }
+            }
+        }
         let Some(source) = &fd.source_signature else {
             return Some(Self::legacy_scheme_from_function_descriptor(fd, metadata));
         };
@@ -1068,6 +1079,8 @@ impl TypeChecker {
             metadata_names: std::cell::OnceCell::new(),
             metadata_impls_by_owner: Maybe::None,
             metadata_impl_receipts: Map::new(),
+            metadata_inherent_receipts: Set::new(),
+            metadata_inherent_loading: Set::new(),
             metadata_source_impl_loading: Set::new(),
             analysis_control: None,
             place_operands: Vec::new(),
@@ -1230,6 +1243,8 @@ impl TypeChecker {
             metadata_names: std::cell::OnceCell::new(),
             metadata_impls_by_owner: Maybe::None,
             metadata_impl_receipts: Map::new(),
+            metadata_inherent_receipts: Set::new(),
+            metadata_inherent_loading: Set::new(),
             metadata_source_impl_loading: Set::new(),
             analysis_control: None,
             place_operands: Vec::new(),
@@ -1393,6 +1408,8 @@ impl TypeChecker {
             metadata_names: std::cell::OnceCell::new(),
             metadata_impls_by_owner: Maybe::None,
             metadata_impl_receipts: Map::new(),
+            metadata_inherent_receipts: Set::new(),
+            metadata_inherent_loading: Set::new(),
             metadata_source_impl_loading: Set::new(),
             analysis_control: None,
             place_operands: Vec::new(),

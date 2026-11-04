@@ -25,8 +25,84 @@ pub use verum_modules::ModuleId;
 pub enum GenericBinder {
     Type(TypeVar),
     Value(Type),
+    /// A source-owned level, instantiated in the same map as universe-bearing types.
+    Universe(UniverseLevel),
     /// Explicit lifetime argument with no executable witness slot.
     ErasedLifetime,
+}
+
+impl GenericBinder {
+    /// Convert a value already bound by a declaration's lexical parameter frame.
+    pub(crate) fn declared(parameter: &Type) -> Result<Self, Text> {
+        match parameter {
+            Type::Var(variable) => Ok(Self::Type(*variable)),
+            Type::Meta {
+                value: ValueTerm::Parameter(_),
+                ..
+            } => Ok(Self::Value(parameter.clone())),
+            _ => Err("implementation parameter lacks a declaration-owned identity".into()),
+        }
+    }
+}
+
+/// Freshen a declaration-owned mixed telescope once. Names remain diagnostic;
+/// only the identities explicitly listed here are quantified.
+pub(crate) fn instantiate_binders(
+    parameters: &[GenericBinder],
+    universe_parameters: &[u32],
+) -> Result<Substitution, Text> {
+    let mut substitution = Substitution::new();
+    substitution.universes =
+        crate::universe_inference::UniverseInference::instantiate(universe_parameters)?;
+    for parameter in parameters {
+        match parameter {
+            GenericBinder::Universe(_) => {
+                return Err("universe binders require their separate declaration-owned level roster".into());
+            }
+            GenericBinder::ErasedLifetime => {
+                return Err("erased lifetime is not a quantified type or value binder".into());
+            }
+            GenericBinder::Type(variable) => {
+                if substitution
+                    .insert(*variable, Type::Var(TypeVar::fresh()))
+                    .is_some()
+                {
+                    return Err("duplicate quantified type variable".into());
+                }
+            }
+            GenericBinder::Value(Type::Meta {
+                name,
+                ty,
+                refinement,
+                value: ValueTerm::Parameter(id),
+            }) => {
+                let fresh = Type::Meta {
+                    name: name.clone(),
+                    ty: ty.clone(),
+                    refinement: refinement.clone(),
+                    value: ValueTerm::Inference(ValueId::fresh()),
+                };
+                if substitution.value_bindings.insert(*id, fresh).is_some() {
+                    return Err("duplicate quantified value parameter".into());
+                }
+            }
+            GenericBinder::Value(_) => {
+                return Err(
+                    "a quantified value parameter must have a rigid declaration identity".into(),
+                );
+            }
+        }
+    }
+    substitution.value_bindings = substitution
+        .value_bindings
+        .iter()
+        .map(|(id, value)| {
+            value
+                .try_apply_subst(&substitution)
+                .map(|value| (*id, value))
+        })
+        .collect::<Result<IndexMap<_, _>, _>>()?;
+    Ok(substitution)
 }
 
 /// A type scheme represents a polymorphic type: ∀α β. T
@@ -106,41 +182,48 @@ impl InstantiatedScheme {
 
 impl TypeScheme {
     pub fn try_instantiate(&self) -> Result<InstantiatedScheme, Text> {
-        let mut subst = Substitution::new();
-        subst.universes = crate::universe_inference::UniverseInference::instantiate(&self.universe_params)?;
+        let parameters: List<GenericBinder> = self
+            .vars
+            .iter()
+            .copied()
+            .map(GenericBinder::Type)
+            .chain(
+                self.value_parameters
+                    .iter()
+                    .cloned()
+                    .map(GenericBinder::Value),
+            )
+            .collect();
+        let subst = instantiate_binders(&parameters, &self.universe_params)?;
         let mut fresh_vars = List::new();
         let mut implicit_vars = Set::new();
         for original in &self.vars {
-            let fresh = TypeVar::fresh();
-            if subst.insert(*original, Type::Var(fresh)).is_some() {
-                return Err("duplicate quantified type variable".into());
-            }
-            fresh_vars.push(fresh);
-            if self.implicit_vars.contains(original) { implicit_vars.insert(fresh); }
-        }
-        let mut value_parameters = List::new();
-        for parameter in &self.value_parameters {
-            let Type::Meta { name, ty, refinement, value: ValueTerm::Parameter(id) } = parameter else {
-                return Err("a quantified value parameter must have a rigid declaration identity".into());
+            let Some(Type::Var(fresh)) = subst.get(original) else {
+                return Err("quantified type variable lacks its fresh identity".into());
             };
-            let fresh = Type::Meta { name: name.clone(), ty: ty.clone(), refinement: refinement.clone(),
-                value: ValueTerm::Inference(ValueId::fresh()) };
-            if subst.value_bindings.insert(*id, fresh.clone()).is_some() {
-                return Err("duplicate quantified value parameter".into());
+            fresh_vars.push(*fresh);
+            if self.implicit_vars.contains(original) {
+                implicit_vars.insert(*fresh);
             }
-            value_parameters.push(fresh);
         }
-        let rebased_values = subst.value_bindings.iter().map(|(id, value)|
-            value.try_apply_subst(&subst).map(|value| (*id, value)))
-            .collect::<Result<IndexMap<_, _>, _>>()?;
-        subst.value_bindings = rebased_values;
-        // Every domain uses the same owner substitution as the signature.
-        let value_parameters = value_parameters.iter().map(|parameter| parameter.try_apply_subst(&subst))
+        let value_parameters = self
+            .value_parameters
+            .iter()
+            .map(|parameter| parameter.try_apply_subst(&subst))
             .collect::<Result<List<_>, _>>()?;
         let explicit_method_vars = self.explicit_method_vars.as_ref().map(|slots| slots.iter().map(|slot| match slot {
             Some(GenericBinder::Type(var)) => subst.get(var).and_then(|ty| match ty {
                 Type::Var(var) => Some(GenericBinder::Type(*var)), _ => None,
             }).ok_or_else(|| Text::from("explicit type slot has no quantified owner")).map(Some),
+            Some(GenericBinder::Universe(level)) => {
+                let UniverseLevel::Variable(id) = level else {
+                    return Err("explicit universe slot lacks a rigid declaration identity".into());
+                };
+                if !self.universe_params.contains(id) {
+                    return Err("explicit universe slot has no quantified owner".into());
+                }
+                subst.universes.apply(level).map(|level| Some(GenericBinder::Universe(level)))
+            },
             Some(GenericBinder::ErasedLifetime) => Ok(Some(GenericBinder::ErasedLifetime)),
             Some(GenericBinder::Value(value)) => {
                 let Type::Meta { value: ValueTerm::Parameter(id), ty, refinement, .. } = value else {
@@ -164,21 +247,39 @@ impl TypeScheme {
         };
         let mut type_bounds = Map::new();
         for (original, bounds) in &self.var_type_bounds {
-            type_bounds.insert(fresh_key(original)?, bounds.iter()
-                .map(|bound| bound.try_apply_subst(&subst)).collect::<Result<_, _>>()?);
+            type_bounds.insert(
+                fresh_key(original)?,
+                bounds
+                    .iter()
+                    .map(|bound| bound.try_apply_subst(&subst))
+                    .collect::<Result<_, _>>()?,
+            );
         }
         let mut protocol_bounds = Map::new();
         for (original, bounds) in &self.var_protocol_bounds {
-            protocol_bounds.insert(fresh_key(original)?, bounds.iter()
-                .map(|bound| bound.try_apply_subst(&subst)).collect::<Result<_, _>>()?);
+            protocol_bounds.insert(
+                fresh_key(original)?,
+                bounds
+                    .iter()
+                    .map(|bound| bound.try_apply_subst(&subst))
+                    .collect::<Result<_, _>>()?,
+            );
         }
         Ok(InstantiatedScheme {
             ty: self.ty.try_apply_subst(&subst)?,
             implicit_vars,
             type_bounds,
             protocol_bounds,
-            where_clauses: self.where_clauses.iter().map(|clause| clause.try_apply_subst(&subst)).collect::<Result<_, _>>()?,
-            impl_self_type: self.impl_self_type.as_ref().map(|ty| ty.try_apply_subst(&subst)).transpose()?,
+            where_clauses: self
+                .where_clauses
+                .iter()
+                .map(|clause| clause.try_apply_subst(&subst))
+                .collect::<Result<_, _>>()?,
+            impl_self_type: self
+                .impl_self_type
+                .as_ref()
+                .map(|ty| ty.try_apply_subst(&subst))
+                .transpose()?,
             explicit_method_vars,
             value_parameters,
             fresh_vars,
@@ -317,20 +418,25 @@ impl TypeScheme {
     pub fn with_universe_parameters(mut self, parameters: List<u32>) -> Result<Self, Text> {
         let mut seen = Set::new();
         if parameters.len() > crate::universe_level::MAX_LEVEL_NODES
-            || parameters.iter().any(|id| !seen.insert(*id)) {
+            || parameters.iter().any(|id| !seen.insert(*id))
+        {
             return Err("invalid quantified universe parameter roster".into());
         }
         // Pure binder renaming does not enlarge level expressions. Validate
         // the shape before publishing a scheme used by infallible consumers.
         self.ty.try_apply_subst(&Substitution::new())?;
         for bounds in self.var_type_bounds.values() {
-            for bound in bounds { bound.try_apply_subst(&Substitution::new())?; }
+            for bound in bounds {
+                bound.try_apply_subst(&Substitution::new())?;
+            }
         }
         self.universe_params = parameters;
         Ok(self)
     }
 
-    pub fn universe_parameters(&self) -> &[u32] { &self.universe_params }
+    pub fn universe_parameters(&self) -> &[u32] {
+        &self.universe_params
+    }
 
     /// Check if a type variable is implicit (inferred from context)
     pub fn is_implicit(&self, var: &TypeVar) -> bool {
@@ -352,7 +458,9 @@ impl TypeScheme {
 
     /// Instantiate the type scheme with fresh type variables
     pub fn instantiate(&self) -> Type {
-        self.try_instantiate().expect("validated scheme instantiation").ty
+        self.try_instantiate()
+            .expect("validated scheme instantiation")
+            .ty
     }
 
     /// Instantiate the type scheme and return both the type and the ordered list of fresh type vars
@@ -361,7 +469,9 @@ impl TypeScheme {
     /// The returned Vec<TypeVar> preserves the order of vars in the scheme, which should match
     /// the order of type params in the original implement block + method declaration.
     pub fn instantiate_with_fresh_vars(&self) -> (Type, List<TypeVar>) {
-        let instance = self.try_instantiate().expect("validated scheme instantiation");
+        let instance = self
+            .try_instantiate()
+            .expect("validated scheme instantiation");
         (instance.ty, instance.fresh_vars)
     }
 
@@ -371,7 +481,9 @@ impl TypeScheme {
     /// fresh type variables should be inferred vs. explicitly provided.
     /// Implicit arguments: compiler-inferred function arguments resolved by unification or type class search
     pub fn instantiate_with_implicit_info(&self) -> (Type, List<TypeVar>, Set<TypeVar>) {
-        let instance = self.try_instantiate().expect("validated scheme instantiation");
+        let instance = self
+            .try_instantiate()
+            .expect("validated scheme instantiation");
         (instance.ty, instance.fresh_vars, instance.implicit_vars)
     }
 
@@ -385,7 +497,9 @@ impl TypeScheme {
     /// Returns: (instantiated_type, fresh_vars, type_bounds_for_fresh_vars)
     /// The Map maps fresh TypeVar to its type bounds (if any).
     pub fn instantiate_with_type_bounds(&self) -> (Type, List<TypeVar>, Map<TypeVar, List<Type>>) {
-        let instance = self.try_instantiate().expect("validated scheme instantiation");
+        let instance = self
+            .try_instantiate()
+            .expect("validated scheme instantiation");
         (instance.ty, instance.fresh_vars, instance.type_bounds)
     }
 
@@ -396,7 +510,9 @@ impl TypeScheme {
     pub fn instantiate_with_protocol_bounds(
         &self,
     ) -> (Type, List<TypeVar>, Map<TypeVar, List<ProtocolBound>>) {
-        let instance = self.try_instantiate().expect("validated scheme instantiation");
+        let instance = self
+            .try_instantiate()
+            .expect("validated scheme instantiation");
         (instance.ty, instance.fresh_vars, instance.protocol_bounds)
     }
 
@@ -795,7 +911,10 @@ impl UniverseContext {
     pub fn add_constraint(&mut self, constraint: UniverseConstraint) {
         self.substitution = UniverseSubstitution::new();
         let variables = constraint.variables();
-        self.supply.lock().reserved.extend(variables.iter().copied());
+        self.supply
+            .lock()
+            .reserved
+            .extend(variables.iter().copied());
         self.known_variables.extend(variables);
         self.constraints.push(constraint);
     }
@@ -970,8 +1089,12 @@ impl RecordPlace {
     fn identity(&mut self) -> Option<u64> {
         use std::sync::atomic::{AtomicU64, Ordering};
         static NEXT: AtomicU64 = AtomicU64::new(0);
-        if let Some(id) = self.id { return Some(id); }
-        let id = NEXT.try_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1)).ok()?;
+        if let Some(id) = self.id {
+            return Some(id);
+        }
+        let id = NEXT
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+            .ok()?;
         self.id = Some(id);
         Some(id)
     }
@@ -1112,7 +1235,9 @@ impl TypeEnv {
         let original = Text::from(original);
         let mut scope = Some(&*self);
         let binding = loop {
-            let Some(env) = scope else { return false; };
+            let Some(env) = scope else {
+                return false;
+            };
             if let Some(scheme) = env.bindings.get(&original) {
                 break (
                     scheme.clone(),
@@ -1263,11 +1388,18 @@ impl TypeEnv {
     pub(crate) fn dropping_loan_storage(&self, id: u64, returning: bool) -> Option<Text> {
         let mut scope = self;
         loop {
-            if let Some((name, place)) = scope.record_places.iter().find(|(_, place)| place.id == Some(id)) {
-                return (!returning || !matches!(place.reference, Some(ReferenceOrigin::Parameter)))
-                    .then(|| name.clone());
+            if let Some((name, place)) = scope
+                .record_places
+                .iter()
+                .find(|(_, place)| place.id == Some(id))
+            {
+                return (!returning
+                    || !matches!(place.reference, Some(ReferenceOrigin::Parameter)))
+                .then(|| name.clone());
             }
-            if !returning { return None; }
+            if !returning {
+                return None;
+            }
             scope = scope.parent.as_deref()?;
         }
     }
@@ -1311,10 +1443,18 @@ impl TypeEnv {
         Some(source)
     }
 
-    pub(crate) fn pin_record_source(&mut self, source: &crate::ty::RecordReceiver, origin: Span) -> Option<()> {
+    pub(crate) fn pin_record_source(
+        &mut self,
+        source: &crate::ty::RecordReceiver,
+        origin: Span,
+    ) -> Option<()> {
         let mut scope = self;
         loop {
-            if let Some(place) = scope.record_places.values_mut().find(|p| p.id == Some(source.binding)) {
+            if let Some(place) = scope
+                .record_places
+                .values_mut()
+                .find(|p| p.id == Some(source.binding))
+            {
                 place.projection.get_or_insert(origin);
                 return Some(());
             }
@@ -1820,11 +1960,12 @@ impl TypeContext {
     ) {
         let type_name = type_name.into();
         if let Some(journal) = &mut self.type_definition_journal {
-            journal.constructors.entry(type_name.clone())
+            journal
+                .constructors
+                .entry(type_name.clone())
                 .or_insert_with(|| self.inductive_constructors.get(&type_name).cloned());
         }
-        self.inductive_constructors
-            .insert(type_name, constructors);
+        self.inductive_constructors.insert(type_name, constructors);
     }
 
     /// Get constructors for an inductive type (for exhaustiveness checking)
@@ -2056,7 +2197,10 @@ impl TypeContext {
     pub fn define_type(&mut self, name: impl Into<Text>, ty: Type) {
         let name = name.into();
         if let Some(journal) = &mut self.type_definition_journal {
-            journal.types.entry(name.clone()).or_insert_with(|| self.type_defs.get(&name).cloned());
+            journal
+                .types
+                .entry(name.clone())
+                .or_insert_with(|| self.type_defs.get(&name).cloned());
         }
         if let Ok(filter) = std::env::var("VERUM_TRACE_DEFTYPE")
             && (filter == "1" || filter == name.as_str())
@@ -2091,36 +2235,60 @@ impl TypeContext {
     }
 
     pub(crate) fn finish_type_definition_journal(&mut self, commit: bool) {
-        let Some(journal) = self.type_definition_journal.take() else { return; };
-        if commit { return; }
+        let Some(journal) = self.type_definition_journal.take() else {
+            return;
+        };
+        if commit {
+            return;
+        }
         for (name, previous) in journal.types {
             match previous {
-                Some(ty) => { self.type_defs.insert(name, ty); }
-                None => { self.type_defs.remove(&name); }
+                Some(ty) => {
+                    self.type_defs.insert(name, ty);
+                }
+                None => {
+                    self.type_defs.remove(&name);
+                }
             }
         }
         for (name, previous) in journal.aliases {
             match previous {
-                Some(ty) => { self.type_aliases.insert(name, ty); }
-                None => { self.type_aliases.remove(&name); }
+                Some(ty) => {
+                    self.type_aliases.insert(name, ty);
+                }
+                None => {
+                    self.type_aliases.remove(&name);
+                }
             }
         }
         for (name, previous) in journal.module_types {
             match previous {
-                Some(ty) => { self.module_type_defs.insert(name, ty); }
-                None => { self.module_type_defs.remove(&name); }
+                Some(ty) => {
+                    self.module_type_defs.insert(name, ty);
+                }
+                None => {
+                    self.module_type_defs.remove(&name);
+                }
             }
         }
         for (name, previous) in journal.module_aliases {
             match previous {
-                Some(ty) => { self.module_type_aliases.insert(name, ty); }
-                None => { self.module_type_aliases.remove(&name); }
+                Some(ty) => {
+                    self.module_type_aliases.insert(name, ty);
+                }
+                None => {
+                    self.module_type_aliases.remove(&name);
+                }
             }
         }
         for (name, previous) in journal.constructors {
             match previous {
-                Some(constructors) => { self.inductive_constructors.insert(name, constructors); }
-                None => { self.inductive_constructors.remove(&name); }
+                Some(constructors) => {
+                    self.inductive_constructors.insert(name, constructors);
+                }
+                None => {
+                    self.inductive_constructors.remove(&name);
+                }
             }
         }
     }
@@ -2133,7 +2301,10 @@ impl TypeContext {
     #[track_caller]
     pub fn remove_type(&mut self, name: &Text) {
         if let Some(journal) = &mut self.type_definition_journal {
-            journal.types.entry(name.clone()).or_insert_with(|| self.type_defs.get(name).cloned());
+            journal
+                .types
+                .entry(name.clone())
+                .or_insert_with(|| self.type_defs.get(name).cloned());
         }
         if let Ok(filter) = std::env::var("VERUM_TRACE_DEFTYPE")
             && (filter == "1" || filter == name.as_str())
@@ -2166,7 +2337,10 @@ impl TypeContext {
         let name = name.into();
         if let Some(journal) = &mut self.type_definition_journal {
             let key = (module_id, name.clone());
-            journal.module_types.entry(key.clone()).or_insert_with(|| self.module_type_defs.get(&key).cloned());
+            journal
+                .module_types
+                .entry(key.clone())
+                .or_insert_with(|| self.module_type_defs.get(&key).cloned());
         }
         // Store in both qualified and unqualified maps for compatibility
         self.module_type_defs
@@ -2320,7 +2494,10 @@ impl TypeContext {
     pub fn define_alias(&mut self, alias_name: impl Into<Text>, target_type: Type) {
         let alias_name = alias_name.into();
         if let Some(journal) = &mut self.type_definition_journal {
-            journal.aliases.entry(alias_name.clone()).or_insert_with(|| self.type_aliases.get(&alias_name).cloned());
+            journal
+                .aliases
+                .entry(alias_name.clone())
+                .or_insert_with(|| self.type_aliases.get(&alias_name).cloned());
         }
         self.type_aliases.insert(alias_name, target_type);
     }
@@ -2329,7 +2506,10 @@ impl TypeContext {
     pub fn remove_alias(&mut self, alias_name: &str) {
         let key: Text = alias_name.into();
         if let Some(journal) = &mut self.type_definition_journal {
-            journal.aliases.entry(key.clone()).or_insert_with(|| self.type_aliases.get(&key).cloned());
+            journal
+                .aliases
+                .entry(key.clone())
+                .or_insert_with(|| self.type_aliases.get(&key).cloned());
         }
         self.type_aliases.remove(&key);
     }
@@ -2344,7 +2524,10 @@ impl TypeContext {
         let alias_name = alias_name.into();
         if let Some(journal) = &mut self.type_definition_journal {
             let key = (module_id, alias_name.clone());
-            journal.module_aliases.entry(key.clone()).or_insert_with(|| self.module_type_aliases.get(&key).cloned());
+            journal
+                .module_aliases
+                .entry(key.clone())
+                .or_insert_with(|| self.module_type_aliases.get(&key).cloned());
         }
         self.module_type_aliases
             .insert((module_id, alias_name.clone()), target_type.clone());

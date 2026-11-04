@@ -22,6 +22,7 @@ fn make_impl(protocol: &str, for_type: Type, rank: usize) -> ProtocolImpl {
     let path = Path::single(Ident::new(protocol, Span::default()));
 
     ProtocolImpl {
+        parameters: for_type.free_vars().into_iter().map(verum_types::context::GenericBinder::Type).collect(),
         protocol: path,
         protocol_args: List::new(),
         for_type,

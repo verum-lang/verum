@@ -41,6 +41,7 @@ fn make_path(name: &str) -> Path {
 
 fn make_simple_impl(protocol: &str, for_type: Type) -> ProtocolImpl {
     ProtocolImpl {
+        parameters: for_type.free_vars().into_iter().map(verum_types::context::GenericBinder::Type).collect(),
         protocol: make_path(protocol),
         protocol_args: vec![].into(),
         for_type,
@@ -377,6 +378,7 @@ fn test_protocol_impl_method_signature() {
     );
 
     let impl_ = ProtocolImpl {
+        parameters: verum_common::List::new(),
         protocol: make_path("Eq"),
         protocol_args: vec![].into(),
         for_type: Type::int(),
@@ -500,6 +502,7 @@ fn test_default_method_ne_from_eq() {
     );
 
     let impl_ = ProtocolImpl {
+        parameters: verum_common::List::new(),
         protocol: make_path("Eq"),
         protocol_args: vec![].into(),
         for_type: Type::int(),
@@ -597,6 +600,7 @@ fn test_explicit_method_overrides_default() {
     );
 
     let impl_ = ProtocolImpl {
+        parameters: verum_common::List::new(),
         protocol: make_path("Eq"),
         protocol_args: vec![].into(),
         for_type: Type::int(),
@@ -669,6 +673,7 @@ fn test_missing_required_method_error() {
 
     // Create Eq implementation without required 'eq' method
     let impl_ = ProtocolImpl {
+        parameters: verum_common::List::new(),
         protocol: make_path("Eq"),
         protocol_args: vec![].into(),
         for_type: Type::int(),
@@ -742,6 +747,7 @@ fn test_associated_type_simple() {
     impl_assoc_types.insert("Item".into(), verum_types::protocol::AssociatedTypeAssignment::ordinary(Type::int()));
 
     let impl_ = ProtocolImpl {
+        parameters: verum_common::List::new(),
         protocol: make_path("Iterator"),
         protocol_args: vec![].into(),
         for_type: Type::Named {
@@ -887,6 +893,7 @@ fn test_nested_associated_types() {
     );
 
     let impl_ = ProtocolImpl {
+        parameters: verum_common::List::new(),
         protocol: make_path("Container"),
         protocol_args: vec![].into(),
         for_type: Type::Named {
@@ -945,6 +952,7 @@ fn test_orphan_rule_local_protocol() {
 
     // Implement local protocol for foreign type - should be OK
     let impl_ = ProtocolImpl {
+        parameters: verum_common::List::new(),
         protocol: make_path("MyProtocol"),
         protocol_args: vec![].into(),
         for_type: Type::Named {
@@ -997,6 +1005,7 @@ fn test_orphan_rule_local_type() {
 
     // Implement foreign protocol for local type - should be OK
     let impl_ = ProtocolImpl {
+        parameters: verum_common::List::new(),
         protocol: make_path("ForeignProtocol"),
         protocol_args: vec![].into(),
         for_type: Type::Named {
@@ -1049,6 +1058,7 @@ fn test_orphan_rule_violation() {
 
     // Try to implement foreign protocol for foreign type - should fail
     let impl_ = ProtocolImpl {
+        parameters: verum_common::List::new(),
         protocol: make_path("ForeignProtocol"),
         protocol_args: vec![].into(),
         for_type: Type::Named {
@@ -1103,6 +1113,7 @@ fn test_orphan_rule_with_generic_type_parameter() {
 
     // Implement foreign protocol for List<MyType> - should be OK (local type in args)
     let impl_ = ProtocolImpl {
+        parameters: verum_common::List::new(),
         protocol: make_path("ForeignProtocol"),
         protocol_args: vec![].into(),
         for_type: Type::Named {
@@ -1170,6 +1181,7 @@ fn test_generic_protocol_simple() {
     protocol_args.push(Type::int()); // T = Int
 
     let impl_ = ProtocolImpl {
+        parameters: verum_common::List::new(),
         protocol: make_path("From"),
         protocol_args,
         for_type: Type::text(),
@@ -1228,6 +1240,7 @@ fn test_generic_protocol_multiple_params() {
     protocol_args.push(Type::text()); // E = Text
 
     let impl_ = ProtocolImpl {
+        parameters: verum_common::List::new(),
         protocol: make_path("TryInto"),
         protocol_args,
         for_type: Type::float(),
@@ -1374,6 +1387,7 @@ fn test_error_message_method_not_found() {
 
     // Register implementation without methods
     let impl_ = ProtocolImpl {
+        parameters: verum_common::List::new(),
         protocol: make_path("Eq"),
         protocol_args: vec![].into(),
         for_type: Type::int(),
@@ -1431,6 +1445,7 @@ fn test_error_message_orphan_rule_violation() {
     checker.register_type_crate("ForeignType".into(), Text::from("another_crate"));
 
     let impl_ = ProtocolImpl {
+        parameters: verum_common::List::new(),
         protocol: make_path("ForeignProtocol"),
         protocol_args: vec![].into(),
         for_type: Type::Named {
@@ -1496,6 +1511,7 @@ fn test_error_message_overlapping_implementations() {
 
     // First implementation
     let impl1 = ProtocolImpl {
+        parameters: verum_common::List::new(),
         protocol: make_path("TestProtocol"),
         protocol_args: vec![].into(),
         for_type: Type::int(),
@@ -1512,6 +1528,7 @@ fn test_error_message_overlapping_implementations() {
 
     // Second implementation (overlapping)
     let impl2 = ProtocolImpl {
+        parameters: verum_common::List::new(),
         protocol: make_path("TestProtocol"),
         protocol_args: vec![].into(),
         for_type: Type::int(),

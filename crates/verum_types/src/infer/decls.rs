@@ -62,6 +62,12 @@ use verum_common::{Heap, List, Map, Maybe, Set, Shared, Text, ToText};
 #[allow(unused_imports)]
 use verum_modules::{ModulePath, ModuleRegistry, NameResolver, resolve_import, resolver::NameKind};
 
+#[derive(Clone, Copy)]
+enum ExpectedImplementation<'a> {
+    Protocol(&'a Text, &'a Type),
+    Inherent(&'a Type),
+}
+
 impl TypeChecker {
     /// Record the arity a type declaration establishes for its own name.
     ///
@@ -119,9 +125,8 @@ impl TypeChecker {
         // meta Int>` count as arity 1, and `Matrix<Float, 2, 3>` was
         // refused as "expects 1 type argument(s), but 3 were provided".
         //
-        // Lifetimes are deliberately absent: they are not written at use
-        // sites, so counting them would inflate the expected argument
-        // count.
+        // Lifetime annotations are erased in both declarations and
+        // applications; they never occupy a retained substitution slot.
         let mut param_record: indexmap::IndexMap<verum_common::Text, Type> =
             indexmap::IndexMap::new();
         for param in generics.iter() {
@@ -155,9 +160,20 @@ impl TypeChecker {
         Ok(arity)
     }
 
+    /// Nominal arguments use the same exact declaration roster as applications.
+    /// Erased annotations and invented Unit slots never enter nominal identity.
+    fn declared_nominal_arguments(&self, name: &Text, span: Span) -> Result<List<Type>> {
+        let owner = self.declared_type_key(name.as_str());
+        match self.ctx.lookup_type(&format!("__type_params_{owner}")) {
+            Some(Type::Record(parameters)) => Ok(parameters.values().cloned().collect()),
+            _ => Err(TypeError::OtherWithCodeSpanned { code: "E407".into(),
+                msg: "nominal declaration has no owned parameter roster".into(), span }),
+        }
+    }
+
     /// Preserve the value sort of meta/const parameters in the declaration
     /// frame. A runtime type PID exists only for ordinary type parameters.
-    fn bind_semantic_value_parameters(&mut self, declaration: &TypeDecl) -> Result<()> {
+    fn prepare_type_declaration_parameters(&mut self, declaration: &TypeDecl) -> Result<()> {
         use verum_ast::ty::GenericParamKind;
         // Value roles are source semantics even when the declaration needs no
         // additional archive carrier. Aliases must not publish an erased body.
@@ -168,18 +184,21 @@ impl TypeChecker {
                     .insert(name.name.clone(), value);
             }
         }
+        if !matches!(&declaration.body, TypeDeclBody::Protocol(_) | TypeDeclBody::Coinductive(_)) {
+            self.record_type_param_defaults(declaration.name.name.as_str(), &declaration.generics)?;
+        }
         Ok(())
     }
 
-    /// Alias application substitutes every declared slot in source order.
-    /// Filtering value parameters changes both arity and substitution identity.
+    /// Alias application substitutes every retained declaration slot in source
+    /// order. Lifetime annotations erase; value parameters retain their identity.
     fn register_source_alias_parameters(
         &mut self,
         name: &Text,
         parameters: &List<verum_ast::ty::GenericParam>,
     ) {
         use verum_ast::ty::GenericParamKind;
-        let names: List<Text> = parameters.iter().map(|parameter| {
+        let names: List<Text> = parameters.iter().filter(|parameter| !matches!(parameter.kind, GenericParamKind::Lifetime { .. })).map(|parameter| {
             match &parameter.kind {
                 GenericParamKind::Type { name, .. }
                 | GenericParamKind::HigherKinded { name, .. }
@@ -372,6 +391,7 @@ impl TypeChecker {
         let mut any = false;
         for gp in generics.iter() {
             match &gp.kind {
+                GenericParamKind::Lifetime { .. } => continue,
                 GenericParamKind::Type {
                     default: Maybe::Some(ast_ty),
                     ..
@@ -414,7 +434,9 @@ impl TypeChecker {
         // on `register_declared_type_arity`: this map is keyed by simple
         // name across every module, so a declaration that stays silent
         // leaves a same-named type's count to answer for it.
-        let generics_count = type_decl.generics.len();
+        let generics_count = type_decl.generics.iter()
+            .filter(|parameter| !matches!(parameter.kind, verum_ast::ty::GenericParamKind::Lifetime { .. }))
+            .count();
         self.type_generics_count
             .insert(type_name.clone(), generics_count);
 
@@ -525,7 +547,7 @@ impl TypeChecker {
                 GenericParamKind::KindAnnotated { name, .. } => name.name.as_str().into(),
                 GenericParamKind::Const { name, .. } => name.name.as_str().into(),
                 GenericParamKind::Meta { name, .. } => name.name.as_str().into(),
-                GenericParamKind::Lifetime { name } => name.name.as_str().into(),
+                GenericParamKind::Lifetime { .. } => continue,
                 GenericParamKind::Context { name } => name.name.as_str().into(),
                 GenericParamKind::Level { name } => name.name.as_str().into(),
             };
@@ -593,13 +615,7 @@ impl TypeChecker {
         let body_result: Result<()> = (|| {
         // Defaults share the declaration's lexical parameter frame and owner.
         // Imported signatures cannot postpone a missing name to the consumer.
-        self.bind_semantic_value_parameters(type_decl)?;
-        // Protocol defaults belong to their retained source telescope. They
-        // may name the selected receiver, which does not exist at declaration
-        // time; a nominal default cache cannot represent that obligation.
-        if !matches!(effective_body, TypeDeclBody::Protocol(_) | TypeDeclBody::Coinductive(_)) {
-            self.record_type_param_defaults(type_name.as_str(), &type_decl.generics)?;
-        }
+        self.prepare_type_declaration_parameters(type_decl)?;
         match effective_body {
             TypeDeclBody::Alias(aliased_type) => {
                 // Register the type alias in the type context
@@ -1775,20 +1791,7 @@ impl TypeChecker {
                     // Register as opaque Named type (no field structure)
                     let named_type = Type::Named {
                         path: Path::single(type_decl.name.clone()),
-                        args: type_decl
-                            .generics
-                            .iter()
-                            .map(|param| {
-                                use verum_ast::ty::GenericParamKind;
-                                match &param.kind {
-                                    GenericParamKind::Type { name, .. } => Type::Named {
-                                        path: Path::single(name.clone()),
-                                        args: List::new(),
-                                    },
-                                    _ => Type::Unit,
-                                }
-                            })
-                            .collect(),
+                        args: self.declared_nominal_arguments(&type_name, type_decl.span)?,
                     };
                     // Store ONLY the named type, no __struct_fields_ entry
                     self.define_type_in_current_module(type_name.clone(), named_type);
@@ -1806,20 +1809,7 @@ impl TypeChecker {
                     // The record structure is stored separately for field access validation
                     let named_type = Type::Named {
                         path: Path::single(type_decl.name.clone()),
-                        args: type_decl
-                            .generics
-                            .iter()
-                            .map(|param| {
-                                use verum_ast::ty::GenericParamKind;
-                                match &param.kind {
-                                    GenericParamKind::Type { name, .. } => Type::Named {
-                                        path: Path::single(name.clone()),
-                                        args: List::new(),
-                                    },
-                                    _ => Type::Unit,
-                                }
-                            })
-                            .collect(),
+                        args: self.declared_nominal_arguments(&type_name, type_decl.span)?,
                     };
 
                     // Store the named type for protocol method dispatch
@@ -2557,7 +2547,7 @@ impl TypeChecker {
                 GenericParamKind::KindAnnotated { name, .. } => name.name.as_str().into(),
                 GenericParamKind::Const { name, .. } => name.name.as_str().into(),
                 GenericParamKind::Meta { name, .. } => name.name.as_str().into(),
-                GenericParamKind::Lifetime { name } => name.name.as_str().into(),
+                GenericParamKind::Lifetime { .. } => continue,
                 GenericParamKind::Context { name } => name.name.as_str().into(),
                 GenericParamKind::Level { name } => name.name.as_str().into(),
             };
@@ -2610,7 +2600,7 @@ impl TypeChecker {
         self.push_decl_param_frame(param_frame);
 
         // Now resolve the actual type definition (similar to register_type_declaration)
-        let result = self.bind_semantic_value_parameters(type_decl)
+        let result = self.prepare_type_declaration_parameters(type_decl)
             .and_then(|_| self.resolve_type_body(type_decl, &type_name));
 
         self.pop_decl_param_frame();
@@ -3281,20 +3271,7 @@ impl TypeChecker {
                     // Register as Named type
                     let named_type = Type::Named {
                         path: Path::single(type_decl.name.clone()),
-                        args: type_decl
-                            .generics
-                            .iter()
-                            .map(|param| {
-                                use verum_ast::ty::GenericParamKind;
-                                match &param.kind {
-                                    GenericParamKind::Type { name, .. } => Type::Named {
-                                        path: Path::single(name.clone()),
-                                        args: List::new(),
-                                    },
-                                    _ => Type::Unit,
-                                }
-                            })
-                            .collect(),
+                        args: self.declared_nominal_arguments(&type_name, type_decl.span)?,
                     };
                     // Module-aware: empty record registration.
                     self.define_type_in_current_module(type_name.clone(), named_type);
@@ -3308,20 +3285,7 @@ impl TypeChecker {
                     // Register as Named type for nominal identity
                     let named_type = Type::Named {
                         path: Path::single(type_decl.name.clone()),
-                        args: type_decl
-                            .generics
-                            .iter()
-                            .map(|param| {
-                                use verum_ast::ty::GenericParamKind;
-                                match &param.kind {
-                                    GenericParamKind::Type { name, .. } => Type::Named {
-                                        path: Path::single(name.clone()),
-                                        args: List::new(),
-                                    },
-                                    _ => Type::Unit,
-                                }
-                            })
-                            .collect(),
+                        args: self.declared_nominal_arguments(&type_name, type_decl.span)?,
                     };
 
                     // Module-aware: non-empty record registration.
@@ -4802,28 +4766,54 @@ impl TypeChecker {
         &mut self,
         impl_decl: &verum_ast::decl::ImplDecl,
         expected_protocol: &Text,
-        expected_target: &Text,
+        expected_target: &Type,
     ) -> Result<()> {
-        self.register_impl_block_expected(impl_decl, Some((expected_protocol, expected_target)))
+        self.register_impl_block_expected(impl_decl, Some(ExpectedImplementation::Protocol(expected_protocol, expected_target)))
+    }
+
+    pub(super) fn register_owned_inherent_impl_block(
+        &mut self,
+        declaration: &verum_ast::decl::ImplDecl,
+        expected_target: &Type,
+    ) -> Result<()> {
+        self.register_impl_block_expected(declaration, Some(ExpectedImplementation::Inherent(expected_target)))
+    }
+
+    /// Nominal attachment never changes the full receiver used by selection.
+    /// Source methods and VBC ownership use the same reference/pointer anchor.
+    fn implementation_attachment_type(mut receiver: &Type) -> &Type {
+        while let Type::Reference { inner, .. }
+            | Type::CheckedReference { inner, .. }
+            | Type::UnsafeReference { inner, .. }
+            | Type::Pointer { inner, .. } = receiver
+        { receiver = inner; }
+        receiver
     }
 
     fn validate_impl_owner(
         &self,
         implementation: &crate::protocol::ProtocolImpl,
-        expected: (&Text, &Text),
+        expected: (&Text, &Type),
     ) -> Result<()> {
         let protocol = self.path_to_string(&implementation.protocol);
-        let target = match &implementation.for_type {
-            Type::Named { path, .. } => self.path_to_string(path),
-            Type::Generic { name, .. } if !name.starts_with("::") => name.clone(),
-            _ => return Err(TypeError::OtherWithCodeSpanned {
-                code: "E405".into(), msg: "source implementation metadata requires a canonical nominal target".into(), span: implementation.span,
-            }),
+        if &protocol != expected.0 {
+            return Err(TypeError::OtherWithCodeSpanned { code: "E405".into(),
+                msg: "source implementation differs from its metadata protocol owner".into(), span: implementation.span });
+        }
+        self.validate_impl_target(&implementation.for_type, expected.1, implementation.span)
+    }
+
+    fn validate_impl_target(&self, actual: &Type, expected: &Type, span: Span) -> Result<()> {
+        let target = match Self::implementation_attachment_type(actual) {
+            Type::Named { path, .. } => Type::Named { path: path.clone(), args: List::new() },
+            Type::Generic { name, .. } if !name.starts_with("::") => Type::Generic { name: name.clone(), args: List::new() },
+            ty if !matches!(ty, Type::Unknown) && ty.primitive_name().is_some() => ty.clone(),
+            _ => return Err(TypeError::OtherWithCodeSpanned { code: "E405".into(),
+                msg: "source implementation metadata requires a declared target identity".into(), span }),
         };
-        if &protocol != expected.0 || &target != expected.1 {
-            return Err(TypeError::OtherWithCodeSpanned {
-                code: "E405".into(), msg: "source implementation differs from its metadata protocol or target owner".into(), span: implementation.span,
-            });
+        if !self.protocol_checker.read().types_structurally_equal(&target, expected) {
+            return Err(TypeError::OtherWithCodeSpanned { code: "E405".into(),
+                msg: "source implementation differs from its metadata protocol or target owner".into(), span });
         }
         Ok(())
     }
@@ -4831,22 +4821,36 @@ impl TypeChecker {
     fn register_impl_block_expected(
         &mut self,
         impl_decl: &verum_ast::decl::ImplDecl,
-        expected: Option<(&Text, &Text)>,
+        expected: Option<ExpectedImplementation<'_>>,
     ) -> Result<()> {
         let filtered = self.cfg_filtered_impl(impl_decl);
         let declaration = filtered.as_ref().unwrap_or(impl_decl);
+        if matches!(expected, Some(ExpectedImplementation::Inherent(_)))
+            && !matches!(declaration.kind, verum_ast::decl::ImplKind::Inherent(_)) {
+            return Err(TypeError::Other("inherent metadata contains a protocol implementation".into()));
+        }
         if matches!(declaration.kind, verum_ast::decl::ImplKind::Protocol { .. }) {
             let registry = self.protocol_checker.read();
             if let Some(implementation) = registry.source_impl(&self.current_module_path, declaration)? {
-                if let Some(expected) = expected { self.validate_impl_owner(implementation, expected)?; }
+                if let Some(ExpectedImplementation::Protocol(protocol, target)) = expected { self.validate_impl_owner(implementation, (protocol, target))?; }
                 return Ok(());
             }
-        } else if expected.is_some() {
+        } else if matches!(expected, Some(ExpectedImplementation::Protocol(_, _))) {
             return Err(TypeError::OtherWithCodeSpanned {
                 code: "E405".into(), msg: "associated-family metadata requires a protocol implementation".into(), span: declaration.span,
             });
         }
-        self.register_impl_block_inner(declaration, expected)
+        self.register_impl_block_inner(declaration, expected)?;
+        if matches!(expected, Some(ExpectedImplementation::Protocol(_, _)))
+            && self.protocol_checker.read().source_impl(&self.current_module_path, declaration)?.is_none()
+        {
+            return Err(TypeError::OtherWithCodeSpanned {
+                code: "E405".into(),
+                msg: "source implementation did not produce a declaration-owned registration".into(),
+                span: declaration.span,
+            });
+        }
+        Ok(())
     }
 
     pub(super) fn source_impl_specialization(
@@ -4915,7 +4919,7 @@ impl TypeChecker {
     }
 
     /// Inner implementation of register_impl_block
-    fn register_impl_block_inner(&mut self, impl_decl: &verum_ast::decl::ImplDecl, expected: Option<(&Text, &Text)>) -> Result<()> {
+    fn register_impl_block_inner(&mut self, impl_decl: &verum_ast::decl::ImplDecl, expected: Option<ExpectedImplementation<'_>>) -> Result<()> {
         use verum_ast::decl::{FunctionParamKind, ImplItemKind, ImplKind};
 
         if let ImplKind::Protocol {
@@ -5076,10 +5080,22 @@ impl TypeChecker {
             }
         }
 
+        // Imported source signatures resolve parameters through the lexical
+        // declaration frame, just as ordinary declarations do. The receiver,
+        // protocol arguments and members must share this exact telescope.
+        self.decl_param_frames.push(owner_frame.clone());
         let result = match &impl_decl.kind {
-            ImplKind::Inherent(_) => self.register_inherent_impl_methods(impl_decl, &type_param_names),
-            ImplKind::Protocol { .. } => self.register_protocol_impl_methods(impl_decl, &type_param_names, &owner_frame, expected),
+            ImplKind::Inherent(target) => (|| {
+                if let Some(ExpectedImplementation::Inherent(expected)) = expected {
+                    let actual = self.ast_to_type(target)?;
+                    self.validate_impl_target(&actual, expected, impl_decl.span)?;
+                }
+                self.register_inherent_impl_methods(impl_decl, &type_param_names)
+            })(),
+            ImplKind::Protocol { .. } => self.register_protocol_impl_methods(impl_decl, &type_param_names, &owner_frame,
+                match expected { Some(ExpectedImplementation::Protocol(protocol, target)) => Some((protocol, target)), _ => None }),
         };
+        self.decl_param_frames.pop();
 
         // Restore the binder frame on failed publication as well.
         for param_name in type_param_names {
@@ -5251,7 +5267,7 @@ impl TypeChecker {
                             // Wrap method registration in error recovery so that a single
                             // method failing to resolve types doesn't prevent remaining methods
                             // in the impl block from being registered.
-                            let method_result: Result<()> = self.with_declared_value_scope(&func.generics, |checker| {
+                            let method_result: Result<()> = self.with_declared_callable_scope(func, |checker| {
                                 // Check if this is a static method (no self parameter)
                                 // `is_self` is the authority on what counts as a
                                 // receiver. Re-listing the variants here left out
@@ -5302,7 +5318,9 @@ impl TypeChecker {
                                             let fresh_var = TypeVar::fresh();
                                             let type_var = Type::Var(fresh_var);
                                             let name_text: Text = name.name.clone();
-                                            checker.ctx.define_type(name_text.clone(), type_var);
+                                            checker.ctx.define_type(name_text.clone(), type_var.clone());
+                                            checker.decl_param_frames.last_mut().expect("method declaration frame")
+                                                .insert(name_text.clone(), type_var);
                                             method_type_param_names.push(name_text);
                                             method_type_vars.push(fresh_var);
 
@@ -5365,8 +5383,11 @@ impl TypeChecker {
                                         .collect();
                                     ordered_vars.extend(method_type_vars);
                                     let mut func_scheme =
-                                        checker.ctx.generalize_with_vars(func_ty, &ordered_vars);
+                                        checker.ctx.generalize_with_vars(func_ty, &ordered_vars)
+                                            .with_universe_parameters(checker.current_universe_parameters())
+                                            .map_err(|message| TypeError::UniverseBinding { message, span: func.span })?;
                                     func_scheme.impl_self_type = Some(self_type.clone());
+                                    checker.record_explicit_method_vars(&mut func_scheme, func);
                                     // Record how many ordered vars are impl-level so method-level params
                                     // (e.g., method's own <U>) aren't bound from receiver type args at call time.
                                     func_scheme.impl_var_count = type_param_names.len();
@@ -5424,7 +5445,9 @@ impl TypeChecker {
                                             let fresh_var = TypeVar::fresh();
                                             let type_var = Type::Var(fresh_var);
                                             let name_text: Text = name.name.clone();
-                                            checker.ctx.define_type(name_text.clone(), type_var);
+                                            checker.ctx.define_type(name_text.clone(), type_var.clone());
+                                            checker.decl_param_frames.last_mut().expect("method declaration frame")
+                                                .insert(name_text.clone(), type_var);
                                             method_type_param_names.push(name_text);
 
                                             // Extract type bounds (e.g., F: fn(T) -> U)
@@ -5548,7 +5571,9 @@ impl TypeChecker {
                                     }
 
                                     let mut method_scheme =
-                                        checker.ctx.generalize_with_vars(method_ty, &ordered_vars);
+                                        checker.ctx.generalize_with_vars(method_ty, &ordered_vars)
+                                            .with_universe_parameters(checker.current_universe_parameters())
+                                            .map_err(|message| TypeError::UniverseBinding { message, span: func.span })?;
                                     // impl_var_count is the number of impl-level
                                     // vars IN for_type, i.e. the first block.
                                     // This is exactly `receiver.args.len()` at call
@@ -5674,7 +5699,7 @@ impl TypeChecker {
         impl_decl: &verum_ast::decl::ImplDecl,
         type_param_names: &List<verum_common::Text>,
         owner_frame: &indexmap::IndexMap<Text, Type>,
-        expected: Option<(&Text, &Text)>,
+        expected: Option<(&Text, &Type)>,
     ) -> Result<()> {
         use verum_ast::decl::{FunctionParamKind, ImplItemKind, ImplKind};
         use verum_common::Text;
@@ -5694,10 +5719,11 @@ impl TypeChecker {
                     &verum_ast::Path { span: protocol.span, ..Self::text_to_path(&protocol_identity) },
                     protocol_args, Some(&resolved_self_type),
                 )?;
-                let type_name_opt = match &resolved_self_type {
+                let type_name_opt = match Self::implementation_attachment_type(&resolved_self_type) {
                     Type::Named { path, .. } => Some(self.path_to_string(path)),
                     Type::Generic { name, .. } => Some(name.clone()),
-                    _ => None,
+                    ty => ty.primitive_name()
+                        .filter(|_| !matches!(ty, Type::Unknown)).map(Text::from),
                 }
                 .or_else(|| match &for_type.kind {
                     verum_ast::ty::TypeKind::Path(path) => {
@@ -6380,6 +6406,9 @@ impl TypeChecker {
 
                     // Create and register ProtocolImpl
                     let protocol_impl = crate::protocol::ProtocolImpl {
+                        parameters: owner_frame.values().map(crate::context::GenericBinder::declared)
+                            .collect::<std::result::Result<List<_>, _>>()
+                            .map_err(|message| TypeError::UniverseBinding { message, span: impl_decl.span })?,
                         protocol: Self::text_to_path(&protocol_identity),
                         protocol_args: resolved_protocol_args,
                         for_type: for_type_resolved,

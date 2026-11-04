@@ -584,7 +584,7 @@ impl SpecializationSelector {
         protocol: &Protocol,
         self_type: &Type,
         protocol_checker: &ProtocolChecker,
-        unifier: &mut Unifier,
+        _unifier: &mut Unifier,
     ) -> Result<List<ImplementId>, SpecializationError> {
         let mut candidates = List::new();
 
@@ -592,15 +592,12 @@ impl SpecializationSelector {
         let impls = protocol_checker.get_implementations_for_protocol(&protocol.name);
 
         for (impl_id, impl_info) in impls.iter().enumerate() {
-            // Check if self_type matches impl pattern
-            if self.matches_impl_pattern(self_type, &impl_info.for_type, unifier) {
-                // Verify where clauses are satisfied
-                if self.check_where_clauses(self_type, &impl_info.where_clauses, protocol_checker) {
-                    // Check negative specialization constraints
-                    if self.check_negative_constraints(impl_info, protocol_checker) {
-                        candidates.push(impl_id);
-                    }
-                }
+            if protocol_checker
+                .instantiate_applicable_implementation(impl_info, self_type, None)
+                .is_some()
+                && self.check_negative_constraints(impl_info, protocol_checker)
+            {
+                candidates.push(impl_id);
             }
         }
 
@@ -642,49 +639,6 @@ impl SpecializationSelector {
         matcher
             .try_apply(&pattern, Span::default())
             .is_ok_and(|matched| matched == *self_type)
-    }
-
-    /// Check if where clauses are satisfied for a type
-    ///
-    /// Handles both positive bounds (T: Protocol) and negative bounds (T: !Protocol).
-    ///
-    /// Multi-protocol bounds: combining multiple protocol constraints (T: Display + Debug) — Negative Bounds
-    fn check_where_clauses(
-        &self,
-        self_type: &Type,
-        where_clauses: &[WhereClause],
-        protocol_checker: &ProtocolChecker,
-    ) -> bool {
-        for clause in where_clauses {
-            // Check if the type satisfies all bounds in the where clause
-            for bound in &clause.bounds {
-                // Check negative bounds differently from positive bounds
-                if bound.is_negative {
-                    // For negative bounds (T: !Protocol), verify T does NOT implement Protocol
-                    match self.check_negative_bound(&clause.ty, bound, protocol_checker) {
-                        NegativeBoundResult::Satisfied => {
-                            // Type correctly does NOT implement the protocol
-                            continue;
-                        }
-                        NegativeBoundResult::Violated => {
-                            // Type DOES implement the protocol - bound violated
-                            return false;
-                        }
-                        NegativeBoundResult::Unknown => {
-                            // For generic type variables, we're conservative - assume satisfied
-                            // The bound will be checked again when the type is instantiated
-                            continue;
-                        }
-                    }
-                } else {
-                    // For positive bounds, use standard check
-                    if !protocol_checker.check_protocol_bound(self_type, bound) {
-                        return false;
-                    }
-                }
-            }
-        }
-        true
     }
 
     /// Check if a type satisfies a negative bound (T: !Protocol)
@@ -1963,7 +1917,16 @@ mod tests {
     }
 
     fn make_impl(for_type: Type, where_clauses: List<WhereClause>) -> ProtocolImpl {
+        // This fixture declares every variable in its pattern as an implementation binder.
+        let mut variables = for_type.free_vars();
+        for clause in &where_clauses {
+            variables.extend(clause.ty.free_vars());
+        }
         ProtocolImpl {
+            parameters: variables
+                .into_iter()
+                .map(crate::context::GenericBinder::Type)
+                .collect(),
             protocol: Path::single(Ident::new("DeepClone", make_span())),
             protocol_args: List::new(),
             for_type,

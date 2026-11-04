@@ -243,7 +243,7 @@ fn native_replay() -> Text {
          #print axioms Verum.UniverseInstantiation.checked_equation\n",
     );
     use verum_types::{
-        context::TypeScheme,
+        context::{GenericBinder, TypeScheme},
         ty::{Type, TypeVar},
     };
     let owner = TypeVar::fresh();
@@ -262,6 +262,10 @@ fn native_replay() -> Text {
         .with_universe_parameters(declared.into_iter().collect())
         .unwrap();
     scheme.impl_self_type = Some(source_type);
+    scheme.explicit_method_vars =
+        Some(List::from_iter(declared.into_iter().map(|id| {
+            Some(GenericBinder::Universe(Level::Variable(id)))
+        })));
     let instance = scheme.try_instantiate().unwrap();
     let Type::Function { return_type, .. } = &instance.type_bounds[&instance.fresh_vars[0]][0]
     else {
@@ -282,6 +286,22 @@ fn native_replay() -> Text {
             instance.universe_instantiation(),
             &source_level,
             level,
+            None,
+        );
+    }
+    for (index, parameter) in declared.iter().enumerate() {
+        let Some(GenericBinder::Universe(observed)) =
+            &instance.explicit_method_vars.as_ref().unwrap()[index]
+        else {
+            panic!("native explicit universe slot")
+        };
+        emit_observed_case(
+            &mut output,
+            &format!("SchemeSlot{index}"),
+            &declared,
+            instance.universe_instantiation(),
+            &Level::Variable(*parameter),
+            observed,
             None,
         );
     }
@@ -382,6 +402,8 @@ fn independent_lean_checks_native_instantiation_and_resolved_equations() {
         "SchemeBody.unrestrictedSemantics",
         "SchemeBound.unrestrictedSemantics",
         "SchemeReceiver.unrestrictedSemantics",
+        "SchemeSlot0.unrestrictedSemantics",
+        "SchemeSlot1.unrestrictedSemantics",
         "Unsolved.unrestrictedSemantics",
         "Independent.unrestrictedSemantics",
         "NamespaceSeparation.unrestrictedSemantics",

@@ -6374,6 +6374,9 @@ impl TypeChecker {
 
                 // Create and register the ProtocolImpl
                 let protocol_impl = crate::protocol::ProtocolImpl {
+                    parameters: owner_frame.values().map(crate::context::GenericBinder::declared)
+                        .collect::<std::result::Result<List<_>, _>>()
+                        .map_err(|message| TypeError::UniverseBinding { message, span: impl_decl.span })?,
                     protocol: protocol.clone(),
                     protocol_args: resolved_protocol_args,
                     for_type: for_type_resolved,
@@ -9904,8 +9907,8 @@ impl TypeChecker {
 
 
             // Collect type variables for the impl's generic parameters
-            let mut type_param_to_var: std::collections::HashMap<Text, Type> =
-                std::collections::HashMap::new();
+            let mut type_param_to_var: indexmap::IndexMap<Text, Type> =
+                indexmap::IndexMap::new();
 
             for generic_param in &impl_decl.generics {
                 if let verum_ast::ty::GenericParamKind::Type { name, .. } = &generic_param.kind {
@@ -10034,6 +10037,9 @@ impl TypeChecker {
 
             // Build the ProtocolImpl
             let protocol_impl = ProtocolImpl {
+                parameters: owner_frame.values().map(crate::context::GenericBinder::declared)
+                    .collect::<std::result::Result<List<_>, _>>()
+                    .map_err(|message| TypeError::UniverseBinding { message, span: impl_decl.span })?,
                 protocol: protocol.clone(),
                 protocol_args: resolved_protocol_args,
                 for_type: resolved_for_type,
@@ -24129,7 +24135,7 @@ impl TypeChecker {
                         proto.methods.get(&method_name).map(|pm| pm.ty.clone())
                     });
                     if let Some(raw_ty) = raw_ty {
-                        found = Some(pc.substitute_type_params(&raw_ty, &subst));
+                        found = Some(raw_ty.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?);
                         break;
                     }
                 }

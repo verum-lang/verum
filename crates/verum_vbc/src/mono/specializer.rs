@@ -1132,6 +1132,7 @@ impl<'a> BytecodeSpecializer<'a> {
             declared_layout: base_desc.and_then(|d| d.declared_layout),
             // A specialized runtime carrier is not a new source declaration.
             source_declaration: None,
+            source_inherent_implementations: Default::default(),
         };
 
         // Update layout cache

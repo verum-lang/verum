@@ -55,6 +55,7 @@ fn make_impl(protocol: &str, for_type: Type, rank: usize) -> ProtocolImpl {
     };
 
     ProtocolImpl {
+        parameters: for_type.free_vars().into_iter().map(verum_types::context::GenericBinder::Type).collect(),
         protocol: path,
         protocol_args: vec![].into(),
         for_type,
@@ -766,6 +767,7 @@ fn make_negative_impl(protocol: &str, for_type: Type, negative_protocol: &str) -
     };
 
     ProtocolImpl {
+        parameters: for_type.free_vars().into_iter().map(verum_types::context::GenericBinder::Type).collect(),
         protocol: path,
         protocol_args: vec![].into(),
         for_type,

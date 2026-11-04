@@ -52,16 +52,19 @@ pub fn type_declaration_needs_semantic_carrier(declaration: &crate::TypeDecl) ->
     let mut scan = SignatureScan::new(false);
     scan.visit_type_decl(declaration);
     scan.finish()?;
-    Ok(universes || scan.uses_applied_projection || scan.uses_rank_two || scan.uses_callable_contexts
-        || matches!(&declaration.body, crate::TypeDeclBody::Protocol(body) | crate::TypeDeclBody::Coinductive(body)
-            if body.items.iter().any(|item| matches!(&item.kind, crate::decl::ProtocolItemKind::Type { .. })))
+    Ok(universes
+        || scan.uses_applied_projection
+        || scan.uses_rank_two
+        || scan.uses_callable_contexts
+        || matches!(&declaration.body, crate::TypeDeclBody::Protocol(_) | crate::TypeDeclBody::Coinductive(_))
         || declaration.generics.iter().any(|param| {
             matches!(
                 param.kind,
                 GenericParamKind::Type {
                     default: Some(_),
                     ..
-                } | GenericParamKind::Meta { .. } | GenericParamKind::Const { .. }
+                } | GenericParamKind::Meta { .. }
+                    | GenericParamKind::Const { .. }
             )
         }))
 }
@@ -245,10 +248,7 @@ pub fn validate_source_signature(function: &FunctionDecl, is_method: bool) -> Re
     supported(&scan, is_method || function.is_method())
 }
 
-fn supported(scan: &SignatureScan, is_method: bool) -> Result<()> {
-    if scan.uses_universes && is_method {
-        return Err("universe-bearing method signatures are not supported in metadata".into());
-    }
+fn supported(scan: &SignatureScan, _is_method: bool) -> Result<()> {
     if scan.universe_in_rank_two {
         return Err("universe-bearing rank-2 signatures are not supported in metadata".into());
     }
@@ -633,12 +633,17 @@ impl Visitor for SignatureScan {
         self.scopes.pop();
     }
     fn visit_type(&mut self, ty: &crate::Type) {
-        if self.validate && matches!(&ty.kind, TypeKind::Qualified { trait_ref, .. }
-            if !trait_ref.segments.is_empty()) {
-            self.fail("qualified associated projection requires a typed protocol application carrier");
+        if self.validate
+            && matches!(&ty.kind, TypeKind::Qualified { trait_ref, .. }
+            if !trait_ref.segments.is_empty())
+        {
+            self.fail(
+                "qualified associated projection requires a typed protocol application carrier",
+            );
         }
         if matches!(&ty.kind, TypeKind::Generic { base, .. }
-            if matches!(base.kind, TypeKind::AssociatedType { .. } | TypeKind::Qualified { .. })) {
+            if matches!(base.kind, TypeKind::AssociatedType { .. } | TypeKind::Qualified { .. }))
+        {
             self.uses_applied_projection = true;
         }
         if self.error.is_some() {
@@ -1013,12 +1018,16 @@ impl serde::ser::SerializeStructVariant for Compound<'_> {
 }
 
 /// Retain the implementation header and associated assignments in their actual
-/// source scope. Method/proof bodies have separate executable authorities.
+/// source scope. Runtime method bodies have separate executable authorities.
+/// Retained proof obligations remain syntax, not proof certificates.
 /// Validate the retained fields before cloning, including nested AST data.
 pub fn source_associated_implementation(
     declaration: &crate::decl::ImplDecl,
 ) -> Result<crate::decl::ImplDecl> {
-    source_associated_implementation_items(declaration, &declaration.items.iter().collect::<Vec<_>>())
+    source_associated_implementation_items(
+        declaration,
+        &declaration.items.iter().collect::<Vec<_>>(),
+    )
 }
 
 /// Capture exactly the items admitted for the compilation target.
@@ -1055,12 +1064,15 @@ pub fn source_associated_implementation_items(
         .map_err(|error| error.0)?;
     for item in items {
         match &item.kind {
-            ImplItemKind::Type { .. } => budget.visit(item, 1).map_err(|error| error.0)?,
+            ImplItemKind::Type { .. } | ImplItemKind::Const { .. } | ImplItemKind::Proof { .. } => {
+                budget.visit(item, 1).map_err(|error| error.0)?
+            }
             ImplItemKind::Function(function) => {
                 check_size(function)?;
-                budget.visit(&(&item.attributes, &item.visibility, &item.span), 1).map_err(|error| error.0)?;
+                budget
+                    .visit(&(&item.attributes, &item.visibility, &item.span), 1)
+                    .map_err(|error| error.0)?;
             }
-            _ => return Err("associated implementation carrier cannot represent constants or proof clauses".into()),
         }
     }
     let retained = ImplDecl {
@@ -1073,13 +1085,16 @@ pub fn source_associated_implementation_items(
         span: *span,
         items: items
             .iter()
-            .filter_map(|item| match &item.kind {
-                ImplItemKind::Type { .. } => Some((*item).clone()),
-                ImplItemKind::Function(function) => Some(crate::decl::ImplItem {
-                    attributes: item.attributes.clone(), visibility: item.visibility.clone(),
-                    span: item.span, kind: ImplItemKind::Function(copy_function_signature(function)),
-                }),
-                _ => None,
+            .map(|item| match &item.kind {
+                ImplItemKind::Type { .. }
+                | ImplItemKind::Const { .. }
+                | ImplItemKind::Proof { .. } => (*item).clone(),
+                ImplItemKind::Function(function) => crate::decl::ImplItem {
+                    attributes: item.attributes.clone(),
+                    visibility: item.visibility.clone(),
+                    span: item.span,
+                    kind: ImplItemKind::Function(copy_function_signature(function)),
+                },
             })
             .collect(),
     };
@@ -1097,17 +1112,15 @@ pub fn validate_source_associated_implementation(
     Budget::new()
         .visit(declaration, 0)
         .map_err(|error| error.0)?;
-    let ImplKind::Protocol {
-        protocol,
-        protocol_args,
-        for_type,
-    } = &declaration.kind
-    else {
-        return Err("associated implementation carrier requires a protocol declaration".into());
+    let (for_type, protocol_args) = match &declaration.kind {
+        ImplKind::Inherent(target) => (target, &[][..]),
+        ImplKind::Protocol { protocol, protocol_args, for_type } => {
+            if protocol.segments.is_empty() {
+                return Err("implementation carrier has no protocol identity".into());
+            }
+            (for_type, protocol_args.as_slice())
+        }
     };
-    if protocol.segments.is_empty() {
-        return Err("associated implementation carrier has no protocol identity".into());
-    }
     let mut scan = SignatureScan::new(true);
     scan.nominal_depth = 1;
     scan.push_generics(&declaration.generics);
@@ -1138,31 +1151,41 @@ pub fn validate_source_associated_implementation(
     }
     let mut names = verum_common::Set::new();
     for item in &declaration.items {
-        if let ImplItemKind::Function(function) = &item.kind {
-            if function.body.is_some() {
-                return Err("associated implementation carrier contains a method body".into());
-            }
-            scan.attributes(&item.attributes);
-            scan.visit_function(function);
-            continue;
-        }
-        let ImplItemKind::Type {
-            name,
-            type_params,
-            ty,
-        } = &item.kind
-        else {
-            return Err("associated implementation carrier contains an executable item".into());
+        let name = match &item.kind {
+            ImplItemKind::Function(function) => &function.name,
+            ImplItemKind::Type { name, .. } | ImplItemKind::Const { name, .. } => name,
+            ImplItemKind::Proof { axiom_name, .. } => axiom_name,
         };
         if name.name.is_empty() || !names.insert(name.name.clone()) {
-            return Err(
-                "associated implementation carrier has an empty or repeated assignment".into(),
-            );
+            return Err("implementation carrier has an empty or repeated declaration".into());
         }
-        scan.push_generics(type_params);
         scan.attributes(&item.attributes);
-        scan.visit_type(ty);
-        scan.scopes.pop();
+        match &item.kind {
+            ImplItemKind::Function(function) => {
+                if function.body.is_some() {
+                    return Err("associated implementation carrier contains a method body".into());
+                }
+                let nominal_depth = scan.nominal_depth;
+                if matches!(declaration.kind, ImplKind::Inherent(_)) { scan.nominal_depth = 0; }
+                scan.visit_function(function);
+                scan.nominal_depth = nominal_depth;
+            }
+            ImplItemKind::Type {
+                type_params, ty, ..
+            } => {
+                scan.push_generics(type_params);
+                scan.visit_type(ty);
+                scan.scopes.pop();
+            }
+            ImplItemKind::Const { ty, value, .. } => {
+                scan.visit_type(ty);
+                scan.visit_expr(value);
+            }
+            ImplItemKind::Proof { tactic, .. } => {
+                // Retain the obligation's source; serialization does not discharge it.
+                scan.visit_tactic_expr(tactic);
+            }
+        }
     }
     scan.scopes.pop();
     scan.finish()
