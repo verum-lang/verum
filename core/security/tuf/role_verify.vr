@@ -283,7 +283,7 @@ fn extract_keyval_public_hex(key: &TufKey) -> Result<Text, RoleVerifyError> {
         .ok_or_else(|| MalformedKey("keyval.public not a string".to_text()))
 }
 
-fn extract_rsa_public_key(key: &TufKey) -> Result<RsaPublicKey, RoleVerifyError> {
+fn extract_rsa_public_key(key: &TufKey) -> Result<RsaVerifyKey, RoleVerifyError> {
     let obj = key.keyval.as_object()
         .ok_or_else(|| MalformedKey("keyval not an object".to_text()))?;
     // TUF stores RSA keys as PEM-encoded SubjectPublicKeyInfo —
