@@ -380,7 +380,7 @@ public module internal;
 // Top-level Diakrisis / MSFS modules (10 files)
 public module absolute_layer;        // MSFS — Absolute Layer (F_S, Π_4, …)
 public module accessible;            // Adámek-Rosický accessible categories
-public module concrete_accessible;   // Concrete (∞,1)-cat instances
+public module concrete_accessible;   // Executable concrete category models
 public module diakrisis_primitive;   // Carrier protocol for Axi-0..9 + T-α / T-2f*
 public module dual_absolute_layer;   // MSFS §10 — Dual Absolute Layer (F̃_S, …)
 public module meta_cls;              // Meta_Cls + Meta_Cls^⊤ (M-PROOFS-E)

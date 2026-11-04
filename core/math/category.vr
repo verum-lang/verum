@@ -5,14 +5,9 @@
 // Spec: 13-formal-proofs.md
 //
 
-// A comprehensive category theory library defining categories, functors,
-// natural transformations, adjunctions, monads, limits, colimits, toposes,
-// sheaves, and Kan extensions. Each construction carries its axioms as
-// formal verification obligations.
-//
-
-// This module aspires to surpass existing formalizations (Lean's Mathlib,
-// Coq's MathComp, Agda's stdlib) in both breadth and ergonomics.
+// Operational interfaces for categorical constructions. Boolean law queries
+// describe diagnostic checks; they do not carry kernel-checked proof values.
+// A protocol implementation alone is not evidence of the categorical axioms.
 // =============================================================================
 
 @arch_module(
@@ -33,12 +28,15 @@ module core.math.category;
 
 /// Type parameters:
 ///  Obj - The type of objects
-///  Mor - The type of morphisms (indexed by source and target objects)
+///  Mor - A flat morphism carrier. Source and target are runtime operations;
+///        this interface does not index morphism types by their endpoints.
 public type Category<Obj, Mor> is protocol {
     /// Identity morphism for an object.
     fn id(a: &Obj) -> Mor;
 
-    /// Compose two morphisms: g after f (f then g).
+    /// Compose g after f. The categorical equation is meaningful only when
+    /// target(f) equals source(g); this legacy flat interface does not encode
+    /// that premise. General implementations must expose their domain checks.
     fn compose(f: &Mor, g: &Mor) -> Mor;
 
     /// Source object of a morphism.
@@ -47,16 +45,14 @@ public type Category<Obj, Mor> is protocol {
     /// Target object of a morphism.
     fn target(f: &Mor) -> Obj;
 
-    /// Left identity: compose(id(source(f)), f) = f
-    @verify(formal)
+    /// Diagnostic query for compose(id(source(f)), f) = f.
+    /// Returning true is not a kernel proof of the equation.
     fn left_identity(f: &Mor) -> Bool;
 
-    /// Right identity: compose(f, id(target(f))) = f
-    @verify(formal)
+    /// Diagnostic query for compose(f, id(target(f))) = f.
     fn right_identity(f: &Mor) -> Bool;
 
-    /// Associativity: compose(compose(f, g), h) = compose(f, compose(g, h))
-    @verify(formal)
+    /// Diagnostic query for associativity on composable f, g, h.
     fn associativity(f: &Mor, g: &Mor, h: &Mor) -> Bool;
 };
 

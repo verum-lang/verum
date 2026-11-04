@@ -36,9 +36,9 @@
 //  • Accessible∞Category — the ∞-categorical lift (Lurie HTT 5.4).
 //
 
-// The module is protocol-only at this layer (M-INFRA Phase 2); Phase 3
-// will land concrete instances (Set is ω-accessible, Cat is ω-accessible,
-// the κ_1-accessible witness for S_S^global from MSFS §3.3).
+// This module declares model requirements and explicit axioms. Its Boolean
+// methods are queries, not kernel proof values. In particular, the executable
+// models in concrete_accessible do not certify universal accessibility.
 // =============================================================================
 
 @arch_module(
@@ -137,10 +137,9 @@ public axiom lambda_filtered_descends<J, lambda: RegularCardinal, mu: RegularCar
 /// a group is ω-presentable iff it is finitely presented in the
 /// classical sense. This generalises: λ-presentable ≅ "definable by
 /// fewer than λ generators and relations" in the appropriate sense.
-public type LambdaPresentable<C: Category, lambda: RegularCardinal> is protocol {
-    /// The object x : C exposed as an opaque integer handle (the
-    /// concrete object lives in C's surface).
-    fn underlying_object(&self) -> Int;
+public type LambdaPresentable<Obj, Mor, C: Category<Obj, Mor>, lambda: RegularCardinal> is protocol {
+    /// The object in this category's declared object carrier.
+    fn underlying_object(&self) -> Obj;
 
     /// Witness that Hom(x, -) preserves λ-filtered colimits.
     fn preserves_lambda_filtered_colimits(&self) -> Bool;
@@ -150,8 +149,8 @@ public type LambdaPresentable<C: Category, lambda: RegularCardinal> is protocol 
 /// μ-presentable for μ ≥ λ. Presentability levels form an ascending
 /// chain (dual to the filteredness chain).
 @framework(adamek_rosicky, "AR 1.16 — λ-presentable ⇒ μ-presentable for μ ≥ λ")
-public axiom lambda_presentable_ascends<C: Category, lambda: RegularCardinal, mu: RegularCardinal>(
-    obj: &LambdaPresentable<C, lambda>,
+public axiom lambda_presentable_ascends<Obj, Mor, C: Category<Obj, Mor>, lambda: RegularCardinal, mu: RegularCardinal>(
+    obj: &LambdaPresentable<Obj, Mor, C, lambda>,
     mu_param: &mu,
 ) -> Bool
     requires mu_param.ordinal_rank() >= lambda.ordinal_rank()
@@ -175,7 +174,7 @@ public axiom lambda_presentable_ascends<C: Category, lambda: RegularCardinal, mu
 /// reindexing, and accessible localisation. This is the load-bearing
 /// invariant for MSFS Lemma 3.4 — `S_S^global` inherits its
 /// κ_1-accessibility from the closure operations of Definition 3.3.
-public type AccessibleCategory<kappa: RegularCardinal> is protocol extends Category {
+public type AccessibleCategory<Obj, Mor, kappa: RegularCardinal> is protocol extends Category<Obj, Mor> {
     /// Witness that C has all κ-filtered colimits.
     fn has_kappa_filtered_colimits(&self) -> Bool;
 
@@ -197,8 +196,8 @@ public type AccessibleCategory<kappa: RegularCardinal> is protocol extends Categ
 /// argument work: the colimit of an S_S^global-valued tower stays
 /// in S_S^global at appropriately bumped depth.
 @framework(adamek_rosicky, "AR 1.26 — κ-accessible cats closed under κ-filtered colimits")
-public axiom accessible_closed_under_kappa_filtered_colimits<kappa: RegularCardinal>(
-    cat: &AccessibleCategory<kappa>,
+public axiom accessible_closed_under_kappa_filtered_colimits<Obj, Mor, kappa: RegularCardinal>(
+    cat: &AccessibleCategory<Obj, Mor, kappa>,
 ) -> Bool
     requires cat.has_kappa_filtered_colimits()
     ensures  cat.has_kappa_filtered_colimits()
@@ -209,8 +208,8 @@ public axiom accessible_closed_under_kappa_filtered_colimits<kappa: RegularCardi
 /// representation). Used at MSFS Definition 3.3 to characterise
 /// the closure operations O1–O6 as accessible-functor compositions.
 @framework(lair_makkai_pare, "Lair-MP 2.45 — accessible cats ≃ 2-models of accessible 2-theory")
-public axiom accessible_eq_models_of_accessible_theory<kappa: RegularCardinal>(
-    cat: &AccessibleCategory<kappa>,
+public axiom accessible_eq_models_of_accessible_theory<Obj, Mor, kappa: RegularCardinal>(
+    cat: &AccessibleCategory<Obj, Mor, kappa>,
 ) -> Bool
     requires cat.has_kappa_presentable_dense_subcategory()
     ensures  cat.has_kappa_filtered_colimits();

@@ -19,12 +19,8 @@
 //  missing_dispatchers()` reports zero gaps.
 //
 
-//  * MSFS proof bodies: `core/math/syn_mod.vr.
-//  syn_mod_lemma_3_4_steps_2_3` and
-//  `core/math/concrete_accessible.vr.
-//  grothendieck_construction_n_1_constructive` now reference
-//  the kernel-discharge route inline; downstream theorems pick
-//  up the kernel coverage transitively.
+//  * A bridge declaration does not establish a concrete model or discharge
+//  downstream theorem premises. Such evidence must be checked separately.
 //
 
 //  * Tactic dispatcher: `verum_smt.industrial_fast_path.
