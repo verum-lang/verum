@@ -1617,15 +1617,7 @@ impl TypeChecker {
             }).collect();
             self.ctx.define_type(key, Type::Record(field_map));
         }
-        if !descriptor.generic_params.is_empty() {
-            self.type_generics_count.insert(owner.clone(), descriptor.generic_params.len());
-            let key: Text = format!("__type_params_{owner}").into();
-            if self.ctx.lookup_type(key.as_str()).is_none() {
-                let parameters = descriptor.generic_params.iter()
-                    .map(|parameter| (parameter.name.clone(), Type::Int)).collect();
-                self.ctx.define_type(key, Type::Record(parameters));
-            }
-        }
+        self.register_metadata_parameters(&owner, descriptor);
     }
 
     /// Preserve the variables minted for a nominal metadata template in its
@@ -1678,7 +1670,19 @@ impl TypeChecker {
             };
             if !is_sum || sum_slots.is_some() {
                 let parameters = descriptor.generic_params.iter().enumerate()
-                    .map(|(index, parameter)| (parameter.name.clone(), sum_slots.map_or(Type::Int, |slots| slots[index].clone())))
+                    .map(|(index, parameter)| {
+                        let slot = match sum_slots {
+                            Some(slots) => slots[index].clone(),
+                            // Legacy type-only descriptors retain declared named
+                            // slots, just like source record/alias declarations.
+                            // Int is a concrete carrier, never a parameter marker.
+                            None => Type::Named {
+                                path: Path::single(Ident::new(parameter.name.as_str(), Span::default())),
+                                args: List::new(),
+                            },
+                        };
+                        (parameter.name.clone(), slot)
+                    })
                     .collect();
                 self.ctx.define_type(parameters_key, Type::Record(parameters));
             }
