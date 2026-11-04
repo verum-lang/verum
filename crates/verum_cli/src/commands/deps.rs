@@ -164,11 +164,6 @@ pub fn update(package: Option<Text>) -> Result<()> {
                     .filter_map(|v| Version::parse(v.version.as_str()).ok())
                     .collect();
 
-                if available.is_empty() {
-                    ui::warn(&format!("    No versions available for {}", name));
-                    continue;
-                }
-
                 // Find latest version matching constraints
                 let version_req = current_version.as_str();
                 match resolve_version(version_req, &available) {
@@ -200,15 +195,10 @@ pub fn update(package: Option<Text>) -> Result<()> {
                             ui::info(&format!("    {} -> {} (new version)", name, latest_str));
                         }
                     }
-                    Err(e) => {
-                        ui::warn(&format!("    Failed to resolve {}: {}", name, e));
-                    }
+                    Err(error) => return Err(error),
                 }
             }
-            Err(e) => {
-                // Registry unavailable - try to work offline
-                ui::warn(&format!("    Registry unavailable for {}: {}", name, e));
-            }
+            Err(error) => return Err(error),
         }
     }
 
@@ -232,11 +222,11 @@ pub fn update(package: Option<Text>) -> Result<()> {
             }
         }
 
-        // Save updated manifest
+        // Complete registry reads before publishing either updated file. A
+        // failed index request must leave both prior files intact.
+        let lockfile = prepare_lockfile(&manifest_dir, &manifest)?;
         manifest.to_file(&manifest_path)?;
-
-        // Update lockfile
-        update_lockfile(&manifest_dir, &manifest)?;
+        lockfile.to_file(&Manifest::lockfile_path(&manifest_dir))?;
 
         ui::success(&format!("Updated {} dependencies", updates.len()));
     }
@@ -244,8 +234,11 @@ pub fn update(package: Option<Text>) -> Result<()> {
     Ok(())
 }
 
-/// Update lockfile after dependency changes
-fn update_lockfile(manifest_dir: &std::path::Path, manifest: &Manifest) -> Result<()> {
+/// Resolve a candidate lockfile without mutating project files.
+fn prepare_lockfile(
+    manifest_dir: &std::path::Path,
+    manifest: &Manifest,
+) -> Result<crate::registry::Lockfile> {
     use crate::registry::types::CogSource;
     use crate::registry::{
         DependencyResolver, LockedCog, Lockfile, RegistryClient, resolve_version,
@@ -284,52 +277,47 @@ fn update_lockfile(manifest_dir: &std::path::Path, manifest: &Manifest) -> Resul
             Dependency::Detailed { version, .. } => version.clone().unwrap_or_else(|| "*".into()),
         };
 
-        // Try to get versions from registry via get_index
-        if let Ok(index_entry) = client.get_index(name.as_str()) {
-            let available: Vec<Version> = index_entry
-                .versions
-                .iter()
-                .filter(|v| !v.yanked)
-                .filter_map(|v| Version::parse(v.version.as_str()).ok())
-                .collect();
+        let index_entry = client.get_index(name.as_str())?;
+        let available: Vec<Version> = index_entry
+            .versions
+            .iter()
+            .filter(|v| !v.yanked)
+            .filter_map(|v| Version::parse(v.version.as_str()).ok())
+            .collect();
 
-            if let Ok(resolved_version) = resolve_version(version_req.as_str(), &available) {
-                // Add to resolver graph
-                let dep_idx = resolver.add_cog(
-                    name.clone(),
-                    resolved_version.clone(),
-                    CogSource::Registry {
-                        registry: client.base_url().into(),
-                        version: resolved_version.to_string().into(),
-                    },
-                    Set::new(),
-                );
+        let resolved_version = resolve_version(version_req.as_str(), &available)?;
+        // Add to resolver graph
+        let dep_idx = resolver.add_cog(
+            name.clone(),
+            resolved_version.clone(),
+            CogSource::Registry {
+                registry: client.base_url().into(),
+                version: resolved_version.to_string().into(),
+            },
+            Set::new(),
+        );
 
-                // Create edge from root to dependency
-                let version_req = semver::VersionReq::parse(version_req.as_str())
-                    .unwrap_or(semver::VersionReq::STAR);
-                resolver.add_dependency(root_idx, dep_idx, version_req, List::new(), false);
+        // Create edge from root to dependency
+        let version_req = semver::VersionReq::parse(version_req.as_str())?;
+        resolver.add_dependency(root_idx, dep_idx, version_req, List::new(), false);
 
-                // Update lockfile
-                lockfile
-                    .packages
-                    .retain(|p| p.name.as_str() != name.as_str());
-                lockfile.packages.push(LockedCog {
-                    name: name.clone(),
-                    version: resolved_version.to_string().into(),
-                    source: CogSource::Registry {
-                        registry: client.base_url().into(),
-                        version: resolved_version.to_string().into(),
-                    },
-                    checksum: "".into(), // Filled when downloading
-                    dependencies: Map::new(),
-                    features: List::new(),
-                    optional: false,
-                });
-            }
-        }
+        // Update lockfile
+        lockfile
+            .packages
+            .retain(|p| p.name.as_str() != name.as_str());
+        lockfile.packages.push(LockedCog {
+            name: name.clone(),
+            version: resolved_version.to_string().into(),
+            source: CogSource::Registry {
+                registry: client.base_url().into(),
+                version: resolved_version.to_string().into(),
+            },
+            checksum: "".into(), // Filled when downloading
+            dependencies: Map::new(),
+            features: List::new(),
+            optional: false,
+        });
     }
-
     // Check for conflicts and cycles
     if let Err(e) = resolver.check_conflicts() {
         ui::warn(&format!("Version conflict detected: {}", e));
@@ -339,10 +327,7 @@ fn update_lockfile(manifest_dir: &std::path::Path, manifest: &Manifest) -> Resul
         ui::warn(&format!("Dependency cycle detected: {:?}", cycle));
     }
 
-    // Save lockfile
-    lockfile.to_file(&lockfile_path)?;
-
-    Ok(())
+    Ok(lockfile)
 }
 
 pub fn list(tree: bool) -> Result<()> {
@@ -385,3 +370,7 @@ pub fn list(tree: bool) -> Result<()> {
     println!();
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "../../tests/commands/deps_registry_errors.rs"]
+mod registry_errors;

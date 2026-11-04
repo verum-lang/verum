@@ -37,7 +37,7 @@ fn malformed_manifest_does_not_select_public_registry() {
 }
 
 #[test]
-fn existing_implicit_registry_defaults_are_preserved() {
+fn implicit_registry_defaults_share_one_authority_and_preserve_overrides() {
     child_case("defaults");
 }
 
@@ -142,9 +142,23 @@ fn isolated_install_case() {
             );
             std::fs::write(&path, "[cog]\nname = \"consumer\"\nversion = \"0.1.0\"\n").unwrap();
             assert_eq!(
-                RegistryClient::from_manifest().unwrap().base_url(),
                 crate::config::RegistryConfig::default().index.as_str(),
+                crate::registry::DEFAULT_REGISTRY,
             );
+            assert_eq!(
+                RegistryClient::from_manifest().unwrap().base_url(),
+                crate::registry::DEFAULT_REGISTRY,
+            );
+            std::fs::write(&path, "[cog]\nname = \"consumer\"\nversion = \"0.1.0\"\n[registry]\n").unwrap();
+            assert_eq!(
+                RegistryClient::from_manifest().unwrap().base_url(),
+                crate::registry::DEFAULT_REGISTRY,
+            );
+            let configured = "https://private.example.invalid/registry";
+            std::fs::write(&path, format!(
+                "[cog]\nname = \"consumer\"\nversion = \"0.1.0\"\n[registry]\nindex = \"{configured}\"\n"
+            )).unwrap();
+            assert_eq!(RegistryClient::from_manifest().unwrap().base_url(), configured);
         }
         return;
     }

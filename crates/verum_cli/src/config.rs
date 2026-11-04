@@ -1625,7 +1625,7 @@ impl Default for RegistryConfig {
 }
 
 fn default_registry() -> Text {
-    "https://packages.verum.lang".into()
+    crate::registry::DEFAULT_REGISTRY.into()
 }
 
 fn default_dev_opt() -> u8 {
