@@ -841,7 +841,7 @@ fn test_associated_type_in_implementation() {
     );
 
     let mut associated_types = Map::new();
-    associated_types.insert("Item".into(), Type::Int); // Concrete type for Item
+    associated_types.insert("Item".into(), verum_types::protocol::AssociatedTypeAssignment::ordinary(Type::Int)); // Concrete type for Item
 
     // Use a simpler type since List might not be available in Type
     let for_type = Type::Int;

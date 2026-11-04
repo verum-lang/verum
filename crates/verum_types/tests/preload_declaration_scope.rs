@@ -42,6 +42,7 @@ fn metadata() -> CoreMetadata {
         },
     );
     metadata.implementations.push(ImplementationDescriptor {
+        source_implementation: None,
         protocol: "Probe".into(),
         target_type: "Shadow".into(),
         generic_params: List::new(),

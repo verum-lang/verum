@@ -23,7 +23,7 @@ pub use callable::validate_archive_callable_spelling;
 mod source_signature_wire;
 
 /// Current sidecar schema; bincode archives must be rebuilt when this changes.
-pub const CORE_METADATA_VERSION: u32 = 7;
+pub const CORE_METADATA_VERSION: u32 = 8;
 
 /// Framed sidecars reject stale schemas before decoding their AST payloads.
 pub const CORE_METADATA_MAGIC: &[u8; 8] = b"VRMETA\0\0";
@@ -871,6 +871,9 @@ pub struct FunctionDescriptor {
 /// Implementation descriptor (impl Protocol for Type)
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImplementationDescriptor {
+    /// Exact lexical authority for associated family assignments and their local parameters.
+    #[serde(default)]
+    pub source_implementation: Option<verum_ast::source_implementation::AssociatedImplementationSource>,
     /// Protocol being implemented
     pub protocol: Text,
 
@@ -921,6 +924,7 @@ impl std::hash::Hash for ImplementationDescriptor {
             associated_types,
             methods,
             protocol_args,
+            source_implementation,
         } = self;
         protocol.hash(state);
         target_type.hash(state);
@@ -934,6 +938,7 @@ impl std::hash::Hash for ImplementationDescriptor {
         }
         methods.hash(state);
         protocol_args.hash(state);
+        source_implementation.hash(state);
     }
 }
 

@@ -20,6 +20,14 @@
 
 #[path = "protocol_obligations.rs"]
 mod obligations;
+#[path = "protocol_implementation_match.rs"]
+mod implementation_match;
+#[path = "protocol_associated_assignment.rs"]
+mod associated_assignment;
+pub use associated_assignment::AssociatedTypeAssignment;
+#[path = "protocol_associated_families.rs"]
+mod associated_families;
+pub use associated_families::FamilyApplication;
 
 use std::cell::RefCell;
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
@@ -1052,10 +1060,9 @@ pub struct ProtocolImpl {
     pub where_clauses: List<WhereClause>,
     /// Method implementations
     pub methods: Map<Text, Type>,
-    /// Associated type assignments (supports GAT instantiations)
-    /// For GATs: maps "Item<T>" to the concrete type
-    /// Generic Associated Types (GATs): associated types with their own type parameters, enabling lending iterators and monadic abstractions — .1 lines 116-142
-    pub associated_types: Map<Text, Type>,
+    /// Declaration-owned associated assignments, indexed by the member name.
+    /// A family retains its own local telescope until fully applied.
+    pub associated_types: Map<Text, AssociatedTypeAssignment>,
     /// Associated constant values
     pub associated_consts: Map<Text, ConstValue>,
     /// Specialization metadata (if this impl specializes another)
@@ -1070,6 +1077,18 @@ pub struct ProtocolImpl {
     /// This enables extracting additional type bindings (like T) from function type parameters
     /// during associated type resolution via `substitute_impl_type_params`.
     pub type_param_fn_bounds: Map<TypeVar, Type>,
+}
+
+impl ProtocolImpl {
+    /// Distinguish an absent assignment from a family requiring arguments.
+    /// Only absence may permit a declaration default at a zero-argument use.
+    pub fn ordinary_associated_type(&self, name: &Text) -> Result<Option<&Type>, ProtocolError> {
+        self.associated_types.get(name).map(|assignment| {
+            assignment.ordinary_body().ok_or_else(|| ProtocolError::AssociatedTypeNotSpecified {
+                protocol: self.protocol.clone(), assoc_name: name.clone(), for_type: self.for_type.clone(),
+            })
+        }).transpose()
+    }
 }
 
 /// Where clause for constrained implementations
@@ -1206,11 +1225,11 @@ impl VTable {
     /// - for_type: Type implementing the protocol
     /// - methods: Map of method names to types
     /// - associated_types: Map of associated type names to types (from impl block)
-    pub fn new_with_gats(
+    pub fn new_with_gats<Assignment>(
         protocol: Text,
         for_type: Type,
         methods: &Map<Text, Type>,
-        associated_types: &Map<Text, Type>,
+        associated_types: &Map<Text, Assignment>,
     ) -> Self {
         let mut method_indices = Map::new();
 
@@ -3836,11 +3855,11 @@ impl ProtocolChecker {
                     protocol_args: List::new(),
                     where_clauses: List::new(),
                     methods: Map::new(),
-                    associated_types: {
+                    associated_types: ({
                         let mut assoc = Map::new();
                         assoc.insert("Output".into(), output_type);
                         assoc
-                    },
+                    }).into_iter().map(|(name, ty): (Text, Type)| (name, AssociatedTypeAssignment::ordinary(ty))).collect(),
                     associated_consts: Map::new(),
                     specialization: Maybe::None,
                     impl_crate: Maybe::Some("stdlib".into()),
@@ -3875,7 +3894,7 @@ impl ProtocolChecker {
             protocol_args: List::new(),
             where_clauses: List::new(),
             methods: Map::new(),
-            associated_types: {
+            associated_types: ({
                 let mut assoc = Map::new();
                 // Output = T
                 assoc.insert("Output".into(), Type::Var(crate::ty::TypeVar::with_id(0)));
@@ -3891,7 +3910,7 @@ impl ProtocolChecker {
                     },
                 );
                 assoc
-            },
+            }).into_iter().map(|(name, ty): (Text, Type)| (name, AssociatedTypeAssignment::ordinary(ty))).collect(),
             associated_consts: Map::new(),
             specialization: Maybe::None,
             impl_crate: Maybe::Some("stdlib".into()),
@@ -3913,7 +3932,7 @@ impl ProtocolChecker {
             protocol_args: List::new(),
             where_clauses: List::new(),
             methods: Map::new(),
-            associated_types: {
+            associated_types: ({
                 let mut assoc = Map::new();
                 // Output = T
                 assoc.insert("Output".into(), Type::Var(crate::ty::TypeVar::with_id(0)));
@@ -3932,7 +3951,7 @@ impl ProtocolChecker {
                     },
                 );
                 assoc
-            },
+            }).into_iter().map(|(name, ty): (Text, Type)| (name, AssociatedTypeAssignment::ordinary(ty))).collect(),
             associated_consts: Map::new(),
             specialization: Maybe::None,
             impl_crate: Maybe::Some("stdlib".into()),
@@ -3951,7 +3970,7 @@ impl ProtocolChecker {
             protocol_args: List::new(),
             where_clauses: List::new(),
             methods: Map::new(),
-            associated_types: {
+            associated_types: ({
                 let mut assoc = Map::new();
                 // Output = T
                 assoc.insert("Output".into(), Type::Var(crate::ty::TypeVar::with_id(0)));
@@ -3973,7 +3992,7 @@ impl ProtocolChecker {
                     },
                 );
                 assoc
-            },
+            }).into_iter().map(|(name, ty): (Text, Type)| (name, AssociatedTypeAssignment::ordinary(ty))).collect(),
             associated_consts: Map::new(),
             specialization: Maybe::None,
             impl_crate: Maybe::Some("stdlib".into()),
@@ -4856,7 +4875,8 @@ impl ProtocolChecker {
                 subst_map.insert(Text::from("T0"), self_ty);
 
                 // Add associated type mappings to resolve Self.Item projections
-                for (assoc_name, assoc_ty) in impl_.associated_types.iter() {
+                for (assoc_name, assignment) in impl_.associated_types.iter() {
+                    let Some(assoc_ty) = assignment.ordinary_body() else { continue };
                     let prefixed_name = format!("::{}", assoc_name);
                     subst_map.insert(Text::from(prefixed_name), assoc_ty.clone());
                     subst_map.insert(assoc_name.clone(), assoc_ty.clone());
@@ -5115,22 +5135,30 @@ impl ProtocolChecker {
         self.protocols.get(&self.make_protocol_key(path))
     }
 
-    pub(crate) fn has_source_impl(
+    pub(crate) fn source_impl(
         &self,
         owner: &Text,
         declaration: &verum_ast::decl::ImplDecl,
-    ) -> crate::Result<bool> {
+    ) -> crate::Result<Option<&ProtocolImpl>> {
         let Some((original, index)) = self.source_impls.get(&(owner.clone(), declaration.span)) else {
-            return Ok(false);
+            return Ok(None);
         };
-        if original.as_ref() == declaration && self.impls.get(*index).is_some() {
-            return Ok(true);
+        if original.as_ref() == declaration && let Some(implementation) = self.impls.get(*index) {
+            return Ok(Some(implementation));
         }
         Err(crate::TypeError::OtherWithCodeSpanned {
             code: "E405".into(),
             msg: format!("source implementation in `{owner}` changed after publication").into(),
             span: declaration.span,
         })
+    }
+
+    pub(crate) fn has_source_impl(
+        &self,
+        owner: &Text,
+        declaration: &verum_ast::decl::ImplDecl,
+    ) -> crate::Result<bool> {
+        self.source_impl(owner, declaration).map(|implementation| implementation.is_some())
     }
 
     pub(crate) fn register_source_impl(
@@ -5735,7 +5763,7 @@ impl ProtocolChecker {
         };
 
         // Look up associated type in implementation
-        if let Some(assoc_ty) = impl_.associated_types.get(assoc_name) {
+        if let Some(assoc_ty) = impl_.ordinary_associated_type(assoc_name)? {
             // Apply the substitution to get the concrete associated type
             let resolved_ty = self.apply_substitution(assoc_ty, &substitution);
             return Ok(resolved_ty);
@@ -6339,6 +6367,19 @@ impl ProtocolChecker {
                         .iter()
                         .zip(a2.iter())
                         .all(|(t1, t2)| self.types_structurally_equal(t1, t2))
+            }
+            (Type::Named { path, args: left }, Type::Generic { name, args: right })
+            | (Type::Generic { name, args: right }, Type::Named { path, args: left }) => {
+                // Source and archive producers use both representations of a
+                // nominal application. Identity is the complete declaring path;
+                // a projection, relative path or matching suffix is insufficient.
+                !name.starts_with("::")
+                    && path.segments.iter().map(|segment| match segment {
+                        verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.as_str()),
+                        _ => None,
+                    }).eq(name.as_str().split('.').map(Some))
+                    && left.len() == right.len()
+                    && left.iter().zip(right).all(|(left, right)| self.types_structurally_equal(left, right))
             }
             (Type::Tuple(e1), Type::Tuple(e2)) => {
                 e1.len() == e2.len()
@@ -7318,7 +7359,7 @@ impl ProtocolChecker {
 
         // Argument bindings and receiver bindings belong to the same selected
         // declaration; an associated type must not come from another instance.
-        if let Some(assoc_ty) = impl_.associated_types.get(assoc_name) {
+        if let Some(assoc_ty) = impl_.ordinary_associated_type(assoc_name)? {
             return Ok(
                 self.substitute_impl_type_params_for_instantiation(assoc_ty, impl_, ty, args)
             );
@@ -8024,7 +8065,8 @@ impl ProtocolChecker {
 
         for impl_ in impls.iter() {
             // Check if this implementation has the associated type explicitly defined
-            if let Some(assoc_ty) = impl_.associated_types.get(assoc_name) {
+            if let Some(assignment) = impl_.associated_types.get(assoc_name) {
+                let Some(assoc_ty) = assignment.ordinary_body() else { continue };
                 let substituted = self.substitute_impl_type_params(assoc_ty, impl_, ty);
 
                 // Check if the substituted type is a projection (still needs resolution)
@@ -8547,6 +8589,29 @@ impl ProtocolChecker {
     /// we get `::Item[ListIter<Int>]`. This function resolves it to `&Int`.
     pub fn normalize_projection_type(&self, ty: &Type) -> Type {
         match ty {
+            Type::TypeApp { constructor, args } => {
+                if let Type::Generic { name, args: receiver } = constructor.as_ref()
+                    && name.starts_with("::") && receiver.len() == 1
+                {
+                    let receiver = self.normalize_projection_type(&receiver[0]);
+                    let args: List<_> = args.iter().map(|argument| self.normalize_projection_type(argument)).collect();
+                    let application = Type::TypeApp {
+                        constructor: Box::new(Type::Generic { name: name.clone(), args: List::from_iter([receiver.clone()]) }), args: args.clone(),
+                    };
+                    return self.resolve_associated_family(&receiver, &name[2..].into(), &args, &[])
+                        .ok().flatten().map(|value| value.result).unwrap_or(application);
+                }
+                Type::TypeApp {
+                    constructor: Box::new(self.normalize_projection_type(constructor)),
+                    args: args.iter().map(|argument| self.normalize_projection_type(argument)).collect(),
+                }
+            }
+            Type::Generic { name, args } if name.starts_with("::") && args.len() > 1 => {
+                self.normalize_projection_type(&Type::TypeApp {
+                    constructor: Box::new(Type::Generic { name: name.clone(), args: List::from_iter([args[0].clone()]) }),
+                    args: args.iter().skip(1).cloned().collect(),
+                })
+            }
             Type::Generic { name, args } if name.as_str().starts_with("::") && args.len() == 1 => {
                 // This is a projection type - try to resolve it
                 let assoc_name = &name.as_str()[2..]; // Strip "::" prefix
@@ -8713,16 +8778,14 @@ impl ProtocolChecker {
 
                 // Resolve Output associated type
                 let output = impl_
-                    .associated_types
-                    .get(&"Output".into())
+                    .ordinary_associated_type(&"Output".into()).ok()?
                     .cloned()
                     .map(|t| self.apply_type_substitution_with_map(&t, &subst))
                     .or_else(|| self.try_find_associated_type(ty, &"Output".into()));
 
                 // Resolve Residual associated type
                 let residual = impl_
-                    .associated_types
-                    .get(&"Residual".into())
+                    .ordinary_associated_type(&"Residual".into()).ok()?
                     .cloned()
                     .map(|t| self.apply_type_substitution_with_map(&t, &subst))
                     .or_else(|| self.try_find_associated_type(ty, &"Residual".into()));
@@ -8855,13 +8918,11 @@ impl ProtocolChecker {
                             let mut subst = Map::new();
                             self.build_type_substitution_for_impl(&impl_.for_type, ty, &mut subst);
                             let output = impl_
-                                .associated_types
-                                .get(&"Output".into())
+                                .ordinary_associated_type(&"Output".into()).ok()?
                                 .cloned()
                                 .map(|t| self.apply_type_substitution_with_map(&t, &subst));
                             let residual = impl_
-                                .associated_types
-                                .get(&"Residual".into())
+                                .ordinary_associated_type(&"Residual".into()).ok()?
                                 .cloned()
                                 .map(|t| self.apply_type_substitution_with_map(&t, &subst));
                             if let (Some(output), Some(residual)) = (output, residual) {
@@ -9571,8 +9632,7 @@ impl ProtocolChecker {
 
             // Extract associated types Item and IntoIter
             let item = impl_
-                .associated_types
-                .get(&"Item".into())
+                .ordinary_associated_type(&"Item".into()).ok()?
                 .cloned()
                 .map(|t| self.apply_type_substitution_with_map(&t, &subst))
                 // CRITICAL: Normalize projection types after substitution
@@ -9581,8 +9641,7 @@ impl ProtocolChecker {
                 .map(|t| self.normalize_projection_type(&t));
 
             let iter = impl_
-                .associated_types
-                .get(&"IntoIter".into())
+                .ordinary_associated_type(&"IntoIter".into()).ok()?
                 .cloned()
                 .map(|t| self.apply_type_substitution_with_map(&t, &subst))
                 .map(|t| self.normalize_projection_type(&t));
@@ -9695,8 +9754,7 @@ impl ProtocolChecker {
             // Extract associated type Output - use apply_type_substitution (not _with_map)
             // because the latter does not resolve deferred projection types (::Output[...]).
             if let Some(output) = impl_
-                .associated_types
-                .get(&"Output".into())
+                .ordinary_associated_type(&"Output".into()).ok()?
                 .cloned()
                 .map(|t| self.apply_type_substitution(&t, &subst))
             {
@@ -9757,14 +9815,12 @@ impl ProtocolChecker {
 
             // Extract associated types Item and IntoIter
             let item = impl_
-                .associated_types
-                .get(&"Item".into())
+                .ordinary_associated_type(&"Item".into()).ok()?
                 .cloned()
                 .map(|t| self.apply_type_substitution_with_map(&t, &subst));
 
             let iter = impl_
-                .associated_types
-                .get(&"IntoAsyncIter".into())
+                .ordinary_associated_type(&"IntoAsyncIter".into()).ok()?
                 .cloned()
                 .map(|t| self.apply_type_substitution_with_map(&t, &subst))
                 .or_else(|| Some(ty.clone())); // Default: type is its own async iterator
@@ -9817,8 +9873,7 @@ impl ProtocolChecker {
             let target = match protocol_name {
                 "Ref" | "RefMut" => impl_.protocol_args.first(),
                 "Deref" | "DerefMut" => impl_
-                    .associated_types
-                    .get(&verum_common::Text::from("Target")),
+                    .ordinary_associated_type(&verum_common::Text::from("Target")).ok()?,
                 _ => None,
             };
             let Some(target) = target else { continue };
@@ -9979,15 +10034,13 @@ impl ProtocolChecker {
 
             // Extract associated types Idx and Output
             let key = impl_
-                .associated_types
-                .get(&"Idx".into())
+                .ordinary_associated_type(&"Idx".into()).ok()?
                 .cloned()
                 .map(|t| self.apply_type_substitution_with_map(&t, &subst))
                 .unwrap_or(Type::Int); // Default to Int if not specified
 
             let output = impl_
-                .associated_types
-                .get(&"Output".into())
+                .ordinary_associated_type(&"Output".into()).ok()?
                 .cloned()
                 .map(|t| self.apply_type_substitution_with_map(&t, &subst));
 
@@ -10043,8 +10096,7 @@ impl ProtocolChecker {
 
             // Extract associated type Inner
             if let Some(inner) = impl_
-                .associated_types
-                .get(&"Inner".into())
+                .ordinary_associated_type(&"Inner".into()).ok()?
                 .cloned()
                 .map(|t| self.apply_type_substitution_with_map(&t, &subst))
             {
@@ -10396,16 +10448,12 @@ impl ProtocolChecker {
         // 4. Check required associated types
         for (assoc_name, assoc_type_def) in protocol_def.associated_types.iter() {
             if let Some(impl_assoc_type) = impl_.associated_types.get(assoc_name) {
-                // Associated type is defined - check bounds
-                for bound in assoc_type_def.bounds.iter() {
-                    if !self.implements(impl_assoc_type, &bound.protocol) {
-                        let bound_name = self.extract_protocol_name(&bound.protocol);
-                        violations.push(ProtocolViolation::AssociatedTypeBoundViolation {
-                            assoc_name: assoc_name.clone(),
-                            actual_type: impl_assoc_type.clone(),
-                            unsatisfied_bound: bound_name,
-                        });
-                    }
+                if let Err(failure) = self.check_associated_assignment(impl_, assoc_name, impl_assoc_type) {
+                    violations.push(ProtocolViolation::AssociatedTypeBoundViolation {
+                        assoc_name: assoc_name.clone(),
+                        actual_type: failure.actual.unwrap_or_else(|| Type::Generic { name: format!("::{assoc_name}").into(), args: List::from_iter([impl_.for_type.clone()]) }),
+                        unsatisfied_bound: failure.bound.unwrap_or(failure.reason),
+                    });
                 }
             } else if assoc_type_def.default.is_none() {
                 // Required associated type not defined (no default)
@@ -13211,24 +13259,13 @@ impl ProtocolChecker {
 
         for (assoc_name, assoc_type) in all_assoc_types.iter() {
             if let Some(impl_type) = impl_.associated_types.get(assoc_name) {
-                // Associated type is provided - check bounds
-                for bound in assoc_type.bounds.iter() {
-                    if !self.implements(impl_type, &bound.protocol) {
-                        return Err(ConformanceError::AssociatedTypeBoundNotSatisfied {
-                            assoc_type: assoc_name.clone(),
-                            bound: self.extract_protocol_name(&bound.protocol),
-                            actual_type: impl_type.clone(),
-                            span: impl_.span,
-                        });
-                    }
-                }
-
-                // For GATs, check arity
-                if assoc_type.is_gat() {
-                    // The implementation should provide a type that can be
-                    // instantiated with the same number of type parameters
-                    // This is checked during actual instantiation
-                }
+                self.check_associated_assignment(impl_, assoc_name, impl_type)
+                    .map_err(|failure| ConformanceError::AssociatedTypeBoundNotSatisfied {
+                        assoc_type: assoc_name.clone(),
+                        bound: failure.bound.unwrap_or(failure.reason),
+                        actual_type: failure.actual.unwrap_or_else(|| Type::Generic { name: format!("::{assoc_name}").into(), args: List::from_iter([impl_.for_type.clone()]) }),
+                        span: impl_.span,
+                    })?;
 
                 // Check variance compatibility
                 assoc_type
@@ -13239,12 +13276,6 @@ impl ProtocolChecker {
                         span: impl_.span,
                     })?;
 
-                // Check refinement constraints if present
-                if let Maybe::Some(ref _refinement) = assoc_type.refinement {
-                    // Validate that the implementation type satisfies the refinement
-                    // This requires SMT solving for full verification
-                    // For now, we accept structural compatibility
-                }
             } else if assoc_type.default.is_none() {
                 // Associated type not provided and has no default
                 return Err(ConformanceError::MissingAssociatedType {
@@ -16703,7 +16734,7 @@ mod tests {
             },
             where_clauses: List::new(),
             methods: Map::new(),
-            associated_types: impl_assoc_types,
+            associated_types: impl_assoc_types.into_iter().map(|(name, ty)| (name, AssociatedTypeAssignment::ordinary(ty))).collect(),
             associated_consts: Map::new(),
             specialization: Maybe::None,
             impl_crate: Maybe::Some("test".into()),
@@ -17518,3 +17549,49 @@ mod tests {
 #[cfg(test)]
 #[path = "../tests/unit/protocol_registration_work.rs"]
 mod protocol_registration_work;
+
+#[cfg(test)]
+mod nominal_application_identity_tests {
+    use super::*;
+
+    fn named(owner: &str, arguments: List<Type>) -> Type {
+        Type::Named {
+            path: Path {
+                segments: owner.split('.').map(|name| verum_ast::ty::PathSegment::Name(Ident::new(name, Span::default()))).collect(),
+                span: Span::default(),
+            },
+            args: arguments,
+        }
+    }
+    fn generic(owner: &str, arguments: List<Type>) -> Type {
+        Type::Generic { name: owner.into(), args: arguments }
+    }
+    #[test]
+    fn nominal_source_and_archive_forms_have_symmetric_exact_identity() {
+        let checker = ProtocolChecker::new();
+        let source = named("a.Owner", List::from_iter([named("b.Item", List::from_iter([Type::Int]))]));
+        let archive = generic("a.Owner", List::from_iter([generic("b.Item", List::from_iter([Type::Int]))]));
+        assert!(checker.types_structurally_equal(&source, &archive));
+        assert!(checker.types_structurally_equal(&archive, &source));
+    }
+    #[test]
+    fn cross_representation_identity_cannot_merge_owners_or_arguments() {
+        let checker = ProtocolChecker::new();
+        let source = named("a.Owner", List::from_iter([Type::Int]));
+        for other in [generic("b.Owner", List::from_iter([Type::Int])), generic("Owner", List::from_iter([Type::Int])), generic("a.Owner", List::from_iter([Type::Bool])), generic("a.Owner", List::new())] {
+            assert!(!checker.types_structurally_equal(&source, &other));
+            assert!(!checker.types_structurally_equal(&other, &source));
+        }
+    }
+    #[test]
+    fn projection_and_relative_paths_are_not_nominal_identity_evidence() {
+        let checker = ProtocolChecker::new();
+        let source = named("Owner", List::from_iter([Type::Int]));
+        assert!(!checker.types_structurally_equal(&source, &generic("::Owner", List::from_iter([Type::Int]))));
+        let relative = Type::Named {
+            path: Path {segments: [verum_ast::ty::PathSegment::Relative, verum_ast::ty::PathSegment::Name(Ident::new("Owner", Span::default()))].into_iter().collect(), span: Span::default()},
+            args: List::from_iter([Type::Int]),
+        };
+        assert!(!checker.types_structurally_equal(&relative, &generic("a.Owner", List::from_iter([Type::Int]))));
+    }
+}

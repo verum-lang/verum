@@ -346,6 +346,7 @@ mod tests {
 
         let mut metadata = with_static("[Int; 2]");
         metadata.implementations.push(ImplementationDescriptor {
+            source_implementation: None,
             protocol: "P".into(),
             target_type: "Record".into(),
             generic_params: vec![GenericParam {

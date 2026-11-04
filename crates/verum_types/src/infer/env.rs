@@ -1066,6 +1066,7 @@ impl TypeChecker {
             metadata_names: std::cell::OnceCell::new(),
             metadata_impls_by_owner: Maybe::None,
             metadata_impl_receipts: Map::new(),
+            metadata_source_impl_loading: Set::new(),
             analysis_control: None,
             place_operands: Vec::new(),
             stdlib_tail_registered: Set::new(),
@@ -1227,6 +1228,7 @@ impl TypeChecker {
             metadata_names: std::cell::OnceCell::new(),
             metadata_impls_by_owner: Maybe::None,
             metadata_impl_receipts: Map::new(),
+            metadata_source_impl_loading: Set::new(),
             analysis_control: None,
             place_operands: Vec::new(),
             stdlib_tail_registered: Set::new(),
@@ -1389,6 +1391,7 @@ impl TypeChecker {
             metadata_names: std::cell::OnceCell::new(),
             metadata_impls_by_owner: Maybe::None,
             metadata_impl_receipts: Map::new(),
+            metadata_source_impl_loading: Set::new(),
             analysis_control: None,
             place_operands: Vec::new(),
             stdlib_tail_registered: Set::new(),
@@ -11554,11 +11557,13 @@ impl TypeChecker {
                     let rhs_resolved = self.unifier.apply(&rhs_ty);
                     if self.check_expr(right, &rhs_resolved).is_ok() {
                         // Get the output type - either from associated types or return type
-                        let output_ty = impl_
+                        let output_ty = match impl_
                             .associated_types
                             .get(&verum_common::Text::from("Output"))
-                            .cloned()
-                            .unwrap_or_else(|| return_type.as_ref().clone());
+                        {
+                            Some(assignment) => assignment.ordinary_body()?.clone(),
+                            None => return_type.as_ref().clone(),
+                        };
 
                         // Apply unifier to resolve any type variables
                         return Some(self.unifier.apply(&output_ty));
@@ -11628,11 +11633,13 @@ impl TypeChecker {
             // Try to unify (don't mutate on failure)
             if self.types_compatible(&rhs_resolved, &right_resolved) {
                 // Get the output type - either from associated types or the left type
-                let output_ty = impl_
+                let output_ty = match impl_
                     .associated_types
                     .get(&verum_common::Text::from("Output"))
-                    .cloned()
-                    .unwrap_or_else(|| left_ty.clone());
+                {
+                    Some(assignment) => assignment.ordinary_body()?.clone(),
+                    None => left_ty.clone(),
+                };
 
                 return Some(self.unifier.apply(&output_ty));
             }

@@ -397,6 +397,7 @@ fn record_projection_cannot_escape_into_descriptor_headers_or_impls() {
             1 => descriptor.type_params[0].type_bounds.push(ty),
             2 => descriptor.alias_target = Some(ty),
             3 => descriptor.protocols.push(ProtocolImpl {
+                source_implementation: None,
                 protocol: ProtocolId(1002),
                 methods: vec![],
                 associated_types: vec![(StringId::EMPTY, ty)],

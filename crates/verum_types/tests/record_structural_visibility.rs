@@ -152,6 +152,7 @@ fn with_collection_metadata(mut metadata: CoreMetadata) -> CoreMetadata {
     // exact owner used by this mounted collection. The public constructor runs
     // the production marker scan; no unifier registration hook is used.
     metadata.implementations.push(ImplementationDescriptor {
+        source_implementation: None,
         protocol: "ArrayCoercible".into(),
         target_type: "core.structural_collection.Storage".into(),
         generic_params: List::new(),

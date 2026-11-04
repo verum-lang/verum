@@ -132,7 +132,8 @@ pub const VERSION_MAJOR: u16 = 2;
 /// Minor 37 preserves associated family bounds as typed AST bounds.
 /// Minor 38 preserves applied associated projection arguments and qualifiers.
 /// Minor 39 preserves the yielding property of eager callable types.
-pub const VERSION_MINOR: u16 = 39;
+/// Minor 40 retains declaration-owned associated-family implementations.
+pub const VERSION_MINOR: u16 = 40;
 
 /// Minor-version floors for sections whose presence readers gate on.  The
 /// register-type-hints section has been written unconditionally since minor 2,

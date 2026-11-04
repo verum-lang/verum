@@ -1000,7 +1000,26 @@ impl<'a> Deserializer<'a> {
  } else {
      Vec::new()
  };
+ let source_implementation = if self.header.as_ref().map_or(0, |h| h.version_minor) >= 40 {
+     match decode_u8(self.data, &mut self.offset)? {
+         0 => None,
+         1 => {
+             let length = decode_varint(self.data, &mut self.offset)?;
+             if length > crate::source_signature_codec::MAX_SOURCE_SIGNATURE_BYTES as u64 {
+                 return Err(VbcError::Deserialization("source implementation exceeds byte budget".into()));
+             }
+             let end = self.offset.checked_add(length as usize)
+                 .filter(|end| *end <= self.data.len())
+                 .ok_or_else(|| VbcError::Deserialization("truncated source implementation".into()))?;
+             let source = crate::source_signature_codec::decode_implementation(&self.data[self.offset..end])?;
+             self.offset = end;
+             Some(source)
+         }
+         _ => return Err(VbcError::Deserialization("invalid source implementation presence tag".into())),
+     }
+ } else { None };
  protocols.push(ProtocolImpl {
+ source_implementation,
  protocol,
  methods,
  associated_types,
@@ -2270,6 +2289,7 @@ mod tests {
  let mut desc = TypeDescriptor { id: TypeId(1000), name, ..TypeDescriptor::default() };
  for i in 0..count {
  desc.protocols.push(ProtocolImpl {
+ source_implementation: None,
  protocol: ProtocolId(i),
  methods: vec![i, i + 1],
  associated_types: vec![(name, TypeRef::Concrete(TypeId::INT))],

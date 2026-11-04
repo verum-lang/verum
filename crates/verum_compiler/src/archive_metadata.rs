@@ -79,7 +79,7 @@ fn validate_projection_metadata_carriers(module: &VbcModule) -> Result<(), Text>
         for ty in types { check(ty, descriptor.source_declaration.is_some())?; }
         // An owner's type declaration is not its implementations' local scope.
         for implementation in &descriptor.protocols {
-            for (_, body) in &implementation.associated_types { check(body, false)?; }
+            for (_, body) in &implementation.associated_types { check(body, implementation.source_implementation.is_some())?; }
         }
     }
     Ok(())
@@ -206,6 +206,15 @@ pub fn archive_to_core_metadata(archive: &VbcArchive) -> Result<CoreMetadata, Te
             return Err(format!("module {} predates declaration-owned protocol dispatch; rebuild the archive", entry.name).into());
         }
         validate_projection_metadata_carriers(&module)?;
+        let descriptors: HashMap<_, _> = module.types.iter().map(|ty| (ty.id, ty)).collect();
+        for ty in module.types.iter().filter(|ty| ty.kind != verum_vbc::types::TypeKind::Protocol) {
+            for implementation in &ty.protocols {
+                if implementation.source_implementation.is_none()
+                    && verum_vbc::types::protocol_uses_associated_families(implementation.protocol, |id| descriptors.get(&id).copied()) {
+                    return Err("associated family implementation lacks its declaration-owned source telescope".into());
+                }
+            }
+        }
         // Absence is evidence too: a copy without a declaration environment
         // cannot borrow one from another archive entry during map merging.
         let mut owners = Vec::new();
@@ -218,6 +227,9 @@ pub fn archive_to_core_metadata(archive: &VbcArchive) -> Result<CoreMetadata, Te
         }
         owners.extend(module.functions.iter().filter(|function| function.source_signature.is_some())
             .map(|function| function.origin_module.and_then(|id| module.strings.get(id)).unwrap_or(&module.name).to_owned()));
+        owners.extend(module.types.iter().flat_map(|ty| &ty.protocols)
+            .filter_map(|implementation| implementation.source_implementation.as_ref())
+            .map(|source| source.origin_module().to_owned()));
         for owner in owners {
             let scope = module.declaration_type_bindings.get(&Text::from(owner.as_str()));
             if let Some(previous) = semantic_scopes.get(&owner) {
@@ -308,7 +320,13 @@ pub fn archive_to_core_metadata(archive: &VbcArchive) -> Result<CoreMetadata, Te
     reconcile_type_declarations(&mut meta, &declarations);
     resolve_opaque_type_ids_in_alias_targets(&mut meta, &archive_type_names);
     attach_declared_methods(&mut meta);
-
+    if meta.implementations.iter().any(|implementation| implementation.source_implementation.is_some()) {
+        let shared = std::sync::Arc::new(meta);
+        verum_types::TypeChecker::validate_source_implementation_metadata(shared.clone())
+            .map_err(|error| Text::from(format!("source implementation metadata: {error:?}")))?;
+        return std::sync::Arc::try_unwrap(shared)
+            .map_err(|_| Text::from("source implementation validation retained the metadata snapshot"));
+    }
     Ok(meta)
 }
 
@@ -1957,6 +1975,7 @@ fn collect_type_impls(
             })
             .collect();
         let descriptor = ImplementationDescriptor {
+            source_implementation: proto_impl.source_implementation.clone(),
             protocol: protocol_name,
             target_type: target_name.clone(),
             generic_params,

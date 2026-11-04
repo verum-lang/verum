@@ -95,7 +95,7 @@ fn load_projection(binding: Option<TypeRef>, args: Vec<TypeRef>) -> verum_vbc::m
     let mut carrier = TypeDescriptor { id: TypeId(3000), name, kind: TypeKind::Record, ..Default::default() };
     if let Some(body) = binding {
         let assoc = module.intern_string("Item");
-        carrier.protocols.push(ProtocolImpl { protocol: ProtocolId(3100), methods: vec![],
+        carrier.protocols.push(ProtocolImpl { source_implementation: None, protocol: ProtocolId(3100), methods: vec![],
             associated_types: vec![(assoc, body)], protocol_args_text: vec![], type_param_fn_bounds: vec![] });
     }
     module.types.push(carrier);

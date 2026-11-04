@@ -408,8 +408,10 @@ impl<'a> ProjectionResolver<'a> {
 
         for impl_ in impls {
             // Check if this implementation has the associated type
-            if let Some(assoc_ty) = impl_.associated_types.get(assoc_name) {
-                candidates.push((impl_, assoc_ty.clone()));
+            if let Some(assignment) = impl_.associated_types.get(assoc_name) {
+                if let Some(assoc_ty) = assignment.ordinary_body() {
+                    candidates.push((impl_, assoc_ty.clone()));
+                }
             } else {
                 // Check protocol definition for default
                 let protocol_name: Text = impl_
@@ -513,6 +515,12 @@ impl<'a> ProjectionResolver<'a> {
     /// concrete types.
     pub fn normalize(&self, ty: &Type) -> Result<Type, ProjectionError> {
         match ty {
+            Type::Generic { name, args } if name.starts_with("::") && args.len() > 1 => {
+                self.normalize(&Type::TypeApp {
+                    constructor: Box::new(Type::Generic { name: name.clone(), args: List::from_iter([args[0].clone()]) }),
+                    args: args.iter().skip(1).cloned().collect(),
+                })
+            }
             // Check for projection syntax: "T.Item" or "T::Item"
             Type::Generic { name, args } if name.contains(".") || name.contains("::") => {
                 // Parse the projection path
@@ -659,6 +667,21 @@ impl<'a> ProjectionResolver<'a> {
             }
 
             Type::TypeApp { constructor, args } => {
+                if let Type::Generic { name, args: receiver } = constructor.as_ref()
+                    && name.starts_with("::") && receiver.len() == 1
+                {
+                    let receiver = self.normalize(&receiver[0])?;
+                    let args: List<_> = args.iter().map(|argument| self.normalize(argument)).collect::<Result<_, _>>()?;
+                    let application = Type::TypeApp {
+                        constructor: Box::new(Type::Generic { name: name.clone(), args: List::from_iter([receiver.clone()]) }), args: args.clone(),
+                    };
+                    if matches!(receiver, Type::Var(_)) { return Ok(application); }
+                    return self.protocol_checker.resolve_associated_family(&receiver, &name[2..].into(), &args, &[])
+                        .map(|value| value.map(|value| value.result).unwrap_or(application))
+                        .map_err(|reason| ProjectionError::NestedProjectionFailed {
+                            outer: receiver.to_text(), inner: name.clone(), reason, span: self.span,
+                        });
+                }
                 let normalized_constructor = self.normalize(constructor)?;
                 let normalized_args = args
                     .iter()
@@ -829,7 +852,7 @@ mod tests {
             methods: Map::new(),
             associated_types: {
                 let mut assoc = Map::new();
-                assoc.insert("Item".into(), Type::Var(TypeVar::with_id(0)));
+                assoc.insert("Item".into(), crate::protocol::AssociatedTypeAssignment::ordinary(Type::Var(TypeVar::with_id(0))));
                 assoc
             },
             associated_consts: Map::new(),

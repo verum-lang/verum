@@ -28,6 +28,7 @@ fn carrier(owner: &str, name: &str, id: TypeId) -> VbcModule {
         kind: TypeKind::Primitive,
         origin_module: Some(origin),
         protocols: [ProtocolImpl {
+            source_implementation: None,
             protocol: ProtocolId(protocol.0),
             methods: vec![],
             associated_types: vec![],

@@ -131,6 +131,7 @@ fn assoc_bindings_roundtrip_through_wire_format() {
     td.id = TypeId(4242);
     td.name = type_name;
     td.protocols.push(ProtocolImpl {
+        source_implementation: None,
         protocol: ProtocolId(7),
         methods: vec![1, 2],
         associated_types: vec![(name_sid, TypeRef::Generic(verum_vbc::types::TypeParamId(0)))],

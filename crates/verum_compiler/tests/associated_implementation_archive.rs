@@ -1,0 +1,273 @@
+//! Associated families retain their lexical telescope through actual archive publication.
+use std::sync::Arc;
+use verum_common::{List, Text};
+use verum_compiler::archive_metadata::archive_to_core_metadata;
+use verum_fast_parser::Parser;
+use verum_types::{TypeChecker, core_metadata::CoreMetadata};
+use verum_vbc::{
+    archive::{ArchiveBuilder, read_archive, write_archive},
+    codegen::{CodegenConfig, VbcCodegen},
+    deserialize::deserialize_module,
+    module::VbcModule,
+    serialize::serialize_module,
+};
+
+const OWNER: &str = "core.family_archive";
+const SIMPLE: &str = r#"
+module core.family_archive;
+public type Rel is protocol { type Out<Declared>; fn tag(&self)->Int; };
+public type Pair<A, B> is { first: A, second: B };
+public type Owner is { value: Bool };
+implement Rel for Owner { type Out<Actual> = Pair<Bool, Actual>; fn tag(&self)->Int { 7 } }
+"#;
+
+fn diagnostics(checker: &mut TypeChecker, source: &str) -> Vec<String> {
+    let ast = Parser::new(source)
+        .parse_module()
+        .expect("actual source grammar");
+    checker.register_stdlib_types_for_module(&ast);
+    let mut errors = checker
+        .prepare_module_declarations(&ast)
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    for item in &ast.items {
+        if let Err(error) = checker.check_item(item) {
+            errors.push(error.to_string());
+        }
+    }
+    errors.extend(
+        checker
+            .take_deferred_errors()
+            .iter()
+            .map(ToString::to_string),
+    );
+    errors.extend(
+        checker
+            .diagnostics()
+            .iter()
+            .filter(|d| d.is_error())
+            .map(|d| format!("{d:?}")),
+    );
+    errors
+}
+
+fn source_module(source: &str) -> VbcModule {
+    let mut checker = TypeChecker::new();
+    checker.register_primitives();
+    checker.set_current_module_path(OWNER);
+    let errors = diagnostics(&mut checker, source);
+    assert!(
+        errors.is_empty(),
+        "source producer must typecheck: {errors:?}"
+    );
+    let ast = Parser::new(source).parse_module().unwrap();
+    VbcCodegen::with_config(CodegenConfig::new(OWNER))
+        .compile_module(&ast)
+        .expect("actual declarations compile")
+}
+
+fn publish(module: &VbcModule) -> Result<CoreMetadata, String> {
+    let wire = serialize_module(module).map_err(|e| e.to_string())?;
+    let restored = deserialize_module(&wire).map_err(|e| e.to_string())?;
+    let mut builder = ArchiveBuilder::new();
+    builder
+        .add_module(OWNER, &restored, &[])
+        .map_err(|e| e.to_string())?;
+    let mut bytes = List::new();
+    write_archive(&builder.finish(), &mut bytes).map_err(|e| e.to_string())?;
+    let archive =
+        read_archive(std::io::Cursor::new(bytes.as_slice())).map_err(|e| e.to_string())?;
+    let metadata = archive_to_core_metadata(&archive).map_err(|e| e.to_string())?;
+    let sidecar =
+        verum_types::core_metadata::encode_metadata(&metadata).map_err(|e| e.to_string())?;
+    verum_types::core_metadata::decode_metadata(&sidecar).map_err(|e| e.to_string())
+}
+
+fn consumer_errors(metadata: &CoreMetadata, source: &str, eager: bool) -> Vec<String> {
+    let mut registry = verum_modules::ModuleRegistry::new();
+    registry.register(verum_modules::ModuleInfo::new(
+        verum_modules::ModuleId::new(0),
+        verum_modules::ModulePath::from_str(OWNER),
+        Parser::new("").parse_module().unwrap(),
+        verum_ast::FileId::new(0),
+        Text::new(),
+    ));
+    let metadata = Arc::new(metadata.clone());
+    let mut checker = if eager {
+        TypeChecker::new_with_core_eager(metadata)
+    } else {
+        TypeChecker::new_with_core(metadata)
+    };
+    checker.register_primitives();
+    checker.set_current_module_path("consumer");
+    checker.set_module_registry_direct(registry);
+    diagnostics(&mut checker, source)
+}
+
+#[test]
+fn renamed_family_locals_and_fixed_rhs_survive_wire_archive_and_sidecar() {
+    let module = source_module(SIMPLE);
+    let original = module
+        .types
+        .iter()
+        .flat_map(|t| &t.protocols)
+        .find_map(|p| p.source_implementation.clone())
+        .expect("actual implementation telescope");
+    assert_eq!(original.origin_module(), OWNER);
+    let metadata = publish(&module).expect("publish complete source evidence");
+    assert!(
+        metadata
+            .implementations
+            .iter()
+            .any(|i| i.source_implementation.as_ref() == Some(&original)),
+        "the exact declaration-owned carrier must survive all archive boundaries"
+    );
+    for eager in [false, true] {
+        let good = consumer_errors(
+            &metadata,
+            "mount core.family_archive.{Owner,Pair}; fn probe(value:Owner.Out<Int>)->Pair<Bool,Int>{value}",
+            eager,
+        );
+        assert!(good.is_empty(), "eager={eager}: {good:?}");
+        let bad = consumer_errors(
+            &metadata,
+            "mount core.family_archive.{Owner,Pair}; fn probe(value:Owner.Out<Int>)->Pair<Int,Bool>{value}",
+            eager,
+        );
+        assert!(
+            bad.iter().any(|e| e.to_lowercase().contains("mismatch")),
+            "the fixed Bool argument cannot be replaced positionally; eager={eager}: {bad:?}"
+        );
+    }
+}
+
+#[test]
+fn receiver_substitution_and_family_locals_remain_separate_after_publication() {
+    let module = source_module(
+        r#"
+module core.family_archive;
+public type Rel is protocol { type Out<X>; };
+public type Owner<A,B> is { left:A, right:B };
+implement<A,B> Rel for Owner<B,A> { type Out<Local> = (A,B,Local); }
+"#,
+    );
+    let metadata = publish(&module).unwrap();
+    for eager in [false, true] {
+        let good = consumer_errors(
+            &metadata,
+            "mount core.family_archive.Owner; type Concrete is Owner<Bool,Int>; fn probe(value:Concrete.Out<Text>)->(Int,Bool,Text){value}",
+            eager,
+        );
+        assert!(good.is_empty(), "eager={eager}: {good:?}");
+        let bad = consumer_errors(
+            &metadata,
+            "mount core.family_archive.Owner; type Concrete is Owner<Bool,Int>; fn probe(value:Concrete.Out<Text>)->(Bool,Int,Text){value}",
+            eager,
+        );
+        assert!(
+            bad.iter().any(|e| e.to_lowercase().contains("mismatch")),
+            "eager={eager}: {bad:?}"
+        );
+    }
+}
+
+#[test]
+fn erased_family_telescope_cannot_publish_an_owner_scoped_substitute() {
+    let mut module = source_module(SIMPLE);
+    assert!(
+        publish(&module).is_ok(),
+        "unmodified evidence is the positive control"
+    );
+    let mut removed = 0;
+    for implementation in module.types.iter_mut().flat_map(|t| &mut t.protocols) {
+        if implementation.source_implementation.take().is_some() {
+            removed += 1;
+        }
+    }
+    assert_eq!(removed, 1);
+    let error = publish(&module)
+        .expect_err("erased source telescope must not be guessed from runtime slots");
+    assert!(
+        error.contains(
+            "associated family implementation lacks its declaration-owned source telescope"
+        ),
+        "{error}"
+    );
+}
+
+#[test]
+fn foreign_receiver_carrier_is_not_authority_for_the_enclosing_owner() {
+    let source = format!(
+        "{SIMPLE} public type Decoy is {{ value:Int }}; implement Rel for Decoy {{ type Out<Local> = Pair<Int, Local>; fn tag(&self)->Int {{ 9 }} }}"
+    );
+    let mut module = source_module(&source);
+    assert!(
+        publish(&module).is_ok(),
+        "both real implementations are valid before substitution"
+    );
+    let decoy = module
+        .types
+        .iter()
+        .find(|t| module.get_string(t.name) == Some("Decoy"))
+        .expect("source Decoy descriptor")
+        .protocols
+        .iter()
+        .find_map(|p| p.source_implementation.clone())
+        .expect("real Decoy source carrier");
+    let owner_id = module
+        .types
+        .iter()
+        .find(|t| module.get_string(t.name) == Some("Owner"))
+        .expect("source Owner descriptor")
+        .id;
+    let implementation = module
+        .types
+        .iter_mut()
+        .find(|t| t.id == owner_id)
+        .unwrap()
+        .protocols
+        .iter_mut()
+        .find(|p| p.source_implementation.is_some())
+        .unwrap();
+    implementation.source_implementation = Some(decoy);
+    let error = publish(&module).expect_err("a foreign implementation cannot certify this owner");
+    assert!(
+        error.to_lowercase().contains("implementation")
+            && (error.to_lowercase().contains("receiver")
+                || error.to_lowercase().contains("target")
+                || error.to_lowercase().contains("owner")),
+        "{error}"
+    );
+}
+
+#[test]
+fn family_local_shadowing_does_not_capture_an_archived_owner_parameter() {
+    let module = source_module(
+        r#"
+module core.family_archive;
+public type Rel is protocol { type Out<X>; };
+public type Pair<A,B> is { left:A, right:B };
+public type Owner<A> is { value:A };
+implement<A> Rel for Owner<A> { type Out<A> = Pair<Bool,A>; }
+"#,
+    );
+    let metadata = publish(&module).unwrap();
+    for eager in [false, true] {
+        let good = consumer_errors(
+            &metadata,
+            "mount core.family_archive.{Owner,Pair}; type Concrete is Owner<Text>; fn probe(value:Concrete.Out<Int>)->Pair<Bool,Int>{value}",
+            eager,
+        );
+        assert!(good.is_empty(), "eager={eager}: {good:?}");
+        let bad = consumer_errors(
+            &metadata,
+            "mount core.family_archive.{Owner,Pair}; type Concrete is Owner<Text>; fn probe(value:Concrete.Out<Int>)->Pair<Bool,Text>{value}",
+            eager,
+        );
+        assert!(
+            bad.iter().any(|e| e.to_lowercase().contains("mismatch")),
+            "eager={eager}: {bad:?}"
+        );
+    }
+}

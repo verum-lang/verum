@@ -15,6 +15,8 @@
 // Submodules containing impl TypeChecker method groups
 mod associated_type_bounds;
 mod associated_type_obligations;
+mod source_associated_assignments;
+mod associated_family_applications;
 mod source_declarations;
 mod protocol_arguments;
 mod protocol_methods;
@@ -1261,6 +1263,8 @@ pub struct TypeChecker {
     /// Successful exact target spellings for descriptor positions in the
     /// installed metadata. A different descriptor never inherits this evidence.
     metadata_impl_receipts: Map<usize, Set<Text>>,
+    /// Active source replays are not completed admission receipts.
+    metadata_source_impl_loading: Set<usize>,
     /// Names whose always-run stdlib registration tail has already executed.
     ///
     /// `ensure_stdlib_type_loaded` is called **66_846 times** while checking a

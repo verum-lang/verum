@@ -10428,9 +10428,11 @@ impl VbcCodegen {
                                         return None;
                                     }
                                     Some(selected_items.iter().filter_map(|item| {
-                                        let verum_ast::decl::ImplItemKind::Type { name, ty, .. } = &item.kind else {
+                                        let verum_ast::decl::ImplItemKind::Type { name, ty, type_params } = &item.kind else {
                                             return None;
                                         };
+                                        // A local family parameter is never an owner-scoped runtime slot.
+                                        if !type_params.is_empty() { return None; }
                                         let declared = self.semantic_formal_type(ty, &param_map, &declared_ids)?;
                                         let normalized = substitution.apply(&declared).ok()?;
                                         formal_parameters::resolved(&normalized, &owner_ids, 0)
@@ -10537,7 +10539,16 @@ impl VbcCodegen {
                             // (T1068: 176 `implement P for <primitive>`
                             // blocks in `core/`, all absent from the shipped
                             // registry).
+                            let source_implementation = if crate::types::protocol_uses_associated_families(
+                                crate::types::ProtocolId(proto_type_id.0), |id| self.type_by_id(id),
+                            ) || selected_items.iter().any(|item| matches!(&item.kind,
+                                verum_ast::decl::ImplItemKind::Type { type_params, .. } if !type_params.is_empty())) {
+                                Some(verum_ast::source_implementation::AssociatedImplementationSource::new_with_items(
+                                    self.lexical_type_scope().into(), impl_decl, &selected_items,
+                                ).map_err(|message| CodegenError::new(CodegenErrorKind::InvalidSourceSignature(message.into_string())))?)
+                            } else { None };
                             let impl_record = crate::types::ProtocolImpl {
+                                source_implementation,
                                 protocol: crate::types::ProtocolId(proto_type_id.0),
                                 methods: method_fn_ids,
                                 associated_types: assoc_bindings,
@@ -16651,6 +16662,7 @@ impl VbcCodegen {
                         let super_name = Self::format_type_path(path);
                         if let Some(super_id) = self.nominal_type_id(&super_name) {
                             type_desc.protocols.push(crate::types::ProtocolImpl {
+                                source_implementation: None,
                                 protocol: crate::types::ProtocolId(super_id.0),
                                 methods: Vec::new(),
                                 // Super-protocol EDGES carry no impl
@@ -26499,6 +26511,7 @@ impl VbcCodegen {
                     .map(|tid| crate::types::ProtocolId(tid.0))
                     .unwrap_or(pi.protocol);
                 crate::types::ProtocolImpl {
+                    source_implementation: pi.source_implementation.clone(),
                     protocol: new_protocol,
                     methods: pi.methods.clone(),
                     // Import-remap preserves the carried bindings as-is

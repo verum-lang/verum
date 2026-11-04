@@ -1415,6 +1415,9 @@ impl Default for VariantDescriptor {
 /// Protocol implementation for a type.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProtocolImpl {
+    /// Declaration-owned family telescope; runtime slots cannot encode its local binders.
+    #[serde(default)]
+    pub source_implementation: Option<verum_ast::source_implementation::AssociatedImplementationSource>,
     /// Protocol being implemented.
     pub protocol: ProtocolId,
     /// Methods implementing the protocol (function IDs).
@@ -2492,6 +2495,7 @@ mod tests {
     fn test_type_descriptor_with_protocols() {
         let mut td = TypeDescriptor::default();
         td.protocols.push(ProtocolImpl {
+            source_implementation: None,
             protocol: ProtocolId(100),
             methods: vec![1, 2, 3],
             associated_types: Vec::new(),
@@ -2651,6 +2655,7 @@ mod tests {
     #[test]
     fn test_protocol_impl() {
         let pi = ProtocolImpl {
+            source_implementation: None,
             protocol: ProtocolId(50),
             methods: vec![100, 101, 102],
             associated_types: Vec::new(),
@@ -2664,6 +2669,7 @@ mod tests {
     #[test]
     fn test_protocol_impl_empty_methods() {
         let pi = ProtocolImpl {
+            source_implementation: None,
             protocol: ProtocolId(1),
             methods: vec![],
             associated_types: Vec::new(),
@@ -2957,6 +2963,7 @@ mod tests {
     #[test]
     fn test_protocol_impl_serde() {
         let pi = ProtocolImpl {
+            source_implementation: None,
             protocol: ProtocolId(50),
             methods: vec![1, 2, 3],
             associated_types: Vec::new(),
@@ -3394,4 +3401,30 @@ mod tests {
         sorted_names.dedup();
         assert_eq!(names.len(), sorted_names.len(), "duplicate name in SMART_POINTER_TYPE_IDS");
     }
+}
+
+/// Whether this exact protocol or an inherited declaration owns a family telescope.
+/// Used both while producing implementation records and before metadata publication.
+pub fn protocol_uses_associated_families<'a>(
+    protocol: ProtocolId,
+    descriptor: impl Fn(TypeId) -> Option<&'a TypeDescriptor>,
+) -> bool {
+    let mut pending = vec![TypeId(protocol.0)];
+    let mut seen = std::collections::HashSet::new();
+    while let Some(id) = pending.pop() {
+        if !seen.insert(id) { continue; }
+        let Some(ty) = descriptor(id) else { continue; };
+        if let Some(declaration) = &ty.source_declaration {
+            if let verum_ast::TypeDeclBody::Protocol(body) | verum_ast::TypeDeclBody::Coinductive(body) = &declaration.body {
+                if body.items.iter().any(|item| matches!(&item.kind,
+                    verum_ast::decl::ProtocolItemKind::Type { type_params, .. } if !type_params.is_empty())) {
+                    return true;
+                }
+            }
+        }
+        if ty.kind == TypeKind::Protocol {
+            pending.extend(ty.protocols.iter().map(|edge| TypeId(edge.protocol.0)));
+        }
+    }
+    false
 }

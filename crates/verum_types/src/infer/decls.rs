@@ -2106,6 +2106,7 @@ impl TypeChecker {
                     defining_crate: Maybe::None,
                     span: type_decl.span,
                 };
+                self.check_protocol_family_applications(&protocol)?;
                 self.unifier.register_protocol_name(protocol.name.as_str());
                 // This run parsed the declaration, so its default-body flags are
                 // trustworthy — see `protocols_with_known_defaults`.
@@ -3602,6 +3603,7 @@ impl TypeChecker {
                     defining_crate: Maybe::None,
                     span: type_decl.span,
                 };
+                self.check_protocol_family_applications(&protocol)?;
                 self.unifier.register_protocol_name(protocol.name.as_str());
                 // This run parsed the declaration, so its default-body flags are
                 // trustworthy — see `protocols_with_known_defaults`.
@@ -4677,6 +4679,7 @@ impl TypeChecker {
             defining_crate: verum_common::Maybe::None,
             span: proto_decl.span,
         };
+        self.check_protocol_family_applications(&protocol)?;
         self.unifier.register_protocol_name(protocol.name.as_str());
         // This run parsed the declaration, so its default-body flags are
         // trustworthy — see `protocols_with_known_defaults`.
@@ -4790,14 +4793,58 @@ impl TypeChecker {
     ///
     /// Relies on RUST_MIN_STACK=16MB for stack safety on deep recursion.
     pub fn register_impl_block(&mut self, impl_decl: &verum_ast::decl::ImplDecl) -> Result<()> {
+        self.register_impl_block_expected(impl_decl, None)
+    }
+
+    pub(super) fn register_owned_impl_block(
+        &mut self,
+        impl_decl: &verum_ast::decl::ImplDecl,
+        expected_protocol: &Text,
+        expected_target: &Text,
+    ) -> Result<()> {
+        self.register_impl_block_expected(impl_decl, Some((expected_protocol, expected_target)))
+    }
+
+    fn validate_impl_owner(
+        &self,
+        implementation: &crate::protocol::ProtocolImpl,
+        expected: (&Text, &Text),
+    ) -> Result<()> {
+        let protocol = self.path_to_string(&implementation.protocol);
+        let target = match &implementation.for_type {
+            Type::Named { path, .. } => self.path_to_string(path),
+            Type::Generic { name, .. } if !name.starts_with("::") => name.clone(),
+            _ => return Err(TypeError::OtherWithCodeSpanned {
+                code: "E405".into(), msg: "source implementation metadata requires a canonical nominal target".into(), span: implementation.span,
+            }),
+        };
+        if &protocol != expected.0 || &target != expected.1 {
+            return Err(TypeError::OtherWithCodeSpanned {
+                code: "E405".into(), msg: "source implementation differs from its metadata protocol or target owner".into(), span: implementation.span,
+            });
+        }
+        Ok(())
+    }
+
+    fn register_impl_block_expected(
+        &mut self,
+        impl_decl: &verum_ast::decl::ImplDecl,
+        expected: Option<(&Text, &Text)>,
+    ) -> Result<()> {
         let filtered = self.cfg_filtered_impl(impl_decl);
         let declaration = filtered.as_ref().unwrap_or(impl_decl);
-        if matches!(declaration.kind, verum_ast::decl::ImplKind::Protocol { .. })
-            && self.protocol_checker.read().has_source_impl(&self.current_module_path, declaration)?
-        {
-            return Ok(());
+        if matches!(declaration.kind, verum_ast::decl::ImplKind::Protocol { .. }) {
+            let registry = self.protocol_checker.read();
+            if let Some(implementation) = registry.source_impl(&self.current_module_path, declaration)? {
+                if let Some(expected) = expected { self.validate_impl_owner(implementation, expected)?; }
+                return Ok(());
+            }
+        } else if expected.is_some() {
+            return Err(TypeError::OtherWithCodeSpanned {
+                code: "E405".into(), msg: "associated-family metadata requires a protocol implementation".into(), span: declaration.span,
+            });
         }
-        self.register_impl_block_inner(declaration)
+        self.register_impl_block_inner(declaration, expected)
     }
 
     pub(super) fn source_impl_specialization(
@@ -4866,7 +4913,7 @@ impl TypeChecker {
     }
 
     /// Inner implementation of register_impl_block
-    fn register_impl_block_inner(&mut self, impl_decl: &verum_ast::decl::ImplDecl) -> Result<()> {
+    fn register_impl_block_inner(&mut self, impl_decl: &verum_ast::decl::ImplDecl, expected: Option<(&Text, &Text)>) -> Result<()> {
         use verum_ast::decl::{FunctionParamKind, ImplItemKind, ImplKind};
 
         if let ImplKind::Protocol {
@@ -4893,12 +4940,14 @@ impl TypeChecker {
 
         // Register generic type parameters from the impl block
         let mut type_param_names = List::new();
+        let mut owner_frame = indexmap::IndexMap::new();
         for generic_param in &impl_decl.generics {
             use verum_ast::ty::GenericParamKind;
             match &generic_param.kind {
                 GenericParamKind::Type { name, .. } => {
                     let type_var = Type::Var(TypeVar::fresh());
                     let name_text: Text = name.name.clone();
+                    owner_frame.insert(name_text.clone(), type_var.clone());
                     self.ctx.define_type(name_text.clone(), type_var);
                     type_param_names.push(name_text);
                 }
@@ -4907,6 +4956,7 @@ impl TypeChecker {
                     // This prevents "type not found" errors when used in type arguments like StackAllocator<SIZE>.
                     let name_text: Text = name.name.clone();
                     let value_type = self.source_value_parameter(generic_param)?;
+                    owner_frame.insert(name_text.clone(), value_type.clone());
                     self.ctx.define_type(name_text.clone(), value_type);
                     type_param_names.push(name_text);
                 }
@@ -4914,6 +4964,7 @@ impl TypeChecker {
                     // For meta parameters like `N: meta usize`, similar handling as const generics
                     let name_text: Text = name.name.clone();
                     let value_type = self.source_value_parameter(generic_param)?;
+                    owner_frame.insert(name_text.clone(), value_type.clone());
                     self.ctx.define_type(name_text.clone(), value_type);
                     type_param_names.push(name_text);
                 }
@@ -4980,7 +5031,8 @@ impl TypeChecker {
                                     {
                                         let type_var = Type::Var(TypeVar::fresh());
                                         let name_text: Text = name.into();
-                                        self.ctx.define_type(name_text.clone(), type_var);
+                                        owner_frame.insert(name_text.clone(), type_var.clone());
+                    self.ctx.define_type(name_text.clone(), type_var);
                                         type_param_names.push(name_text);
                                     }
                                 }
@@ -5006,10 +5058,16 @@ impl TypeChecker {
                             _ => None,
                         };
                         if let Some(bound_ty) = bound_ty_ast {
+                            let parameter_start = type_param_names.len();
                             self.extract_implicit_type_params_from_type(
                                 bound_ty,
                                 &mut type_param_names,
                             );
+                            for name in type_param_names.iter().skip(parameter_start) {
+                                if let Some(ty) = self.ctx.lookup_type(name.as_str()) {
+                                    owner_frame.insert(name.clone(), ty.clone());
+                                }
+                            }
                         }
                     }
                 }
@@ -5018,7 +5076,7 @@ impl TypeChecker {
 
         let result = match &impl_decl.kind {
             ImplKind::Inherent(_) => self.register_inherent_impl_methods(impl_decl, &type_param_names),
-            ImplKind::Protocol { .. } => self.register_protocol_impl_methods(impl_decl, &type_param_names),
+            ImplKind::Protocol { .. } => self.register_protocol_impl_methods(impl_decl, &type_param_names, &owner_frame, expected),
         };
 
         // Restore the binder frame on failed publication as well.
@@ -5624,6 +5682,8 @@ impl TypeChecker {
         &mut self,
         impl_decl: &verum_ast::decl::ImplDecl,
         type_param_names: &List<verum_common::Text>,
+        owner_frame: &indexmap::IndexMap<Text, Type>,
+        expected: Option<(&Text, &Text)>,
     ) -> Result<()> {
         use verum_ast::decl::{FunctionParamKind, ImplItemKind, ImplKind};
         use verum_common::Text;
@@ -6268,20 +6328,9 @@ impl TypeChecker {
                         }
                     }
 
-                    // CRITICAL FIX: Collect associated types from impl items
-                    // This enables proper resolution of associated type projections like T.Item
-                    let mut associated_types: Map<Text, Type> = Map::new();
-                    for item in &impl_decl.items {
-                        if let ImplItemKind::Type {
-                            name, ty: assoc_ty, ..
-                        } = &item.kind
-                        {
-                            if let Ok(resolved_ty) = self.ast_to_type(assoc_ty) {
-                                let assoc_name: Text = name.name.clone();
-                                associated_types.insert(assoc_name, self.unifier.normalize_aliases(&resolved_ty));
-                            }
-                        }
-                    }
+                    let associated_types = self.elaborate_impl_associated_assignments(
+                        &protocol_identity, impl_decl, owner_frame,
+                    )?;
 
                     // Convert for_type to Type
                     // CRITICAL FIX: Use ast_to_type_lenient to avoid expanding type aliases.
@@ -6364,6 +6413,7 @@ impl TypeChecker {
                     //  protocol_impl.for_type, protocol_impl.where_clauses);
                     // }
 
+                    if let Some(expected) = expected { self.validate_impl_owner(&protocol_impl, expected)?; }
                     let publication = self.protocol_checker.write().register_source_impl(
                         &self.current_module_path, impl_decl, protocol_impl,
                     );

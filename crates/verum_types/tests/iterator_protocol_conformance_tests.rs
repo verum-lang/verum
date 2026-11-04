@@ -99,7 +99,7 @@ fn valid_impl() -> ProtocolImpl {
     impl_methods.insert("next".into(), next_sig);
 
     let mut assoc_types = Map::new();
-    assoc_types.insert("Item".into(), Type::Int);
+    assoc_types.insert("Item".into(), verum_types::protocol::AssociatedTypeAssignment::ordinary(Type::Int));
 
     ProtocolImpl {
         protocol: iterator_path(),

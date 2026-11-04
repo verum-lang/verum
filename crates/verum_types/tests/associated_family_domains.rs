@@ -11,14 +11,19 @@ fn errors(source: &str) -> Vec<String> {
     let mut errors = checker
         .prepare_module_declarations(&module)
         .iter()
-        .map(ToString::to_string)
+        .map(|error| format!("{error:?}"))
         .collect::<Vec<_>>();
     for item in &module.items {
         if let Err(error) = checker.check_item(item) {
-            errors.push(error.to_string());
+            errors.push(format!("{error:?}"));
         }
     }
-    errors.extend(checker.take_deferred_errors().iter().map(ToString::to_string));
+    errors.extend(
+        checker
+            .take_deferred_errors()
+            .iter()
+            .map(|error| format!("{error:?}")),
+    );
     errors.extend(
         checker
             .diagnostics()

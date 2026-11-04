@@ -18,6 +18,7 @@ fn parameter() -> GenericParam {
 
 fn descriptor() -> ImplementationDescriptor {
     ImplementationDescriptor {
+        source_implementation: None,
         protocol: "Inspect".into(),
         target_type: "Container".into(),
         generic_params: List::from_iter([parameter()]),
@@ -141,7 +142,7 @@ fn rejected_alias_is_retried_without_readmitting_successful_aliases() {
             for_type: parse_descriptor_type_string("owner.Container<Int>").unwrap(),
             where_clauses: List::new(),
             methods: Default::default(),
-            associated_types: [("Item".into(), Type::Bool)].into_iter().collect(),
+            associated_types: [("Item".into(), verum_types::protocol::AssociatedTypeAssignment::ordinary(Type::Bool))].into_iter().collect(),
             associated_consts: Default::default(),
             specialization: Maybe::None,
             impl_crate: Maybe::None,

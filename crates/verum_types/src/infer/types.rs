@@ -1111,7 +1111,7 @@ impl TypeChecker {
                 Ok(Type::type_constructor(name, *arity, kind))
             }
 
-            TypeKind::Qualified { .. } => self.ast_to_qualified_type(ast_ty),
+            TypeKind::Qualified { .. } => self.ast_to_qualified_type(ast_ty, false),
 
             TypeKind::Bounded { base, bounds: _ } => {
                 // Bounded type: T where T: Protocol
@@ -1609,7 +1609,9 @@ fn substitute_refinement_binder(
                         self.resolve_qualified_type_with_parameter_key(path, base.span)?
                     }
                 } else {
-                    (self.ast_to_type(base)?, None)
+                    (if matches!(base.kind, TypeKind::Qualified { .. }) {
+                        self.ast_to_qualified_type(base, true)?
+                    } else { self.ast_to_type(base)? }, None)
                 };
 
                 // DEBUG: trace HKT TypeApp construction
@@ -1976,7 +1978,7 @@ fn substitute_refinement_binder(
                     }
                 }
 
-                Ok(result_type)
+                self.resolve_checked_family_application(&result_type, ast_ty.span)
     }
 
     /// Keep the selected variant declaration in value types. Opening a case
@@ -2006,7 +2008,7 @@ fn substitute_refinement_binder(
     /// `<T as Protocol>::Item`, `T.Item` (Verum sugar), or module-qualified path
     /// (`super.X`, `cog.X.Y`). Defers to a Generic projection when self-type
     /// contains unresolved vars.
-    fn ast_to_qualified_type(&mut self, ast_ty: &verum_ast::ty::Type) -> Result<Type> {
+    fn ast_to_qualified_type(&mut self, ast_ty: &verum_ast::ty::Type, family_head: bool) -> Result<Type> {
         use verum_ast::ty::TypeKind;
         let TypeKind::Qualified { self_ty, trait_ref, assoc_name } = &ast_ty.kind
             else { unreachable!() };
@@ -2146,7 +2148,17 @@ fn substitute_refinement_binder(
                     _ => false,
                 };
 
-                if self.has_unresolved_vars(&self_type) || is_self_type {
+                if family_head && !is_empty_protocol {
+                    return Err(TypeError::OtherWithCodeSpanned {
+                        code: "E405".into(), msg: "qualified family applications require a retained protocol application".into(), span: ast_ty.span,
+                    });
+                }
+                if !family_head && is_empty_protocol && !is_self_type {
+                    if let Some(application) = self.resolve_checked_omitted_family(&self_type, &assoc_name_text, ast_ty.span)? {
+                        return Ok(application);
+                    }
+                }
+                if family_head || self.has_unresolved_vars(&self_type) || is_self_type {
                     // Create a deferred projection type that will be resolved during normalization
                     // Use the new ::AssocName format with base type in args
                     let projection_name: Text = Text::from(format!("::{}", assoc_name_text));
@@ -3952,64 +3964,19 @@ fn substitute_refinement_binder(
                 Type::Record(substituted_fields)
             }
 
-            // TypeApp - substitute in constructor and args, then try to resolve
             Type::TypeApp { constructor, args } => {
-                let substituted_ctor = self.substitute_self_type(constructor, self_ty);
-                let substituted_args: List<Type> = args
-                    .iter()
-                    .map(|a| self.substitute_self_type(a, self_ty))
-                    .collect();
-
-                // If constructor is a resolved projection, try to apply GAT args
-                match &substituted_ctor {
-                    Type::Generic {
-                        name,
-                        args: ctor_args,
-                    } if name.starts_with("::") && ctor_args.len() == 1 => {
-                        let assoc_name = &name[2..];
-                        let base_ty = &ctor_args[0];
-                        if !self.has_unresolved_vars(base_ty) {
-                            if let Some(resolved) =
-                                self.try_resolve_associated_type_projection(base_ty, assoc_name)
-                            {
-                                // resolved is the associated type body (e.g., List<T>)
-                                // substituted_args are the GAT type args (e.g., [Int])
-                                // Substitute the GAT params into the resolved type
-                                if let Type::Generic { name: rn, args: ra } = &resolved {
-                                    if !substituted_args.is_empty() {
-                                        let mut subst = indexmap::IndexMap::new();
-                                        for (i, arg) in ra.iter().enumerate() {
-                                            if let Type::Var(tv) = arg {
-                                                if let Some(replacement) = substituted_args.get(i) {
-                                                    subst.insert(
-                                                        verum_common::Text::from(format!(
-                                                            "T{}",
-                                                            tv.id()
-                                                        )),
-                                                        replacement.clone(),
-                                                    );
-                                                }
-                                            }
-                                        }
-                                        if !subst.is_empty() {
-                                            return self.substitute_type_params(&resolved, &subst);
-                                        }
-                                        return Type::Generic {
-                                            name: rn.clone(),
-                                            args: substituted_args,
-                                        };
-                                    }
-                                }
-                                return resolved;
-                            }
-                        }
-                    }
-                    _ => {}
+                if let Type::Generic { name, args: receiver } = constructor.as_ref()
+                    && name.starts_with("::") && receiver.len() == 1
+                {
+                    let application = Type::TypeApp {
+                        constructor: Box::new(Type::Generic { name: name.clone(), args: List::from_iter([self.substitute_self_type(&receiver[0], self_ty)]) }),
+                        args: args.iter().map(|argument| self.substitute_self_type(argument, self_ty)).collect(),
+                    };
+                    return self.normalize_family_application(&application);
                 }
-
                 Type::TypeApp {
-                    constructor: Box::new(substituted_ctor),
-                    args: substituted_args,
+                    constructor: Box::new(self.substitute_self_type(constructor, self_ty)),
+                    args: args.iter().map(|argument| self.substitute_self_type(argument, self_ty)).collect(),
                 }
             }
 
@@ -4027,7 +3994,7 @@ fn substitute_refinement_binder(
     pub(super) fn resolve_associated_type_projections_with_impl(
         &self,
         ty: &Type,
-        associated_types: &verum_common::Map<verum_common::Text, Type>,
+        associated_types: &verum_common::Map<verum_common::Text, crate::protocol::AssociatedTypeAssignment>,
         param_subst: &indexmap::IndexMap<verum_common::Text, Type>,
     ) -> Type {
         match ty {
@@ -4036,7 +4003,7 @@ fn substitute_refinement_binder(
                 if name.starts_with("::") && args.len() == 1 {
                     let assoc_name: verum_common::Text = name[2..].into(); // Strip "::" prefix
                     // Look up the associated type in the implementation
-                    if let Some(assoc_ty) = associated_types.get(&assoc_name) {
+                    if let Some(assoc_ty) = associated_types.get(&assoc_name).and_then(|assignment| assignment.ordinary_body()) {
                         // Apply param_subst to the associated type value (e.g., &T -> &Int)
                         return self.substitute_type_params(assoc_ty, param_subst);
                     }
@@ -4055,7 +4022,7 @@ fn substitute_refinement_binder(
                         .is_some_and(|c| c.is_ascii_uppercase())
                     && matches!(self.ctx.lookup_type(name.as_str()), Option::None)
                     && let Some(assoc_ty) =
-                        associated_types.get(&verum_common::Text::from(name.as_str()))
+                        associated_types.get(&verum_common::Text::from(name.as_str())).and_then(|assignment| assignment.ordinary_body())
                 {
                     return self.substitute_type_params(assoc_ty, param_subst);
                 }
@@ -4166,43 +4133,19 @@ fn substitute_refinement_binder(
                 }
             }
 
-            // TypeApp - resolve in constructor and args, then try GAT resolution
             Type::TypeApp { constructor, args } => {
-                let resolved_ctor = self.resolve_associated_type_projections_with_impl(
-                    constructor,
-                    associated_types,
-                    param_subst,
-                );
-                let resolved_args: List<Type> = args
-                    .iter()
-                    .map(|a| {
-                        self.resolve_associated_type_projections_with_impl(
-                            a,
-                            associated_types,
-                            param_subst,
-                        )
-                    })
-                    .collect();
-
-                // If constructor resolved from ::AssocName to concrete type, apply GAT args
-                match &resolved_ctor {
-                    Type::Generic { name, args: ga }
-                        if !name.starts_with("::") && !resolved_args.is_empty() =>
-                    {
-                        // Constructor is now concrete (e.g., List<T>) — apply GAT params
-                        Type::Generic {
-                            name: name.clone(),
-                            args: resolved_args,
-                        }
-                    }
-                    Type::Named { path, .. } if !resolved_args.is_empty() => Type::Named {
-                        path: path.clone(),
-                        args: resolved_args,
-                    },
-                    _ => Type::TypeApp {
-                        constructor: Box::new(resolved_ctor),
-                        args: resolved_args,
-                    },
+                if let Type::Generic { name, args: receiver } = constructor.as_ref()
+                    && name.starts_with("::") && receiver.len() == 1
+                {
+                    let application = Type::TypeApp {
+                        constructor: Box::new(Type::Generic { name: name.clone(), args: List::from_iter([self.substitute_type_params(&receiver[0], param_subst)]) }),
+                        args: args.iter().map(|argument| self.substitute_type_params(argument, param_subst)).collect(),
+                    };
+                    return self.normalize_family_application(&application);
+                }
+                Type::TypeApp {
+                    constructor: Box::new(self.resolve_associated_type_projections_with_impl(constructor, associated_types, param_subst)),
+                    args: args.iter().map(|argument| self.resolve_associated_type_projections_with_impl(argument, associated_types, param_subst)).collect(),
                 }
             }
 
@@ -4816,6 +4759,13 @@ fn substitute_refinement_binder(
                 predicate: predicate.clone(),
             },
 
+            Generic { name, args } if name.starts_with("::") && args.len() > 1 => {
+                let application = Type::TypeApp {
+                    constructor: Box::new(Type::Generic { name: name.clone(), args: List::from_iter([args[0].clone()]) }),
+                    args: args.iter().skip(1).cloned().collect(),
+                };
+                self.normalize_type_impl(&application, depth + 1)
+            }
             Generic { name, args } => {
                 let d = depth + 1;
                 let normalized_args: List<Type> = args
@@ -5434,6 +5384,16 @@ fn substitute_refinement_binder(
     ) -> Type {
         use Type::*;
                 let d = depth + 1;
+                if let Type::Generic { name, args: receiver } = constructor.as_ref()
+                    && name.starts_with("::") && receiver.len() == 1
+                {
+                    let application = Type::TypeApp {
+                        constructor: Box::new(Type::Generic { name: name.clone(), args: List::from_iter([self.normalize_type_impl(&receiver[0], d)]) }),
+                        args: args.iter().map(|argument| self.normalize_type_impl(argument, d)).collect(),
+                    };
+                    let resolved = self.normalize_family_application(&application);
+                    return if resolved == application { application } else { self.normalize_type_impl(&resolved, d) };
+                }
                 let normalized_ctor = self.normalize_type_impl(constructor, d);
                 let normalized_args: List<Type> = args
                     .iter()

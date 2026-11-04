@@ -46,8 +46,8 @@ fn checker_with_listiter_impl(param: TypeVar) -> (ProtocolChecker, Type) {
         )),
         args: [Type::Var(param)].into_iter().collect(),
     };
-    let mut assoc: Map<Text, Type> = Map::new();
-    assoc.insert(Text::from("Item"), Type::Var(param));
+    let mut assoc = Map::new();
+    assoc.insert(Text::from("Item"), verum_types::protocol::AssociatedTypeAssignment::ordinary(Type::Var(param)));
     let impl_ = ProtocolImpl {
         protocol: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
             "Iterator",

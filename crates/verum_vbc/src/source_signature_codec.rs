@@ -66,3 +66,11 @@ pub(crate) fn decode_type(bytes: &[u8]) -> VbcResult<TypeDecl> {
         verum_ast::source_signature::validate_source_type_declaration,
     )
 }
+
+/// The shared source carrier validates both syntax and bounded decoding.
+pub(crate) fn encode_implementation(source: &verum_ast::source_implementation::AssociatedImplementationSource) -> VbcResult<Vec<u8>> {
+    encode_payload(source, |source| source.declaration().map(|_| ()))
+}
+pub(crate) fn decode_implementation(bytes: &[u8]) -> VbcResult<verum_ast::source_implementation::AssociatedImplementationSource> {
+    decode_payload(bytes, |source: &verum_ast::source_implementation::AssociatedImplementationSource| source.declaration().map(|_| ()))
+}

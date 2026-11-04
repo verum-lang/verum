@@ -284,7 +284,10 @@ fn actual_registered_specialization_must_preserve_universal_item() {
     subst.insert(variable, Type::Int);
     let mut concrete = blanket.clone();
     concrete.for_type = concrete.for_type.try_apply_subst(&subst).unwrap();
-    concrete.associated_types.insert("Item".into(), Type::Text);
+    concrete.associated_types.insert(
+        "Item".into(),
+        verum_types::protocol::AssociatedTypeAssignment::ordinary(Type::Text),
+    );
     concrete.specialization = Some(SpecializationInfo {
         is_specialized: true,
         specializes: None,

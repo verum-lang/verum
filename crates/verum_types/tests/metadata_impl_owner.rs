@@ -62,6 +62,7 @@ fn metadata(qualified: bool, reverse: bool) -> CoreMetadata {
         },
     );
     metadata.implementations.push(ImplementationDescriptor {
+        source_implementation: None,
         protocol: "Deref".into(),
         target_type: if qualified {
             "alpha.Wrapper"
@@ -427,13 +428,15 @@ fn owner_bucket_keeps_protocol_instantiations_in_declaration_order() {
         assert_eq!(
             implementations[0]
                 .associated_types
-                .get(&Text::from("Target")),
+                .get(&Text::from("Target"))
+                .and_then(|assignment| assignment.ordinary_body()),
             Some(&verum_types::Type::Text)
         );
         assert_eq!(
             implementations[1]
                 .associated_types
-                .get(&Text::from("Target")),
+                .get(&Text::from("Target"))
+                .and_then(|assignment| assignment.ordinary_body()),
             Some(&verum_types::Type::Bool)
         );
         assert!(

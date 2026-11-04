@@ -245,7 +245,7 @@ fn test_explicit_associated_type_overrides_default() {
         methods: Map::new(),
         associated_types: {
             let mut assoc = Map::new();
-            assoc.insert("Item".into(), Type::int());
+            assoc.insert("Item".into(), verum_types::protocol::AssociatedTypeAssignment::ordinary(Type::int()));
             assoc
         },
         associated_consts: Map::new(),

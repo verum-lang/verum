@@ -1007,6 +1007,7 @@ impl TypeChecker {
             metadata_names: std::cell::OnceCell::new(),
             metadata_impls_by_owner: Maybe::None,
             metadata_impl_receipts: Map::new(),
+            metadata_source_impl_loading: Set::new(),
             analysis_control: None,
             place_operands: Vec::new(),
             stdlib_tail_registered: Set::new(),
@@ -1224,6 +1225,7 @@ impl TypeChecker {
         self.metadata_declaring_modules = std::cell::OnceCell::new();
         self.metadata_impls_by_owner = Maybe::None;
         self.metadata_impl_receipts.clear();
+        self.metadata_source_impl_loading.clear();
         self.stdlib_tail_registered.clear();
     }
 
@@ -2761,6 +2763,75 @@ impl TypeChecker {
         register(implementation, last);
     }
 
+    /// Replay the implementation's actual lexical telescope through ordinary
+    /// declaration checking. Runtime descriptor strings cannot substitute for it.
+    fn register_metadata_source_impl(
+        &mut self,
+        descriptor: &crate::core_metadata::ImplementationDescriptor,
+        metadata: &crate::core_metadata::CoreMetadata,
+    ) -> Result<()> {
+        let source = descriptor.source_implementation.as_ref()
+            .ok_or_else(|| TypeError::Other("missing source implementation".into()))?;
+        let declaration = source.declaration().map_err(TypeError::Other)?;
+        let protocol = metadata.types.get(&descriptor.protocol)
+            .map(Self::metadata_declaring_key)
+            .or_else(|| metadata.protocols.get(&descriptor.protocol).map(|protocol| {
+                let owner = protocol.origin_module_path.as_ref().filter(|owner| !owner.is_empty())
+                    .unwrap_or(&protocol.module_path);
+                verum_common::qualified_name::qualify_module_name(owner, &protocol.name).into()
+            }))
+            .ok_or_else(|| TypeError::Other("source implementation has no declared protocol owner".into()))?;
+        let target = metadata.types.get(&descriptor.target_type)
+            .map(Self::metadata_declaring_key)
+            .ok_or_else(|| TypeError::Other("source implementation has no declared target owner".into()))?;
+        let previous_owner = std::mem::replace(&mut self.current_module_path, source.origin_module().into());
+        let previous_signature_scope = std::mem::replace(&mut self.resolving_source_signature, true);
+        let previous_parameters = std::mem::take(&mut self.decl_param_frames);
+        // A lazy declaration must not capture the importing function's generic
+        // variables. Nominal declarations remain available by their owned keys.
+        let is_parameter = |ty: &Type| matches!(ty, Type::Var(_) | Type::TypeConstructor { .. });
+        let previous_bindings: Vec<_> = self.ctx.type_defs.iter()
+            .filter(|(_, ty)| is_parameter(ty)).map(|(name, ty)| (name.clone(), ty.clone())).collect();
+        for (name, _) in &previous_bindings { self.ctx.type_defs.remove(name); }
+        self.ctx.enter_scope();
+        let result = self.register_owned_impl_block(&declaration, &protocol, &target);
+        self.ctx.exit_scope();
+        self.ctx.type_defs.retain(|_, ty| !is_parameter(ty));
+        for (name, ty) in previous_bindings { self.ctx.type_defs.insert(name, ty); }
+        self.decl_param_frames = previous_parameters;
+        self.resolving_source_signature = previous_signature_scope;
+        self.current_module_path = previous_owner;
+        result
+    }
+
+    /// Check declaration-bearing implementations through the same lazy admission
+    /// path used by compiler, LSP and Studio consumers. Publication must not
+    /// attach a valid declaration to a different runtime owner.
+    pub fn validate_source_implementation_metadata(
+        metadata: std::sync::Arc<crate::core_metadata::CoreMetadata>,
+    ) -> Result<()> {
+        let mut checker = Self::new_with_core(metadata.clone());
+        checker.register_primitives();
+        for (position, implementation) in metadata.implementations.iter().enumerate() {
+            if implementation.source_implementation.is_none() { continue; }
+            checker.register_stdlib_impls_for_target(&implementation.target_type);
+            if let Some(error) = checker.take_deferred_errors().into_iter().next() {
+                return Err(error);
+            }
+            if let Some(diagnostic) = checker.diagnostics().iter().find(|diagnostic| diagnostic.is_error()) {
+                return Err(TypeError::Other(format!("{diagnostic:?}").into()));
+            }
+            let complete = checker.metadata_impl_receipts.get(&position).is_some_and(|registered| {
+                Self::metadata_impl_target_keys(&implementation.target_type, &metadata)
+                    .iter().all(|key| registered.contains(key))
+            });
+            if !complete {
+                return Err(TypeError::Other("source implementation has no completed owner admission".into()));
+            }
+        }
+        Ok(())
+    }
+
     fn register_stdlib_impls_for_target(&mut self, type_name: &Text) -> Vec<Text> {
         use crate::protocol::ProtocolImpl;
         let mut proto_deps: Vec<Text> = Vec::new();
@@ -2797,6 +2868,8 @@ impl TypeChecker {
             if impl_desc.protocol.as_str().is_empty() {
                 continue;
             }
+            if impl_desc.source_implementation.is_some()
+                && !self.metadata_source_impl_loading.insert(position) { continue; }
             // Make sure the protocol body is registered so we can
             // pull its method-signature map.  Idempotent — a no-op
             // when this protocol was already loaded earlier.
@@ -2812,7 +2885,22 @@ impl TypeChecker {
                         .all(|key| registered.contains(key))
                 },
             ) {
+                self.metadata_source_impl_loading.remove(&position);
                 proto_deps.push(impl_desc.protocol.clone());
+                continue;
+            }
+
+            if impl_desc.source_implementation.is_some() {
+                let result = self.register_metadata_source_impl(impl_desc, &metadata);
+                self.metadata_source_impl_loading.remove(&position);
+                match result {
+                    Ok(()) => {
+                        self.metadata_impl_receipts.entry(position).or_default().extend(
+                            Self::metadata_impl_target_keys(&impl_desc.target_type, &metadata));
+                        proto_deps.push(impl_desc.protocol.clone());
+                    }
+                    Err(error) => self.deferred_soundness_errors.push(error),
+                }
                 continue;
             }
 
@@ -2908,7 +2996,7 @@ impl TypeChecker {
                 for_type: for_type_registered,
                 where_clauses: List::new(),
                 methods,
-                associated_types,
+                associated_types: associated_types.into_iter().map(|(name, ty)| (name, crate::protocol::AssociatedTypeAssignment::ordinary(ty))).collect(),
                 associated_consts: verum_common::Map::new(),
                 specialization: Maybe::None,
                 impl_crate: Maybe::None,
@@ -4228,6 +4316,7 @@ impl TypeChecker {
             metadata_names: std::cell::OnceCell::new(),
             metadata_impls_by_owner: Maybe::None,
             metadata_impl_receipts: Map::new(),
+            metadata_source_impl_loading: Set::new(),
             analysis_control: None,
             place_operands: Vec::new(),
             stdlib_tail_registered: Set::new(),
@@ -4657,7 +4746,7 @@ impl TypeChecker {
                 for_type: for_type_registered,
                 where_clauses: verum_common::List::new(),
                 methods,
-                associated_types,
+                associated_types: associated_types.into_iter().map(|(name, ty)| (name, crate::protocol::AssociatedTypeAssignment::ordinary(ty))).collect(),
                 associated_consts: verum_common::Map::new(),
                 specialization: verum_common::Maybe::None,
                 impl_crate: verum_common::Maybe::None,

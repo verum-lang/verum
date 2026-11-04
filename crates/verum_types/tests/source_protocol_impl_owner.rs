@@ -126,7 +126,8 @@ fn assert_registered_owner(checker: &TypeChecker, owner: &str, protocol_owner: &
     assert_eq!(
         implementation
             .associated_types
-            .get(&Text::from("Reference")),
+            .get(&Text::from("Reference"))
+            .and_then(|assignment| assignment.ordinary_body()),
         Some(&Type::Int)
     );
     assert!(
@@ -399,7 +400,8 @@ fn generic_source_target_keeps_reordered_parameter_bindings() {
     assert_eq!(
         implementation
             .associated_types
-            .get(&Text::from("Reference")),
+            .get(&Text::from("Reference"))
+            .and_then(|assignment| assignment.ordinary_body()),
         Some(&Type::Var(*left))
     );
     assert!(implementation.methods.contains_key(&Text::from("value")));

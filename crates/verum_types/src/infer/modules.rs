@@ -5822,6 +5822,7 @@ impl TypeChecker {
 
             // Collect type variables and their names for later quantification
             let mut impl_type_vars: List<TypeVar> = List::new();
+            let mut owner_frame = indexmap::IndexMap::new();
 
             let bindings = (|| -> Result<()> {
             // Register type parameters from the implement block
@@ -5831,11 +5832,13 @@ impl TypeChecker {
                     GenericParamKind::Type { name, .. } => {
                         let type_var = TypeVar::fresh();
                         let name_text: verum_common::Text = name.name.clone();
+                        owner_frame.insert(name_text.clone(), Type::Var(type_var));
                         self.ctx.define_type(name_text.clone(), Type::Var(type_var));
                         impl_type_vars.push(type_var);
                     }
                     GenericParamKind::Meta { name, .. } | GenericParamKind::Const { name, .. } => {
                         let value = self.source_value_parameter(generic_param)?;
+                        owner_frame.insert(name.name.clone(), value.clone());
                         self.ctx.define_type(name.name.clone(), value);
                     }
                     _ => {}
@@ -6299,24 +6302,11 @@ impl TypeChecker {
 
                 // The publication reads this implementation's declared binder
                 // frame, not the lazy caller's surrounding source telescope.
-                let frame = impl_type_bindings.iter().filter_map(|(name, _)| {
-                    self.ctx.lookup_type(name.as_str()).cloned().map(|ty| (name.clone(), ty))
-                }).collect();
-                self.push_decl_param_frame(frame);
+                self.push_decl_param_frame(owner_frame.clone());
                 let publication = (|| -> Result<()> {
-                // Build associated types
-                let mut associated_types: verum_common::Map<verum_common::Text, Type> =
-                    verum_common::Map::new();
-                for item in &impl_decl.items {
-                    if let ImplItemKind::Type {
-                        name, ty: assoc_ty, ..
-                    } = &item.kind
-                    {
-                        if let Ok(resolved_ty) = self.ast_to_type(assoc_ty) {
-                            associated_types.insert(name.name.clone(), self.unifier.normalize_aliases(&resolved_ty));
-                        }
-                    }
-                }
+                let associated_types = self.elaborate_impl_associated_assignments(
+                    &self.path_to_string(protocol), impl_decl, &owner_frame,
+                )?;
 
                 // Build where clauses from impl generics
                 let mut where_clauses: verum_common::List<crate::protocol::WhereClause> =
@@ -9926,6 +9916,7 @@ impl TypeChecker {
                     type_param_to_var.insert(name_text, type_var_ty);
                 } else if let verum_ast::ty::GenericParamKind::Meta { name, .. } | verum_ast::ty::GenericParamKind::Const { name, .. } = &generic_param.kind {
                     let value = self.source_value_parameter(generic_param)?;
+                    type_param_to_var.insert(name.name.clone(), value.clone());
                     self.ctx.define_type(name.name.clone(), value);
                 }
             }
@@ -9986,16 +9977,10 @@ impl TypeChecker {
                 &protocol, protocol_args, Some(&resolved_for_type),
             )?;
 
-            // Extract associated types from impl items (e.g., `type Item = &T;`)
-            let mut associated_types: Map<Text, Type> = Map::new();
-            for item in &impl_decl.items {
-                if let verum_ast::decl::ImplItemKind::Type { name, ty, .. } = &item.kind {
-                    let resolved_ty = self
-                        .ast_to_type(ty)
-                        .unwrap_or_else(|_| self.ast_to_type_lenient(ty));
-                    associated_types.insert(name.name.clone(), self.unifier.normalize_aliases(&resolved_ty));
-                }
-            }
+            let owner_frame = type_param_to_var.iter().map(|(name, ty)| (name.clone(), ty.clone())).collect();
+            let associated_types = self.elaborate_impl_associated_assignments(
+                &self.path_to_string(&protocol), impl_decl, &owner_frame,
+            )?;
 
             // Process where clause for additional function type bounds.
             if let Some(ref where_clause) = impl_decl.generic_where_clause {

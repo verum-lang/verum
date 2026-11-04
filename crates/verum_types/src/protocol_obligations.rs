@@ -3,12 +3,12 @@
 //! Inference may postpone a constraint. This boundary may not: every conditional
 //! implementation used here needs evidence, and possible specializations must
 //! preserve the same associated equalities under their intersection.
+use super::implementation_match::CandidateMatch;
 use super::{ProtocolBound, ProtocolChecker, ProtocolConstraints, ProtocolImpl, WhereClause};
 use crate::{
     ty::{Substitution, Type, TypeVar},
     unify::Unifier,
 };
-use verum_ast::Span;
 use verum_common::{List, Text, ToText};
 
 impl ProtocolChecker {
@@ -157,7 +157,12 @@ impl Obligations<'_> {
         let mut covering = false;
         for index in candidates {
             let implementation = &self.checker.impls[index];
-            let overlap = match self.match_candidate(implementation, ty, &bound.args, false) {
+            let overlap = match self.checker.match_implementation_candidate(
+                implementation,
+                ty,
+                Some(&bound.args),
+                false,
+            ) {
                 CandidateMatch::Matched(substitution) => substitution,
                 CandidateMatch::Disjoint => continue,
                 CandidateMatch::Unknown => {
@@ -169,10 +174,14 @@ impl Obligations<'_> {
             // A case that can become applicable after instantiation cannot be
             // discarded merely because its where clause is currently unknown.
             self.check_equalities(implementation, bound, &overlap)?;
-            if let CandidateMatch::Matched(substitution) =
-                self.match_candidate(implementation, ty, &bound.args, true)
+            if let CandidateMatch::Matched(substitution) = self
+                .checker
+                .match_implementation_candidate(implementation, ty, Some(&bound.args), true)
             {
-                let mut proved = true;
+                let mut proved = self
+                    .checker
+                    .check_implementation_callable_bounds(implementation, &substitution)
+                    .is_ok();
                 for clause in &implementation.where_clauses {
                     let clause_ty = clause.ty.try_apply_subst(&substitution)?;
                     for required in &clause.bounds {
@@ -240,7 +249,7 @@ impl Obligations<'_> {
     ) -> Result<(), Text> {
         for (name, expected) in &bound.associated_types {
             let actual = if let Some(actual) = implementation.associated_types.get(name) {
-                actual.try_apply_subst(substitution)?
+                actual.instantiate(&[], substitution)?
             } else {
                 let key = self.checker.make_protocol_key(&bound.protocol);
                 let protocol = self
@@ -291,157 +300,5 @@ impl Obligations<'_> {
             }
         }
         Ok(())
-    }
-    fn match_candidate(
-        &self,
-        implementation: &ProtocolImpl,
-        ty: &Type,
-        args: &[Type],
-        rigid: bool,
-    ) -> CandidateMatch {
-        if implementation.protocol_args.len() != args.len()
-            || provably_disjoint(&implementation.for_type, ty)
-            || implementation
-                .protocol_args
-                .iter()
-                .zip(args)
-                .any(|(a, b)| provably_disjoint(a, b))
-        {
-            return CandidateMatch::Disjoint;
-        }
-        match self.try_match_candidate(implementation, ty, args, rigid) {
-            Some(substitution) => CandidateMatch::Matched(substitution),
-            None => CandidateMatch::Unknown,
-        }
-    }
-    fn try_match_candidate(
-        &self,
-        implementation: &ProtocolImpl,
-        ty: &Type,
-        args: &[Type],
-        rigid: bool,
-    ) -> Option<Substitution> {
-        let mut variables = implementation.for_type.free_vars();
-        for ty in &implementation.protocol_args {
-            variables.extend(ty.free_vars());
-        }
-        for ty in implementation.associated_types.values() {
-            variables.extend(ty.free_vars());
-        }
-        for clause in &implementation.where_clauses {
-            variables.extend(clause.ty.free_vars());
-            for bound in &clause.bounds {
-                for ty in bound.args.iter().chain(bound.associated_types.values()) {
-                    variables.extend(ty.free_vars());
-                }
-            }
-        }
-        let fresh: Substitution = variables
-            .into_iter()
-            .map(|variable| (variable, Type::Var(TypeVar::fresh())))
-            .collect();
-        let mut matcher = Unifier::new();
-        if rigid {
-            let mut variables = ty.free_vars();
-            for arg in args {
-                variables.extend(arg.free_vars());
-            }
-            matcher.enter_rigid_scope(
-                variables
-                    .into_iter()
-                    .map(|var| (var, format!("parameter{}", var.id()).into(), false, None)),
-            );
-        }
-        let pattern = implementation.for_type.try_apply_subst(&fresh).ok()?;
-        matcher.unify(&pattern, ty, Span::default()).ok()?;
-        for (pattern, actual) in implementation.protocol_args.iter().zip(args) {
-            matcher
-                .unify(
-                    &pattern.try_apply_subst(&fresh).ok()?,
-                    actual,
-                    Span::default(),
-                )
-                .ok()?;
-        }
-        // Unification also serves inference/coercion. A proof match additionally
-        // requires exact equality after substitution, so coercions are not evidence.
-        if !self.same(
-            &matcher.try_apply(&pattern, Span::default()).ok()?,
-            &matcher.try_apply(ty, Span::default()).ok()?,
-        ) {
-            return None;
-        }
-        for (pattern, actual) in implementation.protocol_args.iter().zip(args) {
-            if !self.same(
-                &matcher
-                    .try_apply(&pattern.try_apply_subst(&fresh).ok()?, Span::default())
-                    .ok()?,
-                &matcher.try_apply(actual, Span::default()).ok()?,
-            ) {
-                return None;
-            }
-        }
-        let mut substitution = matcher.get_substitution().clone();
-        for (variable, fresh_variable) in &fresh {
-            substitution.insert(
-                *variable,
-                matcher.try_apply(fresh_variable, Span::default()).ok()?,
-            );
-        }
-        Some(substitution)
-    }
-}
-
-/// Failure to elaborate a match is not evidence that two domains are disjoint.
-enum CandidateMatch {
-    Matched(Substitution),
-    Disjoint,
-    Unknown,
-}
-
-fn provably_disjoint(a: &Type, b: &Type) -> bool {
-    match (a, b) {
-        (Type::Named { path: a, args: aa }, Type::Named { path: b, args: ba }) => {
-            let segments = |path: &verum_ast::Path| {
-                path.segments
-                    .iter()
-                    .map(|segment| match segment {
-                        verum_ast::ty::PathSegment::Name(name) => Some(name.name.clone()),
-                        _ => None,
-                    })
-                    .collect::<Option<Vec<_>>>()
-            };
-            match (segments(a), segments(b)) {
-                (Some(a), Some(b)) if a != b => true,
-                _ => {
-                    aa.len() != ba.len() || aa.iter().zip(ba).any(|(a, b)| provably_disjoint(a, b))
-                }
-            }
-        }
-        (Type::Generic { name: a, args: aa }, Type::Generic { name: b, args: ba })
-            if !a.starts_with("::") && !b.starts_with("::") =>
-        {
-            a != b
-                || aa.len() != ba.len()
-                || aa.iter().zip(ba).any(|(a, b)| provably_disjoint(a, b))
-        }
-        (Type::Tuple(a), Type::Tuple(b)) => {
-            a.len() != b.len() || a.iter().zip(b).any(|(a, b)| provably_disjoint(a, b))
-        }
-        (
-            Type::Reference {
-                mutable: a,
-                inner: ai,
-            },
-            Type::Reference {
-                mutable: b,
-                inner: bi,
-            },
-        ) => a != b || provably_disjoint(ai, bi),
-        (
-            Type::Unit | Type::Bool | Type::Int | Type::Float | Type::Char | Type::Text,
-            Type::Unit | Type::Bool | Type::Int | Type::Float | Type::Char | Type::Text,
-        ) => a != b,
-        _ => false,
     }
 }

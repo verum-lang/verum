@@ -739,7 +739,7 @@ fn test_associated_type_simple() {
 
     // Create implementation with Item = Int
     let mut impl_assoc_types = Map::new();
-    impl_assoc_types.insert("Item".into(), Type::int());
+    impl_assoc_types.insert("Item".into(), verum_types::protocol::AssociatedTypeAssignment::ordinary(Type::int()));
 
     let impl_ = ProtocolImpl {
         protocol: make_path("Iterator"),
@@ -880,10 +880,10 @@ fn test_nested_associated_types() {
     let mut impl_assoc_types = Map::new();
     impl_assoc_types.insert(
         "Item".into(),
-        Type::Named {
+        verum_types::protocol::AssociatedTypeAssignment::ordinary(Type::Named {
             path: make_path("List"),
             args: vec![Type::int()].into(),
-        },
+        }),
     );
 
     let impl_ = ProtocolImpl {

@@ -411,6 +411,12 @@ impl Serializer {
                 encode_u32(name.0, &mut self.output);
                 encode_u32(bound.0, &mut self.output);
             }
+            self.output.push(u8::from(proto_impl.source_implementation.is_some()));
+            if let Some(source) = &proto_impl.source_implementation {
+                let bytes = crate::source_signature_codec::encode_implementation(source)?;
+                encode_varint(bytes.len() as u64, &mut self.output);
+                self.output.extend_from_slice(&bytes);
+            }
         }
 
         // Alias target (TypeKind::Alias only — encoded for every
