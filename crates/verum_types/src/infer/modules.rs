@@ -18628,26 +18628,43 @@ impl TypeChecker {
         // Now current_receiver is the base expression (e.g., 'a' in a.b().c().d())
         // and chain contains all method calls in reverse order
 
+        // A rooted namespace is syntax, never a receiver value. Resolve the
+        // first complete callable path through ordinary Call inference; later
+        // methods operate only on the value that call actually returns.
+        if let Some(mut path) = self.rooted_field_path(current_receiver) {
+            let mut steps = chain.into_iter().rev();
+            let (_, method, type_args, args, span) = steps.next().expect("method chain is nonempty");
+            path.segments.push(verum_ast::ty::PathSegment::Name(method.clone()));
+            path.span = span;
+            let mut call = Expr::new(ExprKind::Call {
+                func: Box::new(Expr::new(ExprKind::Path(path), span)),
+                type_args: type_args.clone(), args: args.iter().cloned().collect(),
+            }, span);
+            for (_, method, type_args, args, span) in steps {
+                call = Expr::new(ExprKind::MethodCall {
+                    receiver: Box::new(call), method: method.clone(),
+                    type_args: type_args.clone(), args: args.iter().cloned().collect(),
+                }, span);
+            }
+            return self.synth_expr(&call);
+        }
+
         // Step 1: Synthesize type of the base expression (NOT a method call, so no recursion issue)
         // Set in_call_arg_context so that path expressions use borrow_value instead of use_value.
         // This is critical for affine values in loops: methods like push(&mut self) borrow, not consume.
         //
-        // Module-alias bypass: if the base is a single-segment Path that names a `mount X.Y.Z;`
-        // (or `mount X as A;`) alias, synth_expr would raise UnboundVariable because the alias has
-        // no value binding. The first method call is then resolved as `module_path.method(...)` by
-        // `try_resolve_super_path_call`'s module_aliases branch — which reads receiver.kind directly
-        // and ignores the precomputed receiver type. Substitute a fresh type variable as a
-        // placeholder so the chain dispatch proceeds.
+        // Resolve namespaces through their declarations before synthesizing a
+        // receiver. They cannot be represented by fresh inference variables.
         let base_is_module_alias = matches!(&current_receiver.kind, ExprKind::Path(path)
             if path.segments.len() == 1
                 && matches!(path.segments.first(), Some(verum_ast::ty::PathSegment::Name(ident))
                     if self.module_aliases.contains_key(&ident.name)));
-        // Same bypass for MULTI-SEGMENT module paths
-        // (`core.time.duration_parse.parse(x)` — the base is a Field
-        // chain or a multi-segment Path of bare Names whose root has
-        // no value binding).  synth_expr on such a base dies with
-        // `unbound variable: <root>` before the first-call resolution
-        // (`try_resolve_module_call`'s global-registry arm) ever runs.
+        let base_is_inline_namespace = matches!(&current_receiver.kind, ExprKind::Path(path)
+            if path.segments.len() == 1
+                && matches!(path.segments.first(), Some(verum_ast::ty::PathSegment::Name(ident))
+                    if self.inline_modules.contains_key(&ident.name)
+                        && self.ctx.env.lookup(ident.name.as_str()).is_none()
+                        && self.ctx.lookup_type(ident.name.as_str()).is_none()));
         let base_is_module_path = !base_is_module_alias && {
             let root_name: Option<&str> = match &current_receiver.kind {
                 ExprKind::Path(path) if path.segments.len() >= 2 => {
@@ -18669,10 +18686,28 @@ impl TypeChecker {
             }
         };
         self.with_place_types(current_receiver, |tc| {
+            let mut namespace_first = if base_is_module_alias || base_is_module_path || base_is_inline_namespace {
+                let (_, first_method, first_type_args, first_args, first_span) =
+                    chain.last().expect("method chain is nonempty");
+                let resolved = tc.try_resolve_pre_receiver_method(
+                    current_receiver, first_method, first_type_args, first_args, *first_span, false,
+                )?;
+                Some(resolved.ok_or_else(|| {
+                    let receiver_name = match &current_receiver.kind {
+                        ExprKind::Path(path) => tc.path_to_string(path),
+                        ExprKind::Field { expr, field } => tc.extract_module_path_from_field(expr, field)
+                            .map(|segments| Text::from(segments.join("."))).unwrap_or_default(),
+                        _ => Text::new(),
+                    };
+                    TypeError::UnboundVariable {
+                        name: format!("{}.{}", receiver_name, first_method.name).into(), span: *first_span,
+                    }
+                })?)
+            } else { None };
             let old_call_context = tc.in_call_arg_context;
             tc.in_call_arg_context = true;
-            let base_type = if base_is_module_alias || base_is_module_path {
-                Ok(Type::Var(TypeVar::fresh()))
+            let base_type = if let Some(resolved) = &namespace_first {
+                Ok(resolved.ty.clone())
             } else {
                 tc.synth_expr(current_receiver).map(|result| result.ty)
             };
@@ -18702,7 +18737,9 @@ impl TypeChecker {
             // because receiver.kind is the original base, not the actual receiver.
             let mut is_first_call = true;
             for (step_receiver, method, type_args, args, span) in chain.into_iter().rev() {
-                let result = if is_first_call {
+                let result = if let Some(resolved) = namespace_first.take() {
+                    resolved
+                } else if is_first_call {
                     // First call: pass precomputed type but allow static method lookup
                     // This fixes affine tracking in loops while preserving Int.max_value() patterns
                     tc.infer_method_call_with_recv_type(

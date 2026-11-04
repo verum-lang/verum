@@ -4420,15 +4420,10 @@ impl TypeChecker {
                             "self keyword requires method context".into(),
                         ));
                     }
-                    verum_ast::ty::PathSegment::Super => {
-                        // super as a standalone path is used as a base for field access
-                        // chains like super.module.function(). Return Never to suppress
-                        // downstream errors (Never is a bottom type compatible with any type).
-                        return Ok(Type::Never);
-                    }
-                    verum_ast::ty::PathSegment::Cog => {
-                        // cog as a standalone path is used as a base for qualified access
-                        return Ok(Type::Never);
+                    verum_ast::ty::PathSegment::Super | verum_ast::ty::PathSegment::Cog => {
+                        return Err(TypeError::UnboundVariable {
+                            name: self.path_to_string(path), span,
+                        });
                     }
                     _ => return Err(TypeError::Other("Invalid path".into())),
                 }
@@ -4663,21 +4658,9 @@ impl TypeChecker {
                     .inline_modules
                     .contains_key(&verum_common::Text::from(name))
                 {
-                    // This is an inline module name being used as a namespace
-                    // Return a special marker type that signals this is a module namespace
-                    // The field access handling will navigate into the module
-                    // Module declaration: inline "module name { ... }" or file-based (foo.vr defines module foo) — Inline Modules
-                    Ok(Type::Named {
-                        path: verum_ast::ty::Path {
-                            segments: vec![verum_ast::ty::PathSegment::Name(verum_ast::Ident {
-                                name: format!("__module__{}", name).into(),
-                                span,
-                            })]
-                            .into(),
-                            span,
-                        },
-                        args: List::new(),
-                    })
+                    // A namespace can only participate in a named path. It has
+                    // no runtime value, even when the expected type is inferred.
+                    Err(TypeError::UnboundVariable { name: name.into(), span })
                 } else if let Some(ctor_ty) = self.try_resolve_variant_constructor(name) {
                     // Variant constructor used at value-position
                     // (`Ok(x)`, `Err(e)`, `Some(v)` …).  The
@@ -7008,14 +6991,10 @@ impl TypeChecker {
                             "self keyword requires method context".into(),
                         ));
                     }
-                    verum_ast::ty::PathSegment::Super => {
-                        // super as a standalone path is used as a base for
-                        // field access chains like super.module.function().
-                        return Ok(InferResult::new(Type::Never));
-                    }
-                    verum_ast::ty::PathSegment::Cog => {
-                        // cog as a standalone path is used as a base for qualified access
-                        return Ok(InferResult::new(Type::Never));
+                    verum_ast::ty::PathSegment::Super | verum_ast::ty::PathSegment::Cog => {
+                        return Err(TypeError::UnboundVariable {
+                            name: self.path_to_string(path), span: expr.span,
+                        });
                     }
                     _ => return Err(TypeError::Other("Invalid path".into())),
                 }
@@ -8791,6 +8770,31 @@ impl TypeChecker {
                 })?;
             return self.instantiate_value_scheme(&scheme, span).map(Some);
         }
+        // A synthetic import must not succeed by reusing an unrelated bare
+        // binding. Prove this owner publishes the requested member first.
+        let owner = segments[..segments.len() - 1].join(".");
+        let registered = {
+            let registry = self.module_registry.read();
+            self.get_module_with_path_aliases(&owner, &registry)
+                .is_some_and(|module| module.exports.get(&item_name).is_some())
+        };
+        let inline = self.find_inline_module_for_import(qualified.as_str(), false)
+            .and_then(|(key, name)| self.inline_modules.get(&Text::from(key)).map(|module| (module, name)))
+            .and_then(|(module, name)| module.items.as_ref().map(|items| (items, name)))
+            .is_some_and(|(items, name)| items.iter().any(|item| match &item.kind {
+                verum_ast::ItemKind::Function(f) => f.name.name.as_str() == name,
+                verum_ast::ItemKind::Const(c) => c.name.name.as_str() == name,
+                verum_ast::ItemKind::Static(s) => s.name.name.as_str() == name,
+                verum_ast::ItemKind::Type(t) => t.name.name.as_str() == name,
+                verum_ast::ItemKind::ExternBlock(block) => block.functions.iter().any(|f| f.name.name.as_str() == name),
+                _ => false,
+            }));
+        if !registered && !inline
+            && !self.module_publishes_fn(&owner, item_name.as_str())
+            && !self.module_publishes_type(&owner, item_name.as_str())
+        {
+            return Ok(None);
+        }
         let path = verum_ast::ty::Path::new(
             segments
                 .iter()
@@ -9043,6 +9047,10 @@ impl TypeChecker {
     fn infer_expr_field(&mut self, expr: &Expr) -> Result<InferResult> {
         use ExprKind::*;
         let ExprKind::Field { expr: obj, field } = &expr.kind else { unreachable!() };
+
+        if let Some(path) = self.rooted_field_path(expr) {
+            return self.resolve_multi_segment_path(&path, expr.span);
+        }
 
         if let Some(property) = verum_ast::TypeProperty::from_str(field.name.as_str())
             && let Some(ty) = self.declaration_property_operand(obj)

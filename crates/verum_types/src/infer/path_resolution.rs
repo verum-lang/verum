@@ -820,6 +820,29 @@ impl TypeChecker {
         }
     }
 
+    /// Field syntax retains namespace keywords until the complete qualified
+    /// value can be resolved. A standalone namespace never has a value type.
+    pub(super) fn rooted_field_path(&self, expression: &Expr) -> Option<Path> {
+        use verum_ast::ty::PathSegment;
+        fn collect(expression: &Expr, segments: &mut List<PathSegment>) -> Option<()> {
+            match &expression.kind {
+                ExprKind::Path(path) => segments.extend(path.segments.iter().cloned()),
+                ExprKind::Field { expr, field } => {
+                    collect(expr, segments)?;
+                    segments.push(PathSegment::Name(field.clone()));
+                }
+                _ => return None,
+            }
+            Some(())
+        }
+        let mut segments = List::new();
+        collect(expression, &mut segments)?;
+        if !matches!(segments.first(), Some(PathSegment::Cog | PathSegment::Super)) {
+            return None;
+        }
+        Some(Path::new(segments, expression.span))
+    }
+
     /// Compute the parent module path from the current module path and a path with `super` segments.
     ///
     /// # Arguments
@@ -1144,10 +1167,11 @@ impl TypeChecker {
                     });
                 }
             } else {
-                // Module exists but has no loaded items - this can happen when
-                // module items weren't transferred to inline_modules from the registry.
-                // Return Never (bottom type) to suppress downstream type errors.
-                return Ok(InferResult::new(Type::Never));
+                // A namespace declaration is not a value declaration. Missing
+                // source items must not manufacture an inhabitant of bottom.
+                return Err(TypeError::UnboundVariable {
+                    name: self.path_to_string(path), span,
+                });
             }
         }
 
@@ -1489,53 +1513,6 @@ impl TypeChecker {
             return Ok(InferResult::new(ty));
         }
 
-        // Strategy 4: For paths like std.X.Y, try resolving the last segment as a type
-        // This is a lenient fallback for external module references
-        if segments.len() >= 2 {
-            let last_name = match segments.last() {
-                Some(name) => name,
-                None => {
-                    return Err(TypeError::Other(verum_common::Text::from(
-                        "path has no segments despite len >= 2 check",
-                    )));
-                }
-            };
-            let last_name_str = last_name.as_str();
-            // Try looking up the last segment as a type
-            if let Maybe::Some(ty) = self.ctx.lookup_type(last_name_str) {
-                return Ok(InferResult::new(ty.clone()));
-            }
-            // Try looking up as a variable
-            if let Some(scheme) = self.ctx.env.lookup(last_name_str).cloned() {
-                return Ok(InferResult::new(self.instantiate_value_scheme(&scheme, span)?));
-            }
-            // If the last segment looks like a type name, create a forward reference
-            if last_name_str
-                .chars()
-                .next()
-                .is_some_and(|c| c.is_uppercase())
-            {
-                if is_wellknown_type_name(last_name_str) {
-                    return Ok(InferResult::new(Type::Named {
-                        path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
-                            last_name_str,
-                            span,
-                        )),
-                        args: List::new(),
-                    }));
-                }
-            }
-        }
-
-        // All strategies failed - for common module prefixes, return Never to suppress cascading
-        let first_name = segments.first().map(|s| s.as_str()).unwrap_or("");
-        if matches!(
-            first_name,
-            "std" | "core" | "sys" | "net" | "io" | "fs" | "collections" | "sync" | "async_"
-        ) {
-            return Ok(InferResult::new(Type::Never));
-        }
-
         // Provide helpful error message
         let path_str = self.path_to_string(path);
         let suggestions = self.generate_path_suggestions(&segments);
@@ -1676,25 +1653,9 @@ impl TypeChecker {
             }
         }
 
-        // Fallback: try to resolve the last segment as a type/value name
-        if let Some(PathSegment::Name(ident)) = path.segments.last() {
-            let last_name = ident.name.as_str();
-            if let Maybe::Some(ty) = self.ctx.lookup_type(last_name) {
-                return Ok(InferResult::new(ty.clone()));
-            }
-            if let Some(scheme) = self.ctx.env.lookup(last_name).cloned() {
-                return Ok(InferResult::new(self.instantiate_value_scheme(&scheme, span)?));
-            }
-            if is_wellknown_type_name(last_name) {
-                return Ok(InferResult::new(Type::Named {
-                    path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(last_name, span)),
-                    args: List::new(),
-                }));
-            }
-        }
-
-        // Return Never to suppress downstream errors for unresolved module paths
-        Ok(InferResult::new(Type::Never))
+        Err(TypeError::UnboundVariable {
+            name: self.path_to_string(path), span,
+        })
     }
 
     /// Resolve super path (super::module::item)
@@ -1821,25 +1782,9 @@ impl TypeChecker {
             }
         }
 
-        // Fallback: try to resolve the last segment as a type/value name
-        if let Some(PathSegment::Name(ident)) = path.segments.last() {
-            let last_name = ident.name.as_str();
-            if let Maybe::Some(ty) = self.ctx.lookup_type(last_name) {
-                return Ok(InferResult::new(ty.clone()));
-            }
-            if let Some(scheme) = self.ctx.env.lookup(last_name).cloned() {
-                return Ok(InferResult::new(self.instantiate_value_scheme(&scheme, span)?));
-            }
-            if is_wellknown_type_name(last_name) {
-                return Ok(InferResult::new(Type::Named {
-                    path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(last_name, span)),
-                    args: List::new(),
-                }));
-            }
-        }
-
-        // Return Never to suppress downstream errors for unresolved module paths
-        Ok(InferResult::new(Type::Never))
+        Err(TypeError::UnboundVariable {
+            name: self.path_to_string(path), span,
+        })
     }
 
     /// Resolve self path (self::item or Self::associated)
