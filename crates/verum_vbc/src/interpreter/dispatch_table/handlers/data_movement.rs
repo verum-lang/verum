@@ -122,21 +122,27 @@ pub(in super::super) fn handle_loadt(
         state.set_reg(dst, Value::from_i64(value));
         return Ok(DispatchResult::Continue);
     }
-    // LoadT exposes the historical dispatch head, while CallG/SetCallWitness
-    // now retain structural facts. Keep this projection local to this value
-    // operation rather than destructively summarizing the bytecode decoder.
-    let mut head = &tr;
-    let resolved = loop {
+    fn dispatch_head(module: &crate::module::VbcModule, ty: &crate::types::TypeRef, depth: usize)
+        -> Result<Option<crate::types::TypeId>, String>
+    {
         use crate::types::TypeRef;
-        match head {
-            TypeRef::Concrete(id) | TypeRef::Instantiated { base: id, .. } => break Some(*id),
-            TypeRef::Reference { inner, .. } | TypeRef::Slice(inner) => head = inner,
-            TypeRef::Array { element, .. } => head = element,
-            TypeRef::AssociatedProjection { base, .. } => head = base,
-            TypeRef::Function { .. } | TypeRef::Rank2Function { .. } | TypeRef::Tuple(_) => break Some(crate::types::TypeId::UNIT),
-            _ => break None,
+        if depth >= 64 { return Err("cyclic or excessively deep associated type witness".into()); }
+        match ty {
+            TypeRef::Concrete(id) | TypeRef::Instantiated { base: id, .. } => Ok(Some(*id)),
+            TypeRef::Reference { inner, .. } | TypeRef::Slice(inner) => dispatch_head(module, inner, depth + 1),
+            TypeRef::Array { element, .. } => dispatch_head(module, element, depth + 1),
+            TypeRef::AssociatedProjection { base, qualifier, assoc, args } => {
+                let result = crate::associated_types::resolve_projection(module, base, qualifier.as_ref(), assoc, args)
+                    .map_err(|error| error.to_string())?
+                    .ok_or_else(|| "associated type requires an unambiguous declaration-owned binding and family telescope".to_owned())?;
+                dispatch_head(module, &result, depth + 1)
+            }
+            TypeRef::Function { .. } | TypeRef::Rank2Function { .. } | TypeRef::Tuple(_) => Ok(Some(crate::types::TypeId::UNIT)),
+            _ => Ok(None),
         }
-    };
+    }
+    let resolved = dispatch_head(&state.module, &tr, 0).map_err(|message|
+        InterpreterError::InvalidBytecode { pc: state.pc() as usize, message })?;
     match resolved {
         Some(id) => state.set_reg(dst, Value::from_type(id)),
         None => state.set_reg(dst, Value::nil()),

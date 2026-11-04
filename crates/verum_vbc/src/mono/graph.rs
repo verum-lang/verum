@@ -159,7 +159,12 @@ pub fn type_ref_depth(type_ref: &TypeRef) -> usize {
         }
         TypeRef::Reference { inner, .. } | TypeRef::Slice(inner) => 1 + type_ref_depth(inner),
         TypeRef::Array { element, .. } => 1 + type_ref_depth(element),
-        TypeRef::AssociatedProjection { base, .. } => 1 + type_ref_depth(base),
+        TypeRef::AssociatedProjection { base, qualifier, args, .. } => {
+            1 + std::iter::once(base.as_ref())
+                .chain(args.iter())
+                .chain(qualifier.iter().flat_map(|application| &application.args))
+                .map(type_ref_depth).max().unwrap_or(0)
+        }
         _ => 1,
     }
 }
@@ -225,10 +230,22 @@ fn hash_type_ref<H: Hasher>(type_ref: &TypeRef, hasher: &mut H) {
             7u8.hash(hasher);
             hash_type_ref(element, hasher);
         }
-        TypeRef::AssociatedProjection { base, assoc } => {
+        TypeRef::AssociatedProjection { base, qualifier, assoc, args } => {
             10u8.hash(hasher);
             hash_type_ref(base, hasher);
+            qualifier.is_some().hash(hasher);
+            if let Some(application) = qualifier {
+                application.protocol.hash(hasher);
+                application.args.len().hash(hasher);
+                for arg in &application.args {
+                    hash_type_ref(arg, hasher);
+                }
+            }
             assoc.hash(hasher);
+            args.len().hash(hasher);
+            for arg in args {
+                hash_type_ref(arg, hasher);
+            }
         }
         TypeRef::RecordFieldProjection { owner, ordinal } => {
             12u8.hash(hasher);

@@ -48,10 +48,12 @@ pub fn type_declaration_uses_universes(declaration: &crate::TypeDecl) -> Result<
 /// type slots. Keep these declarations for exact application elaboration.
 pub fn type_declaration_needs_semantic_carrier(declaration: &crate::TypeDecl) -> Result<bool> {
     let universes = type_declaration_uses_universes(declaration)?;
-    Ok(universes
+    let mut scan = SignatureScan::new(false);
+    scan.visit_type_decl(declaration);
+    scan.finish()?;
+    Ok(universes || scan.uses_applied_projection
         || matches!(&declaration.body, crate::TypeDeclBody::Protocol(body) | crate::TypeDeclBody::Coinductive(body)
-            if body.items.iter().any(|item| matches!(&item.kind, crate::decl::ProtocolItemKind::Type { type_params, bounds, where_clause, default_type, .. }
-                if !type_params.is_empty() || !bounds.is_empty() || where_clause.is_some() || default_type.is_some())))
+            if body.items.iter().any(|item| matches!(&item.kind, crate::decl::ProtocolItemKind::Type { .. })))
         || declaration.generics.iter().any(|param| {
             matches!(
                 param.kind,
@@ -182,7 +184,11 @@ fn copy_type_declaration(declaration: &crate::TypeDecl) -> crate::TypeDecl {
 /// Capture the entire declaration signature, with only its executable body
 /// removed. Ordinary signatures retain their established metadata path.
 pub fn source_signature(function: &FunctionDecl, is_method: bool) -> Result<Option<FunctionDecl>> {
-    if !signature_uses_universes(function)? {
+    check_size(function)?;
+    let mut needs = SignatureScan::new(false);
+    needs.visit_function(function);
+    needs.finish()?;
+    if !needs.uses_universes && !needs.uses_applied_projection {
         return Ok(None);
     }
     let mut scan = SignatureScan::new(true);
@@ -253,6 +259,7 @@ fn supported(scan: &SignatureScan, is_method: bool) -> Result<()> {
 struct SignatureScan {
     validate: bool,
     uses_universes: bool,
+    uses_applied_projection: bool,
     universe_in_rank_two: bool,
     rank_two_depth: usize,
     type_bound_depth: usize,
@@ -267,6 +274,7 @@ impl SignatureScan {
         Self {
             validate,
             uses_universes: false,
+            uses_applied_projection: false,
             universe_in_rank_two: false,
             rank_two_depth: 0,
             type_bound_depth: 0,
@@ -622,6 +630,14 @@ impl Visitor for SignatureScan {
         self.scopes.pop();
     }
     fn visit_type(&mut self, ty: &crate::Type) {
+        if self.validate && matches!(&ty.kind, TypeKind::Qualified { trait_ref, .. }
+            if !trait_ref.segments.is_empty()) {
+            self.fail("qualified associated projection requires a typed protocol application carrier");
+        }
+        if matches!(&ty.kind, TypeKind::Generic { base, .. }
+            if matches!(base.kind, TypeKind::AssociatedType { .. } | TypeKind::Qualified { .. })) {
+            self.uses_applied_projection = true;
+        }
         if self.error.is_some() {
             return;
         }

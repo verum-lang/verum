@@ -67,6 +67,7 @@ fn zero_capture_sparse_witnesses_survive_sync_callbacks() {
 fn missing_extra_and_unresolved_lexical_arguments_refuse() {
     for (args, expected) in [
         (vec![TypeRef::Concrete(TypeId::INT), TypeRef::AssociatedProjection {
+            qualifier: None, args: Vec::new(),
             base: Box::new(TypeRef::Concrete(TypeId::INT)), assoc: "Output".into(),
         }], "unresolved closure lexical witness"),
         (vec![], "lexical witness mismatch"),

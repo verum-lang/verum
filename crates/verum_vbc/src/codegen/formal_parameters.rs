@@ -451,8 +451,11 @@ fn remapped_declaration_type(
             TypeRef::Generic(_) | TypeRef::ConstValue(_) => true,
             TypeRef::Reference { inner, .. }
             | TypeRef::Slice(inner)
-            | TypeRef::Array { element: inner, .. }
-            | TypeRef::AssociatedProjection { base: inner, .. } => known(inner, map, depth + 1),
+            | TypeRef::Array { element: inner, .. } => known(inner, map, depth + 1),
+            TypeRef::AssociatedProjection { base, qualifier, args, .. } => known(base, map, depth + 1)
+                && args.iter().all(|argument| known(argument, map, depth + 1))
+                && qualifier.as_ref().is_none_or(|application| id_known(TypeId(application.protocol.0))
+                    && application.args.iter().all(|argument| known(argument, map, depth + 1))),
             TypeRef::Instantiated { base, args } => {
                 id_known(*base) && args.iter().all(|ty| known(ty, map, depth + 1))
             }
@@ -495,8 +498,12 @@ fn resolved_in_scope(ty: &TypeRef, declared_ids: &[TypeParamId], depth: usize, b
         TypeRef::ConstValue(_) => true,
         // The record telescope supplies this binder, not the callable's scope.
         TypeRef::RecordFieldProjection { .. } => false,
-        TypeRef::AssociatedProjection { base, assoc } => !assoc.is_empty()
-            && resolved_in_scope(base, declared_ids, depth + 1, binders),
+        TypeRef::AssociatedProjection { base, qualifier, assoc, args } => !assoc.is_empty()
+            && resolved_in_scope(base, declared_ids, depth + 1, binders)
+            && args.iter().all(|argument| resolved_in_scope(argument, declared_ids, depth + 1, binders))
+            && qualifier.as_ref().is_none_or(|application|
+                concrete(TypeId(application.protocol.0)) && application.args.iter().all(|argument|
+                    resolved_in_scope(argument, declared_ids, depth + 1, binders))),
         TypeRef::Reference { inner, .. } | TypeRef::Slice(inner)
         | TypeRef::Array { element: inner, .. } => resolved_in_scope(inner, declared_ids, depth + 1, binders),
         TypeRef::Tuple(parts) => parts.iter().all(|p| resolved_in_scope(p, declared_ids, depth + 1, binders)),

@@ -3854,7 +3854,7 @@ fn substitute_refinement_binder(
                 // try to resolve it now that Self has been substituted in the base type.
                 // This handles cases like Self.Item where Self = SliceIter<Int> and
                 // Item should resolve to &Int via the Iterator implementation.
-                if name.starts_with("::") && !substituted_args.is_empty() {
+                if name.starts_with("::") && substituted_args.len() == 1 {
                     let assoc_name = &name[2..]; // Strip "::" prefix
                     let base_ty = &substituted_args[0];
 
@@ -3932,7 +3932,7 @@ fn substitute_refinement_binder(
                     Type::Generic {
                         name,
                         args: ctor_args,
-                    } if name.starts_with("::") && !ctor_args.is_empty() => {
+                    } if name.starts_with("::") && ctor_args.len() == 1 => {
                         let assoc_name = &name[2..];
                         let base_ty = &ctor_args[0];
                         if !self.has_unresolved_vars(base_ty) {
@@ -4000,7 +4000,7 @@ fn substitute_refinement_binder(
         match ty {
             Type::Generic { name, args } => {
                 // Check if this is an associated type projection (::AssocName)
-                if name.starts_with("::") {
+                if name.starts_with("::") && args.len() == 1 {
                     let assoc_name: verum_common::Text = name[2..].into(); // Strip "::" prefix
                     // Look up the associated type in the implementation
                     if let Some(assoc_ty) = associated_types.get(&assoc_name) {
@@ -4828,7 +4828,7 @@ fn substitute_refinement_binder(
                 }
                 // Format 2: ::AssocName with base_ty in args[0]
                 // This format is used for T.Item, C.Iter.Item etc.
-                else if name.starts_with("::") && !normalized_args.is_empty() {
+                else if name.starts_with("::") && normalized_args.len() == 1 {
                     let assoc_name = &name[2..]; // Strip "::" prefix
                     let base_ty = &normalized_args[0];
 

@@ -49,6 +49,42 @@ use verum_vbc::module::VbcModule;
 use verum_vbc::types::{TypeKind, TypeRef, VariantKind};
 
 
+fn validate_projection_metadata_carriers(module: &VbcModule) -> Result<(), Text> {
+    fn contains(ty: &TypeRef, depth: usize, qualified_only: bool) -> bool {
+        if depth > 128 { return true; }
+        let nested = |ty: &TypeRef| contains(ty, depth + 1, qualified_only);
+        match ty {
+            TypeRef::AssociatedProjection { base, qualifier, args, .. } => qualifier.is_some()
+                || (!qualified_only && !args.is_empty()) || nested(base) || args.iter().any(nested),
+            TypeRef::Instantiated { args, .. } | TypeRef::Tuple(args) => args.iter().any(nested),
+            TypeRef::Reference { inner, .. } | TypeRef::Slice(inner) | TypeRef::Array { element: inner, .. } => nested(inner),
+            TypeRef::Function { params, return_type, .. } | TypeRef::Rank2Function { params, return_type, .. } => params.iter().any(nested) || nested(return_type),
+            _ => false,
+        }
+    }
+    let check = |ty: &TypeRef, has_source: bool| {
+        if contains(ty, 0, true) {
+            Err(Text::from("qualified associated projection requires a typed metadata carrier; publication refused"))
+        } else if !has_source && contains(ty, 0, false) {
+            Err(Text::from("applied associated projection lacks its declaration-owned source signature; publication refused"))
+        } else { Ok(()) }
+    };
+    for function in &module.functions {
+        for ty in function.type_references() { check(ty, function.source_signature.is_some())?; }
+    }
+    for descriptor in &module.types {
+        let types = descriptor.fields.iter().flat_map(|field| std::iter::once(&field.type_ref).chain(field.declaration_type.iter()))
+            .chain(descriptor.variants.iter().flat_map(|variant| variant.payload.iter().chain(variant.fields.iter().map(|field| &field.type_ref))))
+            .chain(descriptor.alias_target.iter());
+        for ty in types { check(ty, descriptor.source_declaration.is_some())?; }
+        // An owner's type declaration is not its implementations' local scope.
+        for implementation in &descriptor.protocols {
+            for (_, body) in &implementation.associated_types { check(body, false)?; }
+        }
+    }
+    Ok(())
+}
+
 /// Decode a full declaration policy. Missing/invalid scoped evidence stays Unknown;
 /// neither the coarse visibility nor the importing module can replace it.
 fn field_declared_visibility(
@@ -169,6 +205,7 @@ pub fn archive_to_core_metadata(archive: &VbcArchive) -> Result<CoreMetadata, Te
         if module.header.version_minor < 33 {
             return Err(format!("module {} predates declaration-owned protocol dispatch; rebuild the archive", entry.name).into());
         }
+        validate_projection_metadata_carriers(&module)?;
         // Absence is evidence too: a copy without a declaration environment
         // cannot borrow one from another archive entry during map merging.
         let mut owners = Vec::new();
@@ -2081,12 +2118,13 @@ fn render_type_ref(
         // Associated-type projection `F.Output` → `::Output<F>` (parseable back
         // into `Type::Generic { name: "::Output", args: [F] }` by
         // parse_descriptor_type_string).
-        TypeRef::AssociatedProjection { base, assoc } => {
-            format!(
-                "::{}<{}>",
-                assoc,
-                render_type_ref(base, declared_name, param_id_to_name)
-            )
+        TypeRef::AssociatedProjection { base, qualifier, assoc, args } => {
+            let mut arguments = vec![render_type_ref(base, declared_name, param_id_to_name)];
+            arguments.extend(args.iter().map(|ty| render_type_ref(ty, declared_name, param_id_to_name)));
+            // Publication rejects qualified projections before this legacy
+            // textual channel can erase their protocol selection.
+            debug_assert!(qualifier.is_none());
+            format!("::{assoc}<{}>", arguments.join(", "))
         }
         // CONST-GENERIC-VALUE-CARRY-1: const-generic VALUE argument renders
         // as its literal so `StackAllocator<256>` round-trips through the

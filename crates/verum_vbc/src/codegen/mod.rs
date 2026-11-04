@@ -18321,6 +18321,7 @@ impl VbcCodegen {
         nominal_defaults: &[TypeId],
     ) -> CodegenResult<TypeRef> {
         use verum_ast::ty::{PathSegment, TypeKind};
+        associated_types::require_projection_application_evidence(ty)?;
         // Generic instantiation: recurse into args with the same map
         // so nested type-param references (`Result<T, E>` from
         // `type IoResult<T> is Result<T, StreamError>;`) preserve
@@ -18358,7 +18359,23 @@ impl VbcCodegen {
                     args: arg_refs,
                 });
             }
-            return Ok(base_ref);
+            if let TypeRef::AssociatedProjection { base, qualifier, assoc, args: previous } = base_ref {
+                if !previous.is_empty() {
+                    return Err(CodegenError::with_span(CodegenErrorKind::InvalidSourceSignature(
+                        "associated family cannot be applied twice".into()), ty.span));
+                }
+                let arguments = args.iter().map(|argument| match argument {
+                    verum_ast::ty::GenericArg::Type(ty) => self.resolve_type_ref_in_scope(
+                        ty, generic_param_map, preserve_refs, declaration_scope, array_count,
+                        self_type, values, nominal_defaults),
+                    verum_ast::ty::GenericArg::Const(expression) => values.argument(expression, generic_param_map),
+                    _ => Err(CodegenError::with_span(CodegenErrorKind::InvalidSourceSignature(
+                        "associated argument lacks an exact runtime witness".into()), ty.span)),
+                }).collect::<CodegenResult<_>>()?;
+                return Ok(TypeRef::AssociatedProjection { base, qualifier, assoc, args: arguments });
+            }
+            return Err(CodegenError::with_span(CodegenErrorKind::InvalidSourceSignature(
+                "type application has no declared constructor".into()), ty.span));
         }
         // T1033 (ARCHIVE-DROPS-REFERENCE-QUALIFIERS-1) — the SIGNATURE
         // question, asked before the layout one below.  A protocol
@@ -18656,7 +18673,7 @@ impl VbcCodegen {
                 _ => TypeRef::Concrete(crate::types::TypeId::UNIT),
             };
             return Ok(TypeRef::AssociatedProjection {
-                base: Box::new(base_ref),
+                base: Box::new(base_ref), qualifier: None, args: Vec::new(),
                 assoc: assoc_str,
             });
         }
@@ -18781,6 +18798,7 @@ impl VbcCodegen {
     /// This enables storing return type information for method dispatch prefixing.
     fn ast_type_to_type_ref(&self, ty: &verum_ast::ty::Type) -> CodegenResult<TypeRef> {
         use verum_ast::ty::TypeKind;
+        associated_types::require_projection_application_evidence(ty)?;
 
         Ok(match &ty.kind {
             TypeKind::Int => TypeRef::Concrete(TypeId::INT),
@@ -18826,8 +18844,24 @@ impl VbcCodegen {
                         base: base_id,
                         args: arg_refs,
                     }
+                } else if let TypeRef::AssociatedProjection { base, qualifier, assoc, args: previous } = base_ref {
+                    if !previous.is_empty() {
+                        return Err(CodegenError::with_span(CodegenErrorKind::InvalidSourceSignature(
+                            "associated family cannot be applied twice".into()), ty.span));
+                    }
+                    let arguments = args.iter().map(|argument| match argument {
+                        verum_ast::ty::GenericArg::Type(ty) => self.ast_type_to_type_ref(ty),
+                        verum_ast::ty::GenericArg::Const(expression) => Self::render_const_generic_arg(expression)
+                            .and_then(|value| value.parse::<i64>().ok()).map(TypeRef::ConstValue)
+                            .ok_or_else(|| CodegenError::with_span(CodegenErrorKind::InvalidSourceSignature(
+                                "associated value argument is not an exact scalar".into()), ty.span)),
+                        _ => Err(CodegenError::with_span(CodegenErrorKind::InvalidSourceSignature(
+                            "associated argument lacks an exact runtime witness".into()), ty.span)),
+                    }).collect::<CodegenResult<_>>()?;
+                    TypeRef::AssociatedProjection { base, qualifier, assoc, args: arguments }
                 } else {
-                    base_ref
+                    return Err(CodegenError::with_span(CodegenErrorKind::InvalidSourceSignature(
+                        "type application has no declared constructor".into()), ty.span));
                 }
             }
             // A Tier-2 raw reference IS a machine word — its descriptor
@@ -18936,6 +18970,7 @@ impl VbcCodegen {
             // re-generalized, to an independent generic param that defaulted
             // to Int at call sites (async future_poll_sync suite).
             TypeKind::AssociatedType { base, assoc } => TypeRef::AssociatedProjection {
+                qualifier: None, args: Vec::new(),
                 base: Box::new(self.ast_type_to_type_ref(base)?),
                 assoc: assoc.name.to_string(),
             },

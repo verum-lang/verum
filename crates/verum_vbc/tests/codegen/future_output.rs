@@ -87,6 +87,7 @@ fn growing_projection_cycle_has_a_recursion_bound() {
     // Each expansion grows the name, so exact-cycle detection alone is
     // insufficient for this descriptor graph.
     descriptor.protocols[0].associated_types[0].1 = TypeRef::AssociatedProjection {
+            qualifier: None, args: Vec::new(),
         base: Box::new(TypeRef::Instantiated {
             base: id,
             args: [TypeRef::Instantiated {

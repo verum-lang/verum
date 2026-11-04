@@ -6625,7 +6625,7 @@ impl ProtocolChecker {
                 // Deferred projections are created when A.Item is encountered with A being
                 // a type parameter. After substitution, if the base type is now concrete,
                 // we should resolve the projection.
-                if name.starts_with("::") && !substituted_args.is_empty() {
+                if name.starts_with("::") && substituted_args.len() == 1 {
                     let assoc_name: Text = name.trim_start_matches("::");
                     let base_type = &substituted_args[0];
 
@@ -7922,7 +7922,7 @@ impl ProtocolChecker {
                 let substituted = self.substitute_impl_type_params(assoc_ty, impl_, ty);
 
                 // Check if the substituted type is a projection (still needs resolution)
-                let is_projection = matches!(&substituted, Type::Generic { name, args } if name.as_str().starts_with("::") && !args.is_empty());
+                let is_projection = matches!(&substituted, Type::Generic { name, args } if name.as_str().starts_with("::") && args.len() == 1);
 
                 if is_projection {
                     // Try to recursively resolve the projection
@@ -8420,7 +8420,7 @@ impl ProtocolChecker {
     fn try_resolve_projection_type(&self, ty: &Type, _original_assoc_name: &Text) -> Option<Type> {
         // Check if this is a projection type (::AssocName format)
         if let Type::Generic { name, args } = ty {
-            if name.as_str().starts_with("::") && !args.is_empty() {
+            if name.as_str().starts_with("::") && args.len() == 1 {
                 let assoc_name = &name.as_str()[2..]; // Strip "::" prefix
                 let base_ty = &args[0];
 
@@ -8439,7 +8439,7 @@ impl ProtocolChecker {
     /// we get `::Item[ListIter<Int>]`. This function resolves it to `&Int`.
     pub fn normalize_projection_type(&self, ty: &Type) -> Type {
         match ty {
-            Type::Generic { name, args } if name.as_str().starts_with("::") && !args.is_empty() => {
+            Type::Generic { name, args } if name.as_str().starts_with("::") && args.len() == 1 => {
                 // This is a projection type - try to resolve it
                 let assoc_name = &name.as_str()[2..]; // Strip "::" prefix
                 let base_ty = &args[0];
@@ -12091,7 +12091,7 @@ impl ProtocolChecker {
                     .collect();
 
                 // Check if this is a projection type (::AssocName format)
-                if name.as_str().starts_with("::") && !substituted_args.is_empty() {
+                if name.as_str().starts_with("::") && substituted_args.len() == 1 {
                     let assoc_name = &name.as_str()[2..]; // Strip "::" prefix
                     let base_ty = &substituted_args[0];
 

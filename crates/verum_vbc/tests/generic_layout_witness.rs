@@ -556,6 +556,7 @@ fn generic_associated_property_keeps_its_projection_through_wire() {
             .find(|f| module.get_string(f.name) == Some("measure"))
             .expect("measure");
         let projection = TypeRef::AssociatedProjection {
+            qualifier: None, args: Vec::new(),
             base: Box::new(TypeRef::Generic(TypeParamId(0))),
             assoc: "Item".into(),
         };

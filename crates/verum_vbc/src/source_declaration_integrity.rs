@@ -450,7 +450,13 @@ fn validate_record_projections(descriptor: &TypeDescriptor) -> Result<(), Text> 
                 pending.push((inner.as_ref(), scope));
             }
             TypeRef::Array { element, .. } => pending.push((element.as_ref(), scope)),
-            TypeRef::AssociatedProjection { base, .. } => pending.push((base.as_ref(), scope)),
+            TypeRef::AssociatedProjection { base, qualifier, args, .. } => {
+                pending.push((base.as_ref(), scope));
+                pending.extend(args.iter().map(|argument| (argument, scope)));
+                if let Some(application) = qualifier {
+                    pending.extend(application.args.iter().map(|argument| (argument, scope)));
+                }
+            },
             TypeRef::Concrete(_) | TypeRef::Generic(_) | TypeRef::ConstValue(_) => {}
         }
     }
@@ -804,8 +810,8 @@ fn projection_pattern_matches(
                 (ProjectionShape::Slice, TypeRef::Slice(inner)) => actual.push(inner.as_ref()),
                 (
                     ProjectionShape::Associated(expected),
-                    TypeRef::AssociatedProjection { base, assoc },
-                ) if expected.as_str() == assoc => actual.push(base.as_ref()),
+                    TypeRef::AssociatedProjection { base, qualifier: None, assoc, args },
+                ) if expected.as_str() == assoc && args.is_empty() => actual.push(base.as_ref()),
                 _ => return false,
             }
             children.len() == actual.len()

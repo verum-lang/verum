@@ -598,7 +598,8 @@ impl VbcCodegen {
             TypeRef::RecordFieldProjection { owner, ordinal } => TypeRef::RecordFieldProjection {
                 owner: *owner, ordinal: *ordinal,
             },
-            TypeRef::AssociatedProjection { base, assoc } => {
+            TypeRef::AssociatedProjection { base, qualifier, assoc, args } => {
+                if qualifier.is_some() || !args.is_empty() { return None; }
                 let base = self.resolve_declared_projections(base, depth + 1)?;
                 let (owner, args) = match &base {
                     TypeRef::Concrete(id) => (*id, &[][..]),
@@ -667,7 +668,9 @@ fn fully_bound_at(ty: &TypeRef, bindings: &TypeSubstitution, depth: u32) -> bool
             params.iter().all(|ty| fully_bound_at(ty, bindings, depth))
                 && fully_bound_at(return_type, bindings, depth)
         }
-        TypeRef::AssociatedProjection { base, .. } => fully_bound_at(base, bindings, depth),
+        TypeRef::AssociatedProjection { base, qualifier, args, .. } => fully_bound_at(base, bindings, depth)
+            && args.iter().all(|argument| fully_bound_at(argument, bindings, depth))
+            && qualifier.as_ref().is_none_or(|application| application.args.iter().all(|argument| fully_bound_at(argument, bindings, depth))),
         _ => true,
     }
 }

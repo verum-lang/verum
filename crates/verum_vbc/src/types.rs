@@ -634,6 +634,10 @@ pub enum TypeRef {
     /// future_poll_sync conformance suite).  `base` is the projected-over
     /// type (usually a `Generic` param), `assoc` the associated-type name.
     AssociatedProjection {
+        /// Selected declaration, when the source or checked bound identifies it.
+        qualifier: Option<ProtocolApplication>,
+        /// Applied local family arguments in their declaration order.
+        args: Vec<TypeRef>,
         /// The base type the projection is taken over (the `F` in `F.Output`).
         base: Box<TypeRef>,
         /// The associated-type name (e.g. `"Output"`).
@@ -661,6 +665,15 @@ pub enum TypeRef {
     /// or a projection from an arbitrary runtime receiver. `ordinal` is the
     /// declaration ordinal (not a global field-name index).
     RecordFieldProjection { owner: TypeId, ordinal: u32 },
+}
+
+pub(crate) const MAX_TYPE_APPLICATION_ARGUMENTS: usize = 64;
+
+/// A complete protocol application; arguments remain typed values or types.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ProtocolApplication {
+    pub protocol: ProtocolId,
+    pub args: Vec<TypeRef>,
 }
 
 // Non-self-describing serializers identify variants by their ordinal, ignoring
@@ -704,8 +717,13 @@ impl TypeRef {
                 params.iter().any(Self::contains_record_field_projection)
                     || return_type.contains_record_field_projection(),
             Self::Reference { inner, .. } | Self::Slice(inner)
-            | Self::Array { element: inner, .. }
-            | Self::AssociatedProjection { base: inner, .. } => inner.contains_record_field_projection(),
+            | Self::Array { element: inner, .. } => inner.contains_record_field_projection(),
+            Self::AssociatedProjection { base, qualifier, args, .. } => {
+                base.contains_record_field_projection()
+                    || args.iter().any(Self::contains_record_field_projection)
+                    || qualifier.as_ref().is_some_and(|application|
+                        application.args.iter().any(Self::contains_record_field_projection))
+            }
         }
     }
 
@@ -758,7 +776,9 @@ impl TypeRef {
             TypeRef::Slice(inner) => inner.is_generic(),
             // A projection `F.Output` is generic iff its base is (it references
             // the type param `F`).
-            TypeRef::AssociatedProjection { base, .. } => base.is_generic(),
+            TypeRef::AssociatedProjection { base, qualifier, args, .. } => base.is_generic()
+                || args.iter().any(Self::is_generic)
+                || qualifier.as_ref().is_some_and(|application| application.args.iter().any(Self::is_generic)),
             // A carried const VALUE is fully concrete.
             TypeRef::ConstValue(_) => false,
             TypeRef::RecordFieldProjection { .. } => true,

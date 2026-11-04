@@ -3364,7 +3364,7 @@ impl Unifier {
             // If projection base contains type variables, defer by allowing unification
             (Generic { name, args }, other) | (other, Generic { name, args })
                 if name.as_str().starts_with("::")
-                    && !args.is_empty()
+                    && args.len() == 1
                     && Self::has_type_vars(&args[0]) =>
             {
                 // The projection's base type is not yet fully resolved.
@@ -3404,7 +3404,7 @@ impl Unifier {
             // before.
             (Generic { name, args }, other)
                 if name.as_str().starts_with("::")
-                    && !args.is_empty()
+                    && args.len() == 1
                     && !Self::has_type_vars(&args[0])
                     && self.projection_resolver.is_some() =>
             {
@@ -3423,7 +3423,7 @@ impl Unifier {
             }
             (other, Generic { name, args })
                 if name.as_str().starts_with("::")
-                    && !args.is_empty()
+                    && args.len() == 1
                     && !Self::has_type_vars(&args[0])
                     && self.projection_resolver.is_some() =>
             {

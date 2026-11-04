@@ -776,6 +776,9 @@ impl VbcLinker {
             crate::source_declaration_integrity::validate_impl_function_bounds(proto_impl, &self.out.strings)
                 .map_err(|_| LinkError::InvalidImplementationBound)?;
             proto_impl.protocol = remap.map_protocol(proto_impl.protocol)?;
+            for (_, binding) in &mut proto_impl.associated_types {
+                *binding = self.remap_type_ref(binding, remap)?;
+            }
             // methods: stored as Vec<u32> of FunctionId.0 values.
             for mid in proto_impl.methods.iter_mut() {
                 *mid = remap.map_function(FunctionId(*mid))?.0;
@@ -893,9 +896,16 @@ impl VbcLinker {
             TypeRef::Slice(inner) => {
                 TypeRef::Slice(Box::new(self.remap_type_ref(inner, remap)?))
             }
-            TypeRef::AssociatedProjection { base, assoc } => TypeRef::AssociatedProjection {
+            TypeRef::AssociatedProjection { base, qualifier, assoc, args } => TypeRef::AssociatedProjection {
                 base: Box::new(self.remap_type_ref(base, remap)?),
+                qualifier: qualifier.as_ref().map(|application| {
+                    Ok(crate::types::ProtocolApplication {
+                        protocol: remap.map_protocol(application.protocol)?,
+                        args: application.args.iter().map(|ty| self.remap_type_ref(ty, remap)).collect::<Result<_, LinkError>>()?,
+                    })
+                }).transpose()?,
                 assoc: assoc.clone(),
+                args: args.iter().map(|ty| self.remap_type_ref(ty, remap)).collect::<Result<_, _>>()?,
             },
             // Const-generic VALUE — no ids to remap.
             TypeRef::ConstValue(v) => TypeRef::ConstValue(*v),

@@ -291,8 +291,19 @@ impl<'a> Validator<'a> {
             TypeRef::Slice(inner) => {
                 self.validate_type_ref_in_record(inner, depth + 1, record_field);
             }
-            TypeRef::AssociatedProjection { base, .. } => {
+            TypeRef::AssociatedProjection { base, qualifier, args, assoc } => {
                 self.validate_type_ref_in_record(base, depth + 1, record_field);
+                if assoc.is_empty() || args.len() > crate::types::MAX_TYPE_APPLICATION_ARGUMENTS {
+                    self.errors.push(VbcError::Deserialization("invalid associated projection application".into()));
+                }
+                for argument in args { self.validate_type_ref_in_record(argument, depth + 1, record_field); }
+                if let Some(application) = qualifier {
+                    self.validate_type_ref_in_record(&TypeRef::Concrete(TypeId(application.protocol.0)), depth + 1, record_field);
+                    if application.args.len() > crate::types::MAX_TYPE_APPLICATION_ARGUMENTS {
+                        self.errors.push(VbcError::Deserialization("protocol application exceeds argument budget".into()));
+                    }
+                    for argument in &application.args { self.validate_type_ref_in_record(argument, depth + 1, record_field); }
+                }
             }
             TypeRef::ConstValue(_) => {
                 // Const-generic VALUE — nothing to validate (no ids).

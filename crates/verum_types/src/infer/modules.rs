@@ -18770,7 +18770,7 @@ impl TypeChecker {
                 // Resolve top-level associated type projections (e.g., ::Item[ListIter<Int>] → &Int)
                 // Only attempt for direct projection types (not deeply nested) to avoid stack overflow
                 if let Type::Generic { name, args } = &current_ty {
-                    if name.as_str().starts_with("::") && !args.is_empty() {
+                    if name.as_str().starts_with("::") && args.len() == 1 {
                         let assoc_name = &name.as_str()[2..];
                         if let Some(resolved) =
                             tc.try_resolve_associated_type_projection(&args[0], assoc_name)

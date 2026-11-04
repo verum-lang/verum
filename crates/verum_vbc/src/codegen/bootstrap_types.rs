@@ -70,8 +70,15 @@ fn type_ids(ty: &TypeRef, ids: &mut Vec<TypeId>) {
         }
         TypeRef::Reference { inner, .. }
         | TypeRef::Slice(inner)
-        | TypeRef::Array { element: inner, .. }
-        | TypeRef::AssociatedProjection { base: inner, .. } => type_ids(inner, ids),
+        | TypeRef::Array { element: inner, .. } => type_ids(inner, ids),
+        TypeRef::AssociatedProjection { base, qualifier, args, .. } => {
+            type_ids(base, ids);
+            for argument in args { type_ids(argument, ids); }
+            if let Some(application) = qualifier {
+                ids.push(TypeId(application.protocol.0));
+                for argument in &application.args { type_ids(argument, ids); }
+            }
+        },
         TypeRef::Tuple(elements) => {
             for element in elements {
                 type_ids(element, ids);

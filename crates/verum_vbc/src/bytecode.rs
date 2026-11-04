@@ -3063,7 +3063,8 @@ fn encode_optional_reg(reg: Option<Reg>, output: &mut Vec<u8>) {
 /// - 0x07: Slice(inner)
 /// - 0x08: rejected legacy unscoped rank-2 function
 /// - 0x0C: scoped Rank2Function { type_param_count, params, return_type, contexts }
-/// - 0x09: AssociatedProjection { base, assoc }
+/// - 0x09: Legacy plain associated projection (read-only)
+/// - 0x0E: AssociatedProjection { base, qualifier, assoc, args }
 /// - 0x0A: ConstValue(i64) — const-generic value argument
 #[inline]
 pub(crate) fn encode_type_ref(type_ref: &TypeRef, output: &mut Vec<u8>) {
@@ -3144,12 +3145,20 @@ pub(crate) fn encode_type_ref(type_ref: &TypeRef, output: &mut Vec<u8>) {
                 encode_varint(ctx.0 as u64, output);
             }
         }
-        TypeRef::AssociatedProjection { base, assoc } => {
-            output.push(0x09);
+        TypeRef::AssociatedProjection { base, qualifier, assoc, args } => {
+            output.push(0x0E);
             encode_type_ref(base, output);
+            output.push(u8::from(qualifier.is_some()));
+            if let Some(application) = qualifier {
+                encode_varint(u64::from(application.protocol.0), output);
+                encode_varint(application.args.len() as u64, output);
+                for argument in &application.args { encode_type_ref(argument, output); }
+            }
             let bytes = assoc.as_bytes();
             encode_varint(bytes.len() as u64, output);
             output.extend_from_slice(bytes);
+            encode_varint(args.len() as u64, output);
+            for argument in args { encode_type_ref(argument, output); }
         }
         TypeRef::ConstValue(v) => {
             // CONST-GENERIC-VALUE-CARRY-1: const-generic value argument.
@@ -6030,7 +6039,8 @@ fn decode_extended_reg_operands(
 /// - 0x07: Slice(inner)
 /// - 0x08: rejected legacy unscoped rank-2 function
 /// - 0x0C: scoped Rank2Function { type_param_count, params, return_type, contexts }
-/// - 0x09: AssociatedProjection { base, assoc }
+/// - 0x09: Legacy plain associated projection (read-only)
+/// - 0x0E: AssociatedProjection { base, qualifier, assoc, args }
 /// - 0x0A: ConstValue(i64) — const-generic value argument
 pub(crate) fn decode_type_ref(data: &[u8], offset: &mut usize) -> VbcResult<TypeRef> {
     use smallvec::SmallVec;
@@ -6157,7 +6167,32 @@ pub(crate) fn decode_type_ref(data: &[u8], offset: &mut usize) -> VbcResult<Type
             }
             let assoc = String::from_utf8_lossy(&data[*offset..*offset + len]).into_owned();
             *offset += len;
-            Ok(TypeRef::AssociatedProjection { base, assoc })
+            Ok(TypeRef::AssociatedProjection { base, assoc, qualifier: None, args: Vec::new() })
+        }
+        0x0E => {
+            let base = Box::new(decode_type_ref(data, offset)?);
+            let qualifier = match decode_u8(data, offset)? {
+                0 => None,
+                1 => {
+                    let protocol = u32::try_from(decode_varint(data, offset)?)
+                        .map_err(|_| VbcError::InvalidTypeRef { offset: *offset as u32, discriminant })?;
+                    Some(crate::types::ProtocolApplication {
+                        protocol: crate::types::ProtocolId(protocol),
+                        args: decode_application_arguments(data, offset)?,
+                    })
+                }
+                _ => return Err(VbcError::InvalidTypeRef { offset: *offset as u32, discriminant }),
+            };
+            let length = usize::try_from(decode_varint(data, offset)?)
+                .map_err(|_| VbcError::InvalidTypeRef { offset: *offset as u32, discriminant })?;
+            let end = offset.checked_add(length).filter(|end| *end <= data.len())
+                .ok_or(VbcError::InvalidTypeRef { offset: *offset as u32, discriminant })?;
+            let assoc = std::str::from_utf8(&data[*offset..end])
+                .map_err(|_| VbcError::InvalidTypeRef { offset: *offset as u32, discriminant })?.to_owned();
+            *offset = end;
+            let args = decode_application_arguments(data, offset)?;
+            if assoc.is_empty() { return Err(VbcError::InvalidTypeRef { offset: *offset as u32, discriminant }); }
+            Ok(TypeRef::AssociatedProjection { base, qualifier, assoc, args })
         }
         0x0A => {
             // ConstValue(i64) — CONST-GENERIC-VALUE-CARRY-1
@@ -6176,6 +6211,16 @@ pub(crate) fn decode_type_ref(data: &[u8], offset: &mut usize) -> VbcResult<Type
             discriminant,
         }),
     }
+}
+
+fn decode_application_arguments(data: &[u8], offset: &mut usize) -> VbcResult<Vec<TypeRef>> {
+    let count = decode_varint(data, offset)?;
+    if count > crate::types::MAX_TYPE_APPLICATION_ARGUMENTS as u64 {
+        return Err(VbcError::TableTooLarge { field: "type_application_args",
+            count: count.min(u64::from(u32::MAX)) as u32,
+            max: crate::types::MAX_TYPE_APPLICATION_ARGUMENTS as u32 });
+    }
+    (0..count).map(|_| decode_type_ref(data, offset)).collect()
 }
 
 /// Decodes a binary integer instruction.

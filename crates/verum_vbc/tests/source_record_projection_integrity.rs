@@ -103,6 +103,7 @@ fn nested_types(inner: TypeRef) -> Vec<TypeRef> {
         },
         TypeRef::Slice(Heap::new(inner.clone())),
         TypeRef::AssociatedProjection {
+            qualifier: None, args: Vec::new(),
             base: Heap::new(inner),
             assoc: "Item".into(),
         },
@@ -148,6 +149,7 @@ fn record_projection_accepts_only_its_preceding_universe_binder_through_nested_t
 fn a_nominal_path_cannot_be_replaced_by_a_record_projection() {
     let mut module = fixture("type Carrier is { carrier: Type, value: carrier.Item };");
     module.types[0].fields[1].declaration_type = Some(TypeRef::AssociatedProjection {
+            qualifier: None, args: Vec::new(),
         base: Heap::new(projection()),
         assoc: "Item".into(),
     });

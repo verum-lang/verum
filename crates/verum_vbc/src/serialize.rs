@@ -25,7 +25,7 @@ use serde::Serialize;
 
 use crate::compression::{CompressionOptions, compress};
 use crate::encoding::*;
-use crate::error::VbcResult;
+use crate::error::{VbcError, VbcResult};
 use crate::format::{
     CompressionAlgorithm, HEADER_SIZE, MAGIC, VERSION_MAJOR, VERSION_MINOR, VbcFlags, VbcHeader,
 };
@@ -649,12 +649,28 @@ impl Serializer {
                     encode_u32(ctx.0, &mut self.output);
                 }
             }
-            TypeRef::AssociatedProjection { base, assoc } => {
-                self.output.push(0x0A);
+            TypeRef::AssociatedProjection { base, qualifier, assoc, args } => {
+                if assoc.is_empty() || args.len() > crate::types::MAX_TYPE_APPLICATION_ARGUMENTS
+                    || qualifier.as_ref().is_some_and(|application| application.args.len() > crate::types::MAX_TYPE_APPLICATION_ARGUMENTS) {
+                    return Err(VbcError::Serialization("invalid associated projection application".into()));
+                }
+                self.output.push(0x0E);
                 self.serialize_type_ref(base)?;
+                self.output.push(u8::from(qualifier.is_some()));
+                if let Some(application) = qualifier {
+                    encode_u32(application.protocol.0, &mut self.output);
+                    encode_varint(application.args.len() as u64, &mut self.output);
+                    for argument in &application.args {
+                        self.serialize_type_ref(argument)?;
+                    }
+                }
                 let bytes = assoc.as_bytes();
                 encode_varint(bytes.len() as u64, &mut self.output);
                 self.output.extend_from_slice(bytes);
+                encode_varint(args.len() as u64, &mut self.output);
+                for argument in args {
+                    self.serialize_type_ref(argument)?;
+                }
             }
             TypeRef::RecordFieldProjection { owner, ordinal } => {
                 self.output.push(0x0D);

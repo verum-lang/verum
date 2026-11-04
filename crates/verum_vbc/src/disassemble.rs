@@ -218,8 +218,14 @@ fn format_type_ref(module: &VbcModule, tr: &TypeRef) -> String {
         TypeRef::Slice(inner) => {
             format!("[{}]", format_type_ref(module, inner))
         }
-        TypeRef::AssociatedProjection { base, assoc } => {
-            format!("{}.{}", format_type_ref(module, base), assoc)
+        TypeRef::AssociatedProjection { base, qualifier, assoc, args } => {
+            let render = |ty: &TypeRef| format_type_ref(module, ty);
+            let suffix = |arguments: &[TypeRef]| if arguments.is_empty() { String::new() }
+                else { format!("<{}>", arguments.iter().map(render).collect::<Vec<_>>().join(", ")) };
+            let base = if let Some(application) = qualifier {
+                format!("<{} as {}{}>", render(base), format_type_id(module, TypeId(application.protocol.0)), suffix(&application.args))
+            } else { render(base) };
+            format!("{base}.{assoc}{}", suffix(args))
         }
         // Const-generic VALUE argument — renders as its literal.
         TypeRef::ConstValue(v) => v.to_string(),

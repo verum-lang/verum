@@ -194,7 +194,14 @@ pub fn rewrite_type_ref_ids(ty: &mut crate::types::TypeRef, remap: &dyn IdRemap)
         TypeRef::Reference { inner, .. } | TypeRef::Slice(inner) => rewrite_type_ref_ids(inner, remap),
         TypeRef::Tuple(elements) => { for element in elements { rewrite_type_ref_ids(element, remap); } }
         TypeRef::Array { element, .. } => rewrite_type_ref_ids(element, remap),
-        TypeRef::AssociatedProjection { base, .. } => rewrite_type_ref_ids(base, remap),
+        TypeRef::AssociatedProjection { base, qualifier, args, .. } => {
+            rewrite_type_ref_ids(base, remap);
+            if let Some(application) = qualifier {
+                application.protocol = remap.map_protocol(application.protocol);
+                for arg in &mut application.args { rewrite_type_ref_ids(arg, remap); }
+            }
+            for arg in args { rewrite_type_ref_ids(arg, remap); }
+        }
         TypeRef::Generic(_) | TypeRef::ConstValue(_) => {}
     }
 }

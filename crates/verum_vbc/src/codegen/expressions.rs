@@ -17522,7 +17522,9 @@ impl VbcCodegen {
                 }
                 TypeRef::Reference { inner, .. } | TypeRef::Slice(inner) => has_shadow(inner),
                 TypeRef::Array { element, .. } => has_shadow(element),
-                TypeRef::AssociatedProjection { base, .. } => has_shadow(base),
+                TypeRef::AssociatedProjection { base, qualifier, args, .. } => has_shadow(base)
+                    || args.iter().any(has_shadow)
+                    || qualifier.as_ref().is_some_and(|application| application.args.iter().any(has_shadow)),
                 TypeRef::Function {
                     params,
                     return_type,

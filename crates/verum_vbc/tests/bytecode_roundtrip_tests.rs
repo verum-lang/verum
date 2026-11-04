@@ -888,6 +888,7 @@ fn test_roundtrip_call_g_associated_projection_type_arg() {
         type_args: vec![TypeRef::Instantiated {
             base: TypeId(515),
             args: vec![TypeRef::AssociatedProjection {
+            qualifier: None, args: Vec::new(),
                 base: Box::new(TypeRef::Generic(TypeParamId(0))),
                 assoc: "Output".to_string(),
             }],

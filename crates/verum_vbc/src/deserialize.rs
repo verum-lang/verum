@@ -293,7 +293,7 @@ const MAX_FIELDS_PER_VARIANT: usize = 1024;
 /// carries varint-driven counts for instantiation args, function
 /// params, and context names — all reachable from hostile
 /// bytecode in arbitrarily-deep type expressions.
-const MAX_TYPE_REF_INSTANTIATION_ARGS: usize = 64;
+const MAX_TYPE_REF_INSTANTIATION_ARGS: usize = crate::types::MAX_TYPE_APPLICATION_ARGUMENTS;
 const MAX_FN_TYPE_REF_PARAMS: usize = 256;
 const MAX_FN_TYPE_REF_CONTEXTS: usize = 32;
 
@@ -1460,7 +1460,28 @@ impl<'a> Deserializer<'a> {
      }
      let assoc = String::from_utf8_lossy(&self.data[self.offset..self.offset + len]).into_owned();
      self.offset += len;
-     Ok(TypeRef::AssociatedProjection { base, assoc })
+     Ok(TypeRef::AssociatedProjection { base, assoc, qualifier: None, args: Vec::new() })
+ }
+ 0x0E if self.header.as_ref().is_some_and(|header| header.version_minor >= 38) => {
+     let base = Box::new(self.parse_type_ref()?);
+     let qualifier = match decode_u8(self.data, &mut self.offset)? {
+         0 => None,
+         1 => Some(crate::types::ProtocolApplication {
+             protocol: ProtocolId(decode_u32(self.data, &mut self.offset)?),
+             args: self.parse_application_arguments()?,
+         }),
+         _ => return Err(VbcError::Deserialization("invalid projection qualifier tag".into())),
+     };
+     let length = decode_varint(self.data, &mut self.offset)?;
+     let end = usize::try_from(length).ok().and_then(|length| self.offset.checked_add(length))
+         .filter(|end| *end <= self.data.len())
+         .ok_or(VbcError::InvalidTypeRefTag(tag))?;
+     let assoc = std::str::from_utf8(&self.data[self.offset..end])
+         .map_err(|_| VbcError::InvalidTypeRefTag(tag))?.to_owned();
+     self.offset = end;
+     let args = self.parse_application_arguments()?;
+     if assoc.is_empty() { return Err(VbcError::InvalidTypeRefTag(tag)); }
+     Ok(TypeRef::AssociatedProjection { base, qualifier, assoc, args })
  }
  0x0B => {
      // ConstValue(i64) — CONST-GENERIC-VALUE-CARRY-1 (format 2.8).
@@ -1473,6 +1494,16 @@ impl<'a> Deserializer<'a> {
  }),
  _ => Err(VbcError::InvalidTypeRefTag(tag)),
  }
+ }
+
+ fn parse_application_arguments(&mut self) -> VbcResult<Vec<TypeRef>> {
+     let count = decode_varint(self.data, &mut self.offset)?;
+     if count > MAX_TYPE_REF_INSTANTIATION_ARGS as u64 {
+         return Err(VbcError::TableTooLarge { field: "type_application_args",
+             count: count.min(u64::from(u32::MAX)) as u32,
+             max: MAX_TYPE_REF_INSTANTIATION_ARGS as u32 });
+     }
+     (0..count).map(|_| self.parse_type_ref()).collect()
  }
 
  /// Parses a function descriptor.

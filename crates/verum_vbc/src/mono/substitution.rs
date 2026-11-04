@@ -203,9 +203,16 @@ fn map_free_parameters(
         TypeRef::Slice(element) => {
             TypeRef::Slice(Box::new(map_free_parameters(element, depth, map)?))
         }
-        TypeRef::AssociatedProjection { base, assoc } => TypeRef::AssociatedProjection {
+        TypeRef::AssociatedProjection { base, qualifier, assoc, args } => TypeRef::AssociatedProjection {
             base: Box::new(map_free_parameters(base, depth, map)?),
+            qualifier: qualifier.as_ref().map(|application| {
+                Ok(crate::types::ProtocolApplication {
+                    protocol: application.protocol,
+                    args: application.args.iter().map(|ty| map_free_parameters(ty, depth, map)).collect::<Result<_, SubstitutionError>>()?,
+                })
+            }).transpose()?,
             assoc: assoc.clone(),
+            args: args.iter().map(|ty| map_free_parameters(ty, depth, map)).collect::<Result<_, _>>()?,
         },
     })
 }

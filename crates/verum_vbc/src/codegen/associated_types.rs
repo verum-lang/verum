@@ -7,6 +7,17 @@ use crate::{
 };
 use verum_common::{List, Set};
 
+/// A written protocol qualifier must be elaborated as an exact application.
+/// The current source lowerer cannot produce that witness, so it may not erase
+/// the qualifier and publish an unqualified projection instead.
+pub(super) fn require_projection_application_evidence(ty: &verum_ast::Type) -> super::CodegenResult<()> {
+    if matches!(&ty.kind, verum_ast::TypeKind::Qualified { trait_ref, .. } if !trait_ref.segments.is_empty()) {
+        return Err(super::CodegenError::with_span(super::CodegenErrorKind::InvalidSourceSignature(
+            "qualified associated projection requires declaration-owned protocol application elaboration".into()), ty.span));
+    }
+    Ok(())
+}
+
 /// Source identities for fully specialized implementation heads. The ABI maps both
 /// pointer-width integers to PTR; it cannot distinguish their implementations.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -293,7 +304,8 @@ impl VbcCodegen {
             let nested = |ty, active: &mut Set<TypeRef>| resolve(codegen, ty, active, depth + 1);
             match ty {
                 TypeRef::RecordFieldProjection { .. } => None,
-                TypeRef::AssociatedProjection { base, assoc } => {
+                TypeRef::AssociatedProjection { base, qualifier, assoc, args } => {
+                    if qualifier.is_some() || !args.is_empty() { return None; }
                     if !active.insert(ty.clone()) {
                         return None;
                     }

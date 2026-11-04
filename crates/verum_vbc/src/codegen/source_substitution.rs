@@ -257,8 +257,14 @@ fn reserve_indices(ty: &TypeRef, reserved: &mut BTreeSet<u16>) {
         }
         TypeRef::Reference { inner, .. }
         | TypeRef::Slice(inner)
-        | TypeRef::Array { element: inner, .. }
-        | TypeRef::AssociatedProjection { base: inner, .. } => reserve_indices(inner, reserved),
+        | TypeRef::Array { element: inner, .. } => reserve_indices(inner, reserved),
+        TypeRef::AssociatedProjection { base, qualifier, args, .. } => {
+            reserve_indices(base, reserved);
+            for argument in args { reserve_indices(argument, reserved); }
+            if let Some(application) = qualifier {
+                for argument in &application.args { reserve_indices(argument, reserved); }
+            }
+        },
         TypeRef::Concrete(_) | TypeRef::ConstValue(_) | TypeRef::RecordFieldProjection { .. } => {}
     }
 }

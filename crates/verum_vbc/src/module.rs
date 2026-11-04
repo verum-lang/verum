@@ -925,9 +925,15 @@ impl VbcModule {
             TypeRef::Slice(inner) => {
                 format!("[{}]", self.display_type_ref(inner))
             }
-            TypeRef::AssociatedProjection { base, assoc } => {
-                format!("{}.{}", self.display_type_ref(base), assoc)
-            }
+            TypeRef::AssociatedProjection { base, qualifier, assoc, args } => {
+            let render = |ty: &TypeRef| self.display_type_ref(ty);
+            let suffix = |arguments: &[TypeRef]| if arguments.is_empty() { String::new() }
+                else { format!("<{}>", arguments.iter().map(render).collect::<Vec<_>>().join(", ")) };
+            let base = if let Some(application) = qualifier {
+                format!("<{} as {}{}>", render(base), self.display_type_id(TypeId(application.protocol.0)), suffix(&application.args))
+            } else { render(base) };
+            format!("{base}.{assoc}{}", suffix(args))
+        }
             // Const-generic VALUE argument renders as its literal —
             // `StackAllocator<256>` round-trips as written.
             TypeRef::ConstValue(v) => v.to_string(),
