@@ -60,6 +60,7 @@ impl TypeChecker {
             }
         };
         let base = self.ast_to_type(ty)?;
+        let base = self.normalize_type(&base);
         let refinement = refinement.map(|predicate| crate::refinement::RefinementPredicate {
             predicate: (**predicate).clone(),
             binding: crate::refinement::RefinementBinding::Sigma(name.name.clone()),

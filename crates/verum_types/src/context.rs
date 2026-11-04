@@ -25,6 +25,8 @@ pub use verum_modules::ModuleId;
 pub enum GenericBinder {
     Type(TypeVar),
     Value(Type),
+    /// Explicit lifetime argument with no executable witness slot.
+    ErasedLifetime,
 }
 
 /// A type scheme represents a polymorphic type: ∀α β. T
@@ -139,6 +141,7 @@ impl TypeScheme {
             Some(GenericBinder::Type(var)) => subst.get(var).and_then(|ty| match ty {
                 Type::Var(var) => Some(GenericBinder::Type(*var)), _ => None,
             }).ok_or_else(|| Text::from("explicit type slot has no quantified owner")).map(Some),
+            Some(GenericBinder::ErasedLifetime) => Ok(Some(GenericBinder::ErasedLifetime)),
             Some(GenericBinder::Value(value)) => {
                 let Type::Meta { value: ValueTerm::Parameter(id), ty, refinement, .. } = value else {
                     return Err("explicit value slot lacks a rigid declaration identity".into());

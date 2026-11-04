@@ -3,7 +3,7 @@ use std::sync::Arc;
 use verum_ast::{ItemKind, Module};
 use verum_common::{List, ResourceDiscipline, Text};
 use verum_fast_parser::Parser;
-use verum_types::{core_metadata::*, TypeChecker};
+use verum_types::{TypeChecker, core_metadata::*};
 const OWNER: &str = "scope.provider";
 fn parse(s: &str) -> Module {
     Parser::new(s).parse_module().expect("grammar")
@@ -119,21 +119,30 @@ fn consumer(function: &str, tail: &str, eager: bool) -> List<Text> {
 const ID: &str = "public fn id<N: meta Int>(cell: Cell<N>) -> Cell<N> { cell }";
 #[test]
 fn positive_declared_owner_replayed_independently() {
-    assert!(source_errors(&format!(
-        "public type Cell<N: meta Int> is {{ public value: () }}; {ID}"
-    ))
-    .is_empty());
+    assert!(
+        source_errors(&format!(
+            "public type Cell<N: meta Int> is {{ public value: () }}; {ID}"
+        ))
+        .is_empty()
+    );
     for eager in [false, true] {
         for tail in [
-        "fn caller<N: meta Int>(cell: scope.provider.Cell<N>) -> scope.provider.Cell<N> { scope.provider.id(cell) }",
-        "fn caller<N: meta Int>(cell: scope.provider.Cell<7>) -> scope.provider.Cell<7> { scope.provider.id<7>(cell) }",
-    ] { let es=consumer(ID,tail,eager); assert!(es.is_empty(),"eager={eager}: {es:?}"); }
+            "fn caller<N: meta Int>(cell: scope.provider.Cell<N>) -> scope.provider.Cell<N> { scope.provider.id(cell) }",
+            "fn caller<N: meta Int>(cell: scope.provider.Cell<7>) -> scope.provider.Cell<7> { scope.provider.id<7>(cell) }",
+        ] {
+            let es = consumer(ID, tail, eager);
+            assert!(es.is_empty(), "eager={eager}: {es:?}");
+        }
     }
 }
 #[test]
 fn negative_import_cannot_identify_distinct_caller_parameters() {
     for eager in [false, true] {
-        let es=consumer(ID,"fn caller<N: meta Int,M: meta Int>(cell: scope.provider.Cell<N>) -> scope.provider.Cell<M> { scope.provider.id<N>(cell) }",eager);
+        let es = consumer(
+            ID,
+            "fn caller<N: meta Int,M: meta Int>(cell: scope.provider.Cell<N>) -> scope.provider.Cell<M> { scope.provider.id<N>(cell) }",
+            eager,
+        );
         assert!(
             es.iter()
                 .any(|e| e.contains("Mismatch") || e.contains("exact value")),
@@ -155,7 +164,11 @@ fn negative_import_cannot_capture_undeclared_value_binder() {
         "invalid provider must refuse undeclared N: {own:?}"
     );
     for eager in [false, true] {
-        let es=consumer(bad,"fn caller<N: meta Int>(cell: scope.provider.Cell<N>) -> scope.provider.Cell<N> { scope.provider.leaked<0>(cell) }",eager);
+        let es = consumer(
+            bad,
+            "fn caller<N: meta Int>(cell: scope.provider.Cell<N>) -> scope.provider.Cell<N> { scope.provider.leaked<0>(cell) }",
+            eager,
+        );
         assert!(
             es.iter()
                 .any(|e| e.contains("TypeNotFound") && e.contains("N")),
@@ -167,7 +180,11 @@ fn negative_import_cannot_capture_undeclared_value_binder() {
 fn negative_import_cannot_borrow_ambient_refinement_constant() {
     let bad = "public fn bounded<M: meta Int{it >= N}>(cell: Cell<M>) -> Cell<M> { cell }";
     for eager in [false, true] {
-        let es=consumer(bad,"fn caller<N: meta Int>(cell: scope.provider.Cell<7>) -> scope.provider.Cell<7> { scope.provider.bounded<7>(cell) }",eager);
+        let es = consumer(
+            bad,
+            "fn caller<N: meta Int>(cell: scope.provider.Cell<7>) -> scope.provider.Cell<7> { scope.provider.bounded<7>(cell) }",
+            eager,
+        );
         assert!(
             es.iter().any(|e| e.contains("domain")
                 || e.contains("Undefined")
@@ -179,11 +196,45 @@ fn negative_import_cannot_borrow_ambient_refinement_constant() {
 #[test]
 fn negative_owned_function_value_cannot_become_foreign_constant() {
     for eager in [false, true] {
-        let es=consumer(ID,"fn caller<N: meta Int>(cell: scope.provider.Cell<N>) -> scope.provider.Cell<7> { scope.provider.id<7>(cell) }",eager);
+        let es = consumer(
+            ID,
+            "fn caller<N: meta Int>(cell: scope.provider.Cell<N>) -> scope.provider.Cell<7> { scope.provider.id<7>(cell) }",
+            eager,
+        );
         assert!(
             es.iter()
                 .any(|e| e.contains("Mismatch") || e.contains("exact value")),
             "eager={eager}: {es:?}"
+        );
+    }
+}
+
+#[test]
+fn imported_erased_lifetime_preserves_the_following_type_slot() {
+    let source = "public fn id<'a,T>(cell:T)->T { cell }";
+    assert!(
+        source_errors(&format!(
+            "{source} fn probe()->Int {{ id<'static,Int>(7) }}"
+        ))
+        .is_empty()
+    );
+    for eager in [false, true] {
+        let errors = consumer(
+            source,
+            "fn probe()->Int { scope.provider.id<'static,Int>(7) }",
+            eager,
+        );
+        assert!(errors.is_empty(), "eager={eager}: {errors:?}");
+        let errors = consumer(
+            source,
+            "fn probe()->Int { scope.provider.id<Int,Int>(7) }",
+            eager,
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("lifetime parameter")),
+            "eager={eager}: {errors:?}"
         );
     }
 }

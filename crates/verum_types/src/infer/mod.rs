@@ -31,6 +31,7 @@ mod write_places;
 mod structural_clone;
 mod loan_ends;
 mod record_kernel;
+mod record_parameters;
 mod field_visibility;
 pub(crate) mod decls;           // Type declaration registration (register_type_declaration*, …)
 pub(crate) mod env;             // Environment management (stdlib bootstrap, pre-register, constraints)

@@ -3104,6 +3104,7 @@ fn substitute_refinement_binder(
                             Some(GenericBinder::Value(value.clone()))
                         }, _ => None,
                     },
+                verum_ast::ty::GenericParamKind::Lifetime { .. } => Some(GenericBinder::ErasedLifetime),
                 _ => None,
             };
             (!parameter.is_implicit).then_some(binder)
@@ -3183,7 +3184,12 @@ fn substitute_refinement_binder(
             });
         }
         for (argument, slot) in arguments.iter().zip(slots.iter()) {
-            if let Some(crate::context::GenericBinder::Type(var)) = slot {
+            if let Some(crate::context::GenericBinder::ErasedLifetime) = slot {
+                if !matches!(argument, verum_ast::ty::GenericArg::Lifetime(_)) {
+                    return Err(TypeError::OtherWithCodeSpanned { code: "E405".into(),
+                        msg: "lifetime parameter requires an explicit lifetime argument".into(), span });
+                }
+            } else if let Some(crate::context::GenericBinder::Type(var)) = slot {
                 let Some(ty) = argument.type_for_declared_slot() else {
                     return Err(TypeError::OtherWithCodeSpanned {
                         code: "E400".into(),

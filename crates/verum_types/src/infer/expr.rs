@@ -2157,67 +2157,25 @@ impl TypeChecker {
                         self.ensure_stdlib_type_loaded(&next, &mut pending);
                     }
                 }
-                // Get type parameters from the stored type definition
-                let type_params_key = format!("__type_params_{}", type_name);
-                let type_params: List<verum_common::Text> = match self
-                    .ctx
-                    .lookup_type(type_params_key.as_str())
-                {
-                    Option::Some(Type::Record(params_map)) => params_map.keys().cloned().collect(),
-                    _ => List::new(), // No type parameters
-                };
-
-                // Extract concrete type args from expected type (e.g., Int from Box<Int>)
-                // CRITICAL FIX: If expected is a type variable and this is a generic type,
-                // create fresh type variables for the type parameters.
-                // The constructor creates a nominal value. Its expected view can
-                // attenuate that value, while a spread must itself supply the
-                // requested permissions and is checked against the original view.
                 let record_expected = match expected {
                     Type::CapabilityRestricted { base, .. } => base.as_ref(),
                     ty => ty,
                 };
-                let type_args: List<Type> = match record_expected {
-                    Type::Named { args, .. } | Type::Generic { args, .. } if !args.is_empty() => args.clone(),
-                    Type::Named { args, .. } if args.is_empty() && !type_params.is_empty() => {
-                        // Named type without args but we have type params - create fresh vars
-                        type_params
-                            .iter()
-                            .map(|_| Type::Var(TypeVar::fresh()))
-                            .collect()
-                    }
-                    _ if !type_params.is_empty() => {
-                        // Expected is a type variable or other - create fresh type vars for generic types
-                        type_params
-                            .iter()
-                            .map(|_| Type::Var(TypeVar::fresh()))
-                            .collect()
-                    }
-                    _ => List::new(),
+                let supplied = match record_expected {
+                    Type::Named { args, .. } | Type::Generic { args, .. } if !args.is_empty() => Some(args.as_slice()),
+                    _ => None,
                 };
-
-                // Build a substitution from type parameters to type arguments
-                let mut param_subst = indexmap::IndexMap::new();
-                for (param_name, arg_ty) in type_params.iter().zip(type_args.iter()) {
-                    param_subst.insert(param_name.clone(), arg_ty.clone());
-                }
-
-                // Apply the substitution to get resolved field types
-                let expected_fields = if let Some(field_types) = stored_fields {
-                    let mut resolved_fields = indexmap::IndexMap::new();
-                    for (fname, fty) in field_types.iter() {
-                        // Substitute type variables with concrete types
-                        let resolved_ty = self.substitute_type_params(fty, &param_subst);
-                        // CRITICAL FIX: Also resolve any placeholder types (forward references)
-                        // When types are defined out of order, field types may contain placeholders
-                        // like <placeholder:Metadata> that need to be resolved to the actual type.
-                        let resolved_ty = self.substitute_placeholders(&resolved_ty);
-                        resolved_fields.insert(fname.clone(), resolved_ty);
-                    }
-                    resolved_fields
-                } else {
-                    return self.synth_and_check(expr, expected);
+                let Some(field_types) = stored_fields else { return self.synth_and_check(expr, expected); };
+                let parameter_owner = match &declaration_ty {
+                    Type::Named { path, .. } => self.path_to_string(path),
+                    Type::Generic { name, .. } => name.clone(),
+                    _ => type_name.clone(),
                 };
+                let (expected_fields, type_args) = self.instantiate_nominal_record_fields(
+                    parameter_owner.as_str(), &field_types, supplied, expr.span,
+                )?;
+                let expected_fields = expected_fields.into_iter().map(|(name, ty)|
+                    (name, self.substitute_placeholders(&ty))).collect();
 
                 if !self.check_dependent_record_fields(&declaration_ty, &expected_fields, fields, base.as_deref(), expr.span)? {
                     // Handle base record spread
@@ -9830,8 +9788,11 @@ impl TypeChecker {
                     && let Some(field_ty) = fields.get(&field_name)
                 {
                     // Apply type parameter substitution to get concrete field type
-                    let resolved_ty =
-                        self.substitute_type_params(field_ty, &param_subst);
+                    let field_ty = field_ty.clone();
+                    let fields = indexmap::IndexMap::from_iter([(field_name.clone(), field_ty)]);
+                    let resolved_ty = self.instantiate_nominal_record_fields(
+                        type_name.as_str(), &fields, Some(args.as_slice()), expr.span,
+                    )?.0.remove(&field_name).expect("selected field");
                     // Track affine field access (partial move tracking)
                     if let Some(ref var_name) = var_name_for_affine {
                         self.track_affine_field_access(
@@ -9850,8 +9811,11 @@ impl TypeChecker {
                     && let Some(field_ty) = fields.get(&field_name)
                 {
                     // Apply type parameter substitution to get concrete field type
-                    let resolved_ty =
-                        self.substitute_type_params(field_ty, &param_subst);
+                    let field_ty = field_ty.clone();
+                    let fields = indexmap::IndexMap::from_iter([(field_name.clone(), field_ty)]);
+                    let resolved_ty = self.instantiate_nominal_record_fields(
+                        type_name.as_str(), &fields, Some(args.as_slice()), expr.span,
+                    )?.0.remove(&field_name).expect("selected field");
                     // Track affine field access (partial move tracking)
                     if let Some(ref var_name) = var_name_for_affine {
                         self.track_affine_field_access(
@@ -11565,52 +11529,11 @@ impl TypeChecker {
             Type::Generic { name, .. } => name.clone(),
             _ => self.path_to_string(path),
         };
-        let type_params_key = format!("__type_params_{type_name}");
-        let type_params_lookup = self.ctx.lookup_type(type_params_key.as_str());
-
-        let (expected_fields, type_param_vars): (
-            indexmap::IndexMap<verum_common::Text, Type>,
-            List<Type>,
-        ) = if let Option::Some(Type::Record(params_map)) = type_params_lookup {
-            // This type has type parameters - instantiate with fresh variables
-            let type_params: List<verum_common::Text> =
-                params_map.keys().cloned().collect();
-            if !type_params.is_empty() {
-                // Create fresh type variables for each parameter
-                let mut param_subst = indexmap::IndexMap::new();
-                let mut fresh_vars = List::new();
-                for param_name in type_params.iter() {
-                    let fresh_var = Type::Var(TypeVar::fresh());
-                    fresh_vars.push(fresh_var.clone());
-                    param_subst.insert(param_name.clone(), fresh_var);
-                }
-                // Apply substitution to all field types
-                let mut resolved_fields = indexmap::IndexMap::new();
-                for (fname, fty) in expected_fields.iter() {
-                    let resolved_ty = self.substitute_type_params(fty, &param_subst);
-                    // CRITICAL FIX: Also resolve any placeholder types (forward references)
-                    let resolved_ty = self.substitute_placeholders(&resolved_ty);
-                    resolved_fields.insert(fname.clone(), resolved_ty);
-                }
-                (resolved_fields, fresh_vars)
-            } else {
-                // Non-generic type: still need to resolve placeholders
-                let mut resolved_fields = indexmap::IndexMap::new();
-                for (fname, fty) in expected_fields.iter() {
-                    let resolved_ty = self.substitute_placeholders(fty);
-                    resolved_fields.insert(fname.clone(), resolved_ty);
-                }
-                (resolved_fields, List::new())
-            }
-        } else {
-            // No type parameters: still need to resolve placeholders
-            let mut resolved_fields = indexmap::IndexMap::new();
-            for (fname, fty) in expected_fields.iter() {
-                let resolved_ty = self.substitute_placeholders(fty);
-                resolved_fields.insert(fname.clone(), resolved_ty);
-            }
-            (resolved_fields, List::new())
-        };
+        let (expected_fields, type_param_vars) = self.instantiate_nominal_record_fields(
+            type_name.as_str(), &expected_fields, None, expr.span,
+        )?;
+        let expected_fields = expected_fields.into_iter().map(|(name, ty)|
+            (name, self.substitute_placeholders(&ty))).collect();
 
         if !self.check_dependent_record_fields(&record_ty, &expected_fields, fields, base.as_deref(), expr.span)? {
             // Step 3: Handle base record spread (...base syntax)

@@ -107,7 +107,7 @@ impl TypeChecker {
         &mut self,
         type_name: &verum_common::Text,
         generics: &List<verum_ast::ty::GenericParam>,
-    ) -> usize {
+    ) -> Result<usize> {
         use verum_ast::ty::GenericParamKind;
 
         // Every positional parameter that carries a user-visible name —
@@ -136,8 +136,10 @@ impl TypeChecker {
                 _ => None,
             };
             if let Some(n) = name_opt {
-                let parameter = self.lookup_decl_param(n.as_str())
-                    .filter(|ty| matches!(ty, Type::Meta { .. })).cloned().unwrap_or(Type::Int);
+                let parameter = self.lookup_decl_param(n.as_str()).cloned()
+                    .ok_or_else(|| TypeError::OtherWithCodeSpanned { code: "E407".into(),
+                        msg: format!("parameter '{n}' has no declaration-owned lexical binder").into(),
+                        span: param.span })?;
                 param_record.insert(n, parameter);
             }
         }
@@ -150,7 +152,7 @@ impl TypeChecker {
             type_name.as_str(),
             Type::Record(param_record),
         );
-        arity
+        Ok(arity)
     }
 
     /// Preserve the value sort of meta/const parameters in the declaration
@@ -634,7 +636,7 @@ impl TypeChecker {
                 // so that `Reducer<Int, Bool>` correctly substitutes A=Int, R=Bool
                 {
                     let arity = self
-                        .register_declared_type_arity(&type_name, &type_decl.generics);
+                        .register_declared_type_arity(&type_name, &type_decl.generics)?;
                     // Register kind for this type constructor (stdlib-agnostic)
                     if arity > 0 {
                         use crate::kind_inference::KindInference;
@@ -1330,7 +1332,7 @@ impl TypeChecker {
                     // staying silent, which would leave a same-named type's
                     // arity to answer for this one — see
                     // `register_declared_type_arity`.
-                    self.register_declared_type_arity(&type_name, &type_decl.generics);
+                    self.register_declared_type_arity(&type_name, &type_decl.generics)?;
                 }
 
                 // CRITICAL: Register variant type to name mapping for instance method lookup
@@ -1725,7 +1727,7 @@ impl TypeChecker {
             else { unreachable!() };
         self.register_record_field_visibility(type_name.as_str(), fields);
         // Field binders may shadow declaration parameters in the field telescope.
-        self.register_declared_type_arity(type_name, &type_decl.generics);
+        self.register_declared_type_arity(type_name, &type_decl.generics)?;
         let type_name = type_name.clone();
                 // CRITICAL: Register a placeholder type FIRST to handle recursive type definitions
                 // and prevent infinite recursion when processing field types.
@@ -1985,7 +1987,7 @@ impl TypeChecker {
         use verum_common::Text;
         let TypeDeclBody::Protocol(protocol_body) = &type_decl.body
             else { unreachable!() };
-        self.register_declared_type_arity(type_name, &type_decl.generics);
+        self.register_declared_type_arity(type_name, &type_decl.generics)?;
         let type_name = type_name.clone();
                 // Protocol types (e.g., `type Database is protocol { ... }`)
                 // Register as Named type for type checking
@@ -2667,7 +2669,7 @@ impl TypeChecker {
                 self.define_type_in_current_module(type_name.clone(), named_type);
 
                 // Register the arity this alias declares for its own name.
-                self.register_declared_type_arity(&type_name, &type_decl.generics);
+                self.register_declared_type_arity(&type_name, &type_decl.generics)?;
             }
             TypeDeclBody::Variant(_) => self.resolve_variant_type_body(type_decl, type_name)?,
             TypeDeclBody::Record(_) => self.resolve_record_type_body(type_decl, type_name)?,
@@ -3243,7 +3245,7 @@ impl TypeChecker {
             else { unreachable!() };
         self.register_record_field_visibility(type_name.as_str(), fields);
         // Field binders may shadow declaration parameters in the field telescope.
-        self.register_declared_type_arity(type_name, &type_decl.generics);
+        self.register_declared_type_arity(type_name, &type_decl.generics)?;
         let type_name = type_name.clone();
                 // CRITICAL: Register a placeholder type FIRST to handle recursive type definitions
                 // and prevent infinite recursion when processing field types.
@@ -3487,7 +3489,7 @@ impl TypeChecker {
         use verum_common::Text;
         let verum_ast::decl::TypeDeclBody::Protocol(protocol_body) = &type_decl.body
             else { unreachable!() };
-        self.register_declared_type_arity(type_name, &type_decl.generics);
+        self.register_declared_type_arity(type_name, &type_decl.generics)?;
         let type_name = type_name.clone();
                 // Protocol types are registered as Named types
                 let ty = Type::Named {
