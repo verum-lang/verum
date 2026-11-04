@@ -608,11 +608,7 @@ impl VbcCodegen {
         for key in &selected {
             let (mi, ti) = catalog[key];
             let module = available[mi];
-            if module.types[ti].source_declaration.is_some() {
-                let owner = module.types[ti].origin_module.and_then(|id| module.strings.get(id))
-                    .unwrap_or(&module.name);
-                self.retain_declaration_type_scope(module, owner)?;
-            }
+            self.retain_type_declaration_scopes(module, &module.types[ti])?;
             let mut ty = module.types[ti].clone();
             // Retain this fact from the original descriptor: unresolved glue
             // becomes None below, but that loss cannot authorize absorption.

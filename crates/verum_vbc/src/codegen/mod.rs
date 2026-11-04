@@ -7203,50 +7203,77 @@ impl VbcCodegen {
         Ok(())
     }
 
+    /// Every attached source declaration needs the scope of its own origin,
+    /// including implementation-only carriers with no nominal source AST.
+    fn type_declaration_scope_owners(
+        descriptor: &TypeDescriptor, name: Option<&str>, origin: &str,
+    ) -> CodegenResult<std::collections::BTreeSet<Text>> {
+        let mut owners: std::collections::BTreeSet<Text> = descriptor
+            .source_inherent_implementations.iter()
+            .chain(descriptor.protocols.iter().filter_map(|implementation|
+                implementation.source_implementation.as_ref()))
+            .map(|source| source.origin_module().into()).collect();
+        if descriptor.source_declaration.is_some() {
+            let name = name.ok_or_else(|| CodegenError::internal("semantic type has no name"))?;
+            let qualified = crate::module::qualify_module_name(origin, name);
+            let (owner, _) = qualified.rsplit_once('.').ok_or_else(||
+                CodegenError::internal("semantic type has no declaring module"))?;
+            owners.insert(owner.into());
+        }
+        Ok(owners)
+    }
+
+    fn retain_type_declaration_scopes(
+        &mut self, module: &crate::module::VbcModule, descriptor: &TypeDescriptor,
+    ) -> CodegenResult<()> {
+        let origin = descriptor.origin_module.and_then(|id| module.strings.get(id))
+            .unwrap_or(&module.name);
+        for owner in Self::type_declaration_scope_owners(
+            descriptor, module.strings.get(descriptor.name), origin,
+        ).inspect_err(|error| self.record_source_declaration_error(error.clone()))? {
+            self.retain_declaration_type_scope(module, &owner)?;
+        }
+        Ok(())
+    }
+
     fn retain_module_declaration_type_scopes(
         &mut self, module: &crate::module::VbcModule,
     ) -> CodegenResult<()> {
-        let mut owners = std::collections::BTreeSet::new();
         for descriptor in &module.types {
-            owners.extend(descriptor.source_inherent_implementations.iter().map(|source| source.origin_module()));
-            if descriptor.source_declaration.is_some() {
-                owners.insert(descriptor.origin_module.and_then(|id| module.strings.get(id))
-                    .unwrap_or(&module.name));
-            }
+            self.retain_type_declaration_scopes(module, descriptor)?;
         }
         for descriptor in &module.functions {
             if descriptor.source_signature.is_some() {
-                owners.insert(descriptor.origin_module.and_then(|id| module.strings.get(id))
-                    .unwrap_or(&module.name));
+                let owner = descriptor.origin_module.and_then(|id| module.strings.get(id))
+                    .unwrap_or(&module.name);
+                self.retain_declaration_type_scope(module, owner)?;
             }
         }
-        for owner in owners { self.retain_declaration_type_scope(module, owner)?; }
         Ok(())
     }
 
     fn collect_declaration_type_bindings(&self) -> CodegenResult<crate::declaration_bindings_codec::Bindings> {
-        let mut owners = std::collections::BTreeSet::new();
+        let mut owners: std::collections::BTreeSet<Text> = std::collections::BTreeSet::new();
         // An implementation can reserve a protocol descriptor without declaring
         // that protocol. Only a source-owned default body needs its lexical scope.
         owners.extend(self.protocol_registry.values().filter(|protocol| !protocol.default_methods.is_empty())
-            .map(|protocol| protocol.source_module.as_str()));
+            .map(|protocol| Text::from(protocol.source_module.as_str())));
         for descriptor in &self.types {
-            owners.extend(descriptor.source_inherent_implementations.iter().map(|source| source.origin_module()));
-            if descriptor.source_declaration.is_some() {
-                owners.insert(descriptor.origin_module.and_then(|id| self.ctx.strings.get(id.0 as usize))
-                    .map(String::as_str).unwrap_or(&self.config.module_name));
-            }
+            let origin = descriptor.origin_module.and_then(|id| self.ctx.strings.get(id.0 as usize))
+                .map(String::as_str).unwrap_or(&self.config.module_name);
+            owners.extend(Self::type_declaration_scope_owners(
+                descriptor, self.ctx.strings.get(descriptor.name.0 as usize).map(String::as_str), origin,
+            )?);
         }
         for descriptor in &self.functions {
             let descriptor = &descriptor.descriptor;
             if descriptor.source_signature.is_some() {
                 owners.insert(descriptor.origin_module.and_then(|id| self.ctx.strings.get(id.0 as usize))
-                    .map(String::as_str).unwrap_or(&self.config.module_name));
+                    .map(String::as_str).unwrap_or(&self.config.module_name).into());
             }
         }
         let mut bindings = crate::declaration_bindings_codec::Bindings::new();
         for owner in owners {
-            let owner = Text::from(owner);
             let source = self.declaration_source_type_bindings(&owner);
             let imported = self.imported_declaration_type_bindings.get(&owner);
             if source.is_some() && imported.is_some_and(|scope| scope != &source) {
