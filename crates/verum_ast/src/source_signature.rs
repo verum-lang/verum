@@ -44,8 +44,9 @@ pub fn type_declaration_uses_universes(declaration: &crate::TypeDecl) -> Result<
 }
 
 /// Defaults belong to their source telescope, including its lexical scope and
-/// prior binders. Protocol value kinds likewise cannot be inferred from runtime
-/// type slots. Keep these declarations for exact application elaboration.
+/// prior binders. Value kinds, sorts and refinements likewise cannot be inferred
+/// from runtime type slots. Keep every nominal value telescope for exact
+/// application elaboration.
 pub fn type_declaration_needs_semantic_carrier(declaration: &crate::TypeDecl) -> Result<bool> {
     let universes = type_declaration_uses_universes(declaration)?;
     let mut scan = SignatureScan::new(false);
@@ -60,16 +61,9 @@ pub fn type_declaration_needs_semantic_carrier(declaration: &crate::TypeDecl) ->
                 GenericParamKind::Type {
                     default: Some(_),
                     ..
-                }
+                } | GenericParamKind::Meta { .. } | GenericParamKind::Const { .. }
             )
-        })
-        || (matches!(declaration.body, crate::TypeDeclBody::Protocol(_))
-            && declaration.generics.iter().any(|param| {
-                matches!(
-                    param.kind,
-                    GenericParamKind::Meta { .. } | GenericParamKind::Const { .. }
-                )
-            })))
+        }))
 }
 
 /// Preserve declaration semantics that the runtime descriptor erases. Protocol
