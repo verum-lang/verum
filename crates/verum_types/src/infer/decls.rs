@@ -448,8 +448,28 @@ impl TypeChecker {
         }
         let result = self.register_type_declaration_body(type_decl, type_name);
         self.types_being_registered.remove(&key);
+        self.publish_direct_type_declaration(type_decl, &result);
 
         result
+    }
+
+    /// Both direct and two-pass registration retain the declaration that owns
+    /// constructor parameter roles. Lazy loads publish through their outer
+    /// transaction, so nested success cannot escape a later group failure.
+    fn publish_direct_type_declaration(
+        &mut self,
+        declaration: &verum_ast::TypeDecl,
+        result: &Result<()>,
+    ) {
+        if self.source_type_registration.depth != 0 {
+            return;
+        }
+        let key = self.declared_type_key(declaration.name.name.as_str());
+        if result.is_ok() {
+            self.source_type_registration.completed.insert(key, declaration.clone());
+        } else {
+            self.source_type_registration.completed.remove(&key);
+        }
     }
 
     /// Tuple/newtype constructors return the same nominal declaration that
@@ -2475,7 +2495,8 @@ impl TypeChecker {
             checker.resolve_type_definition_inner(type_decl, resolution_stack)
         });
         self.in_type_declaration = prev_in_type_decl;
-        return out;
+        self.publish_direct_type_declaration(type_decl, &out);
+        out
     }
 
     fn resolve_type_definition_inner(
