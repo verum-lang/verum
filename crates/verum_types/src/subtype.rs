@@ -609,8 +609,10 @@ impl Subtyping {
                         }
                     }
                     (Some(_), None) | (None, Some(_)) => {
-                        // Mixed: fall through to base-type + refinement check;
-                        // a concrete value always inhabits the variable meta slot.
+                        // A declaration parameter is an arbitrary fixed value,
+                        // not a call-local inference slot. Sharing its scalar
+                        // sort does not establish equality with a constant.
+                        return false;
                     }
                     (None, None) => {
                         // Names must match (same meta parameter)

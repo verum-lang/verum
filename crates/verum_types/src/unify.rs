@@ -3955,11 +3955,16 @@ impl Unifier {
                         return self.unify_inner(t1, t2, span);
                     }
                     (Some(_), None) | (None, Some(_)) => {
-                        // One side is a concrete value, the other is a variable
-                        // meta parameter — the variable binds to the value.
-                        // Unify base types; substitution pickup happens at the
-                        // enclosing Generic/Named args-list traversal.
-                        return self.unify_inner(t1, t2, span);
+                        // A declaration parameter denotes an arbitrary value,
+                        // not an inference slot. Equal scalar sorts do not make
+                        // that value equal to a particular constant. A call
+                        // must first instantiate its own declared value binder;
+                        // equality cannot perform that substitution implicitly.
+                        return Err(TypeError::Mismatch {
+                            expected: format!("exact value index `{n2}`").into(),
+                            actual: format!("exact value index `{n1}`").into(),
+                            span,
+                        });
                     }
                     (None, None) => {
                         // Fall through to name-based comparison below.
