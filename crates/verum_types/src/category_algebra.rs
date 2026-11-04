@@ -2,12 +2,12 @@
 //!
 //! A *category* consists of objects and morphisms (arrows between
 //! objects), with composition that is associative and respects
-//! identity. This module provides a finite, finitely-presented
+//! identity. This module provides a finite, explicitly tabulated
 //! category core: a small object set, a list of morphisms typed
 //! by source/target, a composition table, and verification of
 //! the categorical laws.
 //!
-//! The existing `core/math/category.vr` stdlib module (738 LoC)
+//! The `core/math/category.vr` stdlib module
 //! describes categories at the protocol level. This module
 //! complements it with a *concrete data structure* for working
 //! with finite presentations programmatically — useful for
@@ -30,12 +30,10 @@
 //! * [`Morphism`] — typed arrow `source → target`.
 //! * [`Category`] — finite presentation (objects, morphisms,
 //!  identities, composition table).
-//! * [`compose`] — categorical composition, with type-check.
-//! * [`check_laws`] — verifies left/right identity + associativity.
+//! * [`Category::compose`] — look up a declared composition.
+//! * [`Category::check_laws`] — check totality, endpoints and all category laws.
 
-use std::collections::{BTreeMap, BTreeSet};
-
-use verum_common::Text;
+use verum_common::{List, OrderedMap, OrderedSet, Text};
 
 /// A categorical object.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -88,12 +86,13 @@ impl std::fmt::Display for Morphism {
 /// A finite category presentation.
 #[derive(Debug, Clone, Default)]
 pub struct Category {
-    objects: BTreeSet<Object>,
-    morphisms: BTreeMap<Text, Morphism>,
+    objects: OrderedSet<Object>,
+    morphisms: OrderedMap<Text, Morphism>,
     /// Identity morphism for each object, by object name.
-    identities: BTreeMap<Object, Text>,
-    /// Composition table: (g, f) ↦ g ∘ f, both keyed by morphism name.
-    composition: BTreeMap<(Text, Text), Text>,
+    identities: OrderedMap<Object, Text>,
+    /// Composition table: g ↦ (f ↦ g ∘ f), keyed by morphism name.
+    /// Nested keys permit borrowed lookups without allocating key pairs.
+    composition: OrderedMap<Text, OrderedMap<Text, Text>>,
 }
 
 impl Category {
@@ -115,14 +114,19 @@ impl Category {
     /// `m` must already be registered with `m.source = m.target = obj`.
     pub fn set_identity(&mut self, obj: Object, m: impl Into<Text>) -> Result<(), CategoryError> {
         let name = m.into();
+        self.check_identity_shape(&obj, &name)?;
+        self.identities.insert(obj, name);
+        Ok(())
+    }
+
+    fn check_identity_shape(&self, obj: &Object, name: &Text) -> Result<(), CategoryError> {
         let morph = self
             .morphisms
-            .get(&name)
+            .get(name)
             .ok_or_else(|| CategoryError::UnknownMorphism { name: name.clone() })?;
-        if morph.source != obj || morph.target != obj {
+        if &morph.source != obj || &morph.target != obj {
             return Err(CategoryError::IdentityShape { name: name.clone() });
         }
-        self.identities.insert(obj, name);
         Ok(())
     }
 
@@ -138,40 +142,55 @@ impl Category {
         let g_name = g.into();
         let f_name = f.into();
         let res_name = result.into();
+        self.check_composition_shape(&g_name, &f_name, &res_name)?;
+        self.composition
+            .entry(g_name)
+            .or_default()
+            .insert(f_name, res_name);
+        Ok(())
+    }
+
+    fn check_composition_shape(
+        &self,
+        g_name: &Text,
+        f_name: &Text,
+        res_name: &Text,
+    ) -> Result<(), CategoryError> {
         let gm = self
             .morphisms
-            .get(&g_name)
+            .get(g_name)
             .ok_or_else(|| CategoryError::UnknownMorphism {
                 name: g_name.clone(),
             })?;
         let fm = self
             .morphisms
-            .get(&f_name)
+            .get(f_name)
             .ok_or_else(|| CategoryError::UnknownMorphism {
                 name: f_name.clone(),
             })?;
         if fm.target != gm.source {
             return Err(CategoryError::CompositionTypeMismatch {
-                g: g_name,
-                f: f_name,
+                g: g_name.clone(),
+                f: f_name.clone(),
             });
         }
         let rm = self
             .morphisms
-            .get(&res_name)
+            .get(res_name)
             .ok_or_else(|| CategoryError::UnknownMorphism {
                 name: res_name.clone(),
             })?;
         if rm.source != fm.source || rm.target != gm.target {
-            return Err(CategoryError::CompositionResultShape { result: res_name });
+            return Err(CategoryError::CompositionResultShape {
+                result: res_name.clone(),
+            });
         }
-        self.composition.insert((g_name, f_name), res_name);
         Ok(())
     }
 
     /// Look up `g ∘ f`.
     pub fn compose(&self, g: &Text, f: &Text) -> Option<&Text> {
-        self.composition.get(&(g.clone(), f.clone()))
+        self.composition.get(g)?.get(f)
     }
 
     /// Identity morphism for an object.
@@ -187,53 +206,69 @@ impl Category {
         self.morphisms.len()
     }
 
-    /// Verify the categorical laws on this finite presentation.
-    /// Returns the first violation found (alphabetical ordering)
-    /// or `Ok(())` if every law holds.
+    /// Check the current finite presentation, including totality and endpoints.
+    /// Setter validation is insufficient because an arrow can later be replaced.
+    /// Success describes this immutable snapshot; it is not a proof of a category
+    /// with unenumerated objects or morphisms.
     pub fn check_laws(&self) -> Result<(), CategoryError> {
-        // Left identity: id_B ∘ f = f for every f : A → B.
+        for object in self.objects.iter() {
+            let identity =
+                self.identities
+                    .get(object)
+                    .ok_or_else(|| CategoryError::MissingIdentity {
+                        object: object.clone(),
+                    })?;
+            self.check_identity_shape(object, identity)?;
+        }
+        for (g, row) in self.composition.iter() {
+            for (f, result) in row.iter() {
+                self.check_composition_shape(g, f, result)?;
+            }
+        }
+
+        // Index by endpoints: only composable pairs and triples enter the laws.
+        // Ordered iteration gives reproducible diagnostics without sorting or
+        // cloning names in the cubic (one-object category) case.
+        let mut outgoing: OrderedMap<&Object, List<&Morphism>> = OrderedMap::new();
+        for arrow in self.morphisms.values() {
+            outgoing.entry(&arrow.source).or_default().push(arrow);
+        }
         for f in self.morphisms.values() {
-            let id_target = self.identities.get(&f.target).cloned();
-            if let Some(id_t) = id_target {
-                let composed = self.compose(&id_t, &f.name);
-                if composed != Some(&f.name) {
-                    return Err(CategoryError::LeftIdentityFailure {
-                        morphism: f.name.clone(),
-                    });
+            if let Some(successors) = outgoing.get(&&f.target) {
+                for g in successors {
+                    self.require_composition(&g.name, &f.name)?;
                 }
             }
         }
-        // Right identity: f ∘ id_A = f for every f : A → B.
         for f in self.morphisms.values() {
-            let id_source = self.identities.get(&f.source).cloned();
-            if let Some(id_s) = id_source {
-                let composed = self.compose(&f.name, &id_s);
-                if composed != Some(&f.name) {
-                    return Err(CategoryError::RightIdentityFailure {
-                        morphism: f.name.clone(),
-                    });
-                }
+            // The first pass established an identity for every endpoint.
+            let id_target = self.identities.get(&f.target).expect("checked identity");
+            let id_source = self.identities.get(&f.source).expect("checked identity");
+            if self.require_composition(id_target, &f.name)? != &f.name {
+                return Err(CategoryError::LeftIdentityFailure {
+                    morphism: f.name.clone(),
+                });
             }
-        }
-        // Associativity: h ∘ (g ∘ f) = (h ∘ g) ∘ f for every
-        // composable triple. We iterate alphabetically for
-        // determinism.
-        let mut names: Vec<&Text> = self.morphisms.keys().collect();
-        names.sort();
-        for h in &names {
-            for g in &names {
-                for f in &names {
-                    let gf = self.compose(g, f).cloned();
-                    let hg = self.compose(h, g).cloned();
-                    if let (Some(gf), Some(hg)) = (gf, hg) {
-                        let lhs = self.compose(h, &gf).cloned();
-                        let rhs = self.compose(&hg, f).cloned();
-                        if lhs.is_some() && rhs.is_some() && lhs != rhs {
-                            return Err(CategoryError::AssociativityFailure {
-                                h: (**h).clone(),
-                                g: (**g).clone(),
-                                f: (**f).clone(),
-                            });
+            if self.require_composition(&f.name, id_source)? != &f.name {
+                return Err(CategoryError::RightIdentityFailure {
+                    morphism: f.name.clone(),
+                });
+            }
+            if let Some(successors) = outgoing.get(&&f.target) {
+                for g in successors {
+                    let gf = self.require_composition(&g.name, &f.name)?;
+                    if let Some(thirds) = outgoing.get(&&g.target) {
+                        for h in thirds {
+                            let hg = self.require_composition(&h.name, &g.name)?;
+                            let lhs = self.require_composition(&h.name, gf)?;
+                            let rhs = self.require_composition(hg, &f.name)?;
+                            if lhs != rhs {
+                                return Err(CategoryError::AssociativityFailure {
+                                    h: h.name.clone(),
+                                    g: g.name.clone(),
+                                    f: f.name.clone(),
+                                });
+                            }
                         }
                     }
                 }
@@ -241,10 +276,20 @@ impl Category {
         }
         Ok(())
     }
+
+    fn require_composition(&self, g: &Text, f: &Text) -> Result<&Text, CategoryError> {
+        self.compose(g, f)
+            .ok_or_else(|| CategoryError::MissingComposition {
+                g: g.clone(),
+                f: f.clone(),
+            })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CategoryError {
+    MissingIdentity { object: Object },
+    MissingComposition { g: Text, f: Text },
     UnknownMorphism { name: Text },
     IdentityShape { name: Text },
     CompositionTypeMismatch { g: Text, f: Text },
@@ -257,6 +302,10 @@ pub enum CategoryError {
 impl std::fmt::Display for CategoryError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::MissingIdentity { object } => write!(f, "object `{object}` has no identity"),
+            Self::MissingComposition { g, f: ff } => {
+                write!(f, "composition `{g} ∘ {ff}` is missing")
+            }
             Self::UnknownMorphism { name } => write!(f, "unknown morphism `{}`", name.as_str()),
             Self::IdentityShape { name } => write!(
                 f,
@@ -388,14 +437,15 @@ mod tests {
 
     #[test]
     fn check_laws_detects_left_identity_failure() {
-        // f : A → B, id_B exists, but id_B ∘ f is *not* registered
-        // as f. This is a missing-composition case rather than a
-        // wrong one — left-identity should still flag.
+        // A total one-object operation with a deliberately wrong left unit.
         let mut c = Category::new();
-        c.add_morphism(Morphism::new("f", obj("A"), obj("B")));
-        c.add_morphism(Morphism::new("id_B", obj("B"), obj("B")));
-        c.set_identity(obj("B"), "id_B").unwrap();
-        // No id_B ∘ f registered → left-identity fails for f.
+        c.add_morphism(Morphism::new("f", obj("A"), obj("A")));
+        c.add_morphism(Morphism::new("id", obj("A"), obj("A")));
+        c.set_identity(obj("A"), "id").unwrap();
+        c.set_composition("id", "id", "id").unwrap();
+        c.set_composition("id", "f", "id").unwrap();
+        c.set_composition("f", "id", "f").unwrap();
+        c.set_composition("f", "f", "f").unwrap();
         let r = c.check_laws();
         assert!(matches!(r, Err(CategoryError::LeftIdentityFailure { .. })));
     }
@@ -449,6 +499,27 @@ mod tests {
         c.add_morphism(Morphism::new("path1", obj("A"), obj("D")));
         c.add_morphism(Morphism::new("path2", obj("A"), obj("D")));
 
+        let arrows: List<_> = c.morphisms.values().cloned().collect();
+        for object in ["A", "B", "C", "D"] {
+            let id = Text::from(format!("id_{object}"));
+            c.add_morphism(Morphism::new(id.clone(), obj(object), obj(object)));
+            c.set_identity(obj(object), id.clone()).unwrap();
+            c.set_composition(id.clone(), id.clone(), id).unwrap();
+        }
+        for arrow in arrows {
+            c.set_composition(
+                format!("id_{}", arrow.target),
+                arrow.name.clone(),
+                arrow.name.clone(),
+            )
+            .unwrap();
+            c.set_composition(
+                arrow.name.clone(),
+                format!("id_{}", arrow.source),
+                arrow.name,
+            )
+            .unwrap();
+        }
         c.set_composition("g", "f", "gf").unwrap();
         c.set_composition("h", "g", "hg").unwrap();
         c.set_composition("h", "gf", "path1").unwrap();
@@ -468,6 +539,27 @@ mod tests {
         c.add_morphism(Morphism::new("hg", obj("B"), obj("D")));
         c.add_morphism(Morphism::new("hgf", obj("A"), obj("D")));
 
+        let arrows: List<_> = c.morphisms.values().cloned().collect();
+        for object in ["A", "B", "C", "D"] {
+            let id = Text::from(format!("id_{object}"));
+            c.add_morphism(Morphism::new(id.clone(), obj(object), obj(object)));
+            c.set_identity(obj(object), id.clone()).unwrap();
+            c.set_composition(id.clone(), id.clone(), id).unwrap();
+        }
+        for arrow in arrows {
+            c.set_composition(
+                format!("id_{}", arrow.target),
+                arrow.name.clone(),
+                arrow.name.clone(),
+            )
+            .unwrap();
+            c.set_composition(
+                arrow.name.clone(),
+                format!("id_{}", arrow.source),
+                arrow.name,
+            )
+            .unwrap();
+        }
         c.set_composition("g", "f", "gf").unwrap();
         c.set_composition("h", "g", "hg").unwrap();
         c.set_composition("h", "gf", "hgf").unwrap();
