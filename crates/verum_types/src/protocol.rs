@@ -601,7 +601,7 @@ impl ProtocolMethod {
         values.insert("Self".into(), receiver.clone());
         let apply = |ty: &Type| -> std::result::Result<Type, Text> {
             let ty = ty.try_apply_subst(&substitution)?;
-            Ok(ty.substitute_params(&values))
+            ty.try_substitute_params(&values)
         };
         applied.ty = apply(&self.ty)?;
         applied.type_param_bounds = self

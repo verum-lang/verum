@@ -620,3 +620,88 @@ impl ProtocolChecker {
             })
     }
 }
+
+impl ProtocolChecker {
+    /// Resolve a projection while checking this exact implementation, before it
+    /// is published as evidence. Its owner telescope and assignments are already
+    /// elaborated; no lookup may select a different protocol on the receiver.
+    pub(crate) fn source_impl_projection(
+        &self,
+        implementation: &ProtocolImpl,
+        method_owner: &Text,
+        method_arguments: &[Type],
+        name: &Text,
+        supplied: &[Type],
+        assumptions: &[WhereClause],
+    ) -> Result<Type, Text> {
+        let key = self.extract_protocol_name(&implementation.protocol);
+        let candidate = self.associated_declaration_application(
+            &key,
+            &implementation.protocol_args,
+            &implementation.for_type,
+            name,
+            &mut Vec::new(),
+        )?;
+        let selected = self
+            .associated_declaration_application(
+                method_owner,
+                method_arguments,
+                &implementation.for_type,
+                name,
+                &mut Vec::new(),
+            )?
+            .ok_or_else(|| Text::from("method projection is absent from its declaring protocol"))?;
+        let candidate_owns_assignment = candidate.is_some_and(|candidate| {
+            candidate.owner == selected.owner
+                && candidate.arguments.len() == selected.arguments.len()
+                && candidate
+                    .arguments
+                    .iter()
+                    .zip(&selected.arguments)
+                    .all(|(a, b)| self.types_structurally_equal(a, b))
+        });
+        let (arguments, scope) = self.complete_associated_family_arguments(
+            &selected.declaration,
+            &implementation.for_type,
+            &selected.arguments,
+            supplied,
+            assumptions,
+        )?;
+        if candidate_owns_assignment
+            && let Some(assignment) = implementation.associated_types.get(name)
+        {
+            return assignment.instantiate(&arguments, &Substitution::new());
+        }
+        if selected.owner != key {
+            // An inherited method uses only an established implementation of its
+            // exact ancestor application. A child may declare a different C.
+            let span = implementation.span;
+            let path = verum_ast::Path::new(
+                selected
+                    .owner
+                    .as_str()
+                    .split('.')
+                    .map(|name| verum_ast::ty::PathSegment::Name(verum_ast::Ident::new(name, span)))
+                    .collect(),
+                span,
+            );
+            if let Some((ancestor, substitution)) = self.find_impl_for_instantiation(
+                &implementation.for_type,
+                &path,
+                &selected.arguments,
+            ) {
+                if let Some(assignment) = ancestor.associated_types.get(name) {
+                    return assignment.instantiate(&arguments, &substitution);
+                }
+            }
+        }
+        if let Some(default) = &selected.declaration.default {
+            default.try_apply_subst(&scope)
+        } else {
+            Err(
+                "method projection has no established associated assignment or declared default"
+                    .into(),
+            )
+        }
+    }
+}

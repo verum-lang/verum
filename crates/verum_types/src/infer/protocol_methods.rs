@@ -14,6 +14,12 @@ use verum_ast::{
 };
 use verum_common::{List, Map, Text};
 
+pub(super) struct AppliedProtocolMethod {
+    pub owner: Text,
+    pub arguments: List<Type>,
+    pub method: ProtocolMethod,
+}
+
 fn invalid(span: Span, message: impl Into<Text>) -> TypeError {
     TypeError::OtherWithCodeSpanned {
         code: "E405".into(),
@@ -325,23 +331,25 @@ impl TypeChecker {
 
     /// Resolve a method along declared super-protocol applications. Every edge
     /// transports the owner's argument roster before the next lookup.
-    pub(super) fn applied_protocol_method_in_hierarchy(
+    pub(super) fn applied_protocol_methods_in_hierarchy(
         &self,
         protocol_name: &Text,
         arguments: &[Type],
         receiver: &Type,
+        owner_receiver: &Type,
         method_name: &Text,
         span: Span,
-    ) -> Result<Option<ProtocolMethod>> {
+    ) -> Result<List<AppliedProtocolMethod>> {
         fn visit(
             checker: &TypeChecker,
             name: &Text,
             arguments: &[Type],
             receiver: &Type,
+            owner_receiver: &Type,
             method: &Text,
             span: Span,
             active: &mut List<Text>,
-        ) -> Result<Option<ProtocolMethod>> {
+        ) -> Result<List<AppliedProtocolMethod>> {
             if active.len() >= 128 || active.contains(name) {
                 return Err(invalid(
                     span,
@@ -360,13 +368,16 @@ impl TypeChecker {
                     )
                 })?;
             if let Some(method) = protocol.methods.get(method) {
-                return method
-                    .apply_owner(arguments, receiver)
-                    .map(Some)
-                    .map_err(|message| invalid(span, message));
+                return Ok(List::from_iter([AppliedProtocolMethod {
+                    owner: name.clone(),
+                    arguments: arguments.iter().cloned().collect(),
+                    method: method
+                        .apply_owner(arguments, receiver)
+                        .map_err(|message| invalid(span, message))?,
+                }]));
             }
             if protocol.super_protocols.is_empty() {
-                return Ok(None);
+                return Ok(List::new());
             }
             let mut substitution = crate::ty::Substitution::new();
             match &protocol.constraints {
@@ -381,7 +392,7 @@ impl TypeChecker {
                             "super-protocol application lacks its complete owner arguments",
                         ));
                     }
-                    substitution.insert(*self_type, receiver.clone());
+                    substitution.insert(*self_type, owner_receiver.clone());
                     for (variable, argument) in parameters.iter().zip(arguments) {
                         substitution.insert(*variable, argument.clone());
                     }
@@ -395,30 +406,83 @@ impl TypeChecker {
                 _ => {}
             }
             active.push(name.clone());
+            let mut methods: List<AppliedProtocolMethod> = List::new();
             for super_bound in &protocol.super_protocols {
+                if super_bound.is_negative {
+                    continue;
+                }
                 let bound = super_bound
                     .try_apply_subst(&substitution)
                     .map_err(|message| invalid(span, message))?;
                 let owner = checker.path_to_string(&bound.protocol);
-                if let Some(method) =
-                    visit(checker, &owner, &bound.args, receiver, method, span, active)?
-                {
-                    active.pop();
-                    return Ok(Some(method));
+                for candidate in visit(
+                    checker,
+                    &owner,
+                    &bound.args,
+                    receiver,
+                    owner_receiver,
+                    method,
+                    span,
+                    active,
+                )? {
+                    // A diamond reaching the same declaration/application adds
+                    // one obligation. Distinct declarations are never first-wins.
+                    if !methods.iter().any(|prior| {
+                        prior.owner == candidate.owner
+                            && prior.arguments.len() == candidate.arguments.len()
+                            && prior
+                                .arguments
+                                .iter()
+                                .zip(&candidate.arguments)
+                                .all(|(a, b)| {
+                                    checker
+                                        .protocol_checker
+                                        .read()
+                                        .types_structurally_equal(a, b)
+                                })
+                    }) {
+                        methods.push(candidate);
+                    }
                 }
             }
             active.pop();
-            Ok(None)
+            Ok(methods)
         }
         visit(
             self,
             protocol_name,
             arguments,
             receiver,
+            owner_receiver,
             method_name,
             span,
             &mut List::new(),
         )
+    }
+
+    pub(super) fn applied_protocol_method_in_hierarchy(
+        &self,
+        protocol_name: &Text,
+        arguments: &[Type],
+        receiver: &Type,
+        method_name: &Text,
+        span: Span,
+    ) -> Result<Option<ProtocolMethod>> {
+        let methods = self.applied_protocol_methods_in_hierarchy(
+            protocol_name,
+            arguments,
+            receiver,
+            receiver,
+            method_name,
+            span,
+        )?;
+        if methods.len() > 1 {
+            return Err(invalid(
+                span,
+                "protocol method has competing inherited declaration owners",
+            ));
+        }
+        Ok(methods.into_iter().next().map(|selected| selected.method))
     }
 
     /// Prepare a protocol candidate without granting its requirements. The

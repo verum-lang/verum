@@ -6434,6 +6434,7 @@ impl TypeChecker {
                     // }
 
                     if let Some(expected) = expected { self.validate_impl_owner(&protocol_impl, expected)?; }
+                    self.check_source_impl_signatures(impl_decl, &protocol_impl, owner_frame)?;
                     let publication = self.protocol_checker.write().register_source_impl(
                         &self.current_module_path, impl_decl, protocol_impl,
                     );
@@ -7542,93 +7543,8 @@ impl TypeChecker {
             self.push_diagnostic_for(error);
         }
 
-        // T1078: the SIGNATURE check runs BEFORE the early return
-        // below, for the same reason the bound check does (T1074).
-        // That return exists for METHOD COMPLETENESS and its
-        // precondition — `protocols_with_known_defaults` holds only
-        // protocols whose SOURCE was seen — is narrower than this
-        // check's: comparing two signatures needs the protocol's
-        // declaration, which the archive carries perfectly well.
-        //
-        // Measured: `implement Display for Shown` with
-        // `fn fmt(&self, f: &mut Formatter) -> Text` (the protocol
-        // declares `-> Result<(), FormatError>`) compiled with ZERO
-        // diagnostics, and `to_string()` then printed an empty string,
-        // because the blanket writes through the formatter the impl
-        // never touches.  The identical mistake against a LOCALLY
-        // declared protocol was reported as E427 all along — the
-        // difference was only where the protocol came from.
-        // T1029: and the part that JUDGES rather than prints. The probe
-        // this closes is `fn greet(&self, times: Int) -> Int` implemented
-        // as `fn greet(&self, name: Text) -> Bool` — a caller behind the
-        // bound passes an Int, gets a Bool back where an Int was promised,
-        // and nothing complained. Only unambiguous scalar disagreements
-        // are reported; see `unambiguous_signature_disagreement` for why
-        // the lenient comparison beside it must not be turned on as a
-        // diagnostic.
-        let mismatches: Vec<(Text, String, verum_ast::span::Span)> = {
-            let guard = self.protocol_checker.read();
-            if std::env::var("VERUM_TRACE_PROTO_SIG").is_ok() {
-                // UNCONDITIONAL, before the match: "protocol not in the
-                // registry" and "signatures agree" are indistinguishable
-                // by silence, and they need different repairs.
-                eprintln!(
-                    "[proto-sig] impl of `{}`: in_registry={} items={}",
-                    proto_ident,
-                    guard.get_protocol(&proto_ident).is_some(),
-                    impl_decl.items.len()
-                );
-            }
-            match guard.get_protocol(&proto_ident) {
-                verum_common::Maybe::Some(protocol) => impl_decl
-                    .items
-                    .iter()
-                    .filter_map(|item| {
-                        let verum_ast::decl::ImplItemKind::Function(func) = &item.kind else {
-                            return None;
-                        };
-                        let proto_method = match protocol.methods.get(&func.name.name) {
-                            verum_common::Maybe::Some(m) => m,
-                            verum_common::Maybe::None => return None,
-                        };
-                        if let Some(declared) = proto_method.receiver_kind()
-                            && !declared.meta().allows_mutation
-                            && crate::core_metadata::ReceiverKind::from_declaration(func).meta().allows_mutation
-                        {
-                            return Some((func.name.name.clone(),
-                                "implementation requires a mutable or owned receiver where the protocol grants shared access".into(),
-                                func.span));
-                        }
-                        let impl_ty = crate::method_resolution::function_decl_to_type(func);
-                        // The protocol's OWN parameters, plus the
-                        // method's: both are bound elsewhere than in
-                        // this comparison, so neither can disagree.
-                        let mut bound: Vec<Text> = protocol
-                            .type_params
-                            .iter()
-                            .map(|tp| tp.name.clone())
-                            .collect();
-                        bound.extend(func.generics.iter().filter_map(|g| {
-                            match &g.kind {
-                                verum_ast::ty::GenericParamKind::Type { name, .. }
-                                | verum_ast::ty::GenericParamKind::HigherKinded {
-                                    name, ..
-                                } => Some(name.name.clone()),
-                                _ => None,
-                            }
-                        }));
-                        Self::unambiguous_signature_disagreement(
-                            &proto_method.ty,
-                            &impl_ty,
-                            &bound,
-                            &|t: &Type| self.scalar_behind(t),
-                        )
-                        .map(|why| (func.name.name.clone(), why, func.span))
-                    })
-                    .collect(),
-                verum_common::Maybe::None => Vec::new(),
-            }
-        };
+        // Signatures are checked in the declaration-owned implementation
+        // frame before this implementation is published as protocol evidence.
         // MEASUREMENT, not a diagnostic (VERUM_TRACE_PROTO_MISSING).
         //
         // A protocol method that the implementation never provides and
@@ -7664,21 +7580,6 @@ impl TypeChecker {
                 }
             }
         }
-        for (method, why, span) in mismatches {
-            self.push_diagnostic_for(TypeError::OtherWithCodeSpanned {
-                code: Text::from("E427"),
-                msg: Text::from(format!(
-                    "`{}` does not match the signature `{}` declares: {}\n  \
-                     note: a caller behind the bound `{}` uses the PROTOCOL's \
-                     signature, so the mismatch is invisible at the call site \
-                     and wrong at run time",
-                    method, proto_ident, why, proto_ident
-                )),
-                span,
-            });
-        }
-
-
         let Some((required_set, _declared)) =
             self.protocols_with_known_defaults.get(&proto_ident).cloned()
         else {
@@ -7971,98 +7872,7 @@ impl TypeChecker {
         }
     }
 
-    /// Describe how two function types disagree, or None when they do not
-    /// disagree in a way worth counting.
-    /// A type this comparison can judge with CERTAINTY: the built-in
-    /// scalars, and nothing else.
-    ///
-    /// `Unknown` is excluded on purpose — it is the ABSENCE of an answer,
-    /// not an answer, and treating it as one is how a checker starts
-    /// reporting its own gaps as the author's mistakes.
-    /// The built-in scalar a named type IS, under another name.
-    ///
-    /// Asked of two authorities rather than answered with a list:
-    /// `IntegerKind::from_name` decides what a sized integer alias is
-    /// (`UInt64`, `USize`, …) — the same authority
-    /// `warn_comparison_without_ordering` asks — and the ALIAS TABLE
-    /// decides what a declared name resolves to.
-    ///
-    /// The alias table, not `type_defs`: a declaration registers its
-    /// resolved type with `define_alias` and deliberately stores a
-    /// SELF-REFERENTIAL `Type::Named { NonNeg }` in `type_defs`, to keep
-    /// the indirection generic aliases need (`TypeDeclBody::Alias`).  A
-    /// walker that follows `lookup_type` stops on its own tail, which is
-    /// how the first version of this exclusion came out inert.
-    /// `resolve_alias` is the table `unify` itself consults.
-    ///
-    /// A refinement is unwrapped to its base for the same reason: `unify`
-    /// relates `Refined { base }` to `base` in BOTH directions, so for
-    /// `type NonNeg is Int { it >= 0 }` the two names are one type to
-    /// every other part of the checker.
-    ///
-    /// RESOLVING, not excluding.  The first repair pushed such names into
-    /// `bound_names` — "cannot disagree here" — and that silenced the
-    /// TRUE pole along with the false one: `Text` against `NonNeg` is a
-    /// disagreement precisely because `NonNeg` is `Int`.  Normalising
-    /// both sides and then comparing keeps both answers.
-    fn scalar_behind(&self, t: &Type) -> Option<Type> {
-        let Type::Named { path, .. } = t else {
-            return None;
-        };
-        let name = match path.segments.last() {
-            Some(verum_ast::ty::PathSegment::Name(i)) => i.name.clone(),
-            _ => return None,
-        };
-        if crate::integer_hierarchy::IntegerKind::from_name(name.as_str()).is_some() {
-            return Some(Type::Int);
-        }
-        if matches!(name.as_str(), "Float32" | "Float64") {
-            return Some(Type::Float);
-        }
-        if name.as_str() == "Byte" {
-            return Some(Type::Int);
-        }
-        let mut cur_name = name.clone();
-        let mut cur = self
-            .ctx
-            .resolve_alias(name.as_str())
-            .or_else(|| self.ctx.lookup_type(name.as_str()))?
-            .clone();
-        // A chain of refinements and aliases ends at a representation;
-        // the bound stops a cycle from spinning here.
-        for _ in 0..8 {
-            match cur {
-                Type::Refined { ref base, .. } => {
-                    let next = (**base).clone();
-                    cur = next;
-                }
-                Type::Named { ref path, .. } => {
-                    let n = match path.segments.last() {
-                        Some(verum_ast::ty::PathSegment::Name(i)) => i.name.clone(),
-                        _ => return None,
-                    };
-                    if n == cur_name {
-                        // The self-reference described above: this name
-                        // has no further definition to follow.
-                        return None;
-                    }
-                    let next = self
-                        .ctx
-                        .resolve_alias(n.as_str())
-                        .or_else(|| self.ctx.lookup_type(n.as_str()))?
-                        .clone();
-                    cur_name = n;
-                    cur = next;
-                }
-                _ => break,
-            }
-        }
-        if Self::is_decidable_scalar(&cur) {
-            Some(cur)
-        } else {
-            None
-        }
-    }
+
 
     fn is_decidable_scalar(t: &Type) -> bool {
         matches!(

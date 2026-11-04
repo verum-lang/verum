@@ -1376,30 +1376,67 @@ impl Type {
     /// how the malformed `Result<Unit>` class was born.  The body never
     /// read unifier state, so it belongs here, beside `apply_arguments`.
     pub fn substitute_params(&self, subst: &Map<Text, Type>) -> Type {
-        Self::substitute_params_impl(self, subst, 0)
+        // Compatibility callers retain the previous depth-limit behavior. Source
+        // declaration application uses the fallible boundary below.
+        self.try_substitute_params(subst).unwrap_or_else(|error| {
+            tracing::warn!("{error}");
+            self.clone()
+        })
     }
 
-    fn substitute_params_impl(ty: &Type, subst: &Map<Text, Type>, depth: usize) -> Type {
+    /// Substitute named declaration parameters without returning a partial type
+    /// when traversal or capture-avoiding binder renaming fails.
+    pub fn try_substitute_params(&self, subst: &Map<Text, Type>) -> Result<Type, Text> {
+        Self::try_substitute_params_impl(self, subst, 0)
+    }
+
+    fn named_substitution_under_binders(
+        binders: &[TypeVar],
+        body: &Type,
+        substitution: &Map<Text, Type>,
+        remaining_depth: usize,
+    ) -> Result<(List<TypeVar>, Type, Map<Text, Type>), Text> {
+        let mut scoped = substitution.clone();
+        for binder in binders {
+            scoped.remove(&Text::from(format!("{binder}")));
+        }
+        let mut ranges = Set::new();
+        for replacement in scoped.values() {
+            replacement.collect_type_variables(&mut ranges, false, Some(remaining_depth))?;
+        }
+        let mut occupied = ranges.clone();
+        body.collect_type_variables(&mut occupied, true, Some(remaining_depth))?;
+        let mut alpha = Substitution::new();
+        let mut renamed = List::new();
+        for binder in binders {
+            let variable = if ranges.contains(binder) {
+                let mut fresh = TypeVar::fresh();
+                while occupied.contains(&fresh) {
+                    fresh = TypeVar::fresh();
+                }
+                occupied.insert(fresh);
+                alpha.insert(*binder, Type::Var(fresh));
+                fresh
+            } else {
+                *binder
+            };
+            renamed.push(variable);
+        }
+        let body = body.try_apply_subst_with_depth(&alpha, 0, remaining_depth)?;
+        Ok((renamed, body, scoped))
+    }
+
+    fn try_substitute_params_impl(
+        ty: &Type,
+        subst: &Map<Text, Type>,
+        depth: usize,
+    ) -> Result<Type, Text> {
         const MAX_DEPTH: usize = 100;
         if depth > MAX_DEPTH {
-            // #306: surface the silent depth-limit fallback so a
-            // chain of self-referential type aliases hitting the
-            // cap is observable in telemetry rather than producing
-            // a mysteriously-unsubstituted type. Conservative fall
-            // back is correct (returns the type unmodified) but
-            // hiding the event from the user makes downstream
-            // type-error messages baffling.
-            tracing::warn!(
-                "apply_alias_subst depth limit ({}) exceeded — \
-                 returning type unchanged.  This typically means \
-                 a self-referential type alias chain; consider \
-                 simplifying the alias graph.",
-                MAX_DEPTH
-            );
-            return ty.clone();
+            return Err("named type substitution exceeded its structural depth budget".into());
         }
         let d = depth + 1;
-        match ty {
+        Ok(match ty {
             // A diagnostic name cannot authorize substitution of a value binder.
             Type::Meta { .. } => ty.clone(),
 
@@ -1407,7 +1444,7 @@ impl Type {
             Type::Var(tv) => {
                 let name = Text::from(format!("{}", tv));
                 if let Some(replacement) = subst.get(&name) {
-                    return replacement.clone();
+                    return Ok(replacement.clone());
                 }
                 ty.clone()
             }
@@ -1415,13 +1452,13 @@ impl Type {
             Type::Generic { name, args } => {
                 if args.is_empty() {
                     if let Some(replacement) = subst.get(name) {
-                        return replacement.clone();
+                        return Ok(replacement.clone());
                     }
                 }
                 let new_args: List<Type> = args
                     .iter()
-                    .map(|a| Self::substitute_params_impl(a, subst, d))
-                    .collect();
+                    .map(|a| Self::try_substitute_params_impl(a, subst, d))
+                    .collect::<Result<_, Text>>()?;
                 Type::Generic {
                     name: name.clone(),
                     args: new_args,
@@ -1433,14 +1470,14 @@ impl Type {
                 if args.is_empty() {
                     if let Some(ident) = path.as_ident() {
                         if let Some(replacement) = subst.get(&ident.name) {
-                            return replacement.clone();
+                            return Ok(replacement.clone());
                         }
                     }
                 }
                 let new_args: List<Type> = args
                     .iter()
-                    .map(|a| Self::substitute_params_impl(a, subst, d))
-                    .collect();
+                    .map(|a| Self::try_substitute_params_impl(a, subst, d))
+                    .collect::<Result<_, Text>>()?;
                 Type::Named {
                     path: path.clone(),
                     args: new_args,
@@ -1450,16 +1487,16 @@ impl Type {
             Type::Variant(variants) => {
                 let new_variants: indexmap::IndexMap<Text, Type> = variants
                     .iter()
-                    .map(|(k, v)| (k.clone(), Self::substitute_params_impl(v, subst, d)))
-                    .collect();
+                    .map(|(k, v)| Ok((k.clone(), Self::try_substitute_params_impl(v, subst, d)?)))
+                    .collect::<Result<_, Text>>()?;
                 Type::Variant(new_variants)
             }
             // Record types: recurse into fields
             Type::Record(fields) => {
                 let new_fields: indexmap::IndexMap<Text, Type> = fields
                     .iter()
-                    .map(|(k, v)| (k.clone(), Self::substitute_params_impl(v, subst, d)))
-                    .collect();
+                    .map(|(k, v)| Ok((k.clone(), Self::try_substitute_params_impl(v, subst, d)?)))
+                    .collect::<Result<_, Text>>()?;
                 Type::Record(new_fields)
             }
             // Function types: recurse into params and return
@@ -1473,9 +1510,9 @@ impl Type {
             } => {
                 let new_params: List<Type> = params
                     .iter()
-                    .map(|p| Self::substitute_params_impl(p, subst, d))
-                    .collect();
-                let new_ret = Box::new(Self::substitute_params_impl(return_type, subst, d));
+                    .map(|p| Self::try_substitute_params_impl(p, subst, d))
+                    .collect::<Result<_, Text>>()?;
+                let new_ret = Box::new(Self::try_substitute_params_impl(return_type, subst, d)?);
                 Type::Function {
                     property_requirement: property_requirement.clone(),
                     params: new_params,
@@ -1487,37 +1524,95 @@ impl Type {
             }
             // Reference types: recurse into inner
             Type::Reference { inner, mutable } => Type::Reference {
-                inner: Box::new(Self::substitute_params_impl(inner, subst, d)),
+                inner: Box::new(Self::try_substitute_params_impl(inner, subst, d)?),
                 mutable: *mutable,
             },
             Type::CheckedReference { inner, mutable } => Type::CheckedReference {
-                inner: Box::new(Self::substitute_params_impl(inner, subst, d)),
+                inner: Box::new(Self::try_substitute_params_impl(inner, subst, d)?),
                 mutable: *mutable,
             },
             Type::Ownership { inner, mutable } => Type::Ownership {
-                inner: Box::new(Self::substitute_params_impl(inner, subst, d)),
+                inner: Box::new(Self::try_substitute_params_impl(inner, subst, d)?),
                 mutable: *mutable,
             },
             // Tuple types: recurse
             Type::Tuple(elements) => {
                 let new_elements: List<Type> = elements
                     .iter()
-                    .map(|e| Self::substitute_params_impl(e, subst, d))
-                    .collect();
+                    .map(|e| Self::try_substitute_params_impl(e, subst, d))
+                    .collect::<Result<_, Text>>()?;
                 Type::Tuple(new_elements)
             }
             // Array types: recurse into element type
             Type::Array { element, size } => Type::Array {
-                element: Box::new(Self::substitute_params_impl(element, subst, d)),
+                element: Box::new(Self::try_substitute_params_impl(element, subst, d)?),
                 size: *size,
             },
             // Future types: recurse into output
             Type::Future { output } => Type::Future {
-                output: Box::new(Self::substitute_params_impl(output, subst, d)),
+                output: Box::new(Self::try_substitute_params_impl(output, subst, d)?),
             },
+            // An associated family application retains its receiver separately
+            // from its arguments; substitute both without reducing its identity.
+            Type::TypeApp { constructor, args } => Type::TypeApp {
+                constructor: Box::new(Self::try_substitute_params_impl(constructor, subst, d)?),
+                args: args
+                    .iter()
+                    .map(|arg| Self::try_substitute_params_impl(arg, subst, d))
+                    .collect::<Result<_, Text>>()?,
+            },
+            Type::Slice { element } => Type::Slice {
+                element: Box::new(Self::try_substitute_params_impl(element, subst, d)?),
+            },
+            Type::UnsafeReference { inner, mutable } => Type::UnsafeReference {
+                inner: Box::new(Self::try_substitute_params_impl(inner, subst, d)?),
+                mutable: *mutable,
+            },
+            Type::Pointer { inner, mutable } => Type::Pointer {
+                inner: Box::new(Self::try_substitute_params_impl(inner, subst, d)?),
+                mutable: *mutable,
+            },
+            Type::VolatilePointer { inner, mutable } => Type::VolatilePointer {
+                inner: Box::new(Self::try_substitute_params_impl(inner, subst, d)?),
+                mutable: *mutable,
+            },
+            Type::GenRef { inner } => Type::GenRef {
+                inner: Box::new(Self::try_substitute_params_impl(inner, subst, d)?),
+            },
+            Type::Generator {
+                yield_ty,
+                return_ty,
+            } => Type::Generator {
+                yield_ty: Box::new(Self::try_substitute_params_impl(yield_ty, subst, d)?),
+                return_ty: Box::new(Self::try_substitute_params_impl(return_ty, subst, d)?),
+            },
+            Type::Refined { base, predicate } => Type::Refined {
+                base: Box::new(Self::try_substitute_params_impl(base, subst, d)?),
+                predicate: predicate.clone(),
+            },
+            Type::Forall { vars, body } => {
+                let (vars, body, scoped) =
+                    Self::named_substitution_under_binders(vars, body, subst, MAX_DEPTH - depth)?;
+                Type::Forall {
+                    vars,
+                    body: Box::new(Self::try_substitute_params_impl(&body, &scoped, d)?),
+                }
+            }
+            Type::Exists { var, body } => {
+                let (vars, body, scoped) = Self::named_substitution_under_binders(
+                    std::slice::from_ref(var),
+                    body,
+                    subst,
+                    MAX_DEPTH - depth,
+                )?;
+                Type::Exists {
+                    var: vars[0],
+                    body: Box::new(Self::try_substitute_params_impl(&body, &scoped, d)?),
+                }
+            }
             // All other types: return as-is
             _ => ty.clone(),
-        }
+        })
     }
 
     pub fn bind_params(head: &Type, recv: &Type) -> Map<Text, Type> {
