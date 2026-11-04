@@ -2921,6 +2921,11 @@ impl VbcCodegen {
     /// This should be called on all modules BEFORE collect_non_protocol_declarations
     /// to ensure protocols are available when processing impl blocks.
     pub fn collect_protocol_definitions(&mut self, module: &Module) {
+        match self.selected_source_module(module, &self.config.module_name) {
+            Ok(true) => {},
+            Ok(false) => return,
+            Err(error) => { self.record_source_declaration_error(error); return; },
+        }
         use verum_ast::decl::ProtocolItemKind;
 
         for item in module.items.iter() {
@@ -5796,6 +5801,7 @@ impl VbcCodegen {
     /// via `collect_all_declarations()`. Unlike `compile_function_bodies()`, this does
     /// NOT call `build_module()` — call `finalize_module()` separately when done.
     pub fn compile_module_items(&mut self, module: &Module) -> CodegenResult<()> {
+        if !self.selected_source_module(module, &self.config.module_name)? { return Ok(()); }
         let prev = self.ctx.current_source_module.take();
         if let Some(name) =
             self.source_file_owner(module, &self.config.module_name)
@@ -5824,6 +5830,7 @@ impl VbcCodegen {
     /// module actually calls a skipped function, it will get a FunctionNotFound error
     /// at runtime, which is the correct behavior.
     pub fn compile_module_items_lenient(&mut self, module: &Module) -> CodegenResult<()> {
+        if !self.selected_source_module(module, &self.config.module_name)? { return Ok(()); }
         let prev = self.ctx.current_source_module.take();
         if let Some(name) =
             self.source_file_owner(module, &self.config.module_name)
@@ -8261,23 +8268,7 @@ impl VbcCodegen {
         self.register_runtime_io_functions();
         self.scope_to_own_module(module);
 
-        // #107 — module-level @cfg gating. If the AST module carries
-        // attributes (e.g., `module.attributes` populated by the parser
-        // from a file-scope `@cfg(target_os = "windows")` placed before
-        // the first item), evaluate them once. If they don't match the
-        // active build cfg, return an empty VbcModule — every item in
-        // this file is implicitly conditional on the module-level cfg.
-        //
-
-        // This complements the per-item check at `should_compile_item`
-        // for cases where the @cfg appears at file scope (above the
-        // module's first item) rather than on individual declarations.
-        // Without this, on macOS the entire `core/sys/windows/winsock2.vr`
-        // compiles its `public fn` bodies, emitting `_socket`/`_bind`/...
-        // symbols that shadow libSystem's BSD socket API and SIGABRT
-        // when called via the wrappers from `core/net/tcp.vr`.
-        if !module.attributes.is_empty() && !self.cfg_evaluator.should_include(&module.attributes) {
-            // Module gated out — produce an empty VbcModule.
+        if !self.selected_source_module(module, &self.config.module_name)? {
             return self.build_module();
         }
 
@@ -8332,6 +8323,10 @@ impl VbcCodegen {
         self.register_stdlib_constants();
         self.register_stdlib_intrinsics();
         self.register_runtime_io_functions();
+
+        if !self.selected_source_module(module, &self.config.module_name)? {
+            return self.build_module();
+        }
 
         // The implicit prelude is language semantics, and this entry
         // compiles a module the way production does — so it mounts
@@ -8548,7 +8543,10 @@ impl VbcCodegen {
     /// (a primitive receiver had no type NAME), fixed separately.
     pub fn run_unit_declaration_prepasses(&mut self, files: &[&Module]) -> CodegenResult<()> {
         let parent = self.config.module_name.clone();
-        let owned: Vec<_> = files.iter().map(|module| (parent.as_str(), *module)).collect();
+        let mut owned = Vec::new();
+        for module in files {
+            if self.selected_source_module(module, &parent)? { owned.push((parent.as_str(), *module)); }
+        }
         let result = self.run_owned_declaration_prepasses(&owned);
         self.config.module_name = parent;
         result
@@ -8715,7 +8713,7 @@ impl VbcCodegen {
         self.check_source_declaration_error()?;
         let mut first_error: Option<CodegenError> = None;
         for (parent, module) in files {
-            if !self.cfg_evaluator.should_include(&module.attributes) { continue; }
+            if !self.selected_source_module(module, &parent)? { continue; }
             let previous_parent = std::mem::replace(&mut self.config.module_name, (*parent).to_owned());
             let previous_scope = self.ctx.current_source_module.take();
             if let Some(name) =
@@ -8808,8 +8806,10 @@ impl VbcCodegen {
     /// the output archive's name. Every declaration phase keeps this ownership.
     pub fn collect_owned_unit_declarations(&mut self, files: &[(&str, &Module)]) -> CodegenResult<()> {
         let previous = self.config.module_name.clone();
-        let active: Vec<_> = files.iter().copied().filter(|(_, module)|
-            self.cfg_evaluator.should_include(&module.attributes)).collect();
+        let mut active = Vec::new();
+        for (parent, module) in files.iter().copied() {
+            if self.selected_source_module(module, &parent)? { active.push((parent, module)); }
+        }
         let result = self.prepare_owned_unit_declarations(&active)
             .and_then(|()| self.collect_prepared_owned_declarations(&active));
         self.config.module_name = previous;
@@ -8932,6 +8932,7 @@ impl VbcCodegen {
         source_path: &str,
         core_root: &str,
     ) -> CodegenResult<()> {
+        if !self.selected_source_module(module, &self.config.module_name)? { return Ok(()); }
         let mut resolved_files: std::collections::HashSet<String> =
             std::collections::HashSet::new();
         // Prevent re-resolving the source file itself
@@ -8944,11 +8945,12 @@ impl VbcCodegen {
         let mut imported = MountedSourceFiles::new(core_root, module.file_id);
         self.resolve_mounts_recursive(module, source_path, core_root, &mut resolved_files, &mut imported)?;
         let parent = self.config.module_name.clone();
-        let files: Vec<_> = imported.modules.iter()
-            .filter(|module| self.cfg_evaluator.should_include(&module.attributes))
-            .map(|module| (parent.as_str(), module)).collect();
+        let mut files = Vec::new();
+        for module in &imported.modules {
+            let source_parent = imported.parents.get(&module.file_id).map(String::as_str).unwrap_or(&parent);
+            if self.selected_source_module(module, source_parent)? { files.push((parent.as_str(), module)); }
+        }
         let graph: Vec<_> = std::iter::once((parent.as_str(), module))
-            .filter(|(_, module)| self.cfg_evaluator.should_include(&module.attributes))
             .chain(files.iter().copied()).collect();
         let collect = std::time::Instant::now();
         let previous = std::mem::replace(&mut self.mounted_file_parents, imported.parents);
@@ -9074,6 +9076,9 @@ impl VbcCodegen {
         resolved_files: &mut std::collections::HashSet<String>,
         imported: &mut MountedSourceFiles,
     ) -> CodegenResult<()> {
+
+        let source_parent = imported.parents.get(&module.file_id).map(String::as_str).unwrap_or(&self.config.module_name);
+        if !self.selected_source_module(module, source_parent)? { return Ok(()); }
 
         // Collect all files to parse (avoid borrow issues with recursive calls)
         let mut to_parse: Vec<String> = Vec::new();

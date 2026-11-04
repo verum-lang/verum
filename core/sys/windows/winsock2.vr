@@ -3,6 +3,7 @@
     stratum: MsfsStratum.LFnd,
     lifecycle: Lifecycle.Definition
 )
+@cfg(target_os = "windows")
 module core.sys.windows.winsock2;
 
 // =============================================================================
@@ -36,8 +37,6 @@ module core.sys.windows.winsock2;
 
 // Spec: new-arch-spec.md §5.4
 // =============================================================================
-
-@cfg(target_os = "windows")
 
 mount sys.common.{FileDesc, OSError};
 mount super.kernel32.{GetLastError, CloseHandle};

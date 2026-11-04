@@ -658,6 +658,82 @@ impl Default for CfgEvaluator {
     }
 }
 
+/// Selection of the sources backing a module, evaluated from declarations.
+/// A child can have several conditional declarations; any active declaration
+/// makes its backing source available.
+#[derive(Debug)]
+pub struct SourceModuleSelection {
+    pub include: bool,
+    pub children: Map<Text, bool>,
+}
+
+impl SourceModuleSelection {
+    pub fn unrestricted() -> Self {
+        Self { include: true, children: Map::new() }
+    }
+
+    pub fn includes_child(&self, name: &str) -> bool {
+        self.children.iter().all(|(child, active)| *active
+            || (name != child.as_str() && !name.strip_prefix(child.as_str()).is_some_and(|tail| tail.starts_with('.'))))
+    }
+
+    /// An ancestor's restriction cannot be undone by a child's declaration.
+    pub fn intersect(&mut self, inherited: Self) {
+        self.include &= inherited.include;
+        for (name, active) in inherited.children {
+            self.children.entry(name).and_modify(|own| *own &= active).or_insert(active);
+        }
+    }
+
+    pub fn for_child(&self, name: &str) -> Self {
+        let prefix = format!("{name}.");
+        Self {
+            include: self.include && self.includes_child(name),
+            children: self.children.iter().filter_map(|(child, active)|
+                child.strip_prefix(&prefix).map(|tail| (Text::from(tail), *active))).collect(),
+        }
+    }
+}
+
+impl CfgEvaluator {
+    /// Select a source file from its actual header and module attributes.
+    /// A cfg attached to a mount or function does not condition the file.
+    /// Validate every module predicate, including after an inactive condition.
+    pub fn source_module_selection(
+        &self,
+        module: &crate::Module,
+        owner: &str,
+    ) -> Result<SourceModuleSelection, crate::Span> {
+        let include = |attributes: &[crate::Attribute]| -> Result<bool, crate::Span> {
+            let mut selected = true;
+            for attribute in attributes {
+                let (active, failures) = self.should_include_with_failures(std::slice::from_ref(attribute));
+                if !failures.is_empty() { return Err(attribute.span); }
+                selected &= active;
+            }
+            Ok(selected)
+        };
+        let mut selection = SourceModuleSelection::unrestricted();
+        selection.include = include(&module.attributes)?;
+        let header = module.file_header_index();
+        for (index, item) in module.items.iter().enumerate() {
+            let crate::ItemKind::Module(declaration) = &item.kind else { continue };
+            if declaration.items.is_some() { continue; }
+            let selected = include(&item.attributes)?;
+            if Some(index) == header {
+                selection.include &= selected;
+            } else {
+                let name = declaration.name.name.as_str();
+                let relative = name.strip_prefix(owner).and_then(|tail| tail.strip_prefix('.'))
+                    .unwrap_or(name);
+                selection.children.entry(Text::from(relative))
+                    .and_modify(|active| *active |= selected).or_insert(selected);
+            }
+        }
+        Ok(selection)
+    }
+}
+
 /// Trait for types that have attributes (for cfg filtering).
 pub trait HasAttributes {
     fn attributes(&self) -> &[crate::attr::Attribute];

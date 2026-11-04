@@ -22,45 +22,9 @@ use std::path::Path;
 
 use verum_ast::cfg::{CfgEvaluator, TargetConfig};
 
-/// Selection of the sources backing a module, evaluated from declarations.
-/// A child can have several conditional declarations; any active declaration
-/// makes its backing source available.
-#[derive(Debug)]
-pub(crate) struct SourceModuleSelection {
-    pub include: bool,
-    pub children: std::collections::BTreeMap<String, bool>,
-}
+pub(crate) use verum_ast::cfg::SourceModuleSelection;
 
-impl SourceModuleSelection {
-    pub fn unrestricted() -> Self {
-        Self { include: true, children: std::collections::BTreeMap::new() }
-    }
-
-    pub fn includes_child(&self, name: &str) -> bool {
-        self.children.iter().all(|(child, active)| *active
-            || (name != child && !name.strip_prefix(child).is_some_and(|tail| tail.starts_with('.'))))
-    }
-
-    /// An ancestor's restriction cannot be undone by a child's declaration.
-    pub fn intersect(&mut self, inherited: Self) {
-        self.include &= inherited.include;
-        for (name, active) in inherited.children {
-            self.children.entry(name).and_modify(|own| *own &= active).or_insert(active);
-        }
-    }
-
-    pub fn for_child(&self, name: &str) -> Self {
-        let prefix = format!("{name}.");
-        Self {
-            include: self.includes_child(name),
-            children: self.children.iter().filter_map(|(child, active)|
-                child.strip_prefix(&prefix).map(|tail| (tail.to_owned(), *active))).collect(),
-        }
-    }
-}
-
-/// Parse the actual module declarations. Attributes attached to a mount or a
-/// function are not attributes of its containing file, regardless of spacing.
+/// Parse the source, then use the same declaration selection as VBC consumers.
 pub(crate) fn source_module_selection(
     content: &str,
     owner: &str,
@@ -68,36 +32,8 @@ pub(crate) fn source_module_selection(
 ) -> Result<SourceModuleSelection, String> {
     let module = verum_fast_parser::Parser::new(content).parse_module()
         .map_err(|error| format!("cannot parse module selection for {owner}: {error:?}"))?;
-    let evaluator = CfgEvaluator::with_config(target.clone());
-    let include = |attributes: &[verum_ast::Attribute]| -> Result<bool, String> {
-        let mut included = true;
-        for attribute in attributes {
-            let (selected, failures) = evaluator.should_include_with_failures(std::slice::from_ref(attribute));
-            if !failures.is_empty() {
-                return Err(format!("invalid @cfg on module declaration in {owner} at {:?}", attribute.span));
-            }
-            included &= selected;
-        }
-        Ok(included)
-    };
-    let mut selection = SourceModuleSelection::unrestricted();
-    selection.include = include(&module.attributes)?;
-    let header = module.file_header_index();
-    for (index, item) in module.items.iter().enumerate() {
-        let verum_ast::ItemKind::Module(declaration) = &item.kind else { continue };
-        if declaration.items.is_some() { continue; }
-        let name = declaration.name.name.as_str();
-        let selected = include(&item.attributes)?;
-        if Some(index) == header {
-            selection.include &= selected;
-        } else {
-            let relative = name.strip_prefix(owner).and_then(|tail| tail.strip_prefix('.'))
-                .unwrap_or(name);
-            selection.children.entry(relative.to_owned())
-                .and_modify(|active| *active |= selected).or_insert(selected);
-        }
-    }
-    Ok(selection)
+    CfgEvaluator::with_config(target.clone()).source_module_selection(&module, owner)
+        .map_err(|span| format!("invalid @cfg on module declaration in {owner} at {span:?}"))
 }
 
 // =============================================================================
