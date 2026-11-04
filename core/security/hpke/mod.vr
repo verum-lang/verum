@@ -71,8 +71,9 @@ mount core.security.kdf.hkdf.{
     hkdf_extract_sha256, hkdf_expand_sha256, HkdfError,
 };
 mount core.security.aead.chacha20_poly1305.{
-    ChaCha20Poly1305, ChaChaNonce, AeadError,
+    ChaCha20Poly1305, AeadError,
 };
+mount core.security.cipher.chacha20.{ChaChaNonce};
 
 // =============================================================================
 // Suite constants (RFC 9180 §7)
