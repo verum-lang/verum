@@ -1576,6 +1576,62 @@ fn substitute_refinement_binder(
         Ok(())
     }
 
+    /// A value parameter's sort and its predicate are separate obligations.
+    /// Constants discharge predicates by evaluation; symbolic arguments must
+    /// carry a domain that entails the declaration's domain. Failure to prove
+    /// an obligation is never admission, including identical opaque predicates.
+    fn meta_argument_satisfies_domain(&self, parameter: &Type, argument: &Type) -> bool {
+        let (Type::Meta { ty: expected, refinement: required, .. },
+             Type::Meta { ty: actual, refinement: known, value, .. }) = (parameter, argument)
+        else { return false; };
+        let domain = |ty: &Type, predicate: &Option<crate::refinement::RefinementPredicate>| {
+            let ty = self.normalize_type(ty);
+            match predicate {
+                Some(predicate) => Type::refined(ty, predicate.clone()),
+                None => ty,
+            }
+        };
+        let expected = domain(expected, required);
+        if let Some(value) = value {
+            let mut current = &expected;
+            while let Type::Refined { base, predicate } = current {
+                let mut evaluator = crate::const_eval::ConstEvaluator::new();
+                evaluator.bind(predicate.bound_variable(), value.clone());
+                if predicate.binds_subject("self") {
+                    evaluator.bind("self", value.clone());
+                }
+                if !matches!(evaluator.eval(&predicate.predicate),
+                    Ok(verum_common::ConstValue::Bool(true)))
+                {
+                    return false;
+                }
+                current = base;
+            }
+            true
+        } else {
+            let actual = domain(actual, known);
+            let mut required_domain = &expected;
+            while let Type::Refined { base, predicate } = required_domain {
+                let mut known_domain = &actual;
+                let mut established = false;
+                while let Type::Refined { base, predicate: premise } = known_domain {
+                    established |= crate::refinement_entailment::entails(
+                        actual.base(), premise, expected.base(), predicate,
+                    );
+                    known_domain = base;
+                }
+                let unconstrained = crate::refinement::RefinementPredicate::trivial(predicate.span);
+                if !established && !crate::refinement_entailment::entails(
+                    actual.base(), &unconstrained, expected.base(), predicate,
+                ) {
+                    return false;
+                }
+                required_domain = base;
+            }
+            true
+        }
+    }
+
     fn ast_to_generic_type(&mut self, ast_ty: &verum_ast::ty::Type) -> Result<Type> {
         self.apply_generic_type_arguments(ast_ty, None)
     }
@@ -1646,7 +1702,11 @@ fn substitute_refinement_binder(
                             };
                             type_args.push(match symbolic.or_else(|| self.eval_const_arg(expr)) {
                                 Some(ty) => ty,
-                                None => self.synth_expr(expr)?.ty,
+                                None => return Err(TypeError::OtherWithCodeSpanned {
+                                    code: "E405".into(),
+                                    msg: "generic value expression has no represented compile-time identity; its runtime type cannot replace the value".into(),
+                                    span: expr.span,
+                                }),
                             });
                         }
                         GenericArg::Lifetime(lifetime) => {
@@ -1768,7 +1828,7 @@ fn substitute_refinement_binder(
                             {
                                 let valid = match (role, argument) {
                                     (Type::Meta { ty: expected, .. }, Type::Meta { ty: actual, .. }) =>
-                                        self.types_equivalent(actual, expected),
+                                        self.normalize_type(actual).base() == self.normalize_type(expected).base(),
                                     (Type::Meta { .. }, _) | (_, Type::Meta { .. }) => false,
                                     _ => true,
                                 };
@@ -1792,6 +1852,21 @@ fn substitute_refinement_binder(
                             args,
                             ast_ty.span,
                         )?;
+                        if let Some(Type::Record(parameters)) = self.ctx.lookup_type(&params_key) {
+                            for ((name, role), argument) in parameters.iter().zip(
+                                type_args.iter().filter(|ty| !matches!(ty, Type::Lifetime { .. })),
+                            ) {
+                                if matches!(role, Type::Meta { .. })
+                                    && !self.meta_argument_satisfies_domain(role, argument)
+                                {
+                                    return Err(TypeError::OtherWithCodeSpanned {
+                                        code: "E405".into(),
+                                        msg: format!("cannot establish the declared value domain for `{type_name}.{name}`: expected {role}, found {argument}").into(),
+                                        span: ast_ty.span,
+                                    });
+                                }
+                            }
+                        }
                 }
 
                 // APPLYING TYPE ARGUMENTS TO A TYPE ALIAS IS A SUBSTITUTION,
