@@ -85,6 +85,18 @@ impl TypeChecker {
         let has_associated_bounds = associated_types
             .values()
             .any(|associated| !associated.bounds.is_empty());
+        // A local requirement narrows the family's domain even if its result
+        // has no bounds. Prove it from the declared domain using the same rigid
+        // variables and implication checker as result obligations.
+        let needs_domain_check = |name: &Text| {
+            provided.get(name).is_some_and(|(parameters, _, _)| {
+                parameters.iter().any(|parameter| match &parameter.kind {
+                    GenericParamKind::Type { bounds, .. } => !bounds.is_empty(),
+                    _ => true,
+                })
+            })
+        };
+        let has_family_domains = associated_types.keys().any(needs_domain_check);
         if let ProtocolConstraints::Unsupported(reason) = &constraints {
             return Err(refusal(declaration.span, reason.clone()));
         }
@@ -95,7 +107,7 @@ impl TypeChecker {
             parameter_bounds,
         } = &constraints
         else {
-            return if has_associated_bounds || has_parameter_bounds || !super_protocols.is_empty() {
+            return if has_associated_bounds || has_family_domains || has_parameter_bounds || !super_protocols.is_empty() {
                 Err(refusal(
                     declaration.span,
                     "protocol obligations lack their declaration-owned telescope",
@@ -105,6 +117,7 @@ impl TypeChecker {
             };
         };
         if !has_associated_bounds
+            && !has_family_domains
             && super_protocols.is_empty()
             && parameter_bounds
                 .iter()
@@ -207,7 +220,7 @@ impl TypeChecker {
                 }
             }
             for (name, associated) in &associated_types {
-                if associated.bounds.is_empty() {
+                if associated.bounds.is_empty() && !needs_domain_check(name) {
                     continue;
                 }
                 let mut family_frame = frame.clone();
