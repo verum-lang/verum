@@ -11326,9 +11326,8 @@ impl<'ctx> PlatformIR<'ctx> {
         let exec_closure_bb = ctx.append_basic_block(func, "exec_closure");
         let exec_store_bb = ctx.append_basic_block(func, "exec_store");
 
-        // Null safety net: NewClosure's unresolved-fn sentinel
-        // materialises 0 — complete the task with result 0 instead of
-        // jumping to address 0.
+        // A missing callable is an execution failure. It cannot publish a
+        // completed result, including zero, through the raw completion slot.
         let fn_is_null = builder
             .build_int_compare(
                 IntPredicate::EQ,
@@ -11342,9 +11341,7 @@ impl<'ctx> PlatformIR<'ctx> {
             .or_llvm_err()?;
 
         builder.position_at_end(exec_null_bb);
-        builder
-            .build_unconditional_branch(exec_store_bb)
-            .or_llvm_err()?;
+        self.emit_runtime_failure(module, &builder, "Thread pool task has no callable")?;
 
         // exec_tag: discriminate raw (bit0=1) vs closure object (bit0=0)
         builder.position_at_end(exec_tagged_bb);
@@ -11421,11 +11418,10 @@ impl<'ctx> PlatformIR<'ctx> {
             .build_unconditional_branch(exec_store_bb)
             .or_llvm_err()?;
 
-        // exec_store: merge the three paths
+        // exec_store: only actual callback results may complete the task.
         builder.position_at_end(exec_store_bb);
         let result_phi = builder.build_phi(i64_type, "task_result").or_llvm_err()?;
         result_phi.add_incoming(&[
-            (&i64_type.const_zero(), exec_null_bb),
             (&raw_result, exec_raw_bb),
             (&closure_result, exec_closure_bb),
         ]);
