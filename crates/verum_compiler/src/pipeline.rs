@@ -108,6 +108,10 @@ mod llvm_lowering;
 mod loading;
 
 #[cfg(test)]
+#[path = "../tests/unit/meta_aggregate_const_evaluation.rs"]
+mod meta_aggregate_const_evaluation_tests;
+
+#[cfg(test)]
 #[path = "../tests/unit/meta_evaluation_failures.rs"]
 mod meta_evaluation_failure_tests;
 
@@ -2052,40 +2056,6 @@ impl<'s> CompilationPipeline<'s> {
         ctx
     }
 
-    /// Check if a meta error is a "real" error that should be reported,
-    /// vs an infrastructure limitation (unsupported expression, function not found, etc.).
-    fn is_reportable_meta_error(e: &crate::meta::MetaError) -> bool {
-        use crate::meta::MetaError;
-        matches!(
-            e,
-            // M0XX: Core meta errors (type mismatches in user code)
-            MetaError::TypeMismatch { .. } |
-            // M1XX: Builtin errors (runtime failures in builtins)
-            MetaError::AssertionFailed { .. } |
-            MetaError::BuiltinEvalError { .. } |
-            MetaError::TypeMismatchBuiltin { .. } |
-            // M2XX: Context errors
-            MetaError::MissingContext { .. } |
-            MetaError::ContextCapabilityDenied { .. } |
-            MetaError::ContextScopeViolation { .. } |
-            // M3XX: Sandbox errors (runtime limits)
-            MetaError::ForbiddenOperation { .. } |
-            MetaError::MemoryLimitExceeded { .. } |
-            MetaError::RecursionLimitExceeded { .. } |
-            MetaError::IterationLimitExceeded { .. } |
-            MetaError::TimeoutExceeded { .. } |
-            MetaError::IONotAllowed { .. } |
-            MetaError::UnsafeNotAllowed { .. } |
-            MetaError::PathTraversalBlocked { .. } |
-            // M6XX: Const evaluation errors
-            MetaError::ConstOverflow { .. } |
-            MetaError::DivisionByZero |
-            MetaError::IndexOutOfBounds { .. } |
-            // Compile errors emitted explicitly
-            MetaError::CompileError(_)
-        )
-    }
-
     /// Walk module AST to find @const blocks and evaluate them.
     fn find_and_eval_const_blocks(
         &self,
@@ -2134,78 +2104,63 @@ impl<'s> CompilationPipeline<'s> {
         context_items: &[verum_ast::Item],
         errors: &mut Vec<(String, crate::meta::MetaError)>,
     ) {
-        use verum_ast::expr::ExprKind;
+        use verum_ast::visitor::{Visitor, walk_expr};
 
-        match &expr.kind {
-            ExprKind::MetaFunction { name, args, .. } if name.as_str() == "const" => {
-                // @const { ... } block — evaluate arguments
-                for arg in args.iter() {
-                    // ARCH-P4 step (ii): VBC-engine-first under the
-                    // flag; fail-closed to the tree-walk (see the
-                    // sibling @meta gate above). The module's type
-                    // items ride along so record-typed consts compile.
-                    if crate::meta::vbc_eval::vbc_meta_engine_selected() {
-                        if crate::meta::vbc_eval::vbc_eval_meta_expr(
-                            arg,
-                            arg.span,
-                            context_items,
-                        )
-                        .is_ok()
+        struct ConstEvaluator<'a, 's> {
+            pipeline: &'a CompilationPipeline<'s>,
+            module_path: &'a Text,
+            context_items: &'a [verum_ast::Item],
+            errors: &'a mut Vec<(String, crate::meta::MetaError)>,
+        }
+
+        impl Visitor for ConstEvaluator<'_, '_> {
+            fn visit_expr(&mut self, expr: &verum_ast::expr::Expr) {
+                use verum_ast::expr::ExprKind;
+                // Quoted tokens belong to a later stage and are not evaluated.
+                if matches!(expr.kind, ExprKind::Quote { .. }) {
+                    return;
+                }
+                if let ExprKind::MetaFunction { name, args, .. } = &expr.kind
+                    && name.as_str() == "const"
+                {
+                    for arg in args.iter() {
+                        // Preserve the selected engine and its existing fallback.
+                        if crate::meta::vbc_eval::vbc_meta_engine_selected()
+                            && crate::meta::vbc_eval::vbc_eval_meta_expr(
+                                arg,
+                                arg.span,
+                                self.context_items,
+                            )
+                            .is_ok()
                         {
                             continue;
                         }
-                    }
-                    let mut ctx = self
-                        .fresh_meta_ctx_with_version_stamp()
-                        .with_registry(std::sync::Arc::new(self.meta_registry.clone()))
-                        .with_current_module(module_path.clone());
-                    match ctx.ast_expr_to_meta_expr(arg) {
-                        Ok(meta_expr) => {
-                            if let Err(e) = ctx.eval_meta_expr(&meta_expr) {
-                                if Self::is_reportable_meta_error(&e) {
-                                    errors.push(("@const block".to_string(), e));
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            if Self::is_reportable_meta_error(&e) {
-                                errors.push(("@const block".to_string(), e));
-                            }
+                        let mut context = self
+                            .pipeline
+                            .fresh_meta_ctx_with_version_stamp()
+                            .with_registry(std::sync::Arc::new(self.pipeline.meta_registry.clone()))
+                            .with_current_module(self.module_path.clone());
+                        let result = context
+                            .ast_expr_to_meta_expr(arg)
+                            .and_then(|expression| context.eval_meta_expr(&expression));
+                        if let Err(error) = result {
+                            self.errors.push(("@const block".to_string(), error));
                         }
                     }
+                    // Each argument was already evaluated, including its children.
+                    return;
                 }
-            }
-            // Recurse into sub-expressions
-            ExprKind::Block(block) => {
-                for stmt in &block.stmts {
-                    match &stmt.kind {
-                        verum_ast::stmt::StmtKind::Expr { expr: e, .. } => {
-                            self.collect_const_blocks_from_expr(e, module_path, context_items, errors);
-                        }
-                        verum_ast::stmt::StmtKind::Let {
-                            value: Maybe::Some(e),
-                            ..
-                        } => {
-                            self.collect_const_blocks_from_expr(e, module_path, context_items, errors);
-                        }
-                        _ => {}
-                    }
-                }
-                if let Maybe::Some(e) = &block.expr {
-                    self.collect_const_blocks_from_expr(e, module_path, context_items, errors);
-                }
-            }
-            ExprKind::Call { func, args, .. } => {
-                self.collect_const_blocks_from_expr(func, module_path, context_items, errors);
-                for arg in args.iter() {
-                    self.collect_const_blocks_from_expr(arg, module_path, context_items, errors);
-                }
-            }
-            _ => {
-                // Other expressions: no recursive search needed for now
-                // A full implementation would walk all sub-expressions
+                walk_expr(self, expr);
             }
         }
+
+        ConstEvaluator {
+            pipeline: self,
+            module_path,
+            context_items,
+            errors,
+        }
+        .visit_expr(expr);
     }
 
     /// Unified pre-codegen validation.
@@ -2436,4 +2391,3 @@ mod script_parse_routing_tests {
         ));
     }
 }
-

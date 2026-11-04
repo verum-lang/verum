@@ -15,6 +15,12 @@ pub enum MetaExpr {
     /// Literal value
     Literal(MetaValue),
 
+    /// Tuple construction; elements are evaluated in source order.
+    Tuple(List<MetaExpr>),
+
+    /// Array construction; elements are evaluated in source order.
+    Array(List<MetaExpr>),
+
     /// Variable reference
     Variable(Text),
 

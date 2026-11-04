@@ -352,6 +352,23 @@ fn path_to_type(path: &Path) -> Option<Type> {
 }
 
 impl MetaContext {
+    /// Construct an aggregate through the selected evaluator, preserving source
+    /// order, the first error, and the shared allocation budget.
+    fn eval_meta_aggregate(
+        &mut self,
+        elements: &List<MetaExpr>,
+        construct: fn(List<ConstValue>) -> ConstValue,
+        evaluate: fn(&mut Self, &MetaExpr) -> Result<ConstValue, MetaError>,
+    ) -> Result<ConstValue, MetaError> {
+        let values = elements
+            .iter()
+            .map(|element| evaluate(self, element))
+            .collect::<Result<List<_>, _>>()?;
+        let value = construct(values);
+        self.track_allocation(const_value_alloc_size(&value))?;
+        Ok(value)
+    }
+
     /// Convert AST statement to MetaStmt
     fn ast_stmt_to_meta_stmt(&self, stmt: &verum_ast::stmt::Stmt) -> Result<MetaStmt, MetaError> {
         match &stmt.kind {
@@ -556,39 +573,23 @@ impl MetaContext {
                     expr: Heap::new(inner_meta),
                 })
             }
-            ExprKind::Tuple(elements) => {
-                let meta_elements = elements
-                    .iter()
-                    .map(|e| self.ast_expr_to_meta_expr(e))
-                    .collect::<Result<List<_>, _>>()?;
-                // Convert to tuple literal
-                Ok(MetaExpr::Literal(ConstValue::Tuple(
-                    meta_elements
-                        .into_iter()
-                        .map(|e| match e {
-                            MetaExpr::Literal(v) => v,
-                            _ => ConstValue::Unit,
-                        })
-                        .collect(),
-                )))
+            ExprKind::Tuple(elements) if elements.is_empty() => {
+                Ok(MetaExpr::Literal(ConstValue::Unit))
             }
+            ExprKind::Tuple(elements) => Ok(MetaExpr::Tuple(
+                elements
+                    .iter()
+                    .map(|element| self.ast_expr_to_meta_expr(element))
+                    .collect::<Result<List<_>, _>>()?,
+            )),
             ExprKind::Array(array_expr) => {
                 match array_expr {
-                    verum_ast::ArrayExpr::List(elements) => {
-                        let meta_elements = elements
+                    verum_ast::ArrayExpr::List(elements) => Ok(MetaExpr::Array(
+                        elements
                             .iter()
-                            .map(|e| self.ast_expr_to_meta_expr(e))
-                            .collect::<Result<List<_>, _>>()?;
-                        Ok(MetaExpr::Literal(ConstValue::Array(
-                            meta_elements
-                                .into_iter()
-                                .map(|e| match e {
-                                    MetaExpr::Literal(v) => v,
-                                    _ => ConstValue::Unit,
-                                })
-                                .collect(),
-                        )))
-                    }
+                            .map(|element| self.ast_expr_to_meta_expr(element))
+                            .collect::<Result<List<_>, _>>()?,
+                    )),
                     verum_ast::ArrayExpr::Repeat { value, count } => {
                         // For repeat syntax [value; count], evaluate count
                         let val = self.ast_expr_to_meta_expr(value)?;
@@ -930,6 +931,13 @@ impl MetaContext {
 
         match expr {
             MetaExpr::Literal(val) => Ok(val.clone()),
+
+            MetaExpr::Tuple(elements) => self.eval_meta_aggregate(
+                elements, ConstValue::Tuple, Self::eval_meta_expr,
+            ),
+            MetaExpr::Array(elements) => self.eval_meta_aggregate(
+                elements, ConstValue::Array, Self::eval_meta_expr,
+            ),
 
             MetaExpr::Variable(name) => {
                 self.get(name)
@@ -2767,7 +2775,7 @@ impl MetaContext {
     /// - `${...}` patterns: Parse inner tokens as expr, evaluate, substitute
     /// - `$[...]` patterns: Repetition blocks (iterate and expand)
     fn expand_token_tree_splices(
-        &self,
+        &mut self,
         tokens: &List<verum_ast::expr::TokenTree>,
     ) -> Result<List<verum_ast::expr::TokenTree>, MetaError> {
         use verum_ast::expr::{MacroDelimiter, TokenTree, TokenTreeKind};
@@ -2893,7 +2901,7 @@ impl MetaContext {
     /// Parses the inner tokens as an expression, evaluates it in the meta
     /// context, and converts the result to tokens.
     fn expand_expr_splice(
-        &self,
+        &mut self,
         inner_tokens: &List<verum_ast::expr::TokenTree>,
         span: Span,
     ) -> Result<List<verum_ast::expr::TokenTree>, MetaError> {
@@ -2915,10 +2923,8 @@ impl MetaContext {
         // Convert AST expression to meta expression
         let meta_expr = self.ast_expr_to_meta_expr(&expr)?;
 
-        // Evaluate the meta expression
-        // Note: We need a mutable self for evaluation, but we only have &self here.
-        // This is a design constraint - for now, we'll use a simple approach that
-        // handles common cases like variable references.
+        // Preserve the splice evaluator's supported operations. Aggregate
+        // construction shares the ordinary evaluator's allocation accounting.
         let value = self.evaluate_simple_meta_expr(&meta_expr)?;
 
         // Convert the result to tokens
@@ -2928,12 +2934,12 @@ impl MetaContext {
     /// Evaluate a simple meta expression (for splice context)
     ///
     /// This is an extended evaluation that handles common expression patterns
-    /// without requiring mutable self. Supports:
+    /// with the same aggregate construction budget as ordinary evaluation. Supports:
     /// - Literals and variables
     /// - Binary and unary operations
     /// - Field access, indexing, and tuple indexing
     /// - Simple method calls on known types (len, is_empty, etc.)
-    fn evaluate_simple_meta_expr(&self, expr: &MetaExpr) -> Result<ConstValue, MetaError> {
+    fn evaluate_simple_meta_expr(&mut self, expr: &MetaExpr) -> Result<ConstValue, MetaError> {
         match expr {
             MetaExpr::Variable(name) => self.get(name).ok_or_else(|| {
                 MetaError::Other(Text::from(format!(
@@ -2942,6 +2948,12 @@ impl MetaContext {
                 )))
             }),
             MetaExpr::Literal(val) => Ok(val.clone()),
+            MetaExpr::Tuple(elements) => self.eval_meta_aggregate(
+                elements, ConstValue::Tuple, Self::evaluate_simple_meta_expr,
+            ),
+            MetaExpr::Array(elements) => self.eval_meta_aggregate(
+                elements, ConstValue::Array, Self::evaluate_simple_meta_expr,
+            ),
 
             // Binary operations - evaluate both sides and apply operator
             MetaExpr::Binary { op, left, right } => {
