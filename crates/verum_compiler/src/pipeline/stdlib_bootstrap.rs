@@ -2062,10 +2062,10 @@ one module and therefore never seeded",
         // Pool-owned nominal signatures accompany the existing text/layout
         // registry. Import only this source unit's dependency closure.
         let mut prior_modules: Vec<_> = self.compiled_stdlib_modules.values().collect();
-        prior_modules.extend(declaration_interfaces.iter().filter(|interface| {
-            interface.name != module.name
-                && !self.compiled_stdlib_modules.contains_key(&interface.name)
-        }));
+        // A declaration archive can contain many source owners, including
+        // dependencies of the unit whose name happens to match the archive.
+        // The importer excludes local declarations by their source identity.
+        prior_modules.extend(declaration_interfaces);
         prior_modules.sort_by(|a, b| a.name.cmp(&b.name));
         self.import_core_nominal_dependencies(&mut codegen, ast_modules, &prior_modules)
             .map_err(|error| anyhow::anyhow!("{}: {error}", module.name))?;
