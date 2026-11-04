@@ -4851,15 +4851,14 @@ impl TypeChecker {
                                 let short_name = verum_common::Text::from(register_name);
                                 if !self.inline_modules.contains_key(&short_name) {
                                     // First check the source module's AST for an inline module
-                                    let source_ast_opt = self
+                                    let source_module = self
                                         .get_module_with_path_aliases(
                                             source_module_path.as_str(),
                                             registry,
-                                        )
-                                        .map(|m| m.ast.clone());
+                                        );
                                     let inline_mod_found =
-                                        source_ast_opt.as_ref().and_then(|ast| {
-                                            ast.items.iter().find_map(|ast_item| {
+                                        source_module.as_ref().and_then(|module| {
+                                            module.ast.items.iter().find_map(|ast_item| {
                                                 if let verum_ast::ItemKind::Module(mod_decl) =
                                                     &ast_item.kind
                                                 {
@@ -5650,11 +5649,11 @@ impl TypeChecker {
     /// Returns a list of ImplDecl for both inherent AND protocol implementations of the type.
     /// This ensures that methods from protocol implementations (e.g., `implement Allocator for GlobalAllocator`)
     /// are also available for method calls on the implementing type.
-    pub(super) fn find_impl_blocks_for_type(
+    pub(super) fn find_impl_blocks_for_type<'ast>(
         &self,
-        ast: &verum_ast::Module,
+        ast: &'ast verum_ast::Module,
         type_name: &str,
-    ) -> List<verum_ast::decl::ImplDecl> {
+    ) -> List<&'ast verum_ast::decl::ImplDecl> {
         use verum_ast::ItemKind;
         use verum_ast::decl::ImplKind;
 
@@ -5697,7 +5696,7 @@ impl TypeChecker {
                     };
 
                     if base_type_name == Some(type_name) {
-                        impl_blocks.push(impl_decl.clone());
+                        impl_blocks.push(impl_decl);
                     }
                 }
             }
@@ -5773,8 +5772,8 @@ impl TypeChecker {
 
         let mut registration_error = None;
         for original in impl_blocks {
-            let selected = self.cfg_filtered_impl(&original);
-            let impl_decl = selected.as_ref().unwrap_or(&original);
+            let selected = self.cfg_filtered_impl(original);
+            let impl_decl = selected.as_ref().unwrap_or(original);
             let specialization = match Self::source_impl_specialization(impl_decl) {
                 Ok(value) => value,
                 Err(error) => {
