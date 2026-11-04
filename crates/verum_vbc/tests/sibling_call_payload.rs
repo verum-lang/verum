@@ -165,13 +165,7 @@ fn lexical_wildcards_preserve_reexported_nominal_witnesses_without_selecting_a_s
         "module sample.facade; public mount sample.storage.*;",
         "module sample.consumer; mount sample.facade.*; mount sample.storage.*;\n\
          fn forward<T>(item: Parcel<Int, T>) -> Parcel<Int, T> { item }
-         fn restricted(item: Local) -> Int { 1 }
-         fn locked(item: Secret) -> Int { 2 }",
-        "module outside.client; mount sample.facade.*;
-         fn leaked(item: Local) -> Int { 3 }
-         fn hidden(item: Secret) -> Int { 4 }",
-        "module sample.conflict; mount sample.facade.*; mount sample.other.*;\n\
-         fn unresolved<T>(item: Parcel<T>) -> Int { 0 }",
+         fn restricted(item: Local) -> Int { 1 }",
     ];
     let files: Vec<_> = source.iter().map(|s| Parser::new(s).parse_module().unwrap()).collect();
     for reverse in [false, true] {
@@ -181,6 +175,8 @@ fn lexical_wildcards_preserve_reexported_nominal_witnesses_without_selecting_a_s
         compiler.collect_unit_declarations(&files).unwrap();
         compiler.compile_unit_items(&files, ItemFailurePolicy::Strict).unwrap();
         let module = compiler.finalize_module().unwrap();
+        let wire = verum_vbc::serialize::serialize_module(&module).unwrap();
+        for module in [module, verum_vbc::deserialize::deserialize_module(&wire).unwrap()] {
         let own_type = module.types.iter().find(|t| {
             module.get_string(t.name) == Some("Parcel")
                 && t.origin_module.and_then(|name| module.get_string(name)) == Some("sample.storage")
@@ -193,10 +189,37 @@ fn lexical_wildcards_preserve_reexported_nominal_witnesses_without_selecting_a_s
         assert_eq!(forward.semantic_parameter_types().unwrap()[0].as_ref(), Some(&expected));
         assert_eq!(forward.semantic_return.as_ref(), Some(&expected));
         assert!(function("sample.consumer.restricted").semantic_parameter_types().unwrap()[0].is_some());
-        for denied in ["sample.consumer.locked", "outside.client.hidden", "outside.client.leaked"] {
-            assert!(function(denied).semantic_parameter_types().unwrap()[0].is_none(), "{denied}");
         }
-        assert!(function("sample.conflict.unresolved").semantic_parameter_types().unwrap()[0].is_none());
+    }
+}
+
+#[test]
+fn inaccessible_and_ambiguous_glob_witnesses_refuse_instead_of_erasing_signatures() {
+    use verum_vbc::codegen::CodegenErrorKind;
+
+    for (consumer, denied) in [
+        ("module sample.consumer; mount sample.facade.*; fn locked(item: Secret) -> Int { 2 }", "Secret"),
+        ("module outside.client; mount sample.facade.*; fn hidden(item: Secret) -> Int { 4 }", "Secret"),
+        ("module outside.client; mount sample.facade.*; fn leaked(item: Local) -> Int { 3 }", "Local"),
+        ("module sample.conflict; mount sample.facade.*; mount sample.other.*; fn unresolved<T>(item: Parcel<T>) -> Int { 0 }", "Parcel"),
+    ] {
+        let sources = [
+            "module sample.storage; public type Parcel<A, B> is { first: A, second: B }; type Secret is { value: Int }; public(crate) type Local is { value: Int };",
+            "module sample.other; public type Parcel<T> is { other: T };",
+            "module sample.facade; public mount sample.storage.*;",
+            consumer,
+        ];
+        let modules: Vec<_> = sources.iter().map(|source| Parser::new(source).parse_module().unwrap()).collect();
+        for reverse in [false, true] {
+            let mut files: Vec<_> = modules.iter().collect();
+            if reverse { files.reverse(); }
+            let mut compiler = VbcCodegen::with_config(CodegenConfig::new("sample"));
+            let error = compiler.collect_unit_declarations(&files).unwrap_err();
+            assert!(
+                matches!(&error.kind, CodegenErrorKind::InvalidSourceSignature(message) if message.contains(denied)),
+                "{consumer}: {error:?}"
+            );
+        }
     }
 }
 
