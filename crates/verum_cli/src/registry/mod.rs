@@ -6,8 +6,9 @@ pub mod cache_manager;
 pub mod client;
 pub mod content_store;
 pub mod enterprise;
-pub mod ipfs;
+mod index;
 pub(crate) mod installed;
+pub mod ipfs;
 pub mod lockfile;
 pub mod lockfile_v3;
 pub mod mirror;
@@ -57,11 +58,6 @@ pub(crate) fn finish_source_archive<W: std::io::Write>(
 /// other dependency kinds (path / git) and the script-side
 /// frontmatter UI surfaces the network failure with a typed error.
 pub const DEFAULT_REGISTRY: &str = "https://vcogs.io";
-
-/// Registry index URL
-pub fn registry_index_url(base: &str) -> String {
-    format!("{}/index", base)
-}
 
 /// Registry API URL
 pub fn registry_api_url(base: &str) -> String {

@@ -279,30 +279,15 @@ impl RegistryClient {
         Ok(report)
     }
 
-    /// Get package index
+    /// Read one complete, validated version set from the selected registry.
     pub fn get_index(&self, name: &str) -> Result<IndexEntry> {
-        let url = format!(
-            "{}/index/{}",
-            super::registry_index_url(self.base_url.as_str()),
-            name
-        );
-
+        let url = super::index::index_url(self.base_url.as_str(), name)?;
         let response = self
             .client
-            .get(&url)
+            .get(url)
             .send()
-            .map_err(|e| CliError::Network(e.to_string()))?;
-
-        if !response.status().is_success() {
-            return Err(CliError::Registry(format!(
-                "Index not found for package: {}",
-                name
-            )));
-        }
-
-        response
-            .json()
-            .map_err(|e| CliError::Registry(format!("Failed to parse index: {}", e)))
+            .map_err(|error| CliError::Network(error.to_string()))?;
+        super::index::read_index(response, name)
     }
 
     /// Login to registry
@@ -402,6 +387,9 @@ impl RegistryClient {
 
 fn http_client_builder() -> reqwest::blocking::ClientBuilder {
     Client::builder()
+        // Registry responses belong to the selected endpoint. A redirect is
+        // not permission to resolve versions or fetch metadata from another.
+        .redirect(reqwest::redirect::Policy::none())
         .timeout(Duration::from_secs(30))
         .user_agent("verum-cli/1.0.0")
 }
@@ -418,3 +406,7 @@ mod publication_transport;
 #[cfg(test)]
 #[path = "../../tests/registry/publication_receipts.rs"]
 mod publication_receipts;
+
+#[cfg(test)]
+#[path = "../../tests/registry/index_contract.rs"]
+mod index_contract;
