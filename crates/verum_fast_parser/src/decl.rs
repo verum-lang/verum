@@ -4469,7 +4469,7 @@ impl<'a> RecursiveParser<'a> {
         let start_pos = self.stream.position();
 
         // Parse attributes first (e.g., @must_use, @deprecated, @doc)
-        let _attributes = self.parse_attributes()?;
+        let attributes = self.parse_attributes()?;
 
         // Check for 'default' contextual keyword before type/const/fn
         // 'default' is not a reserved keyword, so we check for it as an identifier
@@ -4764,7 +4764,7 @@ impl<'a> RecursiveParser<'a> {
                 meta_where_clause: meta_where,
                 requires: requires.into_iter().collect(),
                 ensures: ensures.into_iter().collect(),
-                attributes: List::new(),
+                attributes: attributes.into_iter().collect(),
                 body: None,
                 span,
             };
