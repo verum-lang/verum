@@ -461,3 +461,72 @@ fn named_unknown_is_not_the_unknown_top_type() {
             .is_none()
     );
 }
+
+#[test]
+fn generic_and_named_nominals_share_full_qualified_owner_identity() {
+    let nominal = |owner: &str, argument: Type| Type::Generic {
+        name: owner.into(),
+        args: [argument].into_iter().collect(),
+    };
+    let named = |owner: &str, argument: Type, segmented: bool| Type::Named {
+        path: if segmented {
+            Path::new(
+                owner
+                    .split('.')
+                    .map(|component| {
+                        verum_ast::ty::PathSegment::Name(Ident::new(component, Span::default()))
+                    })
+                    .collect(),
+                Span::default(),
+            )
+        } else {
+            path(owner)
+        },
+        args: [argument].into_iter().collect(),
+    };
+    for declared in [
+        nominal("alpha.Owner", Type::Int),
+        named("alpha.Owner", Type::Int, false),
+        named("alpha.Owner", Type::Int, true),
+    ] {
+        let mut checker = checker();
+        let mut declaration = implementation(declared);
+        declaration.associated_types.insert(
+            "OwnedCarrier".into(),
+            AssociatedTypeAssignment::ordinary(Type::Bool),
+        );
+        checker
+            .register_impl(declaration)
+            .expect("actual declaration");
+        for actual in [
+            nominal("alpha.Owner", Type::Int),
+            named("alpha.Owner", Type::Int, false),
+            named("alpha.Owner", Type::Int, true),
+        ] {
+            assert!(
+                checker.implements_cached(&actual, &path("Evidence")),
+                "same full owner: {actual:?}"
+            );
+            assert_eq!(
+                checker.try_find_associated_type(&actual, &"OwnedCarrier".into()),
+                Some(Type::Bool)
+            );
+        }
+        for other in [
+            nominal("beta.Owner", Type::Int),
+            named("beta.Owner", Type::Int, false),
+            named("Owner", Type::Int, false),
+            named("alpha.Owner", Type::Bool, true),
+        ] {
+            assert!(
+                !checker.implements_cached(&other, &path("Evidence")),
+                "distinct owner or argument: {other:?}"
+            );
+            assert!(
+                checker
+                    .try_find_associated_type(&other, &"OwnedCarrier".into())
+                    .is_none()
+            );
+        }
+    }
+}

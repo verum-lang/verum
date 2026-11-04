@@ -6469,28 +6469,29 @@ impl ProtocolChecker {
     }
 
     /// Check if two paths are equal
+    fn nominal_path_components(path: &Path) -> impl Iterator<Item = &str> {
+        path.segments
+            .iter()
+            .filter_map(|segment| match segment {
+                verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.as_str()),
+                _ => None,
+            })
+            .flat_map(|name| name.split('.'))
+    }
+
     fn paths_equal(&self, p1: &Path, p2: &Path) -> bool {
         // Metadata may carry a canonical qualified name in one Ident; source
         // syntax carries one segment per component. Both denote the same full
         // declaration path, never merely its leaf. Relative markers remain
         // distinct and cannot be erased by rendering a routing key.
-        fn components(path: &Path) -> impl Iterator<Item = &str> {
-            path.segments
-                .iter()
-                .filter_map(|segment| match segment {
-                    verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.as_str()),
-                    _ => None,
-                })
-                .flat_map(|name| name.split('.'))
-        }
         let nominal = |path: &Path| {
             path.segments
                 .iter()
                 .all(|segment| matches!(segment, verum_ast::ty::PathSegment::Name(_)))
         };
         if nominal(p1) && nominal(p2) {
-            let mut left = components(p1);
-            let mut right = components(p2);
+            let mut left = Self::nominal_path_components(p1);
+            let mut right = Self::nominal_path_components(p2);
             loop {
                 match (left.next(), right.next()) {
                     (Some(a), Some(b)) if !a.is_empty() && a == b => {}
@@ -6565,14 +6566,12 @@ impl ProtocolChecker {
                 // nominal application. Identity is the complete declaring path;
                 // a projection, relative path or matching suffix is insufficient.
                 !name.starts_with("::")
+                    && !name.is_empty()
                     && path
                         .segments
                         .iter()
-                        .map(|segment| match segment {
-                            verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.as_str()),
-                            _ => None,
-                        })
-                        .eq(name.as_str().split('.').map(Some))
+                        .all(|segment| matches!(segment, verum_ast::ty::PathSegment::Name(_)))
+                    && Self::nominal_path_components(path).eq(name.as_str().split('.'))
                     && left.len() == right.len()
                     && left
                         .iter()
