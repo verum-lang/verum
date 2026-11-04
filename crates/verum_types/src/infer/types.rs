@@ -1669,6 +1669,9 @@ fn substitute_refinement_binder(
 
                 }
 
+                // Keep the owned substitution for an alias body as well as
+                // each later parameter's carrier; both use the same telescope.
+                let mut argument_scope = crate::ty::Substitution::new();
                 // Validate and default arguments using the registration selected
                 // with this exact template, including phantom parameter slots.
                 if let Some(type_name) = parameter_key.as_ref() {
@@ -1746,16 +1749,26 @@ fn substitute_refinement_binder(
                                 });
                             }
                         }
-                        // A carried meta slot is a value of its declared sort.
-                        // The PID vector covers only ordinary type arguments;
-                        // use the exact declaration frame for kind checking.
-                        if let Some(Type::Record(parameters)) = self.ctx.lookup_type(&params_key)
-                            && parameters.values().any(|p| matches!(p, Type::Meta { .. }))
-                        {
-                            for ((name, role), argument) in parameters.iter().zip(
+                        // Instantiate the declaration-owned telescope in prefix
+                        // order. A later value carrier may depend on an earlier
+                        // type/value binder; its source spelling is not identity.
+                        let mut value_parameters = List::new();
+                        if let Some(Type::Record(parameters)) = self.ctx.lookup_type(&params_key) {
+                            let mixed = parameters.values().any(|role| matches!(role, Type::Meta { .. }));
+                            let mut named_types = indexmap::IndexMap::new();
+                            for ((name, declared), argument) in parameters.iter().zip(
                                 type_args.iter().filter(|ty| !matches!(ty, Type::Lifetime { .. })))
                             {
-                                let valid = match (role, argument) {
+                                // Records and aliases retain declaration-local named
+                                // type slots. Only this exact roster authorizes their
+                                // substitution, and only inside the declared carrier.
+                                // Actual argument ranges are never rewritten by name.
+                                let role = if matches!(declared, Type::Meta { .. }) {
+                                    self.substitute_declared_named_slots(declared, &named_types)
+                                        .and_then(|role| role.try_apply_subst(&argument_scope))
+                                } else { Ok(declared.clone()) }.map_err(|msg|
+                                    TypeError::OtherWithCodeSpanned { code: "E407".into(), msg, span: ast_ty.span })?;
+                                let valid = match (&role, argument) {
                                     (Type::Meta { ty: expected, .. }, Type::Meta { ty: actual, .. }) =>
                                         self.normalize_type(actual).base() == self.normalize_type(expected).base(),
                                     (Type::Meta { .. }, _) | (_, Type::Meta { .. }) => false,
@@ -1767,6 +1780,39 @@ fn substitute_refinement_binder(
                                         msg: format!("argument for `{type_name}.{name}` has the wrong kind: expected {role}, found {argument}").into(),
                                         span: ast_ty.span,
                                     });
+                                }
+                                if matches!(role, Type::Meta { .. }) {
+                                    value_parameters.push((name.clone(), role, argument.clone()));
+                                }
+                                // Quantify only identities owned by this exact
+                                // declaration, never free variables in its body.
+                                match crate::context::GenericBinder::declared(declared) {
+                                    Ok(crate::context::GenericBinder::Type(variable)) => {
+                                        argument_scope.insert(variable, argument.clone());
+                                    }
+                                    Ok(crate::context::GenericBinder::Value(Type::Meta {
+                                        value: crate::ty::ValueTerm::Parameter(id), ..
+                                    })) => {
+                                        argument_scope.value_bindings.insert(id, argument.clone());
+                                    }
+                                    _ if matches!(declared, Type::Named { path, args }
+                                        if args.is_empty() && path.as_ident().is_some_and(|ident| ident.name == *name)) => {
+                                        named_types.insert(name.clone(), argument.clone());
+                                    }
+                                    _ if matches!(declared, Type::Generic { name: declared_name, args }
+                                        if args.is_empty() && declared_name == name) => {
+                                        named_types.insert(name.clone(), argument.clone());
+                                    }
+                                    _ if mixed => {
+                                        return Err(TypeError::OtherWithCodeSpanned {
+                                            code: "E407".into(),
+                                            msg: "mixed nominal telescope requires declaration-owned type and value binders".into(),
+                                            span: ast_ty.span,
+                                        });
+                                    }
+                                    // Existing higher-kinded/legacy type-only
+                                    // roles have no type/value identity to bind.
+                                    _ => {}
                                 }
                             }
                         }
@@ -1781,19 +1827,13 @@ fn substitute_refinement_binder(
                             args,
                             ast_ty.span,
                         )?;
-                        if let Some(Type::Record(parameters)) = self.ctx.lookup_type(&params_key) {
-                            for ((name, role), argument) in parameters.iter().zip(
-                                type_args.iter().filter(|ty| !matches!(ty, Type::Lifetime { .. })),
-                            ) {
-                                if matches!(role, Type::Meta { .. })
-                                    && !self.meta_argument_satisfies_domain(role, argument)
-                                {
-                                    return Err(TypeError::OtherWithCodeSpanned {
-                                        code: "E405".into(),
-                                        msg: format!("cannot establish the declared value domain for `{type_name}.{name}`: expected {role}, found {argument}").into(),
-                                        span: ast_ty.span,
-                                    });
-                                }
+                        for (name, role, argument) in value_parameters {
+                            if !self.meta_argument_satisfies_domain(&role, &argument) {
+                                return Err(TypeError::OtherWithCodeSpanned {
+                                    code: "E405".into(),
+                                    msg: format!("cannot establish the declared value domain for `{type_name}.{name}`: expected {role}, found {argument}").into(),
+                                    span: ast_ty.span,
+                                });
                             }
                         }
                 }
@@ -1827,7 +1867,8 @@ fn substitute_refinement_binder(
                         args: type_args.clone(),
                     };
                     if let Some(expanded) = self.unifier.try_expand_alias(&unexpanded) {
-                        return Ok(expanded);
+                        return expanded.try_apply_subst(&argument_scope).map_err(|msg|
+                            TypeError::OtherWithCodeSpanned { code: "E407".into(), msg, span: ast_ty.span });
                     }
                 }
 
