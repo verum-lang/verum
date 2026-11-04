@@ -56,10 +56,11 @@ implement<T> Pick for Holder<T> {
             eprintln!("[pin-diag] impl items: {:?}", kinds);
         }
     }
+    let project = tempfile::tempdir().expect("source project");
     let config = CodegenConfig::new("probe_assoc.vr").with_validation();
     let mut codegen = VbcCodegen::with_config(config);
     codegen
-        .compile_module_with_mounts(&module_ast, "probe_assoc.vr", ".")
+        .compile_module_with_mounts(&module_ast, "probe_assoc.vr", project.path().to_str().unwrap())
         .unwrap_or_else(|e| panic!("compile failed: {:?}", e));
     let module = codegen
         .finalize_module()
@@ -166,11 +167,21 @@ public type Predicate is protocol {};
 implement<I, F: fn(&I.Item) -> Bool> Predicate for Select<I, F> {}
 "#;
     let ast = Parser::new(source).parse_module().expect("parse");
+    let project = tempfile::tempdir().expect("source project");
     let mut codegen = VbcCodegen::with_config(CodegenConfig::new("bounds.vr").with_validation());
     codegen
-        .compile_module_with_mounts(&ast, "bounds.vr", ".")
+        .compile_module_with_mounts(&ast, "bounds.vr", project.path().to_str().unwrap())
         .expect("compile");
     codegen.finalize_module().expect("finalize")
+}
+
+/// Corrupt the declared fixture implementation, independently of descriptor order.
+fn function_bound_mut(module: &mut verum_vbc::module::VbcModule) -> &mut (verum_vbc::types::StringId, verum_vbc::types::StringId) {
+    let owner = module.types.iter().find(|ty| module.get_string(ty.name) == Some("Select")).expect("Select declaration").id;
+    let owner = module.types.iter_mut().find(|ty| ty.id == owner).unwrap();
+    let implementation = owner.protocols.iter_mut().find(|implementation| !implementation.type_param_fn_bounds.is_empty()).expect("declared callable bound");
+    assert_eq!(implementation.type_param_fn_bounds.len(), 1);
+    &mut implementation.type_param_fn_bounds[0]
 }
 
 fn assert_function_bound(module: &verum_vbc::module::VbcModule) {
@@ -230,12 +241,7 @@ fn wire_and_linker_reject_a_dangling_implementation_bound_operand() {
     let template = compile_function_bound_impl();
     for damage_name in [true, false] {
         let mut module = template.clone();
-        let ty = module
-            .types
-            .iter_mut()
-            .find(|ty| !ty.protocols.is_empty())
-            .unwrap();
-        let pair = &mut ty.protocols[0].type_param_fn_bounds[0];
+        let pair = function_bound_mut(&mut module);
         if damage_name {
             pair.0 = StringId(u32::MAX);
         } else {
@@ -271,12 +277,7 @@ fn in_range_function_bound_operands_must_have_the_declared_grammar() {
     ] {
         let mut module = template.clone();
         let pair = (module.intern_string(parameter), module.intern_string(bound));
-        let ty = module
-            .types
-            .iter_mut()
-            .find(|ty| !ty.protocols.is_empty())
-            .unwrap();
-        ty.protocols[0].type_param_fn_bounds[0] = pair;
+        *function_bound_mut(&mut module) = pair;
         assert!(
             verum_vbc::serialize::serialize_module(&module)
                 .unwrap_err()
