@@ -2,6 +2,24 @@
 // core.action.verify — ε-audit, gauge-consistency (VVA §11.2, §11.4)
 // =============================================================================
 
+mount core.action.primitives.{
+    Primitive,
+    primitive_as_text,
+    is_observational,
+    is_constructive,
+    is_proof_producing,
+    EpsilonMath,
+    EpsilonCompute,
+    EpsilonObserve,
+    EpsilonProve,
+    EpsilonDecide,
+    EpsilonTranslate,
+    EpsilonConstruct,
+    EpsilonClassify,
+};
+mount core.action.enactments.{Enactment, is_autopoietic};
+mount core.action.gauge.{canonicalise, gauge_equivalent};
+
 public type AuditVerdict is
     Consistent
   | TooWeak

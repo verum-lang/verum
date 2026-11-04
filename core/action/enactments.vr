@@ -10,6 +10,17 @@
 // `is_adjoint(α, epsilon(α))`.
 // =============================================================================
 
+mount core.action.primitives.{Primitive, primitive_as_text};
+mount core.action.gauge.{canonicalise};
+mount core.action.articulation.{
+    Articulation,
+    primitive_articulation,
+    raw_actic_articulation,
+    is_raw_actic,
+    articulation_eq,
+    articulation_as_text,
+};
+
 @derive(Clone)
 public type Enactment is {
     name:            Text,

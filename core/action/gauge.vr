@@ -2,6 +2,9 @@
 // core.action.gauge — gauge freedom on enactments
 // =============================================================================
 
+mount core.action.primitives.{Primitive, EpsilonObserve, primitive_eq};
+mount core.action.enactments.{Enactment};
+
 fn sort_observational_runs(steps: List<Primitive>) -> List<Primitive> {
     let mut result: List<Primitive> = List.new();
     let mut i: Int = 0;
