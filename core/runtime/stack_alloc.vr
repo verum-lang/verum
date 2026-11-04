@@ -73,7 +73,7 @@
 module core.runtime.stack_alloc;
 
 mount mem.{Alloc, Layout, AllocError};
-mount sync.{AtomicInt, MemoryOrdering};
+mount core.sync.{AtomicInt, MemoryOrdering};
 mount core.{Maybe, Result};
 mount core.intrinsics.{memcpy};
 mount core.intrinsics.runtime.mem_raw.{memcpy_addr};

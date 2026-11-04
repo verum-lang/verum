@@ -55,8 +55,8 @@ module core.runtime.recovery;
 
 mount sys.{monotonic_nanos};
 mount core.{Result, Text, Maybe, TypeId, Display};
-mount time.Duration;
-mount sync.{AtomicU8, AtomicU16, AtomicU32, AtomicU64, MemoryOrdering};
+mount core.time.Duration;
+mount core.sync.{AtomicU8, AtomicU16, AtomicU32, AtomicU64, MemoryOrdering};
 
 // =============================================================================
 // Retry Policy

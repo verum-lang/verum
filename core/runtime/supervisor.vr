@@ -75,7 +75,7 @@ mount core.intrinsics.{
     supervisor_log_escalation,
     supervisor_set_parent,
 };
-mount sync.{AtomicBool, AtomicU8, AtomicU16, AtomicU64, MemoryOrdering, Mutex, RwLock};
+mount core.sync.{AtomicBool, AtomicU8, AtomicU16, AtomicU64, MemoryOrdering, Mutex, RwLock};
 mount core.sync.once.OnceLock;
 mount core.base.memory.Shared;
 mount core.base.maybe.Maybe;
