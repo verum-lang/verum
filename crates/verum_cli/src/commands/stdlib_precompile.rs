@@ -10,7 +10,7 @@
 //! `verum` binary keeps the public surface minimal and the
 //! reuse-don't-fork principle intact.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use verum_compiler::precompile::{PrecompileConfig, precompile_stdlib};
 
@@ -24,24 +24,7 @@ pub fn run(
     target: Option<String>,
     verbose: bool,
 ) -> Result<(), CliError> {
-    let cwd = std::env::current_dir().map_err(|e| {
-        CliError::Custom(format!("failed to read cwd for workspace resolution: {e}"))
-    })?;
-
-    let mut cfg = PrecompileConfig::for_workspace(&cwd).map_err(|e| {
-        CliError::Custom(format!(
-            "failed to resolve workspace root from cwd: {e}. Pass --stdlib-path explicitly."
-        ))
-    })?;
-
-    if let Some(p) = stdlib_path {
-        cfg.stdlib_path = p;
-    }
-    if let Some(o) = out {
-        cfg.output_path = o;
-    }
-    cfg.target_triple = target;
-    cfg.verbose = verbose;
+    let cfg = resolve_config(stdlib_path, out, target, verbose)?;
 
     ui::step("Precompiling stdlib to VBC archive");
     ui::detail("Source", &cfg.stdlib_path.display().to_string());
@@ -72,3 +55,36 @@ pub fn run(
 
     Ok(())
 }
+
+/// Explicit source selection does not require a surrounding Verum workspace.
+/// Workspace discovery remains the authority only when no source was supplied.
+fn resolve_config(
+    stdlib_path: Option<PathBuf>,
+    out: Option<PathBuf>,
+    target: Option<String>,
+    verbose: bool,
+) -> Result<PrecompileConfig, CliError> {
+    let mut cfg = match stdlib_path {
+        Some(source) => PrecompileConfig::for_source(source, Path::new(".")),
+        None => {
+            let cwd = std::env::current_dir().map_err(|e| {
+                CliError::Custom(format!("failed to read cwd for workspace resolution: {e}"))
+            })?;
+            PrecompileConfig::for_workspace(&cwd).map_err(|e| {
+                CliError::Custom(format!(
+                    "failed to resolve workspace root from cwd: {e}. Pass --stdlib-path explicitly."
+                ))
+            })?
+        }
+    };
+    if let Some(output) = out {
+        cfg.output_path = output;
+    }
+    cfg.target_triple = target;
+    cfg.verbose = verbose;
+    Ok(cfg)
+}
+
+#[cfg(test)]
+#[path = "../../tests/commands/stdlib_precompile.rs"]
+mod tests;

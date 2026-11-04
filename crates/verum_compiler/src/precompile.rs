@@ -50,17 +50,23 @@ impl PrecompileConfig {
     /// `<workspace>/target/precompiled-stdlib/runtime.vbca`.
     pub fn for_workspace(start: &Path) -> Result<Self> {
         let workspace = find_workspace_root(start)?;
-        let stdlib_path = workspace.join("core");
-        let output_path = workspace
+        Ok(Self::for_source(workspace.join("core"), &workspace))
+    }
+
+    /// Configure an explicitly selected source tree without discovering a workspace.
+    /// Relative source/output paths retain the caller's normal cwd semantics.
+    /// The default archive is placed under `output_base/target/precompiled-stdlib`.
+    pub fn for_source(stdlib_path: PathBuf, output_base: &Path) -> Self {
+        let output_path = output_base
             .join("target")
             .join("precompiled-stdlib")
             .join("runtime.vbca");
-        Ok(Self {
+        Self {
             stdlib_path,
             output_path,
             target_triple: None,
             verbose: false,
-        })
+        }
     }
 }
 

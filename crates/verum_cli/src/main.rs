@@ -2587,15 +2587,15 @@ enum StdlibSub {
     /// stdlib epic). Default output path is
     /// `target/precompiled-stdlib/runtime.vbca`. Stdlib path defaults
     /// to the current workspace's `core/` directory; pass
-    /// `--stdlib-path` to override.
+    /// `--stdlib-path` to select a source tree without a workspace.
     Precompile {
-        /// Override `core/` path. Defaults to the workspace's
-        /// `core/` directory (auto-detected by walking up from cwd).
+        /// Select a `core/` source tree, independently of workspace discovery.
+        /// When omitted, walk up from cwd to find the workspace's `core/`.
         #[clap(long, value_name = "DIR")]
         stdlib_path: Option<std::path::PathBuf>,
 
-        /// Output `.vbca` path. Defaults to
-        /// `<workspace>/target/precompiled-stdlib/runtime.vbca`.
+        /// Output `.vbca` path. Defaults to `target/precompiled-stdlib/runtime.vbca`
+        /// under cwd for an explicit source, otherwise under the detected workspace.
         #[clap(long, short = 'o', value_name = "FILE")]
         out: Option<std::path::PathBuf>,
 
