@@ -38,6 +38,16 @@ struct DeclarationApplication {
     arguments: List<Type>,
 }
 
+/// Borrowed declaration authority for a source protocol whose methods are
+/// still being elaborated. It is never inserted into the shared registry.
+#[derive(Clone, Copy)]
+pub(crate) struct AssociatedDeclarationHeader<'a> {
+    pub identity: &'a Text,
+    pub constraints: &'a super::ProtocolConstraints,
+    pub associated: &'a verum_common::Map<Text, AssociatedType>,
+    pub supers: &'a [ProtocolBound],
+}
+
 pub struct FamilyApplication {
     pub arguments: List<Type>,
     pub result: Type,
@@ -53,6 +63,13 @@ impl ProtocolChecker {
         arguments: &[Type],
         assumptions: &[WhereClause],
     ) -> Result<Option<FamilyApplication>, Text> {
+        self.resolve_associated_family_with_header(receiver, name, arguments, assumptions, None)
+    }
+
+    pub(crate) fn resolve_associated_family_with_header(
+        &self, receiver: &Type, name: &Text, arguments: &[Type],
+        assumptions: &[WhereClause], header: Option<AssociatedDeclarationHeader<'_>>,
+    ) -> Result<Option<FamilyApplication>, Text> {
         let mut symbolic: Option<(Text, List<Type>, FamilyApplication)> = None;
         for assumption in assumptions {
             if !self.types_structurally_equal(&assumption.ty, receiver) {
@@ -63,12 +80,13 @@ impl ProtocolChecker {
                     continue;
                 }
                 let key = self.make_protocol_key(&bound.protocol);
-                let Some(selected) = self.associated_declaration_application(
+                let Some(selected) = self.associated_declaration_application_in_scope(
                     &key,
                     &bound.args,
                     receiver,
                     name,
                     &mut Vec::new(),
+                    header,
                 )?
                 else {
                     continue;
@@ -127,12 +145,13 @@ impl ProtocolChecker {
                     .iter()
                     .map(|argument| argument.try_apply_subst(&substitution))
                     .collect::<Result<_, _>>()?;
-                let Some(selected_declaration) = self.associated_declaration_application(
+                let Some(selected_declaration) = self.associated_declaration_application_in_scope(
                     key,
                     &owner_arguments,
                     receiver,
                     name,
                     &mut Vec::new(),
+                    header,
                 )?
                 else {
                     continue;
@@ -450,14 +469,24 @@ impl ProtocolChecker {
         name: &Text,
         active: &mut Vec<Text>,
     ) -> Result<Option<DeclarationApplication>, Text> {
+        self.associated_declaration_application_in_scope(key, arguments, receiver, name, active, None)
+    }
+
+    fn associated_declaration_application_in_scope(
+        &self, key: &Text, arguments: &[Type], receiver: &Type, name: &Text,
+        active: &mut Vec<Text>, header: Option<AssociatedDeclarationHeader<'_>>,
+    ) -> Result<Option<DeclarationApplication>, Text> {
         if active.len() >= 64 || active.contains(key) {
             return Err("recursive associated declaration inheritance has no finite owner".into());
         }
-        let protocol = self
-            .protocols
-            .get(key)
-            .ok_or_else(|| Text::from("associated declaration owner is unavailable"))?;
-        if let Some(declaration) = protocol.associated_types.get(name) {
+        let (constraints, associated, supers) = if let Some(header) = header.filter(|header| header.identity == key) {
+            (header.constraints, header.associated, header.supers)
+        } else {
+            let protocol = self.protocols.get(key)
+                .ok_or_else(|| Text::from("associated declaration owner is unavailable"))?;
+            (&protocol.constraints, &protocol.associated_types, protocol.super_protocols.as_slice())
+        };
+        if let Some(declaration) = associated.get(name) {
             return Ok(Some(DeclarationApplication {
                 owner: key.clone(),
                 declaration: declaration.clone(),
@@ -467,14 +496,14 @@ impl ProtocolChecker {
         active.push(key.clone());
         let resolved = (|| {
             let mut selected: Option<DeclarationApplication> = None;
-            if protocol.super_protocols.is_empty() {
+            if supers.is_empty() {
                 return Ok(None);
             }
             let super::ProtocolConstraints::Declared {
                 self_type,
                 parameters,
                 ..
-            } = &protocol.constraints
+            } = constraints
             else {
                 return Err("inherited associated declaration lacks its owner telescope".into());
             };
@@ -489,18 +518,19 @@ impl ProtocolChecker {
                 .map(|(variable, argument)| (*variable, argument.clone()))
                 .collect();
             scope.insert(*self_type, receiver.clone());
-            for bound in &protocol.super_protocols {
+            for bound in supers {
                 if bound.is_negative {
                     continue;
                 }
                 let bound = bound.try_apply_subst(&scope)?;
                 let parent = self.make_protocol_key(&bound.protocol);
-                let Some(candidate) = self.associated_declaration_application(
+                let Some(candidate) = self.associated_declaration_application_in_scope(
                     &parent,
                     &bound.args,
                     receiver,
                     name,
                     active,
+                    header,
                 )?
                 else {
                     continue;

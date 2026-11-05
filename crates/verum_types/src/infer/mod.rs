@@ -22,6 +22,7 @@ mod protocol_arguments;
 mod protocol_methods;
 mod source_impl_signatures;
 mod source_type_registration;
+mod source_protocol_header;
 mod universe_parameters;
 mod call_obligations;
 mod callable_properties;

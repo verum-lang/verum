@@ -2011,9 +2011,6 @@ impl TypeChecker {
                 // This enables method lookup for bounded generic types like `fn foo<T: Display>(item: T)`
                 // Without this, calling protocol methods on bounded type parameters fails.
                 use verum_ast::decl::ProtocolItemKind;
-                let mut protocol_methods: Map<Text, crate::protocol::ProtocolMethod> = Map::new();
-                let mut protocol_assoc_types: Map<Text, crate::protocol::AssociatedType> =
-                    Map::new();
 
                 // Self type is represented as Named type with path "Self"
                 let self_type = Type::Named {
@@ -2059,40 +2056,14 @@ impl TypeChecker {
                     &[type_decl.generic_where_clause.as_ref(), protocol_body.generic_where_clause.as_ref()],
                 );
 
-                for item in &protocol_body.items {
-                    // Extract associated types (e.g., `type Item;` or `type Iterator: Iterator;`)
-                    if let ProtocolItemKind::Type {
-                        name,
-                        type_params: assoc_type_params,
-                        bounds,
-                        ..
-                    } = &item.kind
-                    {
-                        let assoc_name: Text = name.name.clone();
-
-                        let assoc_type = self.elaborate_associated_type(
-                            &type_decl.generics, &constraint_scope, &item.kind,
-                        )?;
-                        protocol_assoc_types.insert(assoc_name, assoc_type);
-                    }
-
-                    if let ProtocolItemKind::Function {
-                        decl: method,
-                        default_impl,
-                    } = &item.kind
-                    {
-                        let signature = self.elaborate_protocol_method(
-                            &type_decl.generics, &constraint_scope, method,
-                            method.body.is_some() || default_impl.is_some(),
-                        )?;
-                        protocol_methods.insert(method.name.name.clone(), signature);
-                    }
-                }
-
                 let super_protocols = match declared_supers {
                     Some(supers) => supers,
                     None => self.convert_super_protocols(&protocol_body.extends)?,
                 };
+                let (protocol_methods, protocol_assoc_types) = self.elaborate_protocol_members(
+                    self.declared_type_key(type_name.as_str()), &type_decl.generics,
+                    &constraint_scope, &super_protocols, &protocol_body.items,
+                )?;
 
                 // Create and register Protocol object
                 // Convert AST is_context bool to ProtocolKind:
@@ -3487,9 +3458,6 @@ impl TypeChecker {
                 // This enables method lookup for bounded generic types like `fn foo<T: Display>(item: T)`
                 // Without this, calling protocol methods on bounded type parameters fails.
                 use verum_ast::decl::ProtocolItemKind;
-                let mut protocol_methods: Map<Text, crate::protocol::ProtocolMethod> = Map::new();
-                let mut protocol_assoc_types: Map<Text, crate::protocol::AssociatedType> =
-                    Map::new();
 
                 // Self type is represented as Named type with path "Self"
                 let self_type = Type::Named {
@@ -3508,6 +3476,7 @@ impl TypeChecker {
                 // Save the old value to restore later.
                 let old_self_type = self.current_self_type.clone();
                 self.set_current_self_type(Maybe::Some(self_type.clone()));
+                let registration = (|| -> Result<()> {
 
                 // CRITICAL FIX: Register protocol's type parameters (like T in Into<T>) BEFORE
                 // processing method signatures. This allows the return type `T` to be resolved
@@ -3533,40 +3502,14 @@ impl TypeChecker {
                     &[type_decl.generic_where_clause.as_ref(), protocol_body.generic_where_clause.as_ref()],
                 );
 
-                for item in &protocol_body.items {
-                    // Extract associated types (e.g., `type Item;` or `type Iterator: Iterator;`)
-                    if let ProtocolItemKind::Type {
-                        name,
-                        type_params: assoc_type_params,
-                        bounds,
-                        ..
-                    } = &item.kind
-                    {
-                        let assoc_name: Text = name.name.clone();
-
-                        let assoc_type = self.elaborate_associated_type(
-                            &type_decl.generics, &constraint_scope, &item.kind,
-                        )?;
-                        protocol_assoc_types.insert(assoc_name, assoc_type);
-                    }
-
-                    if let ProtocolItemKind::Function {
-                        decl: method,
-                        default_impl,
-                    } = &item.kind
-                    {
-                        let signature = self.elaborate_protocol_method(
-                            &type_decl.generics, &constraint_scope, method,
-                            method.body.is_some() || default_impl.is_some(),
-                        )?;
-                        protocol_methods.insert(method.name.name.clone(), signature);
-                    }
-                }
-
                 let super_protocols = match declared_supers {
                     Some(supers) => supers,
                     None => self.convert_super_protocols(&protocol_body.extends)?,
                 };
+                let (protocol_methods, protocol_assoc_types) = self.elaborate_protocol_members(
+                    self.declared_type_key(type_name.as_str()), &type_decl.generics,
+                    &constraint_scope, &super_protocols, &protocol_body.items,
+                )?;
 
                 // Create and register Protocol object
                 // Convert AST is_context bool to ProtocolKind
@@ -3618,9 +3561,10 @@ impl TypeChecker {
                         .register_constraint_protocol(type_name.clone());
                 }
 
-                // Restore the previous current_self_type
+                Ok(())
+                })();
                 self.set_current_self_type(old_self_type);
-        Ok(())
+        registration
     }
 
     pub fn register_all_type_names(&mut self, items: &[verum_ast::Item]) {
@@ -4615,31 +4559,17 @@ impl TypeChecker {
         );
 
         // Convert protocol methods to type system methods
-        let mut protocol_methods: verum_common::Map<
-            verum_common::Text,
-            crate::protocol::ProtocolMethod,
-        > = verum_common::Map::new();
-
         let (constraint_scope, declared_supers) = self.protocol_constraint_scope(
             &proto_decl.generics, &proto_decl.bounds, &[proto_decl.generic_where_clause.as_ref()],
         );
-        for item in &proto_decl.items {
-            if let verum_ast::decl::ProtocolItemKind::Function { decl, default_impl } = &item.kind {
-                let signature = self.elaborate_protocol_method(
-                    &proto_decl.generics, &constraint_scope, decl,
-                    decl.body.is_some() || default_impl.is_some(),
-                )?;
-                protocol_methods.insert(decl.name.name.clone(), signature);
-            }
-        }
-
-        let mut associated_types = verum_common::Map::new();
-        for item in &proto_decl.items {
-            if let verum_ast::decl::ProtocolItemKind::Type { name, .. } = &item.kind {
-                let associated = self.elaborate_associated_type(&proto_decl.generics, &constraint_scope, &item.kind)?;
-                associated_types.insert(name.name.clone(), associated);
-            }
-        }
+        let super_protocols = match declared_supers {
+            Some(supers) => supers,
+            None => self.convert_super_protocols(&proto_decl.bounds)?,
+        };
+        let (protocol_methods, associated_types) = self.elaborate_protocol_members(
+            self.declared_type_key(type_name.as_str()), &proto_decl.generics,
+            &constraint_scope, &super_protocols, &proto_decl.items,
+        )?;
 
         // Determine protocol kind from is_context flag
         let kind = if proto_decl.is_context {
@@ -4658,10 +4588,7 @@ impl TypeChecker {
             methods: protocol_methods,
             associated_types,
             associated_consts: verum_common::Map::new(),
-            super_protocols: match declared_supers {
-                Some(supers) => supers,
-                None => self.convert_super_protocols(&proto_decl.bounds)?,
-            },
+            super_protocols,
             specialization_info: verum_common::Maybe::None,
             defining_crate: verum_common::Maybe::None,
             span: proto_decl.span,

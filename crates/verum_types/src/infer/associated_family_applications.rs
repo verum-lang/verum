@@ -26,6 +26,16 @@ pub(super) fn projection_parts(ty: &Type) -> Option<(&Type, Text, &[Type])> {
     }
 }
 
+/// Source admission also proves ordinary zero-argument associated members.
+/// Keep their existing normalization representation unchanged.
+pub(super) fn checked_projection_parts(ty: &Type) -> Option<(&Type, Text, &[Type])> {
+    match ty {
+        Type::Generic { name, args } if name.starts_with("::") && args.len() == 1 =>
+            Some((&args[0], name[2..].into(), &[])),
+        _ => projection_parts(ty),
+    }
+}
+
 impl TypeChecker {
     pub(super) fn resolve_checked_family_application(&self, ty: &Type, span: Span) -> Result<Type> {
         let Some((receiver, name, arguments)) = projection_parts(ty) else {
@@ -78,6 +88,10 @@ impl TypeChecker {
             .iter()
             .map(|variable| Type::Var(*variable))
             .collect();
+        let header = super::source_protocol_header::SourceProtocolHeader {
+            identity: protocol.name.clone(), parameters: protocol.source_parameters.clone().unwrap_or_default(),
+            owner: Some(owner.clone()), constraints: protocol.constraints.clone(), associated: protocol.associated_types.clone(), supers: protocol.super_protocols.clone(),
+        };
         for method in protocol.methods.values() {
             let Some(scope) = &method.scope else {
                 continue;
@@ -100,34 +114,11 @@ impl TypeChecker {
                 }
             }
             while let Some(ty) = pending.pop() {
-                if let Some((receiver, name, arguments)) = projection_parts(ty) {
+                if let Some((receiver, name, arguments)) = checked_projection_parts(ty) {
                     if matches!(receiver, Type::Named { path, args } if args.is_empty() && path.as_ident().is_some_and(|name| name.name.as_str() == "Self"))
                     {
-                        let declaration =
-                            protocol.associated_types.get(&name).ok_or_else(|| {
-                                TypeError::OtherWithCodeSpanned {
-                                    code: "E405".into(),
-                                    msg: format!(
-                                        "protocol does not declare associated family `{name}`"
-                                    )
-                                    .into(),
-                                    span: protocol.span,
-                                }
-                            })?;
-                        self.protocol_checker
-                            .read()
-                            .complete_associated_family_arguments(
-                                declaration,
-                                receiver,
-                                &owner,
-                                arguments,
-                                &assumptions,
-                            )
-                            .map_err(|msg| TypeError::OtherWithCodeSpanned {
-                                code: "E405".into(),
-                                msg,
-                                span: protocol.span,
-                            })?;
+                        self.validate_projection_with_header(Some(&header), receiver, &name,
+                            arguments, &assumptions, protocol.span)?;
                     }
                 }
                 match ty {

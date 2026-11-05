@@ -80,7 +80,10 @@ impl TypeChecker {
         // lexical scope. Re-resolving its owned identity as a new source name
         // would re-enter lazy registration inside an implementation scope.
         let identity = self.path_to_string(protocol);
-        let (parameters, arity) = {
+        let (parameters, arity) = if let Some(header) = self.source_type_registration.headers.iter().rev()
+            .find(|header| header.identity == identity) {
+            (Some(header.parameters.clone()), header.parameters.len())
+        } else {
             let checker = self.protocol_checker.read();
             let declaration = checker
                 .get_protocol_definition(identity.as_str())
@@ -362,6 +365,8 @@ impl TypeChecker {
                 resolved
             }
             TypeKind::Path(_)
+            | TypeKind::Qualified { .. }
+            | TypeKind::AssociatedType { .. }
             | TypeKind::Unit
             | TypeKind::Never
             | TypeKind::Bool
@@ -392,6 +397,10 @@ impl TypeChecker {
                     "type argument validation exceeds its structural limit",
                 )
             })?;
+        if let Some((receiver, name, arguments)) = super::associated_family_applications::checked_projection_parts(ty) {
+            self.validate_elaborated_type_argument(receiver, span)?;
+            return self.validate_source_projection(receiver, &name, arguments, span);
+        }
         match ty {
             Type::Meta { .. } | Type::Unknown => Err(invalid(
                 span,
@@ -400,6 +409,9 @@ impl TypeChecker {
             Type::Named { path, args } => {
                 self.validate_constructor_argument_roles(&self.path_to_string(path), args, span)
             }
+            Type::Generic { name, .. } if name.starts_with("::") => Err(invalid(
+                span, "associated projection lacks its complete receiver and argument carrier",
+            )),
             Type::Generic { name, args } => {
                 self.validate_constructor_argument_roles(name, args, span)
             }

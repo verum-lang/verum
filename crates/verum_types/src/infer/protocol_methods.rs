@@ -85,6 +85,10 @@ impl TypeChecker {
             path: verum_ast::Path::single(verum_ast::Ident::new("Self", method.span)),
             args: List::new(),
         }));
+        let assumption_base = self.source_type_registration.projection_assumptions.len();
+        if let ProtocolConstraints::Declared { parameter_bounds, .. } = constraints {
+            self.source_type_registration.projection_assumptions.extend(parameter_bounds.iter().cloned());
+        }
         let result = (|| -> Result<_> {
             let mut type_bounds: Map<Text, List<Type>> = Map::new();
             for (parameter, variable) in method.generics.iter().zip(&scope.binders.local) {
@@ -116,6 +120,9 @@ impl TypeChecker {
                     }
                 }
                 if !protocol_bounds.is_empty() {
+                    self.source_type_registration.projection_assumptions.push(crate::protocol::WhereClause {
+                        ty: Type::Var(*variable), bounds: protocol_bounds.clone(),
+                    });
                     scope.protocol_bounds.insert(*variable, protocol_bounds);
                 }
             }
@@ -136,10 +143,9 @@ impl TypeChecker {
                     };
                     let subject = self.ast_to_type(ty)?;
                     let bounds = self.convert_type_bounds_for_receiver(bounds, Some(&subject))?;
-                    scope.where_clauses.push(crate::protocol::WhereClause {
-                        ty: subject,
-                        bounds,
-                    });
+                    let clause = crate::protocol::WhereClause { ty: subject, bounds };
+                    self.source_type_registration.projection_assumptions.push(clause.clone());
+                    scope.where_clauses.push(clause);
                 }
             }
             let params = method
@@ -196,6 +202,7 @@ impl TypeChecker {
             signature.scope = Some(scope);
             Ok(signature)
         })();
+        self.source_type_registration.projection_assumptions.truncate(assumption_base);
         self.set_current_self_type(saved_self);
         self.pop_decl_param_frame();
         result

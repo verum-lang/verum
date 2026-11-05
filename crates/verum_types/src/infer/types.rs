@@ -2193,6 +2193,16 @@ fn substitute_refinement_binder(
                     _ => false,
                 };
 
+                // The deferred carrier stores a receiver and member, but no
+                // qualified protocol identity. Refuse rather than erase the
+                // explicit selection into an unrelated same-leaf projection.
+                if !is_empty_protocol && (self.has_unresolved_vars(&self_type) || is_self_type) {
+                    return Err(TypeError::OtherWithCodeSpanned {
+                        code: "E405".into(),
+                        msg: "symbolic qualified projection requires a retained protocol identity".into(),
+                        span: ast_ty.span,
+                    });
+                }
                 if family_head && !is_empty_protocol {
                     return Err(TypeError::OtherWithCodeSpanned {
                         code: "E405".into(), msg: "qualified family applications require a retained protocol application".into(), span: ast_ty.span,

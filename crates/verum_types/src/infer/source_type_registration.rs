@@ -5,6 +5,8 @@ use verum_common::{List, Map, Text};
 
 #[derive(Debug, Default)]
 pub(crate) struct SourceTypeRegistration {
+    pub headers: Vec<super::source_protocol_header::SourceProtocolHeader>,
+    pub projection_assumptions: Vec<crate::protocol::WhereClause>,
     pub completed: Map<Text, TypeDecl>,
     pub pending: Map<Text, TypeDecl>,
     pub depth: usize,

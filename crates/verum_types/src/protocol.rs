@@ -28,6 +28,7 @@ pub use associated_assignment::AssociatedTypeAssignment;
 #[path = "protocol_associated_families.rs"]
 mod associated_families;
 pub use associated_families::FamilyApplication;
+pub(crate) use associated_families::AssociatedDeclarationHeader;
 
 use std::cell::RefCell;
 use std::sync::{
