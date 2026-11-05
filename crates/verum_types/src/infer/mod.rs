@@ -44,7 +44,8 @@ pub(crate) mod expr;            // Expression inference (synth_expr, check_expr,
 pub(crate) mod modules;         // Module/import/export methods (check_item, check_module, …)
 pub(crate) mod patterns;        // Pattern binding and destructuring
 pub(crate) mod path_resolution; // Path resolution (ExprKind::Path)
-pub(crate) mod types;           // Type resolution (ast_to_type*, normalize_type*, check_cast)
+pub(crate) mod types;
+mod type_forms;           // Type resolution (ast_to_type*, normalize_type*, check_cast)
 
 use crate::const_eval::ConstEvaluator;
 use crate::context::{TypeContext, TypeScheme};
