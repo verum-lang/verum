@@ -1,7 +1,7 @@
 //! The implicit prelude, as an AST fact.
 //!
 //! Every Verum module implicitly mounts `core.prelude.*` unless it
-//! opts out (`@![no_implicit_prelude]`). That sentence is LANGUAGE
+//! opts out (`@no_implicit_prelude module …;`). That sentence is LANGUAGE
 //! semantics, so the injector that makes it true lives here, next to
 //! the AST it rewrites — not in any one consumer. The compiler
 //! pipeline injects it for user compiles, and the VBC test harness

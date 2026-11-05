@@ -460,7 +460,8 @@ impl Module {
         matches!(CogKind::of(self), CogKind::Script)
     }
 
-    /// Check if this module has the @![no_implicit_prelude] attribute.
+    /// Check the source header and retained module attributes for
+    /// `@no_implicit_prelude`.
     ///
     /// When set, the module does not automatically import the standard prelude
     /// (core types like List, Text, Map, Maybe, etc.). All types must be
@@ -468,6 +469,8 @@ impl Module {
     pub fn has_no_implicit_prelude(&self) -> bool {
         self.attributes
             .iter()
+            .chain(self.file_header_index().into_iter()
+                .flat_map(|index| self.items[index].attributes.iter()))
             .any(|attr| attr.name.as_str() == "no_implicit_prelude")
     }
 
