@@ -54,6 +54,101 @@ pub struct FamilyApplication {
 }
 
 impl ProtocolChecker {
+    /// Equations supplied by actual declaration premises for one selected
+    /// associated member. A same-spelling member on another protocol is not
+    /// evidence: both routes must reach the same declaration-owned family.
+    pub(super) fn associated_premise_equations(
+        &self,
+        receiver: &Type,
+        required: &ProtocolBound,
+        name: &Text,
+        assumptions: &[WhereClause],
+    ) -> Result<List<(Type, Type)>, Text> {
+        let mut equations = List::new();
+        if required.is_negative { return Ok(equations); }
+        let expected = self.checked_equality_declaration(receiver, required, name)?;
+        let value = required.associated_types.get(name)
+            .ok_or_else(|| Text::from("associated equation lacks its required value"))?;
+        for clause in assumptions {
+            if !self.types_structurally_equal(receiver, &clause.ty) { continue; }
+            for bound in &clause.bounds {
+                if bound.is_negative { continue; }
+                let key = self.make_protocol_key(&bound.protocol);
+                let Some(selected) = self.associated_declaration_application(
+                    &key, &bound.args, receiver, name, &mut Vec::new(),
+                )? else { continue; };
+                if selected.owner != expected.owner
+                    || selected.arguments.len() != expected.arguments.len()
+                    || !selected.arguments.iter().zip(&expected.arguments)
+                        .all(|(actual, expected)| self.types_structurally_equal(actual, expected))
+                { continue; }
+                self.checked_equality_declaration(receiver, bound, name)?;
+                let actual = if let Some(actual) = bound.associated_types.get(name) {
+                    actual.clone()
+                } else {
+                    // A declared member proves its own projection, even when
+                    // its value is abstract. The checked family resolver keeps
+                    // ambiguous owners and defaults from becoming equalities.
+                    self.resolve_associated_family(receiver, name, &[], assumptions)?
+                        .ok_or_else(|| Text::from("associated premise lacks a declared member"))?
+                        .result
+                };
+                equations.push((value.clone(), actual));
+            }
+        }
+        Ok(equations)
+    }
+
+    /// Preserve an explicit inherited equality only when both applications
+    /// select the exact same member owner. Fixed parent equalities must agree.
+    pub(super) fn inherit_associated_equalities(
+        &self,
+        receiver: &Type,
+        source: &ProtocolBound,
+        inherited: &mut ProtocolBound,
+    ) -> Result<(), Text> {
+        for (name, value) in &source.associated_types {
+            let key = self.make_protocol_key(&inherited.protocol);
+            let Some(target) = self.associated_declaration_application(
+                &key, &inherited.args, receiver, name, &mut Vec::new(),
+            )? else { continue; };
+            let selected = self.checked_equality_declaration(receiver, source, name)?;
+            if target.owner != selected.owner || target.arguments != selected.arguments { continue; }
+            if let Some(prior) = inherited.associated_types.get(name) {
+                if !self.types_structurally_equal(prior, value) {
+                    return Err("inherited associated equality conflicts with its declared parent".into());
+                }
+            } else {
+                inherited.associated_types.insert(name.clone(), value.clone());
+            }
+        }
+        Ok(())
+    }
+
+    fn checked_equality_declaration(
+        &self, receiver: &Type, bound: &ProtocolBound, name: &Text,
+    ) -> Result<DeclarationApplication, Text> {
+        let key = self.make_protocol_key(&bound.protocol);
+        let protocol = self.get_protocol(&key)
+            .ok_or_else(|| Text::from("associated equality protocol is unavailable"))?;
+        let super::ProtocolConstraints::Declared { parameters, .. } = &protocol.constraints else {
+            return Err("associated equality lacks its declaration-owned telescope".into());
+        };
+        if parameters.len() != bound.args.len() {
+            return Err("associated equality protocol arguments are incomplete".into());
+        }
+        let selected = self.associated_declaration_application(
+            &key, &bound.args, receiver, name, &mut Vec::new(),
+        )?.ok_or_else(|| Text::from("associated equality names an undeclared family"))?;
+        let (arguments, _) = self.complete_associated_family_arguments(
+            &selected.declaration, receiver, &selected.arguments, &[], &[],
+        )?;
+        if !arguments.is_empty() {
+            return Err("an applied associated family requires a parameterized equality".into());
+        }
+        Ok(selected)
+    }
+
     /// Resolve only when a declaration and all potentially applicable bindings
     /// agree. Rigid symbolic receiver coverage is retained as a later obligation.
     pub fn resolve_associated_family(

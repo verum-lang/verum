@@ -1,10 +1,39 @@
 //! One rigid implementation matcher shared by proof obligations and family applications.
-use super::{ProtocolChecker, ProtocolImpl};
+use super::{ProtocolChecker, ProtocolImpl, WhereClause};
 use crate::{
     ty::{Substitution, Type},
     unify::Unifier,
 };
 use verum_ast::Span;
+
+/// Checked lexical premises used by both candidate inference and final proof.
+/// Candidate-owned variables may be inferred; caller declarations remain rigid.
+pub(super) struct ConstraintEnvironment<'a> {
+    pub protocols: &'a [WhereClause],
+    pub callables: &'a verum_common::Map<crate::ty::TypeVar, Type>,
+}
+
+impl ConstraintEnvironment<'_> {
+    /// Reachable premise owners carry their whole declared contracts. Follow
+    /// protocol subjects as well as callable outputs until neither adds a
+    /// variable; no variable is introduced by an implementation requirement.
+    fn extend_variables(&self, variables: &mut verum_common::Set<crate::ty::TypeVar>) {
+        loop {
+            let before = variables.len();
+            extend_callable_variables(variables, self.callables);
+            for clause in self.protocols {
+                if !clause.ty.free_vars().iter().all(|variable| variables.contains(variable)) { continue; }
+                for bound in &clause.bounds {
+                    if bound.is_negative { continue; }
+                    for argument in bound.args.iter().chain(bound.associated_types.values()) {
+                        variables.extend(argument.free_vars());
+                    }
+                }
+            }
+            if before == variables.len() { break; }
+        }
+    }
+}
 
 impl ProtocolChecker {
     pub(crate) fn instantiate_applicable_implementation(
@@ -40,16 +69,16 @@ impl ProtocolChecker {
         args: Option<&[Type]>,
         rigid: bool,
     ) -> CandidateMatch {
-        self.match_implementation_candidate_with_callables(implementation, ty, args, rigid, &Default::default())
+        self.match_implementation_candidate_in_environment(implementation, ty, args, rigid, &ConstraintEnvironment { protocols: &[], callables: &Default::default() })
     }
 
-    pub(super) fn match_implementation_candidate_with_callables(
+    pub(super) fn match_implementation_candidate_in_environment(
         &self,
         implementation: &ProtocolImpl,
         ty: &Type,
         args: Option<&[Type]>,
         rigid: bool,
-        callables: &verum_common::Map<crate::ty::TypeVar, Type>,
+        environment: &ConstraintEnvironment<'_>,
     ) -> CandidateMatch {
         // A declaration parameter is rigid until its own telescope instantiates
         // it. An inference hole in a declared head has no such authority. A
@@ -77,7 +106,7 @@ impl ProtocolChecker {
         {
             return CandidateMatch::Disjoint;
         }
-        match self.try_match_candidate(implementation, ty, args, rigid, callables) {
+        match self.try_match_candidate(implementation, ty, args, rigid, environment) {
             Some(substitution) => CandidateMatch::Matched(substitution),
             None => CandidateMatch::Unknown,
         }
@@ -88,7 +117,7 @@ impl ProtocolChecker {
         ty: &Type,
         args: Option<&[Type]>,
         rigid: bool,
-        callables: &verum_common::Map<crate::ty::TypeVar, Type>,
+        environment: &ConstraintEnvironment<'_>,
     ) -> Option<Substitution> {
         let mut variables = implementation.for_type.free_vars();
         for ty in &implementation.protocol_args {
@@ -119,7 +148,17 @@ impl ProtocolChecker {
                 variables.extend(argument.free_vars());
             }
         }
-        if rigid { extend_callable_variables(&mut variables, callables); }
+        if rigid {
+            for clause in environment.protocols {
+                variables.extend(clause.ty.free_vars());
+                for bound in &clause.bounds {
+                    for argument in bound.args.iter().chain(bound.associated_types.values()) {
+                        variables.extend(argument.free_vars());
+                    }
+                }
+            }
+            environment.extend_variables(&mut variables);
+        }
         let mut matcher = Unifier::new();
         matcher.enter_rigid_scope(variables.into_iter().map(|variable| {
             (
@@ -143,58 +182,74 @@ impl ProtocolChecker {
                 matcher.unify(&pattern, actual, Span::default()).ok()?;
             }
         }
-        // Callable owner bounds may determine variables absent from the head,
-        // for example F: fn(A) -> B. Infer their structural arguments once;
-        // check_implementation_callable_bounds still proves the full contract.
-        let mut pending: Vec<_> = implementation.type_param_fn_bounds.iter().collect();
-        while !pending.is_empty() {
-            let before = pending.len();
+        // Callable and associated equations share a worklist: either can
+        // determine an owner needed by the other. Only actual premises supply
+        // equations; the final proof still checks every implementation bound.
+        let fresh_type_holes: verum_common::Set<_> =
+            fresh.values().flat_map(Type::free_vars).collect();
+        let mut pending_callables: Vec<_> = implementation.type_param_fn_bounds.iter().collect();
+        let mut pending_equalities = Vec::new();
+        for clause in &implementation.where_clauses {
+            let subject = clause.ty.try_apply_subst(&fresh).ok()?;
+            for bound in &clause.bounds {
+                if bound.is_negative { continue; }
+                let bound = bound.try_apply_subst(&fresh).ok()?;
+                for name in bound.associated_types.keys() {
+                    pending_equalities.push((subject.clone(), bound.clone(), name.clone()));
+                }
+            }
+        }
+        loop {
+            let before = pending_callables.len() + pending_equalities.len();
             let mut blocked = Vec::new();
-            for (owner, bound) in pending {
-            let actual = matcher
-                .try_apply(
-                    &Type::Var(*owner).try_apply_subst(&fresh).ok()?,
-                    Span::default(),
-                )
-                .ok()?;
-            let Some(actual) = callable_contract(&actual, callables) else {
-                blocked.push((owner, bound));
-                continue;
-            };
-            let required = bound.try_apply_subst(&fresh).ok()?;
-            let (
-                Type::Function {
-                    params: actual_params,
-                    return_type: actual_result,
-                    ..
-                },
-                Type::Function {
-                    params: required_params,
-                    return_type: required_result,
-                    ..
-                },
-            ) = (actual, &required)
-            else {
-                return None;
-            };
-            if actual_params.len() != required_params.len() {
-                return None;
+            for (owner, bound) in pending_callables {
+                let actual = matcher.try_apply(
+                    &Type::Var(*owner).try_apply_subst(&fresh).ok()?, Span::default(),
+                ).ok()?;
+                let Some(actual) = callable_contract(&actual, environment.callables) else {
+                    blocked.push((owner, bound));
+                    continue;
+                };
+                let required = bound.try_apply_subst(&fresh).ok()?;
+                let (
+                    Type::Function { params: actual_params, return_type: actual_result, .. },
+                    Type::Function { params: required_params, return_type: required_result, .. },
+                ) = (actual, &required) else { return None; };
+                if actual_params.len() != required_params.len() { return None; }
+                for (required, actual) in required_params.iter().zip(actual_params)
+                    .chain(std::iter::once((required_result.as_ref(), actual_result.as_ref())))
+                {
+                    matcher.unify(required, actual, Span::default()).ok()?;
+                }
             }
-            for (required, actual) in
-                required_params
-                    .iter()
-                    .zip(actual_params)
-                    .chain(std::iter::once((
-                        required_result.as_ref(),
-                        actual_result.as_ref(),
-                    )))
-            {
-                matcher.unify(required, actual, Span::default()).ok()?;
+            pending_callables = blocked;
+            let mut blocked = Vec::new();
+            for (subject, bound, name) in pending_equalities {
+                let actual_subject = matcher.try_apply(&subject, Span::default()).ok()?;
+                if actual_subject.free_vars().iter().any(|var| fresh_type_holes.contains(var)) {
+                    blocked.push((subject, bound, name));
+                    continue;
+                }
+                let required = bound.try_apply_subst(matcher.get_substitution()).ok()?;
+                let equations = self.associated_premise_equations(
+                    &actual_subject, &required, &name, environment.protocols,
+                ).ok()?;
+                if equations.is_empty() {
+                    blocked.push((subject, bound, name));
+                    continue;
+                }
+                for (required, actual) in equations {
+                    matcher.unify(&required, &actual, Span::default()).ok()?;
+                    if !self.types_structurally_equal(
+                        &matcher.try_apply(&required, Span::default()).ok()?,
+                        &matcher.try_apply(&actual, Span::default()).ok()?,
+                    ) { return None; }
+                }
             }
+            pending_equalities = blocked;
+            if pending_callables.len() + pending_equalities.len() == before { break; }
         }
-            if blocked.len() == before { return None; }
-            pending = blocked;
-        }
+        if !pending_callables.is_empty() { return None; }
         // Each value domain belongs to the declaration, not to the inferred
         // argument. Keep it while applying the selected substitution.
         for parameter in &implementation.parameters {
@@ -237,8 +292,6 @@ impl ProtocolChecker {
                 return None;
             }
         }
-        let fresh_type_holes: verum_common::Set<_> =
-            fresh.values().flat_map(Type::free_vars).collect();
         let mut substitution = matcher.get_substitution().clone();
         for (variable, fresh_variable) in &fresh {
             let argument = matcher.try_apply(fresh_variable, Span::default()).ok()?;
@@ -247,7 +300,7 @@ impl ProtocolChecker {
                 .iter()
                 .any(|variable| fresh_type_holes.contains(variable))
             {
-                // The head and declared callable equations did not determine
+                // The head and declared premise equations did not determine
                 // this parameter. It cannot escape as an arbitrary output type.
                 return None;
             }
@@ -326,14 +379,14 @@ impl ProtocolChecker {
         implementation: &ProtocolImpl,
         substitution: &Substitution,
     ) -> Result<(), verum_common::Text> {
-        self.check_implementation_callable_bounds_with_premises(implementation, substitution, &Default::default())
+        self.check_implementation_callable_bounds_in_environment(implementation, substitution, &ConstraintEnvironment { protocols: &[], callables: &Default::default() })
     }
 
-    pub(super) fn check_implementation_callable_bounds_with_premises(
+    pub(super) fn check_implementation_callable_bounds_in_environment(
         &self,
         implementation: &ProtocolImpl,
         substitution: &Substitution,
-        callables: &verum_common::Map<crate::ty::TypeVar, Type>,
+        environment: &ConstraintEnvironment<'_>,
     ) -> Result<(), verum_common::Text> {
         let mut permitted = implementation
             .for_type
@@ -342,10 +395,10 @@ impl ProtocolChecker {
         for argument in &implementation.protocol_args {
             permitted.extend(argument.try_apply_subst(substitution)?.free_vars());
         }
-        extend_callable_variables(&mut permitted, callables);
+        environment.extend_variables(&mut permitted);
         for (variable, requirement) in &implementation.type_param_fn_bounds {
             let actual = Type::Var(*variable).try_apply_subst(substitution)?;
-            let actual = callable_contract(&actual, callables).ok_or_else(||
+            let actual = callable_contract(&actual, environment.callables).ok_or_else(||
                 verum_common::Text::from("callable implementation condition has no declared function evidence"))?;
             let required = requirement.try_apply_subst(substitution)?;
             if !matches!(actual, Type::Function { .. })

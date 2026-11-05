@@ -3,7 +3,7 @@
 //! Inference may postpone a constraint. This boundary may not: every conditional
 //! implementation used here needs evidence, and possible specializations must
 //! preserve the same associated equalities under their intersection.
-use super::implementation_match::CandidateMatch;
+use super::implementation_match::{CandidateMatch, ConstraintEnvironment};
 use super::{ProtocolBound, ProtocolChecker, ProtocolConstraints, ProtocolImpl, WhereClause};
 use crate::{
     ty::{Substitution, Type, TypeVar},
@@ -19,6 +19,7 @@ impl ProtocolChecker {
         &self,
         ty: &Type,
         bound: &ProtocolBound,
+        assumptions: &[WhereClause],
         callables: &verum_common::Map<TypeVar, Type>,
     ) -> Result<List<WhereClause>, Text> {
         let key = self.make_protocol_key(&bound.protocol);
@@ -26,8 +27,8 @@ impl ProtocolChecker {
         if let Some(index) = self.impls_by_protocol.get(&key) {
             for index in index.candidates(ty) {
                 let implementation = &self.impls[index];
-                if let CandidateMatch::Matched(substitution) = self.match_implementation_candidate_with_callables(
-                    implementation, ty, Some(&bound.args), true, callables,
+                if let CandidateMatch::Matched(substitution) = self.match_implementation_candidate_in_environment(
+                    implementation, ty, Some(&bound.args), true, &ConstraintEnvironment { protocols: assumptions, callables },
                 ) {
                     for clause in &implementation.where_clauses {
                         requirements.push(clause.try_apply_subst(&substitution)?);
@@ -136,6 +137,24 @@ impl Obligations<'_> {
             if self.same(&subject, ty) && self.entails(&actual, expected) {
                 return Ok(true);
             }
+            if self.same(&subject, ty)
+                && !actual.is_negative && !expected.is_negative
+                && self.checker.paths_equal(&actual.protocol, &expected.protocol)
+                && actual.args.len() == expected.args.len()
+                && actual.args.iter().zip(&expected.args).all(|(a, b)| self.same(a, b))
+            {
+                let mut proved = true;
+                for name in expected.associated_types.keys() {
+                    let equations = self.checker.associated_premise_equations(
+                        ty, expected, name, self.assumptions,
+                    )?;
+                    if equations.is_empty() || !equations.iter().all(|(a, b)| self.same(a, b)) {
+                        proved = false;
+                        break;
+                    }
+                }
+                if proved { return Ok(true); }
+            }
             if actual.is_negative
                 || seen.iter().any(|(prior, bound)| {
                     self.same(prior, &subject)
@@ -173,7 +192,9 @@ impl Obligations<'_> {
                 .collect();
             substitution.insert(*self_type, subject.clone());
             for inherited in &protocol.super_protocols {
-                pending.push((subject.clone(), inherited.try_apply_subst(&substitution)?));
+                let mut inherited = inherited.try_apply_subst(&substitution)?;
+                self.checker.inherit_associated_equalities(&subject, &actual, &mut inherited)?;
+                pending.push((subject.clone(), inherited));
             }
             for clause in parameter_bounds {
                 let subject = clause.ty.try_apply_subst(&substitution)?;
@@ -218,12 +239,12 @@ impl Obligations<'_> {
         let mut covering = false;
         for index in candidates {
             let implementation = &self.checker.impls[index];
-            let overlap = match self.checker.match_implementation_candidate_with_callables(
+            let overlap = match self.checker.match_implementation_candidate_in_environment(
                 implementation,
                 ty,
                 Some(&bound.args),
                 false,
-                self.callables,
+                &ConstraintEnvironment { protocols: self.assumptions, callables: self.callables },
             ) {
                 CandidateMatch::Matched(substitution) => substitution,
                 CandidateMatch::Disjoint => continue,
@@ -238,11 +259,11 @@ impl Obligations<'_> {
             self.check_equalities(implementation, bound, &overlap)?;
             if let CandidateMatch::Matched(substitution) = self
                 .checker
-                .match_implementation_candidate_with_callables(implementation, ty, Some(&bound.args), true, self.callables)
+                .match_implementation_candidate_in_environment(implementation, ty, Some(&bound.args), true, &ConstraintEnvironment { protocols: self.assumptions, callables: self.callables })
             {
                 let mut proved = self
                     .checker
-                    .check_implementation_callable_bounds_with_premises(implementation, &substitution, self.callables)
+                    .check_implementation_callable_bounds_in_environment(implementation, &substitution, &ConstraintEnvironment { protocols: self.assumptions, callables: self.callables })
                     .is_ok();
                 for clause in &implementation.where_clauses {
                     let clause_ty = clause.ty.try_apply_subst(&substitution)?;

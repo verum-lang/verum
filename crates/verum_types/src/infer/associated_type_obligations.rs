@@ -421,7 +421,7 @@ impl TypeChecker {
             if registry.check_universal_bounds_with_callables(&subject, std::slice::from_ref(&bound), assumptions, callables).is_ok() {
                 continue;
             }
-            let requirements = registry.source_bound_requirements(&subject, &bound, callables)
+            let requirements = registry.source_bound_requirements(&subject, &bound, assumptions, callables)
                 .map_err(|error| refusal(span, error))?;
             for clause in requirements {
                 for required in clause.bounds {
