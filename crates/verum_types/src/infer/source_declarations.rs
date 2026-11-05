@@ -396,8 +396,11 @@ impl TypeChecker {
         let registry = self.module_registry.read();
         let Some(module) = self.get_module_with_path_aliases(self.current_module_path.as_str(), &registry) else {
             // Low-level declaration APIs may have no file registry. Only an
-            // exact successfully registered source declaration owns this name.
-            return self.source_type_registration.completed.get(&self.declared_type_key(name))
+            // exact active declaration or successfully committed source owns
+            // this name. Recursive bounds consult their current transaction.
+            let key = self.declared_type_key(name);
+            return self.source_type_registration.pending.get(&key)
+                .or_else(|| self.source_type_registration.completed.get(&key))
                 .map(|declaration| (declaration.clone(), self.current_module_path.clone()));
         };
         let declared = self.find_type_declaration_with_source_module_inner(
@@ -511,8 +514,8 @@ impl TypeChecker {
         // A nominal entry may only be a placeholder left by failed source
         // elaboration. Completed loads, and recursive loads in this active
         // transaction, are the only authority for a cache hit.
-        if let Some(accepted) = self.source_type_registration.completed.get(&key)
-            .or_else(|| self.source_type_registration.pending.get(&key))
+        if let Some(accepted) = self.source_type_registration.pending.get(&key)
+            .or_else(|| self.source_type_registration.completed.get(&key))
         {
             if accepted != declaration {
                 let message: Text = format!("conflicting source declarations while loading {key}").into();
@@ -529,103 +532,31 @@ impl TypeChecker {
             }
             return result;
         }
-        let outermost = self.source_type_registration.depth == 0;
-        if outermost {
-            self.ctx.begin_type_definition_journal();
-            self.unifier.begin_variant_registration_journal();
-        }
-        self.source_type_registration.pending.insert(key.clone(), declaration.clone());
-        self.source_type_registration.aliases.insert(key.clone(), self.unifier.alias_binding(key.as_str()));
-        if matches!(declaration.body, verum_ast::TypeDeclBody::Protocol(_) | verum_ast::TypeDeclBody::Coinductive(_)) {
-            self.source_type_registration.protocols.insert(key.clone(), super::source_type_registration::SourceProtocolRegistration {
-                publications: Vec::new(),
-                unifier_name: self.unifier.protocol_name_is_registered(&key),
-                defaults: self.protocols_with_known_defaults.get(&key).cloned(),
-            });
-        }
-        self.source_type_registration.depth += 1;
-        self.source_type_registration.variants.arities.entry(declaration.name.name.clone())
-            .or_insert_with(|| self.type_generics_count.get(&declaration.name.name).copied());
-        // Loading a return type is not a mount of its lexical name or
-        // constructors. Keep qualified declaration metadata, while restoring
-        // this one pre-existing consumer binding on success and failure.
-        let local_name = declaration.name.name.clone();
-        let previous_type = self.ctx.type_defs.get(&local_name).cloned();
-        let previous_alias = self.ctx.type_aliases.get(&local_name).cloned();
-        let previous_unifier_alias = self.unifier.alias_binding(local_name.as_str());
-        self.ctx.enter_scope();
-        let registration =
-            self.register_type_declaration_in_module(declaration, owner.as_str());
-        self.ctx.exit_scope();
-        match previous_type {
-            Some(ty) => {
-                self.ctx.type_defs.insert(local_name.clone(), ty);
+        self.with_source_type_registration(declaration, key.clone(), |checker| {
+            // A return type load is not a mount of its local spelling. Retain
+            // declaration metadata, restoring the consumer binding on both exits.
+            let local_name = declaration.name.name.clone();
+            let previous_type = checker.ctx.type_defs.get(&local_name).cloned();
+            let previous_alias = checker.ctx.type_aliases.get(&local_name).cloned();
+            let previous_unifier_alias = checker.unifier.alias_binding(local_name.as_str());
+            checker.ctx.enter_scope();
+            let registration = checker.register_type_declaration_in_module(declaration, owner.as_str());
+            checker.ctx.exit_scope();
+            match previous_type {
+                Some(ty) => { checker.ctx.type_defs.insert(local_name.clone(), ty); }
+                None => { checker.ctx.type_defs.remove(&local_name); }
             }
-            None => {
-                self.ctx.type_defs.remove(&local_name);
+            match previous_alias {
+                Some(ty) => { checker.ctx.type_aliases.insert(local_name.clone(), ty); }
+                None => { checker.ctx.type_aliases.remove(&local_name); }
             }
-        }
-        match previous_alias {
-            Some(ty) => {
-                self.ctx.type_aliases.insert(local_name.clone(), ty);
-            }
-            None => {
-                self.ctx.type_aliases.remove(&local_name);
-            }
-        }
-        self.unifier
-            .restore_alias_binding(local_name, previous_unifier_alias);
-        let result = registration.and_then(|()| {
-            self.ctx.lookup_type(key.as_str()).cloned()
-                .map(|ty| (ty, key.clone()))
-                .ok_or_else(|| TypeError::TypeNotFound { name: key.clone(), span })
-        });
-        self.source_type_registration.depth -= 1;
-        if let Err(error) = &result {
-            self.source_type_registration.failure = Some(error.to_string().into());
-        }
-        if outermost {
-            let pending = std::mem::take(&mut self.source_type_registration.pending);
-            let aliases = std::mem::take(&mut self.source_type_registration.aliases);
-            let protocols = std::mem::take(&mut self.source_type_registration.protocols);
-            if let Some(failure) = self.source_type_registration.failure.take() {
-                // A nested declaration may have completed using this load's
-                // provisional type. None of this group's nominal bindings may
-                // remain usable after any member fails; retries must elaborate
-                // them again. Lexical environment entries were already scoped.
-                self.ctx.finish_type_definition_journal(false);
-                self.finish_source_variant_registrations(false);
-                for (name, binding) in aliases {
-                    self.unifier.restore_alias_binding(name, binding);
-                }
-                for (name, binding) in protocols {
-                    for publication in binding.publications.into_iter().rev() {
-                        self.protocol_checker.write().restore_protocol_binding(publication);
-                    }
-                    self.unifier.restore_protocol_name(name.clone(), binding.unifier_name);
-                    match binding.defaults {
-                        Some(defaults) => { self.protocols_with_known_defaults.insert(name, defaults); }
-                        None => { self.protocols_with_known_defaults.remove(&name); }
-                    }
-                }
-                for name in pending.keys() {
-                    self.ctx.type_defs.remove(name);
-                    self.ctx.type_aliases.remove(name);
-                    self.unifier.restore_alias_binding(name.clone(), (None, None));
-                }
-                return match result {
-                    Err(error) => Err(error),
-                    Ok(_) => Err(TypeError::UniverseBinding {
-                        message: format!("source declaration load for {key} failed: {failure}").into(),
-                        span,
-                    }),
-                };
-            }
-            self.ctx.finish_type_definition_journal(true);
-            self.finish_source_variant_registrations(true);
-            self.source_type_registration.completed.extend(pending);
-        }
-        result
+            checker.unifier.restore_alias_binding(local_name, previous_unifier_alias);
+            registration.and_then(|()| {
+                checker.ctx.lookup_type(key.as_str()).cloned()
+                    .map(|ty| (ty, key.clone()))
+                    .ok_or_else(|| TypeError::TypeNotFound { name: key.clone(), span })
+            })
+        })
     }
 
     /// Resolve only a nominal key whose exact source module declares the type.

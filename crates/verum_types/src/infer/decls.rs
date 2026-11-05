@@ -269,9 +269,13 @@ impl TypeChecker {
     ///
     /// Relies on RUST_MIN_STACK=16MB for stack safety on deeply nested types.
     pub fn register_type_declaration(&mut self, type_decl: &verum_ast::TypeDecl) -> Result<()> {
-        self.with_declared_universe_scope("type", &type_decl.name.name, &type_decl.generics, |checker| {
-            checker.register_type_declaration_in_universe_scope(type_decl)
-        })
+        let key = self.declared_type_key(type_decl.name.name.as_str());
+        let result = self.with_source_type_registration(type_decl, key, |checker| {
+            checker.with_declared_universe_scope("type", &type_decl.name.name, &type_decl.generics, |checker| {
+                checker.register_type_declaration_in_universe_scope(type_decl)
+            })
+        });
+        result
     }
 
     fn register_type_declaration_in_universe_scope(&mut self, type_decl: &verum_ast::TypeDecl) -> Result<()> {
@@ -398,28 +402,8 @@ impl TypeChecker {
         }
         let result = self.register_type_declaration_body(type_decl, type_name);
         self.types_being_registered.remove(&key);
-        self.publish_direct_type_declaration(type_decl, &result);
 
         result
-    }
-
-    /// Both direct and two-pass registration retain the declaration that owns
-    /// constructor parameter roles. Lazy loads publish through their outer
-    /// transaction, so nested success cannot escape a later group failure.
-    fn publish_direct_type_declaration(
-        &mut self,
-        declaration: &verum_ast::TypeDecl,
-        result: &Result<()>,
-    ) {
-        if self.source_type_registration.depth != 0 {
-            return;
-        }
-        let key = self.declared_type_key(declaration.name.name.as_str());
-        if result.is_ok() {
-            self.source_type_registration.completed.insert(key, declaration.clone());
-        } else {
-            self.source_type_registration.completed.remove(&key);
-        }
     }
 
     /// Tuple/newtype constructors return the same nominal declaration that
@@ -2228,10 +2212,10 @@ impl TypeChecker {
 
         // Register as placeholder - will be resolved in pass 2
         let placeholder = Type::Placeholder {
-            name: type_name.clone(),
+            name: self.declared_type_key(type_name.as_str()),
             span,
         };
-        self.ctx.define_type(type_name.clone(), placeholder);
+        self.define_type_in_current_module(type_name.clone(), placeholder);
 
         // Also register generic type parameters as placeholders if present
         // This allows generic types like Maybe<T> to be referenced
@@ -2413,11 +2397,13 @@ impl TypeChecker {
         // refinement's name check applies here and nowhere else.
         let prev_in_type_decl = self.in_type_declaration;
         self.in_type_declaration = true;
-        let out = self.with_declared_universe_scope("type", &type_decl.name.name, &type_decl.generics, |checker| {
-            checker.resolve_type_definition_inner(type_decl, resolution_stack)
+        let key = self.declared_type_key(type_decl.name.name.as_str());
+        let out = self.with_source_type_registration(type_decl, key, |checker| {
+            checker.with_declared_universe_scope("type", &type_decl.name.name, &type_decl.generics, |checker| {
+                checker.resolve_type_definition_inner(type_decl, resolution_stack)
+            })
         });
         self.in_type_declaration = prev_in_type_decl;
-        self.publish_direct_type_declaration(type_decl, &out);
         out
     }
 

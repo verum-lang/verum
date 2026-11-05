@@ -4794,12 +4794,10 @@ impl Unifier {
             //  SegmentError { inner: MmapFailed(...) | MunmapFailed(...) | ... }
             (Placeholder { name, .. }, other) | (other, Placeholder { name, .. }) => {
                 let compatible = match other {
-                    // the forward-declared name itself (compare the path head name)
-                    Named { path, .. } => matches!(
-                        path.segments.last(),
-                        Some(verum_ast::ty::PathSegment::Name(ident))
-                            if ident.name.as_str() == name.as_str()
-                    ),
+                    // The forward declaration and nominal carry the same
+                    // exact owner key; a sibling's identical leaf is not proof.
+                    Named { path, .. } => crate::ty::nominal_path_name(path)
+                        .is_some_and(|declared| declared.as_ref() == name.as_str()),
                     Generic { name: n, .. } => n == name,
                     // undetermined sides defer to later resolution
                     Var(_) | Unknown => true,

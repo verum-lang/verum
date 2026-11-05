@@ -1,5 +1,5 @@
 //! Source declaration loads publish success only after recursive loading closes.
-use crate::Type;
+use crate::{Result, Type, TypeError};
 use verum_ast::TypeDecl;
 use verum_common::{List, Map, Text};
 
@@ -51,6 +51,128 @@ fn restore_entries<T>(target: &mut Map<Text, T>, journal: Map<Text, Option<T>>) 
 }
 
 impl super::TypeChecker {
+    /// All declaration entry points share the source-load transaction. A
+    /// provisional recursive carrier is usable only until this whole load
+    /// succeeds; a later field or dependency error rolls its namespace back.
+    pub(super) fn with_source_type_registration<T>(
+        &mut self,
+        declaration: &TypeDecl,
+        key: Text,
+        register: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> Result<T> {
+        if self
+            .source_type_registration
+            .pending
+            .get(&key)
+            .is_some_and(|pending| pending != declaration)
+        {
+            let message: Text =
+                format!("conflicting source declarations while loading {key}").into();
+            self.source_type_registration.failure = Some(message.clone());
+            return Err(TypeError::UniverseBinding {
+                message,
+                span: declaration.span,
+            });
+        }
+        let outermost = self.source_type_registration.depth == 0;
+        if outermost {
+            self.ctx.begin_type_definition_journal();
+            self.unifier.begin_variant_registration_journal();
+        }
+        self.source_type_registration
+            .pending
+            .insert(key.clone(), declaration.clone());
+        // Direct registration also publishes a local spelling. Keep the first
+        // snapshot when a lazy load re-enters this same declaration.
+        for name in [key.clone(), declaration.name.name.clone()] {
+            self.source_type_registration
+                .aliases
+                .entry(name.clone())
+                .or_insert_with(|| self.unifier.alias_binding(name.as_str()));
+        }
+        if matches!(
+            declaration.body,
+            verum_ast::TypeDeclBody::Protocol(_) | verum_ast::TypeDeclBody::Coinductive(_)
+        ) {
+            self.source_type_registration
+                .protocols
+                .entry(key.clone())
+                .or_insert_with(|| SourceProtocolRegistration {
+                    publications: Vec::new(),
+                    unifier_name: self.unifier.protocol_name_is_registered(&key),
+                    defaults: self.protocols_with_known_defaults.get(&key).cloned(),
+                });
+        }
+        self.source_type_registration
+            .variants
+            .arities
+            .entry(declaration.name.name.clone())
+            .or_insert_with(|| {
+                self.type_generics_count
+                    .get(&declaration.name.name)
+                    .copied()
+            });
+        self.source_type_registration.depth += 1;
+        let result = register(self);
+        self.source_type_registration.depth -= 1;
+        if let Err(error) = &result {
+            self.source_type_registration.failure = Some(error.to_string().into());
+        }
+        if outermost {
+            let pending = std::mem::take(&mut self.source_type_registration.pending);
+            let aliases = std::mem::take(&mut self.source_type_registration.aliases);
+            let protocols = std::mem::take(&mut self.source_type_registration.protocols);
+            if let Some(failure) = self.source_type_registration.failure.take() {
+                self.ctx.finish_type_definition_journal(false);
+                self.finish_source_variant_registrations(false);
+                for (name, binding) in aliases {
+                    self.unifier.restore_alias_binding(name, binding);
+                }
+                for (name, binding) in protocols {
+                    for publication in binding.publications.into_iter().rev() {
+                        self.protocol_checker
+                            .write()
+                            .restore_protocol_binding(publication);
+                    }
+                    self.unifier
+                        .restore_protocol_name(name.clone(), binding.unifier_name);
+                    match binding.defaults {
+                        Some(defaults) => {
+                            self.protocols_with_known_defaults.insert(name, defaults);
+                        }
+                        None => {
+                            self.protocols_with_known_defaults.remove(&name);
+                        }
+                    }
+                }
+                for (key, declaration) in &pending {
+                    // Pass one may precede this transaction. Only this exact
+                    // declaration owns its restored forward placeholder. Keep
+                    // previously accepted carriers and another owner's local
+                    // placeholder; the journal already restored their aliases.
+                    for name in [key, &declaration.name.name] {
+                        if matches!(self.ctx.type_defs.get(name), Some(Type::Placeholder { name: owner, .. }) if owner == key)
+                        {
+                            self.ctx.type_defs.remove(name);
+                        }
+                    }
+                }
+                return match result {
+                    Err(error) => Err(error),
+                    Ok(_) => Err(TypeError::UniverseBinding {
+                        message: format!("source declaration load for {key} failed: {failure}")
+                            .into(),
+                        span: declaration.span,
+                    }),
+                };
+            }
+            self.ctx.finish_type_definition_journal(true);
+            self.finish_source_variant_registrations(true);
+            self.source_type_registration.completed.extend(pending);
+        }
+        result
+    }
+
     pub(super) fn journal_variant_parent(&mut self, name: &Text) {
         if self.source_type_registration.depth != 0 {
             self.source_type_registration
