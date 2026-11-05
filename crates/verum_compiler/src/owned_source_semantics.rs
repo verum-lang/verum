@@ -181,6 +181,14 @@ pub(crate) fn check_source_module(
     // A file header names this scope. It is not a nested module declaration.
     // Spans and all body/declaration nodes remain those of the original source.
     let mut body = module.clone();
+    // A minimal source graph may have no standard library. When it does,
+    // use its actual prelude and the shared opt-out/idempotence policy.
+    // Written mounts still undergo ordinary resolution, including failures.
+    if verum_ast::prelude::implicit_prelude_path(&body)
+        .is_some_and(|path| registry.read().get_by_path(path).is_some())
+    {
+        verum_ast::prelude::inject_implicit_prelude_mount(&mut body);
+    }
     if let Some(header) = body.file_header_index() {
         body.items.remove(header);
     }

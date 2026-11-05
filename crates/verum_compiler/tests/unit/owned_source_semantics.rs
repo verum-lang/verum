@@ -441,3 +441,42 @@ fn inline_and_file_sources_cannot_claim_conflicting_declarations() {
     .expect_err("a source file cannot replace the inline declaration");
     assert!(error.to_string().contains("realm.child"), "{error}");
 }
+
+// Original-source admission shares the ordinary implicit prelude policy.
+fn check_prelude_scope(provider: &str, consumer: &str) -> Vec<String> {
+    let sources = [("core.prelude",provider),("core.consumer",consumer)];
+    let asts: Vec<_> = sources.iter().enumerate().map(|(i,(_,source))|
+        verum_fast_parser::FastParser::new().parse_module_str(source,FileId::new(i as u32)).unwrap()).collect();
+    let graph = super::source_registry(sources.iter().zip(&asts).map(|((owner,_),ast)|(*owner,*owner,ast))).unwrap();
+    let mut checker=verum_types::TypeChecker::with_minimal_context();checker.register_builtins();
+    match super::check_source_module(&mut checker,"core.consumer",&asts[1],&graph){
+        Ok(())=>vec![],Err(errors)=>errors.iter().map(|e|e.message().to_string()).collect()
+    }
+}
+#[test] fn implicit_prelude_is_in_scope_for_local_declarations(){
+    let errors=check_prelude_scope("module core.prelude; public type Ambient is {public value:Int};", "module core.consumer; type Packet is {value:Ambient}; fn read(packet:&Packet)->Int{packet.value.value}");
+    assert!(errors.is_empty(),"{errors:?}");
+}
+#[test] fn opt_out_keeps_the_name_unavailable(){
+    let errors=check_prelude_scope("module core.prelude; public type Ambient is {public value:Int};", "@no_implicit_prelude module core.consumer; type Packet is {value:Ambient};");
+    assert!(errors.iter().any(|e|e.contains("Ambient")),"{errors:?}");
+}
+#[test] fn private_prelude_type_stays_private(){
+    let errors=check_prelude_scope("module core.prelude; private type Ambient is {public value:Int};", "module core.consumer; type Packet is {value:Ambient};");
+    assert!(errors.iter().any(|e|e.contains("Ambient")),"{errors:?}");
+}
+#[test] fn local_declaration_has_priority(){
+    let errors=check_prelude_scope("module core.prelude; public type Ambient is {public wrong:Bool};", "module core.consumer; type Ambient is {value:Int}; fn read(value:&Ambient)->Int{value.value}");
+    assert!(errors.is_empty(),"{errors:?}");
+}
+#[test] fn explicit_prelude_mount_is_not_duplicated(){
+    let errors=check_prelude_scope("module core.prelude; public type Ambient is {public value:Int};", "module core.consumer; mount core.prelude.Ambient; fn read(value:&Ambient)->Int{value.value}");
+    assert!(errors.is_empty(),"{errors:?}");
+}
+#[test] fn minimal_core_can_be_checked_without_a_prelude_declaration(){
+    let source=verum_fast_parser::FastParser::new().parse_module_str("module core; public fn probe()->Int{42}",FileId::new(0)).unwrap();
+    let graph=super::source_registry([("core","mod.vr",&source)]).unwrap();
+    let mut checker=verum_types::TypeChecker::with_minimal_context();checker.register_builtins();
+    let result=super::check_source_module(&mut checker,"core",&source,&graph);
+    assert!(result.is_ok(),"{result:?}");
+}
