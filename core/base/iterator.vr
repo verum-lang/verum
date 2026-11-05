@@ -4458,7 +4458,7 @@ implement<I: Iterator> IntoIterator for PeekableIter<I> {
 }
 
 implement<I: Iterator> IntoIterator for DedupIter<I>
-where I.Item: Eq {
+where I.Item: Eq + Clone {
     type Item = I.Item;
     type IntoIter = DedupIter<I>;
     fn into_iter(self) -> DedupIter<I> { self }
