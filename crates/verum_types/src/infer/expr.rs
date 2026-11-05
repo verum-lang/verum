@@ -10851,7 +10851,7 @@ impl TypeChecker {
                     .unify(&count_result.ty, &Type::int(), count.span)?;
 
                 // Meta system: unified compile-time computation via "meta fn", "meta" parameters, @derive macros, tagged literals, all under single "meta" concept — Evaluate count at compile time for size
-                let array_size = match self.const_eval.eval(count) {
+                let array_size = match self.const_eval.eval_source(count, self.current_module_path.as_str(), !self.resolving_source_signature, &self.ctx.env.unavailable_constant_names()) {
                     Ok(const_val) => {
                         // Successfully evaluated to constant
                         const_val.as_u128().map(|n| n as usize)
@@ -14783,10 +14783,13 @@ impl TypeChecker {
     /// Relies on RUST_MIN_STACK=16MB for stack safety on deep recursion.
     pub(super) fn infer_block(&mut self, block: &Block) -> Result<InferResult> {
         let _depth_guard = self.inc_inference_depth("infer_block")?;
-        match self.cfg_filtered_block(block) {
+        let constant_scope = self.const_eval.enter_source_scope(self.current_module_path.as_str());
+        let result = match self.cfg_filtered_block(block) {
             Some(filtered) => self.infer_block_inner(&filtered),
             None => self.infer_block_inner(block),
-        }
+        };
+        self.const_eval.leave_scope(constant_scope);
+        result
     }
 
     /// Drop the statements `@cfg(...)` excludes for this target, or
@@ -14984,10 +14987,13 @@ impl TypeChecker {
     /// Check a block against expected type.
     pub(super) fn check_block(&mut self, block: &Block, expected: &Type) -> Result<InferResult> {
         let _depth_guard = self.inc_inference_depth("check_block")?;
-        match self.cfg_filtered_block(block) {
+        let constant_scope = self.const_eval.enter_source_scope(self.current_module_path.as_str());
+        let result = match self.cfg_filtered_block(block) {
             Some(filtered) => self.check_block_inner(&filtered, expected),
             None => self.check_block_inner(block, expected),
-        }
+        };
+        self.const_eval.leave_scope(constant_scope);
+        result
     }
 
     fn check_block_inner(&mut self, block: &Block, expected: &Type) -> Result<InferResult> {

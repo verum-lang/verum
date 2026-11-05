@@ -2307,7 +2307,7 @@ impl TypeChecker {
 
         // Fall back to const_eval for paths (const variables) and expressions
         // This handles: SIZE, SIZE + 1, SIZE * 2 - 3, OFFSET - 5, etc.
-        match self.const_eval.eval(expr) {
+        match self.const_eval.eval_source(expr, self.current_module_path.as_str(), !self.resolving_source_signature, &self.ctx.env.unavailable_constant_names()) {
             Ok(const_val) => {
                 // Convert i128 to i64, safe for array indices
                 const_val
@@ -3165,7 +3165,7 @@ impl TypeChecker {
     /// Publish count owners using the parsed file and its installed file scope.
     /// Ordinary namespace registration retains its own existing contract.
     pub fn prepare_checked_count_file(&mut self, module: &verum_ast::Module) {
-        self.const_eval.declare_count_file(&module.items, self.current_module_path.as_str());
+        self.const_eval.declare_count_file_selected(&module.items, self.current_module_path.as_str(), &self.cfg_evaluator);
     }
 
     /// Pre-register a module and all nested modules (public interface).
@@ -10525,7 +10525,7 @@ impl TypeChecker {
                 if let verum_ast::ItemKind::Impl(impl_decl) = &item.kind {
                     self.register_impl_block(impl_decl)?;
                 }
-                self.check_item(item)?;
+                self.check_local_item(item)?;
                 // #[cfg(debug_assertions)]
                 // eprintln!("[DEBUG] check_stmt_inner: StmtKind::Item completed");
                 Ok(false)

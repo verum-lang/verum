@@ -1120,6 +1120,10 @@ pub struct TypeEnv {
     /// Roles supplied by the declaration that installed a binding. In
     /// particular, a root value cannot be identified from its type scheme.
     declared_values: Set<Text>,
+    constant_values: Set<Text>,
+    meta_parameter_values: Set<Text>,
+    /// The declaration telescope survives same-scope runtime value shadowing.
+    meta_parameters: Map<Text, Type>,
     /// Parent environment (for nested scopes)
     parent: Option<Box<TypeEnv>>,
     /// Type parameters in scope with their bounds
@@ -1141,6 +1145,9 @@ impl TypeEnv {
             record_places: Map::new(),
             type_parameter_mirrors: Set::new(),
             declared_values: Set::new(),
+            constant_values: Set::new(),
+            meta_parameter_values: Set::new(),
+            meta_parameters: Map::new(),
             parent: None,
             type_params: Map::new(),
             current_module: Maybe::None,
@@ -1158,6 +1165,9 @@ impl TypeEnv {
             record_places: Map::new(),
             type_parameter_mirrors: Set::new(),
             declared_values: Set::new(),
+            constant_values: Set::new(),
+            meta_parameter_values: Set::new(),
+            meta_parameters: Map::new(),
             parent: Some(Box::new(self.clone())),
             type_params: Map::new(),
             current_module: self.current_module, // Inherit module context
@@ -1238,6 +1248,8 @@ impl TypeEnv {
         self.record_places.remove(&name_text);
         self.type_parameter_mirrors.remove(&name_text);
         self.declared_values.remove(&name_text);
+        self.constant_values.remove(&name_text);
+        self.meta_parameter_values.remove(&name_text);
         self.bindings.insert(name_text, scheme);
     }
 
@@ -1247,6 +1259,59 @@ impl TypeEnv {
         let name = name.into();
         self.insert(name.clone(), scheme);
         self.declared_values.insert(name);
+    }
+
+    /// Constant provenance follows the actual lexical declaration, never its
+    /// scalar type. Ordinary insertions revoke it when a runtime value shadows.
+    pub(crate) fn insert_constant(&mut self, name: impl Into<Text>, scheme: TypeScheme) {
+        let name = name.into();
+        self.insert_value(name.clone(), scheme);
+        self.constant_values.insert(name);
+    }
+
+    pub(crate) fn insert_meta_parameter(&mut self, name: impl Into<Text>, scheme: TypeScheme) {
+        let name = name.into();
+        self.meta_parameters.insert(name.clone(), scheme.ty.clone());
+        self.insert_value(name.clone(), scheme);
+        self.meta_parameter_values.insert(name);
+    }
+
+    /// Compare against the exact installed declaration parameter. Before its
+    /// value scope is entered (signature elaboration), outer homonyms cannot
+    /// shadow the new binder. In its body, the nearest value binding decides.
+    pub(crate) fn shadows_meta_parameter(&self, name: &str, parameter: &Type) -> bool {
+        let key = Text::from(name);
+        let mut scope = Some(self);
+        let mut nearest = None;
+        let mut depth = 0;
+        while let Some(env) = scope {
+            if nearest.is_none() && env.bindings.contains_key(&key) {
+                nearest = Some((depth, env.meta_parameter_values.contains(&key)));
+            }
+            if env.meta_parameters.get(&key) == Some(parameter) {
+                return nearest != Some((depth, true));
+            }
+            depth += 1;
+            scope = env.parent.as_deref();
+        }
+        false
+    }
+
+    /// Bare local names unavailable to constant evaluation. Stop at each nearest
+    /// binding; declaration-owned globals and qualified module paths are separate.
+    pub(crate) fn unavailable_constant_names(&self) -> Set<Text> {
+        let mut seen = Set::new();
+        let mut unavailable = Set::new();
+        let mut scope = self;
+        while let Some(parent) = scope.parent.as_deref() {
+            for name in scope.bindings.keys() {
+                if seen.insert(name.clone()) && !scope.constant_values.contains(name) {
+                    unavailable.insert(name.clone());
+                }
+            }
+            scope = parent;
+        }
+        unavailable
     }
 
     /// Rebind an existing name without inventing or discarding its declaration
@@ -1263,6 +1328,8 @@ impl TypeEnv {
                     scheme.clone(),
                     env.declared_values.contains(&original),
                     env.type_parameter_mirrors.contains(&original),
+                    env.constant_values.contains(&original),
+                    env.meta_parameter_values.contains(&original),
                 );
             }
             scope = env.parent.as_deref();
@@ -1273,7 +1340,13 @@ impl TypeEnv {
             self.declared_values.insert(alias.clone());
         }
         if binding.2 {
-            self.type_parameter_mirrors.insert(alias);
+            self.type_parameter_mirrors.insert(alias.clone());
+        }
+        if binding.3 {
+            self.constant_values.insert(alias.clone());
+        }
+        if binding.4 {
+            self.meta_parameter_values.insert(alias);
         }
         true
     }
@@ -1308,6 +1381,8 @@ impl TypeEnv {
         env.record_places.remove(&name_text);
         env.type_parameter_mirrors.remove(&name_text);
         env.declared_values.remove(&name_text);
+        env.constant_values.remove(&name_text);
+        env.meta_parameter_values.remove(&name_text);
         env.bindings.insert(name_text, scheme);
     }
 
@@ -1327,6 +1402,8 @@ impl TypeEnv {
         self.record_places.remove(&name);
         self.type_parameter_mirrors.remove(&name);
         self.declared_values.remove(&name);
+        self.constant_values.remove(&name);
+        self.meta_parameter_values.remove(&name);
         self.bindings.shift_remove(&name).is_some()
     }
 

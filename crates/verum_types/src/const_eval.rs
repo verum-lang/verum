@@ -30,7 +30,7 @@ use verum_ast::{
     stmt::{Stmt, StmtKind},
     ty::PathSegment,
 };
-use verum_common::{ConstValue, List, Map, Maybe, Text};
+use verum_common::{ConstValue, List, Map, Maybe, Set, Text};
 
 // ConstValue is imported from verum_common - the unified canonical type
 // See: verum_common/src/const_value.rs for the full implementation
@@ -221,11 +221,28 @@ impl MetaFunction {
 /// let result = eval.eval(&expr)?;
 /// assert_eq!(result, ConstValue::Int(5));
 /// ```
+#[derive(Clone)]
+struct ConstantBinding {
+    value: std::result::Result<ConstValue, Text>,
+    checked: std::result::Result<verum_ast::checked_const::Scalar, Text>,
+}
+
+struct ConstantFrame {
+    owner: Option<Text>,
+    boundary: bool,
+    bindings: Map<Text, ConstantBinding>,
+}
+
 pub struct ConstEvaluator {
     /// Environment mapping variable names to values
-    env: Map<Text, ConstValue>,
+    env: Map<Text, ConstantBinding>,
+    frames: List<ConstantFrame>,
+    source_owner: Option<Text>,
+    allow_locals: bool,
     /// Array counts keep their checked domain separate from rich meta values.
     count_values: Map<Text, std::result::Result<verum_ast::checked_const::Scalar, Text>>,
+    /// Unevaluated declaration-owned count sources, available before signatures.
+    count_sources: Map<Text, (Text, Option<Expr>)>,
     /// Module ownership comes from declarations, including empty modules.
     count_modules: verum_ast::checked_const::ModuleOwners,
     /// File-aware callers identify headers explicitly; nested forwards do not.
@@ -252,7 +269,11 @@ impl ConstEvaluator {
     pub fn new() -> Self {
         Self {
             env: Map::new(),
+            frames: List::new(),
+            source_owner: None,
+            allow_locals: true,
             count_values: Map::new(),
+            count_sources: Map::new(),
             count_modules: Default::default(),
             count_file_headers: Map::new(),
             functions: Map::new(),
@@ -276,39 +297,111 @@ impl ConstEvaluator {
         self.max_depth
     }
 
-    /// Bind a variable to a value
-    pub fn bind(&mut self, name: impl Into<Text>, value: ConstValue) {
-        let name = name.into();
+    fn binding(value: ConstValue) -> ConstantBinding {
         let scalar = match &value {
-            ConstValue::Int(value) => i64::try_from(*value)
-                .ok()
-                .map(verum_ast::checked_const::Scalar::Int),
-            ConstValue::UInt(value) => i64::try_from(*value)
-                .ok()
-                .map(verum_ast::checked_const::Scalar::Int),
+            ConstValue::Int(value) => i64::try_from(*value).ok().map(verum_ast::checked_const::Scalar::Int),
+            ConstValue::UInt(value) => i64::try_from(*value).ok().map(verum_ast::checked_const::Scalar::Int),
             ConstValue::Bool(value) => Some(verum_ast::checked_const::Scalar::Bool(*value)),
             _ => None,
         };
-        self.count_values.insert(
-            name.clone(),
-            scalar.ok_or_else(|| Text::from("constant is outside the checked scalar domain")),
-        );
-        self.env.insert(name, value);
+        ConstantBinding { value: Ok(value), checked: scalar.ok_or_else(|| "constant is outside the checked scalar domain".into()) }
     }
 
-    /// Record both domains from source. Evaluating the checked form before
-    /// binding prevents a wider meta intermediate from hiding i64 overflow.
-    pub fn bind_source(&mut self, name: &str, expr: &Expr, scope: &str) {
-        let checked = self
-            .eval_checked_scalar(expr, scope)
-            .map_err(|error| Text::from(format!("{error}")));
-        // Rich meta evaluation retains its existing environment and semantics.
-        if let Ok(value) = self.eval(expr) {
-            self.env.insert(Text::from(name), value);
+    /// Programmatic bindings belong to the active evaluation frame, or to the
+    /// root environment when no lexical evaluation is in progress.
+    pub fn bind(&mut self, name: impl Into<Text>, value: ConstValue) {
+        let name = name.into();
+        let binding = Self::binding(value);
+        if let Some(frame) = self.frames.last_mut() {
+            frame.bindings.insert(name, binding);
+        } else {
+            self.count_values.insert(name.clone(), binding.checked.clone());
+            self.env.insert(name, binding);
         }
-        let scope = Self::count_scope(scope);
-        self.count_values
-            .insert(Text::from(format!("{scope}.{name}")), checked);
+    }
+
+    fn push_frame(&mut self, owner: Option<Text>, boundary: bool) -> usize {
+        let depth = self.frames.len();
+        self.frames.push(ConstantFrame { owner, boundary, bindings: Map::new() });
+        depth
+    }
+
+    pub(crate) fn enter_source_scope(&mut self, owner: &str) -> usize {
+        self.push_frame(Some(Self::count_scope(owner)), false)
+    }
+
+    pub(crate) fn leave_scope(&mut self, depth: usize) {
+        assert!(self.frames.len() > depth, "constant scope must be paired");
+        self.frames.truncate(depth);
+    }
+
+    fn local_binding(&self, name: &Text, owner: Option<&Text>) -> Option<&ConstantBinding> {
+        if !self.allow_locals || name.contains(".") { return None; }
+        for frame in self.frames.iter().rev() {
+            if frame.owner.as_ref().is_none_or(|actual| Some(actual) == owner)
+                && let Some(binding) = frame.bindings.get(name) {
+                return Some(binding);
+            }
+            if frame.boundary { break; }
+        }
+        None
+    }
+
+    pub(crate) fn has_local_source_binding(&self, name: &str, scope: &str) -> bool {
+        self.local_binding(&name.into(), Some(&Self::count_scope(scope))).is_some()
+    }
+
+    /// Evaluate under a selected source owner. Signature elaboration explicitly
+    /// disables caller-local facts; source globals never use a caller's frame.
+    pub(crate) fn eval_source(&mut self, expr: &Expr, scope: &str, allow_locals: bool, unavailable: &Set<Text>) -> Result<ConstValue> {
+        let previous_owner = self.source_owner.replace(Self::count_scope(scope));
+        // Hide caller facts with a boundary, while evaluation-created blocks
+        // and parameters still see their own compile-time local bindings.
+        let previous_locals = std::mem::replace(&mut self.allow_locals, true);
+        let depth = self.push_frame(self.source_owner.clone(), !allow_locals);
+        if allow_locals {
+            for name in unavailable {
+                let error: Text = format!("lexical binding `{name}` is not an evaluated constant").into();
+                self.frames.last_mut().expect("evaluation frame").bindings.insert(name.clone(),
+                    ConstantBinding { value: Err(error.clone()), checked: Err(error) });
+            }
+        }
+        let result = self.eval(expr);
+        self.leave_scope(depth);
+        self.source_owner = previous_owner;
+        self.allow_locals = previous_locals;
+        result
+    }
+
+    fn source_binding(&mut self, expr: &Expr, scope: &str, local: bool, unavailable: &Set<Text>) -> ConstantBinding {
+        let checked = self.eval_checked_scalar(expr, scope, local, unavailable).map_err(|error| Text::from(format!("{error}")));
+        let value = self.eval_source(expr, scope, local, unavailable).map_err(|error| Text::from(format!("{error}")));
+        ConstantBinding { value, checked }
+    }
+
+    /// Declaration-owned facts survive local scopes and lazy source loads.
+    pub fn bind_source(&mut self, name: &str, expr: &Expr, scope: &str) {
+        let binding = self.source_binding(expr, scope, false, &Set::new());
+        let key: Text = format!("{}.{}", Self::count_scope(scope), name).into();
+        self.count_values.insert(key.clone(), binding.checked.clone());
+        self.env.insert(key, binding);
+    }
+
+    pub(crate) fn bind_local_source(&mut self, name: &str, expr: &Expr, scope: &str, unavailable: &Set<Text>) -> Result<()> {
+        let binding = self.source_binding(expr, scope, true, unavailable);
+        self.insert_local_source(name, binding, scope)
+    }
+
+    pub(crate) fn invalidate_local_source(&mut self, name: &str, error: Text, scope: &str) -> Result<()> {
+        self.insert_local_source(name, ConstantBinding { value: Err(error.clone()), checked: Err(error) }, scope)
+    }
+
+    fn insert_local_source(&mut self, name: &str, binding: ConstantBinding, scope: &str) -> Result<()> {
+        let owner = Self::count_scope(scope);
+        let frame = self.frames.last_mut().filter(|frame| frame.owner.as_ref() == Some(&owner))
+            .ok_or_else(|| ConstEvalError::Other("local constant has no owning lexical frame".into()))?;
+        frame.bindings.insert(name.into(), binding);
+        Ok(())
     }
 
     /// Normalize only the checked-count domain: compiler file paths omit the
@@ -322,6 +415,12 @@ impl ConstEvaluator {
     /// Prepare a parsed file under the compiler's already-selected file scope.
     /// Its first named bodiless declaration is a header, not a child module.
     pub fn declare_count_file(&mut self, items: &[verum_ast::Item], scope: &str) {
+        self.declare_count_file_selected(items, scope, &Default::default());
+    }
+
+    pub(crate) fn declare_count_file_selected(
+        &mut self, items: &[verum_ast::Item], scope: &str, cfg: &verum_ast::cfg::CfgEvaluator,
+    ) {
         if let Some(header) = items.iter().find_map(|item| match &item.kind {
             verum_ast::ItemKind::Module(module)
                 if module.items.is_none() && !module.name.name.is_empty() => Some(module),
@@ -331,16 +430,39 @@ impl ConstEvaluator {
         }
         let scope = Self::count_scope(scope);
         self.count_modules.declare(scope.as_str());
+        self.declare_count_items(items, scope.as_str(), cfg);
+    }
+
+    fn declare_count_items(
+        &mut self, items: &[verum_ast::Item], scope: &str, cfg: &verum_ast::cfg::CfgEvaluator,
+    ) {
         for item in items {
-            if let verum_ast::ItemKind::Module(module) = &item.kind {
-                self.declare_count_modules(module, scope.as_str());
+            if !cfg.should_include(&item.attributes) { continue; }
+            match &item.kind {
+                verum_ast::ItemKind::Const(declaration) => {
+                    let key: Text = format!("{scope}.{}", declaration.name.name).into();
+                    let source = (scope.into(), declaration.generics.is_empty()
+                        .then(|| declaration.value.clone()));
+                    if self.count_sources.get(&key) != Some(&source) {
+                        self.count_values.remove(&key);
+                    }
+                    self.count_sources.insert(key, source);
+                }
+                verum_ast::ItemKind::Module(module) => self.declare_count_modules_selected(module, scope, cfg),
+                _ => (),
             }
         }
     }
 
-    /// Record the actual source module tree before evaluating its members.
-    /// This is separate from value bindings and leaves rich meta lookup intact.
+    /// Record source ownership and unevaluated declarations. Evaluation uses the
+    /// shared checked scalar evaluator, without executing rich meta code here.
     pub fn declare_count_modules(&mut self, module: &verum_ast::decl::ModuleDecl, parent: &str) {
+        self.declare_count_modules_selected(module, parent, &Default::default());
+    }
+
+    pub(crate) fn declare_count_modules_selected(
+        &mut self, module: &verum_ast::decl::ModuleDecl, parent: &str, cfg: &verum_ast::cfg::CfgEvaluator,
+    ) {
         if module.items.is_none()
             && self.count_file_headers.get(&module.span) == Some(&module.name.name) {
             return;
@@ -349,17 +471,17 @@ impl ConstEvaluator {
         let path = format!("{parent}.{}", module.name.name);
         self.count_modules.declare(&path);
         if let Some(items) = &module.items {
-            for item in items {
-                if let verum_ast::ItemKind::Module(child) = &item.kind {
-                    self.declare_count_modules(child, &path);
-                }
-            }
+            self.declare_count_items(items, &path, cfg);
         }
     }
 
     /// Checked producer domain used by concrete array lengths, not meta calls.
     pub fn eval_array_count(&self, expr: &Expr, scope: &str) -> Result<i64> {
-        self.eval_checked_scalar(expr, scope)?
+        self.eval_array_count_in_source(expr, scope, true, &Set::new())
+    }
+
+    pub(crate) fn eval_array_count_in_source(&self, expr: &Expr, scope: &str, allow_locals: bool, unavailable: &Set<Text>) -> Result<i64> {
+        self.eval_checked_scalar(expr, scope, allow_locals, unavailable)?
             .as_i64()
             .ok_or(ConstEvalError::NotConstant)
     }
@@ -368,6 +490,15 @@ impl ConstEvaluator {
         &self,
         expr: &Expr,
         scope: &str,
+        allow_locals: bool,
+        unavailable: &Set<Text>,
+    ) -> Result<verum_ast::checked_const::Scalar> {
+        self.eval_checked_scalar_in_source(expr, scope, allow_locals, unavailable, &mut List::new(), &mut 4096)
+    }
+
+    fn eval_checked_scalar_in_source(
+        &self, expr: &Expr, scope: &str, allow_locals: bool,
+        unavailable: &Set<Text>, active: &mut List<Text>, remaining: &mut usize,
     ) -> Result<verum_ast::checked_const::Scalar> {
         let scope = Self::count_scope(scope);
         let scope = scope.as_str();
@@ -399,6 +530,12 @@ impl ConstEvaluator {
             let Some(name) = name(leaf, 0) else {
                 return Ok(None);
             };
+            if allow_locals && unavailable.contains(&name) {
+                return Err(ConstEvalError::Other(format!("lexical binding `{name}` is not an evaluated constant").into()));
+            }
+            if allow_locals && let Some(binding) = self.local_binding(&name, Some(&Text::from(scope))) {
+                return binding.checked.clone().map(Some).map_err(ConstEvalError::Other);
+            }
             // Source constants are keyed by their declaring module. Walk
             // lexical ancestors, retaining every written path segment. A
             // missing sibling/owner must never become a same-leaf lookup.
@@ -406,24 +543,32 @@ impl ConstEvaluator {
             // an invalid shadow cannot borrow a valid outer value (T1626).
             let owner_key = self.count_modules.member(name.as_str(), scope, "cog");
             let mut anchor = Some(scope);
-            let resolved = loop {
-                if let Some(key) = &owner_key {
-                    break self.count_values.get(key);
-                }
-                let Some(current) = anchor else {
-                    break self.count_values.get(&name);
-                };
+            let key = loop {
+                if let Some(key) = &owner_key { break key.clone(); }
+                let Some(current) = anchor else { break name.clone(); };
                 let key = Text::from(format!("{current}.{name}"));
-                if let Some(value) = self.count_values.get(&key) {
-                    break Some(value);
+                if self.count_values.contains_key(&key) || self.count_sources.contains_key(&key) {
+                    break key;
                 }
                 anchor = current.rsplit_once('.').map(|(parent, _)| parent);
             };
-            match resolved {
-                Some(Ok(value)) => Ok(Some(*value)),
-                Some(Err(error)) => Err(ConstEvalError::Other(error.clone())),
-                None => Ok(None),
+            if let Some(value) = self.count_values.get(&key) {
+                return value.clone().map(Some).map_err(ConstEvalError::Other);
             }
+            let Some((owner, source)) = self.count_sources.get(&key) else { return Ok(None); };
+            let Some(source) = source else {
+                return Err(ConstEvalError::Other(format!("generic constant `{key}` requires explicit instantiation").into()));
+            };
+            if active.contains(&key) || active.len() >= 64 || *remaining == 0 {
+                return Err(ConstEvalError::Other(format!("cyclic or over-budget array count declaration `{key}`").into()));
+            }
+            *remaining -= 1;
+            active.push(key);
+            // A referenced declaration is evaluated at its owner, without the
+            // caller's local bindings. Always restore the active lookup stack.
+            let result = self.eval_checked_scalar_in_source(source, owner, false, unavailable, active, remaining);
+            active.pop();
+            result.map(Some)
         })
         .map_err(|error| match error {
             verum_ast::checked_const::EvalError::Resolver(error) => error,
@@ -431,15 +576,35 @@ impl ConstEvaluator {
         })
     }
 
+    fn lookup_binding(&self, name: &Text) -> Option<&ConstantBinding> {
+        if let Some(local) = self.local_binding(name, self.source_owner.as_ref()) { return Some(local); }
+        if let Some(owner) = &self.source_owner {
+            if let Some(key) = self.count_modules.member(name.as_str(), owner.as_str(), "cog") {
+                return self.env.get(&key);
+            }
+            let mut anchor = Some(owner.as_str());
+            while let Some(scope) = anchor {
+                let key: Text = format!("{scope}.{name}").into();
+                if let Some(binding) = self.env.get(&key) { return Some(binding); }
+                anchor = scope.rsplit_once('.').map(|(parent, _)| parent);
+            }
+        }
+        self.env.get(name)
+    }
+
     /// Get the current value of a variable, if bound
     pub fn get(&self, name: &Text) -> Option<ConstValue> {
-        self.env.get(name).cloned()
+        self.lookup_binding(name).and_then(|binding| binding.value.clone().ok())
     }
 
     /// Unbind a variable (remove from environment)
     pub fn unbind(&mut self, name: &Text) {
-        self.env.remove(name);
-        self.count_values.remove(name);
+        if let Some(frame) = self.frames.last_mut() {
+            frame.bindings.remove(name);
+        } else {
+            self.env.remove(name);
+            self.count_values.remove(name);
+        }
     }
 
     /// Register a meta function for compile-time evaluation
@@ -494,24 +659,19 @@ impl ConstEvaluator {
             // Literals
             ExprKind::Literal(lit) => self.eval_literal(lit),
 
-            // Variable lookup
+            // A written qualified path is never a lexical local binding.
             ExprKind::Path(path) => {
-                // Simple path with single identifier
-                if path.segments.len() == 1 {
-                    if let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0] {
-                        let name = ident.name.as_str();
-                        match self.env.get(&Text::from(name)) {
-                            Some(val) => Ok(val.clone()),
-                            None => Err(ConstEvalError::UnboundVariable {
-                                name: Text::from(name),
-                            }),
-                        }
-                    } else {
-                        Err(ConstEvalError::NotConstant)
+                let mut parts = List::new();
+                for segment in &path.segments {
+                    match segment {
+                        PathSegment::Name(name) => parts.push(name.name.as_str()),
+                        PathSegment::Cog if parts.is_empty() => parts.push("cog"),
+                        _ => return Err(ConstEvalError::NotConstant),
                     }
-                } else {
-                    Err(ConstEvalError::NotConstant)
                 }
+                let name: Text = parts.join(".").into();
+                self.lookup_binding(&name).ok_or_else(|| ConstEvalError::UnboundVariable { name })?
+                    .value.clone().map_err(ConstEvalError::Other)
             }
 
             // Binary operations
@@ -699,25 +859,20 @@ impl ConstEvaluator {
             arg_values.push(self.eval(arg)?);
         }
 
-        // Save current environment
-        let old_env = self.env.clone();
-
-        // Bind parameters to argument values
+        // Callee parameters see globals and their own block locals, never
+        // another function's or caller block's lexical bindings.
+        let depth = self.push_frame(None, true);
+        let previous_owner = self.source_owner.take();
+        let previous_locals = std::mem::replace(&mut self.allow_locals, true);
         for (param_name, arg_value) in meta_fn.param_names.iter().zip(arg_values.iter()) {
-            self.env.insert(param_name.clone(), arg_value.clone());
+            self.bind(param_name.clone(), arg_value.clone());
         }
-
-        // Increment recursion depth
         self.recursion_depth += 1;
-
-        // Evaluate the function body
         let result = self.eval_block(&meta_fn.body);
-
-        // Decrement recursion depth
         self.recursion_depth -= 1;
-
-        // Restore environment
-        self.env = old_env;
+        self.leave_scope(depth);
+        self.source_owner = previous_owner;
+        self.allow_locals = previous_locals;
 
         result
     }
@@ -729,24 +884,15 @@ impl ConstEvaluator {
     ///
     /// Meta system: unified compile-time computation via "meta fn", "meta" parameters, @derive macros, tagged literals, all under single "meta" concept — Section 3.2 - Block evaluation in meta context
     fn eval_block(&mut self, block: &Block) -> Result<ConstValue> {
-        // Save environment for restoration after block
-        let old_env = self.env.clone();
-
-        // Evaluate statements
-        for stmt in &block.stmts {
-            self.eval_stmt(stmt)?;
-        }
-
-        // Evaluate final expression or return unit
-        let result = if let Maybe::Some(expr) = &block.expr {
-            self.eval(expr)
-        } else {
-            // Block without trailing expression evaluates to unit
-            Ok(ConstValue::Unit)
-        };
-
-        // Restore environment (let bindings are local to block)
-        self.env = old_env;
+        let depth = self.push_frame(self.source_owner.clone(), false);
+        let result = (|| {
+            for stmt in &block.stmts { self.eval_stmt(stmt)?; }
+            match &block.expr {
+                Some(expr) => self.eval(expr),
+                None => Ok(ConstValue::Unit),
+            }
+        })();
+        self.leave_scope(depth);
 
         result
     }
@@ -846,7 +992,7 @@ impl ConstEvaluator {
     fn bind_pattern(&mut self, pattern: &Pattern, value: ConstValue) -> Result<()> {
         match &pattern.kind {
             PatternKind::Ident { name, .. } => {
-                self.env.insert(Text::from(name.name.as_str()), value);
+                self.bind(name.name.clone(), value);
                 Ok(())
             }
 
@@ -901,8 +1047,7 @@ impl ConstEvaluator {
     fn try_bind_pattern(&mut self, pattern: &Pattern, value: &ConstValue) -> bool {
         match &pattern.kind {
             PatternKind::Ident { name, .. } => {
-                self.env
-                    .insert(Text::from(name.name.as_str()), value.clone());
+                self.bind(name.name.clone(), value.clone());
                 true
             }
 
@@ -1478,19 +1623,12 @@ impl ConstEvaluator {
 
     /// Substitute meta parameters in a type with their computed values
     pub fn substitute_meta(&mut self, ty: &Type, env: &Map<Text, ConstValue>) -> Result<Type> {
-        // Save current environment
-        let old_env = self.env.clone();
-
-        // Extend with new bindings
-        for (name, value) in env.iter() {
-            self.env.insert(name.clone(), value.clone());
-        }
-
-        // Evaluate the type
+        let depth = self.push_frame(None, true);
+        let previous_locals = std::mem::replace(&mut self.allow_locals, true);
+        for (name, value) in env { self.bind(name.clone(), value.clone()); }
         let result = self.eval_meta_type(ty);
-
-        // Restore environment
-        self.env = old_env;
+        self.leave_scope(depth);
+        self.allow_locals = previous_locals;
 
         result
     }

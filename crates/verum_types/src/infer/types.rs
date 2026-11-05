@@ -659,9 +659,7 @@ impl TypeChecker {
         let elem_ty = self.ast_to_type(element)?;
         // Extract array size via const evaluation if size expression is present
         let array_size = if let verum_common::Maybe::Some(size_expr) = size {
-            self.const_eval
-                .eval_array_count(size_expr, self.current_module_path.as_str())
-                .ok().and_then(|value| usize::try_from(value).ok())
+            self.checked_array_length(size_expr)?
         } else {
             None
         };
@@ -2502,6 +2500,60 @@ fn substitute_refinement_binder(
         }).collect());
     }
 
+    /// Array lengths currently retain concrete sizes, or an unknown size for
+    /// one declaration-owned integer parameter. Compound symbolic expressions
+    /// need a retained length term; a failed evaluation cannot stand for one.
+    fn checked_array_length(&mut self, expr: &Expr) -> Result<Option<usize>> {
+        let mut leaf = expr;
+        let mut depth = 0;
+        while let ExprKind::Paren(inner) = &leaf.kind {
+            depth += 1;
+            if depth > 64 {
+                return Err(TypeError::OtherWithCodeSpanned {
+                    code: "E400".into(),
+                    msg: "array length expression exceeds its nesting limit".into(),
+                    span: expr.span,
+                });
+            }
+            leaf = inner;
+        }
+        if let ExprKind::Path(path) = &leaf.kind
+            && let Some(name) = path.as_ident()
+            && (self.resolving_source_signature || !self.const_eval.has_local_source_binding(
+                name.name.as_str(), self.current_module_path.as_str()))
+            && let Some(parameter) = self.lookup_decl_param(name.name.as_str()).cloned()
+            && (self.resolving_source_signature || !self.ctx.env.shadows_meta_parameter(name.name.as_str(), &parameter))
+        {
+            if let Type::Meta { ty, value: crate::ty::ValueTerm::Parameter(_), .. } = parameter {
+                let carrier = self.normalize_type(&ty);
+                let integer = match carrier.base() {
+                    Type::Int => true,
+                    Type::Named { path, args } if args.is_empty() => path.as_ident()
+                        .is_some_and(|name| wkt_names::is_integer_type(name.as_str())),
+                    _ => false,
+                };
+                if integer { return Ok(None); }
+            }
+            return Err(TypeError::OtherWithCodeSpanned {
+                code: "E400".into(),
+                msg: "symbolic array length requires a declaration-owned integer value parameter".into(),
+                span: expr.span,
+            });
+        }
+        let value = self.const_eval.eval_array_count_in_source(
+            expr, self.current_module_path.as_str(), !self.resolving_source_signature, &self.ctx.env.unavailable_constant_names(),
+        ).map_err(|error| TypeError::OtherWithCodeSpanned {
+            code: "E400".into(),
+            msg: format!("array length requires a checked nonnegative constant or an exact declaration-owned integer parameter; compound symbolic lengths are not represented: {error}").into(),
+            span: expr.span,
+        })?;
+        usize::try_from(value).map(Some).map_err(|_| TypeError::OtherWithCodeSpanned {
+            code: "E400".into(),
+            msg: "array length is negative or exceeds the supported size range".into(),
+            span: expr.span,
+        })
+    }
+
     /// Projected array syntax must not erase an invalid length to an unsized
     /// inference variable. Use the same checked signed constant domain as VBC.
     fn validate_explicit_array_lengths(&mut self, ty: &verum_ast::Type) -> Result<()> {
@@ -2522,7 +2574,7 @@ fn substitute_refinement_binder(
                     if let Some(size) = size {
                         let length = self
                             .const_eval
-                            .eval_array_count(size, self.current_module_path.as_str())
+                            .eval_array_count_in_source(size, self.current_module_path.as_str(), !self.resolving_source_signature, &self.ctx.env.unavailable_constant_names())
                             .ok()
                             .and_then(|value| usize::try_from(value).ok());
                         if length.is_none() {
@@ -6046,7 +6098,7 @@ fn substitute_refinement_binder(
 
         // (2) Compile-time-constant source pins the value exactly.
         if let Some(expr) = from_expr {
-            if let Ok(value) = self.const_eval.eval(expr) {
+            if let Ok(value) = self.const_eval.eval_source(expr, self.current_module_path.as_str(), !self.resolving_source_signature, &self.ctx.env.unavailable_constant_names()) {
                 if let Some(v) = value.as_i128() {
                     lo = lo.max(v);
                     hi = hi.min(v);

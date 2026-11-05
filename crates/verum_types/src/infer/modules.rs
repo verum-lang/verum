@@ -113,6 +113,14 @@ impl TypeChecker {
     ///
     /// Relies on RUST_MIN_STACK=16MB for stack safety on deep recursion.
     pub fn check_item(&mut self, item: &verum_ast::Item) -> Result<()> {
+        self.check_item_in_scope(item, false)
+    }
+
+    pub(super) fn check_local_item(&mut self, item: &verum_ast::Item) -> Result<()> {
+        self.check_item_in_scope(item, true)
+    }
+
+    fn check_item_in_scope(&mut self, item: &verum_ast::Item, local: bool) -> Result<()> {
         let _depth_guard = self.inc_inference_depth("check_item")?;
         // A `meta` declaration must be on record BEFORE any body that calls
         // it is inferred, so that `validate_meta_function_call` refuses
@@ -121,9 +129,50 @@ impl TypeChecker {
         // holding the whole module call `register_declared_meta_macros`,
         // which covers the other order too.
         self.note_declared_meta_macros(item);
-        let outcome = self.with_value_obligation_scope(false, |checker| checker.check_item_inner(item));
+        let outcome = self.with_value_obligation_scope(false, |checker| {
+            if local && let verum_ast::ItemKind::Const(declaration) = &item.kind {
+                if !checker.cfg_evaluator.should_include(&item.attributes) { return Ok(()); }
+                checker.check_constant_declaration(declaration, true)
+            } else {
+                checker.check_item_inner(item)
+            }
+        });
         self.check_analysis_control()?;
         outcome
+    }
+
+    fn check_constant_declaration(&mut self, declaration: &verum_ast::decl::ConstDecl, local: bool) -> Result<()> {
+        let owner = self.current_module_path.clone();
+        let name = declaration.name.name.clone();
+        let result: Result<()> = (|| {
+            let expected = self.ast_to_type(&declaration.ty)?;
+            if local {
+                // Local declarations belong to the block, not to the module's
+                // dependency graph. An enclosing global initializer keeps its
+                // own dependency context while reading this initializer.
+                self.check_expr(&declaration.value, &expected)?;
+                self.const_eval.bind_local_source(name.as_str(), &declaration.value, owner.as_str(), &self.ctx.env.unavailable_constant_names())
+                    .map_err(|error| TypeError::OtherWithCodeSpanned { code: "E405".into(), msg: error.to_string().into(), span: declaration.span })?;
+            } else {
+                let key: Text = format!("{owner}.{name}").into();
+                let previous = self.current_constant_path.replace(key.clone());
+                self.constant_dependencies.insert(key.clone(), std::collections::HashSet::new());
+                let checked = self.check_expr(&declaration.value, &expected);
+                self.current_constant_path = previous;
+                checked?;
+                self.check_constant_cycle(&key)?;
+                self.const_eval.bind_source(name.as_str(), &declaration.value, owner.as_str());
+            }
+            self.ctx.env.insert_constant(name.as_str(), TypeScheme::mono(expected));
+            Ok(())
+        })();
+        if local && let Err(error) = &result {
+            // A rejected inner declaration still shadows an outer constant;
+            // later statements must not borrow the outer value as recovery.
+            self.const_eval.invalidate_local_source(name.as_str(), error.to_string().into(), owner.as_str())
+                .map_err(|error| TypeError::OtherWithCodeSpanned { code: "E405".into(), msg: error.to_string().into(), span: declaration.span })?;
+        }
+        result
     }
 
     /// Record every `meta <name>(...)` declaration in `module`, including
@@ -244,66 +293,7 @@ impl TypeChecker {
 
                 Ok(())
             }
-            ItemKind::Const(const_decl) => {
-                let expected = self.ast_to_type(&const_decl.ty)?;
-
-                // Build full path for this constant
-                let const_name = const_decl.name.name.as_str();
-                let const_full_path = if self.current_module_path.as_str() == "cog" {
-                    verum_common::Text::from(format!("cog.{}", const_name))
-                } else {
-                    verum_common::Text::from(format!(
-                        "{}.{}",
-                        self.current_module_path.as_str(),
-                        const_name
-                    ))
-                };
-
-                // Set up dependency tracking for this constant
-                self.current_constant_path = Maybe::Some(const_full_path.clone());
-                self.constant_dependencies
-                    .insert(const_full_path.clone(), std::collections::HashSet::new());
-
-                // Check the constant's value expression (this will record dependencies)
-                self.check_expr(&const_decl.value, &expected)?;
-
-                // Clear the current constant path
-                self.current_constant_path = Maybe::None;
-
-                // T0727 probe: the circular-constant check silently stops
-                // applying when the file sits two or more directories below the
-                // cog manifest (measured by bisection: depth 1 fires, depth 2
-                // does not). The cycle is found by matching a constant's FULL
-                // PATH against the dependency edges recorded while checking its
-                // value, so this prints both sides of that comparison.
-                if std::env::var("VERUM_TRACE_CONSTDEP").is_ok() {
-                    let deps: Vec<String> = self
-                        .constant_dependencies
-                        .get(&const_full_path)
-                        .map(|s| s.iter().map(|d| d.to_string()).collect())
-                        .unwrap_or_default();
-                    eprintln!(
-                        "[constdep] module='{}' const='{}' deps={:?}",
-                        self.current_module_path.as_str(),
-                        const_full_path,
-                        deps
-                    );
-                }
-                // Check for circular dependencies involving this constant
-                self.check_constant_cycle(&const_full_path)?;
-
-                // Evaluate the constant value and bind it to const_eval for later use
-                // This enables compile-time evaluation of expressions using this const
-                self.const_eval.bind_source(
-                    const_name, &const_decl.value, self.current_module_path.as_str(),
-                );
-
-                // Add to context
-                self.ctx
-                    .env
-                    .insert_value(const_decl.name.name.as_str(), TypeScheme::mono(expected));
-                Ok(())
-            }
+            ItemKind::Const(const_decl) => self.check_constant_declaration(const_decl, false),
             ItemKind::Static(static_decl) => {
                 let expected = self.ast_to_type(&static_decl.ty)?;
 
@@ -422,7 +412,7 @@ impl TypeChecker {
     fn check_module(&mut self, module: &verum_ast::decl::ModuleDecl) -> Result<()> {
         // Save current module path
         let saved_path = self.current_module_path.clone();
-        self.const_eval.declare_count_modules(module, saved_path.as_str());
+        self.const_eval.declare_count_modules_selected(module, saved_path.as_str(), &self.cfg_evaluator);
 
         // Build new module path
         let module_name = module.name.name.as_str();
@@ -11429,6 +11419,16 @@ impl TypeChecker {
         self.unifier
             .enter_rigid_scope(func_rigid_type_params.iter().cloned());
         self.ctx.enter_scope();
+        // Install the exact inherited and method-owned value telescope before
+        // runtime parameters. Later bindings may shadow the values, while the
+        // declaration identities remain available to the count admission rule.
+        if let Some(parameters) = self.decl_param_frames.last() {
+            for (name, parameter) in parameters {
+                if matches!(parameter, Type::Meta { value: crate::ty::ValueTerm::Parameter(_), .. }) {
+                    self.ctx.env.insert_meta_parameter(name.clone(), TypeScheme::mono(parameter.clone()));
+                }
+            }
+        }
 
         // Enter a new context scope for this function
         // This allows provide statements within the function to shadow outer provides
@@ -11559,7 +11559,7 @@ impl TypeChecker {
                     // Add to environment
                     self.ctx
                         .env
-                        .insert(name.name.clone(), TypeScheme::mono(meta_ty));
+                        .insert_meta_parameter(name.name.clone(), TypeScheme::mono(meta_ty));
                 }
                 GenericParamKind::Const { name, ty } => {
                     // Deprecated const generics - convert to meta
@@ -11583,7 +11583,7 @@ impl TypeChecker {
                         })?;
                     self.ctx
                         .env
-                        .insert(name.name.clone(), TypeScheme::mono(meta_ty));
+                        .insert_meta_parameter(name.name.clone(), TypeScheme::mono(meta_ty));
                 }
                 GenericParamKind::Lifetime { name } => {
                     // Lifetime parameters for borrow checking
@@ -14110,7 +14110,7 @@ impl TypeChecker {
         &mut self,
         expr: &Expr,
     ) -> std::result::Result<verum_common::ConstValue, crate::const_eval::ConstEvalError> {
-        self.const_eval.eval(expr)
+        self.const_eval.eval_source(expr, self.current_module_path.as_str(), !self.resolving_source_signature, &self.ctx.env.unavailable_constant_names())
     }
 
     /// Evaluate and substitute meta parameters in a type

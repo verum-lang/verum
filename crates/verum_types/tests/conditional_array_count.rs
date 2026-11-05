@@ -257,9 +257,12 @@ fn checked_array_lengths_keep_nearest_and_explicit_declaration_owners() {
         checker.set_current_module_path(scope);
         let syntax = Parser::new(&format!("[Byte; {count}]"))
             .parse_type().unwrap();
-        let verum_types::ty::Type::Array { size, .. } = checker.ast_to_type(&syntax).unwrap() else {
-            panic!("expected array type");
-        };
-        assert_eq!(size, expected, "{scope}: {count}");
+        let result = checker.ast_to_type(&syntax);
+        if let Some(expected) = expected {
+            let verum_types::ty::Type::Array { size, .. } = result.unwrap() else { panic!("expected array type") };
+            assert_eq!(size, Some(expected), "{scope}: {count}");
+        } else {
+            assert!(matches!(result, Err(verum_types::TypeError::OtherWithCodeSpanned { code, .. }) if code == "E400"), "unknown owner must refuse");
+        }
     }
 }

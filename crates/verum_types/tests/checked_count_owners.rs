@@ -174,10 +174,12 @@ fn a_later_forward_is_not_mistaken_for_the_file_header() {
         let syntax = Parser::new(&format!("[Byte; {count}]"))
             .parse_type()
             .unwrap();
-        let verum_types::ty::Type::Array { size, .. } = checker.ast_to_type(&syntax).unwrap()
-        else {
-            panic!("array")
-        };
-        assert_eq!(size, expected, "{count}");
+        let result = checker.ast_to_type(&syntax);
+        if let Some(expected) = expected {
+            let verum_types::ty::Type::Array { size, .. } = result.unwrap() else { panic!("array") };
+            assert_eq!(size, Some(expected), "{count}");
+        } else {
+            assert!(matches!(result, Err(verum_types::TypeError::OtherWithCodeSpanned { code, .. }) if code == "E400"), "missing owned count must refuse");
+        }
     }
 }

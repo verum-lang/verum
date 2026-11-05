@@ -646,7 +646,7 @@ impl TypeChecker {
         })?;
         let value = self
             .const_eval
-            .eval_array_count(&expression, self.current_module_path.as_str())
+            .eval_array_count_in_source(&expression, self.current_module_path.as_str(), !self.resolving_source_signature, &self.ctx.env.unavailable_constant_names())
             .map_err(|error| {
                 invalid(
                     expression.span,

@@ -6219,7 +6219,7 @@ impl TypeChecker {
         if let Ok(const_ty) = self.ast_to_type(&const_decl.ty) {
             self.ctx
                 .env
-                .insert_value(const_decl.name.name.as_str(), TypeScheme::mono(const_ty));
+                .insert_constant(const_decl.name.name.as_str(), TypeScheme::mono(const_ty));
         }
     }
 
@@ -6893,10 +6893,13 @@ impl TypeChecker {
         if matches!(impl_decl.kind, verum_ast::decl::ImplKind::Protocol { .. }) {
             self.register_impl_block(impl_decl)?;
         }
-        match self.cfg_filtered_impl(impl_decl) {
+        self.push_decl_param_frame(indexmap::IndexMap::new());
+        let result = match self.cfg_filtered_impl(impl_decl) {
             Some(filtered) => self.check_impl_block_inner(&filtered),
             None => self.check_impl_block_inner(impl_decl),
-        }
+        };
+        self.pop_decl_param_frame();
+        result
     }
 
     /// Inner implementation of check_impl_block
@@ -6942,6 +6945,8 @@ impl TypeChecker {
                     let type_var = Type::Var(TypeVar::fresh());
                     let name_text: Text = name.name.clone();
                     self.ctx.define_type(name_text.clone(), type_var.clone());
+                    self.decl_param_frames.last_mut().expect("implementation body parameter scope")
+                        .insert(name_text.clone(), type_var.clone());
 
                     // Register bounds from generic parameter declaration
                     // Example: implement<T: Clone> List<T> { ... }
@@ -6969,7 +6974,9 @@ impl TypeChecker {
                 GenericParamKind::Meta { name, .. } | GenericParamKind::Const { name, .. } => {
                     let value_type = self.source_value_parameter(generic_param)?;
                     let name_text = name.name.clone();
-                    self.ctx.define_type(name_text.clone(), value_type);
+                    self.ctx.define_type(name_text.clone(), value_type.clone());
+                    self.decl_param_frames.last_mut().expect("implementation body parameter scope")
+                        .insert(name_text.clone(), value_type);
                     type_param_names.push(name_text);
                 }
                 _ => {} // Lifetime, Context, Level params handled elsewhere
