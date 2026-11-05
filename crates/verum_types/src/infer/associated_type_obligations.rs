@@ -423,9 +423,33 @@ impl TypeChecker {
         assumptions: &[WhereClause],
         span: Span,
     ) -> Result<()> {
-        for bound in bounds {
+        let mut pending: Vec<_> = bounds.iter().map(|bound| (ty.clone(), bound.clone())).collect();
+        let mut seen: Vec<(Type, ProtocolBound)> = Vec::new();
+        while let Some((subject, bound)) = pending.pop() {
+            if seen.iter().any(|(prior, requirement)| prior == &subject && requirement == &bound) {
+                continue;
+            }
+            if seen.len() == 4096 {
+                return Err(refusal(span, "source protocol evidence budget exhausted"));
+            }
+            seen.push((subject.clone(), bound.clone()));
             let name = self.path_to_string(&bound.protocol);
             self.ensure_stdlib_type_loaded_transitive(&name);
+            self.load_source_bound_implementations(&subject, &bound, assumptions, span)?;
+            let registry = self.protocol_checker.read();
+            // A declaration assumption can already prove this goal. Otherwise
+            // follow only the actual matched implementation's owned telescope,
+            // never guessed protocols for a nominal argument's spelling.
+            if registry.check_universal_bounds(&subject, std::slice::from_ref(&bound), assumptions).is_ok() {
+                continue;
+            }
+            let requirements = registry.source_bound_requirements(&subject, &bound)
+                .map_err(|error| refusal(span, error))?;
+            for clause in requirements {
+                for required in clause.bounds {
+                    pending.push((clause.ty.clone(), required));
+                }
+            }
         }
         self.protocol_checker
             .read()

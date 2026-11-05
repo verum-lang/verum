@@ -633,6 +633,50 @@ impl TypeChecker {
         Some((module, declaration))
     }
 
+    /// Load only the exact nominal owner's implementations of this required
+    /// protocol before asking the immutable proof engine for evidence. An
+    /// in-progress module import is not evidence, and unrelated implementations
+    /// must not be checked first merely because they appear earlier in source.
+    pub(super) fn load_source_bound_implementations(
+        &mut self,
+        receiver: &Type,
+        bound: &crate::protocol::ProtocolBound,
+        assumptions: &[crate::protocol::WhereClause],
+        span: Span,
+    ) -> Result<()> {
+        let Some((module, declaration)) = self.source_receiver_declaration(receiver) else {
+            return Ok(());
+        };
+        let owner = module.path.to_string();
+        let protocol = self.path_to_string(&bound.protocol);
+        let key = (format!("{owner}.{}", declaration.name.name).into(), protocol.clone());
+        if !self.source_type_registration.active_impl_bounds.insert(key.clone()) {
+            // An active declaration is not evidence. A previously published
+            // implementation or an explicit caller assumption may still prove
+            // this exact instantiated goal independently of that declaration.
+            return self.protocol_checker.read()
+                .check_universal_bounds(receiver, std::slice::from_ref(bound), assumptions)
+                .map_err(|error| TypeError::OtherWithCodeSpanned {
+                    code: "E405".into(),
+                    msg: format!("recursive source implementation obligation has no independent evidence: {error}").into(),
+                    span,
+                });
+        }
+        // The selected declaration owns its binders. The suspended caller's
+        // same-named parameters and projection assumptions cannot capture them.
+        let frames = std::mem::take(&mut self.decl_param_frames);
+        let assumptions = std::mem::take(
+            &mut self.source_type_registration.projection_assumptions,
+        );
+        let result = self.import_impl_blocks_for_type_in_module_selected(
+            &module.ast, declaration.name.name.as_str(), Some(owner.as_str()), Some(&protocol),
+        );
+        self.decl_param_frames = frames;
+        self.source_type_registration.projection_assumptions = assumptions;
+        self.source_type_registration.active_impl_bounds.remove(&key);
+        result
+    }
+
     pub(super) fn load_source_receiver_methods(&mut self, receiver: &Type) -> Result<()> {
         let Some((module, declaration)) = self.source_receiver_declaration(receiver) else {
             return Ok(());

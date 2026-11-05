@@ -4813,6 +4813,7 @@ impl TypeChecker {
                                             source_path.as_str(),
                                             e
                                         );
+                                        return Err(e);
                                     }
                                 } else {
                                     // Fallback: try to import from the direct module.
@@ -4828,6 +4829,7 @@ impl TypeChecker {
                                             resolved_module_path.as_str(),
                                             e
                                         );
+                                        return Err(e);
                                     }
                                 }
 
@@ -5739,6 +5741,18 @@ impl TypeChecker {
         type_name: &str,
         source_module_path: Option<&str>,
     ) -> Result<()> {
+        self.import_impl_blocks_for_type_in_module_selected(
+            ast, type_name, source_module_path, None,
+        )
+    }
+
+    pub(super) fn import_impl_blocks_for_type_in_module_selected(
+        &mut self,
+        ast: &verum_ast::Module,
+        type_name: &str,
+        source_module_path: Option<&str>,
+        required_protocol: Option<&Text>,
+    ) -> Result<()> {
         use verum_ast::decl::{FunctionParamKind, ImplItemKind, Visibility as AstVisibility};
 
         // #[cfg(debug_assertions)]
@@ -5798,6 +5812,26 @@ impl TypeChecker {
                 }
                 verum_ast::decl::ImplKind::Inherent(_) => None,
             };
+            if let Some(required) = required_protocol {
+                if resolved_protocol.as_ref().map(|path| self.path_to_string(path)).as_ref()
+                    != Some(required)
+                {
+                    continue;
+                }
+                // A prior successful registration owns this exact declaration.
+                // Do not recursively re-check it through a later obligation.
+                let accepted = self.protocol_checker.read()
+                    .has_source_impl(&self.current_module_path, impl_decl);
+                match accepted {
+                    Ok(true) => continue,
+                    Ok(false) => {},
+                    Err(error) => {
+                        self.set_current_module_path(saved_module_path);
+                        self.resolving_source_signature = saved_source_scope;
+                        return Err(error);
+                    }
+                }
+            }
             // Value scopes do not own type definitions. Lazy imports can run
             // inside a generic body, so preserve every name they temporarily bind.
             let impl_type_bindings: List<_> = impl_decl.generics.iter().filter_map(|param| {

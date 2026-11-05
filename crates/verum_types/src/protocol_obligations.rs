@@ -12,6 +12,52 @@ use crate::{
 use verum_common::{List, Text, ToText};
 
 impl ProtocolChecker {
+    /// Discover declaration-owned prerequisites for source loading. This does
+    /// not prove the goal: the ordinary universal checker still validates all
+    /// candidates, equalities, callable bounds and overlapping specializations.
+    pub(crate) fn source_bound_requirements(
+        &self,
+        ty: &Type,
+        bound: &ProtocolBound,
+    ) -> Result<List<WhereClause>, Text> {
+        let key = self.make_protocol_key(&bound.protocol);
+        let mut requirements = List::new();
+        if let Some(index) = self.impls_by_protocol.get(&key) {
+            for index in index.candidates(ty) {
+                let implementation = &self.impls[index];
+                if let CandidateMatch::Matched(substitution) = self.match_implementation_candidate(
+                    implementation, ty, Some(&bound.args), true,
+                ) {
+                    for clause in &implementation.where_clauses {
+                        requirements.push(clause.try_apply_subst(&substitution)?);
+                    }
+                }
+            }
+        }
+        if let Some(protocol) = self.get_protocol(&key)
+            && let ProtocolConstraints::Declared {
+                self_type, parameters, parameter_bounds, ..
+            } = &protocol.constraints
+            && parameters.len() == bound.args.len()
+        {
+            let mut substitution: Substitution = parameters.iter().zip(&bound.args)
+                .map(|(parameter, argument)| (*parameter, argument.clone())).collect();
+            substitution.insert(*self_type, ty.clone());
+            for clause in parameter_bounds {
+                requirements.push(clause.try_apply_subst(&substitution)?);
+            }
+            if !protocol.super_protocols.is_empty() {
+                requirements.push(WhereClause {
+                    ty: ty.clone(),
+                    bounds: protocol.super_protocols.iter()
+                        .map(|bound| bound.try_apply_subst(&substitution))
+                        .collect::<Result<List<_>, _>>()?,
+                });
+            }
+        }
+        Ok(requirements)
+    }
+
     pub fn check_universal_bounds(
         &self,
         ty: &Type,
