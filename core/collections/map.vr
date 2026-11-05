@@ -36,6 +36,7 @@
 module core.collections.map;
 
 mount core.mem.allocator.AllocError;
+mount core.base.iterator.{FromIterator, Extend};
 // Allocator primitives for typed-OOM (#65, #68). See list.vr for
 // rationale — `mount core.*` doesn't surface these via the re-export
 // chain in `core/base/mod.vr` for unqualified function references.
