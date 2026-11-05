@@ -779,3 +779,76 @@ fn explicit_signature_capture_preserves_validation_and_size_refusal() {
     oversized.name = ident(&"x".repeat(1_048_577));
     assert!(verum_ast::source_signature::capture_source_signature(&oversized, false).is_err());
 }
+
+
+#[test]
+fn ordinary_nominal_bounds_retain_their_source_telescope() {
+    let bounds = List::from_iter([TypeBound {
+        kind: TypeBoundKind::Protocol(Path::single(ident("P"))),
+        span: Span::dummy(),
+    }]);
+    for kind in [
+        GenericParamKind::Type {
+            name: ident("T"),
+            bounds: bounds.clone(),
+            default: None,
+        },
+        GenericParamKind::HigherKinded {
+            name: ident("F"),
+            arity: 1,
+            bounds: bounds.clone(),
+        },
+        GenericParamKind::KindAnnotated {
+            name: ident("F"),
+            kind: verum_ast::ty::KindAnnotation::Type,
+            bounds,
+        },
+    ] {
+        let mut declaration = type_declaration(TypeDeclBody::Unit);
+        declaration.generics.push(GenericParam {
+            kind,
+            is_implicit: false,
+            span: Span::dummy(),
+        });
+        let carrier = source_type_declaration(&declaration).unwrap().unwrap();
+        let decoded: TypeDecl =
+            serde_json::from_slice(&serde_json::to_vec(&carrier).unwrap()).unwrap();
+        validate_source_type_declaration(&decoded).unwrap();
+        assert_eq!(decoded, declaration);
+    }
+    let mut unconstrained = type_declaration(TypeDeclBody::Unit);
+    unconstrained.generics.push(ordinary("T"));
+    assert!(source_type_declaration(&unconstrained).unwrap().is_none());
+}
+
+#[test]
+fn ordinary_nominal_where_predicates_survive_source_carrier_roundtrip() {
+    let predicate = WherePredicate {
+        kind: WherePredicateKind::Type {
+            ty: Type::new(TypeKind::Path(Path::single(ident("T"))), Span::dummy()),
+            bounds: List::from_iter([TypeBound {
+                kind: TypeBoundKind::Protocol(Path::single(ident("P"))),
+                span: Span::dummy(),
+            }]),
+        },
+        span: Span::dummy(),
+    };
+    for meta in [false, true] {
+        let mut declaration = type_declaration(TypeDeclBody::Unit);
+        declaration.generics.push(ordinary("T"));
+        let clause = Some(WhereClause::new(
+            List::from_iter([predicate.clone()]),
+            Span::dummy(),
+        ));
+        if meta {
+            declaration.meta_where_clause = clause;
+        } else {
+            declaration.generic_where_clause = clause;
+        }
+        let carrier = source_type_declaration(&declaration).unwrap().unwrap();
+        let decoded: TypeDecl =
+            serde_json::from_slice(&serde_json::to_vec(&carrier).unwrap()).unwrap();
+        validate_source_type_declaration(&decoded).unwrap();
+        assert_eq!(decoded, declaration);
+    }
+}

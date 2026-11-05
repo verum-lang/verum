@@ -49,7 +49,8 @@ pub fn type_declaration_uses_universes(declaration: &crate::TypeDecl) -> Result<
 /// Defaults belong to their source telescope, including its lexical scope and
 /// prior binders. Value kinds, sorts and refinements likewise cannot be inferred
 /// from runtime type slots. Keep every nominal value telescope for exact
-/// application elaboration.
+/// application elaboration. Generic bounds and where predicates define the
+/// domain of every nominal application, even when its runtime layout is erased.
 pub fn type_declaration_needs_semantic_carrier(declaration: &crate::TypeDecl) -> Result<bool> {
     let universes = type_declaration_uses_universes(declaration)?;
     let mut scan = SignatureScan::new(false);
@@ -60,15 +61,18 @@ pub fn type_declaration_needs_semantic_carrier(declaration: &crate::TypeDecl) ->
         || scan.uses_rank_two
         || scan.uses_callable_contexts
         || matches!(&declaration.body, crate::TypeDeclBody::Protocol(_) | crate::TypeDeclBody::Coinductive(_))
-        || declaration.generics.iter().any(|param| {
-            matches!(
-                param.kind,
-                GenericParamKind::Type {
-                    default: Some(_),
-                    ..
-                } | GenericParamKind::Meta { .. }
-                    | GenericParamKind::Const { .. }
-            )
+        || [&declaration.generic_where_clause, &declaration.meta_where_clause]
+            .into_iter()
+            .flatten()
+            .any(|clause| !clause.predicates.is_empty())
+        || declaration.generics.iter().any(|param| match &param.kind {
+            GenericParamKind::Type { bounds, default, .. } => {
+                !bounds.is_empty() || default.is_some()
+            }
+            GenericParamKind::HigherKinded { bounds, .. }
+            | GenericParamKind::KindAnnotated { bounds, .. } => !bounds.is_empty(),
+            GenericParamKind::Meta { .. } | GenericParamKind::Const { .. } => true,
+            _ => false,
         }))
 }
 
