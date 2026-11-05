@@ -37,6 +37,7 @@ module core.text.text;
 // Allocator primitives for typed-OOM (#65, #68). See list.vr for
 // rationale on the explicit mount.
 mount core.base.memory.{try_alloc, try_realloc};
+mount core.base.iterator.{FromIterator, Extend};
 mount core.mem.allocator.AllocError;
 mount core.intrinsics.runtime.mem_raw.{memset_addr};
 
