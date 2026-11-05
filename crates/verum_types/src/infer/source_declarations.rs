@@ -387,18 +387,25 @@ impl TypeChecker {
             return Some((declaration.clone(), self.current_module_path.clone()));
         }
         let registry = self.module_registry.read();
-        self.get_module_with_path_aliases(self.current_module_path.as_str(), &registry)
-            .and_then(|module| {
-                self.find_type_declaration_with_source_module_inner(
-                    &module.ast,
-                    name,
-                    &Text::from(module.path.to_string()),
-                    &registry,
-                    &mut Set::new(),
-                    true,
-                    true,
-                )
-            })
+        let module = self.get_module_with_path_aliases(self.current_module_path.as_str(), &registry)?;
+        let declared = self.find_type_declaration_with_source_module_inner(
+            &module.ast, name, &Text::from(module.path.to_string()),
+            &registry, &mut Set::new(), true, true,
+        );
+        // Written bindings remain authoritative even when their target is
+        // missing or inaccessible; the prelude cannot repair an invalid mount.
+        let explicitly_bound = module.ast.items.iter().any(|item| matches!(
+            &item.kind, verum_ast::ItemKind::Mount(mount)
+                if mount.alias.as_ref().is_some_and(|alias| alias.name.as_str() == name)
+                || source_mount_binds_name(&mount.tree, name)
+        ));
+        if declared.is_some() || explicitly_bound { return declared; }
+        let prelude = verum_ast::prelude::implicit_prelude_path(&module.ast)?;
+        let prelude = self.get_module_with_path_aliases(prelude, &registry)?;
+        self.find_type_declaration_with_source_module_inner(
+            &prelude.ast, name, &Text::from(prelude.path.to_string()),
+            &registry, &mut Set::new(), true, false,
+        )
     }
 
     /// A qualified source name selects its declaration before any template
