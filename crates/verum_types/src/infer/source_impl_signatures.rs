@@ -10,7 +10,7 @@ use verum_ast::{
     Span,
     decl::{ImplDecl, ImplItemKind},
 };
-use verum_common::{List, Text};
+use verum_common::{List, Map, Text};
 
 fn invalid(span: Span, message: impl Into<Text>) -> TypeError {
     TypeError::OtherWithCodeSpanned {
@@ -21,6 +21,100 @@ fn invalid(span: Span, message: impl Into<Text>) -> TypeError {
 }
 
 impl TypeChecker {
+    /// One declaration-owned carrier for conditions at every source impl
+    /// publication boundary. A compound subject is an obligation too; it is
+    /// never narrowed to just the subset that spells a bare parameter name.
+    pub(super) fn elaborate_source_impl_conditions(
+        &mut self,
+        source: &ImplDecl,
+        owner: &indexmap::IndexMap<Text, Type>,
+    ) -> Result<(List<WhereClause>, Map<TypeVar, Type>)> {
+        use verum_ast::ty::{GenericParamKind, WherePredicateKind};
+        let previous_self = self.current_self_type.clone();
+        let assumption_depth = self.source_type_registration.projection_assumptions.len();
+        self.push_decl_param_frame(owner.clone());
+        let result = (|| {
+            let receiver = match &source.kind {
+                verum_ast::decl::ImplKind::Protocol { for_type, .. }
+                | verum_ast::decl::ImplKind::Inherent(for_type) => for_type,
+            };
+            let receiver = self.ast_to_type_for_protocol_impl(receiver)?;
+            self.set_current_self_type(Some(receiver));
+            let mut clauses = List::new();
+            let mut callable_bounds = Map::new();
+            for parameter in &source.generics {
+                if let GenericParamKind::Type { name, bounds, .. } = &parameter.kind {
+                    let subject = owner.get(&name.name).ok_or_else(|| invalid(
+                        parameter.span, "implementation condition lacks its declaration binder",
+                    ))?;
+                    self.append_source_impl_conditions(subject, bounds, owner, &mut clauses, &mut callable_bounds)?;
+                }
+            }
+            for clause in [source.generic_where_clause.as_ref(), source.meta_where_clause.as_ref()]
+                .into_iter().flatten()
+            {
+                for predicate in &clause.predicates {
+                    let WherePredicateKind::Type { ty, bounds } = &predicate.kind else {
+                        return Err(invalid(predicate.span,
+                            "implementation predicate has no checked condition carrier"));
+                    };
+                    let subject = self.ast_to_type(ty)?;
+                    self.append_source_impl_conditions(&subject, bounds, owner, &mut clauses, &mut callable_bounds)?;
+                }
+            }
+            Ok((clauses, callable_bounds))
+        })();
+        self.pop_decl_param_frame();
+        self.set_current_self_type(previous_self);
+        self.source_type_registration.projection_assumptions.truncate(assumption_depth);
+        result
+    }
+
+    fn append_source_impl_conditions(
+        &mut self,
+        subject: &Type,
+        bounds: &[verum_ast::ty::TypeBound],
+        owner: &indexmap::IndexMap<Text, Type>,
+        clauses: &mut List<WhereClause>,
+        callable_bounds: &mut Map<TypeVar, Type>,
+    ) -> Result<()> {
+        use verum_ast::ty::{TypeBoundKind, TypeKind};
+        let mut protocols = List::new();
+        for bound in bounds {
+            match &bound.kind {
+                TypeBoundKind::Equality(ty) | TypeBoundKind::GenericProtocol(ty)
+                    if matches!(ty.kind, TypeKind::Function { .. }) =>
+                {
+                    let Type::Var(parameter) = subject else {
+                        return Err(invalid(bound.span,
+                            "callable implementation condition requires an owned type parameter"));
+                    };
+                    if !owner.values().any(|ty| ty == subject) {
+                        return Err(invalid(bound.span,
+                            "callable implementation condition captures an undeclared parameter"));
+                    }
+                    let required = self.ast_to_type(ty)?;
+                    if let Some(previous) = callable_bounds.get(parameter)
+                        && !self.protocol_checker.read().types_structurally_equal(previous, &required)
+                    {
+                        return Err(invalid(bound.span,
+                            "multiple callable conditions need a represented intersection"));
+                    }
+                    callable_bounds.insert(*parameter, required);
+                }
+                // This shared elaborator refuses unrepresented equalities and
+                // dependent predicates instead of silently weakening the impl.
+                _ => protocols.extend(self.elaborate_family_bounds(std::slice::from_ref(bound))?),
+            }
+        }
+        if !protocols.is_empty() {
+            let clause = WhereClause { ty: subject.clone(), bounds: protocols };
+            self.source_type_registration.projection_assumptions.push(clause.clone());
+            clauses.push(clause);
+        }
+        Ok(())
+    }
+
     pub(super) fn check_source_impl_signatures(
         &mut self,
         source: &ImplDecl,

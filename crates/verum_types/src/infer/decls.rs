@@ -6101,92 +6101,8 @@ impl TypeChecker {
                     // to be available when type-checking method calls that need to find them.
                     // ═══════════════════════════════════════════════════════════════
 
-                    // Collect where clauses from impl generic parameters
-                    // CRITICAL FIX: Use the SAME Type::Var that was defined for this type parameter.
-                    // When try_match_type matches for_type, it builds substitution keys like "T329"
-                    // for Type::Var(TypeVar{id:329}). The where clause must use the same Type::Var
-                    // so apply_substitution can look up the correct key.
-                    let mut impl_where_clauses: List<crate::protocol::WhereClause> = List::new();
-                    // CRITICAL: Collect function type bounds for type parameters.
-                    // For `implement<F: fn(Fut.Output) -> T, T> ...`, captures F's TypeVar → fn type.
-                    let mut type_param_fn_bounds: Map<TypeVar, Type> = Map::new();
-                    for generic_param in &impl_decl.generics {
-                        use verum_ast::ty::GenericParamKind;
-                        if let GenericParamKind::Type { name, bounds, .. } = &generic_param.kind {
-                            if !bounds.is_empty() {
-                                // Look up the Type::Var that was defined at line 45851
-                                // Clone immediately to release the immutable borrow before calling convert_type_bounds
-                                let name_text: Text = name.name.clone();
-                                let type_var_opt =
-                                    self.ctx.lookup_type(name_text.as_str()).cloned();
-                                if let Some(type_var) = type_var_opt {
-                                    // Convert bounds to protocol bounds
-                                    let protocol_bounds = self.convert_type_bounds_for_receiver(bounds, Some(&type_var))?;
-                                    {
-                                        impl_where_clauses.push(crate::protocol::WhereClause {
-                                            ty: type_var.clone(),
-                                            bounds: protocol_bounds,
-                                        });
-                                    }
-                                    // Also capture function type bounds (e.g., F: fn(Fut.Output) -> T)
-                                    for bound in bounds {
-                                        match &bound.kind {
-                                            verum_ast::ty::TypeBoundKind::Equality(bound_ty) => {
-                                                if let verum_ast::ty::TypeKind::Function {
-                                                    ..
-                                                } = &bound_ty.kind
-                                                {
-                                                    if let Type::Var(tv) = &type_var {
-                                                        if let Ok(resolved_fn) =
-                                                            self.ast_to_type(bound_ty)
-                                                        {
-                                                            type_param_fn_bounds
-                                                                .insert(*tv, resolved_fn);
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                            // Capture Fn/FnOnce/FnMut protocol bounds as function type bounds.
-                                            // E.g., F: Fn(I.Item) -> U becomes fn(I.Item) -> U for
-                                            // associated type resolution in substitute_impl_type_params.
-                                            verum_ast::ty::TypeBoundKind::GenericProtocol(
-                                                bound_ty,
-                                            ) => {
-                                                if let verum_ast::ty::TypeKind::Function {
-                                                    ..
-                                                } = &bound_ty.kind
-                                                {
-                                                    if let Type::Var(tv) = &type_var {
-                                                        if let Ok(resolved_fn) =
-                                                            self.ast_to_type(bound_ty)
-                                                        {
-                                                            type_param_fn_bounds
-                                                                .insert(*tv, resolved_fn);
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                            verum_ast::ty::TypeBoundKind::Protocol(path) => {
-                                                // Check if the protocol is Fn/FnOnce/FnMut with generic args
-                                                // These are parsed as Protocol(path) when the path has generic args
-                                                if let Some(ident) = path.as_ident() {
-                                                    let proto_name = ident.name.as_str();
-                                                    if matches!(
-                                                        proto_name,
-                                                        "Fn" | "FnOnce" | "FnMut"
-                                                    ) {
-                                                        // Try to extract function signature from the path's generic args
-                                                        // This handles "Fn(A) -> B" parsed as path with generics
-                                                    }
-                                                }
-                                            }
-                                            _ => {}
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    let (impl_where_clauses, type_param_fn_bounds) =
+                        self.elaborate_source_impl_conditions(impl_decl, owner_frame)?;
 
                     // Collect methods from impl items
                     let mut methods: Map<Text, Type> = Map::new();
@@ -6253,54 +6169,6 @@ impl TypeChecker {
                     // keeps for_type as Named{Result, [T, E]} instead of expanding to the Variant form.
                     // This is necessary for get_implementations() to match lookups correctly.
                     let for_type_resolved = self.ast_to_type_for_protocol_impl(for_type)?;
-
-                    // Process where clause for additional function type bounds.
-                    // This captures bounds like `F: Fn(I.Item) -> U` from where clauses
-                    // that aren't in the generic parameter declarations.
-                    // (debug removed)
-                    if let Some(ref where_clause) = impl_decl.generic_where_clause {
-                        for predicate in &where_clause.predicates {
-                            use verum_ast::ty::WherePredicateKind;
-                            if let WherePredicateKind::Type { ty, bounds } = &predicate.kind {
-                                if let verum_ast::ty::TypeKind::Path(path) = &ty.kind {
-                                    if let Some(ident) = path.as_ident() {
-                                        let param_name: Text = ident.name.clone();
-                                        // Look up the type variable for this parameter
-                                        if let Some(type_var) =
-                                            self.ctx.lookup_type(param_name.as_str()).cloned()
-                                        {
-                                            // Add where clause to impl_where_clauses
-                                            let protocol_bounds = self.convert_type_bounds_for_receiver(bounds, Some(&type_var))?;
-                                    {
-                                                impl_where_clauses.push(
-                                                    crate::protocol::WhereClause {
-                                                        ty: type_var.clone(),
-                                                        bounds: protocol_bounds,
-                                                    },
-                                                );
-                                            }
-                                            // Extract function type bounds from where clause
-                                            for bound in bounds {
-                                                match &bound.kind {
-                                                    verum_ast::ty::TypeBoundKind::Equality(bound_ty)
-                                                    | verum_ast::ty::TypeBoundKind::GenericProtocol(bound_ty) => {
-                                                        if let verum_ast::ty::TypeKind::Function { .. } = &bound_ty.kind {
-                                                            if let Type::Var(tv) = &type_var {
-                                                                if let Ok(resolved_fn) = self.ast_to_type(bound_ty) {
-                                                                    type_param_fn_bounds.insert(*tv, resolved_fn);
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                    _ => {}
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
 
                     // Create and register ProtocolImpl
                     let protocol_impl = crate::protocol::ProtocolImpl {

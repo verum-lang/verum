@@ -6345,33 +6345,8 @@ impl TypeChecker {
                     &self.path_to_string(protocol), impl_decl, &owner_frame,
                 )?;
 
-                // Build where clauses from impl generics
-                let mut where_clauses: verum_common::List<crate::protocol::WhereClause> =
-                    verum_common::List::new();
-                for generic_param in &impl_decl.generics {
-                    use verum_ast::ty::GenericParamKind;
-                    if let GenericParamKind::Type { name, bounds, .. } = &generic_param.kind {
-                        if !bounds.is_empty() {
-                            // CRITICAL FIX: Use the SAME Type::Var that was defined for this type parameter.
-                            // When try_match_type matches for_type, it builds substitution keys like "T329"
-                            // for Type::Var(TypeVar{id:329}). The where clause must use the same Type::Var
-                            // so apply_substitution can look up the correct key.
-                            // Using Type::Named would create key "I" which wouldn't match "T329".
-                            let name_text: verum_common::Text = name.name.clone();
-                            // Clone immediately to release the immutable borrow before calling convert_type_bounds
-                            let type_var_opt = self.ctx.lookup_type(name_text.as_str()).cloned();
-                            if let Some(type_var) = type_var_opt {
-                                let protocol_bounds = self.convert_type_bounds_for_receiver(bounds, Some(&type_var))?;
-                                {
-                                    where_clauses.push(crate::protocol::WhereClause {
-                                        ty: type_var,
-                                        bounds: protocol_bounds,
-                                    });
-                                }
-                            }
-                        }
-                    }
-                }
+                let (where_clauses, type_param_fn_bounds) =
+                    self.elaborate_source_impl_conditions(impl_decl, &owner_frame)?;
 
                 // Resolve the for_type
                 // CRITICAL FIX: Use ast_to_type_for_protocol_impl to avoid expanding type aliases.
@@ -6424,7 +6399,7 @@ impl TypeChecker {
                     specialization,
                     impl_crate: verum_common::Maybe::None,
                     span: impl_decl.span,
-                    type_param_fn_bounds: verum_common::Map::new(),
+                    type_param_fn_bounds,
                 };
 
                 // DEBUG: Log FromResidual protocol impl registration in import_impl_blocks
@@ -9966,51 +9941,8 @@ impl TypeChecker {
                 .ast_to_type(for_type)
                 .unwrap_or_else(|_| self.ast_to_type_lenient(for_type));
 
-            // Build where_clauses from the impl's generics
-            // WhereClause represents "ty: bound1 + bound2"
-            // CRITICAL FIX: Use the SAME Type::Var that's in type_param_to_var.
-            // When try_match_type matches for_type, it builds substitution keys like "T329"
-            // for Type::Var(TypeVar{id:329}). The where clause must use the same Type::Var
-            // so apply_substitution can look up the correct key.
-            let mut where_clauses: List<ProtocolWhereClause> = List::new();
-            // CRITICAL: Collect function type bounds for type parameters.
-            // For `implement<F: fn(Fut.Output) -> T, T> ...`, captures F's TypeVar → fn type.
-            // This enables extracting additional type bindings (like T = Bool from F = fn(Int) -> Bool)
-            // during associated type resolution in substitute_impl_type_params.
-            let mut type_param_fn_bounds: Map<TypeVar, Type> = Map::new();
-            for generic_param in &impl_decl.generics {
-                if let verum_ast::ty::GenericParamKind::Type { name, bounds, .. } =
-                    &generic_param.kind
-                {
-                    let name_text: Text = name.name.clone();
-                    if !bounds.is_empty() {
-                        // Look up the Type::Var that was created for this type parameter
-                        if let Some(type_var) = type_param_to_var.get(&name_text) {
-                            let protocol_bounds =
-                                self.convert_type_bounds_to_protocol_bounds(bounds)?;
-                            for bound in bounds {
-                                match &bound.kind {
-                                    verum_ast::ty::TypeBoundKind::GenericProtocol(ty)
-                                    | verum_ast::ty::TypeBoundKind::Equality(ty)
-                                        if matches!(ty.kind, verum_ast::ty::TypeKind::Function { .. }) =>
-                                    {
-                                        if let Type::Var(tv) = type_var {
-                                            type_param_fn_bounds.insert(*tv, self.ast_to_type(ty)?);
-                                        }
-                                    }
-                                    _ => {}
-                                }
-                            }
-                            if !protocol_bounds.is_empty() {
-                                where_clauses.push(ProtocolWhereClause {
-                                    ty: type_var.clone(),
-                                    bounds: protocol_bounds,
-                                });
-                            }
-                        }
-                    }
-                }
-            }
+            let (where_clauses, type_param_fn_bounds) =
+                self.elaborate_source_impl_conditions(impl_decl, &type_param_to_var)?;
 
             // Resolve protocol type arguments (e.g., U in Into<U>)
             let resolved_protocol_args = self.protocol_application_arguments(
@@ -10021,56 +9953,6 @@ impl TypeChecker {
             let associated_types = self.elaborate_impl_associated_assignments(
                 &self.path_to_string(&protocol), impl_decl, &owner_frame,
             )?;
-
-            // Process where clause for additional function type bounds.
-            if let Some(ref where_clause) = impl_decl.generic_where_clause {
-                for predicate in &where_clause.predicates {
-                    use verum_ast::ty::WherePredicateKind;
-                    if let WherePredicateKind::Type { ty, bounds } = &predicate.kind {
-                        if let verum_ast::ty::TypeKind::Path(path) = &ty.kind {
-                            if let Some(ident) = path.as_ident() {
-                                let param_name: Text = ident.name.clone();
-                                if let Some(type_var) =
-                                    self.ctx.lookup_type(param_name.as_str()).cloned()
-                                {
-                                    // Add where clause bounds
-                                    let protocol_bounds = self.convert_type_bounds_for_receiver(bounds, Some(&type_var))?;
-                                    {
-                                        where_clauses.push(crate::protocol::WhereClause {
-                                            ty: type_var.clone(),
-                                            bounds: protocol_bounds,
-                                        });
-                                    }
-                                    // Extract function type bounds
-                                    for bound in bounds {
-                                        match &bound.kind {
-                                            verum_ast::ty::TypeBoundKind::Equality(bound_ty)
-                                            | verum_ast::ty::TypeBoundKind::GenericProtocol(
-                                                bound_ty,
-                                            ) => {
-                                                if let verum_ast::ty::TypeKind::Function {
-                                                    ..
-                                                } = &bound_ty.kind
-                                                {
-                                                    if let Type::Var(tv) = &type_var {
-                                                        if let Ok(resolved_fn) =
-                                                            self.ast_to_type(bound_ty)
-                                                        {
-                                                            type_param_fn_bounds
-                                                                .insert(*tv, resolved_fn);
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                            _ => {}
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
 
             // Build the ProtocolImpl
             let protocol_impl = ProtocolImpl {
