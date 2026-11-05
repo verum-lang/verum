@@ -25,6 +25,7 @@ mod function_body_scope;
 mod source_impl_signatures;
 mod source_type_registration;
 mod source_protocol_header;
+mod source_dyn_protocol;
 mod universe_parameters;
 mod call_obligations;
 mod callable_properties;

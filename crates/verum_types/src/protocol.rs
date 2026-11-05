@@ -11497,6 +11497,16 @@ impl ProtocolChecker {
             None => return Ok(()), // Unknown protocol, skip check
         };
 
+        self.check_definition_object_safety(protocol)
+    }
+
+    /// Check the complete declaration without publishing it into the registry.
+    /// Source admission uses this same policy for a recursive `dyn` obligation.
+    pub(crate) fn check_definition_object_safety(
+        &self,
+        protocol: &Protocol,
+    ) -> Result<(), List<ObjectSafetyError>> {
+        let protocol_name = &protocol.name;
         let mut errors = List::new();
 
         // Rule 1: Check for associated constants

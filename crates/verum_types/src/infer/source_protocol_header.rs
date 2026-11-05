@@ -18,6 +18,7 @@ pub(crate) struct SourceProtocolHeader {
     pub constraints: ProtocolConstraints,
     pub associated: Map<Text, AssociatedType>,
     pub supers: List<ProtocolBound>,
+    pub dyn_required: Option<Span>,
 }
 
 fn invalid(span: Span, message: impl Into<Text>) -> TypeError {
@@ -39,7 +40,7 @@ impl TypeChecker {
         constraints: &ProtocolConstraints,
         supers: &[ProtocolBound],
         items: &[ProtocolItem],
-    ) -> Result<(Map<Text, ProtocolMethod>, Map<Text, AssociatedType>)> {
+    ) -> Result<(Map<Text, ProtocolMethod>, Map<Text, AssociatedType>, Option<Span>)> {
         // A recursive source load introduces a different Self. Its method
         // obligations must not inherit the caller's equally-spelled receiver.
         let previous = std::mem::take(&mut self.source_type_registration.projection_assumptions);
@@ -61,7 +62,7 @@ impl TypeChecker {
         constraints: &ProtocolConstraints,
         supers: &[ProtocolBound],
         items: &[ProtocolItem],
-    ) -> Result<(Map<Text, ProtocolMethod>, Map<Text, AssociatedType>)> {
+    ) -> Result<(Map<Text, ProtocolMethod>, Map<Text, AssociatedType>, Option<Span>)> {
         let mut associated = Map::new();
         for item in items {
             if let ProtocolItemKind::Type { name, .. } = &item.kind {
@@ -91,6 +92,7 @@ impl TypeChecker {
                 constraints: constraints.clone(),
                 associated: associated.clone(),
                 supers: supers.iter().cloned().collect(),
+                dyn_required: None,
             });
         let result = (|| {
             let mut methods = Map::new();
@@ -109,8 +111,9 @@ impl TypeChecker {
             }
             Ok((methods, associated))
         })();
-        self.source_type_registration.headers.pop();
-        result
+        let header = self.source_type_registration.headers.pop()
+            .expect("source protocol member scope remains active during elaboration");
+        result.map(|(methods, associated)| (methods, associated, header.dyn_required))
     }
 
     /// A projection is a type only after its receiver proves an exact declared

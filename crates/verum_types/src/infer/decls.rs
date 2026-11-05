@@ -2010,7 +2010,7 @@ impl TypeChecker {
                     Some(supers) => supers,
                     None => self.convert_super_protocols(&protocol_body.extends)?,
                 };
-                let (protocol_methods, protocol_assoc_types) = self.elaborate_protocol_members(
+                let (protocol_methods, protocol_assoc_types, dyn_required) = self.elaborate_protocol_members(
                     self.declared_type_key(type_name.as_str()), &type_decl.generics,
                     &constraint_scope, &super_protocols, &protocol_body.items,
                 )?;
@@ -2039,6 +2039,7 @@ impl TypeChecker {
                     defining_crate: Maybe::None,
                     span: type_decl.span,
                 };
+                self.check_pending_protocol_object_safety(&protocol, dyn_required)?;
                 self.check_protocol_family_applications(&protocol)?;
                 self.unifier.register_protocol_name(protocol.name.as_str());
                 // This run parsed the declaration, so its default-body flags are
@@ -3456,7 +3457,7 @@ impl TypeChecker {
                     Some(supers) => supers,
                     None => self.convert_super_protocols(&protocol_body.extends)?,
                 };
-                let (protocol_methods, protocol_assoc_types) = self.elaborate_protocol_members(
+                let (protocol_methods, protocol_assoc_types, dyn_required) = self.elaborate_protocol_members(
                     self.declared_type_key(type_name.as_str()), &type_decl.generics,
                     &constraint_scope, &super_protocols, &protocol_body.items,
                 )?;
@@ -3483,6 +3484,7 @@ impl TypeChecker {
                     defining_crate: Maybe::None,
                     span: type_decl.span,
                 };
+                self.check_pending_protocol_object_safety(&protocol, dyn_required)?;
                 self.check_protocol_family_applications(&protocol)?;
                 self.unifier.register_protocol_name(protocol.name.as_str());
                 // This run parsed the declaration, so its default-body flags are
@@ -4516,7 +4518,7 @@ impl TypeChecker {
             Some(supers) => supers,
             None => self.convert_super_protocols(&proto_decl.bounds)?,
         };
-        let (protocol_methods, associated_types) = self.elaborate_protocol_members(
+        let (protocol_methods, associated_types, dyn_required) = self.elaborate_protocol_members(
             self.declared_type_key(type_name.as_str()), &proto_decl.generics,
             &constraint_scope, &super_protocols, &proto_decl.items,
         )?;
@@ -4543,6 +4545,7 @@ impl TypeChecker {
             defining_crate: verum_common::Maybe::None,
             span: proto_decl.span,
         };
+        self.check_pending_protocol_object_safety(&protocol, dyn_required)?;
         self.check_protocol_family_applications(&protocol)?;
         self.unifier.register_protocol_name(protocol.name.as_str());
         // This run parsed the declaration, so its default-body flags are

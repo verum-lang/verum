@@ -89,6 +89,7 @@ impl TypeChecker {
             .map(|variable| Type::Var(*variable))
             .collect();
         let header = super::source_protocol_header::SourceProtocolHeader {
+            dyn_required: None,
             identity: protocol.name.clone(), parameters: protocol.source_parameters.clone().unwrap_or_default(),
             owner: Some(owner.clone()), constraints: protocol.constraints.clone(), associated: protocol.associated_types.clone(), supers: protocol.super_protocols.clone(),
         };
