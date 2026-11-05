@@ -230,6 +230,9 @@ pub(in super::super) fn handle_iter_new(
     // and the `next` FunctionId for protocol iteration.
     let slot1 = match protocol_next_fid {
         Some(fid) => Value::from_i64(fid.0 as i64),
+        None if iter_type == ITER_TYPE_RANGE => unsafe {
+            *(source.as_ptr::<u8>().add(heap::OBJECT_HEADER_SIZE) as *const Value)
+        },
         None => Value::from_i64(0),
     };
     unsafe {
@@ -294,8 +297,12 @@ pub(in super::super) fn handle_iter_next(
     // Read iterator state
     let iter_data = unsafe { iter_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
     let source = unsafe { *iter_data };
-    let current_idx = unsafe { (*iter_data.add(1)).as_i64() } as usize;
+    let cursor = unsafe { *iter_data.add(1) };
     let iter_type = unsafe { (*iter_data.add(2)).as_i64() };
+    if iter_type == ITER_TYPE_RANGE {
+        return advance_range(state, source, cursor, iter_data, dst, has_next_dst);
+    }
+    let current_idx = cursor.as_i64() as usize;
 
     // Generator iteration: resume via nested dispatch loop, get yielded value
     if iter_type == ITER_TYPE_GENERATOR {
@@ -708,50 +715,6 @@ pub(in super::super) fn handle_iter_next(
             state.set_reg(dst, element);
             state.set_reg(has_next_dst, Value::from_bool(true));
         }
-        ITER_TYPE_RANGE => {
-            // Range layout: [current: i64, end: i64, inclusive: bool]
-            // For IterNew, we store the source range pointer
-            // For IterNext, current_idx is used as the current value
-            //
-
-            // Range objects have layout: [start, end, step, inclusive_flag]
-            // We read these on first iteration
-            let range_header = unsafe { source_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
-
-            // On first iteration (current_idx == 0), initialize from range
-            let current_val = if current_idx == 0 {
-                // Read start value
-                unsafe { (*range_header).as_i64() }
-            } else {
-                // current_idx holds the current value after adjustment
-                current_idx as i64
-            };
-
-            let end_val = unsafe { (*range_header.add(1)).as_i64() };
-            let inclusive = unsafe { (*range_header.add(2)).as_bool() };
-
-            // Check if we've reached the end
-            let at_end = if inclusive {
-                current_val > end_val
-            } else {
-                current_val >= end_val
-            };
-
-            if at_end {
-                state.set_reg(dst, Value::unit());
-                state.set_reg(has_next_dst, Value::from_bool(false));
-                return Ok(DispatchResult::Continue);
-            }
-
-            // Return current value and advance
-            state.set_reg(dst, Value::from_i64(current_val));
-            state.set_reg(has_next_dst, Value::from_bool(true));
-
-            // Store next value in current_idx slot
-            unsafe {
-                *iter_data.add(1) = Value::from_i64(current_val + 1);
-            }
-        }
         _ => {
             // Unknown iterator type
             state.set_reg(dst, Value::unit());
@@ -759,6 +722,42 @@ pub(in super::super) fn handle_iter_next(
         }
     }
 
+    Ok(DispatchResult::Continue)
+}
+
+/// A range cursor is its current integer or Unit after exhaustion. Initializing
+/// the cursor at creation keeps zero available as an ordinary element; consuming
+/// the endpoint never computes a successor outside the integer domain.
+fn advance_range(
+    state: &mut InterpreterState,
+    source: Value,
+    cursor: Value,
+    iter_data: *mut Value,
+    dst: Reg,
+    has_next_dst: Reg,
+) -> InterpreterResult<DispatchResult> {
+    if cursor.is_unit() {
+        state.set_reg(dst, Value::unit());
+        state.set_reg(has_next_dst, Value::from_bool(false));
+        return Ok(DispatchResult::Continue);
+    }
+    let source_ptr = source.as_ptr::<u8>();
+    if source_ptr.is_null() { return Err(InterpreterError::NullPointer); }
+    let range = unsafe { source_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
+    let current = cursor.as_i64();
+    let end = unsafe { (*range.add(1)).as_i64() };
+    let inclusive = unsafe { (*range.add(2)).as_bool() };
+    if current > end || (!inclusive && current == end) {
+        unsafe { *iter_data.add(1) = Value::unit(); }
+        state.set_reg(dst, Value::unit());
+        state.set_reg(has_next_dst, Value::from_bool(false));
+    } else {
+        // In the second branch current < end, so current + 1 cannot overflow.
+        unsafe { *iter_data.add(1) = if current == end { Value::unit() }
+            else { Value::from_i64(current + 1) }; }
+        state.set_reg(dst, cursor);
+        state.set_reg(has_next_dst, Value::from_bool(true));
+    }
     Ok(DispatchResult::Continue)
 }
 
