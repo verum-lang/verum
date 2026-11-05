@@ -34,8 +34,64 @@ use verum_vbc::module::VbcModule;
 use super::CompilationPipeline;
 
 impl<'s> CompilationPipeline<'s> {
+    fn materialize_codegen_sources(&self, entry: &Module) -> Result<(Module, Vec<Arc<Module>>)> {
+        use crate::meta::const_lowering::ConstLowering;
+        let target = self.session.cfg_evaluator().config().clone();
+        let mut units = vec![(
+            VbcCodegen::resolve_full_module_path(entry, "main").unwrap_or_else(|| "main".into()),
+            self.session.get_source(entry.file_id).map(|source| source.name.to_string()).unwrap_or_else(|| "entry source".into()),
+            entry.clone(),
+        )];
+        for (owner, module) in &self.project_modules {
+            if module.file_id == entry.file_id { continue; }
+            units.push((owner.to_string(), self.session.get_source(module.file_id)
+                .map(|source| source.name.to_string()).unwrap_or_else(|| owner.to_string()), module.as_ref().clone()));
+        }
+        let refs: Vec<_> = units.iter().map(|(owner, path, module)| (owner.as_str(), path.as_str(), module)).collect();
+        let mut units = crate::owned_source_semantics::select_source_roster(&refs, &target)?;
+        if units.iter().any(|(_, _, module)| ConstLowering::required(module)) {
+            // The parsed cache is the original source, before the typechecker
+            // stamps resolved call targets. Never weaken the registry's exact
+            // source comparison to authorize an annotated replacement.
+            let originals: Vec<_> = units.iter().map(|(owner, path, module)| {
+                (owner.clone(), path.clone(), self.session.get_module(module.file_id)
+                    .map(|original| original.as_ref().clone()).unwrap_or_else(|| module.clone()))
+            }).collect();
+            let source_refs: Vec<_> = originals.iter().map(|(owner, path, module)|
+                (owner.as_str(), path.as_str(), module)).collect();
+            let mut semantic = crate::phases::semantic_analysis::SemanticAnalysisPhase::new()
+                .with_language_features(self.session.language_features()).with_target(target);
+            if let Some(metadata) = self.stdlib_metadata.get() {
+                semantic = semantic.with_core_metadata(Arc::clone(metadata));
+            }
+            semantic.admit_owned_source_roster(&source_refs, &self.session.module_registry())?;
+            let mut lowering = ConstLowering::new(self.fresh_meta_ctx_with_version_stamp());
+            for (owner, _, module) in &units { lowering.register(owner, module)?; }
+            for (owner, _, module) in &mut units {
+                lowering.lower(owner, module).map_err(|error| {
+                    self.session.emit_diagnostic(verum_diagnostics::DiagnosticBuilder::error()
+                        .message(error.to_string()).span(self.session.convert_span(error.span)).build());
+                    anyhow::anyhow!(error)
+                })?;
+            }
+        }
+        let materialized = if let Some(index) = units.iter().position(|(_, _, module)| module.file_id == entry.file_id) {
+            units.remove(index).2
+        } else {
+            let mut inactive = entry.clone();
+            inactive.items.clear();
+            inactive
+        };
+        let siblings = units.into_iter().map(|(_, _, module)| Arc::new(module)).collect();
+        Ok((materialized, siblings))
+    }
+
     /// Compile AST module to VBC module.
     pub(super) fn compile_ast_to_vbc(&self, module: &Module) -> Result<Arc<VbcModule>> {
+        // This path can be entered in runtime-only mode. A staged computation
+        // still requires original-source admission before its body is erased.
+        let (materialized, sibling_modules) = self.materialize_codegen_sources(module)?;
+        let module = &materialized;
         // Phase 4.4: Dependent-type verification at module boundary.
         // The `DependentVerifier` orchestrator dispatches accumulated
         // goals (cubical equality, universe constraints, sheaf descent,
@@ -493,8 +549,7 @@ impl<'s> CompilationPipeline<'s> {
         // siblings through the SAME phase sequence as the entry
         // module — all declarations across all modules FIRST (so
         // cross-module static binding resolves), then all bodies.
-        let sibling_modules: Vec<std::sync::Arc<verum_ast::Module>> =
-            self.project_modules.values().cloned().collect();
+
         step_mark!("collect_protocol_definitions");
         codegen.collect_protocol_definitions(module);
         for sib in &sibling_modules {

@@ -64,6 +64,7 @@ pub struct MetaRegistryPhase {
     literal_registry: LiteralRegistry,
     /// Current module path being processed (for scoped registration)
     current_module: Text,
+    source_owners: verum_common::Map<verum_ast::FileId, (Text, Text)>,
     /// Statistics for this phase
     stats: RegistrationStats,
 }
@@ -84,6 +85,11 @@ pub struct RegistrationStats {
 }
 
 impl MetaRegistryPhase {
+    pub(crate) fn with_source_owners(mut self, owners: verum_common::Map<verum_ast::FileId, (Text, Text)>) -> Self {
+        self.source_owners = owners;
+        self
+    }
+
     pub fn new() -> Self {
         let literal_registry = LiteralRegistry::new();
         // Register all built-in handlers (d#"...", rx#"...", etc.)
@@ -93,6 +99,7 @@ impl MetaRegistryPhase {
             registry: MetaRegistry::new(),
             literal_registry,
             current_module: Text::from(""),
+            source_owners: verum_common::Map::new(),
             stats: RegistrationStats::default(),
         }
     }
@@ -103,9 +110,12 @@ impl MetaRegistryPhase {
         let mut errors = List::new();
 
         for module in modules {
-            if let Err(mut module_errors) = self.register_module_handlers(module) {
-                errors.append(&mut module_errors);
-            }
+            let owner = self.source_owners.get(&module.file_id).map(|(owner, _)| owner.clone())
+                .unwrap_or_else(|| crate::owned_source_semantics::declared_owner(module, ""));
+            let previous = std::mem::replace(&mut self.current_module, owner);
+            let result = self.register_module_handlers(module);
+            self.current_module = previous;
+            if let Err(mut module_errors) = result { errors.append(&mut module_errors); }
         }
 
         if !errors.is_empty() {
@@ -676,7 +686,7 @@ impl CompilationPhase for MetaRegistryPhase {
         };
 
         // Build registry
-        let mut phase = MetaRegistryPhase::new();
+        let mut phase = MetaRegistryPhase::new().with_source_owners(self.source_owners.clone());
         phase.register_handlers(modules)?;
 
         let duration = start.elapsed();

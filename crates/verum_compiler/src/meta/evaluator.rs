@@ -448,10 +448,30 @@ impl MetaContext {
 
     /// Convert AST Expr to MetaExpr
     pub fn ast_expr_to_meta_expr(&self, expr: &Expr) -> Result<MetaExpr, MetaError> {
+        if self.source_constants.materializing && matches!(&expr.kind,
+            ExprKind::Return(_) | ExprKind::Break { .. } | ExprKind::Continue { .. }
+            | ExprKind::For { .. } | ExprKind::While { .. } | ExprKind::Loop { .. }) {
+            return Err(MetaError::MetaEvaluationFailed {
+                message: "structured control flow is unsupported by compile-time runtime-value materialization".into(),
+            });
+        }
         match &expr.kind {
+            ExprKind::Cast { .. } if self.source_constants.materializing => Err(MetaError::MetaEvaluationFailed {
+                message: "typed cast carrier is unsupported by compile-time runtime-value materialization".into(),
+            }),
             ExprKind::Paren(inner) => self.ast_expr_to_meta_expr(inner),
+            ExprKind::MetaFunction { name, args, .. } if name.as_str() == "const" && args.len() == 1 => self.ast_expr_to_meta_expr(&args[0]),
             ExprKind::Quote { .. } => Ok(MetaExpr::Quote(expr.clone())),
             ExprKind::Literal(lit) => {
+                if self.source_constants.materializing && !matches!(&lit.kind,
+                    verum_ast::LiteralKind::Bool(_) | verum_ast::LiteralKind::Char(_)
+                    | verum_ast::LiteralKind::Text(_)
+                    | verum_ast::LiteralKind::Int(verum_ast::literal::IntLit { suffix: None, .. })
+                    | verum_ast::LiteralKind::Float(verum_ast::literal::FloatLit { suffix: None, .. })) {
+                    return Err(MetaError::MetaEvaluationFailed {
+                        message: "literal carrier is unsupported by compile-time runtime-value materialization".into(),
+                    });
+                }
                 let val = ConstValue::from_literal(lit);
                 Ok(MetaExpr::Literal(val))
             }
@@ -459,7 +479,9 @@ impl MetaContext {
                 if let Some(ident) = path.as_ident() {
                     let name = ident.as_str();
                     // Check if this is a primitive type name - treat as type literal
-                    if is_primitive_type_name(name) {
+                    if self.has_source_variable(name) {
+                        Ok(MetaExpr::Variable(Text::from(name)))
+                    } else if is_primitive_type_name(name) {
                         let ty = primitive_type_from_name(name);
                         Ok(MetaExpr::Literal(ConstValue::Type(ty)))
                     } else if is_likely_type_name(name) {
@@ -939,14 +961,14 @@ impl MetaContext {
                 elements, ConstValue::Array, Self::eval_meta_expr,
             ),
 
-            MetaExpr::Variable(name) => {
-                self.get(name)
-                    .ok_or_else(|| MetaError::MetaEvaluationFailed {
-                        message: format!("Undefined variable: {}", name).into(),
-                    })
-            }
+            MetaExpr::Variable(name) => self.eval_source_variable(name),
 
             MetaExpr::Call(func_name, args) => {
+                if self.has_source_variable(func_name.as_str().split('.').next().unwrap_or(func_name.as_str())) {
+                    return Err(MetaError::MetaEvaluationFailed {
+                        message: format!("callable `{func_name}` is shadowed by a runtime declaration or value binding; compile-time call cannot fall through to a builtin or module function").into(),
+                    });
+                }
                 // Check for forbidden operations FIRST (before evaluating args)
                 if self.is_forbidden_function(func_name) {
                     let category = self.get_forbidden_category(func_name).unwrap_or("I/O");
@@ -965,7 +987,13 @@ impl MetaContext {
                     .map(|arg| self.eval_meta_expr(arg))
                     .collect::<Result<List<_>, _>>()?;
 
-                // First, try to look up a built-in function
+                // A declaration in lexical source scope takes precedence over
+                // a builtin with the same spelling, just as a value binding does.
+                if let Some(registry) = &self.registry {
+                    if let Some(user_fn) = registry.get_user_meta_fn(&self.current_module, func_name) {
+                        return self.execute_user_meta_fn(&user_fn, arg_values.iter().cloned().collect());
+                    }
+                }
                 match self.get_builtin(func_name) {
                     Ok(builtin_info) => {
                         // Call the builtin function
@@ -974,15 +1002,6 @@ impl MetaContext {
                     Err(MetaError::MetaFunctionNotFound(_)) => {
                         // Builtin not found - try user-defined meta function
                         if let Some(ref registry) = self.registry {
-                            if let Maybe::Some(user_fn) =
-                                registry.get_user_meta_fn(&self.current_module, func_name)
-                            {
-                                // Convert List to Vec for execute_user_meta_fn
-                                let args_vec: Vec<ConstValue> =
-                                    arg_values.iter().cloned().collect();
-                                return self.execute_user_meta_fn(&user_fn, args_vec);
-                            }
-
                             // Check if this is an extern (FFI) function - forbidden in meta context
                             if registry.is_any_extern_function(func_name) {
                                 return Err(MetaError::ForbiddenOperation {
@@ -1021,23 +1040,23 @@ impl MetaContext {
 
             MetaExpr::Match { scrutinee, arms } => {
                 let scrutinee_value = self.eval_meta_expr(scrutinee)?;
-
                 for arm in arms {
-                    if self.matches_pattern(&scrutinee_value, &arm.pattern)? {
-                        // Check guard if present
-                        if let Maybe::Some(guard) = &arm.guard {
-                            let guard_val = self.eval_meta_expr(guard)?;
-                            if !guard_val.as_bool() {
-                                continue;
-                            }
+                    let saved: verum_common::Map<Text, Option<ConstValue>> = arm.pattern.bound_identifiers()
+                        .into_iter().map(|name| { let value = self.get(&name); (name, value) }).collect();
+                    let result = (|| {
+                        if !self.matches_pattern(&scrutinee_value, &arm.pattern)? { return Ok(None); }
+                        if let Some(guard) = &arm.guard {
+                            if !self.eval_meta_expr(guard)?.as_bool() { return Ok(None); }
                         }
-                        return self.eval_meta_expr(&arm.body);
+                        self.eval_meta_expr(&arm.body).map(Some)
+                    })();
+                    for (name, value) in saved {
+                        if let Some(value) = value { self.bind(name, value); }
+                        else { self.unbind(&name); }
                     }
+                    if let Some(value) = result? { return Ok(value); }
                 }
-
-                Err(MetaError::NoMatchingArm {
-                    value: format!("{:?}", scrutinee_value).into(),
-                })
+                Err(MetaError::NoMatchingArm { value: format!("{:?}", scrutinee_value).into() })
             }
 
             MetaExpr::Let { name, value, body } => {
@@ -1055,11 +1074,21 @@ impl MetaContext {
             }
 
             MetaExpr::Block(stmts) => {
-                let mut last = ConstValue::Unit;
-                for stmt in stmts {
-                    last = self.eval_meta_stmt(stmt)?;
+                let mut locals = verum_common::Map::new();
+                let result = (|| {
+                    let mut last = ConstValue::Unit;
+                    for stmt in stmts {
+                        last = self.eval_meta_stmt_scoped(stmt, Some(&mut locals))?;
+                    }
+                    Ok(last)
+                })();
+                // Restore only declarations in this block. Assignments to an
+                // existing outer binding retain their ordinary semantics.
+                for (name, previous) in locals {
+                    if let Some(value) = previous { self.bind(name, value); }
+                    else { self.unbind(&name); }
                 }
-                Ok(last)
+                result
             }
 
             MetaExpr::Quote(expr) => {
@@ -1092,6 +1121,11 @@ impl MetaContext {
 
             MetaExpr::Binary { op, left, right } => {
                 let left_val = self.eval_meta_expr(left)?;
+                match (op, &left_val) {
+                    (BinOp::And, ConstValue::Bool(false)) => return Ok(ConstValue::Bool(false)),
+                    (BinOp::Or, ConstValue::Bool(true)) => return Ok(ConstValue::Bool(true)),
+                    _ => {}
+                }
                 let right_val = self.eval_meta_expr(right)?;
                 self.eval_binary_op(*op, left_val, right_val)
             }
@@ -1690,11 +1724,28 @@ impl MetaContext {
 
     /// Evaluate a meta statement
     pub(crate) fn eval_meta_stmt(&mut self, stmt: &MetaStmt) -> Result<ConstValue, MetaError> {
+        self.eval_meta_stmt_scoped(stmt, None)
+    }
+
+    fn bind_meta_local(
+        &mut self, name: Text, value: ConstValue,
+        locals: &mut Option<&mut verum_common::Map<Text, Option<ConstValue>>>,
+    ) {
+        if let Some(locals) = locals {
+            if !locals.contains_key(&name) { locals.insert(name.clone(), self.get(&name)); }
+        }
+        self.bind(name, value);
+    }
+
+    fn eval_meta_stmt_scoped(
+        &mut self, stmt: &MetaStmt,
+        mut locals: Option<&mut verum_common::Map<Text, Option<ConstValue>>>,
+    ) -> Result<ConstValue, MetaError> {
         match stmt {
             MetaStmt::Expr(expr) => self.eval_meta_expr(expr),
             MetaStmt::Let { name, value } => {
                 let val = self.eval_meta_expr(value)?;
-                self.bind(name.clone(), val);
+                self.bind_meta_local(name.clone(), val, &mut locals);
                 Ok(ConstValue::Unit)
             }
             MetaStmt::LetTuple { names, value } => {
@@ -1716,7 +1767,7 @@ impl MetaContext {
                         }
                         for (i, name) in names.iter().enumerate() {
                             if let Some(n) = name {
-                                self.bind(n.clone(), elements[i].clone());
+                                self.bind_meta_local(n.clone(), elements[i].clone(), &mut locals);
                             }
                             // Wildcard (None) - skip binding
                         }
@@ -2480,7 +2531,17 @@ impl MetaContext {
         self.current_recursion_depth += 1;
 
         // Execute the function (with cleanup on any exit path)
+        let saved_bindings = std::mem::take(&mut self.bindings);
+        let saved_runtime = std::mem::take(&mut self.source_constants.runtime_bindings);
+        let saved_owner = std::mem::replace(&mut self.current_module, func.module.clone());
+        let saved_contexts = self.enabled_contexts.clone();
+        let saved_transparent = self.is_transparent;
         let result = self.execute_user_meta_fn_inner(func, args);
+        self.bindings = saved_bindings;
+        self.source_constants.runtime_bindings = saved_runtime;
+        self.current_module = saved_owner;
+        self.enabled_contexts = saved_contexts;
+        self.is_transparent = saved_transparent;
 
         // Decrement recursion depth
         self.current_recursion_depth -= 1;

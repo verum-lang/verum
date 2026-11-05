@@ -14,7 +14,7 @@
 use anyhow::Result;
 use std::sync::Arc;
 use std::time::Instant;
-use verum_common::List;
+use verum_common::{List, Map, Text};
 use verum_diagnostics::{Diagnostic, DiagnosticBuilder, Severity};
 use verum_types::TypeChecker;
 use verum_types::core_metadata::CoreMetadata;
@@ -26,11 +26,13 @@ use super::{
 pub struct SemanticAnalysisPhase {
     /// Verified contracts from Phase 3a (if available)
     verified_contracts: Option<VerifiedContractRegistry>,
+    source_owners: Map<verum_ast::FileId, (Text, Text)>,
+    target: verum_ast::cfg::TargetConfig,
+    module_registry: Option<crate::owned_source_semantics::SourceRegistry>,
     /// Stdlib metadata for type checking (None = StdlibBootstrap mode)
     stdlib_metadata: Option<Arc<CoreMetadata>>,
     /// Number of user modules (from the end of the modules list).
-    /// When core sources are prepended, this tells the phase how many modules
-    /// at the end are user code (vs stdlib). Errors in stdlib modules are non-fatal.
+    /// Retained for API compatibility; every supplied source body is checked.
     /// None means all modules are treated as user code.
     user_module_count: Option<usize>,
     /// Whether cubical normalization is enabled on the unifier
@@ -69,12 +71,150 @@ pub struct SemanticAnalysisPhase {
 }
 
 impl SemanticAnalysisPhase {
+    pub(crate) fn with_source_owners(mut self, owners: Map<verum_ast::FileId, (Text, Text)>) -> Self {
+        self.source_owners = owners;
+        self
+    }
+
+    pub fn with_module_registry(mut self, registry: verum_common::Shared<parking_lot::RwLock<verum_modules::ModuleRegistry>>) -> Self {
+        self.module_registry = Some(registry);
+        self
+    }
+
+    pub(crate) fn with_target(mut self, target: verum_ast::cfg::TargetConfig) -> Self {
+        self.target = target;
+        self
+    }
+
+    pub(crate) fn with_language_features(mut self, features: &crate::language_features::LanguageFeatures) -> Self {
+        self.cubical_enabled = features.types.cubical;
+        self.dependent_enabled = features.types.dependent;
+        self.higher_kinded_enabled = features.types.higher_kinded;
+        self.universe_poly_enabled = features.types.universe_polymorphism;
+        self.coinductive_enabled = features.types.coinductive;
+        self.quotient_enabled = features.types.quotient;
+        self.instance_search_enabled = features.types.instance_search;
+        self.coherence_check_depth = features.types.coherence_check_depth;
+        self.protocol_resolution_strategy = features.protocols.resolution_strategy.clone();
+        self.protocol_blanket_impls = features.protocols.blanket_impls;
+        self.protocol_coherence_mode = features.protocols.coherence.clone();
+        self.protocol_higher_kinded_protocols = features.protocols.higher_kinded_protocols;
+        self.protocol_generic_associated_types = features.protocols.generic_associated_types;
+        self
+    }
+
+    pub(crate) fn select_owned_sources(
+        &self,
+        modules: &[verum_ast::Module],
+    ) -> anyhow::Result<List<(Text, Text, verum_ast::Module)>> {
+        let owned: List<_> = modules.iter().map(|module| {
+            let (owner, path) = self.source_owners.get(&module.file_id).cloned()
+                .unwrap_or_else(|| (crate::owned_source_semantics::declared_owner(module, "cog"), format!("source file {:?}", module.file_id).into()));
+            (owner, path, module)
+        }).collect();
+        let sources: List<_> = owned.iter().map(|(owner, path, module)| (owner.as_str(), path.as_str(), *module)).collect();
+        crate::owned_source_semantics::select_source_roster(&sources, &self.target)
+    }
+
+    /// Admit original staged source before any value materialization. The
+    /// temporary graph preserves the caller's aliases and external modules;
+    /// it is shared across all checkers and never published as lowered metadata.
+    pub(crate) fn admit_owned_source_roster(
+        &self,
+        sources: &[(&str, &str, &verum_ast::Module)],
+        existing: &crate::owned_source_semantics::SourceRegistry,
+    ) -> anyhow::Result<()> {
+        let selected = crate::owned_source_semantics::select_source_roster(sources, &self.target)?;
+        let graph = verum_common::Shared::new(parking_lot::RwLock::new(existing.read().clone()));
+        crate::owned_source_semantics::register_sources(&graph,
+            selected.iter().map(|(owner, path, module)| (owner.as_str(), path.as_str(), module)))?;
+        for (owner, path, module) in &selected {
+            let mut checker = self.configured_checker();
+            if let Err(errors) = crate::owned_source_semantics::check_source_module(
+                &mut checker, owner, module, &graph,
+            ) {
+                anyhow::bail!("semantic checking failed in {owner} ({path}): {}",
+                    errors.iter().map(|diagnostic| diagnostic.message().to_string()).collect::<Vec<_>>().join("\n"));
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn configured_checker(&self) -> TypeChecker {
+        // Mode selection:
+        // - StdlibBootstrap (stdlib_metadata = None): Uses minimal context + builtins only
+        // - NormalBuild (stdlib_metadata = Some): Loads stdlib types from pre-compiled metadata
+        let mut phase_checker = match &self.stdlib_metadata {
+            Some(stdlib) => {
+                tracing::info!(
+                    "Semantic analysis with stdlib metadata: {} types, {} protocols, {} functions",
+                    stdlib.types.len(),
+                    stdlib.protocols.len(),
+                    stdlib.functions.len()
+                );
+                // O(1) Arc clone — TypeChecker shares the metadata
+                // by reference rather than deep-copying ~3MB.
+                TypeChecker::new_with_core(std::sync::Arc::clone(stdlib))
+            }
+            None => {
+                // Compiling stdlib itself - use minimal context, types are registered
+                // dynamically as stdlib .vr files are parsed.
+                tracing::info!("Semantic analysis for stdlib compilation (minimal context)");
+                TypeChecker::with_minimal_context()
+            }
+        };
+
+        // Register built-in types and functions (Int, Bool, print, assert, etc.)
+        // NOTE: In NormalBuild mode, these may already be loaded from stdlib metadata,
+        // but register_builtins() is idempotent and ensures core intrinsics are available.
+        phase_checker.register_builtins();
+
+        // Post-cycle-break (2026-04-24): install SMT backend here — the
+        // verum_types `RefinementChecker` no longer constructs one itself.
+        phase_checker.set_smt_backend(Box::new(
+            verum_smt::refinement_backend::RefinementZ3Backend::new(),
+        ));
+
+        // Apply ALL session-level feature gates to the type checker.
+        phase_checker.set_cubical_enabled(self.cubical_enabled);
+        phase_checker.set_dependent_enabled(self.dependent_enabled);
+        phase_checker.set_higher_kinded_enabled(self.higher_kinded_enabled);
+        phase_checker.set_universe_poly_enabled(self.universe_poly_enabled);
+        phase_checker.set_coinductive_enabled(self.coinductive_enabled);
+        phase_checker.set_quotient_enabled(self.quotient_enabled);
+        phase_checker.set_instance_search_enabled(self.instance_search_enabled);
+        phase_checker.set_coherence_check_depth(self.coherence_check_depth);
+
+        // Apply `[protocols].*` manifest gates to the embedded
+        // ProtocolChecker. Pre-fix the resolver hardcoded
+        // "most_specific" + blanket=true regardless of manifest;
+        // these calls thread the user's `[protocols].resolution_
+        // strategy` and `[protocols].blanket_impls` settings into
+        // the production `find_impl` path so they actually drive
+        // resolution behaviour.
+        phase_checker.set_protocol_resolution_strategy(self.protocol_resolution_strategy.clone());
+        phase_checker.set_protocol_blanket_impls(self.protocol_blanket_impls);
+        phase_checker.set_protocol_coherence_mode(
+            verum_types::protocol::CoherenceMode::from_manifest_str(
+                self.protocol_coherence_mode.as_str(),
+            ),
+        );
+        phase_checker.set_higher_kinded_protocols_enabled(self.protocol_higher_kinded_protocols);
+        phase_checker.set_generic_associated_types_enabled(self.protocol_generic_associated_types);
+
+        phase_checker.set_cfg_target(self.target.clone());
+        phase_checker
+    }
+
     /// Create a new semantic analysis phase in StdlibBootstrap mode.
     ///
     /// Uses minimal context with builtins only (no external stdlib).
     pub fn new() -> Self {
         Self {
             verified_contracts: None,
+            source_owners: Map::new(),
+            module_registry: None,
+            target: verum_ast::cfg::TargetConfig::host(),
             stdlib_metadata: None,
             user_module_count: None,
             cubical_enabled: true,
@@ -99,6 +239,9 @@ impl SemanticAnalysisPhase {
     pub fn with_core(stdlib: Arc<CoreMetadata>) -> Self {
         Self {
             verified_contracts: None,
+            source_owners: Map::new(),
+            module_registry: None,
+            target: verum_ast::cfg::TargetConfig::host(),
             stdlib_metadata: Some(stdlib),
             user_module_count: None,
             cubical_enabled: true,
@@ -240,7 +383,7 @@ impl SemanticAnalysisPhase {
     }
 
     /// Set the number of user modules (from the end of the modules list).
-    /// Modules before this count are treated as stdlib (errors are non-fatal).
+    /// All supplied source modules remain subject to semantic checking.
     pub fn with_user_module_count(mut self, count: usize) -> Self {
         self.user_module_count = Some(count);
         self
@@ -296,70 +439,6 @@ impl CompilationPhase for SemanticAnalysisPhase {
             tracing::info!("Semantic analysis without contract verification");
         }
 
-        // Create a new type checker for this phase
-        //
-
-        // Mode selection:
-        // - StdlibBootstrap (stdlib_metadata = None): Uses minimal context + builtins only
-        // - NormalBuild (stdlib_metadata = Some): Loads stdlib types from pre-compiled metadata
-        let mut phase_checker = match &self.stdlib_metadata {
-            Some(stdlib) => {
-                tracing::info!(
-                    "Semantic analysis with stdlib metadata: {} types, {} protocols, {} functions",
-                    stdlib.types.len(),
-                    stdlib.protocols.len(),
-                    stdlib.functions.len()
-                );
-                // O(1) Arc clone — TypeChecker shares the metadata
-                // by reference rather than deep-copying ~3MB.
-                TypeChecker::new_with_core(std::sync::Arc::clone(stdlib))
-            }
-            None => {
-                // Compiling stdlib itself - use minimal context, types are registered
-                // dynamically as stdlib .vr files are parsed.
-                tracing::info!("Semantic analysis for stdlib compilation (minimal context)");
-                TypeChecker::with_minimal_context()
-            }
-        };
-
-        // Register built-in types and functions (Int, Bool, print, assert, etc.)
-        // NOTE: In NormalBuild mode, these may already be loaded from stdlib metadata,
-        // but register_builtins() is idempotent and ensures core intrinsics are available.
-        phase_checker.register_builtins();
-
-        // Post-cycle-break (2026-04-24): install SMT backend here — the
-        // verum_types `RefinementChecker` no longer constructs one itself.
-        phase_checker.set_smt_backend(Box::new(
-            verum_smt::refinement_backend::RefinementZ3Backend::new(),
-        ));
-
-        // Apply ALL session-level feature gates to the type checker.
-        phase_checker.set_cubical_enabled(self.cubical_enabled);
-        phase_checker.set_dependent_enabled(self.dependent_enabled);
-        phase_checker.set_higher_kinded_enabled(self.higher_kinded_enabled);
-        phase_checker.set_universe_poly_enabled(self.universe_poly_enabled);
-        phase_checker.set_coinductive_enabled(self.coinductive_enabled);
-        phase_checker.set_quotient_enabled(self.quotient_enabled);
-        phase_checker.set_instance_search_enabled(self.instance_search_enabled);
-        phase_checker.set_coherence_check_depth(self.coherence_check_depth);
-
-        // Apply `[protocols].*` manifest gates to the embedded
-        // ProtocolChecker. Pre-fix the resolver hardcoded
-        // "most_specific" + blanket=true regardless of manifest;
-        // these calls thread the user's `[protocols].resolution_
-        // strategy` and `[protocols].blanket_impls` settings into
-        // the production `find_impl` path so they actually drive
-        // resolution behaviour.
-        phase_checker.set_protocol_resolution_strategy(self.protocol_resolution_strategy.clone());
-        phase_checker.set_protocol_blanket_impls(self.protocol_blanket_impls);
-        phase_checker.set_protocol_coherence_mode(
-            verum_types::protocol::CoherenceMode::from_manifest_str(
-                self.protocol_coherence_mode.as_str(),
-            ),
-        );
-        phase_checker.set_higher_kinded_protocols_enabled(self.protocol_higher_kinded_protocols);
-        phase_checker.set_generic_associated_types_enabled(self.protocol_generic_associated_types);
-
         // If contracts are available, enable contract-aware type checking
         // This allows the type checker to leverage verified preconditions/postconditions
         // to strengthen type inference and validate call sites
@@ -376,139 +455,32 @@ impl CompilationPhase for SemanticAnalysisPhase {
 
         let all_warnings = List::new();
 
-        // Multi-pass type checking:
-        // Pass 0a: Register all type NAMES (placeholders) - enables forward references
-        // Pass 0b: Resolve all type BODIES (now all names are known)
-        // Pass 1: Register all function signatures
-        // Pass 2: Register protocol declarations
-        // Pass 3: Register protocol implementations
-        // Pass 4: Type check functions and expressions
-        //
-
-        // When core sources are prepended (e.g., by run_common_pipeline), the first
-        // N-1 modules are stdlib and the last module is user code. Stdlib registration
-        // errors are non-fatal (logged as debug) to match pipeline.rs behavior.
-        // Only user module errors are fatal.
-
-        // Determine which modules are stdlib vs user code.
-        // User module count is set by the caller; default: all modules are user code.
-        let total_modules = modules.len();
-        let user_module_count = self.user_module_count.unwrap_or(total_modules);
-        let stdlib_count = total_modules.saturating_sub(user_module_count);
-
-        // Pass 0a: Register all type NAMES only (enables forward references to types)
-        // This allows type A to reference type B even if B is defined later
-        for module in modules {
-            for item in &module.items {
-                if let verum_ast::ItemKind::Type(type_decl) = &item.kind {
-                    phase_checker.register_type_name_only(type_decl);
-                }
-            }
-        }
-
-        // Pass 0b: Resolve all type BODIES (now all type names are known)
-        for (i, module) in modules.iter().enumerate() {
-            let is_stdlib = i < stdlib_count;
-            // ALIAS-VS-MARKER scope (#41): per declaring module.
-            phase_checker.set_alias_scope_from_items(&module.items);
-            for item in &module.items {
-                if let verum_ast::ItemKind::Type(type_decl) = &item.kind {
-                    if let Err(e) = phase_checker.register_type_declaration(type_decl) {
-                        if is_stdlib {
-                            tracing::debug!("Stdlib type registration error (non-fatal): {:?}", e);
-                        } else {
-                            let diag = e.to_diagnostic();
-                            return Err(List::from(vec![diag]));
-                        }
-                    }
-                }
-            }
-        }
-
-        // Pass 1: Register all function signatures (enables forward calls)
-        for (i, module) in modules.iter().enumerate() {
-            let is_stdlib = i < stdlib_count;
-            for item in &module.items {
-                if let verum_ast::ItemKind::Function(func) = &item.kind {
-                    if let Err(e) = phase_checker.register_function_signature(func) {
-                        if is_stdlib {
-                            tracing::debug!(
-                                "Stdlib function registration error (non-fatal): {:?}",
-                                e
-                            );
-                        } else {
-                            let diag = e.to_diagnostic();
-                            return Err(List::from(vec![diag]));
-                        }
-                    }
-                }
-            }
-        }
-
-        // Pass 2: Register protocols
-        for (i, module) in modules.iter().enumerate() {
-            let is_stdlib = i < stdlib_count;
-            for item in &module.items {
-                if let verum_ast::ItemKind::Protocol(protocol_decl) = &item.kind {
-                    if let Err(e) = phase_checker.register_protocol(protocol_decl) {
-                        if is_stdlib {
-                            tracing::debug!(
-                                "Stdlib protocol registration error (non-fatal): {:?}",
-                                e
-                            );
-                        } else {
-                            let diag = e.to_diagnostic();
-                            return Err(List::from(vec![diag]));
-                        }
-                    }
-                }
-            }
-        }
-
-        // Pass 3: Register protocol implementations
-        for (i, module) in modules.iter().enumerate() {
-            let is_stdlib = i < stdlib_count;
-            for item in &module.items {
-                if let verum_ast::ItemKind::Impl(impl_decl) = &item.kind {
-                    if let Err(e) = phase_checker.register_impl_block(impl_decl) {
-                        if is_stdlib {
-                            tracing::debug!("Stdlib impl registration error (non-fatal): {:?}", e);
-                        } else {
-                            let diag = e.to_diagnostic();
-                            return Err(List::from(vec![diag]));
-                        }
-                    }
-                }
-            }
-        }
-
-        // Pass 4: Type check each item
-        //
-
-        // Only type-check USER modules, not stdlib modules. Stdlib modules
-        // are registered for their type/function/protocol declarations but
-        // their function bodies are not checked here (they were validated
-        // during stdlib compilation).
-        for module in modules.iter().skip(stdlib_count) {
-            for item in &module.items {
-                match phase_checker.check_item(item) {
-                    Ok(()) => {
-                        // Success
-                    }
-                    Err(type_error) => {
-                        // Convert type error to diagnostic
-                        let diag = type_error.to_diagnostic();
-                        return Err(List::from(vec![diag]));
-                    }
-                }
-            }
+        let semantic_error = |error: anyhow::Error| List::from_iter([
+            DiagnosticBuilder::new(Severity::Error).message(format!("{error:#}")).build()
+        ]);
+        let selected = self.select_owned_sources(modules).map_err(semantic_error)?;
+        let registry = self.module_registry.clone()
+            .unwrap_or_else(|| self.configured_checker().module_registry().clone());
+        crate::owned_source_semantics::register_sources(&registry,
+            selected.iter().map(|(owner, path, ast)| (owner.as_str(), path.as_str(), ast)),
+        ).map_err(semantic_error)?;
+        let mut type_metrics = verum_types::TypeCheckMetrics::new();
+        for (owner, _, module) in &selected {
+            let mut checker = self.configured_checker();
+            crate::owned_source_semantics::check_source_module(
+                &mut checker, owner, module, &registry,
+            )?;
+            type_metrics.synth_count += checker.metrics.synth_count;
+            type_metrics.check_count += checker.metrics.check_count;
+            type_metrics.unify_count += checker.metrics.unify_count;
+            type_metrics.refinement_checks += checker.metrics.refinement_checks;
+            type_metrics.protocol_checks += checker.metrics.protocol_checks;
         }
 
         let duration = start.elapsed();
         let mut metrics = PhaseMetrics::new(self.name()).with_duration(duration);
 
         // Add type checker metrics
-        let type_metrics = phase_checker.metrics.clone();
         metrics.add_custom_metric("synth_count", type_metrics.synth_count.to_string());
         metrics.add_custom_metric("check_count", type_metrics.check_count.to_string());
         metrics.add_custom_metric("unify_count", type_metrics.unify_count.to_string());
@@ -533,8 +505,14 @@ impl CompilationPhase for SemanticAnalysisPhase {
         );
         tracing::debug!("{}", type_metrics.report());
 
+        let selected_modules = selected.into_iter().map(|(_, _, module)| module).collect();
+        let data = match input.data {
+            PhaseData::AstModulesWithContracts { verification_results, .. } =>
+                PhaseData::AstModulesWithContracts { modules: selected_modules, verification_results },
+            _ => PhaseData::AstModules(selected_modules),
+        };
         Ok(PhaseOutput {
-            data: input.data, // Pass through AST modules (with or without contracts)
+            data,
             warnings: all_warnings,
             metrics,
         })

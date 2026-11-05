@@ -518,7 +518,7 @@ impl<'s> CompilationPipeline<'s> {
             }
 
             module_registry.write().register(module_info);
-            self.register_inline_modules(module, &module_path, file_id);
+            self.register_inline_modules(module, &module_path)?;
             self.modules
                 .insert(module_path_str.clone(), Arc::new(module.clone()));
         }
@@ -734,7 +734,7 @@ impl<'s> CompilationPipeline<'s> {
             info.exports = extract_exports_from_module(&module, module_id, &module_path)
                 .with_context(|| format!("Cannot export external module '{}'", module_path_str))?;
             registry.write().register(info);
-            self.register_inline_modules(&module, &module_path, file_id);
+            self.register_inline_modules(&module, &module_path)?;
             let module = Arc::new(module);
             self.modules.insert(module_path_str.clone(), module.clone());
             self.project_modules.insert(module_path_str, module);
@@ -1032,7 +1032,7 @@ impl<'s> CompilationPipeline<'s> {
                     module_info.header_warnings = header_warnings;
 
                     module_registry.write().register(module_info);
-                    self.register_inline_modules(&module, &module_path, file_id);
+                    self.register_inline_modules(&module, &module_path)?;
                     let module_rc = Arc::new(module);
                     if std::env::var_os("VERUM_TRACE_PROJECT_LOAD").is_some() {
                         eprintln!(
@@ -1490,60 +1490,11 @@ impl<'s> CompilationPipeline<'s> {
     /// This is needed for modules like `std.prelude` which are defined inline
     /// in `core/mod.vr` rather than in their own file.
     pub(super) fn register_inline_modules(
-        &self,
-        parent_module: &Module,
-        parent_path: &ModulePath,
-        file_id: FileId,
-    ) {
-        let module_registry = self.session.module_registry();
-
-        for item in &parent_module.items {
-            if let ItemKind::Module(mod_decl) = &item.kind {
-                // Check if this is an inline module (has items)
-                if let verum_common::Maybe::Some(ref items) = mod_decl.items {
-                    // Create the child module path
-                    let child_path = parent_path.join(mod_decl.name.name.as_str());
-                    let child_path_str = child_path.to_string();
-
-                    // Create a synthetic AST Module from the items
-                    let inline_module = Module {
-                        items: items.clone(),
-                        attributes: List::new(),
-                        file_id,
-                        span: item.span,
-                    };
-
-                    // Allocate ID and create ModuleInfo
-                    let module_id = module_registry.read().allocate_id();
-                    let mut module_info = ModuleInfo::new(
-                        module_id,
-                        child_path.clone(),
-                        inline_module.clone(),
-                        file_id,
-                        Text::from(""), // No separate source for inline modules
-                    );
-
-                    // Extract exports
-                    match extract_exports_from_module(&inline_module, module_id, &child_path) {
-                        Ok(export_table) => {
-                            module_info.exports = export_table;
-                        }
-                        Err(e) => {
-                            debug!(
-                                "Failed to extract exports from inline module {}: {:?}",
-                                child_path_str, e
-                            );
-                        }
-                    }
-
-                    // Register the inline module
-                    module_registry.write().register(module_info);
-
-                    // Recursively register any nested inline modules
-                    self.register_inline_modules(&inline_module, &child_path, file_id);
-                }
-            }
-        }
+        &self, parent_module: &Module, parent_path: &ModulePath,
+    ) -> Result<()> {
+        crate::owned_source_semantics::register_inline_sources(
+            &self.session.module_registry(), &parent_path.to_string(), parent_module,
+        )
     }
 
     /// Parse source and register meta declarations (Pass 1)

@@ -80,6 +80,7 @@ pub struct MacroExpansionPhase {
     meta_context: MetaContext,
     /// Current module path (for scoped lookup)
     current_module: Text,
+    source_owners: verum_common::Map<verum_ast::FileId, (Text, Text)>,
     /// Current file ID being processed (for literal parsing source context)
     current_file_id: verum_ast::FileId,
     /// Expansion statistics
@@ -133,6 +134,11 @@ pub struct ExpansionStats {
 }
 
 impl MacroExpansionPhase {
+    pub(crate) fn with_source_owners(mut self, owners: verum_common::Map<verum_ast::FileId, (Text, Text)>) -> Self {
+        self.source_owners = owners;
+        self
+    }
+
     /// Create a new macro expansion phase
     pub fn new() -> Self {
         let literal_registry = LiteralRegistry::new();
@@ -145,6 +151,7 @@ impl MacroExpansionPhase {
             literal_registry,
             meta_context: MetaContext::new(),
             current_module: Text::from(""),
+            source_owners: verum_common::Map::new(),
             current_file_id: verum_ast::FileId::new(0),
             stats: ExpansionStats::default(),
             lint_warnings: List::new(),
@@ -170,6 +177,7 @@ impl MacroExpansionPhase {
             literal_registry,
             meta_context: MetaContext::new(),
             current_module: Text::from(""),
+            source_owners: verum_common::Map::new(),
             current_file_id: verum_ast::FileId::new(0),
             stats: ExpansionStats::default(),
             lint_warnings: List::new(),
@@ -263,7 +271,14 @@ impl MacroExpansionPhase {
         let mut all_diagnostics = List::new();
 
         for module in modules {
-            match self.expand_module(module) {
+            let owner = self.source_owners.get(&module.file_id).map(|(owner, _)| owner.clone())
+                .unwrap_or_else(|| crate::owned_source_semantics::declared_owner(module, ""));
+            let previous = std::mem::replace(&mut self.current_module, owner.clone());
+            let previous_context = std::mem::replace(&mut self.meta_context.current_module, owner);
+            let result = self.expand_module(module);
+            self.current_module = previous;
+            self.meta_context.current_module = previous_context;
+            match result {
                 Ok(expanded) => expanded_modules.push(expanded),
                 Err(diags) => {
                     self.stats.errors += diags.len();
@@ -1754,7 +1769,7 @@ impl CompilationPhase for MacroExpansionPhase {
         };
 
         // Create mutable phase for expansion
-        let mut phase = Self::new();
+        let mut phase = Self::new().with_source_owners(self.source_owners.clone());
 
         // Expand macros
         let expanded_modules = phase.expand_modules(modules)?;

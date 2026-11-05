@@ -60,7 +60,7 @@ fn headerless_files_compile_and_execute_through_public_reexport() {
     let module = produce(&[
         (
             "mod.vr",
-            "public module packet; public module api; public module client;",
+            "module core; public module packet; public module api; public module client;",
         ),
         ("packet.vr", PACKET),
         ("api.vr", "public mount core.packet.{Packet, read};"),
@@ -98,7 +98,7 @@ fn explicit_header_overrides_filename_in_registry_and_archive() {
 #[test]
 fn wrong_sibling_mount_cannot_publish_an_archive() {
     let error = produce(&[
-        ("mod.vr", "public module wrong; public module client;"),
+        ("mod.vr", "module core; public module wrong; public module client;"),
         ("wrong.vr", PACKET),
         (
             "client.vr",
@@ -107,9 +107,22 @@ fn wrong_sibling_mount_cannot_publish_an_archive() {
     ])
     .unwrap_err();
     assert!(
-        error.contains("unresolved nominal type 'Packet'"),
+        error.contains("module `core.packet` not found"),
         "{error}"
     );
+}
+
+#[test]
+fn a_public_file_header_cannot_also_claim_a_siblings_owner() {
+    // The first bodyless module declaration names this file, irrespective of
+    // visibility. It must not silently overwrite packet.vr's declarations.
+    let error = produce(&[
+        ("mod.vr", "public module packet; public module client;"),
+        ("packet.vr", PACKET),
+        ("client.vr", "public fn run() -> Int { 42 }"),
+    ])
+    .unwrap_err();
+    assert!(error.contains("conflicting source parts for owner core.packet"), "{error}");
 }
 #[test]
 fn export_index_agrees_with_explicit_and_implicit_file_owners() {

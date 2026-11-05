@@ -444,3 +444,5 @@ pub const BUILD_INFO: &str = concat!(
     env!("CARGO_PKG_REPOSITORY"),
     ")"
 );
+
+mod owned_source_semantics;

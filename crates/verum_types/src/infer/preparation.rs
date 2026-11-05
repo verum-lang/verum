@@ -6,6 +6,11 @@ use verum_ast::{ItemKind, Module};
 use verum_common::{List, Set, Text};
 
 impl TypeChecker {
+    /// Use the compilation target for item, implementation and body selection.
+    pub fn set_cfg_target(&mut self, target: verum_ast::cfg::TargetConfig) {
+        self.cfg_evaluator = verum_ast::cfg::CfgEvaluator::with_config(target);
+    }
+
     /// Prepare a source module before checking its bodies with [`Self::check_item`].
     ///
     /// The caller supplies module identity, registry, lazy resolver, builtins and

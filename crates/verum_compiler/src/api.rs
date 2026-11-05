@@ -421,8 +421,10 @@ pub enum OutputType {
 pub struct CommonPipelineResult {
     /// Typed AST modules (HIR)
     pub typed_modules: List<HirModule>,
-    /// Original AST modules (for reference)
+    /// Target-selected AST modules after checked compile-time materialization.
     pub ast_modules: List<Module>,
+    /// Lexical owner and source path retained for each selected AST file.
+    pub source_owners: verum_common::Map<verum_ast::FileId, (Text, Text)>,
     /// Diagnostics (errors and warnings)
     pub diagnostics: List<Diagnostic>,
     /// Contract verification results
@@ -771,11 +773,37 @@ pub fn run_common_pipeline(
             .with_items_processed(ast_modules.len()),
     );
 
+    // Preserve file ownership across the phase API, including headerless files.
+    let mut source_root = sources.first().and_then(|source| Path::new(source.path.as_str()).parent())
+        .unwrap_or_else(|| Path::new("")).to_path_buf();
+    for source in sources {
+        while !Path::new(source.path.as_str()).starts_with(&source_root) && source_root.pop() {}
+    }
+    let mut source_owners = verum_common::Map::new();
+    for module in &ast_modules {
+        let source = &sources[module.file_id.raw() as usize];
+        let path = Path::new(source.path.as_str());
+        let owner = if source.path.as_str().starts_with('<') {
+            crate::owned_source_semantics::declared_owner(module, "cog")
+        } else {
+            let derived = verum_modules::ModulePath::for_source_file(&source_root, "cog", path);
+            let parent = derived.parent().map(|parent| parent.to_string()).unwrap_or_else(|| "cog".into());
+            crate::module_utils::source_file_module_path(&parent, path, module).into()
+        };
+        source_owners.insert(module.file_id, (owner, source.path.clone()));
+    }
+    // Every staged phase receives the same selected source identities.
+    let selected = semantic_analysis::SemanticAnalysisPhase::new()
+        .with_source_owners(source_owners.clone()).select_owned_sources(&ast_modules)
+        .map_err(|error| CompilationError::type_error(error.to_string()))?;
+    ast_modules = selected.into_iter().map(|(_, _, module)| module).collect();
+
     // Phase 2: Meta Registry (if macros enabled)
     let mut current_data = PhaseData::AstModules(ast_modules.clone());
 
     if config.expand_macros {
-        let meta_phase = meta_registry_phase::MetaRegistryPhase::new();
+        let meta_phase = meta_registry_phase::MetaRegistryPhase::new()
+            .with_source_owners(source_owners.clone());
         let meta_input = PhaseInput {
             data: current_data.clone(),
             context: context.clone(),
@@ -797,6 +825,7 @@ pub fn run_common_pipeline(
     // Phase 3: Macro Expansion
     if config.expand_macros {
         let expansion_phase = macro_expansion::MacroExpansionPhase::new()
+            .with_source_owners(source_owners.clone())
             .with_derive_enabled(config.derive_enabled)
             .with_compile_time_enabled(config.compile_time_enabled)
             .with_macro_recursion_limit(config.macro_recursion_limit);
@@ -942,6 +971,7 @@ pub fn run_common_pipeline(
             .with_protocol_higher_kinded_protocols(config.protocol_higher_kinded_protocols)
             .with_protocol_generic_associated_types(config.protocol_generic_associated_types)
     };
+    let semantic_phase = semantic_phase.with_source_owners(source_owners.clone());
     let semantic_input = PhaseInput {
         data: current_data,
         context: context.clone(),
@@ -958,9 +988,15 @@ pub fn run_common_pipeline(
     all_diagnostics.extend(semantic_output.warnings.clone());
     phase_metrics.push(semantic_output.metrics.clone());
 
+    // Semantic admission returns precisely the target-selected original ASTs.
+    // Only these bodies may subsequently be replaced by compile-time values.
+    ast_modules = match &semantic_output.data {
+        PhaseData::AstModules(modules) | PhaseData::AstModulesWithContracts { modules, .. } => modules.clone(),
+        _ => return Err(CompilationError::internal("Semantic admission did not retain checked source ASTs")),
+    };
     let typed_modules = match semantic_output.data {
         PhaseData::Hir(modules) => modules,
-        PhaseData::AstModules(modules) => {
+        PhaseData::AstModules(modules) | PhaseData::AstModulesWithContracts { modules, .. } => {
             // Fallback: convert AST to minimal HIR
             modules
                 .iter()
@@ -975,6 +1011,38 @@ pub fn run_common_pipeline(
         }
         _ => return Err(CompilationError::internal("Unexpected semantic output")),
     };
+
+    // Original staged bodies have passed semantic checking before replacement.
+    {
+        let modules = &mut ast_modules;
+        let mut lowering = crate::meta::const_lowering::ConstLowering::new(crate::meta::MetaContext::new());
+        let owners: List<Text> = modules.iter().map(|module| {
+            source_owners.get(&module.file_id).map(|(owner, _)| owner.clone())
+                .ok_or_else(|| CompilationError::internal("Checked source lost its lexical owner"))
+        }).collect::<Result<_, _>>()?;
+        let lower_result = (|| {
+            for (owner, module) in owners.iter().zip(modules.iter()) { lowering.register(owner, module)?; }
+            for (owner, module) in owners.iter().zip(modules.iter_mut()) { lowering.lower(owner, module)?; }
+            Ok::<(), crate::meta::const_lowering::ConstLoweringError>(())
+        })();
+        lower_result.map_err(|error| {
+            let location = sources.get(error.span.file_id.raw() as usize).and_then(|source| {
+                verum_common::span::SourceFile::new(error.span.file_id, source.path.to_string(), source.content.to_string())
+                    .span_to_line_col(error.span)
+            }).unwrap_or_else(|| verum_common::LineColSpan::new(
+                format!("<file:{}>", error.span.file_id.raw()), 1, error.span.start as usize, error.span.end as usize,
+            ));
+            let diagnostic = verum_diagnostics::DiagnosticBuilder::error()
+                .message(error.to_string())
+                .span(location)
+                .build();
+            CompilationError::with_diagnostics(
+                CompilationErrorKind::InternalError,
+                format!("compile-time value materialization failed: {error}"),
+                List::from(vec![diagnostic]),
+            )
+        })?;
+    }
 
     // Phase 4b: Context Validation (if enabled)
     // Both `validate_contexts` (per-invocation override) and
@@ -1054,6 +1122,7 @@ pub fn run_common_pipeline(
     Ok(CommonPipelineResult {
         typed_modules,
         ast_modules,
+        source_owners,
         diagnostics: all_diagnostics,
         verification_results,
         metrics,

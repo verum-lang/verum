@@ -196,6 +196,53 @@ impl<'s> CompilationPipeline<'s> {
                 path: entry.absolute_path, owner, ast: entry.module,
             }]));
         }
+        // Registration and checking share the target-selected source declarations.
+        let target = self.session.cfg_evaluator().config().clone();
+        let identities: Vec<_> = all_parsed_modules.iter().flat_map(|(_, files)| files)
+            .map(|file| (file.owner.as_str(), file.path.to_string_lossy().into_owned(), &file.ast)).collect();
+        let refs: Vec<_> = identities.iter().map(|(owner, path, ast)| (*owner, path.as_str(), *ast)).collect();
+        let selected = crate::owned_source_semantics::select_source_roster(&refs, &target)?;
+        let mut selected: verum_common::Map<_, _> = selected.into_iter().map(|(owner, _, ast)| (owner, ast)).collect();
+        for (_, files) in &mut all_parsed_modules {
+            files.retain_mut(|file| {
+                if let Some(ast) = selected.remove(&Text::from(file.owner.as_str())) {
+                    file.ast = ast;
+                    true
+                } else { false }
+            });
+        }
+        let source_identities: Vec<_> = all_parsed_modules.iter().flat_map(|(_, files)| files)
+            .map(|file| (file.owner.as_str(), file.path.to_string_lossy().into_owned(), &file.ast)).collect();
+        crate::owned_source_semantics::ensure_unique_owners(source_identities.iter()
+            .map(|(owner, path, ast)| (*owner, path.as_str(), *ast)))?;
+        // Check the original staged bodies before materialization can erase
+        // annotations. This single admission graph retains session aliases and
+        // external declarations; all file checkers share the same handle.
+        let semantic = crate::phases::semantic_analysis::SemanticAnalysisPhase::new()
+            .with_language_features(self.session.language_features())
+            .with_target(target.clone());
+        let admission_sources: Vec<_> = source_identities.iter()
+            .map(|(owner, path, ast)| (*owner, path.as_str(), *ast)).collect();
+        semantic.admit_owned_source_roster(&admission_sources, &self.session.module_registry())?;
+        // Materialization follows successful original-source admission. Registry
+        // and interface snapshots below must then use the transformed roster.
+        // A single owned roster feeds declarations and bodies. @const results
+        // are materialized here once, before either consumer observes the AST.
+        let mut const_lowering = crate::meta::const_lowering::ConstLowering::new(
+            self.fresh_meta_ctx_with_version_stamp(),
+        );
+        for (_, files) in &all_parsed_modules {
+            for file in files { const_lowering.register(&file.owner, &file.ast)?; }
+        }
+        for (_, files) in &mut all_parsed_modules {
+            for file in files {
+                const_lowering.lower(&file.owner, &mut file.ast).map_err(|error| {
+                    self.session.emit_diagnostic(verum_diagnostics::DiagnosticBuilder::error().message(error.to_string())
+                        .span(self.session.convert_span(error.span)).build());
+                    anyhow::anyhow!(error)
+                })?;
+            }
+        }
         let source_names = module_utils::source_type_names(
             all_parsed_modules
                 .iter()
@@ -259,7 +306,7 @@ impl<'s> CompilationPipeline<'s> {
                     // Inline modules belong to the declaring file, just as in
                     // ordinary project loading. Register them before computing
                     // the public reexport closure for bootstrap dependencies.
-                    self.register_inline_modules(ast_module, &module_path, file_id);
+                    self.register_inline_modules(ast_module, &module_path)?;
                 }
             }
 

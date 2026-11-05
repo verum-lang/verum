@@ -1949,6 +1949,12 @@ impl<'s> CompilationPipeline<'s> {
             .cloned()
             .collect();
 
+        // Seed lexical constants for closed meta verification too. This consumes
+        // the already materialized source carriers used by all later phases.
+        let mut seeds = crate::meta::const_lowering::ConstLowering::new(self.fresh_meta_ctx_with_version_stamp());
+        seeds.register(module_path, module)?;
+        let source_context = seeds.into_context();
+
         // 1. Evaluate meta fn bodies with NO parameters (fully evaluable at compile time)
         for item in &module.items {
             if let ItemKind::Function(func) = &item.kind {
@@ -1973,8 +1979,7 @@ impl<'s> CompilationPipeline<'s> {
                     Maybe::None => continue, // No body (declaration only)
                 };
 
-                let mut ctx = self
-                    .fresh_meta_ctx_with_version_stamp()
+                let mut ctx = source_context.clone()
                     .with_registry(std::sync::Arc::new(self.meta_registry.clone()))
                     .with_current_module(module_path.clone());
 
@@ -2022,8 +2027,16 @@ impl<'s> CompilationPipeline<'s> {
             }
         }
 
-        // 2. Walk all expressions to find @const blocks
-        self.find_and_eval_const_blocks(module, module_path, &mut errors);
+        // Actual entrypoints already supplied materialized ASTs. Standalone
+        // validation uses the same lowering contract, not a second evaluator.
+        let mut lowered = module.clone();
+        let mut lowering = crate::meta::const_lowering::ConstLowering::new(
+            self.fresh_meta_ctx_with_version_stamp(),
+        );
+        if let Err(error) = lowering.register(module_path, &lowered)
+            .and_then(|()| lowering.lower(module_path, &mut lowered)) {
+            errors.push((format!("@const materialization in {} at {:?}", error.owner, error.span), error.error));
+        }
 
         if !errors.is_empty() {
             // Emit diagnostics for all meta evaluation errors
@@ -2054,113 +2067,6 @@ impl<'s> CompilationPipeline<'s> {
         ctx.project_info.git_revision = self.cached_version_stamp.0.clone();
         ctx.project_info.build_time_unix_ms = self.cached_version_stamp.1;
         ctx
-    }
-
-    /// Walk module AST to find @const blocks and evaluate them.
-    fn find_and_eval_const_blocks(
-        &self,
-        module: &Module,
-        module_path: &Text,
-        errors: &mut Vec<(String, crate::meta::MetaError)>,
-    ) {
-        use verum_ast::decl::ItemKind;
-        use verum_ast::expr::ExprKind;
-
-        // Non-function items (type declarations) ride to the VBC meta
-        // engine's synthetic module so record-typed consts compile
-        // (ARCH-P4; the tree-walk is name-blind to type decls).
-        let context_items: Vec<verum_ast::Item> = module
-            .items
-            .iter()
-            .filter(|i| !matches!(i.kind, ItemKind::Function(_)))
-            .cloned()
-            .collect();
-        let context_items = context_items.as_slice();
-
-        // Walk all function bodies for @const blocks
-        for item in &module.items {
-            if let ItemKind::Function(func) = &item.kind {
-                if func.is_meta {
-                    continue; // Already handled above
-                }
-                if let Maybe::Some(body) = &func.body {
-                    let body_expr = match body {
-                        verum_ast::decl::FunctionBody::Block(block) => {
-                            verum_ast::expr::Expr::new(ExprKind::Block(block.clone()), block.span)
-                        }
-                        verum_ast::decl::FunctionBody::Expr(expr) => expr.clone(),
-                    };
-                    self.collect_const_blocks_from_expr(&body_expr, module_path, context_items, errors);
-                }
-            }
-        }
-    }
-
-    /// Recursively search for @const blocks in an expression and evaluate them.
-    fn collect_const_blocks_from_expr(
-        &self,
-        expr: &verum_ast::expr::Expr,
-        module_path: &Text,
-        context_items: &[verum_ast::Item],
-        errors: &mut Vec<(String, crate::meta::MetaError)>,
-    ) {
-        use verum_ast::visitor::{Visitor, walk_expr};
-
-        struct ConstEvaluator<'a, 's> {
-            pipeline: &'a CompilationPipeline<'s>,
-            module_path: &'a Text,
-            context_items: &'a [verum_ast::Item],
-            errors: &'a mut Vec<(String, crate::meta::MetaError)>,
-        }
-
-        impl Visitor for ConstEvaluator<'_, '_> {
-            fn visit_expr(&mut self, expr: &verum_ast::expr::Expr) {
-                use verum_ast::expr::ExprKind;
-                // Quoted tokens belong to a later stage and are not evaluated.
-                if matches!(expr.kind, ExprKind::Quote { .. }) {
-                    return;
-                }
-                if let ExprKind::MetaFunction { name, args, .. } = &expr.kind
-                    && name.as_str() == "const"
-                {
-                    for arg in args.iter() {
-                        // Preserve the selected engine and its existing fallback.
-                        if crate::meta::vbc_eval::vbc_meta_engine_selected()
-                            && crate::meta::vbc_eval::vbc_eval_meta_expr(
-                                arg,
-                                arg.span,
-                                self.context_items,
-                            )
-                            .is_ok()
-                        {
-                            continue;
-                        }
-                        let mut context = self
-                            .pipeline
-                            .fresh_meta_ctx_with_version_stamp()
-                            .with_registry(std::sync::Arc::new(self.pipeline.meta_registry.clone()))
-                            .with_current_module(self.module_path.clone());
-                        let result = context
-                            .ast_expr_to_meta_expr(arg)
-                            .and_then(|expression| context.eval_meta_expr(&expression));
-                        if let Err(error) = result {
-                            self.errors.push(("@const block".to_string(), error));
-                        }
-                    }
-                    // Each argument was already evaluated, including its children.
-                    return;
-                }
-                walk_expr(self, expr);
-            }
-        }
-
-        ConstEvaluator {
-            pipeline: self,
-            module_path,
-            context_items,
-            errors,
-        }
-        .visit_expr(expr);
     }
 
     /// Unified pre-codegen validation.

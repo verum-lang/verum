@@ -41,6 +41,7 @@
 
 // Core modules
 pub mod cache;
+pub mod const_lowering;
 pub mod error;
 /// Cross-run filesystem persistence for `MetaEvalCache` — Phase 9
 /// V0 of the precompiled-stdlib epic. Persists the primitive subset

@@ -48,6 +48,7 @@ pub type ConstValue = MetaValue;
 pub struct MetaContext {
     /// Variable bindings (name -> value)
     pub(crate) bindings: Map<Text, ConstValue>,
+    pub(crate) source_constants: super::const_lowering::SourceConstants,
     /// Type definitions for field/variant lookup
     /// Maps type name (e.g., "Point", "Color") to its definition
     pub(crate) type_definitions: Map<Text, TypeDefinition>,
@@ -249,6 +250,7 @@ impl MetaContext {
     pub fn new() -> Self {
         Self {
             bindings: Map::new(),
+            source_constants: Default::default(),
             type_definitions: Map::new(),
             protocol_implementations: Map::new(),
             runtime_info: RuntimeInfo::default(),

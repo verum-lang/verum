@@ -34747,8 +34747,9 @@ impl VbcCodegen {
                 }
             }
             "const" => {
-                // Compile-time evaluation marker - should have been resolved
-                self.ctx.emit(Instruction::LoadNil { dst: dest });
+                return Err(CodegenError::unsupported_expr(
+                    "unmaterialized @const reached VBC; compile-time value lowering is required",
+                ));
             }
             "intrinsic" => {
                 // @intrinsic("name", arg1, arg2, ...) - compile intrinsic call

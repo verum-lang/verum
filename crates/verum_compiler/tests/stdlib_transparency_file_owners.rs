@@ -13,12 +13,12 @@ fn check(record_first: bool, tuple: bool) {
     write(
         &core,
         "mod.vr",
-        "public module cells; public module consumer;",
+        "module core; public module cells; public module consumer;",
     );
     write(
         &core,
         "cells/mod.vr",
-        "public module alpha; public module beta;",
+        "module core.cells; public module alpha; public module beta;",
     );
     let (opaque, transparent) = if record_first {
         ("alpha", "beta")
