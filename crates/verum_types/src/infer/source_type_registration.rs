@@ -5,6 +5,8 @@ use verum_common::{List, Map, Text};
 
 #[derive(Debug, Default)]
 pub(crate) struct SourceTypeRegistration {
+    /// Lexical source declarations available while preparing one module.
+    pub local_declarations: List<(Text, List<TypeDecl>)>,
     pub active_impl_bounds: verum_common::Set<(Text, Text)>,
     pub headers: Vec<super::source_protocol_header::SourceProtocolHeader>,
     pub projection_assumptions: Vec<crate::protocol::WhereClause>,

@@ -80,6 +80,7 @@ impl TypeChecker {
         // Source declaration frames take precedence over flat context aliases.
         // A single frame also ensures that local parameters shadow owner names.
         self.push_decl_param_frame(frame);
+        let saved_source_scope = std::mem::replace(&mut self.resolving_source_signature, true);
         let saved_self = self.current_self_type.clone();
         self.set_current_self_type(Some(Type::Named {
             path: verum_ast::Path::single(verum_ast::Ident::new("Self", method.span)),
@@ -204,6 +205,7 @@ impl TypeChecker {
         })();
         self.source_type_registration.projection_assumptions.truncate(assumption_base);
         self.set_current_self_type(saved_self);
+        self.resolving_source_signature = saved_source_scope;
         self.pop_decl_param_frame();
         result
     }

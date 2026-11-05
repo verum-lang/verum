@@ -62,6 +62,17 @@ impl TypeChecker {
     /// Resolve forward types, contexts, protocols and implementations, in order.
     #[must_use]
     pub fn prepare_module_types(&mut self, module: &Module) -> List<TypeError> {
+        let declarations = module.items.iter().filter_map(|item| match &item.kind {
+            ItemKind::Type(declaration) if self.cfg_evaluator.should_include(&item.attributes) => Some(declaration.clone()),
+            _ => None,
+        }).collect();
+        self.source_type_registration.local_declarations.push((self.current_module_path.clone(), declarations));
+        let result = self.prepare_module_types_in_source_scope(module);
+        self.source_type_registration.local_declarations.pop();
+        result
+    }
+
+    fn prepare_module_types_in_source_scope(&mut self, module: &Module) -> List<TypeError> {
         let previous_placeholders: Set<Text> = self
             .verify_no_placeholders()
             .into_iter()

@@ -45,7 +45,7 @@ fn bare_name_does_not_mean_associated_projection() {
     assert!(
         errors
             .iter()
-            .any(|e| e.contains("E427") && e.contains("protocol declares")),
+            .any(|e| e.contains("TypeNotFound") && e.contains("\"Q\"")),
         "{errors:?}"
     );
 }

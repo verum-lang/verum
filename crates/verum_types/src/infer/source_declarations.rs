@@ -374,6 +374,13 @@ impl TypeChecker {
         &self,
         name: &str,
     ) -> Option<(verum_ast::TypeDecl, Text)> {
+        for (owner, declarations) in self.source_type_registration.local_declarations.iter().rev() {
+            if owner == &self.current_module_path {
+                if let Some(declaration) = declarations.iter().find(|decl| decl.name.name.as_str() == name) {
+                    return Some((declaration.clone(), owner.clone()));
+                }
+            }
+        }
         // Inline and file modules own their local declarations equally. The
         // registry contains file modules; inline bodies live in this source
         // index and must not fall through to the consumer's flat bindings.
@@ -387,7 +394,12 @@ impl TypeChecker {
             return Some((declaration.clone(), self.current_module_path.clone()));
         }
         let registry = self.module_registry.read();
-        let module = self.get_module_with_path_aliases(self.current_module_path.as_str(), &registry)?;
+        let Some(module) = self.get_module_with_path_aliases(self.current_module_path.as_str(), &registry) else {
+            // Low-level declaration APIs may have no file registry. Only an
+            // exact successfully registered source declaration owns this name.
+            return self.source_type_registration.completed.get(&self.declared_type_key(name))
+                .map(|declaration| (declaration.clone(), self.current_module_path.clone()));
+        };
         let declared = self.find_type_declaration_with_source_module_inner(
             &module.ast, name, &Text::from(module.path.to_string()),
             &registry, &mut Set::new(), true, true,

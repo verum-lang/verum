@@ -256,23 +256,24 @@ impl TypeChecker {
                         }
                     }
                 }
-                // Use the ordinary namespace authority when it preserves a
-                // nominal head. This carries the declaring owner through local
-                // names, mounts and aliases; the current module alone is not
-                // necessarily the owner of an implement target.
-                if let Ok(resolved) = self.resolve_qualified_type(path, ast_ty.span) {
-                    if matches!(
-                        resolved,
-                        Type::Named { .. } | Type::Generic { .. } | Type::Var(_)
-                    ) {
-                        return Ok(resolved);
-                    }
+                // Resolve through the declaring namespace even when the body
+                // is structural (for example a sum). An implementation key is
+                // the selected declaration, never the spelling at its use site.
+                let (resolved, declaration) =
+                    self.resolve_qualified_type_with_parameter_key(path, ast_ty.span)?;
+                if matches!(resolved, Type::Named { .. } | Type::Generic { .. } | Type::Var(_)) {
+                    return Ok(resolved);
                 }
-                // Keep structural alias bodies out of implementation keys.
-                Ok(Type::Named {
-                    path: path.clone(),
-                    args: List::new(),
-                })
+                if let Some(declaration) = declaration {
+                    let segments = declaration.as_str().split('.')
+                        .map(|part| verum_ast::ty::PathSegment::Name(Ident::new(part, ast_ty.span)))
+                        .collect();
+                    return Ok(Type::Named {
+                        path: Path::new(segments, ast_ty.span),
+                        args: List::new(),
+                    });
+                }
+                Ok(resolved)
             }
 
             // For Generic types, create a Named/Generic type without expansion
