@@ -92,6 +92,13 @@ impl MetaContext {
 pub fn materialize_runtime_value(value: ConstValue, span: Span) -> Result<Expr, MetaError> {
     let kind = match value {
         ConstValue::Unit => ExprKind::Tuple(List::new()),
+        ConstValue::Int(value) if value < 0 => ExprKind::Unary {
+            op: UnOp::Neg,
+            // Match parsed source: the literal stores the positive token
+            // magnitude as a u128 bit pattern, with a separate unary sign.
+            // unsigned_abs also represents i128::MIN exactly.
+            expr: verum_common::Heap::new(Expr::literal(Literal::int(value.unsigned_abs() as i128, span))),
+        },
         ConstValue::Int(value) => ExprKind::Literal(Literal::int(value, span)),
         ConstValue::UInt(_) => {
             return Err(failure(

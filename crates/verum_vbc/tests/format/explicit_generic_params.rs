@@ -38,6 +38,9 @@ fn function_bytes(minor: u16) -> Vec<u8> {
     if minor >= 30 {
         bytes.push(0); // v2.30 optional source-level signature
     }
+    if minor >= 43 {
+        bytes.push(0); // v2.43 optional callable declaration identity
+    }
     bytes
 }
 
@@ -99,7 +102,8 @@ fn versioned_function_tails_stop_at_their_own_descriptor_boundary() {
             20..=22 => 43,
             23..=26 => 44,
             27..=29 => 45,
-            _ => 46,
+            30..=42 => 46,
+            _ => 47,
         };
         let mut bytes = function_bytes(minor);
         assert_eq!(bytes.len(), one_len);
@@ -115,6 +119,7 @@ fn versioned_function_tails_stop_at_their_own_descriptor_boundary() {
             assert!(descriptor.value_uses.is_none());
             assert!(descriptor.semantic_return.is_none());
             assert!(descriptor.source_signature.is_none());
+            assert!(descriptor.declaration_identity.is_none());
             assert_eq!(reader.offset, expected, "minor={minor}");
         }
     }
@@ -244,5 +249,46 @@ fn semantic_formal_slot_has_independent_presence_and_type_boundaries() {
         assert_eq!(first.semantic_parameter_types().unwrap(), &[expected]);
         assert_eq!(reader.offset, boundary);
         assert_eq!(reader.parse_function_descriptor().unwrap().id.0, NEXT_ID);
+    }
+}
+
+#[test]
+fn v243_callable_identity_preserves_the_next_descriptor_boundary() {
+    for parent in [None, Some(FunctionId(0x44332211))] {
+        let mut bytes = function_bytes(42);
+        bytes.push(1); // declaration identity present
+        bytes.extend_from_slice(&0x10203040u32.to_le_bytes());
+        bytes.push(u8::from(parent.is_some()));
+        if let Some(parent) = parent {
+            bytes.extend_from_slice(&parent.0.to_le_bytes());
+        }
+        let boundary = bytes.len();
+        append_next_descriptor(&mut bytes, 43);
+        let mut reader = Deserializer::new(&bytes);
+        reader.header = Some(VbcHeader { version_minor: 43, ..VbcHeader::default() });
+        let first = reader.parse_function_descriptor().unwrap();
+        assert_eq!(first.id.0, FIRST_ID);
+        let identity = first.declaration_identity.expect("present identity");
+        assert_eq!(identity.source_name, StringId(0x10203040));
+        assert_eq!(identity.lexical_parent, parent);
+        assert_eq!(reader.offset, boundary);
+        let second = reader.parse_function_descriptor().unwrap();
+        assert_eq!(second.id.0, NEXT_ID);
+        assert!(second.declaration_identity.is_none());
+        assert_eq!(reader.offset, bytes.len());
+    }
+}
+
+#[test]
+fn v243_callable_identity_rejects_invalid_tags_and_truncation() {
+    let prefix = function_bytes(42);
+    let present = [1, 0x40, 0x30, 0x20, 0x10, 1, 0x11, 0x22, 0x33, 0x44];
+    for tail in (0..present.len()).map(|len| &present[..len])
+        .chain([&[2][..], &[1, 0x40, 0x30, 0x20, 0x10, 2][..]])
+    {
+        let bytes = [prefix.as_slice(), tail].concat();
+        let mut reader = Deserializer::new(&bytes);
+        reader.header = Some(VbcHeader { version_minor: 43, ..VbcHeader::default() });
+        assert!(reader.parse_function_descriptor().is_err(), "tail={tail:?}");
     }
 }

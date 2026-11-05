@@ -316,6 +316,7 @@ fn test_roundtrip_function_descriptor() {
             semantic_params: None,
             semantic_return: None,
             source_signature: None,
+            declaration_identity: None,
     };
 
     // Add some dummy bytecode
@@ -384,6 +385,7 @@ fn intrinsic_name_marker_survives_round_trip() {
             semantic_params: None,
             semantic_return: None,
             source_signature: None,
+            declaration_identity: None,
     });
     module.header.function_table_count = 1;
 

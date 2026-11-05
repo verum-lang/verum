@@ -359,15 +359,7 @@ pub fn fs_path_to_module(fs_path: &str) -> String {
 /// // "core/base/mod.vr" with module_name "core" -> "core"
 /// ```
 pub fn derive_submodule_path(module_name: &str, file_path: &Path) -> String {
-    let file_name = file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-
-    if file_name == "mod" {
-        // mod.vr exports at the module level
-        module_name.to_string()
-    } else {
-        // Other files export at submodule level
-        format!("{}.{}", module_name, file_name)
-    }
+    verum_vbc::codegen::VbcCodegen::derive_submodule_path(module_name, file_path)
 }
 
 /// Resolve one source file's namespace independently of its archive grouping.
@@ -378,8 +370,7 @@ pub fn source_file_module_path(
     file_path: &Path,
     module: &verum_ast::Module,
 ) -> String {
-    verum_vbc::codegen::VbcCodegen::resolve_full_module_path(module, module_name)
-        .unwrap_or_else(|| derive_submodule_path(module_name, file_path))
+    verum_vbc::codegen::VbcCodegen::source_file_module_path(module_name, file_path, module)
 }
 
 // =============================================================================

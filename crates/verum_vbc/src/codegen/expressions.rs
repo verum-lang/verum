@@ -7960,14 +7960,6 @@ impl VbcCodegen {
                 function: func_name.clone(),
             }));
         }
-        if args.len() < func_info.param_count {
-            // Check if missing params have defaults (stored in AST)
-            // For now, allow the call if there are defaults — the VBC runtime
-            // will fill in 0/nil for missing args. Full default value compilation
-            // requires AST access at call site which we'll add in a future pass.
-            // This at least prevents the hard error for functions with default params.
-        }
-
         // Compile arguments into consecutive registers
         // IMPORTANT: First compile ALL argument expressions and collect their result registers.
         // Then allocate FRESH consecutive registers for the Call instruction arguments.
@@ -8179,34 +8171,33 @@ impl VbcCodegen {
             // as `f()` must pass 5). Pre-fix this padded a hardcoded
             // LoadI 0 — every omitted defaulted param silently became
             // 0/nil regardless of its declaration. Fall back to the
-            // legacy zero-pad only when no default is declared for the
-            // slot (arity mismatch already admitted upstream).
+            // selected declaration also supplies imported literal defaults.
+            // A missing required argument is an error, never a zero value.
             let actual_arg_count = func_info.param_count.max(args.len());
-            let declared_defaults = self
-                .ctx
-                .function_param_defaults
-                .get(&resolved_name)
-                .or_else(|| self.ctx.function_param_defaults.get(&func_name))
-                .cloned();
+            let declared_defaults = self.declared_callable_defaults.get(&func_info.id).cloned();
             while arg_results.len() < actual_arg_count {
                 let slot = arg_results.len();
-                let default_expr = declared_defaults
-                    .as_ref()
-                    .and_then(|d| d.get(slot))
-                    .and_then(|o| o.as_ref())
-                    .cloned();
-                if let Some(dexpr) = default_expr {
-                    let r = self
-                        .compile_expr(&dexpr)?
-                        .or_internal("default argument has no value")?;
+                // Literal defaults carry consumer-pool constant IDs from the
+                // selected declaration, including through archive imports.
+                if let Some(parameter) = self.declared_callable_descriptors.get(&func_info.id)
+                    .and_then(|declaration| declaration.params.get(slot))
+                    .filter(|parameter| parameter.default.is_some()).cloned()
+                {
+                    let default_reg = self.ctx.alloc_temp();
+                    let load = self.load_parameter_default(default_reg, &parameter)?;
+                    self.ctx.emit(load);
+                    arg_results.push(default_reg);
+                } else if let Some(dexpr) = declared_defaults.as_ref()
+                    .and_then(|defaults| defaults.get(slot)).and_then(Option::as_ref)
+                {
+                    let r = self.compile_expr(dexpr)?.or_internal("default argument has no value")?;
                     arg_results.push(r);
                 } else {
-                    let default_reg = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::LoadI {
-                        dst: default_reg,
-                        value: 0,
-                    });
-                    arg_results.push(default_reg);
+                    return Err(CodegenError::new(CodegenErrorKind::WrongArgumentCount {
+                        expected: func_info.param_count,
+                        found: args.len(),
+                        function: func_name.clone(),
+                    }));
                 }
             }
 

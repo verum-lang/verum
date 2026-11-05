@@ -265,6 +265,7 @@ pub fn archive_to_core_metadata(archive: &VbcArchive) -> Result<CoreMetadata, Te
                 meta.declaration_type_bindings.insert(owner.clone(), bindings.clone());
             }
         }
+        verum_vbc::callable_identity::validate_module(&module)?;
         for function in &module.functions {
             if let Some(signature) = &function.source_signature {
                 verum_ast::source_signature::validate_source_signature(signature, function.parent_type.is_some())?;
@@ -275,7 +276,12 @@ pub fn archive_to_core_metadata(archive: &VbcArchive) -> Result<CoreMetadata, Te
                         Text::from("universe signature descriptor has invalid declaring module"))?,
                     None => module.name.as_str(),
                 };
-                let owns_name = if function.parent_type.is_none() {
+                let owns_name = if function.declaration_identity.as_ref()
+                    .is_some_and(|identity| identity.lexical_parent.is_some()) {
+                    // The validated typed parent supplies lexical ownership;
+                    // backend linkage names are not source declaration names.
+                    true
+                } else if function.parent_type.is_none() {
                     free_function_name_matches_declaration(name, owner, signature.name.name.as_str())
                 } else {
                     name.rsplit('.').next() == Some(signature.name.name.as_str())
@@ -1345,6 +1351,9 @@ fn register_module_metadata(
         }
     }
     for fn_desc in &module.functions {
+        if fn_desc.declaration_identity.as_ref().is_some_and(|identity| identity.lexical_parent.is_some()) {
+            continue;
+        }
         if is_stub_id(fn_desc.id.0) && fn_desc.bytecode_length == 0 {
             continue;
         }

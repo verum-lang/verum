@@ -135,7 +135,8 @@ pub const VERSION_MAJOR: u16 = 2;
 /// Minor 40 retains declaration-owned associated-family implementations.
 /// Every concrete protocol implementation retains its exact source declaration.
 /// Protocol descriptors' super-protocol edges remain edges, not implementations.
-pub const VERSION_MINOR: u16 = 42;
+// v2.43: callable source name and typed lexical-parent identity.
+pub const VERSION_MINOR: u16 = 43;
 
 /// Minor-version floors for sections whose presence readers gate on.  The
 /// register-type-hints section has been written unconditionally since minor 2,

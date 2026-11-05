@@ -202,7 +202,12 @@ impl VbcCodegen {
     /// source's root-qualified paths already identify their namespace; only
     /// an unqualified module head participates in lexical namespace lookup.
     pub(super) fn select_source_mount_path(&self, written: &str, owner: &str) -> verum_common::Text {
-        let parts = mount_path_parts(written);
+        let mut parts = mount_path_parts(written);
+        // In a mount, `self` names the current namespace. Keep this selection
+        // separate from expression paths where `self` is a value receiver.
+        if parts.first().is_some_and(|head| head == "self") {
+            parts[0] = ".".to_owned();
+        }
         if let Some(selected) = Self::resolve_module_path_head_in_scope(&parts, owner) {
             return selected.join(".").into();
         }

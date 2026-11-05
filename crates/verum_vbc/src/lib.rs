@@ -60,6 +60,7 @@ pub mod associated_types;
 pub mod array_storage;
 pub mod bytecode_remap;
 pub mod cfg_key;
+pub mod callable_identity;
 pub mod linker;
 pub mod dtype;
 pub mod entropy;

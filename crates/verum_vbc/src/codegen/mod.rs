@@ -76,6 +76,8 @@ mod cfg_selection;
 mod protocol_results;
 mod constructor_types;
 mod declaration_interface;
+mod forward_declarations;
+mod default_arguments;
 mod callable_generic_rosters;
 mod callable_owner_rosters;
 mod field_visibility;
@@ -581,7 +583,7 @@ pub enum ItemFailurePolicy {
 struct MountedSourceFiles {
     filesystem: mount_filesystem::MountFilesystem,
     modules: Vec<Module>,
-    parents: std::collections::HashMap<verum_ast::FileId, String>,
+    owners: std::collections::HashMap<verum_ast::FileId, String>,
     root: Option<(std::path::PathBuf, String)>,
     entry_id: verum_ast::FileId,
     next_id: u32,
@@ -594,7 +596,7 @@ impl MountedSourceFiles {
             let module = verum_fast_parser::Parser::new(&source).parse_module().ok()?;
             VbcCodegen::extract_source_module_name(&module).map(|name| (path, name))
         });
-        Self { filesystem: Default::default(), modules: Vec::new(), parents: Default::default(), root, entry_id, next_id: 0 }
+        Self { filesystem: Default::default(), modules: Vec::new(), owners: Default::default(), root, entry_id, next_id: 0 }
     }
 
     fn parent_for(&mut self, file: &str) -> Option<String> {
@@ -609,7 +611,14 @@ impl MountedSourceFiles {
         Some(parent)
     }
 
-    fn register(&mut self, file: &str) -> CodegenResult<verum_ast::FileId> {
+    fn retain_owner(&mut self, file: &str, module: &Module) {
+        if let Some(parent) = self.parent_for(file) {
+            let owner = VbcCodegen::source_file_module_path(&parent, std::path::Path::new(file), module);
+            self.owners.insert(module.file_id, owner);
+        }
+    }
+
+    fn register(&mut self) -> CodegenResult<verum_ast::FileId> {
         // The caller's AST already owns its ID, including a nonzero ID supplied
         // by a project source map. An imported parent must never replace it.
         if self.next_id == self.entry_id.raw() {
@@ -619,7 +628,6 @@ impl MountedSourceFiles {
         let id = verum_ast::FileId::new(self.next_id);
         self.next_id = self.next_id.checked_add(1)
             .ok_or_else(|| CodegenError::internal("too many mounted source files"))?;
-        if let Some(parent) = self.parent_for(file) { self.parents.insert(id, parent); }
         Ok(id)
     }
 }
@@ -872,6 +880,7 @@ pub struct VbcCodegen {
     /// Stack of parent function names for nested function name mangling.
     /// Used to generate unique names like `outer$inner$deeply_nested`.
     nested_function_scope: Vec<String>,
+    current_source_callable_parent: Option<FunctionId>,
 
     /// Cfg evaluator for statement-level @cfg filtering.
     /// Statements with non-matching @cfg attributes are skipped.
@@ -1131,9 +1140,9 @@ pub struct VbcCodegen {
     module_constant_bindings: verum_common::Map<(verum_common::Text, verum_common::Text), FunctionInfo>,
     /// Select module heads lexically before resolving a member in that namespace.
     source_module_owners: verum_ast::checked_const::ModuleOwners,
-    /// Loader-owned parents for the distinct files of a mounted declaration unit.
-    /// Empty for normal projects, whose unit already supplies its canonical parent.
-    mounted_file_parents: std::collections::HashMap<verum_ast::FileId, String>,
+    /// Exact parsed source owners for the distinct files of a mounted unit.
+    /// Empty for normal projects, whose unit already supplies its canonical owner.
+    mounted_file_owners: std::collections::HashMap<verum_ast::FileId, String>,
     count_module_scope: Option<verum_common::Text>,
     declared_count_bindings: verum_common::Map<(verum_common::Text, verum_common::Text), FunctionInfo>,
     /// Successfully selected imports retain their actual lexical count scope.
@@ -1383,6 +1392,9 @@ pub struct VbcCodegen {
     /// Retain the declaration type and owner until the initializer is lowered.
     pending_tls_inits: Vec<(String, verum_ast::Expr, u16, verum_ast::Type, Option<String>)>,
     collecting_declaration_interface: bool,
+    /// Callable contracts retained from actual source or imported declarations.
+    declared_callable_descriptors: Map<FunctionId, FunctionDescriptor>,
+    declared_callable_defaults: Map<FunctionId, verum_common::List<Option<verum_ast::Expr>>>,
 }
 
 /// Configuration for code generation.
@@ -2395,6 +2407,7 @@ impl VbcCodegen {
             next_type_id: 0,
             closure_counter: 0,
             nested_function_scope: Vec::new(),
+            current_source_callable_parent: None,
             cfg_evaluator,
             // FFI tables
             foreign_interfaces: Default::default(),
@@ -2444,7 +2457,7 @@ impl VbcCodegen {
             constant_initializers: verum_common::Map::new(),
             module_constant_bindings: verum_common::Map::new(),
             source_module_owners: Default::default(),
-            mounted_file_parents: Default::default(),
+            mounted_file_owners: Default::default(),
             count_module_scope: None,
             declared_count_bindings: verum_common::Map::new(),
             scoped_count_imports: verum_common::Map::new(),
@@ -2663,6 +2676,8 @@ impl VbcCodegen {
             // Pending @thread_local static initializations
             pending_tls_inits: Vec::new(),
             collecting_declaration_interface: false,
+            declared_callable_descriptors: Map::new(),
+            declared_callable_defaults: Map::new(),
             propagate_test_attr: true,
             current_return_ast_type: None,
             current_fn_lookup_name: None,
@@ -3292,12 +3307,30 @@ impl VbcCodegen {
         Some(format!("{}.{}", parent_module_name, ast_name))
     }
 
+    /// Derive the namespace of a source file without a module header.
+    /// A directory's `mod.vr` owns the directory; other files own their stem.
+    pub fn derive_submodule_path(parent: &str, path: &std::path::Path) -> String {
+        let stem = path.file_stem().and_then(|name| name.to_str()).unwrap_or("");
+        if stem == "mod" { parent.to_owned() } else { format!("{parent}.{stem}") }
+    }
+
+    /// Select the actual source namespace independently of archive grouping.
+    /// An explicit header takes precedence over the file-derived namespace.
+    pub fn source_file_module_path(
+        parent: &str, path: &std::path::Path, module: &Module,
+    ) -> String {
+        Self::resolve_full_module_path(module, parent)
+            .unwrap_or_else(|| Self::derive_submodule_path(parent, path))
+    }
+
     fn source_file_owner(&self, module: &Module, fallback: &str) -> Option<String> {
-        let parent = self.mounted_file_parents.get(&module.file_id).map(String::as_str).unwrap_or(fallback);
-        Self::resolve_full_module_path(module, parent).or_else(|| {
+        if let Some(owner) = self.mounted_file_owners.get(&module.file_id) {
+            return Some(owner.clone());
+        }
+        Self::resolve_full_module_path(module, fallback).or_else(|| {
             // An explicit source parent owns headerless files too. Only the
             // anonymous default compilation unit has no namespace to publish.
-            (!parent.is_empty() && parent != "main").then(|| parent.to_owned())
+            (!fallback.is_empty() && fallback != "main").then(|| fallback.to_owned())
         })
     }
 
@@ -3875,7 +3908,7 @@ impl VbcCodegen {
             // compilation. Its names belong to the protocol's lexical source,
             // independently of the receiver or the file draining this queue.
             self.with_deferred_method_scope(&method, |codegen| {
-                codegen.register_impl_function(default_func, type_name, &method.implementation.declaration.ordered_generics)
+                codegen.register_impl_function(default_func, type_name, &method.implementation.declaration.ordered_generics).map(|_| ())
             }).map_err(|error| error.with_context(format!("in inherited signature {full_method_name}")))?;
             self.pending_default_methods.push(method);
         }
@@ -6213,7 +6246,7 @@ impl VbcCodegen {
         // descriptor (with the right name + parent_type + arity)
         // for any id that was registered in `ctx.functions` but
         // hasn't been pushed to `self.functions`.
-        self.emit_missing_stub_descriptors();
+        self.emit_missing_stub_descriptors()?;
         self.coalesce_runtime_scalar_carriers();
         self.check_source_declaration_error()?;
         // Verify type-descriptor self-consistency before emitting bytecode.
@@ -8947,20 +8980,23 @@ impl VbcCodegen {
         let parent = self.config.module_name.clone();
         let mut files = Vec::new();
         for module in &imported.modules {
-            let source_parent = imported.parents.get(&module.file_id).map(String::as_str).unwrap_or(&parent);
-            if self.selected_source_module(module, source_parent)? { files.push((parent.as_str(), module)); }
+            let selected = match imported.owners.get(&module.file_id) {
+                Some(owner) => self.selected_source_owner(module, owner)?,
+                None => self.selected_source_module(module, &parent)?,
+            };
+            if selected { files.push((parent.as_str(), module)); }
         }
         let graph: Vec<_> = std::iter::once((parent.as_str(), module))
             .chain(files.iter().copied()).collect();
         let collect = std::time::Instant::now();
-        let previous = std::mem::replace(&mut self.mounted_file_parents, imported.parents);
+        let previous = std::mem::replace(&mut self.mounted_file_owners, imported.owners);
         // A mounted source can refer back to the entry file. Publish that
         // source's real declarations before resolving any imported signatures,
         // but leave its registration/body pass to the caller exactly once.
         let result = self.prepare_owned_unit_declarations(&graph)
             .and_then(|()| self.collect_prepared_owned_declarations(&files));
         self.config.module_name = parent;
-        self.mounted_file_parents = previous;
+        self.mounted_file_owners = previous;
         mount_cost::add_collect(collect.elapsed());
         mount_cost::report(source_path, t0.elapsed());
         result
@@ -9021,8 +9057,9 @@ impl VbcCodegen {
             // The dependency files carry the targets. The inline module owns
             // the public export edges that make those targets visible here.
             let parent_scope = imported.parent_for(&candidate).unwrap_or_else(|| parent_path.join("."));
-            let parent = Self::resolve_full_module_path(&parent_module, &parent_scope)
-                .unwrap_or(parent_scope);
+            let parent = Self::source_file_module_path(
+                &parent_scope, std::path::Path::new(&candidate), &parent_module,
+            );
             let owner = crate::module::qualify_module_name(&parent, inline_name);
             self.source_module_owners.declare(&owner);
             self.collect_callable_exports(&owner, inline_items);
@@ -9077,8 +9114,11 @@ impl VbcCodegen {
         imported: &mut MountedSourceFiles,
     ) -> CodegenResult<()> {
 
-        let source_parent = imported.parents.get(&module.file_id).map(String::as_str).unwrap_or(&self.config.module_name);
-        if !self.selected_source_module(module, source_parent)? { return Ok(()); }
+        let selected = match imported.owners.get(&module.file_id) {
+            Some(owner) => self.selected_source_owner(module, owner)?,
+            None => self.selected_source_module(module, &self.config.module_name)?,
+        };
+        if !selected { return Ok(()); }
 
         // Collect all files to parse (avoid borrow issues with recursive calls)
         let mut to_parse: Vec<String> = Vec::new();
@@ -9188,12 +9228,13 @@ impl VbcCodegen {
                 CodegenError::internal(format!("reading mounted file {file_path}: {error}"))
             })?;
             let t_parse = std::time::Instant::now();
-            let file_id = imported.register(&file_path)?;
+            let file_id = imported.register()?;
             let parsed = verum_fast_parser::FastParser::new().parse_module_str(&source, file_id);
             mount_cost::add_parse(source.len(), t_parse.elapsed());
             let mut dependency = parsed.map_err(|error| {
                 CodegenError::internal(format!("parsing mounted file {file_path}: {error:?}"))
             })?;
+            imported.retain_owner(&file_path, &dependency);
             self.resolve_mounts_recursive(
                 &dependency, &file_path, core_root, resolved_files, imported,
             )?;
@@ -9632,6 +9673,8 @@ impl VbcCodegen {
         self.source_context_declarations.clear();
         self.source_generic_rosters.clear();
         self.source_callable_rosters.clear();
+        self.declared_callable_descriptors.clear();
+        self.declared_callable_defaults.clear();
         self.pending_implementation_attachments.clear();
         self.source_declaration_slots.clear();
         self.archive_data_sources.clear();
@@ -9640,6 +9683,7 @@ impl VbcCodegen {
         self.next_type_id = 0;
         self.closure_counter = 0;
         self.nested_function_scope.clear();
+        self.current_source_callable_parent = None;
         // Clear FFI tables
         self.ffi_libraries.clear();
         self.ffi_symbols.clear();
@@ -9836,127 +9880,10 @@ impl VbcCodegen {
         // inherent methods.
     }
 
-    /// Registers runtime I/O and networking functions as builtins.
-    /// These emit Call instructions that the LLVM lowering intercepts.
-    pub fn register_runtime_io_functions(&mut self) {
-        use crate::codegen::context::FunctionInfo;
-        // (name, param_count)
-        //
-        // **CLASS-1 FUNDAMENTAL FIX 2026-05-29**: add Text.from_utf8_unchecked
-        // and Text.from_utf8_lossy as pre-registered stubs. Both are intercepted
-        // at runtime by `text_static_runtime.rs::try_intercept_text_static_runtime`
-        // (lines ~240 for from_utf8_lossy, ~250 for from_utf8_unchecked), so the
-        // actual body never runs — the intercept fires by function-name match.
-        //
-        // Pre-fix: in topological compilation order, consumers in `core.base`
-        // (Ulid.to_text, Formatter.write_int, format=semver.format,
-        // write_int_stderr, slice_text helpers) and `core.base.env`
-        // (arg, args_get, get_arg, safe_getenv, Vars.next) compile BEFORE
-        // `core.text` registers the real Text.from_utf8_unchecked /
-        // from_utf8_lossy. Their `compile_call` lookup of
-        // `Text.from_utf8_unchecked` fails → `UndefinedFunction` propagates
-        // → the consumer's whole body lenient-stubs to panic. 6+5 = 11
-        // panic-stubs in runtime.vbca, every test exercising those bodies
-        // panics with `[lenient] X compiled to panic-stub: undefined
-        // function: Text.from_utf8_*`.
-        //
-        // The pre-registration here puts stub FunctionInfos in every module's
-        // ctx.functions at codegen-start, so consumer lookups succeed → emit
-        // clean `Call(stub_id, args)` → at runtime, dispatcher reads the
-        // function's name and routes through the text_static_runtime intercept.
-        //
-        // The intercept guarantees correct behavior because:
-        //   - from_utf8_unchecked is a `public unsafe fn` whose body just
-        //     copies bytes verbatim into an allocated buffer (no validation);
-        //     the intercept performs an equivalent byte-copy via Rust's
-        //     `String::from_utf8_lossy` + allocator.
-        //   - from_utf8_lossy validates UTF-8 and replaces invalid sequences
-        //     with U+FFFD; the intercept does exactly this via the canonical
-        //     `String::from_utf8_lossy`.
-        //
-        // Architectural rule pinned: every Text static factory that has a
-        // runtime intercept MUST be in this pre-registered list so its
-        // qualified name resolves at every module's codegen-start regardless
-        // of topological order. Future text_static_runtime intercepts should
-        // be added here AND to that file's match table simultaneously.
-        // Regression-pinned by every `@ignore` flip in the un-ignoring sweep
-        // after this fix lands.
-        let functions: &[(&str, usize)] = &[
-            ("file_write", 2),
-            ("file_read", 1),
-            ("file_append", 2),
-            ("file_delete", 1),
-            ("file_exists", 1),
-            ("file_read_all", 1),
-            ("file_write_all", 2),
-            ("file_open", 2),
-            ("file_close", 1),
-            ("tcp_connect", 2),
-            ("tcp_listen", 2),
-            ("tcp_listen_v2", 4),
-            ("tcp_local_port", 1),
-            ("tcp_accept", 1),
-            ("tcp_send", 2),
-            ("tcp_recv", 2),
-            ("tcp_close", 1),
-            ("udp_bind", 1),
-            ("udp_send", 3),
-            ("udp_recv", 2),
-            ("udp_close", 1),
-            // Text static factories with runtime intercepts (CLASS-1 fix).
-            ("Text.from_utf8_unchecked", 1),
-            ("Text.from_utf8_lossy", 1),
-        ];
-
-        for (name, param_count) in functions {
-            // Skip if already registered (e.g., from core/ module compilation)
-            if self.ctx.lookup_function(name).is_some() {
-                continue;
-            }
-            let func_id = FunctionId(self.next_func_id);
-            self.next_func_id = self.next_func_id.saturating_add(1);
-
-            // Add stub function with empty body to the function list so it
-            // appears in the VBC module with the correct name. The LLVM lowering
-            // intercepts calls by name and routes to runtime functions.
-            let name_string_id = self.ctx.intern_string_raw(name);
-            let stub_descriptor = FunctionDescriptor {
-                id: func_id,
-                name: StringId(name_string_id),
-                ..Default::default()
-            };
-            self.push_function_dedup(VbcFunction::new(stub_descriptor, vec![]));
-
-            let info = FunctionInfo {
-                has_source_body: false,
-                foreign_declaration: None,
-                callable_signature: None,
-                type_param_ids: Vec::new(),
-                explicit_type_param_ids: Vec::new(),
-                id: func_id,
-                param_count: *param_count,
-                param_names: vec![],
-                param_type_names: vec![],
-                is_async: false,
-                is_generator: false,
-                contexts: vec![],
-                return_type: None,
-                yield_type: None,
-                intrinsic_name: None,
-                variant_tag: None,
-                parent_type_name: None,
-                variant_payload_types: None,
-                is_partial_pattern: false,
-                takes_self_mut_ref: false,
-                return_type_name: None,
-                return_type_inner: None,
-                is_const: false,
-                is_transparent_wrapper: false,
-                param_closure_return_type_names: Vec::new(),
-            };
-            self.ctx.register_function(name.to_string(), info);
-        }
-    }
+    /// Runtime callables are declared by source or imported archive metadata.
+    /// Name/arity tables cannot establish an ABI. Keep this entry point for
+    /// callers that initialize codegen before loading their declarations.
+    pub fn register_runtime_io_functions(&mut self) {}
 
     /// Collects function declarations for forward references.
     /// Attach a protocol impl whose target type this module does not
@@ -10068,11 +9995,11 @@ impl VbcCodegen {
                     // This is a single-function FFI declaration
                     self.register_single_ffi_function(func)?;
                 } else {
-                    self.register_function(func)?;
+                    let function_id = self.register_function(func)?;
                     // Recursively collect nested declarations from function body
                     if let verum_common::Maybe::Some(ref body) = func.body {
                         let func_name = func.name.name.to_string();
-                        self.collect_nested_declarations(body, &func_name)?;
+                        self.collect_nested_declarations(body, &func_name, function_id)?;
                     }
                 }
             }
@@ -10151,6 +10078,7 @@ impl VbcCodegen {
                             // Register function by qualified name (e.g., "List::new") for static calls
                             // and method resolution. We do NOT register by simple name to avoid
                             // collisions with standalone functions of the same name.
+                            let function_id;
                             if let Some(ref ty_name) = type_name {
                                 // Self belongs to the implementation, before any
                                 // method-local binders. Reuse its exact witness for
@@ -10163,7 +10091,7 @@ impl VbcCodegen {
                                     let scope = self.declared_impl_generic_scope(&impl_decl.kind, &impl_generics);
                                     registered_receiver = Some(self.resolve_impl_receiver(target, &scope, &impl_generics)?);
                                 }
-                                self.register_declared_impl_function(
+                                function_id = self.register_declared_impl_function(
                                     func, registered_receiver.as_ref().expect("receiver resolved above"),
                                     ty_name, &impl_generics,
                                 )?;
@@ -10189,13 +10117,13 @@ impl VbcCodegen {
                             } else {
                                 // Fallback: register by simple name if type extraction failed
                                 // This shouldn't happen often now that we handle more type kinds
-                                self.register_function(func)?;
+                                function_id = self.register_function(func)?;
                             }
 
                             // Recursively collect nested declarations from impl function body
                             if let verum_common::Maybe::Some(ref body) = func.body {
                                 let func_name = func.name.name.to_string();
-                                self.collect_nested_declarations(body, &func_name)?;
+                                self.collect_nested_declarations(body, &func_name, function_id)?;
                             }
                         }
                         verum_ast::decl::ImplItemKind::Const { name, value, ty } => {
@@ -11241,58 +11169,7 @@ impl VbcCodegen {
     ///
     /// For nested functions, the name is mangled with the parent scope names
     /// using `$` as a separator (e.g., `outer$inner$deeply_nested`).
-    /// BAKED-DEFAULT-ARG-1: intern a parameter's declared default into
-    /// the module constants table when it is a LITERAL (the stdlib
-    /// shape — `order: Int = 5`), so the VBC `ParamDescriptor.default`
-    /// channel (serialized since day one, never populated) carries the
-    /// fact across the archive boundary. Non-literal defaults return
-    /// None — the callee-side arity relaxation still applies, only the
-    /// cross-archive value injection is unavailable for them.
-    fn param_default_const_id(
-        &mut self,
-        param: &verum_ast::decl::FunctionParam,
-    ) -> Option<crate::ConstId> {
-        let verum_ast::decl::FunctionParamKind::Regular {
-            default_value: verum_common::Maybe::Some(expr),
-            ..
-        } = &param.kind
-        else {
-            return None;
-        };
-        self.literal_expr_const_id(expr)
-    }
-
-    /// Literal-expression → ConstId (Int/Float/Text/Bool + negated
-    /// numeric forms). Bool maps onto the Int table (0/1) — the VBC
-    /// constants table has no Bool entry and the call-site consumer
-    /// reconstructs by the PARAM's declared type, not the const kind.
-    fn literal_expr_const_id(&mut self, expr: &verum_ast::Expr) -> Option<crate::ConstId> {
-        use verum_ast::expr::ExprKind;
-        use verum_ast::literal::LiteralKind;
-        match &expr.kind {
-            ExprKind::Literal(lit) => match &lit.kind {
-                LiteralKind::Int(i) => Some(self.ctx.add_const_int(i.value as i64)),
-                LiteralKind::Float(f) => Some(self.ctx.add_const_float(f.value)),
-                LiteralKind::Bool(b) => Some(self.ctx.add_const_int(*b as i64)),
-                LiteralKind::Text(s) => Some(self.ctx.add_const_string(s.as_str())),
-                _ => None,
-            },
-            ExprKind::Unary {
-                op: verum_ast::UnOp::Neg,
-                expr: inner,
-            } => match &inner.kind {
-                ExprKind::Literal(lit) => match &lit.kind {
-                    LiteralKind::Int(i) => Some(self.ctx.add_const_int(-(i.value as i64))),
-                    LiteralKind::Float(f) => Some(self.ctx.add_const_float(-f.value)),
-                    _ => None,
-                },
-                _ => None,
-            },
-            _ => None,
-        }
-    }
-
-    fn register_function(&mut self, func: &FunctionDecl) -> CodegenResult<()> {
+    fn register_function(&mut self, func: &FunctionDecl) -> CodegenResult<FunctionId> {
         let shadowed = self.callable_value_scope(func, None, &[])?;
         let outer = std::mem::replace(&mut self.current_source_substitution, shadowed);
         let result = self.register_function_in_source_scope(func);
@@ -11300,7 +11177,7 @@ impl VbcCodegen {
         result
     }
 
-    fn register_function_in_source_scope(&mut self, func: &FunctionDecl) -> CodegenResult<()> {
+    fn register_function_in_source_scope(&mut self, func: &FunctionDecl) -> CodegenResult<FunctionId> {
         let source_signature = verum_ast::source_signature::source_signature(func, false)
             .map_err(|message| CodegenError::new(CodegenErrorKind::InvalidSourceSignature(message.to_string())))?;
         let base_name = func.name.name.to_string();
@@ -11748,7 +11625,7 @@ impl VbcCodegen {
             }
         }
 
-        Ok(())
+        Ok(info.id)
     }
 
     /// Registers an active pattern declaration as a callable function.
@@ -14003,7 +13880,7 @@ impl VbcCodegen {
         func: &FunctionDecl,
         type_name: &str,
         impl_generics: &[String],
-    ) -> CodegenResult<()> {
+    ) -> CodegenResult<FunctionId> {
         let scoped = self.callable_value_scope(func, Some(type_name), impl_generics)?;
         let outer = std::mem::replace(&mut self.current_source_substitution, scoped);
         let result = self.register_impl_function_in_source_scope(func, type_name, impl_generics);
@@ -14016,7 +13893,7 @@ impl VbcCodegen {
         func: &FunctionDecl,
         type_name: &str,
         impl_generics: &[String],
-    ) -> CodegenResult<()> {
+    ) -> CodegenResult<FunctionId> {
         let source_signature = verum_ast::source_signature::source_signature(func, true)
             .map_err(|message| CodegenError::new(CodegenErrorKind::InvalidSourceSignature(message.to_string())))?;
         let self_type_name = self.declared_impl_type_name(type_name);
@@ -14223,7 +14100,7 @@ impl VbcCodegen {
         }
         self.ctx.register_function(registration_key, info);
 
-        Ok(())
+        Ok(id)
     }
 
     /// Collects nested declarations from a function body.
@@ -14238,7 +14115,9 @@ impl VbcCodegen {
         &mut self,
         body: &FunctionBody,
         parent_name: &str,
+        parent_id: FunctionId,
     ) -> CodegenResult<()> {
+        let previous_parent = self.current_source_callable_parent.replace(parent_id);
         // Push the parent function name onto the scope stack for name mangling
         self.nested_function_scope.push(parent_name.to_string());
 
@@ -14247,6 +14126,7 @@ impl VbcCodegen {
             FunctionBody::Expr(_) => Ok(()),
         };
         self.nested_function_scope.pop();
+        self.current_source_callable_parent = previous_parent;
         result
     }
 
@@ -19499,7 +19379,9 @@ impl VbcCodegen {
         let shadowed = self.callable_value_scope(func, impl_type_name.map(String::as_str), &self.ctx.generic_type_params_ordered)?;
         let outer_bounds = std::mem::take(&mut self.current_protocol_bounds);
         let outer_substitution = std::mem::replace(&mut self.current_source_substitution, shadowed);
+        let outer_callable = self.current_source_callable_parent;
         let result = self.compile_function_body(func, impl_type_name);
+        self.current_source_callable_parent = outer_callable;
         self.current_source_substitution = outer_substitution;
         self.current_protocol_bounds = outer_bounds;
         result
@@ -19512,6 +19394,7 @@ impl VbcCodegen {
     ) -> CodegenResult<()> {
         let source_signature = verum_ast::source_signature::source_signature(func, impl_type_name.is_some())
             .map_err(|message| CodegenError::new(CodegenErrorKind::InvalidSourceSignature(message.to_string())))?;
+        let lexical_parent = self.current_source_callable_parent;
         let base_name = func.name.name.to_string();
 
         // Build the lookup name - use qualified name for impl functions
@@ -19737,6 +19620,7 @@ impl VbcCodegen {
             .collect();
 
         // Begin function compilation
+        self.current_source_callable_parent = Some(func_info.id);
         self.ctx.begin_function(
             &lookup_name,
             &params_with_mutability,
@@ -20576,8 +20460,20 @@ impl VbcCodegen {
         let mut descriptor = self.new_fn_descriptor(name_id);
         self.trace_id_adoption(func_info.id.0, &descriptor_name);
         descriptor.id = func_info.id;
+        descriptor.declaration_identity = self.declared_callable_descriptors.get(&func_info.id)
+            .and_then(|declaration| declaration.declaration_identity.clone());
+        if descriptor.declaration_identity.is_none() {
+            // Context-provided methods enter through their own registration
+            // path; this actual FunctionDecl supplies their source identity.
+            descriptor.declaration_identity = Some(crate::module::CallableDeclarationIdentity {
+                source_name: StringId(self.intern_string(func.name.name.as_str())),
+                lexical_parent,
+            });
+        }
         descriptor.has_source_body = func.body.is_some();
-        descriptor.source_signature = source_signature;
+        descriptor.source_signature = self.retain_callable_owner_signature(
+            func, source_signature, impl_type_name.map(String::as_str), &receiver_generics,
+        )?;
         if impl_type_name.is_none() {
             descriptor.visibility = if matches!(func.visibility, verum_ast::Visibility::Public) {
                 crate::types::Visibility::Public
@@ -20656,7 +20552,6 @@ impl VbcCodegen {
         // failed at user-code typecheck with `expected 'Heap',
         // found 'Int'`.
         let (method_generic_param_map, method_shadow_band) = (receiver_generics, caller_shadows);
-        let shadowed_impl_generics: Vec<(String, u16)> = Vec::new();
         descriptor.explicit_type_param_ids = Self::explicit_generic_param_ids(
             func, &method_generic_param_map, &method_shadow_band,
         );
@@ -20672,159 +20567,9 @@ impl VbcCodegen {
             m
         };
 
-        // GENERICNAME-CARRY (T0701): serialise the resolved pid→name map
-        // into `descriptor.type_params` — previously left EMPTY, so
-        // `archive_metadata::convert_generic_params` published no
-        // declared generic names and the typechecker's carried-verbatim
-        // signature strings ("F", "B") parsed as rigid `Named` instead
-        // of interning to scheme TypeVars.  FULL map in pid order (impl
-        // level first, then method level, ids = pids) — required by
-        // `mono::Substitution::from_function`, which binds by the
-        // ENTRIES' ids whenever `type_params.len() == args.len()`; a
-        // method-level-only fill would map `args[0]` onto the first
-        // METHOD generic and skip the impl slot.
-        {
-            // Include the SHADOWED impl slots (layered-map): the map
-            // keeps only the winner per name, but the descriptor's
-            // pid-vector must stay dense — a hole at the displaced
-            // impl pid would desync mono's by-entry binding.
-            let mut pid_ordered: Vec<(String, u16)> = method_generic_param_map
-                .iter()
-                .map(|(n, pid)| (n.clone(), *pid))
-                .chain(shadowed_impl_generics.iter().cloned())
-                // VARIANT C: band entries are published AFTER the dense
-                // vector (sort puts 0x8000+ last) so the typechecker's
-                // scheme birth sees the method generic's DECLARED name
-                // and the `__generic_{0x8000+k}` placeholders in bound
-                // strings resolve; dense consumers (mono by-entry
-                // binding, positional carries) filter the band range.
-                .chain(method_shadow_band.iter().map(|(n, pid)| (n.clone(), *pid)))
-                .collect();
-            pid_ordered.sort_unstable_by_key(|(_, pid)| *pid);
-            // FN-BOUND-CARRY (T0701): serialise each generic's
-            // Function-typed bound (`F: fn(I.Item) -> B`) into
-            // `type_bounds`.  An impl-level existential (`B` in
-            // `implement<I, B, F: fn(I.Item) -> B>` — in the impl list
-            // but NOT in the for-type args) is determined ONLY through
-            // a sibling's fn-bound; without this carry the reader's
-            // scheme leaves it a forever-free var (`m.next()` judged
-            // `Some(_)` E404 while the receiver was fully concrete).
-            // Method-level (incl. band) bounds render in the METHOD
-            // scope; impl-level bounds render in the DENSE scope —
-            // same layering as the signature rendering above.
-            let fn_bound_for = |gname: &str,
-                                is_method_level: bool,
-                                name_is_banded: bool|
-             -> CodegenResult<Option<TypeRef>> {
-                use verum_ast::ty::{GenericParamKind, TypeBoundKind, TypeKind};
-                let probe = |gps: &verum_common::List<verum_ast::ty::GenericParam>|
-                 -> Option<verum_ast::ty::Type> {
-                    for gp in gps.iter() {
-                        let (n, bounds) = match &gp.kind {
-                            GenericParamKind::Type { name, bounds, .. } => {
-                                (name.name.as_str(), bounds)
-                            }
-                            GenericParamKind::HigherKinded { name, bounds, .. } => {
-                                (name.name.as_str(), bounds)
-                            }
-                            _ => continue,
-                        };
-                        if n != gname {
-                            continue;
-                        }
-                        for b in bounds.iter() {
-                            let bound_ty = match &b.kind {
-                                TypeBoundKind::Equality(ty) => ty,
-                                TypeBoundKind::GenericProtocol(ty) => ty,
-                                _ => continue,
-                            };
-                            if matches!(&bound_ty.kind, TypeKind::Function { .. }) {
-                                return Some(bound_ty.clone());
-                            }
-                        }
-                    }
-                    None
-                };
-                let ast_bound = if is_method_level {
-                    probe(&func.generics)
-                } else if name_is_banded {
-                    // T0701 (inspect leg): the dense slot of a
-                    // COLLIDING name must never read the method's
-                    // bound — with no impl-scope generics in reach
-                    // (materialised protocol default methods) it
-                    // carries NO bound rather than the wrong one.
-                    self.current_impl_ast_generics
-                        .as_ref()
-                        .and_then(|gps| probe(gps))
-                } else {
-                    self.current_impl_ast_generics
-                        .as_ref()
-                        .and_then(|gps| probe(gps))
-                        .or_else(|| probe(&func.generics))
-                };
-                ast_bound.map(|ty| {
-                    let map = if is_method_level {
-                        &render_generic_param_map
-                    } else {
-                        &method_generic_param_map
-                    };
-                    self.resolve_signature_type_ref(&ty, map)
-                }).transpose()
-            };
-            let fn_own_names: std::collections::HashSet<String> = func
-                .generics
-                .iter()
-                .filter_map(|gp| match &gp.kind {
-                    verum_ast::ty::GenericParamKind::Type { name, .. }
-                    | verum_ast::ty::GenericParamKind::HigherKinded { name, .. } => {
-                        Some(name.name.to_string())
-                    }
-                    _ => None,
-                })
-                .collect();
-            // Two phases: bound rendering borrows `self` immutably
-            // (resolve_field_type_ref), interning needs `&mut self`.
-            // T0701 (inspect leg): a DENSE pid whose name has a shadow-band
-            // twin is the IMPL-level param BY CONSTRUCTION — the band exists
-            // exactly because the method redeclared the name.  The bare
-            // `fn_own_names.contains` test marked impl-F#1 method-level too,
-            // so BOTH F slots serialised the METHOD's `fn(..) -> B` bound;
-            // the extraction rule then pulled B from the RECEIVER'S stored
-            // impl-F value (`inspect`'s `fn(&Item) -> Unit` closure) and
-            // every `.inspect(..).map(|x| ..)` failed "expected Unit".
-            let banded_names: std::collections::HashSet<&str> = method_shadow_band
-                .iter()
-                .map(|(n, _)| n.as_str())
-                .collect();
-            let rendered: Vec<(String, u16, Option<TypeRef>)> = pid_ordered
-                .into_iter()
-                .map(|(gname, pid)| {
-                    let name_is_banded = banded_names.contains(gname.as_str());
-                    let is_method_level = pid >= 0x8000
-                        || (fn_own_names.contains(&gname) && !name_is_banded);
-                    let tb = fn_bound_for(&gname, is_method_level, name_is_banded)?;
-                    Ok((gname, pid, tb))
-                })
-                .collect::<CodegenResult<_>>()?;
-            for (gname, pid, tb) in rendered {
-                let mut type_bounds: smallvec::SmallVec<[TypeRef; 1]> =
-                    smallvec::SmallVec::new();
-                if let Some(tb) = tb {
-                    type_bounds.push(tb);
-                }
-                let name_id = StringId(self.intern_string(&gname));
-                descriptor
-                    .type_params
-                    .push(crate::types::TypeParamDescriptor {
-                        name: name_id,
-                        id: crate::types::TypeParamId(pid),
-                        bounds: smallvec::SmallVec::new(),
-                        default: None,
-                        variance: crate::types::Variance::Invariant,
-                        type_bounds,
-                    });
-            }
-        }
+        descriptor.type_params = self.declared_callable_type_parameters(
+            func, &method_generic_param_map, &method_shadow_band,
+        )?;
 
         // Populate parameter descriptors for proper method dispatch matching.
         // This enables the interpreter to match methods by parameter count.
@@ -20956,7 +20701,7 @@ impl VbcCodegen {
             let param_name_id = StringId(self.intern_string(param_name));
             // BAKED-DEFAULT-ARG-1: carry literal defaults through the
             // (previously dormant) descriptor channel.
-            let default = self.param_default_const_id(param);
+            let default = self.param_default_const_id(param, &type_ref)?;
             // Preserve the source receiver even when its implementation target
             // or ABI carrier cannot distinguish a copy from an exclusive borrow.
             let type_name = match &param.kind {
@@ -21365,7 +21110,7 @@ impl VbcCodegen {
             let param_name_id = StringId(self.intern_string(param_name));
             // BAKED-DEFAULT-ARG-1: carry literal defaults (see the
             // primary compile_function site).
-            let default = self.param_default_const_id(param);
+            let default = self.param_default_const_id(param, &type_ref)?;
             descriptor.params.push(ParamDescriptor {
                 name: param_name_id,
                 type_ref,
@@ -24108,8 +23853,8 @@ impl VbcCodegen {
     /// the actual implementation is intercepted at the call boundary
     /// (`try_intercept_shell_runtime` / `file_runtime` / `env_runtime`
     /// /… in dispatch_table).  No new module dependencies.
-    fn emit_missing_stub_descriptors(&mut self) {
-        self.emit_missing_stub_descriptors_with_callm(true);
+    fn emit_missing_stub_descriptors(&mut self) -> CodegenResult<()> {
+        self.emit_missing_stub_descriptors_with_callm(true)
     }
 
     /// **Task #47 stage-3-only stub descriptor emission.**
@@ -24310,10 +24055,11 @@ impl VbcCodegen {
         // guarantee here is that every referenced stub id has a
         // canonical recorded name.
         for (&id, (name, _info)) in id_to_entry.iter() {
-            self.ctx
-                .stage3_stub_names
-                .entry(id)
-                .or_insert_with(|| name.clone());
+            if let Some(declared) = self.declared_callable_name(FunctionId(id)) {
+                self.ctx.stage3_stub_names.insert(id, declared.to_string());
+            } else {
+                self.ctx.stage3_stub_names.entry(id).or_insert_with(|| name.clone());
+            }
         }
     }
 
@@ -24365,7 +24111,7 @@ impl VbcCodegen {
         crate::codegen::context::canonical_name_better(new, cur)
     }
 
-    fn emit_missing_stub_descriptors_with_callm(&mut self, include_callm: bool) {
+    fn emit_missing_stub_descriptors_with_callm(&mut self, include_callm: bool) -> CodegenResult<()> {
         use std::collections::{HashMap, HashSet};
         // 1. Collect referenced FunctionIds from emitted bytecode.
         let mut referenced: HashSet<u32> = HashSet::new();
@@ -24537,121 +24283,9 @@ impl VbcCodegen {
             // path and resolve to the unique `<TypeName>.as_path`
             // stub instead of bottoming out as
             // "method 'as_path' not found".
-            let name_id = StringId(self.ctx.intern_string_raw(&name));
+            let descriptor = self.referenced_forward_descriptor(info.id, &name)?;
             stub_synthesised.insert(id);
-            let mut descriptor = self.new_fn_descriptor(name_id);
-            descriptor.id = crate::module::FunctionId(id);
-            descriptor.register_count = 1;
-            descriptor.locals_count = info.param_count as u16;
-            // RETNAME-CARRY-1 — stubs carry the declared return-type name too;
-            // user-side bindings typed from a pre-overlay stub lookup must not
-            // degrade to the lossy TypeRef re-derivation.
-            descriptor.return_type_name = info
-                .return_type_name
-                .as_ref()
-                .map(|n| StringId(self.ctx.intern_string_raw(n)));
-            // BAKED-DEFAULT-ARG-1: bodyless decls (`@intrinsic` fns
-            // like `memory_fence(order: Int = 5);`) reach the archive
-            // ONLY as stubs — carry their registered literal defaults
-            // into the descriptor's const channel.
-            let stub_default_ids: Vec<Option<crate::ConstId>> = {
-                let simple = name
-                    .rfind('.')
-                    .map(|p| name[p + 1..].to_string())
-                    .unwrap_or_else(|| name.clone());
-                let defaults = self
-                    .ctx
-                    .function_param_defaults
-                    .get(&name)
-                    .or_else(|| self.ctx.function_param_defaults.get(&simple))
-                    .cloned();
-                match defaults {
-                    Some(v) => v
-                        .iter()
-                        .map(|o| o.as_ref().and_then(|e| self.literal_expr_const_id(e)))
-                        .collect(),
-                    None => Vec::new(),
-                }
-            };
-            // Populate ParamDescriptors — placeholder names + UNIT
-            // type refs.  Arity is the only field the dispatch path
-            // checks for stub descriptors; the body is `RetV` so
-            // type refs aren't consulted at runtime.
-            for (i, pname) in info.param_names.iter().enumerate() {
-                let pname_to_use = if pname.is_empty() {
-                    format!("_arg{}", i)
-                } else {
-                    pname.clone()
-                };
-                let pname_id = StringId(self.ctx.intern_string_raw(&pname_to_use));
-                descriptor.params.push(crate::module::ParamDescriptor {
-                    name: pname_id,
-                    type_ref: TypeRef::Concrete(TypeId::UNIT),
-                    is_mut: false,
-                    default: stub_default_ids.get(i).copied().flatten(),
-                    type_name: StringId::EMPTY,
-                });
-            }
-            // Pad to declared param_count when fewer names were
-            // available (extern FFI declarations sometimes come in
-            // with empty `param_names`).
-            while descriptor.params.len() < info.param_count {
-                let i = descriptor.params.len();
-                let pname_id = StringId(self.ctx.intern_string_raw(&format!("_arg{}", i)));
-                descriptor.params.push(crate::module::ParamDescriptor {
-                    name: pname_id,
-                    type_ref: TypeRef::Concrete(TypeId::UNIT),
-                    is_mut: false,
-                    default: stub_default_ids.get(i).copied().flatten(),
-                    type_name: StringId::EMPTY,
-                });
-            }
-            // PropertySet — only ASYNC matters for stubs; the rest
-            // are runtime-effect tags consulted at AOT codegen, not
-            // by the interpreter's intercept layer.
-            if info.is_async {
-                descriptor.properties |= crate::types::PropertySet::ASYNC;
-            }
-            descriptor.is_generator = info.is_generator;
-            // Copy parent_type when present so method-dispatch
-            // paths that key on `descriptor.parent_type` still work
-            // through the stub (e.g.
-            // `verify_global_type_table_consistency` reports).
-            if let Some(parent_name) = info.parent_type_name.as_deref() {
-                if let Some(&parent_tid) = self.type_name_to_id.get(parent_name) {
-                    descriptor.parent_type = Some(parent_tid);
-                }
-            }
-            // #87/#97 — propagate const-storage marker and inline-
-            // constant marker.  Stubs emitted from a `public const X`
-            // declaration must carry both: `is_const` so the archive-
-            // driven typechecker treats the archive entry as a value,
-            // and `intrinsic_name = Some("__const_val_<N>")` so user-
-            // side codegen inlines the literal at every reference
-            // site instead of emitting a Call to the empty `RetV`
-            // body.  Without these the stub is indistinguishable
-            // from a zero-arg fn whose body trivially returns Unit.
-            descriptor.is_const = info.is_const;
-            if let Some(ref iname) = info.intrinsic_name {
-                descriptor.intrinsic_name =
-                    Some(StringId(self.ctx.intern_string_raw(iname)));
-            }
-            // Stubs synthesised from a const get the const's actual
-            // return type (typically `Int` / `Text`) so the typechecker's
-            // archive-side metadata extraction sees a meaningful type
-            // rather than `Unit` (the declared return for a body-less
-            // RetV stub).  Without this, every cross-module `let x =
-            // SSO_CAPACITY` would type x as Unit.
-            if info.is_const {
-                if let Some(ref rt) = info.return_type {
-                    descriptor.return_type = rt.clone();
-                }
-            }
-            let vbc_func = crate::module::VbcFunction::new(
-                descriptor,
-                vec![Instruction::RetV],
-            );
-            self.functions.push(vbc_func);
+            self.functions.push(VbcFunction::new(descriptor, Vec::new()));
         }
         // CallM stubs are gated — stdlib precompile path
         // (`finalize_module_from_state`) passes `include_callm=false`
@@ -24660,7 +24294,7 @@ impl VbcCodegen {
         // its scale is per-cog (not per-stdlib-module) and the
         // intercept layer needs the descriptor metadata for dispatch.
         if !include_callm {
-            return;
+            return Ok(());
         }
         // CallM stubs.  `method_id` is a STRING id, not a FunctionId,
         // so the FunctionId-driven loop above never sees these.  Without
@@ -24847,88 +24481,17 @@ impl VbcCodegen {
                         info.id.0, stub_name, keys, self.config.module_name
                     );
                 }
-                let name_id = StringId(self.ctx.intern_string_raw(&stub_name));
-                // BAKED-DEFAULT-ARG-1: bodyless decls (`@intrinsic`
-                // fns like `memory_fence(order: Int = 5);`) reach the
-                // archive ONLY through this stub path — carry their
-                // registered literal defaults into the descriptor's
-                // const channel so the user-side loader/typechecker
-                // see the arity relaxation and the injectable value.
-                let stub_default_ids: Vec<Option<crate::ConstId>> = {
-                    let simple = stub_name
-                        .rfind('.')
-                        .map(|p| stub_name[p + 1..].to_string())
-                        .unwrap_or_else(|| stub_name.clone());
-                    let defaults = self
-                        .ctx
-                        .function_param_defaults
-                        .get(&stub_name)
-                        .or_else(|| self.ctx.function_param_defaults.get(&simple))
-                        .cloned();
-                    match defaults {
-                        Some(v) => v
-                            .iter()
-                            .map(|o| {
-                                o.as_ref().and_then(|e| self.literal_expr_const_id(e))
-                            })
-                            .collect(),
-                        None => Vec::new(),
-                    }
-                };
-                let mut descriptor = self.new_fn_descriptor(name_id);
-                descriptor.id = info.id;
-                descriptor.register_count = 1;
-                descriptor.locals_count = info.param_count as u16;
-                // RETNAME-CARRY-1 — stubs carry the declared return-type name too;
-                // user-side bindings typed from a pre-overlay stub lookup must not
-                // degrade to the lossy TypeRef re-derivation.
-                descriptor.return_type_name = info
-                    .return_type_name
-                    .as_ref()
-                    .map(|n| StringId(self.ctx.intern_string_raw(n)));
-                for (i, pname) in info.param_names.iter().enumerate() {
-                    let pname_to_use = if pname.is_empty() {
-                        format!("_arg{}", i)
-                    } else {
-                        pname.clone()
-                    };
-                    let pname_id = StringId(self.ctx.intern_string_raw(&pname_to_use));
-                    descriptor.params.push(crate::module::ParamDescriptor {
-                        name: pname_id,
-                        type_ref: TypeRef::Concrete(TypeId::UNIT),
-                        is_mut: false,
-                        default: stub_default_ids.get(i).copied().flatten(),
-                        type_name: StringId::EMPTY,
-                    });
+                // A suffix candidate is not a selected callable. Only retain
+                // declaration-owned runtime forwards; an unrelated name/count
+                // hint must not manufacture another executable overload.
+                if !self.declared_callable_descriptors.contains_key(&info.id) {
+                    continue;
                 }
-                while descriptor.params.len() < info.param_count {
-                    let i = descriptor.params.len();
-                    let pname_id =
-                        StringId(self.ctx.intern_string_raw(&format!("_arg{}", i)));
-                    descriptor.params.push(crate::module::ParamDescriptor {
-                        name: pname_id,
-                        type_ref: TypeRef::Concrete(TypeId::UNIT),
-                        is_mut: false,
-                        default: stub_default_ids.get(i).copied().flatten(),
-                        type_name: StringId::EMPTY,
-                    });
-                }
-                if info.is_async {
-                    descriptor.properties |= crate::types::PropertySet::ASYNC;
-                }
-                descriptor.is_generator = info.is_generator;
-                if let Some(parent_name) = info.parent_type_name.as_deref() {
-                    if let Some(&parent_tid) = self.type_name_to_id.get(parent_name) {
-                        descriptor.parent_type = Some(parent_tid);
-                    }
-                }
-                let vbc_func = crate::module::VbcFunction::new(
-                    descriptor,
-                    vec![Instruction::RetV],
-                );
-                self.functions.push(vbc_func);
+                let descriptor = self.referenced_forward_descriptor(info.id, &stub_name)?;
+                self.functions.push(VbcFunction::new(descriptor, Vec::new()));
             }
         }
+        Ok(())
     }
 
     /// Builds the final VBC module.
@@ -25480,6 +25043,14 @@ impl VbcCodegen {
                     }
                 }
             }
+            // Mount aliases are lexical bindings, not declaration identities.
+            // In particular, a deeper consumer alias must not replace the
+            // defining owner merely because it contains more path segments.
+            for &id in &external_seen {
+                if let Some(declared) = self.declared_callable_name(FunctionId(id)) {
+                    m.insert(id, declared.to_string());
+                }
+            }
             m
         };
         let carried_externals: Vec<(u32, String)> = std::mem::take(&mut self.user_xmod_carry);
@@ -25769,6 +25340,14 @@ impl VbcCodegen {
                 descriptor.id = FunctionId(new_id);
             }
 
+            if let Some(identity) = descriptor.declaration_identity.as_mut() {
+                identity.source_name = string_id_map.get(identity.source_name.0 as usize).copied()
+                    .ok_or_else(|| CodegenError::internal("callable source name has no string relocation"))?;
+                identity.lexical_parent = identity.lexical_parent.map(|parent| {
+                    func_id_remap.get(&parent.0).copied().map(FunctionId)
+                        .ok_or_else(|| CodegenError::internal("callable lexical parent has no function relocation"))
+                }).transpose()?;
+            }
             // Remap function name_id from codegen index to module StringId (byte offset)
             let codegen_name_idx = descriptor.name.0 as usize;
             descriptor.name = string_id_map
@@ -27552,6 +27131,13 @@ impl VbcCodegen {
             }
         }
         for (&local, source) in &signatures {
+            let parent = source.declaration_identity.as_ref().and_then(|identity| identity.lexical_parent)
+                .and_then(|parent| func_id_remap.get(&parent.0).copied());
+            match self.import_forward_declaration(archive_module, source, FunctionId(local), &type_id_remap, parent)
+                .and_then(|descriptor| self.retain_declared_callable(descriptor)) {
+                Ok(()) => {},
+                Err(error) => self.record_source_declaration_error(error),
+            }
             let roster = self.imported_callable_generic_roster(archive_module, source, &type_id_remap);
             self.source_callable_rosters.insert(FunctionId(local), roster);
             self.ctx.semantic_fn_params.remove(&FunctionId(local));
@@ -28197,6 +27783,13 @@ impl VbcCodegen {
             // (already-remapped) codegen type table.
             let mut new_desc = archive_desc.clone();
             new_desc.id = codegen_fid;
+            // The forward importer already relocated declaration identity using
+            // this archive's exact function and string maps.
+            let Some(declared) = self.declared_callable_descriptors.get(&codegen_fid) else {
+                self.record_source_declaration_error(CodegenError::internal("archive body has no imported declaration"));
+                continue;
+            };
+            new_desc.declaration_identity = declared.declaration_identity.clone();
             // Re-intern the function name into the codegen string
             // table so the finalize-time `string_id_map` can resolve
             // it to the final-module StringId.

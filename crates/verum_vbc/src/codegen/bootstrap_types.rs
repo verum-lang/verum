@@ -713,6 +713,10 @@ impl VbcCodegen {
             }
             if let Some(info) = self.bootstrap_function(module, function.id.0).cloned() {
                 let id = info.id.0;
+                let parent = function.declaration_identity.as_ref().and_then(|identity| identity.lexical_parent)
+                    .and_then(|parent| self.bootstrap_function(module, parent.0).map(|info| info.id));
+                let descriptor = self.import_forward_declaration(module, function, info.id, &maps[mi], parent)?;
+                self.retain_declared_callable(descriptor)?;
                 let roster = self.imported_callable_generic_roster(module, function, &maps[mi]);
                 self.source_callable_rosters.insert(FunctionId(id), roster);
                 // Forward registrations may have no source signature yet.

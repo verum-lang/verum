@@ -100,6 +100,8 @@ pub fn deserialize_module(data: &[u8]) -> VbcResult<VbcModule> {
  // here so Tier-0 dispatch and AOT lowering resolve band ids the
  // same way a freshly-assembled module does. Unresolved leftovers
  // stay band-encoded and surface through the existing loud paths.
+ crate::callable_identity::validate_module(&module)
+     .map_err(|message| VbcError::Deserialization(message.into_string()))?;
  let _unresolved = module.resolve_external_bands();
  Ok(module)
 }
@@ -1907,7 +1909,23 @@ impl<'a> Deserializer<'a> {
          _ => return Err(VbcError::Deserialization("invalid source signature presence".into())),
      }
  } else { None };
+ let declaration_identity = if fmt_minor >= 43 {
+     match decode_u8(self.data, &mut self.offset)? {
+         0 => None,
+         1 => {
+             let source_name = StringId(decode_u32(self.data, &mut self.offset)?);
+             let lexical_parent = match decode_u8(self.data, &mut self.offset)? {
+                 0 => None,
+                 1 => Some(FunctionId(decode_u32(self.data, &mut self.offset)?)),
+                 _ => return Err(VbcError::Deserialization("invalid lexical parent presence".into())),
+             };
+             Some(crate::module::CallableDeclarationIdentity { source_name, lexical_parent })
+         }
+         _ => return Err(VbcError::Deserialization("invalid callable identity presence".into())),
+     }
+ } else { None };
  Ok(FunctionDescriptor {
+ declaration_identity,
  has_source_body,
  semantic_params,
  semantic_return,

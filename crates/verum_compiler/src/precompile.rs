@@ -3262,54 +3262,37 @@ fn inject_declared_module_free_fn_keys(
                 if !matches!(fd.visibility, verum_ast::decl::Visibility::Public) {
                     continue;
                 }
-                let source_signature = verum_ast::source_signature::source_signature(fd, false)
+                let source_signature = verum_ast::source_signature::capture_source_signature(fd, false)
                     .map_err(|error| anyhow::anyhow!("{}: {error}", path.display()))?;
                 let simple = fd.name.name.as_str();
                 let qualified: Text = format!("{}.{}", source_module, simple).into();
                 if let Some(existing) = metadata.functions.get(&qualified) {
-                    if source_signature.is_some() {
-                        let Some(signature) = &existing.source_signature else {
-                            anyhow::bail!("absent semantic universe signature for {qualified}; rebuild from its declaring source");
-                        };
-                        verum_ast::source_signature::validate_source_signature(signature, existing.parent_type.is_some())
-                            .map_err(|error| anyhow::anyhow!("{qualified}: {error}"))?;
-                        let owner = existing.origin_module_path.as_ref().unwrap_or(&existing.module_path);
-                        if owner.as_str() != source_module
-                            || existing.parent_type.is_some()
-                            || !crate::archive_metadata::free_function_name_matches_declaration(
-                                existing.name.as_str(), owner.as_str(), simple)
-                            || signature.name.name.as_str() != simple
-                            || signature.params.len() != existing.params.len()
-                        {
-                            anyhow::bail!(
-                                "semantic universe signature provenance mismatch for {qualified}: \
-                                 owner={owner}, descriptor={}, signature={}, arity={}/{}",
-                                existing.name, signature.name.name, signature.params.len(), existing.params.len()
-                            );
-                        }
-                        // Replay at the producer's FileId, not by deleting source
-                        // fields from the serialized AST. This compares the entire
-                        // body-free declaration (including levels and contracts),
-                        // and refuses stale source with the same name and arity.
-                        let replayed;
-                        let declared = if fd.span.file_id == signature.span.file_id {
-                            source_signature.as_ref()
-                        } else {
-                            let parsed = verum_fast_parser::FastParser::new()
-                                .parse_module_str(&content, signature.span.file_id)
-                                .map_err(|error| anyhow::anyhow!("cannot replay signature source {}: {error:?}", path.display()))?;
-                            let Some(verum_ast::Item { kind: ItemKind::Function(function), .. }) = parsed.items.get(item_index) else {
-                                anyhow::bail!("missing source declaration for {qualified}");
-                            };
-                            replayed = verum_ast::source_signature::source_signature(function, false)
-                                .map_err(|error| anyhow::anyhow!("{qualified}: {error}"))?;
-                            replayed.as_ref()
-                        };
-                        if declared != Some(signature) {
-                            anyhow::bail!("semantic universe signature differs from declaring source for {qualified}");
-                        }
-                    } else if existing.source_signature.is_some() {
-                        anyhow::bail!("conflicting semantic universe signature presence for {qualified}");
+                    let Some(signature) = &existing.source_signature else {
+                        anyhow::bail!("absent semantic universe signature for {qualified}; rebuild from its declaring source");
+                    };
+                    verum_ast::source_signature::validate_source_signature(signature, existing.parent_type.is_some())
+                        .map_err(|error| anyhow::anyhow!("{qualified}: {error}"))?;
+                    let owner = existing.origin_module_path.as_ref().unwrap_or(&existing.module_path);
+                    if owner.as_str() != source_module
+                        || existing.parent_type.is_some()
+                        || !crate::archive_metadata::free_function_name_matches_declaration(
+                            existing.name.as_str(), owner.as_str(), simple)
+                        || signature.name.name.as_str() != simple
+                        || signature.params.len() != existing.params.len()
+                    {
+                        anyhow::bail!(
+                            "semantic universe signature provenance mismatch for {qualified}: \
+                             owner={owner}, descriptor={}, signature={}, arity={}/{}",
+                            existing.name, signature.name.name, signature.params.len(), existing.params.len()
+                        );
+                    }
+                    // Source positions are diagnostics, not declaration identity.
+                    // Compare the same complete, typed body-free contract used by
+                    // VBC, after checking its actual declaring owner above.
+                    if !verum_ast::source_signature::semantically_equal_signatures(&source_signature, signature)
+                        .map_err(|error| anyhow::anyhow!("{qualified}: {error}"))?
+                    {
+                        anyhow::bail!("semantic universe signature differs from declaring source for {qualified}");
                     }
                     // Diagnostic (VERUM_TRACE_DESCSKIP): this guard is
                     // FIRST-WINS, so a thinner descriptor written by an
@@ -3391,7 +3374,7 @@ fn inject_declared_module_free_fn_keys(
                     })
                     .collect();
                 let descriptor = FunctionDescriptor {
-                    source_signature,
+                        source_signature: Some(source_signature),
                     // Unconditional: the `Visibility::Public` guard
                     // above is what lets this loop reach a descriptor
                     // at all.

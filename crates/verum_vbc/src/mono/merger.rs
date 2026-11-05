@@ -299,6 +299,15 @@ impl ModuleMerger {
         // Step 4: Rewrite id references on the DECODED instruction
         // streams via the ONE remap authority.
         self.rewrite_references(&mut output);
+        for function in &mut output.functions {
+            if let Some(identity) = function.declaration_identity.as_mut() {
+                identity.lexical_parent = identity.lexical_parent.map(|parent| {
+                    self.mapping.get(parent).ok_or_else(|| MergeError::FunctionNotFound {
+                        module: self.user_module.name.clone(), function_id: parent,
+                    })
+                }).transpose()?;
+            }
+        }
 
         // Step 5: Re-encode the bytecode blob from the final instruction
         // streams (canonical encoder; instruction-index jump offsets are

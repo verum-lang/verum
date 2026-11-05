@@ -4,6 +4,9 @@
 //! constraints hold. Consumers must elaborate it in the declaring module and
 //! instantiate its quantified levels independently at each use.
 
+mod semantic_identity;
+pub use semantic_identity::semantically_equal_signatures;
+
 use crate::decl::{FunctionDecl, FunctionParamKind};
 use crate::ty::{
     GenericParam, GenericParamKind, TypeBound, TypeBoundKind, TypeKind, UniverseLevelExpr,

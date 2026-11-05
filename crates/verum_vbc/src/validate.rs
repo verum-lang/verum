@@ -323,6 +323,9 @@ impl<'a> Validator<'a> {
 
     /// Validates all function descriptors.
     fn validate_functions(&mut self) {
+        if let Err(message) = crate::callable_identity::validate_module(self.module) {
+            self.errors.push(VbcError::Deserialization(message.into_string()));
+        }
         for (idx, func_desc) in self.module.functions.iter().enumerate() {
             self.validate_function_descriptor(func_desc, idx);
         }

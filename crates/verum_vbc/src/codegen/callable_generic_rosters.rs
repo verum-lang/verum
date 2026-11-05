@@ -48,6 +48,18 @@ impl VbcCodegen {
             .collect()
     }
 
+    /// Retain the complete body-free declaration for every source callable.
+    /// ABI type slots cannot preserve bounds, defaults, value kinds or receivers.
+    pub(super) fn retain_callable_owner_signature(
+        &self, source: &FunctionDecl, signature: Option<FunctionDecl>,
+        parent: Option<&str>, _dense: &std::collections::HashMap<String, u16>,
+    ) -> CodegenResult<Option<FunctionDecl>> {
+        if let Some(signature) = signature { return Ok(Some(signature)); }
+        verum_ast::source_signature::capture_source_signature(source, parent.is_some())
+            .map(Some)
+            .map_err(|message| CodegenError::new(CodegenErrorKind::InvalidSourceSignature(message.into_string())))
+    }
+
     /// Elaborate an omitted implementation telescope using only the inherited
     /// binders selected from its actual nominal target. An empty concrete
     /// implementation remains empty, even when a method has same-named locals.
@@ -212,7 +224,8 @@ impl VbcCodegen {
         self.current_source_substitution = previous_substitution;
         self.default_body_type_scope = previous_owner;
         if let Err(error) = completion {
-            self.record_source_declaration_error(error);
+            let name = module.strings.get(descriptor.name).unwrap_or("<missing name>");
+            self.record_source_declaration_error(error.with_context(format!("imported callable {owner}.{name}")));
             return None;
         }
         Some(roster)

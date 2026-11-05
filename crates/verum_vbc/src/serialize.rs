@@ -126,6 +126,8 @@ impl Serializer {
 
     /// Serializes a complete module.
     fn serialize(&mut self, module: &VbcModule) -> VbcResult<()> {
+        crate::callable_identity::validate_module(module)
+            .map_err(|message| VbcError::Serialization(message.into_string()))?;
         // Reserve space for header
         self.output.resize(HEADER_SIZE, 0);
 
@@ -900,6 +902,14 @@ impl Serializer {
             let bytes = crate::source_signature_codec::encode(signature, desc.parent_type.is_some())?;
             encode_varint(bytes.len() as u64, &mut self.output);
             self.output.extend_from_slice(&bytes);
+        }
+        self.output.push(desc.declaration_identity.is_some() as u8);
+        if let Some(identity) = &desc.declaration_identity {
+            encode_u32(identity.source_name.0, &mut self.output);
+            self.output.push(identity.lexical_parent.is_some() as u8);
+            if let Some(parent) = identity.lexical_parent {
+                encode_u32(parent.0, &mut self.output);
+            }
         }
         Ok(())
     }

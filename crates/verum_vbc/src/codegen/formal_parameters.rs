@@ -104,7 +104,7 @@ impl VbcCodegen {
         receiver: &super::ImplReceiverWitness,
         name: &str,
         generics: &[String],
-    ) -> super::CodegenResult<()> {
+    ) -> super::CodegenResult<crate::module::FunctionId> {
         let saved = self.current_impl_receiver.replace(receiver.clone());
         let result = self.register_impl_function(function, name, generics);
         self.current_impl_receiver = saved;

@@ -1841,6 +1841,7 @@ impl VbcModule {
                     semantic_params: None,
                     semantic_return: None,
                     source_signature: None,
+            declaration_identity: None,
                     explicit_type_param_ids: Vec::new(),
                     id: FunctionId(self.functions.len() as u32),
                     name: name_id,
@@ -2668,8 +2669,17 @@ pub struct OptimizationHints {
 
 /// Function descriptor in the function table.
 ///
-/// Contains all metadata about a function including signature,
-/// bytecode location, and optimization hints.
+/// Names a source declaration without interpreting its backend linkage.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CallableDeclarationIdentity {
+    /// Actual FunctionDecl name; never a backend linkage spelling.
+    pub source_name: StringId,
+    /// Enclosing source callable in this module's FunctionId namespace.
+    /// This is independent of `parent_type` and `func_id_base`.
+    pub lexical_parent: Option<FunctionId>,
+}
+
+/// Function signature, source identity and executable layout.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FunctionDescriptor {
     /// The selected FunctionDecl has a body, including an empty block (v2.24).
@@ -2689,10 +2699,13 @@ pub struct FunctionDescriptor {
     /// the ABI return descriptor cannot supply this source fact (v2.27).
     #[serde(default)]
     pub semantic_return: Option<TypeRef>,
-    /// Complete body-free source signature for universe-bearing free functions
-    /// (v2.30). This is declaration evidence, independent of runtime ABI types.
+    /// Complete body-free source signature (v2.30). This is declaration
+    /// evidence, independent of runtime ABI types and linkage names.
     #[serde(default)]
     pub source_signature: Option<verum_ast::FunctionDecl>,
+    /// Source declaration identity, separate from runtime linkage (v2.43).
+    #[serde(default)]
+    pub declaration_identity: Option<CallableDeclarationIdentity>,
     /// Unique function ID.
     pub id: FunctionId,
 
@@ -2962,6 +2975,7 @@ impl Default for FunctionDescriptor {
             semantic_params: None,
             semantic_return: None,
             source_signature: None,
+            declaration_identity: None,
             id: FunctionId(0),
             name: StringId::EMPTY,
             parent_type: None,
@@ -4385,6 +4399,7 @@ mod precompile_extension_tests {
             semantic_params: None,
             semantic_return: None,
             source_signature: None,
+            declaration_identity: None,
         };
         // Backwards-compat field is filled with the existing layout.
         let _ = &mut desc;
@@ -4445,6 +4460,7 @@ mod precompile_extension_tests {
             semantic_params: None,
             semantic_return: None,
             source_signature: None,
+            declaration_identity: None,
         };
         m.functions.push(desc);
 

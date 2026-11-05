@@ -717,7 +717,12 @@ impl VbcLinker {
 
     /// Consume the linker, return the merged output module ready for
     /// the interpreter or AOT lowering.
-    pub fn finalize(self) -> VbcModule {
+    pub fn finalize(mut self) -> VbcModule {
+        // The in-memory output is a complete module before serialization.
+        self.out.header.type_table_count = self.out.types.len() as u32;
+        self.out.header.function_table_count = self.out.functions.len() as u32;
+        self.out.header.constant_pool_count = self.out.constants.len() as u32;
+        self.out.update_flags();
         self.out
     }
 
@@ -932,6 +937,11 @@ impl VbcLinker {
 
         out.id = remap.map_function(src.id)?;
         out.name = remap.map_string_lenient(src.name);
+        out.origin_module = src.origin_module.map(|owner| remap.map_string(owner)).transpose()?;
+        if let Some(identity) = out.declaration_identity.as_mut() {
+            identity.source_name = remap.map_string(identity.source_name)?;
+            identity.lexical_parent = identity.lexical_parent.map(|parent| remap.map_function(parent)).transpose()?;
+        }
         if let Some(pt) = src.parent_type {
             out.parent_type = Some(remap.map_type_id(pt)?);
         }
@@ -1376,6 +1386,7 @@ mod tests {
             semantic_params: None,
             semantic_return: None,
             source_signature: None,
+            declaration_identity: None,
         };
         let n0 = a.intern_string("alpha");
         let n1 = a.intern_string("beta");
