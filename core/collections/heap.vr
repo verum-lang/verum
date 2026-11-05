@@ -911,14 +911,14 @@ implement<T: Ord + Display> Display for BinaryHeap<T> {
 }
 
 implement<T: Ord> FromIterator<T> for BinaryHeap<T> {
-    fn from_iter<I: Iterator<Item>>(iter: I) -> BinaryHeap<T> {
+    fn from_iter<I: Iterator<Item = T>>(iter: I) -> BinaryHeap<T> {
         let list: List<T> = iter.collect();
         BinaryHeap.from_list(list)
     }
 }
 
 implement<T: Ord> Extend<T> for BinaryHeap<T> {
-    fn extend<I: Iterator<Item>>(&mut self, iter: I) {
+    fn extend<I: Iterator<Item = T>>(&mut self, iter: I) {
         for v in iter {
             self.push(v);
         }

@@ -1249,7 +1249,7 @@ implement<I: FusedIterator, B, F: fn(I.Item) -> B> FusedIterator for MappedIter<
 implement<I: FusedIterator, P: fn(&I.Item) -> Bool> FusedIterator for FilterIter<I, P> {}
 
 /// ChainIter is fused if both inner iterators are fused.
-implement<T, A: FusedIterator<Item>, B: FusedIterator<Item>> FusedIterator for ChainIter<A, B> {}
+implement<T, A: FusedIterator<Item = T>, B: FusedIterator<Item = T>> FusedIterator for ChainIter<A, B> {}
 
 /// EnumerateIter is fused if the inner iterator is fused.
 implement<I: FusedIterator> FusedIterator for EnumerateIter<I> {}
@@ -1551,7 +1551,7 @@ implement<I: ExactSizeIterator> ExactSizeIterator for SkipIter<I> {
 }
 
 /// ChainIter: sum of both lengths.
-implement<T, A: ExactSizeIterator<Item>, B: ExactSizeIterator<Item>> ExactSizeIterator for ChainIter<A, B> {
+implement<T, A: ExactSizeIterator<Item = T>, B: ExactSizeIterator<Item = T>> ExactSizeIterator for ChainIter<A, B> {
     fn len(&self) -> Int {
         let a_len = match self.first {
             Maybe.Some(ref a) => a.len(),
@@ -1621,7 +1621,7 @@ implement<A: ExactSizeIterator, B: ExactSizeIterator> ExactSizeIterator for ZipL
 
 /// Protocol for types that can be created from an iterator.
 public type FromIterator<T> is protocol {
-    fn from_iter<I: Iterator<Item>>(iter: I) -> Self;
+    fn from_iter<I: Iterator<Item = T>>(iter: I) -> Self;
 };
 
 // =============================================================================
@@ -1653,7 +1653,7 @@ implement<I: Iterator> IntoIterator for I {
 
 /// Protocol for types that can be extended from an iterator.
 public type Extend<T> is protocol {
-    fn extend<I: Iterator<Item>>(&mut self, iter: I);
+    fn extend<I: Iterator<Item = T>>(&mut self, iter: I);
 
     fn extend_one(&mut self, item: T) {
         self.extend(once(item));
@@ -1910,7 +1910,7 @@ implement<I: Iterator, P: fn(&I.Item) -> Bool> Iterator for SkipWhileIter<I, P> 
     }
 }
 
-implement<T, A: Iterator<Item>, B: Iterator<Item>> Iterator for ChainIter<A, B> {
+implement<T, A: Iterator<Item = T>, B: Iterator<Item = T>> Iterator for ChainIter<A, B> {
     type Item = T;
 
     fn next(&mut self) -> Maybe<T> {
@@ -1940,7 +1940,7 @@ implement<T, A: Iterator<Item>, B: Iterator<Item>> Iterator for ChainIter<A, B> 
     }
 }
 
-implement<T, A: DoubleEndedIterator<Item>, B: DoubleEndedIterator<Item>> DoubleEndedIterator for ChainIter<A, B> {
+implement<T, A: DoubleEndedIterator<Item = T>, B: DoubleEndedIterator<Item = T>> DoubleEndedIterator for ChainIter<A, B> {
     fn next_back(&mut self) -> Maybe<T> {
         match self.second.next_back() {
             Maybe.Some(x) => Maybe.Some(x),
@@ -2080,7 +2080,7 @@ where I.Item: Eq + Clone {
     }
 }
 
-implement<T, A: Iterator<Item>, B: Iterator<Item>> Iterator for InterleaveIter<A, B> {
+implement<T, A: Iterator<Item = T>, B: Iterator<Item = T>> Iterator for InterleaveIter<A, B> {
     type Item = T;
 
     fn next(&mut self) -> Maybe<T> {

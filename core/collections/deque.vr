@@ -2068,7 +2068,7 @@ implement<T: Display> Display for Deque<T> {
 }
 
 implement<T> FromIterator<T> for Deque<T> {
-    fn from_iter<I: Iterator<Item>>(iter: I) -> Deque<T> {
+    fn from_iter<I: Iterator<Item = T>>(iter: I) -> Deque<T> {
         let mut deque = Deque.new();
         for v in iter {
             deque.push_back(v);
@@ -2078,7 +2078,7 @@ implement<T> FromIterator<T> for Deque<T> {
 }
 
 implement<T> Extend<T> for Deque<T> {
-    fn extend<I: Iterator<Item>>(&mut self, iter: I) {
+    fn extend<I: Iterator<Item = T>>(&mut self, iter: I) {
         for v in iter {
             self.push_back(v);
         }

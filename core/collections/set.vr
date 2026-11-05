@@ -857,7 +857,7 @@ implement<T: Hash + Eq> Eq for Set<T> {
 }
 
 implement<T: Hash + Eq> FromIterator<T> for Set<T> {
-    fn from_iter<I: Iterator<Item>>(iter: I) -> Set<T> {
+    fn from_iter<I: Iterator<Item = T>>(iter: I) -> Set<T> {
         let mut set = Set.new();
         for v in iter {
             set.insert(v);
@@ -867,7 +867,7 @@ implement<T: Hash + Eq> FromIterator<T> for Set<T> {
 }
 
 implement<T: Hash + Eq> Extend<T> for Set<T> {
-    fn extend<I: Iterator<Item>>(&mut self, iter: I) {
+    fn extend<I: Iterator<Item = T>>(&mut self, iter: I) {
         for v in iter {
             self.insert(v);
         }
@@ -1011,7 +1011,7 @@ where T: Clone
 }
 
 // Create set from iterator.
-public fn set_from_iter<T: Hash + Eq, I: Iterator<Item>>(iter: I) -> Set<T> {
+public fn set_from_iter<T: Hash + Eq, I: Iterator<Item = T>>(iter: I) -> Set<T> {
     Set.from_iter(iter)
 }
 

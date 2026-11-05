@@ -1270,7 +1270,7 @@ implement<T> List<T> {
     // =========================================================================
 
     // Append elements from iterator.
-    public fn extend<I: Iterator<Item>>(&mut self, iter: I) {
+    public fn extend<I: Iterator<Item = T>>(&mut self, iter: I) {
         for item in iter {
             self.push(item);
         }
@@ -3169,7 +3169,7 @@ implement<T> IntoIterator for List<T> {
 // =============================================================================
 
 implement<T> FromIterator<T> for List<T> {
-    fn from_iter<I: Iterator<Item>>(iter: I) -> List<T> {
+    fn from_iter<I: Iterator<Item = T>>(iter: I) -> List<T> {
         let mut list = List.new();
         for item in iter {
             list.push(item);
@@ -3183,7 +3183,7 @@ implement<T> FromIterator<T> for List<T> {
 // =============================================================================
 
 implement<T> Extend<T> for List<T> {
-    fn extend<I: Iterator<Item>>(&mut self, iter: I) {
+    fn extend<I: Iterator<Item = T>>(&mut self, iter: I) {
         for item in iter {
             self.push(item);
         }
