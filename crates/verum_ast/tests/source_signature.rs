@@ -753,3 +753,29 @@ fn nested_callable_contexts_retain_exact_declaration_carriers() {
     assert_eq!(nominal_carrier.body, nominal.body);
     validate_source_type_declaration(&nominal_carrier).unwrap();
 }
+
+#[test]
+fn explicit_signature_capture_excludes_large_executable_body() {
+    let mut declaration = function();
+    declaration.params.push(parameter(Type::new(TypeKind::Int, Span::dummy())));
+    let expected = declaration.clone();
+    declaration.body = Some(FunctionBody::Expr(Expr::new(
+        ExprKind::Literal(Literal::string("x".repeat(2 * 1_048_576).into(), Span::dummy())),
+        Span::dummy(),
+    )));
+    assert!(source_signature(&declaration, false).unwrap().is_none());
+    let captured = verum_ast::source_signature::capture_source_signature(&declaration, false).unwrap();
+    assert_eq!(captured, expected);
+    assert!(declaration.body.is_some());
+    validate_source_signature(&captured, false).unwrap();
+}
+
+#[test]
+fn explicit_signature_capture_preserves_validation_and_size_refusal() {
+    let mut unbound = function();
+    unbound.return_type = Some(universe(variable("missing")));
+    assert!(verum_ast::source_signature::capture_source_signature(&unbound, false).is_err());
+    let mut oversized = function();
+    oversized.name = ident(&"x".repeat(1_048_577));
+    assert!(verum_ast::source_signature::capture_source_signature(&oversized, false).is_err());
+}

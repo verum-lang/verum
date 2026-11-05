@@ -202,6 +202,16 @@ pub fn source_signature(function: &FunctionDecl, is_method: bool) -> Result<Opti
     Ok(Some(copy_function_signature(function)))
 }
 
+/// Capture a bounded declaration even when ordinary ABI metadata would suffice.
+/// The executable body is neither traversed nor cloned; the retained signature
+/// passes the same validation required of decoded source metadata.
+pub fn capture_source_signature(function: &FunctionDecl, is_method: bool) -> Result<FunctionDecl> {
+    check_size(function)?;
+    let signature = copy_function_signature(function);
+    validate_source_signature(&signature, is_method)?;
+    Ok(signature)
+}
+
 fn copy_function_signature(function: &FunctionDecl) -> FunctionDecl {
     FunctionDecl {
         visibility: function.visibility.clone(),
