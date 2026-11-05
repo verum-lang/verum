@@ -29,13 +29,13 @@ fn source_mount_binds_name(tree: &verum_ast::decl::MountTree, name: &str) -> boo
 }
 
 #[derive(Clone, Copy)]
-enum MountTargetKind {
+pub(super) enum MountTargetKind {
     Named,
     Glob,
 }
 
 /// Visit explicitly named targets and the glob surfaces that could export a spelling.
-fn source_mount_targets(
+pub(super) fn source_mount_targets(
     mount: &verum_ast::MountDecl,
     owner: &ModulePath,
     name: &str,

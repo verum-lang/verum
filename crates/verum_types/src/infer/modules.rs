@@ -7330,8 +7330,7 @@ impl TypeChecker {
         allow_local_mounts: bool,
     ) -> Option<(verum_ast::decl::TypeDecl, Text)> {
         use verum_ast::ItemKind;
-        use verum_ast::decl::{MountTreeKind, Visibility as AstVisibility};
-        use verum_ast::ty::PathSegment;
+        use verum_ast::decl::Visibility as AstVisibility;
 
         // A mount spelling may be an alias. Declaration identity, relative
         // mounts and cycle detection belong to the resolved registry module.
@@ -7388,21 +7387,6 @@ impl TypeChecker {
             return Some((decl, current_module_path.clone()));
         }
 
-        // Helper to check if path starts with relative marker
-        let is_relative = |path: &verum_ast::ty::Path| -> bool {
-            path.segments
-                .first()
-                .is_some_and(|s| matches!(s, PathSegment::Relative))
-        };
-
-        // Helper to resolve relative module path to absolute path
-        let resolve_relative_path = |relative_path: &str| -> String {
-            if relative_path.is_empty() {
-                return String::new();
-            }
-            format!("{}.{}", current_module_path.as_str(), relative_path)
-        };
-
         // If not found directly, check if it's re-exported via `pub import`
         for item in &ast.items {
             if let ItemKind::Mount(import_decl) = &item.kind {
@@ -7410,133 +7394,28 @@ impl TypeChecker {
                     continue;
                 }
 
-                // Check if this import re-exports our type. Resolves to
-                // (source module path, TRUE declared name to search for
-                // inside it) — the two differ when `type_name` was
-                // matched via a `mount X as Y` rename-alias (T0244):
-                // `public mount .constraint.{LayoutConstraint as
-                // Constraint, ...}` re-exports "Constraint" as a NEW
-                // local spelling for "LayoutConstraint". The alias lives
-                // on `tree.alias`, never in the path segments, so
-                // matching only the pre-alias name can never find such a
-                // re-export when searching BY the alias — every qualified
-                // construction through the alias (`Constraint.Length(10)`)
-                // then fell through to a spurious self-referential
-                // `Type::Named` stub instead of the real variant type.
-                // Once matched, the recursive search must still look for
-                // the TRUE name in the source module, since that module
-                // never declared anything under the alias spelling.
-                let source_module_path: Option<(String, String)> = match &import_decl.tree.kind {
-                    MountTreeKind::Glob(path) => {
-                        // A glob publishes the selected module's public surface;
-                        // it does not create declarations owned by the facade.
-                        let resolved = verum_modules::imports::path_to_module_path_resolved(
-                            path,
-                            &verum_modules::ModulePath::from_str(current_module_path),
-                        );
-                        self.get_module_with_path_aliases(&resolved.to_string(), registry)
-                            .filter(|module| {
-                                module.exports.get(&Text::from(type_name)).is_some_and(|export| {
-                                    export.kind == verum_modules::ExportKind::Type
-                                        && export.visibility == AstVisibility::Public
-                                })
-                            })
-                            .map(|module| (module.path.to_string(), type_name.to_string()))
-                    }
-                    MountTreeKind::Path(path) => {
-                        // Single import: `pub import .errors.RegistryError`
-                        // (optionally `as Foo` — the alias sits on
-                        // `import_decl.tree.alias`, the same tree as
-                        // this Path since there's only one item here).
-                        if let Some(PathSegment::Name(last_ident)) = path.segments.last() {
-                            let true_name = last_ident.name.as_str();
-                            let alias_matches = import_decl
-                                .tree
-                                .alias
-                                .as_ref()
-                                .is_some_and(|a| a.name.as_str() == type_name);
-                            if true_name == type_name || alias_matches {
-                                let has_relative = is_relative(path);
-                                let module_segments: Vec<&str> = path
-                                    .segments
-                                    .iter()
-                                    .take(path.segments.len() - 1)
-                                    .filter_map(|seg| match seg {
-                                        PathSegment::Name(id) => Some(id.name.as_str()),
-                                        _ => None,
-                                    })
-                                    .collect();
-                                let module_path = module_segments.join(".");
-                                let resolved_module_path = if has_relative && !module_path.is_empty() {
-                                    Some(resolve_relative_path(&module_path))
-                                } else if !module_path.is_empty() {
-                                    Some(module_path)
-                                } else {
-                                    None
-                                };
-                                resolved_module_path.map(|m| (m, true_name.to_string()))
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
-                    }
-                    MountTreeKind::Nested { prefix, trees } => {
-                        // Nested import: `pub import .package.{Package, PackageVersion}`
-                        // (any entry optionally `as Alias`, per-tree).
-                        let found_true_name: Option<String> = trees.iter().find_map(|tree| {
-                            if let MountTreeKind::Path(path) = &tree.kind {
-                                if let Some(PathSegment::Name(ident)) = path.segments.first() {
-                                    let true_name = ident.name.as_str();
-                                    let alias_matches = tree
-                                        .alias
-                                        .as_ref()
-                                        .is_some_and(|a| a.name.as_str() == type_name);
-                                    if true_name == type_name || alias_matches {
-                                        Some(true_name.to_string())
-                                    } else {
-                                        None
-                                    }
-                                } else {
-                                    None
+                let mut targets = Vec::new();
+                super::source_declarations::source_mount_targets(
+                    import_decl, &verum_modules::ModulePath::from_str(current_module_path), type_name,
+                    |path, kind| {
+                        use super::source_declarations::MountTargetKind;
+                        let full = path.to_string();
+                        match kind {
+                            MountTargetKind::Named => {
+                                if let Some((owner, name)) = full.rsplit_once('.') {
+                                    targets.push((owner.to_owned(), name.to_owned()));
                                 }
-                            } else {
-                                None
                             }
-                        });
-
-                        if let Some(true_name) = found_true_name {
-                            let has_relative = is_relative(prefix);
-                            let module_segments: Vec<&str> = prefix
-                                .segments
-                                .iter()
-                                .filter_map(|seg| match seg {
-                                    PathSegment::Name(id) => Some(id.name.as_str()),
-                                    _ => None,
-                                })
-                                .collect();
-                            let module_path = module_segments.join(".");
-                            let resolved_module_path = if has_relative && !module_path.is_empty() {
-                                Some(resolve_relative_path(&module_path))
-                            } else if !module_path.is_empty() {
-                                Some(module_path)
-                            } else {
-                                None
-                            };
-                            resolved_module_path.map(|m| (m, true_name))
-                        } else {
-                            None
+                            MountTargetKind::Glob => targets.push((full, type_name.to_owned())),
                         }
-                    }
-                    _ => None,
-                };
+                    },
+                );
+                for (source_path, true_name) in targets {
 
-                if let Some((ref source_path, ref true_name)) = source_module_path {
                     // Look up the source module and find the type there
                     // Use path aliases since "core.io.path" may be stored as "std.io.path"
                     if let Some(source_module) =
-                        self.get_module_with_path_aliases(source_path, registry)
+                        self.get_module_with_path_aliases(&source_path, registry)
                     {
                         // Recursively search (handles chains of re-exports).
                         // Thread the visited-set so ring-shaped re-exports
@@ -7547,7 +7426,7 @@ impl TypeChecker {
                         if let Some((decl, final_path)) = self
                             .find_type_declaration_with_source_module_inner(
                                 &source_module.ast,
-                                true_name,
+                                &true_name,
                                 &verum_common::Text::from(source_path.as_str()),
                                 registry,
                                 visited,
@@ -7580,7 +7459,7 @@ impl TypeChecker {
                                 // (like ops.vr within core/base/). Uses `true_name`
                                 // (T0244) for the same reason as the recursive call above.
                                 if let Some(decl) = self
-                                    .find_type_declaration_in_module(&parent_module.ast, true_name)
+                                    .find_type_declaration_in_module(&parent_module.ast, &true_name)
                                 {
                                     return Some((decl, Text::from(parent_module.path.to_string())));
                                 }
@@ -7605,139 +7484,9 @@ impl TypeChecker {
         current_module_path: &Text,
         registry: &verum_modules::ModuleRegistry,
     ) -> Option<verum_ast::decl::TypeDecl> {
-        use verum_ast::ItemKind;
-        use verum_ast::decl::{MountTreeKind, Visibility as AstVisibility};
-        use verum_ast::ty::PathSegment;
-
-        // First, try to find the type declaration directly
-        if let Some(decl) = self.find_type_declaration_in_module(ast, type_name) {
-            return Some(decl);
-        }
-
-        // Helper to check if path starts with relative marker
-        let is_relative = |path: &verum_ast::ty::Path| -> bool {
-            path.segments
-                .first()
-                .is_some_and(|s| matches!(s, PathSegment::Relative))
-        };
-
-        // Helper to resolve relative module path to absolute path
-        // For `.errors` in module `domain`, returns `domain.errors`
-        let resolve_relative_path = |relative_path: &str| -> String {
-            if relative_path.is_empty() {
-                return String::new();
-            }
-            // If current module is "domain", relative path "errors" becomes "domain.errors"
-            format!("{}.{}", current_module_path.as_str(), relative_path)
-        };
-
-        // If not found directly, check if it's re-exported via `pub import`
-        for item in &ast.items {
-            if let ItemKind::Mount(import_decl) = &item.kind {
-                if import_decl.visibility != AstVisibility::Public {
-                    continue;
-                }
-
-                // Check if this import re-exports our type
-                let source_module_path: Option<String> = match &import_decl.tree.kind {
-                    MountTreeKind::Path(path) => {
-                        // Single import: `pub import .errors.RegistryError`
-                        if let Some(PathSegment::Name(last_ident)) = path.segments.last() {
-                            if last_ident.name.as_str() == type_name {
-                                let has_relative = is_relative(path);
-                                // Extract module path (all segments except the last, skip relative marker)
-                                let module_segments: Vec<&str> = path
-                                    .segments
-                                    .iter()
-                                    .take(path.segments.len() - 1)
-                                    .filter_map(|seg| {
-                                        match seg {
-                                            PathSegment::Name(id) => Some(id.name.as_str()),
-                                            _ => None, // Skip Relative marker
-                                        }
-                                    })
-                                    .collect();
-                                let module_path = module_segments.join(".");
-                                if has_relative && !module_path.is_empty() {
-                                    Some(resolve_relative_path(&module_path))
-                                } else if !module_path.is_empty() {
-                                    Some(module_path)
-                                } else {
-                                    None
-                                }
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
-                    }
-                    MountTreeKind::Nested { prefix, trees } => {
-                        // Nested import: `pub import .package.{Package, PackageVersion}`
-                        let type_found = trees.iter().any(|tree| {
-                            if let MountTreeKind::Path(path) = &tree.kind {
-                                if let Some(PathSegment::Name(ident)) = path.segments.first() {
-                                    ident.name.as_str() == type_name
-                                } else {
-                                    false
-                                }
-                            } else {
-                                false
-                            }
-                        });
-
-                        if type_found {
-                            let has_relative = is_relative(prefix);
-                            // Extract module path from prefix
-                            let module_segments: Vec<&str> = prefix
-                                .segments
-                                .iter()
-                                .filter_map(|seg| {
-                                    match seg {
-                                        PathSegment::Name(id) => Some(id.name.as_str()),
-                                        _ => None, // Skip Relative marker
-                                    }
-                                })
-                                .collect();
-                            let module_path = module_segments.join(".");
-                            if has_relative && !module_path.is_empty() {
-                                Some(resolve_relative_path(&module_path))
-                            } else if !module_path.is_empty() {
-                                Some(module_path)
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
-                    }
-                    _ => None,
-                };
-
-                if let Some(ref source_path) = source_module_path {
-                    // Look up the source module and find the type there
-                    if let Some(source_module) = registry.get_by_path(source_path)
-                        && let Some(decl) =
-                            self.find_type_declaration_in_module(&source_module.ast, type_name)
-                    {
-                        return Some(decl);
-                    } else {
-                        // FALLBACK: Module not found. Try parent module (see find_type_declaration_with_source_module).
-                        if let Some(dot_pos) = source_path.rfind('.') {
-                            let parent_path = &source_path[..dot_pos];
-                            if let Some(parent_module) = registry.get_by_path(parent_path)
-                                && let Some(decl) = self
-                                    .find_type_declaration_in_module(&parent_module.ast, type_name)
-                            {
-                                return Some(decl);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        None
+        self.find_type_declaration_with_source_module_inner(
+            ast, type_name, current_module_path, registry, &mut Set::new(), false, false,
+        ).map(|(declaration, _)| declaration)
     }
 
     /// Find a function or constructor definition, following re-export chains.
