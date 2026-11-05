@@ -22,6 +22,8 @@
 mod associated_assignment;
 #[path = "protocol_implementation_match.rs"]
 mod implementation_match;
+#[path = "protocol_type_authority.rs"]
+mod type_authority;
 #[path = "protocol_obligations.rs"]
 mod obligations;
 pub use associated_assignment::AssociatedTypeAssignment;
@@ -1833,15 +1835,16 @@ impl ImplOverlapIndex {
         Some((segments, arity))
     }
 
-    fn insert(&mut self, target: &Type, index: usize) {
+    fn insert(&mut self, target: &Type, index: usize, unfiltered: bool) {
         self.all.push(index);
-        match Self::nominal_head(target) {
+        match (!unfiltered).then(|| Self::nominal_head(target)).flatten() {
             Some(head) => self.nominal.entry(head).or_default().push(index),
             None => self.other.push(index),
         }
     }
 
-    fn candidates(&self, target: &Type) -> List<usize> {
+    fn candidates(&self, target: &Type, unfiltered: bool) -> List<usize> {
+        if unfiltered { return self.all.clone(); }
         let Some(head) = Self::nominal_head(target) else {
             return self.all.clone();
         };
@@ -1873,6 +1876,7 @@ pub(crate) struct ProtocolBindingReceipt {
 pub struct ProtocolChecker {
     /// Registered protocols
     protocols: Map<Text, Protocol>,
+    type_authority: type_authority::TypeAuthority,
     protocol_revisions: Map<Text, Arc<AtomicBool>>,
     /// Protocol implementations
     impls: List<ProtocolImpl>,
@@ -2075,6 +2079,7 @@ impl ProtocolChecker {
     pub fn new() -> Self {
         let mut checker = Self {
             protocols: Map::new(),
+            type_authority: Default::default(),
             protocol_revisions: Map::new(),
             impls: List::new(),
             source_impls: Map::new(),
@@ -2114,6 +2119,7 @@ impl ProtocolChecker {
     pub fn new_empty() -> Self {
         Self {
             protocols: Map::new(),
+            type_authority: Default::default(),
             protocol_revisions: Map::new(),
             impls: List::new(),
             source_impls: Map::new(),
@@ -5393,7 +5399,7 @@ impl ProtocolChecker {
                 // Current behaviour — both checks are hard errors.
                 self.check_orphan_rule(&impl_)?;
                 if let Some(candidates) = self.impls_by_protocol.get(&protocol_identity) {
-                    for index in candidates.candidates(&impl_.for_type) {
+                    for index in candidates.candidates(&impl_.for_type, self.requires_unfiltered_type_candidates(&impl_.for_type)) {
                         #[cfg(test)]
                         {
                             self.registration_overlap_comparisons += 1;
@@ -5408,7 +5414,7 @@ impl ProtocolChecker {
                 }
                 let mut overlap_warnings = List::new();
                 if let Some(candidates) = self.impls_by_protocol.get(&protocol_identity) {
-                    for index in candidates.candidates(&impl_.for_type) {
+                    for index in candidates.candidates(&impl_.for_type, self.requires_unfiltered_type_candidates(&impl_.for_type)) {
                         #[cfg(test)]
                         {
                             self.registration_overlap_comparisons += 1;
@@ -5493,10 +5499,11 @@ impl ProtocolChecker {
         self.impl_index.entry(key).or_default().push(idx);
         // Populate in every mode, including Off, so a later mode change or
         // cloned checker sees every admitted implementation exactly once.
+        let unfiltered = self.requires_unfiltered_type_candidates(&impl_.for_type);
         self.impls_by_protocol
             .entry(protocol_identity)
             .or_default()
-            .insert(&impl_.for_type, idx);
+            .insert(&impl_.for_type, idx, unfiltered);
         self.impls.push(impl_);
 
         // Invalidate implementation cache since we added a new impl
@@ -6626,6 +6633,14 @@ impl ProtocolChecker {
         if ty1 == ty2 {
             return true;
         }
+        let left = self.expand_declared_alias_head(ty1);
+        let right = self.expand_declared_alias_head(ty2);
+        if left.is_some() || right.is_some() {
+            return self.types_structurally_equal(left.as_ref().unwrap_or(ty1), right.as_ref().unwrap_or(ty2));
+        }
+        if self.has_declared_alias_head(ty1) || self.has_declared_alias_head(ty2) { return false; }
+        if let Some(equal) = self.builtin_types_equal(ty1, ty2) { return equal; }
+        if self.declared_heads_are_disjoint(ty1, ty2) { return false; }
         if let Some(equal) = self.compare_nominal_applications(ty1, ty2,
             |left, right| self.types_structurally_equal(left, right))
         { return equal; }
@@ -11960,6 +11975,14 @@ impl ProtocolChecker {
 
     /// Helper: Check if two types could unify (simple heuristic)
     fn types_could_unify(&self, ty1: &Type, ty2: &Type) -> bool {
+        let left = self.expand_declared_alias_head(ty1);
+        let right = self.expand_declared_alias_head(ty2);
+        if left.is_some() || right.is_some() {
+            return self.types_could_unify(left.as_ref().unwrap_or(ty1), right.as_ref().unwrap_or(ty2));
+        }
+        if self.has_declared_alias_head(ty1) || self.has_declared_alias_head(ty2) { return true; }
+        if let Some(equal) = self.builtin_types_equal(ty1, ty2) { return equal; }
+        if self.declared_heads_are_disjoint(ty1, ty2) { return false; }
         if let Some(overlap) = self.compare_nominal_applications(ty1, ty2,
             |left, right| self.types_could_unify(left, right))
         { return overlap; }

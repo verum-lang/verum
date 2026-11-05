@@ -25,7 +25,7 @@ impl ProtocolChecker {
         let key = self.make_protocol_key(&bound.protocol);
         let mut requirements = List::new();
         if let Some(index) = self.impls_by_protocol.get(&key) {
-            for index in index.candidates(ty) {
+            for index in index.candidates(ty, self.requires_unfiltered_type_candidates(ty)) {
                 let implementation = &self.impls[index];
                 if let CandidateMatch::Matched(substitution) = self.match_implementation_candidate_in_environment(
                     implementation, ty, Some(&bound.args), true, &ConstraintEnvironment { protocols: assumptions, callables },
@@ -234,7 +234,7 @@ impl Obligations<'_> {
             .checker
             .impls_by_protocol
             .get(&key)
-            .map(|index| index.candidates(ty))
+            .map(|index| index.candidates(ty, self.checker.requires_unfiltered_type_candidates(ty)))
             .unwrap_or_default();
         let mut covering = false;
         for index in candidates {

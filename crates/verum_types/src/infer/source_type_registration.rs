@@ -168,9 +168,55 @@ impl super::TypeChecker {
             }
             self.ctx.finish_type_definition_journal(true);
             self.finish_source_variant_registrations(true);
+            for (key, declaration) in &pending {
+                let (arity, alias) = self.completed_protocol_type_authority(key, declaration);
+                self.protocol_checker.write().register_type_declaration_kind(
+                    key.clone(), declaration.body.kind(), arity, alias,
+                );
+            }
             self.source_type_registration.completed.extend(pending);
         }
         result
+    }
+
+    /// Canonicalize only slots listed by the selected declaration. The same
+    /// checked mixed-family carrier supplies role, domain and capture-safe
+    /// substitution to protocol proofs; spelling is never an argument binder.
+    fn completed_protocol_type_authority(
+        &self, key: &Text, declaration: &TypeDecl,
+    ) -> (Option<usize>, Option<crate::protocol::AssociatedTypeAssignment>) {
+        use crate::context::GenericBinder;
+        let Some(Type::Record(roster)) = self.ctx.lookup_type(&format!("__type_params_{key}")) else {
+            return (None, None);
+        };
+        let arity = Some(roster.len());
+        if !matches!(declaration.body, verum_ast::TypeDeclBody::Alias(_)) {
+            return (arity, None);
+        }
+        let alias = (|| {
+            let body = self.unifier.alias_binding(key).0?;
+            let mut named = indexmap::IndexMap::new();
+            let mut parameters = List::new();
+            for (name, role) in roster {
+                let role = self.substitute_declared_named_slots(role, &named).ok()?;
+                let binder = match GenericBinder::declared(&role) {
+                    Ok(binder) => binder,
+                    Err(_) if matches!(&role, Type::Named { path, args }
+                        if args.is_empty() && path.as_ident().is_some_and(|ident| ident.name == *name))
+                        || matches!(&role, Type::Generic { name: own, args } if args.is_empty() && own == name) => {
+                        let variable = crate::ty::TypeVar::fresh();
+                        named.insert(name.clone(), Type::Var(variable));
+                        GenericBinder::Type(variable)
+                    }
+                    _ => return None,
+                };
+                parameters.push(binder);
+            }
+            let body = self.substitute_declared_named_slots(&body, &named).ok()?;
+            crate::protocol::AssociatedTypeAssignment::mixed_family(parameters, body).ok()
+        })();
+        // Failure retains Alias kind, so it cannot become nominal disjointness.
+        (arity, alias)
     }
 
     pub(super) fn journal_variant_parent(&mut self, name: &Text) {

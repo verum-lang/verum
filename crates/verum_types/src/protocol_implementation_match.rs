@@ -160,6 +160,7 @@ impl ProtocolChecker {
             environment.extend_variables(&mut variables);
         }
         let mut matcher = Unifier::new();
+        self.install_builtin_proof_aliases(&mut matcher);
         matcher.enter_rigid_scope(variables.into_iter().map(|variable| {
             (
                 variable,
@@ -169,6 +170,9 @@ impl ProtocolChecker {
             )
         }));
         let pattern = implementation.for_type.try_apply_subst(&fresh).ok()?;
+        let pattern = self.expand_declared_alias_head(&pattern).unwrap_or(pattern);
+        let actual = self.expand_declared_alias_head(ty);
+        let ty = actual.as_ref().unwrap_or(ty);
         if !self.types_structurally_equal(&pattern, ty) {
             matcher.unify(&pattern, ty, Span::default()).ok()?;
         }
@@ -324,9 +328,16 @@ pub(super) enum CandidateMatch {
 }
 
 fn provably_disjoint(checker: &ProtocolChecker, a: &Type, b: &Type) -> bool {
+    let left = checker.expand_declared_alias_head(a);
+    let right = checker.expand_declared_alias_head(b);
+    if left.is_some() || right.is_some() {
+        return provably_disjoint(checker, left.as_ref().unwrap_or(a), right.as_ref().unwrap_or(b));
+    }
+    if checker.has_declared_alias_head(a) || checker.has_declared_alias_head(b) { return false; }
     if checker.types_structurally_equal(a, b) {
         return false;
     }
+    if checker.declared_heads_are_disjoint(a, b) { return true; }
     match (a, b) {
         (Type::Named { path: a, args: aa }, Type::Named { path: b, args: ba }) => {
             !checker.paths_equal(a, b)

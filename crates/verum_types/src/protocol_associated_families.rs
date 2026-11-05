@@ -238,7 +238,7 @@ impl ProtocolChecker {
             if !self.has_associated_declaration(key, name, false, &mut Vec::new()) {
                 continue;
             }
-            for index in index.candidates(receiver) {
+            for index in index.candidates(receiver, self.requires_unfiltered_type_candidates(receiver)) {
                 let implementation = &self.impls[index];
                 let substitution = match self.match_implementation_candidate(
                     implementation,
@@ -701,7 +701,7 @@ impl ProtocolChecker {
             if !self.has_associated_declaration(key, name, true, &mut Vec::new()) {
                 continue;
             }
-            for index in index.candidates(receiver) {
+            for index in index.candidates(receiver, self.requires_unfiltered_type_candidates(receiver)) {
                 let implementation = &self.impls[index];
                 let substitution=match self.match_implementation_candidate(implementation,receiver,None,true) {
                     CandidateMatch::Disjoint=>continue,
