@@ -1179,6 +1179,26 @@ impl TypeEnv {
         self.universe_ctx = universe_ctx;
     }
 
+    /// Save a lexical boundary without cloning away declarations loaded later.
+    pub(crate) fn scope_depth(&self) -> usize {
+        let mut depth = 0;
+        let mut current = self;
+        while let Some(parent) = current.parent.as_deref() {
+            depth += 1;
+            current = parent;
+        }
+        depth
+    }
+
+    /// Unwind an aborted body while keeping mutations to its outer/root scopes.
+    pub(crate) fn restore_scope_depth(&mut self, depth: usize) {
+        let current = self.scope_depth();
+        assert!(current >= depth, "body checker escaped its lexical boundary");
+        for _ in depth..current {
+            self.pop_scope();
+        }
+    }
+
     /// Pop the current scope and restore the parent
     ///
     /// PERF: Zero-copy restoration of parent scope.

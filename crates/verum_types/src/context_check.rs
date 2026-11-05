@@ -521,6 +521,16 @@ pub struct ContextChecker {
 }
 
 impl ContextChecker {
+    /// Lexical body state; dependency declarations remain registered.
+    pub(crate) fn body_scope_snapshot(&self, name: &Text) -> (ContextEnv, ContextSet, Option<FunctionContextInfo>) {
+        (self.env.clone(), self.required.clone(), self.function_registry.get(name).cloned())
+    }
+
+    pub(crate) fn restore_body_scope(&mut self, name: &Text, state: (ContextEnv, ContextSet, Option<FunctionContextInfo>)) {
+        (self.env, self.required) = (state.0, state.1);
+        match state.2 { Some(info) => { self.function_registry.insert(name.clone(), info); }, None => { self.function_registry.remove(name); } }
+    }
+
     pub fn new() -> Self {
         Self {
             env: ContextEnv::new(),

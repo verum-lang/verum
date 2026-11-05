@@ -2879,31 +2879,10 @@ impl TypeChecker {
                         return Ok(InferResult::new(expected.clone()));
                     }
 
-                    // An unsuffixed integer literal against a BOUNDED type
-                    // parameter takes that parameter's type.
-                    //
-                    // `fn matrix_multiply<T: Num>(…)` writing `let sum: T = 0`
-                    // and `fn make_double_transform<N: Numeric>()` writing
-                    // `x * 2` are how numeric generic code is written; a
-                    // literal is polymorphic, and WHICH types it may inhabit
-                    // is decided where the parameter is instantiated, by the
-                    // bound check at the call site.
-                    //
-                    // The condition is "has a bound", not "has a numeric
-                    // bound", and deliberately so: naming `Num` here would
-                    // put stdlib knowledge in the compiler, which this crate
-                    // must not have. The approximation is coarse — a
-                    // `T: Display` parameter accepts `0` too — but it is
-                    // bounded by what the call site verifies, and it keeps
-                    // the case that matters rejected: `fn f<T>(t: T) -> T
-                    // { 42 }` names NO bound, so T could be any type at all
-                    // and 42 is not one of them.
-                    if let Type::Var(var) = expected
-                        && self.unifier.is_rigid(*var)
-                        && !self.get_type_var_bounds(var).is_empty()
-                    {
-                        return Ok(InferResult::new(expected.clone()));
-                    }
+                    // A bound proves operations, not construction from an integer.
+                    // Generic values require a declared conversion or witness;
+                    // no literal recovery may specialize a rigid parameter.
+
                 }
 
                 // Float literal coercion: `4.0` for Float32, Float64

@@ -20,6 +20,8 @@ mod associated_family_applications;
 mod source_declarations;
 mod protocol_arguments;
 mod protocol_methods;
+mod protocol_default_bodies;
+mod function_body_scope;
 mod source_impl_signatures;
 mod source_type_registration;
 mod source_protocol_header;

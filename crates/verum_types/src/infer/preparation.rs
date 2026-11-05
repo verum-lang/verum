@@ -71,6 +71,14 @@ impl TypeChecker {
             })
             .collect();
         self.register_all_type_names(&module.items);
+        // Protocol signatures may require contexts declared later in the file.
+        // Establish only their declared identities here; full method contracts
+        // are elaborated below after nominal type definitions are available.
+        for item in &module.items {
+            if let ItemKind::Context(decl) = &item.kind {
+                self.context_resolver.register_protocol_as_context(decl.name.name.clone());
+            }
+        }
         self.set_alias_scope_from_items(&module.items);
         let mut errors = List::new();
         let mut resolution_stack = List::new();

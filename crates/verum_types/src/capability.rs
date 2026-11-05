@@ -600,6 +600,14 @@ pub struct CapabilityChecker {
 }
 
 impl CapabilityChecker {
+    pub(crate) fn body_scope_snapshot(&self) -> List<ContextCapabilities> {
+        self.context_capabilities.clone()
+    }
+
+    pub(crate) fn restore_body_scope(&mut self, state: List<ContextCapabilities>) {
+        self.context_capabilities = state;
+    }
+
     /// Create a new capability checker
     pub fn new() -> Self {
         Self {

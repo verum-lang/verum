@@ -408,6 +408,15 @@ pub struct StageChecker {
 }
 
 impl StageChecker {
+    pub(crate) fn body_scope_snapshot(&self, name: &Text) -> (Option<Text>, u32, verum_common::List<(Text, u32)>, verum_common::List<Text>, Option<FunctionStageInfo>) {
+        (self.current_function.clone(), self.current_stage, self.function_stack.clone().into(), self.call_path.clone().into(), self.functions.get(name).cloned())
+    }
+
+    pub(crate) fn restore_body_scope(&mut self, name: &Text, state: (Option<Text>, u32, verum_common::List<(Text, u32)>, verum_common::List<Text>, Option<FunctionStageInfo>)) {
+        (self.current_function, self.current_stage, self.function_stack, self.call_path) = (state.0, state.1, state.2.into_iter().collect(), state.3.into_iter().collect());
+        match state.4 { Some(info) => { self.functions.insert(name.clone(), info); }, None => { self.functions.remove(name); } }
+    }
+
     /// Create a new stage checker with the given configuration
     pub fn new(config: StageConfig) -> Self {
         Self {

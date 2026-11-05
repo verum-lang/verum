@@ -206,13 +206,16 @@ impl TypeChecker {
                 // Pass 2: Resolve the full type definition
                 let mut resolution_stack = List::new();
                 self.resolve_type_definition(type_decl, &mut resolution_stack)?;
+                if let TypeDeclBody::Protocol(body) = &type_decl.body {
+                    self.check_protocol_default_bodies(&type_decl.name, &type_decl.generics, &body.items)?;
+                }
                 Ok(())
             }
             ItemKind::Protocol(proto_decl) => {
                 // Register context protocol declarations (context protocol Name { ... })
                 // These are equivalent to TypeDeclBody::Protocol but come from the shorthand syntax.
                 self.register_protocol_decl_item(proto_decl)?;
-                Ok(())
+                self.check_protocol_default_bodies(&proto_decl.name, &proto_decl.generics, &proto_decl.items)
             }
             ItemKind::Impl(impl_decl) => self.check_impl_block(impl_decl),
             ItemKind::ContextGroup(ctx_group) => {
@@ -11182,10 +11185,12 @@ impl TypeChecker {
         // and a leaked parameter would arrive at the next function as a var
         // that refuses to bind to anything.
         let saved_rigid = self.unifier.rigid_snapshot();
-        let result = self.with_value_obligation_scope(true, |checker| {
-            checker.with_declared_universe_scope("function", &func.name.name, &func.generics, |checker| {
-                checker.validate_function_universes(func)?;
-                checker.check_function_inner(func)
+        let result = self.with_function_parameter_scope(func, |checker| {
+            checker.with_value_obligation_scope(true, |checker| {
+                checker.with_declared_universe_scope("function", &func.name.name, &func.generics, |checker| {
+                    checker.validate_function_universes(func)?;
+                    checker.check_function_inner(func)
+                })
             })
         });
         self.unifier.exit_rigid_scope(saved_rigid);
@@ -11334,7 +11339,9 @@ impl TypeChecker {
                     let tvar = TypeVar::fresh();
                     let type_var = Type::Var(tvar);
                     let name_text: Text = name.name.clone();
-                    self.ctx.define_type(name_text.clone(), type_var);
+                    self.ctx.define_type(name_text.clone(), type_var.clone());
+                    self.decl_param_frames.last_mut().expect("function body parameter scope")
+                        .insert(name_text.clone(), type_var);
                     func_type_param_vars.push(tvar);
                     // EVERY type parameter is rigid; the flag records
                     // whether it carries a bound.
@@ -11395,7 +11402,9 @@ impl TypeChecker {
                     // Use a TypeVar for HKT parameter so it participates in instantiation
                     let tvar = TypeVar::fresh();
                     let type_var = Type::Var(tvar);
-                    self.ctx.define_type(name_text.clone(), type_var);
+                    self.ctx.define_type(name_text.clone(), type_var.clone());
+                    self.decl_param_frames.last_mut().expect("function body parameter scope")
+                        .insert(name_text.clone(), type_var);
                     func_type_param_vars.push(tvar);
 
                     // Side table: only register bounded HKTs so bare slot
@@ -11415,7 +11424,9 @@ impl TypeChecker {
                 GenericParamKind::Meta { name, .. } | GenericParamKind::Const { name, .. } => {
                     let value = self.source_value_parameter(generic_param)?;
                     func_value_parameters_by_name.insert(name.name.clone(), value.clone());
-                    self.ctx.define_type(name.name.clone(), value);
+                    self.ctx.define_type(name.name.clone(), value.clone());
+                    self.decl_param_frames.last_mut().expect("function body parameter scope")
+                        .insert(name.name.clone(), value);
                 }
                 _ => {} // Handle other generic param kinds (Const, Lifetime) later
             }
@@ -24816,19 +24827,10 @@ impl TypeChecker {
             }
         }
 
-        // TYPE VARIABLE / PLACEHOLDER METHOD FALLBACK
-        // When receiver type is an unresolved type variable or placeholder, return a fresh
-        // type variable rather than erroring. This allows type inference to continue.
-        match &recv_ty {
-            Type::Var(_) | Type::Placeholder { .. } => {
-                for arg in args.iter() {
-                    let _ = self.synth_expr(arg)?;
-                }
-                let fresh = Type::Var(TypeVar::fresh());
-                return Ok(Some(InferResult::new(fresh)));
-            }
-            _ => {}
-        }
+        // An unresolved receiver supplies no method evidence. Returning a
+        // fresh result here would discard the call obligation permanently.
+        // Contextual inference and declared bounds must resolve the call in
+        // the ordinary dispatch paths before reaching this fallback.
         Ok(None)
     }
 

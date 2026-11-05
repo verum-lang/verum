@@ -959,6 +959,15 @@ pub struct PropertyInferenceContext {
 const BUILTIN_IO_FUNCTIONS: &[&str] = &["print", "println", "eprint", "eprintln"];
 
 impl PropertyInferenceContext {
+    pub(crate) fn body_scope_snapshot(&self, name: &Text) -> (PropertySet, List<PropertySet>, Option<PropertySet>) {
+        (self.current_properties.clone(), self.scope_stack.clone(), self.known_functions.get(name).cloned())
+    }
+
+    pub(crate) fn restore_body_scope(&mut self, name: &Text, state: (PropertySet, List<PropertySet>, Option<PropertySet>)) {
+        (self.current_properties, self.scope_stack) = (state.0, state.1);
+        match state.2 { Some(properties) => { self.known_functions.insert(name.clone(), properties); }, None => { self.known_functions.remove(name); } }
+    }
+
     pub fn forget_function(&mut self, name: &Text) { self.known_functions.remove(name); }
 
     /// Create new property inference context
