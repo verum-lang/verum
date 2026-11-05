@@ -121,6 +121,12 @@ impl TypeChecker {
                         self.validate_projection_with_header(Some(&header), receiver, &name,
                             arguments, &assumptions, protocol.span)?;
                     }
+                    // An applied family is one declaration-owned application.
+                    // Its bare constructor is not a second zero-argument use;
+                    // recursively validate only its receiver and actual inputs.
+                    pending.push(receiver);
+                    pending.extend(arguments.iter());
+                    continue;
                 }
                 match ty {
                     Type::Function {
