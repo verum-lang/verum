@@ -9091,201 +9091,33 @@ impl TypeChecker {
     /// This ensures protocol definitions like `type Into<T> is protocol { fn into(self) -> T; }`
     /// are available for method lookup when blanket impls reference them.
     pub fn register_module_protocols(&mut self, ast: &verum_ast::Module, module_path: &str) {
-        use verum_ast::ItemKind;
-        use verum_ast::decl::TypeDeclBody;
-
-        // Check if we've already registered protocols from this module
         let protocols_key = format!("{}_protocols", module_path);
-        if self.preregistered_modules.contains(&protocols_key) {
+        if !self.preregistered_modules.insert(protocols_key.clone()) {
             return;
         }
-        self.preregistered_modules.insert(protocols_key);
-        let saved_owner = self.current_module_path.clone();
-        let saved_source_scope = self.resolving_source_signature;
-        self.set_current_module_path(module_path);
-        self.resolving_source_signature = true;
-
+        let owner: Text = module_path.into();
+        let mut complete = true;
         for item in &ast.items {
-            if let ItemKind::Type(type_decl) = &item.kind {
-                if let TypeDeclBody::Protocol(protocol_body) = &type_decl.body {
-                    let type_name = self.declared_type_key(type_decl.name.name.as_str());
-
-                    // IMPORTANT: Stdlib-loaded protocols OVERRIDE hardcoded fallbacks.
-                    // The hardcoded protocols in register_builtin_protocols are minimal bootstrap
-                    // versions that may have incomplete method signatures (e.g., Iterator.next()
-                    // returning just TypeVar(1) instead of Maybe<TypeVar(1)>).
-                    // The stdlib definitions are the source of truth.
-
-                    #[cfg(debug_assertions)]
-                    {
-                        if self.protocol_checker.read().has_protocol(&type_name) {
-                            // eprintln!(
-                            // "[DEBUG] Overriding hardcoded protocol '{}' with stdlib definition from '{}'",
-                            // type_name, module_path
-                            // );
-                        } else {
-                            // eprintln!(
-                            // "[DEBUG] Registering protocol type '{}' from module '{}'",
-                            // type_name, module_path
-                            // );
-                        }
-                    }
-
-                    // Enter scope for type parameters
-                    self.ctx.enter_scope();
-
-                    // CRITICAL: Register "Self" in type environment so that Self.Item can be resolved
-                    // when parsing method signatures (e.g., `fn next(&mut self) -> Maybe<Self.Item>`).
-                    // This allows ast_to_type to recognize "Self" as a valid type name.
-                    let self_type = Type::Named {
-                        path: verum_ast::Path::single(verum_ast::Ident::new(
-                            "Self",
-                            verum_ast::Span::default(),
-                        )),
-                        args: List::new(),
-                    };
-                    self.ctx
-                        .define_type(verum_common::Text::from("Self"), self_type.clone());
-
-                    // Save and set current_self_type so that PathSegment::SelfValue can be resolved
-                    let old_self_type = self.current_self_type.clone();
-                    self.current_self_type = verum_common::Maybe::Some(self_type);
-
-                    // Register type parameters (like T in Into<T>)
-                    for generic_param in &type_decl.generics {
-                        if let verum_ast::ty::GenericParamKind::Type { name, .. } =
-                            &generic_param.kind
-                        {
-                            let type_var = TypeVar::fresh();
-                            let param_name: Text = name.name.clone();
-                            self.ctx.define_type(param_name, Type::Var(type_var));
-                        }
-                    }
-
-                    // Build protocol methods and associated types
-                    use verum_ast::decl::{FunctionParamKind, ProtocolItemKind};
-                    let mut protocol_methods: Map<Text, crate::protocol::ProtocolMethod> =
-                        Map::new();
-                    let mut protocol_assoc_types: Map<Text, crate::protocol::AssociatedType> =
-                        Map::new();
-
-                    let (constraint_scope, declared_supers) = self.protocol_constraint_scope(
-                        &type_decl.generics, &protocol_body.extends,
-                        &[type_decl.generic_where_clause.as_ref(), protocol_body.generic_where_clause.as_ref()],
-                    );
-                    for proto_item in &protocol_body.items {
-                        match &proto_item.kind {
-                            ProtocolItemKind::Function { decl, default_impl } => {
-                                match self.elaborate_protocol_method(
-                                    &type_decl.generics, &constraint_scope, decl,
-                                    decl.body.is_some() || default_impl.is_some(),
-                                ) {
-                                    Ok(signature) => { protocol_methods.insert(decl.name.name.clone(), signature); }
-                                    Err(error) => self.push_diagnostic_for(error),
-                                }
-                            }
-                            ProtocolItemKind::Type { name, .. } => {
-                                match self.elaborate_associated_type(&type_decl.generics, &constraint_scope, &proto_item.kind) {
-                                    Ok(assoc) => { protocol_assoc_types.insert(name.name.clone(), assoc); }
-                                    Err(error) => self.push_diagnostic_for(error),
-                                }
-                            }
-                            ProtocolItemKind::Const { .. } => {
-                                // Skip associated consts for now
-                            }
-                            ProtocolItemKind::Axiom(_) => {
-                                // T1-R: protocol axioms are tracked
-                                // elsewhere (in the implement-site
-                                // obligation-discharge pipeline) — they
-                                // do not contribute associated types.
-                            }
-                        }
-                    }
-
-                    let super_protocols = match declared_supers {
-                        Some(supers) => supers,
-                        None => match self.convert_super_protocols(&protocol_body.extends) {
-                            Ok(supers) => supers,
-                            Err(error) => {
-                                self.push_diagnostic_for(error);
-                                self.set_current_self_type(old_self_type);
-                                self.ctx.exit_scope();
-                                continue;
-                            }
-                        },
-                    };
-
-                    // Create and register Protocol object
-                    // Convert AST is_context bool to ProtocolKind:
-                    // - true -> ConstraintAndInjectable (context protocol)
-                    // - false -> Constraint (regular protocol)
-                    let kind = if protocol_body.is_context {
-                        crate::protocol::ProtocolKind::ConstraintAndInjectable
-                    } else {
-                        crate::protocol::ProtocolKind::Constraint
-                    };
-
-                    let type_params = match self.convert_generic_params_to_type_params(&type_decl.generics) {
-                        Ok(parameters) => parameters,
-                        Err(error) => {
-                            self.push_diagnostic_for(error);
-                            self.set_current_self_type(old_self_type);
-                            self.ctx.exit_scope();
-                            continue;
-                        }
-                    };
-                    let protocol = crate::protocol::Protocol {
-                        source_parameters: Some(std::sync::Arc::new(type_decl.generics.clone())),
-                        constraints: constraint_scope,
-                        name: type_name.clone(),
-                        kind,
-                        type_params,
-                        methods: protocol_methods,
-                        associated_types: protocol_assoc_types,
-                        associated_consts: Map::new(),
-                        super_protocols,
-                        specialization_info: Maybe::None,
-                        defining_crate: Maybe::None,
-                        span: type_decl.span,
-                    };
-
-                    self.unifier.register_protocol_name(protocol.name.as_str());
-
-                    let _ = self.protocol_checker.write().register_protocol(protocol);
-
-                    // Auto-register context protocols as injectable contexts.
-                    // This replaces hardcoded register_protocol_as_context calls.
-                    if protocol_body.is_context {
-                        self.context_resolver
-                            .register_protocol_as_context(type_name.clone());
-                    }
-
-                    // Register Kind for protocol in kind inferer
-                    {
-                        use crate::kind_inference::KindInference;
-                        let protocol_kind = if protocol_body.is_context {
-                            crate::kind_inference::Kind::ConstraintAndInjectable
-                        } else {
-                            crate::kind_inference::Kind::Constraint
-                        };
-                        self.kind_inferer()
-                            .register_type_constructor(type_name.as_str(), protocol_kind);
-                    }
-
-                    // Restore previous self type before exiting scope
-                    self.set_current_self_type(old_self_type);
-                    self.ctx.exit_scope();
-
-                    // #[cfg(debug_assertions)]
-                    // eprintln!(
-                    // "[DEBUG] Successfully registered protocol '{}' from module '{}'",
-                    // type_name, module_path
-                    // );
+            if let verum_ast::ItemKind::Type(declaration) = &item.kind
+                && matches!(declaration.body, verum_ast::TypeDeclBody::Protocol(_))
+            {
+                // The ordinary source loader owns the complete parameter and
+                // associated-member header, lexical scope and publication
+                // rollback. A second method-by-method elaborator loses Self's
+                // declaring header and can publish a protocol after errors.
+                if let Err(error) = self.load_source_type_declaration_with_parameter_key(
+                    declaration, &owner, declaration.span,
+                ) {
+                    complete = false;
+                    self.push_diagnostic_for(error);
                 }
             }
         }
-        self.set_current_module_path(saved_owner);
-        self.resolving_source_signature = saved_source_scope;
+        // This key also prevents recursive module scans while declarations are
+        // being loaded. A failed scan is not a completed registration.
+        if !complete {
+            self.preregistered_modules.remove(&protocols_key);
+        }
     }
 
     /// Register all blanket protocol implementations from a module.
