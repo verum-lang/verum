@@ -70,7 +70,7 @@ impl ProtocolChecker {
         &self, receiver: &Type, name: &Text, arguments: &[Type],
         assumptions: &[WhereClause], header: Option<AssociatedDeclarationHeader<'_>>,
     ) -> Result<Option<FamilyApplication>, Text> {
-        let mut symbolic: Option<(Text, List<Type>, FamilyApplication)> = None;
+        let mut symbolic: Option<(Text, List<Type>, FamilyApplication, bool)> = None;
         for assumption in assumptions {
             if !self.types_structurally_equal(&assumption.ty, receiver) {
                 continue;
@@ -98,26 +98,44 @@ impl ProtocolChecker {
                     arguments,
                     assumptions,
                 )?;
+                // A default member may be overridden by an implementation.
+                // Only an equality in the selected receiver's actual bound
+                // fixes its result in universally quantified code.
+                let equality = bound.associated_types.get(name);
+                if equality.is_some() && !completed.is_empty() {
+                    return Err("an applied associated family requires a parameterized equality".into());
+                }
+                let projection = Type::Generic {
+                    name: format!("::{name}").into(),
+                    args: List::from_iter([receiver.clone()]),
+                };
                 let application = FamilyApplication {
-                    result: Type::TypeApp {
-                        constructor: Box::new(Type::Generic {
-                            name: format!("::{name}").into(),
-                            args: List::from_iter([receiver.clone()]),
-                        }),
-                        args: completed.clone(),
-                    },
+                    result: equality.cloned().unwrap_or_else(|| {
+                        if completed.is_empty() { projection } else {
+                            Type::TypeApp { constructor: Box::new(projection), args: completed.clone() }
+                        }
+                    }),
                     arguments: completed,
                 };
-                if let Some((prior, args, _)) = &symbolic {
+                if let Some((prior, args, prior_application, prior_equality)) = &mut symbolic {
                     if prior != &selected.owner || args != &selected.arguments {
                         return Err("symbolic family has competing declaration owners".into());
                     }
+                    if equality.is_some() {
+                        if *prior_equality && !self.types_structurally_equal(
+                            &prior_application.result, &application.result,
+                        ) {
+                            return Err("symbolic family has conflicting associated equalities".into());
+                        }
+                        *prior_application = application;
+                        *prior_equality = true;
+                    }
                 } else {
-                    symbolic = Some((selected.owner, selected.arguments, application));
+                    symbolic = Some((selected.owner, selected.arguments, application, equality.is_some()));
                 }
             }
         }
-        if let Some((_, _, application)) = symbolic {
+        if let Some((_, _, application, _)) = symbolic {
             return Ok(Some(application));
         }
         let mut selected: Option<(Text, List<Type>, FamilyApplication)> = None;

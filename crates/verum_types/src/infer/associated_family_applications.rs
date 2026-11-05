@@ -38,7 +38,7 @@ pub(super) fn checked_projection_parts(ty: &Type) -> Option<(&Type, Text, &[Type
 
 impl TypeChecker {
     pub(super) fn resolve_checked_family_application(&self, ty: &Type, span: Span) -> Result<Type> {
-        let Some((receiver, name, arguments)) = projection_parts(ty) else {
+        let Some((receiver, name, arguments)) = checked_projection_parts(ty) else {
             return Ok(ty.clone());
         };
         let assumptions: List<_> = self

@@ -3326,29 +3326,10 @@ impl Unifier {
                 Ok(subst)
             }
 
-            // ASSOCIATED TYPE PROJECTIONS
-            //
-
-            // Protocol system: method resolution, associated types, default implementations, protocol objects (&dyn Protocol) — Associated type resolution
-            //
-
-            // Associated type projections are represented as Generic { name: "::AssocName", args: [base] }
-            // where base is the type being projected from (e.g., S in S.Item).
-            //
-
-            // When unifying a projection with another type:
-            // 1. If both are projections with same name and bases unify -> unify
-            // 2. If projection has type variable base -> allow (deferred constraint)
-            // 3. If projection has concrete base -> try to resolve, then unify result
-            //
-
-            // This enables generic code like:
-            //  implement<S: Stream> Stream for Enumerate<S> {
-            //  fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<(Int, S.Item)>>
-            //  }
-            //
-
-            // Where S.Item must unify with the actual item type from poll_next results.
+            // Associated projections retain their receiver and member identity.
+            // Equal projections unify structurally; concrete receivers may be
+            // normalized by the installed declaration-backed resolver. An
+            // unresolved projection is not evidence of an arbitrary equality.
 
             // Case 1: Both are projections (same associated type name)
             (Generic { name: n1, args: a1 }, Generic { name: n2, args: a2 })
@@ -3370,39 +3351,6 @@ impl Unifier {
                         self.unify_inner(&ty1.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?, &ty2.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?, span)?;
                     subst = subst.compose(&s).map_err(|message| TypeError::UniverseBinding { message, span })?;
                 }
-                Ok(subst)
-            }
-
-            // Case 2: Projection unifying with non-projection type
-            // If projection base contains type variables, defer by allowing unification
-            (Generic { name, args }, other) | (other, Generic { name, args })
-                if name.as_str().starts_with("::")
-                    && args.len() == 1
-                    && Self::has_type_vars(&args[0]) =>
-            {
-                // The projection's base type is not yet fully resolved.
-                // We allow this unification to succeed, effectively treating the projection
-                // as compatible with the other type. This is sound because:
-                //
-
-                // 1. The base type variable will be resolved later during constraint solving
-                // 2. When resolved, the actual associated type will be determined
-                // 3. At that point, full type checking will verify compatibility
-                //
-
-                // This matches the semantic that in generic code like:
-                //  fn enumerate<S: Stream>(s: S) -> impl Stream<Item = (Int, S.Item)>
-                // The S.Item is "opaque" until S is instantiated with a concrete type.
-
-                // If the other type also has unresolved vars, just succeed
-                if Self::has_type_vars(other) {
-                    return Ok(Substitution::new());
-                }
-
-                // Create a fresh type variable to represent the projection result
-                // and unify it with the other type
-                let projection_var = TypeVar::fresh();
-                let subst = self.bind_var(projection_var, other, span)?;
                 Ok(subst)
             }
 
