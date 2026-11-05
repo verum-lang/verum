@@ -9,7 +9,7 @@ use crate::{
 use verum_ast::{
     Span,
     decl::{ImplDecl, ImplItemKind, ImplKind},
-    ty::{GenericArg, GenericParamKind, WherePredicateKind},
+    ty::{GenericArg, GenericParamKind},
 };
 use verum_common::{List, Map, Text};
 
@@ -178,31 +178,7 @@ impl TypeChecker {
                     "too many protocol type arguments",
                 ));
             }
-            let mut assumptions = List::new();
-            for parameter in &declaration.generics {
-                let GenericParamKind::Type { name, bounds, .. } = &parameter.kind else {
-                    // Value domains travel in their Type::Meta declaration binder.
-                    continue;
-                };
-                assumptions.push(WhereClause {
-                    ty: frame[&name.name].clone(),
-                    bounds: self.elaborate_family_bounds(bounds)?,
-                });
-            }
-            if let Some(clause) = &declaration.generic_where_clause {
-                for predicate in &clause.predicates {
-                    let WherePredicateKind::Type { ty, bounds } = &predicate.kind else {
-                        return Err(refusal(
-                            predicate.span,
-                            "universal associated obligations require typed where constraints",
-                        ));
-                    };
-                    assumptions.push(WhereClause {
-                        ty: self.ast_to_type(ty)?,
-                        bounds: self.elaborate_family_bounds(bounds)?,
-                    });
-                }
-            }
+            let (assumptions, callables) = self.elaborate_source_impl_conditions(declaration, &frame)?;
             for clause in parameter_bounds {
                 let ty = clause
                     .ty
@@ -214,7 +190,7 @@ impl TypeChecker {
                     .map(|bound| bound.try_apply_subst(&substitution))
                     .collect::<std::result::Result<_, _>>()
                     .map_err(|error| refusal(declaration.span, error))?;
-                self.prove_associated_bounds(&ty, &bounds, &assumptions, declaration.span)?;
+                self.prove_associated_bounds(&ty, &bounds, &assumptions, &callables, declaration.span)?;
             }
             let mut values = Map::new();
             for (name, (parameters, ty, _)) in &provided {
@@ -364,6 +340,7 @@ impl TypeChecker {
                                         argument,
                                         &required,
                                         &family_assumptions,
+                                        &callables,
                                         *span,
                                     )?;
                                 }
@@ -404,7 +381,7 @@ impl TypeChecker {
                         })
                         .collect::<std::result::Result<_, _>>()
                         .map_err(|error| refusal(span, error))?;
-                    self.prove_associated_bounds(&actual, &bounds, &family_assumptions, span)
+                    self.prove_associated_bounds(&actual, &bounds, &family_assumptions, &callables, span)
                 })();
                 self.pop_decl_param_frame();
                 checked?;
@@ -421,6 +398,7 @@ impl TypeChecker {
         ty: &Type,
         bounds: &[ProtocolBound],
         assumptions: &[WhereClause],
+        callables: &Map<TypeVar, Type>,
         span: Span,
     ) -> Result<()> {
         let mut pending: Vec<_> = bounds.iter().map(|bound| (ty.clone(), bound.clone())).collect();
@@ -435,15 +413,15 @@ impl TypeChecker {
             seen.push((subject.clone(), bound.clone()));
             let name = self.path_to_string(&bound.protocol);
             self.ensure_stdlib_type_loaded_transitive(&name);
-            self.load_source_bound_implementations(&subject, &bound, assumptions, span)?;
+            self.load_source_bound_implementations(&subject, &bound, assumptions, callables, span)?;
             let registry = self.protocol_checker.read();
             // A declaration assumption can already prove this goal. Otherwise
             // follow only the actual matched implementation's owned telescope,
             // never guessed protocols for a nominal argument's spelling.
-            if registry.check_universal_bounds(&subject, std::slice::from_ref(&bound), assumptions).is_ok() {
+            if registry.check_universal_bounds_with_callables(&subject, std::slice::from_ref(&bound), assumptions, callables).is_ok() {
                 continue;
             }
-            let requirements = registry.source_bound_requirements(&subject, &bound)
+            let requirements = registry.source_bound_requirements(&subject, &bound, callables)
                 .map_err(|error| refusal(span, error))?;
             for clause in requirements {
                 for required in clause.bounds {
@@ -453,7 +431,7 @@ impl TypeChecker {
         }
         self.protocol_checker
             .read()
-            .check_universal_bounds(ty, bounds, assumptions)
+            .check_universal_bounds_with_callables(ty, bounds, assumptions, callables)
             .map_err(|error| refusal(span, error))
     }
 }

@@ -642,6 +642,7 @@ impl TypeChecker {
         receiver: &Type,
         bound: &crate::protocol::ProtocolBound,
         assumptions: &[crate::protocol::WhereClause],
+        callables: &verum_common::Map<crate::ty::TypeVar, Type>,
         span: Span,
     ) -> Result<()> {
         let Some((module, declaration)) = self.source_receiver_declaration(receiver) else {
@@ -655,7 +656,7 @@ impl TypeChecker {
             // implementation or an explicit caller assumption may still prove
             // this exact instantiated goal independently of that declaration.
             return self.protocol_checker.read()
-                .check_universal_bounds(receiver, std::slice::from_ref(bound), assumptions)
+                .check_universal_bounds_with_callables(receiver, std::slice::from_ref(bound), assumptions, callables)
                 .map_err(|error| TypeError::OtherWithCodeSpanned {
                     code: "E405".into(),
                     msg: format!("recursive source implementation obligation has no independent evidence: {error}").into(),

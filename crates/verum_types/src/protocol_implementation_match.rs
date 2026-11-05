@@ -40,6 +40,17 @@ impl ProtocolChecker {
         args: Option<&[Type]>,
         rigid: bool,
     ) -> CandidateMatch {
+        self.match_implementation_candidate_with_callables(implementation, ty, args, rigid, &Default::default())
+    }
+
+    pub(super) fn match_implementation_candidate_with_callables(
+        &self,
+        implementation: &ProtocolImpl,
+        ty: &Type,
+        args: Option<&[Type]>,
+        rigid: bool,
+        callables: &verum_common::Map<crate::ty::TypeVar, Type>,
+    ) -> CandidateMatch {
         // A declaration parameter is rigid until its own telescope instantiates
         // it. An inference hole in a declared head has no such authority. A
         // proof query likewise cannot choose its missing value from a candidate.
@@ -66,7 +77,7 @@ impl ProtocolChecker {
         {
             return CandidateMatch::Disjoint;
         }
-        match self.try_match_candidate(implementation, ty, args, rigid) {
+        match self.try_match_candidate(implementation, ty, args, rigid, callables) {
             Some(substitution) => CandidateMatch::Matched(substitution),
             None => CandidateMatch::Unknown,
         }
@@ -77,6 +88,7 @@ impl ProtocolChecker {
         ty: &Type,
         args: Option<&[Type]>,
         rigid: bool,
+        callables: &verum_common::Map<crate::ty::TypeVar, Type>,
     ) -> Option<Substitution> {
         let mut variables = implementation.for_type.free_vars();
         for ty in &implementation.protocol_args {
@@ -107,6 +119,7 @@ impl ProtocolChecker {
                 variables.extend(argument.free_vars());
             }
         }
+        if rigid { extend_callable_variables(&mut variables, callables); }
         let mut matcher = Unifier::new();
         matcher.enter_rigid_scope(variables.into_iter().map(|variable| {
             (
@@ -133,13 +146,21 @@ impl ProtocolChecker {
         // Callable owner bounds may determine variables absent from the head,
         // for example F: fn(A) -> B. Infer their structural arguments once;
         // check_implementation_callable_bounds still proves the full contract.
-        for (owner, bound) in &implementation.type_param_fn_bounds {
+        let mut pending: Vec<_> = implementation.type_param_fn_bounds.iter().collect();
+        while !pending.is_empty() {
+            let before = pending.len();
+            let mut blocked = Vec::new();
+            for (owner, bound) in pending {
             let actual = matcher
                 .try_apply(
                     &Type::Var(*owner).try_apply_subst(&fresh).ok()?,
                     Span::default(),
                 )
                 .ok()?;
+            let Some(actual) = callable_contract(&actual, callables) else {
+                blocked.push((owner, bound));
+                continue;
+            };
             let required = bound.try_apply_subst(&fresh).ok()?;
             let (
                 Type::Function {
@@ -152,7 +173,7 @@ impl ProtocolChecker {
                     return_type: required_result,
                     ..
                 },
-            ) = (&actual, &required)
+            ) = (actual, &required)
             else {
                 return None;
             };
@@ -170,6 +191,9 @@ impl ProtocolChecker {
             {
                 matcher.unify(required, actual, Span::default()).ok()?;
             }
+        }
+            if blocked.len() == before { return None; }
+            pending = blocked;
         }
         // Each value domain belongs to the declaration, not to the inferred
         // argument. Keep it while applying the selected substitution.
@@ -302,6 +326,15 @@ impl ProtocolChecker {
         implementation: &ProtocolImpl,
         substitution: &Substitution,
     ) -> Result<(), verum_common::Text> {
+        self.check_implementation_callable_bounds_with_premises(implementation, substitution, &Default::default())
+    }
+
+    pub(super) fn check_implementation_callable_bounds_with_premises(
+        &self,
+        implementation: &ProtocolImpl,
+        substitution: &Substitution,
+        callables: &verum_common::Map<crate::ty::TypeVar, Type>,
+    ) -> Result<(), verum_common::Text> {
         let mut permitted = implementation
             .for_type
             .try_apply_subst(substitution)?
@@ -309,8 +342,11 @@ impl ProtocolChecker {
         for argument in &implementation.protocol_args {
             permitted.extend(argument.try_apply_subst(substitution)?.free_vars());
         }
+        extend_callable_variables(&mut permitted, callables);
         for (variable, requirement) in &implementation.type_param_fn_bounds {
             let actual = Type::Var(*variable).try_apply_subst(substitution)?;
+            let actual = callable_contract(&actual, callables).ok_or_else(||
+                verum_common::Text::from("callable implementation condition has no declared function evidence"))?;
             let required = requirement.try_apply_subst(substitution)?;
             if !matches!(actual, Type::Function { .. })
                 || !matches!(required, Type::Function { .. })
@@ -341,7 +377,7 @@ impl ProtocolChecker {
                     return_type: required_result,
                     ..
                 },
-            ) = (&actual, &required)
+            ) = (actual, &required)
             else {
                 unreachable!()
             };
@@ -359,7 +395,7 @@ impl ProtocolChecker {
                         .into(),
                 );
             }
-            if !crate::subtype::Subtyping::new().is_subtype(&actual, &required) {
+            if !crate::subtype::Subtyping::new().is_subtype(actual, &required) {
                 return Err(
                     "callable implementation condition is not established by its actual contract"
                         .into(),
@@ -367,5 +403,33 @@ impl ProtocolChecker {
             }
         }
         Ok(())
+    }
+}
+
+/// A callable premise describes operations on its owner, not equality of the
+/// owner's representation with a function value. Resolve only an exact bound
+/// variable, without specializing the variable or following spelling aliases.
+fn callable_contract<'a>(actual: &'a Type, premises: &'a verum_common::Map<crate::ty::TypeVar, Type>) -> Option<&'a Type> {
+    match actual {
+        Type::Function { .. } => Some(actual),
+        Type::Var(variable) => premises.get(variable).filter(|ty| matches!(ty, Type::Function { .. })),
+        _ => None,
+    }
+}
+
+/// Follow only contracts owned by reachable declaration variables. The visited
+/// set bounds cyclic/higher-order premises and preserves every caller variable
+/// as rigid evidence, including outputs absent from the nominal receiver head.
+fn extend_callable_variables(
+    variables: &mut verum_common::Set<crate::ty::TypeVar>,
+    premises: &verum_common::Map<crate::ty::TypeVar, Type>,
+) {
+    let mut pending: Vec<_> = variables.iter().copied().collect();
+    while let Some(variable) = pending.pop() {
+        if let Some(contract) = premises.get(&variable) {
+            for dependency in contract.free_vars() {
+                if variables.insert(dependency) { pending.push(dependency); }
+            }
+        }
     }
 }

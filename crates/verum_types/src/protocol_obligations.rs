@@ -19,14 +19,15 @@ impl ProtocolChecker {
         &self,
         ty: &Type,
         bound: &ProtocolBound,
+        callables: &verum_common::Map<TypeVar, Type>,
     ) -> Result<List<WhereClause>, Text> {
         let key = self.make_protocol_key(&bound.protocol);
         let mut requirements = List::new();
         if let Some(index) = self.impls_by_protocol.get(&key) {
             for index in index.candidates(ty) {
                 let implementation = &self.impls[index];
-                if let CandidateMatch::Matched(substitution) = self.match_implementation_candidate(
-                    implementation, ty, Some(&bound.args), true,
+                if let CandidateMatch::Matched(substitution) = self.match_implementation_candidate_with_callables(
+                    implementation, ty, Some(&bound.args), true, callables,
                 ) {
                     for clause in &implementation.where_clauses {
                         requirements.push(clause.try_apply_subst(&substitution)?);
@@ -64,9 +65,22 @@ impl ProtocolChecker {
         bounds: &[ProtocolBound],
         assumptions: &[WhereClause],
     ) -> Result<(), Text> {
+        self.check_universal_bounds_with_callables(ty, bounds, assumptions, &Default::default())
+    }
+
+    /// Prove in the declaration's complete protocol and callable environment.
+    /// Callable premises retain their rigid owner identity and full contract.
+    pub fn check_universal_bounds_with_callables(
+        &self,
+        ty: &Type,
+        bounds: &[ProtocolBound],
+        assumptions: &[WhereClause],
+        callables: &verum_common::Map<TypeVar, Type>,
+    ) -> Result<(), Text> {
         let mut context = Obligations {
             checker: self,
             assumptions,
+            callables,
             active: Vec::new(),
             remaining: 4096,
         };
@@ -80,6 +94,7 @@ impl ProtocolChecker {
 struct Obligations<'a> {
     checker: &'a ProtocolChecker,
     assumptions: &'a [WhereClause],
+    callables: &'a verum_common::Map<TypeVar, Type>,
     active: Vec<(Type, ProtocolBound)>,
     remaining: usize,
 }
@@ -203,11 +218,12 @@ impl Obligations<'_> {
         let mut covering = false;
         for index in candidates {
             let implementation = &self.checker.impls[index];
-            let overlap = match self.checker.match_implementation_candidate(
+            let overlap = match self.checker.match_implementation_candidate_with_callables(
                 implementation,
                 ty,
                 Some(&bound.args),
                 false,
+                self.callables,
             ) {
                 CandidateMatch::Matched(substitution) => substitution,
                 CandidateMatch::Disjoint => continue,
@@ -222,11 +238,11 @@ impl Obligations<'_> {
             self.check_equalities(implementation, bound, &overlap)?;
             if let CandidateMatch::Matched(substitution) = self
                 .checker
-                .match_implementation_candidate(implementation, ty, Some(&bound.args), true)
+                .match_implementation_candidate_with_callables(implementation, ty, Some(&bound.args), true, self.callables)
             {
                 let mut proved = self
                     .checker
-                    .check_implementation_callable_bounds(implementation, &substitution)
+                    .check_implementation_callable_bounds_with_premises(implementation, &substitution, self.callables)
                     .is_ok();
                 for clause in &implementation.where_clauses {
                     let clause_ty = clause.ty.try_apply_subst(&substitution)?;
