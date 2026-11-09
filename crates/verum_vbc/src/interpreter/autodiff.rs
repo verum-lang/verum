@@ -41,7 +41,7 @@
 
 use std::collections::HashMap;
 
-use super::tensor::{DType, TensorHandle};
+use super::tensor::{DType, TensorHandle, tensor_concat};
 use crate::instruction::{TensorReduceOp, TensorUnaryOp};
 
 /// Maximum number of nested gradient scopes.
@@ -3108,38 +3108,6 @@ fn tensor_index_select(
 ) -> Option<TensorHandle> {
     // Same as gather for 1D case
     tensor_gather(src, indices, axis)
-}
-
-/// Concatenate tensors along axis.
-fn tensor_concat(tensors: &[&TensorHandle], _axis: usize) -> Option<TensorHandle> {
-    if tensors.is_empty() {
-        return None;
-    }
-
-    let first = tensors[0];
-    let total_size: usize = tensors.iter().map(|t| t.numel).sum();
-
-    let mut shape = first.shape[..first.ndim as usize].to_vec();
-    shape[0] = total_size / shape[1..].iter().product::<usize>().max(1);
-
-    let result = TensorHandle::zeros(&shape, first.dtype)?;
-    let dst_data = result.data.as_ref()?;
-
-    let mut offset = 0;
-    for tensor in tensors {
-        let src_data = tensor.data.as_ref()?;
-
-        // SAFETY: All pointer operations are valid
-        unsafe {
-            let s = (*src_data.as_ptr()).as_ptr();
-            let d = (*dst_data.as_ptr()).as_mut_ptr();
-            let bytes = tensor.numel * tensor.dtype.size();
-            std::ptr::copy_nonoverlapping(s, d.add(offset), bytes);
-        }
-        offset += tensor.numel * tensor.dtype.size();
-    }
-
-    Some(result)
 }
 
 /// Slice tensor along first dimension.

@@ -3619,43 +3619,33 @@ fn tensor_extended_body(
             Ok(DispatchResult::Continue)
         }
 
-        Some(TensorSubOpcode::Concat) => {
-            // Registry wire (T0193): tensor_concat(tensors, dim) —
-            // `tensors` is a List of handles (a single bare handle
-            // also works); dim arrives in a register.
+        Some(operation @ (TensorSubOpcode::Concat | TensorSubOpcode::Stack)) => {
             let dst = read_reg(state)?;
             let handles = read_operand_tensor_list(state)?;
-            let axis = read_operand_i64(state)?.max(0) as usize;
-            if handles.is_empty() {
-                state.set_reg(dst, Value::nil());
-                return Ok(DispatchResult::Continue);
+            let axis_reg = read_reg(state)?;
+            let axis = state.get_reg(axis_reg).try_as_i64().ok_or_else(|| InterpreterError::InvalidOperand {
+                message: format!("{operation:?} requires an integer axis"),
+            })?;
+            // The handles refer to live tensor carriers. No allocation or user code
+            // runs between reading them and completing this CPU operation.
+            let tensors: Vec<_> = handles.iter().map(|&p| unsafe { &*p }).collect();
+            let first = tensors.first().ok_or_else(|| InterpreterError::InvalidOperand {
+                message: format!("{operation:?} requires at least one tensor"),
+            })?;
+            let rank = i64::from(first.ndim) + i64::from(operation == TensorSubOpcode::Stack);
+            let dimension = if axis < 0 { rank + axis } else { axis };
+            if !(0..rank).contains(&dimension) {
+                return Err(InterpreterError::InvalidOperand {
+                    message: format!("{operation:?} axis {axis} out of range for rank {rank}"),
+                });
             }
-            let refs: Vec<&TensorHandle> = handles.iter().map(|&p| unsafe { &*p }).collect();
-            if let Some(result) = super::super::super::tensor::tensor_concat(&refs, axis) {
-                let carrier = alloc_tensor_value(state, result)?;
-                state.set_reg(dst, carrier);
-            } else {
-                state.set_reg(dst, Value::nil());
-            }
-            Ok(DispatchResult::Continue)
-        }
-
-        Some(TensorSubOpcode::Stack) => {
-            // Registry wire (T0193): tensor_stack(tensors, dim).
-            let dst = read_reg(state)?;
-            let handles = read_operand_tensor_list(state)?;
-            let axis = read_operand_i64(state)?.max(0) as usize;
-            if handles.is_empty() {
-                state.set_reg(dst, Value::nil());
-                return Ok(DispatchResult::Continue);
-            }
-            let refs: Vec<&TensorHandle> = handles.iter().map(|&p| unsafe { &*p }).collect();
-            if let Some(result) = super::super::super::tensor::tensor_stack(&refs, axis) {
-                let carrier = alloc_tensor_value(state, result)?;
-                state.set_reg(dst, carrier);
-            } else {
-                state.set_reg(dst, Value::nil());
-            }
+            use super::super::super::tensor::{tensor_concat, tensor_stack};
+            let join = if operation == TensorSubOpcode::Stack { tensor_stack } else { tensor_concat };
+            let result = join(&tensors, dimension as usize).ok_or_else(|| InterpreterError::InvalidOperand {
+                message: format!("{operation:?} could not join the supplied tensor layouts"),
+            })?;
+            let carrier = alloc_tensor_value(state, result)?;
+            state.set_reg(dst, carrier);
             Ok(DispatchResult::Continue)
         }
 
@@ -4685,8 +4675,36 @@ fn read_operand_f64_list(state: &mut InterpreterState) -> InterpreterResult<Vec<
 fn read_operand_tensor_list(
     state: &mut InterpreterState,
 ) -> InterpreterResult<Vec<*mut super::super::super::tensor::TensorHandle>> {
-    let r = read_reg(state)?;
-    Ok(reg_tensor_list(state, r))
+    use super::cbgr_helpers::{
+        decode_cbgr_ref, is_cbgr_ref, resolve_arg_value, validate_cbgr_generation,
+    };
+    let reg = read_reg(state)?;
+    let resolve = |value| {
+        if is_cbgr_ref(&value) {
+            let (slot, generation) = decode_cbgr_ref(value);
+            validate_cbgr_generation(state, slot, generation)?;
+        }
+        resolve_arg_value(state, value)
+    };
+    let value = resolve(state.get_reg(reg))?;
+    let tensor = |value| {
+        let ptr = tensor_handle_ptr(value);
+        if ptr.is_null() {
+            Err(InterpreterError::InvalidOperand {
+                message: "tensor operand is not a tensor handle".into(),
+            })
+        } else {
+            Ok(ptr)
+        }
+    };
+    if let Some(elements) = state.list_elements(value) {
+        elements
+            .into_iter()
+            .map(|elem| tensor(resolve(elem)?))
+            .collect()
+    } else {
+        Ok(vec![tensor(value)?])
+    }
 }
 
 /// Reads a register's Value as f64 (accepts Float, Int, Bool).
@@ -4711,53 +4729,4 @@ fn reg_i64(state: &InterpreterState, reg: crate::instruction::Reg) -> i64 {
     } else {
         v.as_i64()
     }
-}
-
-/// Extracts the tensor handles stored in a `List` register (for
-/// concat / stack / einsum whose .vr surface passes a list of
-/// handles). Non-pointer elements are skipped; an empty vec means
-/// the register held no usable list.
-fn reg_tensor_list(
-    state: &InterpreterState,
-    reg: crate::instruction::Reg,
-) -> Vec<*mut super::super::super::tensor::TensorHandle> {
-    use super::super::super::heap::{OBJECT_HEADER_SIZE, ObjectHeader};
-    use crate::types::TypeId;
-
-    let val = state.get_reg(reg);
-    let mut out = Vec::new();
-
-    if val.is_ptr() {
-        let ptr = val.as_ptr::<u8>();
-        if ptr.is_null() {
-            return out;
-        }
-        let header = unsafe { &*(ptr as *const ObjectHeader) };
-        if header.type_id == TypeId::LIST {
-            let data_ptr = unsafe { ptr.add(OBJECT_HEADER_SIZE) as *const Value };
-            let len = unsafe { (*data_ptr).as_i64() } as usize;
-            let backing_ptr = unsafe { (*data_ptr.add(2)).as_ptr::<u8>() };
-            if !backing_ptr.is_null() {
-                let backing_header = unsafe { &*(backing_ptr as *const ObjectHeader) };
-                let elem_ptr = unsafe { backing_ptr.add(OBJECT_HEADER_SIZE) as *const Value };
-                let max_len = len.min(backing_header.size as usize / std::mem::size_of::<Value>());
-                for i in 0..max_len {
-                    let elem = unsafe { *elem_ptr.add(i) };
-                    // T0202: elements are TENSOR carrier Values — the
-                    // boundary reader rejects non-tensor elements.
-                    let t = tensor_handle_ptr(elem);
-                    if !t.is_null() {
-                        out.push(t);
-                    }
-                }
-                return out;
-            }
-        }
-        // A single bare tensor handle also works: treat as 1-list.
-        let t = tensor_handle_ptr(val);
-        if !t.is_null() {
-            out.push(t);
-        }
-    }
-    out
 }

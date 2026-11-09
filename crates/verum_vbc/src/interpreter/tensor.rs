@@ -482,37 +482,7 @@ impl TensorHandle {
 
     /// Creates a tensor with the given shape and dtype.
     pub fn zeros(shape: &[usize], dtype: DType) -> Option<Self> {
-        if shape.len() > MAX_DIMS {
-            return None;
-        }
-
-        let numel: usize = shape.iter().product();
-        if numel == 0 {
-            return Some(Self::new());
-        }
-
-        let capacity = numel * dtype.size();
-        let data = TensorData::alloc(capacity, dtype.align(), DeviceId::CPU)?;
-
-        let mut handle = Self {
-            dtype,
-            ndim: shape.len() as u8,
-            flags: TensorFlags::CONTIGUOUS | TensorFlags::OWNS_DATA,
-            _reserved: 0,
-            numel,
-            shape: [0; MAX_DIMS],
-            strides: [0isize; MAX_DIMS],
-            data: Some(data),
-            offset: 0,
-        };
-
-        // Copy shape and compute strides (row-major)
-        for (i, &dim) in shape.iter().enumerate() {
-            handle.shape[i] = dim;
-        }
-        handle.compute_strides();
-
-        Some(handle)
+        Self::zeros_on(shape, dtype, DeviceId::CPU)
     }
 
     /// Creates a tensor with the given shape, dtype, and device.
@@ -529,36 +499,26 @@ impl TensorHandle {
     /// `Some(TensorHandle)` on success, `None` if allocation fails or
     /// the device is not available.
     pub fn zeros_on(shape: &[usize], dtype: DType, device: DeviceId) -> Option<Self> {
-        if shape.len() > MAX_DIMS {
+        if shape.len() > MAX_DIMS || !device.is_cpu() {
             return None;
         }
-
-        let numel: usize = shape.iter().product();
-        if numel == 0 {
-            return Some(Self::new());
+        let mut handle = Self::new();
+        handle.dtype = dtype;
+        handle.ndim = shape.len() as u8;
+        handle.shape[..shape.len()].copy_from_slice(shape);
+        let mut elements = 1usize;
+        for (stride, &dimension) in handle.strides[..shape.len()].iter_mut().zip(shape).rev() {
+            *stride = isize::try_from(elements).ok()?;
+            elements = elements.checked_mul(dimension)?;
         }
-
-        let capacity = numel * dtype.size();
-        let data = TensorData::alloc(capacity, dtype.align(), device)?;
-
-        let mut handle = Self {
-            dtype,
-            ndim: shape.len() as u8,
-            flags: TensorFlags::CONTIGUOUS | TensorFlags::OWNS_DATA,
-            _reserved: 0,
-            numel,
-            shape: [0; MAX_DIMS],
-            strides: [0isize; MAX_DIMS],
-            data: Some(data),
-            offset: 0,
-        };
-
-        // Copy shape and compute strides (row-major)
-        for (i, &dim) in shape.iter().enumerate() {
-            handle.shape[i] = dim;
+        handle.numel = elements;
+        if elements > 0 {
+            handle.data = Some(TensorData::alloc(
+                elements.checked_mul(dtype.size())?,
+                dtype.align(),
+                device,
+            )?);
         }
-        handle.compute_strides();
-
         Some(handle)
     }
 
@@ -831,33 +791,23 @@ impl TensorHandle {
         if logical >= self.numel {
             return None;
         }
-        // Fast path: contiguous row-major layout collapses to
-        // offset + logical (offset covers a contiguous slice view).
-        if self.is_contiguous() {
-            return Some(self.offset + logical);
-        }
-        // General path: un-ravel the row-major logical index (last
-        // dimension varies fastest) into coordinates, then apply
-        // strides + offset. Mirrors the strides walk in `get_ptr`.
-        let ndim = self.ndim as usize;
-        let mut physical = self.offset as isize;
-        let mut remaining = logical;
-        for i in (0..ndim).rev() {
-            let dim = self.shape[i];
-            // dim > 0 is guaranteed: logical < numel = Π shape[..ndim],
-            // and numel == 0 would have failed the bound check above.
-            let coord = remaining % dim;
-            remaining /= dim;
-            physical += (coord as isize) * self.strides[i];
-        }
-        debug_assert!(
-            physical >= 0,
-            "Negative physical offset indicates an invalid strided view"
-        );
-        if physical < 0 {
-            return None;
-        }
-        Some(physical as usize)
+        let physical = if self.is_contiguous() {
+            self.offset.checked_add(logical)?
+        } else {
+            let rank = usize::from(self.ndim);
+            let mut physical = isize::try_from(self.offset).ok()?;
+            let mut remaining = logical;
+            for (&dim, &stride) in self.shape.get(..rank)?.iter().zip(&self.strides).rev() {
+                let coordinate = isize::try_from(remaining.checked_rem(dim)?).ok()?;
+                remaining /= dim;
+                physical = physical.checked_add(coordinate.checked_mul(stride)?)?;
+            }
+            usize::try_from(physical).ok()?
+        };
+        // Views share their allocation. The logical length alone cannot
+        // authorize access past the backing storage through an offset or stride.
+        let capacity = unsafe { self.data?.as_ref() }.capacity() / self.dtype.size();
+        (physical < capacity).then_some(physical)
     }
 
     /// Gets element at flat index as f64.
@@ -2573,53 +2523,92 @@ pub fn tensor_linspace(start: f64, end: f64, steps: usize, dtype: DType) -> Opti
     Some(result)
 }
 
-/// Concatenates tensors along an axis.
+/// Concatenates row-major logical slices along an existing dimension.
 pub fn tensor_concat(tensors: &[&TensorHandle], axis: usize) -> Option<TensorHandle> {
-    if tensors.is_empty() {
-        return None;
-    }
+    join_tensors(tensors, axis, JoinAxis::Existing)
+}
 
-    let first = tensors[0];
-    if axis >= first.ndim as usize {
-        return None;
-    }
+#[derive(Clone, Copy)]
+enum JoinAxis {
+    Existing,
+    New,
+}
 
-    // Check all tensors have same dtype and compatible shapes
-    let dtype = first.dtype;
-    for t in tensors.iter().skip(1) {
-        if t.dtype != dtype || t.ndim != first.ndim {
+fn join_tensors(tensors: &[&TensorHandle], axis: usize, mode: JoinAxis) -> Option<TensorHandle> {
+    let first = *tensors.first()?;
+    let rank = usize::from(first.ndim);
+    let shape = first.shape.get(..rank)?;
+    let mut output_shape = shape.to_vec();
+    match mode {
+        JoinAxis::Existing => *output_shape.get_mut(axis)? = 0,
+        JoinAxis::New if axis <= rank && rank < MAX_DIMS => {
+            output_shape.insert(axis, tensors.len())
+        }
+        JoinAxis::New => return None,
+    }
+    for &tensor in tensors {
+        if tensor.ndim != first.ndim || tensor.dtype != first.dtype {
             return None;
         }
-        for i in 0..first.ndim as usize {
-            if i != axis && t.shape[i] != first.shape[i] {
-                return None;
+        let dims = &tensor.shape[..rank];
+        if dims.iter().try_fold(1usize, |n, &d| n.checked_mul(d))? != tensor.numel {
+            return None;
+        }
+        match mode {
+            JoinAxis::Existing
+                if dims[..axis] == shape[..axis] && dims[axis + 1..] == shape[axis + 1..] =>
+            {
+                output_shape[axis] = output_shape[axis].checked_add(dims[axis])?;
+            }
+            JoinAxis::New if dims == shape => {}
+            _ => return None,
+        }
+    }
+    let mut result = TensorHandle::zeros(&output_shape, first.dtype)?;
+    if result.numel == 0 {
+        return Some(result);
+    }
+    // Each outer coordinate takes one row-major block from each input.
+    // A dense view copies the whole block; a strided view follows its logical indices.
+    let outer: usize = output_shape[..axis].iter().product();
+    let inner: usize = output_shape[axis + 1..].iter().product();
+    let width = first.dtype.size();
+    // The result owns a fresh, zero-initialized allocation independent of all inputs.
+    let storage = unsafe { result.data.as_mut()?.as_mut() };
+    let mut output =
+        unsafe { std::slice::from_raw_parts_mut(storage.as_mut_ptr(), storage.capacity()) };
+    for row in 0..outer {
+        for &tensor in tensors {
+            let count = match mode {
+                JoinAxis::Existing => tensor.shape[axis] * inner,
+                JoinAxis::New => inner,
+            };
+            if count == 0 {
+                continue;
+            }
+            let (target, rest) = output.split_at_mut_checked(count * width)?;
+            output = rest;
+            let first_element = row * count;
+            // All tensors admitted here refer to live CPU allocations. Slice indexing
+            // checks both the start and the end of every read against the backing size.
+            let storage = unsafe { tensor.data?.as_ref() };
+            let bytes = unsafe { std::slice::from_raw_parts(storage.as_ptr(), storage.capacity()) };
+            if tensor.is_contiguous() {
+                let start = tensor
+                    .offset
+                    .checked_add(first_element)?
+                    .checked_mul(width)?;
+                target.copy_from_slice(bytes.get(start..start.checked_add(target.len())?)?);
+            } else {
+                for (index, element) in target.chunks_exact_mut(width).enumerate() {
+                    let start = tensor
+                        .logical_to_physical(first_element + index)?
+                        .checked_mul(width)?;
+                    element.copy_from_slice(bytes.get(start..start.checked_add(width)?)?);
+                }
             }
         }
     }
-
-    // Compute output shape
-    let mut out_shape = first.shape;
-    out_shape[axis] = tensors.iter().map(|t| t.shape[axis]).sum();
-
-    let result = TensorHandle::zeros(&out_shape[..first.ndim as usize], dtype)?;
-
-    // Copy data
-    let dst_data = result.data.as_ref()?;
-    let dst_ptr = unsafe { (*dst_data.as_ptr()).as_mut_ptr() };
-
-    let mut offset = 0usize;
-    for t in tensors {
-        if let Some(src_data) = &t.data {
-            // SAFETY: All pointers are valid
-            unsafe {
-                let src_ptr = (*src_data.as_ptr()).as_ptr();
-                let bytes = t.numel * dtype.size();
-                std::ptr::copy_nonoverlapping(src_ptr, dst_ptr.add(offset), bytes);
-                offset += bytes;
-            }
-        }
-    }
-
     Some(result)
 }
 
@@ -3208,59 +3197,7 @@ pub fn tensor_slice(src: &TensorHandle, ranges: &[(usize, usize)]) -> Option<Ten
 
 /// Stacks tensors along a new axis.
 pub fn tensor_stack(tensors: &[&TensorHandle], axis: usize) -> Option<TensorHandle> {
-    if tensors.is_empty() {
-        return None;
-    }
-
-    let first = tensors[0];
-
-    // All tensors must have same shape and dtype
-    for t in tensors.iter().skip(1) {
-        if t.dtype != first.dtype || t.ndim != first.ndim {
-            return None;
-        }
-        for i in 0..first.ndim as usize {
-            if t.shape[i] != first.shape[i] {
-                return None;
-            }
-        }
-    }
-
-    // Build new shape with extra dimension at axis
-    if axis > first.ndim as usize {
-        return None;
-    }
-
-    let mut new_shape = Vec::with_capacity(first.ndim as usize + 1);
-    for i in 0..first.ndim as usize {
-        if i == axis {
-            new_shape.push(tensors.len());
-        }
-        new_shape.push(first.shape[i]);
-    }
-    if axis == first.ndim as usize {
-        new_shape.push(tensors.len());
-    }
-
-    let result = TensorHandle::zeros(&new_shape, first.dtype)?;
-    let dst_data = result.data.as_ref()?;
-
-    // Copy each tensor
-    let elem_size = first.dtype.size();
-    let tensor_size = first.numel * elem_size;
-
-    // SAFETY: all pointers are valid
-    unsafe {
-        let dst_ptr = (*dst_data.as_ptr()).as_mut_ptr();
-        for (i, t) in tensors.iter().enumerate() {
-            if let Some(src_data) = &t.data {
-                let src_ptr = (*src_data.as_ptr()).as_ptr();
-                std::ptr::copy_nonoverlapping(src_ptr, dst_ptr.add(i * tensor_size), tensor_size);
-            }
-        }
-    }
-
-    Some(result)
+    join_tensors(tensors, axis, JoinAxis::New)
 }
 
 /// Broadcasts a tensor to a new shape.

@@ -1539,6 +1539,50 @@ mod tests {
     }
 
     #[test]
+    fn tensor_concat_wire_resolves_signed_axes_and_refuses_malformed_lists() {
+        use crate::instruction::TensorSubOpcode;
+        use crate::interpreter::tensor::{DType, tensor_from_slice};
+        let bytes = encode_instructions(&[
+            Instruction::TensorExtended {
+                sub_op: TensorSubOpcode::Concat.to_byte(),
+                operands: vec![2, 0, 1],
+            },
+            Instruction::Ret { value: Reg(2) },
+        ]);
+        let module = create_test_module(bytes, 3);
+        for (axis, malformed, valid) in [(-1, false, true), (-3, false, false), (1, true, false)] {
+            let mut state = InterpreterState::new(module.clone());
+            state
+                .call_stack
+                .push_frame(FunctionId(0), 3, 0, Reg(0))
+                .unwrap();
+            state.registers.push_frame(3);
+            let input = tensor_from_slice(&[1., 2.], &[2, 1], DType::F64).unwrap();
+            let input = alloc_tensor_value(&mut state, input).unwrap();
+            let second = if malformed { Value::from_i64(7) } else { input };
+            let list = alloc_list_from_values(&mut state, vec![input, second]).unwrap();
+            state.set_reg(Reg(0), list);
+            state.set_reg(Reg(1), Value::from_i64(axis));
+            let result = dispatch_loop_table(&mut state);
+            if valid {
+                let ptr = tensor_handle_ptr(result.unwrap());
+                // The returned value must be a live tensor owned by this interpreter.
+                let joined = unsafe { ptr.as_ref() }.unwrap();
+                assert_eq!(&joined.shape[..2], &[2, 2]);
+                assert_eq!(
+                    (joined.get_element_f64(1), joined.get_element_f64(2)),
+                    (Some(1.), Some(2.))
+                );
+            } else {
+                assert!(
+                    matches!(result, Err(InterpreterError::InvalidOperand { .. })),
+                    "{result:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn test_poly_add_integers() {
         let bytecode = encode_instructions(&[
             Instruction::LoadSmallI {

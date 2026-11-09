@@ -9,7 +9,7 @@
 //! returned the wrong value.
 
 use verum_vbc::dtype::DType;
-use verum_vbc::interpreter::tensor::{TensorFlags, TensorHandle};
+use verum_vbc::interpreter::tensor::{TensorFlags, TensorHandle, tensor_concat, tensor_stack};
 
 /// Contiguous row-major base tensor filled with `vals`.
 fn tensor_from(vals: &[f64], shape: &[usize]) -> TensorHandle {
@@ -52,6 +52,39 @@ fn view_over(
 
 fn read_all(t: &TensorHandle) -> Vec<f64> {
     (0..t.numel).map(|i| t.get_element_f64(i).unwrap()).collect()
+}
+
+#[test]
+fn joins_interleave_logical_rows_and_preserve_views() {
+    let base = tensor_from(&[0., 1., 2., 3., 4., 5.], &[2, 3]);
+    let reversed = view_over(&base, &[2, 2], &[3, -1], 2, false);
+    let column = view_over(&base, &[2, 1], &[3, 1], 0, false);
+    let joined = tensor_concat(&[&reversed, &column], 1).unwrap();
+    assert_eq!(&joined.shape[..2], &[2, 3]);
+    assert_eq!(read_all(&joined), [2., 1., 0., 5., 4., 3.]);
+    let row = view_over(&base, &[2], &[1], 3, true);
+    let flipped = view_over(&base, &[2], &[-1], 2, false);
+    let stacked = tensor_stack(&[&row, &flipped], 1).unwrap();
+    assert_eq!(&stacked.shape[..2], &[2, 2]);
+    assert_eq!(read_all(&stacked), [3., 2., 4., 1.]);
+}
+
+#[test]
+fn joins_preserve_empty_extents_and_reject_incompatible_storage() {
+    let empty = TensorHandle::zeros(&[2, 0], DType::I64).unwrap();
+    let joined = tensor_concat(&[&empty, &empty], 1).unwrap();
+    assert_eq!(
+        (joined.ndim, joined.dtype, joined.numel),
+        (2, DType::I64, 0)
+    );
+    assert_eq!(&joined.shape[..2], &[2, 0]);
+    let base = tensor_from(&[0., 1., 2., 3.], &[2, 2]);
+    assert!(tensor_concat(&[&empty, &base], 1).is_none());
+    let invalid = view_over(&base, &[3], &[1], 3, true);
+    assert!(tensor_concat(&[&invalid], 0).is_none());
+    let before_origin = view_over(&base, &[2], &[-1], 0, false);
+    assert!(tensor_stack(&[&before_origin], 0).is_none());
+    assert!(TensorHandle::zeros(&[usize::MAX, 2], DType::I64).is_none());
 }
 
 #[test]

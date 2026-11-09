@@ -2373,7 +2373,8 @@ public fn cumtrapz<T: RealField>(y: &DynTensor<T>, axis: ISize, dx: T) -> DynTen
     cumsum(&half, axis)
 }
 
-// Concatenate tensors along axis
+// Concatenate borrowed tensors along axis. Owned collections can supply
+// references through their iterator without cloning tensor storage.
 public fn cat<T: RealField>(tensors: &[&DynTensor<T>], axis: ISize) -> DynTensor<T> {
     assert(!tensors.is_empty(), "cat requires at least one tensor");
     let handles: List<&TensorHandle> = tensors.iter().map(|t| &t.data).collect();
@@ -2877,11 +2878,6 @@ public fn min<T: RealField>(x: &DynTensor<T>, y: &DynTensor<T>) -> DynTensor<T> 
 /// Top-k values along last axis.
 public fn topk<T: RealField>(x: &DynTensor<T>, k: USize) -> (DynTensor<T>, DynTensor<USize>) {
     @vbc(TENSOR_TOPK, x.data, k)
-}
-
-/// Concatenate tensors along an axis.
-public fn cat<T: RealField>(tensors: &[DynTensor<T>], axis: ISize) -> DynTensor<T> {
-    @vbc(TENSOR_CAT, tensors, axis)
 }
 
 /// Create tensor from a slice of values.
