@@ -1006,7 +1006,7 @@ implement Iterator for Components {
 // IntoIterator implementation for Components (enables for loops)
 implement IntoIterator for Components {
     type Item = Component;
-    type Iter = Components;
+    type IntoIter = Components;
 
     fn into_iter(self) -> Components {
         self

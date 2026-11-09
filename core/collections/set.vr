@@ -26,6 +26,7 @@
 )
 module core.collections.set;
 
+mount core.base.iterator.{FromIterator, Extend};
 mount core.mem.allocator.AllocError;
 mount super.map.*;
 
@@ -752,7 +753,7 @@ implement<T: Hash + Eq> FusedIterator for SetIntoIter<T> {}
 
 implement<T: Hash + Eq> IntoIterator for Set<T> {
     type Item = T;
-    type Iter = SetIntoIter<T>;
+    type IntoIter = SetIntoIter<T>;
 
     fn into_iter(self) -> SetIntoIter<T> {
         SetIntoIter { inner: self.inner.into_iter() }

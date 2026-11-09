@@ -42,6 +42,7 @@
 )
 module core.collections.deque;
 
+mount core.base.iterator.{FromIterator, Extend};
 mount core.mem.allocator.AllocError;
 mount core.base.ordering.{Ordering};
 // Allocator primitives for typed-OOM (#65, #68). See list.vr for
@@ -1951,7 +1952,7 @@ implement<T> FusedIterator for DequeDrain<T> {}
 
 implement<T> IntoIterator for Deque<T> {
     type Item = T;
-    type Iter = DequeIntoIter<T>;
+    type IntoIter = DequeIntoIter<T>;
 
     fn into_iter(self) -> DequeIntoIter<T> {
         DequeIntoIter { deque: self }
