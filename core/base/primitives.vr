@@ -1380,8 +1380,6 @@ implement Clone for Float {
     public fn clone(&self) -> Float { *self }
 }
 
-implement Copy for Float {}
-
 implement Default for Float {
     @inline(always)
     public fn default() -> Float { 0.0 }
@@ -1698,8 +1696,6 @@ implement Clone for Byte {
     @inline(always)
     public fn clone(&self) -> Byte { *self }
 }
-
-implement Copy for Byte {}
 
 implement Default for Byte {
     @inline(always)
@@ -4512,8 +4508,6 @@ implement Hash for Int64 {
 implement Clone for Int64 {
     public fn clone(&self) -> Int64 { *self }
 }
-implement Copy for Int64 {}
-
 // --- Int128 ---
 implement Eq for Int128 {
     public fn eq(&self, other: &Int128) -> Bool { eq(*self, *other) }
@@ -4550,8 +4544,6 @@ implement Hash for ISize {
 implement Clone for ISize {
     public fn clone(&self) -> ISize { *self }
 }
-implement Copy for ISize {}
-
 // --- UInt8 ---
 implement Eq for UInt8 {
     public fn eq(&self, other: &UInt8) -> Bool { eq(*self, *other) }
@@ -4646,25 +4638,6 @@ implement Clone for UInt128 {
     public fn clone(&self) -> UInt128 { *self }
 }
 implement Copy for UInt128 {}
-
-// --- USize ---
-implement Eq for USize {
-    public fn eq(&self, other: &USize) -> Bool { eq(*self, *other) }
-}
-implement Ord for USize {
-    public fn cmp(&self, other: &USize) -> Ordering {
-        if *self < *other { Less }
-        else if *self > *other { Greater }
-        else { Equal }
-    }
-}
-implement Hash for USize {
-    public fn hash(&self, hasher: &mut Hasher) { hasher.write_int(*self as Int); }
-}
-implement Clone for USize {
-    public fn clone(&self) -> USize { *self }
-}
-implement Copy for USize {}
 
 // --- Float32 ---
 // `PartialEq`, not `Eq`: `Eq` promises REFLEXIVITY — that `a == a`
@@ -5612,61 +5585,6 @@ implement One for USize {
     public fn is_one(&self) -> Bool { *self == (1 as USize) }
 }
 
-implement Add for USize {
-    type Output = USize;
-    public fn add(self, rhs: USize) -> USize { add(self, rhs) }
-}
-
-implement Sub for USize {
-    type Output = USize;
-    public fn sub(self, rhs: USize) -> USize { sub(self, rhs) }
-}
-
-implement Mul for USize {
-    type Output = USize;
-    public fn mul(self, rhs: USize) -> USize { mul(self, rhs) }
-}
-
-implement Div for USize {
-    type Output = USize;
-    public fn div(self, rhs: USize) -> USize { div(self, rhs) }
-}
-
-implement Rem for USize {
-    type Output = USize;
-    public fn rem(self, rhs: USize) -> USize { rem(self, rhs) }
-}
-
-implement BitAnd for USize {
-    type Output = USize;
-    public fn bitand(self, rhs: USize) -> USize { bitand(self, rhs) }
-}
-
-implement BitOr for USize {
-    type Output = USize;
-    public fn bitor(self, rhs: USize) -> USize { bitor(self, rhs) }
-}
-
-implement BitXor for USize {
-    type Output = USize;
-    public fn bitxor(self, rhs: USize) -> USize { bitxor(self, rhs) }
-}
-
-implement Not for USize {
-    type Output = USize;
-    public fn not(self) -> USize { bitnot(self) }
-}
-
-implement Shl for USize {
-    type Output = USize;
-    public fn shl(self, rhs: USize) -> USize { shl(self, rhs as UInt32) }
-}
-
-implement Shr for USize {
-    type Output = USize;
-    public fn shr(self, rhs: USize) -> USize { shr(self, rhs as UInt32) }
-}
-
 // -----------------------------------------------------------------------------
 // Float32
 // -----------------------------------------------------------------------------
@@ -6534,18 +6452,6 @@ implement Display for UInt128 {
 implement Debug for UInt128 {
     public fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         f.write_str(&self.to_text())
-    }
-}
-
-implement Display for USize {
-    public fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str(&self.to_int().to_text())
-    }
-}
-
-implement Debug for USize {
-    public fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str(&self.to_int().to_text())
     }
 }
 

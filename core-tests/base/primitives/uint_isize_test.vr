@@ -8,6 +8,18 @@
 
 mount core.prelude.*;
 
+@test
+fn test_usize_uses_the_same_unsigned_protocol_methods_as_uint64() {
+    let one: USize = 1 as USize;
+    let two: UInt64 = 2 as UInt64;
+    let sum: USize = one.add(one);
+    let product: UInt64 = two.mul(two);
+    let bits: USize = sum.bitxor(7 as USize);
+    assert_eq(sum, 2 as UInt64);
+    assert_eq(product, 4 as USize);
+    assert_eq(bits, 5 as UInt64);
+}
+
 // =============================================================================
 // Section 1: UInt8 (Byte)
 // =============================================================================
