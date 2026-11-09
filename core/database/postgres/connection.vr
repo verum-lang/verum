@@ -1182,7 +1182,13 @@ implement PgConnection {
         );
 
         self.state = PcsBusy;
-        write_all(&mut self.stream, payload.as_slice())?;
+        match write_all(&mut self.stream, payload.as_slice()) {
+            Result.Ok(_) => {},
+            Result.Err(error) => {
+                self.state = PcsFailed;
+                return Result.Err(error);
+            }
+        }
 
         // Update last_formats so the heap parse_data_row understands
         // the binary column wire format.
@@ -1212,38 +1218,65 @@ implement PgConnection {
         let mut rows: List<List<TypedValue>> = List.new();
         let mut command_tag: Text = "".clone();
         let mut diagnostic: Maybe<Diagnostic> = Maybe.None;
+        let mut decode_failure: Maybe<DbError> = Maybe.None;
         loop {
-            let msg = read_message(self)?;
+            let msg = match read_message(self) {
+                Result.Ok(message) => message,
+                Result.Err(error) => {
+                    // We did not reach the Sync boundary. No caller may reuse
+                    // this stream or interpret the remaining bytes as a reply.
+                    self.state = PcsFailed;
+                    return Result.Err(typed_drain_failure(decode_failure, diagnostic, error));
+                }
+            };
             match msg {
                 BmBindComplete => {}
                 BmRowDescription(rd) => {
                     self.last_formats = collect_formats(&rd);
                 }
                 BmDataRow(dr) => {
+                    // A recoverable value error must not strand unread frames.
+                    // Retain the first error, discard later rows, and drain to
+                    // ReadyForQuery before returning it to the caller.
+                    if decode_failure is Maybe.Some(_) || diagnostic is Maybe.Some(_) { continue; }
+                    if stmt.row_description is Maybe.None || dr.values.len() != column_oids.len() {
+                        decode_failure = Maybe.Some(DbError.Adapter(AdapterSpecific.new(
+                            AdPostgres, "TYPED_ROW_WIDTH",
+                            f"row does not match prepared description: expected {column_oids.len()} columns, received {dr.values.len()}",
+                            false,
+                        )));
+                        rows.clear();
+                        continue;
+                    }
                     let mut typed_row: List<TypedValue> = List.with_capacity(dr.values.len());
                     let mut i: Int = 0;
-                    while i < (dr.values.len() as Int) {
-                        let oid = if i < (column_oids.len() as Int) {
-                            column_oids[i]
-                        } else { 0 };
+                    while i < dr.values.len() {
+                        let oid = column_oids[i];
                         match &dr.values[i] {
                             WvNull => { typed_row.push(TvNull); }
                             WvPresent { bytes, .. } => {
                                 match decode_typed_from_bytes(oid, bytes.as_slice(), &mut self.arena) {
-                                    Result.Ok(v)  => typed_row.push(v),
-                                    Result.Err(e) => { return Result.Err(e); }
+                                    Result.Ok(value) => typed_row.push(value),
+                                    Result.Err(error) => {
+                                        decode_failure = Maybe.Some(error);
+                                        break;
+                                    }
                                 }
                             }
                         }
                         i = i + 1;
                     }
-                    rows.push(typed_row);
+                    if decode_failure is Maybe.None { rows.push(typed_row); }
+                    else { rows.clear(); }
                 }
                 BmCommandComplete(cc) => { command_tag = cc.tag; }
                 BmEmptyQueryResponse => {
                     if command_tag.len() == 0 { command_tag = "EMPTY".clone(); }
                 }
-                BmError(d) => { diagnostic = Maybe.Some(d); }
+                BmError(d) => {
+                    if diagnostic is Maybe.None { diagnostic = Maybe.Some(d); }
+                    rows.clear();
+                }
                 BmNotice(_) => {}
                 BmParameterStatus(ps) => {
                     self.parameters.push((ps.name, ps.value));
@@ -1256,13 +1289,19 @@ implement PgConnection {
                 _ => {}
             }
         }
+        // A server execution error is authoritative when present; otherwise
+        // surface the first typed-row error. Neither path can return partial
+        // rows as a successful result.
         match diagnostic {
             Maybe.Some(d) => Result.Err(dberr_from_pg(d)),
-            Maybe.None => Result.Ok(PgTypedQueryResult {
-                command_tag: command_tag,
-                row_description: stmt.row_description.clone(),
-                rows: rows,
-            }),
+            Maybe.None => match decode_failure {
+                Maybe.Some(error) => Result.Err(error),
+                Maybe.None => Result.Ok(PgTypedQueryResult {
+                    command_tag: command_tag,
+                    row_description: stmt.row_description.clone(),
+                    rows: rows,
+                }),
+            },
         }
     }
 
@@ -2221,6 +2260,24 @@ fn make_client_nonce() -> Text {
 // -----------------------------------------------------------------------------
 // I/O helpers
 // -----------------------------------------------------------------------------
+
+/// A fatal wire error before ReadyForQuery makes the connection unusable.
+/// Preserve prior row/server diagnostics as well when draining also fails.
+fn typed_drain_failure(
+    decode: Maybe<DbError>,
+    server: Maybe<Diagnostic>,
+    wire: DbError,
+) -> DbError {
+    let mut diagnostic_text = Text.new();
+    if let Maybe.Some(error) = decode { diagnostic_text.push_str(&f"row decode: {error:?}; "); }
+    if let Maybe.Some(diagnostic) = server {
+        let error = dberr_from_pg(diagnostic);
+        diagnostic_text.push_str(&f"server execution: {error:?}; ");
+    }
+    if diagnostic_text.len() == 0 { return wire; }
+    diagnostic_text.push_str(&f"wire failure while draining: {wire:?}");
+    DbError.Adapter(AdapterSpecific.new(AdPostgres, "TYPED_QUERY_DRAIN_FAILED", diagnostic_text, false))
+}
 
 fn read_message(conn: &mut PgConnection) -> Result<BackendMessage, DbError> {
     // Return any decoded message pushed back by the caller before reading the socket.
