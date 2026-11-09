@@ -423,28 +423,6 @@ public fn dsb_sy();
 public fn isb();
 
 // =============================================================================
-// CACHE OPERATIONS - @llvm_only
-// =============================================================================
-
-/// Clean data cache by virtual address to point of coherency.
-@inline(always)
-@llvm_only(reason = "inline assembly")
-@asm("dc cvac, {0}")
-public unsafe fn dc_cvac(addr: USize);
-
-/// Clean and invalidate data cache by virtual address.
-@inline(always)
-@llvm_only(reason = "inline assembly")
-@asm("dc civac, {0}")
-public unsafe fn dc_civac(addr: USize);
-
-/// Invalidate instruction cache by virtual address.
-@inline(always)
-@llvm_only(reason = "inline assembly")
-@asm("ic ivau, {0}")
-public unsafe fn ic_ivau(addr: USize);
-
-// =============================================================================
 // HINT INSTRUCTIONS - @llvm_only
 // =============================================================================
 
@@ -632,19 +610,19 @@ public unsafe fn tlbi_vmalle1is();
 // =============================================================================
 
 /// Data Cache: Clean by Virtual Address to PoC.  Writes the cache
-/// line containing `va` back to the Point of Coherency (memory) but
+/// line containing `addr` back to the Point of Coherency but
 /// leaves the cached copy.
 @inline(always)
 @llvm_only(reason = "inline assembly")
 @asm("dc cvac, {0}")
-public unsafe fn dc_cvac(va: USize);
+public unsafe fn dc_cvac(addr: USize);
 
 /// Data Cache: Clean and Invalidate by Virtual Address to PoC.
 /// Writes back AND invalidates — typical DMA-prep pattern.
 @inline(always)
 @llvm_only(reason = "inline assembly")
 @asm("dc civac, {0}")
-public unsafe fn dc_civac(va: USize);
+public unsafe fn dc_civac(addr: USize);
 
 /// Data Cache: Invalidate by Virtual Address to PoC (without
 /// write-back — discards dirty data).
@@ -677,7 +655,7 @@ public unsafe fn ic_iallu();
 @inline(always)
 @llvm_only(reason = "inline assembly")
 @asm("ic ivau, {0}")
-public unsafe fn ic_ivau(va: USize);
+public unsafe fn ic_ivau(addr: USize);
 
 // =============================================================================
 // EXCEPTION RETURN / HYPERVISOR / SECURE MONITOR CALLS (#81)
