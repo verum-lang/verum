@@ -34,6 +34,63 @@ fn freshen_template_vars(ty: &Type) -> Type {
     ty.apply_subst(&subst)
 }
 
+/// A single pattern may bind a tuple payload as a whole. Positional patterns
+/// destructure its fields. Both binding passes must use the same shape.
+fn variant_tuple_fields<'a>(
+    tag: &str,
+    patterns: &[Pattern],
+    payload: &'a Type,
+    span: Span,
+) -> Result<&'a [Type]> {
+    use verum_ast::pattern::PatternKind;
+    match payload {
+        Type::Tuple(_) if patterns.len() == 1 => Ok(std::slice::from_ref(payload)),
+        Type::Tuple(fields) if patterns.len() == fields.len() => Ok(fields.as_slice()),
+        Type::Tuple(fields) => Err(TypeError::Other(
+            format!(
+                "Variant '{tag}' expects {} fields (or 1 tuple pattern), but pattern has {} at {}",
+                fields.len(),
+                patterns.len(),
+                span_to_line_col(span)
+            )
+            .into(),
+        )),
+        Type::Unit => match patterns {
+            [] => Ok(&[]),
+            [pattern]
+                if matches!(&pattern.kind, PatternKind::Wildcard)
+                    || matches!(&pattern.kind, PatternKind::Tuple(items) if items.is_empty()) =>
+            {
+                Ok(&[])
+            }
+            [_] => Err(TypeError::Other(
+                format!(
+                    "Variant '{tag}' has no payload to bind at {}",
+                    span_to_line_col(span)
+                )
+                .into(),
+            )),
+            _ => Err(TypeError::Other(
+                format!(
+                    "Variant '{tag}' has no payload but pattern has {} fields at {}",
+                    patterns.len(),
+                    span_to_line_col(span)
+                )
+                .into(),
+            )),
+        },
+        _ if patterns.len() == 1 => Ok(std::slice::from_ref(payload)),
+        _ => Err(TypeError::Other(
+            format!(
+                "Variant '{tag}' has payload type {payload}, expected 1 pattern but got {} at {}",
+                patterns.len(),
+                span_to_line_col(span)
+            )
+            .into(),
+        )),
+    }
+}
+
 impl TypeChecker {
     /// Check compound destructuring assignment: (x, y) += (dx, dy)
     ///
@@ -2870,22 +2927,10 @@ impl TypeChecker {
                             use verum_ast::pattern::VariantPatternData;
                             match variant_data {
                                 VariantPatternData::Tuple(patterns) => {
-                                    // For tuple variant, collect bindings from each pattern
+                                    let fields = variant_tuple_fields(&tag, patterns, payload_ty, pattern.span)?;
                                     let mut all_bindings = List::new();
-                                    // Assuming payload type is a tuple
-                                    if let Type::Tuple(types) = payload_ty {
-                                        for (pat, ty) in patterns.iter().zip(types.iter()) {
-                                            let mut bindings =
-                                                self.collect_pattern_bindings(pat, ty)?;
-                                            all_bindings.append(&mut bindings);
-                                        }
-                                    } else {
-                                        // Single value variant
-                                        for pat in patterns {
-                                            let mut bindings =
-                                                self.collect_pattern_bindings(pat, payload_ty)?;
-                                            all_bindings.append(&mut bindings);
-                                        }
+                                    for (pat, field) in patterns.iter().zip(fields) {
+                                        all_bindings.extend(self.collect_pattern_bindings(pat, field)?);
                                     }
                                     Ok(all_bindings)
                                 }
@@ -3204,98 +3249,19 @@ impl TypeChecker {
         span: Span,
         binding_through_ref: bool,
     ) -> Result<()> {
-        // Helper to wrap type in reference if binding through ref
-        let wrap_if_ref = |ty: &Type| -> Type {
+        let fields = variant_tuple_fields(tag, patterns, payload_ty, span)?;
+        for (pattern, field) in patterns.iter().zip(fields) {
             if binding_through_ref {
-                Type::Reference {
+                let borrowed = Type::Reference {
                     mutable: false,
-                    inner: Box::new(ty.clone()),
-                }
+                    inner: Box::new(field.clone()),
+                };
+                self.bind_pattern(pattern, &borrowed)?;
             } else {
-                ty.clone()
-            }
-        };
-
-        match payload_ty {
-            // Tuple payload: Ok(a, b) with type (T, E)
-            // Supports both flat destructuring: Ok(a, b) and wrapped: Ok((a, b))
-            Type::Tuple(types) => {
-                if patterns.len() == types.len() {
-                    // Flat destructuring: Some(idx, gen) matching (Int, U32)
-                    // Bind each pattern to its corresponding type
-                    for (pat, ty) in patterns.iter().zip(types.iter()) {
-                        let effective_ty = wrap_if_ref(ty);
-                        self.bind_pattern(pat, &effective_ty)?;
-                    }
-                    Ok(())
-                } else if patterns.len() == 1 {
-                    // Single pattern: could be wrapped tuple pattern Some((idx, gen))
-                    // or a single binding for the whole tuple Some(pair)
-                    // Bind the single pattern to the tuple type
-                    let tuple_ty = wrap_if_ref(payload_ty);
-                    self.bind_pattern(&patterns[0], &tuple_ty)
-                } else {
-                    Err(TypeError::Other(verum_common::Text::from(format!(
-                        "Variant '{}' expects {} fields (or 1 tuple pattern), but pattern has {} at {}",
-                        tag,
-                        types.len(),
-                        patterns.len(),
-                        span_to_line_col(span)
-                    ))))
-                }
-            }
-            // Unit payload: represents a variant with no data (like None)
-            // Valid patterns for Unit: empty (), wildcard _, or empty tuple pattern ()
-            Type::Unit => {
-                if patterns.is_empty() {
-                    // No pattern: None() or None - valid for Unit payload
-                    Ok(())
-                } else if patterns.len() == 1 {
-                    // Single pattern for Unit: check if it's a wildcard or empty tuple
-                    // Ok(()) is valid (unit pattern matching unit type)
-                    // Ok(_) is valid (ignores unit)
-                    // Ok(x) should fail (can't bind variable to unit)
-                    match &patterns[0].kind {
-                        verum_ast::pattern::PatternKind::Wildcard => {
-                            Ok(()) // Wildcard ignores the Unit value
-                        }
-                        verum_ast::pattern::PatternKind::Tuple(elements) if elements.is_empty() => {
-                            Ok(()) // Empty tuple pattern () matches Unit type
-                        }
-                        _ => {
-                            // Trying to bind a variable to Unit - this variant has no payload
-                            Err(TypeError::Other(verum_common::Text::from(format!(
-                                "Variant '{}' has no payload to bind at {}",
-                                tag,
-                                span_to_line_col(span)
-                            ))))
-                        }
-                    }
-                } else {
-                    // Multiple patterns for Unit payload is invalid
-                    Err(TypeError::Other(verum_common::Text::from(format!(
-                        "Variant '{}' has Unit payload, but pattern expects {} field(s) at {}",
-                        tag,
-                        patterns.len(),
-                        span_to_line_col(span)
-                    ))))
-                }
-            }
-            // Non-tuple payload treated as single element
-            other_ty => {
-                if patterns.len() != 1 {
-                    return Err(TypeError::Other(verum_common::Text::from(format!(
-                        "Variant '{}' has payload type {}, expected 1 pattern but got {} at {}",
-                        tag,
-                        other_ty,
-                        patterns.len(),
-                        span_to_line_col(span)
-                    ))));
-                }
-                let effective_ty = wrap_if_ref(other_ty);
-                self.bind_pattern(&patterns[0], &effective_ty)
+                self.bind_pattern(pattern, field)?;
             }
         }
+        Ok(())
     }
 
     /// Bind patterns in a record-style variant payload.

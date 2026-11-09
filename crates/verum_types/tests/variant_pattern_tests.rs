@@ -39,6 +39,58 @@ use verum_types::context::TypeScheme;
 use verum_types::infer::*;
 use verum_types::ty::Type;
 
+#[test]
+fn source_patterns_preserve_nested_tuple_payloads_and_require_their_arity() {
+    let prelude = "type Reply<T> is Missing | Found(T);
+        type Choice is Absent | Pair(Int, Bool);";
+    for (ty, arms, valid) in [
+        (
+            "Reply<(Int,Bool)>",
+            "Found((a,b)) => if b {a} else {0}, Missing => 0",
+            true,
+        ),
+        (
+            "&Reply<(Int,Bool)>",
+            "Found((a,b)) => if *b {*a} else {0}, Missing => 0",
+            true,
+        ),
+        ("Reply<(Int,Bool)>", "Found(pair) => pair.0, Missing => 0", true),
+        ("Reply<Int>", "Found((a,)) => a, Missing => 0", false),
+        (
+            "Choice",
+            "Pair(a,b) => if b {a} else {0}, Absent => 0",
+            true,
+        ),
+        (
+            "Reply<(Int,Bool)>",
+            "Found((a,b,c)) => a, Missing => 0",
+            false,
+        ),
+        ("Choice", "Pair(a,b,c) => a, Absent => 0", false),
+    ] {
+        let source = format!("{prelude} fn inspect(x:{ty})->Int {{match x {{{arms}}}}}");
+        let module = verum_fast_parser::Parser::new(&source)
+            .parse_module()
+            .unwrap();
+        let mut checker = TypeChecker::new();
+        checker.register_primitives();
+        let mut errors = checker.prepare_module_declarations(&module);
+        for item in &module.items {
+            if let Err(error) = checker.check_item(item) {
+                errors.push(error);
+            }
+        }
+        errors.extend(checker.take_deferred_errors());
+        let clean = errors.is_empty() && !checker.diagnostics().iter().any(|diag| diag.is_error());
+        assert_eq!(
+            clean,
+            valid,
+            "{source}: {errors:?} {:?}",
+            checker.diagnostics()
+        );
+    }
+}
+
 // ============================================================================
 // Test 1: Simple Variant Patterns (Unit Payloads)
 // ============================================================================
