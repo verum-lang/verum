@@ -130,6 +130,36 @@ fn probe() -> Int {
 }
 
 #[test]
+fn inferred_try_output_retains_the_applied_receiver_of_a_generic_method() {
+    source_value(
+        r#"
+        module core;
+        public type Maybe<T> is None | Some(T);
+        public type Result<T,E> is Ok(T) | Err(E);
+        type Failure is { public code: Int };
+        implement<T> Maybe<T> {
+            fn ok_or_else<E,F:fn()->E>(self, f:F)->Result<T,E> {
+                match self { Some(value) => Ok(value), None => Err(f()) }
+            }
+        }
+        fn lookup(key:Int)->Result<Maybe<(Text,Int)>,Failure> {
+            if key < 0 { Err(Failure {code:31}) }
+            else if key == 0 { Ok(None) } else { Ok(Some(("row",92))) }
+        }
+        fn require(key:Int)->Result<(Text,Int),Failure> {
+            let relation = lookup(key)?;
+            relation.ok_or_else(|| Failure {code:17})
+        }
+        fn read(key:Int)->Int {
+            match require(key) { Ok((_,oid)) => oid, Err(error) => error.code }
+        }
+        fn probe()->Int { read(1)*10000 + read(0)*100 + read(-1) }
+    "#,
+        921731,
+    );
+}
+
+#[test]
 fn residual_conversion_forwards_the_enclosing_generic_binder() {
     source_value(r#"
 type Failure is { code: Int };

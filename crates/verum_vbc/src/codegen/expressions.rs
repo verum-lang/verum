@@ -26911,19 +26911,27 @@ impl VbcCodegen {
             looked_up
         };
 
-        if span.start < span.end {
-            let projected = declared.as_ref().and_then(|ty| self.try_success_payload(ty, success_tag))
-                .or_else(|| {
-                    // An unmapped error parameter does not erase a closed success type.
-                    let ExprKind::MethodCall { receiver, method, type_args, .. } = &inner.kind else {
-                        return None;
-                    };
-                    let owner = self.extract_expr_type_name(receiver)?;
-                    let signature = self.instantiated_method_result(&owner, method.name.as_str(), type_args)?;
-                    self.try_success_payload(&signature, success_tag).filter(|field| !field.is_generic())
-                });
-            self.ctx.declared_result_types.insert(span, projected);
-        }
+        let payload_field = 0;
+        let projected = declared
+            .as_ref()
+            .and_then(|ty| self.projected_variant_field(ty, success_tag, payload_field))
+            .or_else(|| {
+                // An unmapped error parameter does not erase a closed success type.
+                let ExprKind::MethodCall {
+                    receiver,
+                    method,
+                    type_args,
+                    ..
+                } = &inner.kind
+                else {
+                    return None;
+                };
+                let owner = self.extract_expr_type_name(receiver)?;
+                let signature =
+                    self.instantiated_method_result(&owner, method.name.as_str(), type_args)?;
+                self.projected_variant_field(&signature, success_tag, payload_field)
+                    .filter(|field| !field.is_generic())
+            });
 
         self.ctx.emit(Instruction::IsVar {
             dst: is_ok,
@@ -27203,8 +27211,11 @@ impl VbcCodegen {
         self.ctx.emit(Instruction::AsVar {
             dst: result,
             value: inner_reg,
-            tag: 0,
+            tag: payload_field,
         });
+        if span.start < span.end {
+            self.ctx.declared_result_types.insert(span, projected);
+        }
         // NAME THE Ok PAYLOAD FOR THE AOT (T1441). `AsVar`'s lowering can
         // name an extracted payload only from a `Maybe`'s inner type; a
         // `Result` reached through `?` is left UNNAMED, while the same
