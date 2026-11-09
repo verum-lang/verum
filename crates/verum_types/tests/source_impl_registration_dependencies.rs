@@ -70,6 +70,39 @@ fn provider_associated_result_implementation_is_discovered() {
     let errors = check("mount demo.lib.Box;", PROVIDER);
     assert!(errors.is_empty(), "{errors:#?}");
 }
+
+#[test]
+fn imported_implementation_proves_its_own_bounded_receiver() {
+    const PROVIDER: &str = "public type Key is protocol {};
+        public type Other<T> is {value:T}; implement<T> Key for Other<T> {}
+        public type Table<K:Key,V> is {value:V};
+        public type Read<K> is protocol {type Output; fn read(&self,key:K)->&Self.Output;};
+        implement<K:Key,V> Read<K> for Table<K,V> {
+            type Output=V; fn read(&self,key:K)->&V {&self.value}
+        }";
+    let consumer = "mount demo.lib.Table;";
+    let valid = check(consumer, PROVIDER);
+    assert!(valid.is_empty(), "{valid:#?}");
+    let missing = check(
+        consumer,
+        &PROVIDER.replace("implement<K:Key,V>", "implement<K,V>"),
+    );
+    assert!(
+        missing.iter().any(|error| error.contains("Key") && error.contains("Other")),
+        "{missing:#?}"
+    );
+}
+
+#[test]
+fn imported_marker_implementation_still_owes_its_receivers_domain() {
+    let declarations = "public type Key is protocol {}; public type Table<K:Key> is {value:K};
+        public type Mark is protocol {};";
+    let consumer = "mount demo.lib.Table;";
+    let valid = check(consumer, &format!("{declarations} implement<K:Key> Mark for Table<K> {{}}"));
+    assert!(valid.is_empty(), "{valid:#?}");
+    let invalid = check(consumer, &format!("{declarations} implement<K> Mark for Table<K> {{}}"));
+    assert!(invalid.iter().any(|error| error.contains("Key")), "{invalid:#?}");
+}
 #[test]
 fn explicit_dependency_mount_control() {
     let errors = check("mount demo.lib.Rows; mount demo.lib.Box;", PROVIDER);

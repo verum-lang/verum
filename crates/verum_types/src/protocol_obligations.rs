@@ -261,9 +261,13 @@ impl<'a> Obligations<'a> {
                 CandidateMatch::Matched(substitution) => substitution,
                 CandidateMatch::Disjoint => continue,
                 CandidateMatch::Unknown => {
-                    return Err(
-                        "cannot establish disjointness of a competing implementation".into(),
-                    );
+                    return Err(format!(
+                        "cannot establish disjointness of a competing implementation of `{}` for `{}` while proving `{}: {}`",
+                        implementation.protocol,
+                        implementation.for_type.to_text(),
+                        ty.to_text(),
+                        bound.protocol,
+                    ).into());
                 }
             };
             // A case that can become applicable after instantiation cannot be

@@ -64,6 +64,11 @@ use verum_common::{Heap, List, Map, Maybe, Set, Shared, Text, ToText};
 #[allow(unused_imports)]
 use verum_modules::{ModulePath, ModuleRegistry, NameResolver, resolver::NameKind};
 
+enum ApplicationForm {
+    Expanded,
+    ImplementationHead,
+}
+
 impl TypeChecker {
     pub(crate) fn ast_to_type_lenient(&mut self, ast_ty: &verum_ast::ty::Type) -> Type {
         use verum_ast::ty::TypeKind;
@@ -997,6 +1002,25 @@ fn substitute_refinement_binder(
         ast_ty: &verum_ast::ty::Type,
         elaborated: Option<List<Type>>,
     ) -> Result<Type> {
+        self.elaborate_generic_application(ast_ty, elaborated, ApplicationForm::Expanded)
+    }
+
+    /// Publication needs the nominal constructor after its complete argument
+    /// telescope has been checked, including when the protocol has no members.
+    pub(super) fn checked_impl_receiver(&mut self, receiver: &verum_ast::ty::Type) -> Result<Type> {
+        if matches!(receiver.kind, verum_ast::ty::TypeKind::Generic { .. }) {
+            self.elaborate_generic_application(receiver, None, ApplicationForm::ImplementationHead)
+        } else {
+            self.ast_to_type_for_protocol_impl(receiver)
+        }
+    }
+
+    fn elaborate_generic_application(
+        &mut self,
+        ast_ty: &verum_ast::ty::Type,
+        elaborated: Option<List<Type>>,
+        form: ApplicationForm,
+    ) -> Result<Type> {
         use verum_ast::ty::TypeKind;
         let TypeKind::Generic { base, args } = &ast_ty.kind
             else { unreachable!() };
@@ -1271,6 +1295,9 @@ fn substitute_refinement_binder(
                 // that is not an alias `try_expand_alias` returns None and
                 // the arms below run unchanged.
                 if let Some(key) = parameter_key.as_ref() {
+                    if matches!(form, ApplicationForm::ImplementationHead) {
+                        return Ok(Type::Named { path: Self::text_to_path(key), args: type_args });
+                    }
                     let unexpanded = Type::Named {
                         path: Self::text_to_path(key),
                         args: type_args.clone(),

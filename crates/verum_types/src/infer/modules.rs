@@ -6327,91 +6327,65 @@ impl TypeChecker {
                     }
                 }
 
-                // The publication reads this implementation's declared binder
-                // frame, not the lazy caller's surrounding source telescope.
                 self.push_decl_param_frame(owner_frame.clone());
-                let publication = (|| -> Result<()> {
-                let associated_types = self.elaborate_impl_associated_assignments(
-                    &self.path_to_string(protocol), impl_decl, &owner_frame,
-                )?;
+                let publication = self.in_impl_proof_scope(|checker| {
+                    let (where_clauses, type_param_fn_bounds) =
+                        checker.enter_source_impl_conditions(impl_decl, &owner_frame)?;
+                    let identity = checker.path_to_string(protocol);
+                    let associated_types = checker.elaborate_impl_associated_assignments(
+                        &identity, impl_decl, &owner_frame,
+                    )?;
+                    let for_type_resolved = checker.checked_impl_receiver(for_type)?;
 
-                let (where_clauses, type_param_fn_bounds) =
-                    self.elaborate_source_impl_conditions(impl_decl, &owner_frame)?;
+                    let resolved_protocol_args = checker.protocol_application_arguments(
+                        protocol, ast_protocol_args, Some(&for_type_resolved),
+                    )?;
 
-                // Resolve the for_type
-                // CRITICAL FIX: Use ast_to_type_for_protocol_impl to avoid expanding type aliases.
-                // This ensures the ProtocolImpl has for_type as Named{Result, [T, E]} instead of the
-                // expanded Variant form, which is necessary for get_implementations() to match lookups.
-                let for_type_resolved = self
-                    .ast_to_type_for_protocol_impl(for_type)
-                    .unwrap_or_else(|_| self.ast_to_type_lenient(for_type));
-
-                // CRITICAL FIX: Resolve protocol type arguments (e.g., Result<Never, E> in FromResidual<Result<Never, E>>)
-                let resolved_protocol_args = self.protocol_application_arguments(
-                    protocol, ast_protocol_args, Some(&for_type_resolved),
-                )?;
-
-                // Defaults inherit the selected application, including owner values.
-                if let Some(declaration) = self.protocol_checker.read().get_protocol(&self.path_to_string(protocol)) {
-                    let impl_variables: List<TypeVar> = impl_type_bindings.iter().filter_map(|(name, _)| {
-                        match self.ctx.lookup_type(name.as_str()) { Some(Type::Var(var)) => Some(*var), _ => None }
-                    }).collect();
-                    for (name, method) in &declaration.methods {
-                        if methods.contains_key(name) {
-                            for key in [name.clone(), format!("$static${name}").into()] {
-                                let existing = self.inherent_methods.read().get(&method_owner).and_then(|methods| methods.get(&key)).cloned();
-                                if let Some(mut scheme) = existing {
-                                    self.attach_protocol_method_requirements(&mut scheme, method, &resolved_protocol_args, &for_type_resolved, impl_decl.span)?;
-                                    self.inherent_methods.write().entry(method_owner.clone()).or_default().insert(key, scheme);
+                    // Defaults inherit the selected application, including owner values.
+                    if let Some(declaration) = checker.protocol_checker.read().get_protocol(&identity) {
+                        let impl_variables: List<TypeVar> = impl_type_bindings.iter().filter_map(|(name, _)| {
+                            match checker.ctx.lookup_type(name.as_str()) { Some(Type::Var(var)) => Some(*var), _ => None }
+                        }).collect();
+                        for (name, method) in &declaration.methods {
+                            if methods.contains_key(name) {
+                                for key in [name.clone(), format!("$static${name}").into()] {
+                                    let existing = checker.inherent_methods.read().get(&method_owner).and_then(|methods| methods.get(&key)).cloned();
+                                    if let Some(mut scheme) = existing {
+                                        checker.attach_protocol_method_requirements(&mut scheme, method, &resolved_protocol_args, &for_type_resolved, impl_decl.span)?;
+                                        checker.inherent_methods.write().entry(method_owner.clone()).or_default().insert(key, scheme);
+                                    }
                                 }
                             }
-                        }
-                        if method.has_default && !methods.contains_key(name) {
-                            let scheme = self.inherited_protocol_method_scheme(method, &resolved_protocol_args, &for_type_resolved, &impl_variables)?;
-                            methods.insert(name.clone(), scheme.ty.clone());
-                            self.inherent_methods.write().entry(method_owner.clone()).or_default().entry(name.clone()).or_insert(scheme);
+                            if method.has_default && !methods.contains_key(name) {
+                                let scheme = checker.inherited_protocol_method_scheme(method, &resolved_protocol_args, &for_type_resolved, &impl_variables)?;
+                                methods.insert(name.clone(), scheme.ty.clone());
+                                checker.inherent_methods.write().entry(method_owner.clone()).or_default().entry(name.clone()).or_insert(scheme);
+                            }
                         }
                     }
-                }
 
-                // Create and register the ProtocolImpl
-                let protocol_impl = crate::protocol::ProtocolImpl {
-                    parameters: owner_frame.values().map(crate::context::GenericBinder::declared)
-                        .collect::<std::result::Result<List<_>, _>>()
-                        .map_err(|message| TypeError::UniverseBinding { message, span: impl_decl.span })?,
-                    protocol: protocol.clone(),
-                    protocol_args: resolved_protocol_args,
-                    for_type: for_type_resolved,
-                    where_clauses,
-                    methods: methods.clone(),
-                    associated_types,
-                    associated_consts: verum_common::Map::new(),
-                    specialization,
-                    impl_crate: verum_common::Maybe::None,
-                    span: impl_decl.span,
-                    type_param_fn_bounds,
-                };
+                    // Create and register the ProtocolImpl
+                    let protocol_impl = crate::protocol::ProtocolImpl {
+                        parameters: owner_frame.values().map(crate::context::GenericBinder::declared)
+                            .collect::<std::result::Result<List<_>, _>>()
+                            .map_err(|message| TypeError::UniverseBinding { message, span: impl_decl.span })?,
+                        protocol: protocol.clone(),
+                        protocol_args: resolved_protocol_args,
+                        for_type: for_type_resolved,
+                        where_clauses,
+                        methods,
+                        associated_types,
+                        associated_consts: verum_common::Map::new(),
+                        specialization,
+                        impl_crate: verum_common::Maybe::None,
+                        span: impl_decl.span,
+                        type_param_fn_bounds,
+                    };
 
-                // DEBUG: Log FromResidual protocol impl registration in import_impl_blocks
-                // if protocol.as_ident().map(|i| i.as_str()) == Some("FromResidual") {
-                //  eprintln!("[DEBUG import_impl_blocks] Registering FromResidual impl for {}, methods: {:?}",
-                //  protocol_impl.for_type, methods.keys().collect::<Vec<_>>());
-                // }
-
-                // DEBUG: Log protocol impl registration
-                #[cfg(debug_assertions)]
-                {
-                    let proto_name = protocol.as_ident().map(|i| i.as_str()).unwrap_or("?");
-                    // eprintln!(
-                    // "[DEBUG import_impl_blocks] Registering protocol impl: {} for {}",
-                    // proto_name, type_name
-                    // );
-                }
-
-                self.protocol_checker.write().register_source_impl(
-                    &self.current_module_path, impl_decl, protocol_impl,
-                )
-                })();
+                    checker.protocol_checker.write().register_source_impl(
+                        &checker.current_module_path, impl_decl, protocol_impl,
+                    )
+                });
                 self.pop_decl_param_frame();
                 if let Err(error) = publication {
                     registration_error.get_or_insert(error);

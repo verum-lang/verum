@@ -6180,7 +6180,7 @@ impl TypeChecker {
                     // This ensures that `implement<T> FromResidual<Maybe<Never>> for Result<T, E>`
                     // keeps for_type as Named{Result, [T, E]} instead of expanding to the Variant form.
                     // This is necessary for get_implementations() to match lookups correctly.
-                    let for_type_resolved = self.ast_to_type_for_protocol_impl(for_type)?;
+                    let for_type_resolved = self.checked_impl_receiver(for_type)?;
 
                     // Create and register ProtocolImpl
                     let protocol_impl = crate::protocol::ProtocolImpl {
@@ -7338,9 +7338,7 @@ impl TypeChecker {
             }
         };
 
-        if let Err(error) = self.in_impl_proof_scope(|checker| {
-            checker.check_associated_type_obligations(impl_decl, &proto_ident)
-        }) {
+        if let Err(error) = self.check_associated_type_obligations(impl_decl, &proto_ident) {
             self.push_diagnostic_for(error);
         }
 

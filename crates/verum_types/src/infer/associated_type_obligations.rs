@@ -19,6 +19,16 @@ impl TypeChecker {
         declaration: &ImplDecl,
         identity: &Text,
     ) -> Result<()> {
+        self.in_impl_proof_scope(|checker| {
+            checker.check_associated_type_obligations_in_scope(declaration, identity)
+        })
+    }
+
+    fn check_associated_type_obligations_in_scope(
+        &mut self,
+        declaration: &ImplDecl,
+        identity: &Text,
+    ) -> Result<()> {
         let (constraints, associated_types, super_protocols, has_parameter_bounds) = {
             let registry = self.protocol_checker.read();
             let protocol = registry
