@@ -44,6 +44,7 @@ mount super.tensor.{add, sub, mul, div, neg, tensor_pow, tensor_exp, tensor_log,
 mount super.tensor.{matmul, transpose, softmax, sum_axis, mean_axis, var_axis};
 mount super.linalg.{Vector, Matrix};
 mount super.algebra.RealField;
+mount core.collections.graph.Edge;
 // Mounted rather than inherited: the prelude used to publish math's
 // 28 names into every file, which §4ter forbids — the language does
 // not name `sqrt` or Euler's number.
@@ -1087,9 +1088,9 @@ public type GraphNode is {
 
 // Graph edge representing data flow
 public type GraphEdge is {
-    from: NodeId,
-    to: NodeId,
-    tensor_id: AutodiffTensorId,
+    public from: NodeId,
+    public to: NodeId,
+    public tensor_id: AutodiffTensorId,
 };
 
 // Checkpoint data for a node
@@ -1406,7 +1407,7 @@ public context GradientTape {
 // An autodiff computation is a DAG of tensor operations — exactly a
 // labelled directed acyclic graph where nodes are GraphNode operations
 // and edges are GraphEdge tensor-valued data-flow arrows. Exposing it
-// through `core.math.graph.Edge<NodeId, AutodiffTensorId>` lets the full graph
+// through `core.collections.graph.Edge<NodeId, AutodiffTensorId>` lets the full graph
 // algorithm library (bfs, dfs, reachable, topological_sort) apply
 // directly. Topological sort of the autodiff graph IS the forward
 // evaluation order; reverse-topological sort is the backprop order.
@@ -1414,8 +1415,12 @@ public context GradientTape {
 /// Convert one autodiff GraphEdge to the canonical graph edge shape.
 /// The tensor flowing on the edge becomes the edge label, so graph
 /// algorithms can inspect the data-flow structure.
-public fn autodiff_edge_to_graph_edge(e: GraphEdge) -> core.math.graph.Edge<NodeId, AutodiffTensorId> {
-    core.math.graph.Edge {
+public fn autodiff_edge_to_graph_edge(e: GraphEdge) -> Edge<NodeId, AutodiffTensorId> {
+    graph_edge(&e)
+}
+
+fn graph_edge(e: &GraphEdge) -> Edge<NodeId, AutodiffTensorId> {
+    Edge {
         src: e.from,
         tgt: e.to,
         label: e.tensor_id,
@@ -1426,15 +1431,11 @@ public fn autodiff_edge_to_graph_edge(e: GraphEdge) -> core.math.graph.Edge<Node
 /// input to `topological_sort` from `core.math.graph`.
 public fn autodiff_edges_as_graph(
     edges: &List<GraphEdge>,
-) -> List<core.math.graph.Edge<NodeId, AutodiffTensorId>> {
-    let mut out: List<core.math.graph.Edge<NodeId, AutodiffTensorId>> = [];
+) -> List<Edge<NodeId, AutodiffTensorId>> {
+    let mut out: List<Edge<NodeId, AutodiffTensorId>> = [];
     let mut i: Int = 0;
     while i < edges.len() {
-        out.push(core.math.graph.Edge {
-            src: edges[i].from,
-            tgt: edges[i].to,
-            label: edges[i].tensor_id,
-        });
+        out.push(graph_edge(&edges[i]));
         i = i + 1;
     }
     out

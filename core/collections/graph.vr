@@ -30,9 +30,9 @@ module core.collections.graph;
 
 /// A directed edge from `src` to `tgt` with optional label `L`.
 public type Edge<V, L> is {
-    src:   V,
-    tgt:   V,
-    label: L,
+    public src: V,
+    public tgt: V,
+    public label: L,
 };
 
 /// An unlabelled directed edge — `()` is the trivial label.

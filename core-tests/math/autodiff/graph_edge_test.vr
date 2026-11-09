@@ -1,0 +1,25 @@
+mount core.math.autodiff.{NodeId, AutodiffTensorId, GraphEdge, autodiff_edge_to_graph_edge, autodiff_edges_as_graph};
+
+@test
+fn graph_projection_preserves_direction_labels_and_order() {
+    let edge = GraphEdge { from: NodeId(2), to: NodeId(5), tensor_id: AutodiffTensorId(13) };
+    let projected = autodiff_edge_to_graph_edge(edge);
+    assert_eq(projected.src.0, 2 as USize);
+    assert_eq(projected.tgt.0, 5 as USize);
+    assert_eq(projected.label.0, 13 as USize);
+
+    let mut edges: List<GraphEdge> = [];
+    assert_eq(autodiff_edges_as_graph(&edges).len(), 0);
+    edges.push(GraphEdge { from: NodeId(3), to: NodeId(7), tensor_id: AutodiffTensorId(11) });
+    edges.push(GraphEdge { from: NodeId(7), to: NodeId(3), tensor_id: AutodiffTensorId(17) });
+    let result = autodiff_edges_as_graph(&edges);
+    assert_eq(result.len(), 2);
+    assert_eq(result[0].src.0, 3 as USize);
+    assert_eq(result[0].tgt.0, 7 as USize);
+    assert_eq(result[0].label.0, 11 as USize);
+    assert_eq(result[1].src.0, 7 as USize);
+    assert_eq(result[1].tgt.0, 3 as USize);
+    assert_eq(result[1].label.0, 17 as USize);
+}
+
+fn main() {}
