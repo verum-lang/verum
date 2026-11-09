@@ -130,6 +130,23 @@ struct Validator<'a> {
     errors: Vec<VbcError>,
 }
 
+#[derive(Clone, Copy)]
+struct WitnessScope<'a> {
+    parameters: &'a [crate::types::TypeParamDescriptor],
+    local_binders: u32,
+}
+
+impl WitnessScope<'_> {
+    fn admits(self, id: crate::types::TypeParamId) -> bool {
+        let index = u32::from(id.0);
+        index < self.local_binders
+            || self
+                .parameters
+                .iter()
+                .any(|param| u32::from(param.id.0) == index - self.local_binders)
+    }
+}
+
 impl<'a> Validator<'a> {
     /// Creates a new validator.
     fn new(module: &'a VbcModule, options: &'a ValidationOptions) -> Self {
@@ -286,6 +303,26 @@ impl<'a> Validator<'a> {
     }
 
     fn validate_type_ref_in_record(&mut self, type_ref: &TypeRef, depth: usize, record_field: bool) {
+        self.validate_scoped_type_ref(type_ref, depth, record_field, None);
+    }
+
+    fn validate_call_witnesses(&mut self, args: &[TypeRef], function: &FunctionDescriptor) {
+        let scope = WitnessScope {
+            parameters: &function.type_params,
+            local_binders: 0,
+        };
+        for arg in args {
+            self.validate_scoped_type_ref(arg, 0, false, Some(scope));
+        }
+    }
+
+    fn validate_scoped_type_ref(
+        &mut self,
+        type_ref: &TypeRef,
+        depth: usize,
+        record_field: bool,
+        scope: Option<WitnessScope<'_>>,
+    ) {
         if depth > self.options.max_type_depth {
             self.errors.push(VbcError::CircularType(TypeId(0)));
             return;
@@ -298,8 +335,11 @@ impl<'a> Validator<'a> {
                     self.errors.push(VbcError::InvalidTypeId(id.0));
                 }
             }
-            TypeRef::Generic(_) => {
-                // Generic type params are validated in context
+            TypeRef::Generic(id) => {
+                if scope.is_some_and(|scope| !scope.admits(*id)) {
+                    self.errors
+                        .push(VbcError::InvalidTypeParamId(u32::from(id.0)));
+                }
             }
             TypeRef::RecordFieldProjection { owner, .. } => {
                 if !record_field {
@@ -318,7 +358,7 @@ impl<'a> Validator<'a> {
                     self.errors.push(VbcError::InvalidTypeId(base.0));
                 }
                 for arg in args {
-                    self.validate_type_ref_in_record(arg, depth + 1, record_field);
+                    self.validate_scoped_type_ref(arg, depth + 1, record_field, scope);
                 }
             }
             TypeRef::Function {
@@ -327,50 +367,75 @@ impl<'a> Validator<'a> {
                 ..
             } => {
                 for param in params {
-                    self.validate_type_ref_in_record(param, depth + 1, record_field);
+                    self.validate_scoped_type_ref(param, depth + 1, record_field, scope);
                 }
-                self.validate_type_ref_in_record(return_type, depth + 1, record_field);
+                self.validate_scoped_type_ref(return_type, depth + 1, record_field, scope);
             }
             TypeRef::Reference { inner, .. } => {
-                self.validate_type_ref_in_record(inner, depth + 1, record_field);
+                self.validate_scoped_type_ref(inner, depth + 1, record_field, scope);
             }
             TypeRef::Tuple(elems) => {
                 for elem in elems {
-                    self.validate_type_ref_in_record(elem, depth + 1, record_field);
+                    self.validate_scoped_type_ref(elem, depth + 1, record_field, scope);
                 }
             }
             TypeRef::Array { element, .. } => {
-                self.validate_type_ref_in_record(element, depth + 1, record_field);
+                self.validate_scoped_type_ref(element, depth + 1, record_field, scope);
             }
             TypeRef::Slice(inner) => {
-                self.validate_type_ref_in_record(inner, depth + 1, record_field);
+                self.validate_scoped_type_ref(inner, depth + 1, record_field, scope);
             }
-            TypeRef::AssociatedProjection { base, qualifier, args, assoc } => {
-                self.validate_type_ref_in_record(base, depth + 1, record_field);
+            TypeRef::AssociatedProjection {
+                base,
+                qualifier,
+                args,
+                assoc,
+            } => {
+                self.validate_scoped_type_ref(base, depth + 1, record_field, scope);
                 if assoc.is_empty() || args.len() > crate::types::MAX_TYPE_APPLICATION_ARGUMENTS {
-                    self.errors.push(VbcError::Deserialization("invalid associated projection application".into()));
+                    self.errors.push(VbcError::Deserialization(
+                        "invalid associated projection application".into(),
+                    ));
                 }
-                for argument in args { self.validate_type_ref_in_record(argument, depth + 1, record_field); }
+                for argument in args {
+                    self.validate_scoped_type_ref(argument, depth + 1, record_field, scope);
+                }
                 if let Some(application) = qualifier {
-                    self.validate_type_ref_in_record(&TypeRef::Concrete(TypeId(application.protocol.0)), depth + 1, record_field);
+                    self.validate_scoped_type_ref(
+                        &TypeRef::Concrete(TypeId(application.protocol.0)),
+                        depth + 1,
+                        record_field,
+                        scope,
+                    );
                     if application.args.len() > crate::types::MAX_TYPE_APPLICATION_ARGUMENTS {
-                        self.errors.push(VbcError::Deserialization("protocol application exceeds argument budget".into()));
+                        self.errors.push(VbcError::Deserialization(
+                            "protocol application exceeds argument budget".into(),
+                        ));
                     }
-                    for argument in &application.args { self.validate_type_ref_in_record(argument, depth + 1, record_field); }
+                    for argument in &application.args {
+                        self.validate_scoped_type_ref(argument, depth + 1, record_field, scope);
+                    }
                 }
             }
             TypeRef::ConstValue(_) => {
                 // Const-generic VALUE — nothing to validate (no ids).
             }
             TypeRef::Rank2Function {
+                type_param_count,
                 params,
                 return_type,
                 ..
             } => {
+                let scope = scope.map(|scope| WitnessScope {
+                    local_binders: scope
+                        .local_binders
+                        .saturating_add(u32::from(*type_param_count)),
+                    ..scope
+                });
                 for param in params {
-                    self.validate_type_ref_in_record(param, depth + 1, record_field);
+                    self.validate_scoped_type_ref(param, depth + 1, record_field, scope);
                 }
-                self.validate_type_ref_in_record(return_type, depth + 1, record_field);
+                self.validate_scoped_type_ref(return_type, depth + 1, record_field, scope);
             }
         }
     }
@@ -666,7 +731,7 @@ impl<'a> Validator<'a> {
                 self.validate_type_ref(type_ref, 0);
             }
             Instruction::SetCallWitness { type_args } => {
-                for ty in type_args { self.validate_type_ref(ty, 0); }
+                self.validate_call_witnesses(type_args, func);
             }
             // -----------------------------------------------------------
             // Function-call cross-references — `func_id` in range AND
@@ -693,7 +758,7 @@ impl<'a> Validator<'a> {
                     self.check_call_arity(target, args.count as u32, &func_name);
                 }
                 self.check_reg(*dst, max_reg, &func_name);
-                for ty in type_args { self.validate_type_ref(ty, 0); }
+                self.validate_call_witnesses(type_args, func);
                 self.check_reg_range(*args, max_reg, &func_name);
             }
             Instruction::TailCall { func_id, args } => {
@@ -1127,6 +1192,70 @@ mod tests {
         module.header.constant_pool_count = module.constants.len() as u32;
 
         module
+    }
+
+    #[test]
+    fn call_arguments_can_only_reference_binders_in_the_caller() {
+        use crate::types::{TypeParamDescriptor, TypeParamId};
+        let parameter = |id| TypeRef::Generic(TypeParamId(id));
+        let ranked = |outer| TypeRef::Rank2Function {
+            is_async: false,
+            type_param_count: 1,
+            params: vec![parameter(0)],
+            return_type: Box::new(parameter(outer)),
+            contexts: Default::default(),
+        };
+        for dynamic in [true, false] {
+            for (argument, allowed) in [
+                (parameter(3), true),
+                (parameter(0), false),
+                (ranked(0), true),
+                (ranked(4), true),
+                (ranked(3), false),
+                (TypeRef::Tuple(vec![parameter(5)]), false),
+            ] {
+                let instruction = if dynamic {
+                    Instruction::SetCallWitness {
+                        type_args: vec![argument],
+                    }
+                } else {
+                    Instruction::CallG {
+                        dst: Reg(0),
+                        func_id: 1,
+                        type_args: vec![argument],
+                        args: RegRange {
+                            start: Reg(0),
+                            count: 0,
+                        },
+                    }
+                };
+                let mut module = build_module_with_instr(instruction, 2, 2);
+                module.functions[0].type_params.push(TypeParamDescriptor {
+                    id: TypeParamId(3),
+                    ..Default::default()
+                });
+                let result = validate_module(&module);
+                if allowed {
+                    result.expect("declared witness");
+                } else {
+                    assert!(
+                        matches!(result, Err(VbcError::InvalidTypeParamId(_))),
+                        "{result:?}"
+                    );
+                }
+            }
+        }
+        let closed = build_module_with_instr(
+            Instruction::SetCallWitness {
+                type_args: vec![parameter(0)],
+            },
+            2,
+            1,
+        );
+        assert!(matches!(
+            validate_module(&closed),
+            Err(VbcError::InvalidTypeParamId(0))
+        ));
     }
 
     #[test]
