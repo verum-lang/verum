@@ -9430,7 +9430,7 @@ impl TypeChecker {
     }
 
     /// Check if an impl is a blanket impl (the for_type is a type parameter).
-    fn is_blanket_impl_for_type(
+    pub(super) fn is_blanket_impl_for_type(
         &self,
         for_type: &verum_ast::ty::Type,
         generics: &[verum_ast::ty::GenericParam],
@@ -9463,7 +9463,7 @@ impl TypeChecker {
     }
 
     /// Register a blanket impl from its AST node.
-    fn register_blanket_impl_from_ast(
+    pub(super) fn register_blanket_impl_from_ast(
         &mut self,
         impl_decl: &verum_ast::decl::ImplDecl,
     ) -> Result<()> {
@@ -10638,6 +10638,8 @@ impl TypeChecker {
         // and a leaked parameter would arrive at the next function as a var
         // that refuses to bind to anything.
         let saved_rigid = self.unifier.rigid_snapshot();
+        let assumption_depth = self.source_type_registration.projection_assumptions.len();
+        let callable_depth = self.source_type_registration.callable_assumptions.len();
         let result = self.with_function_parameter_scope(func, |checker| {
             checker.with_value_obligation_scope(true, |checker| {
                 checker.with_declared_universe_scope("function", &func.name.name, &func.generics, |checker| {
@@ -10646,6 +10648,8 @@ impl TypeChecker {
                 })
             })
         });
+        self.source_type_registration.projection_assumptions.truncate(assumption_depth);
+        self.source_type_registration.callable_assumptions.truncate(callable_depth);
         self.unifier.exit_rigid_scope(saved_rigid);
         result
     }
@@ -10910,6 +10914,13 @@ impl TypeChecker {
                 .with_bounds(protocol_bounds));
         }
 
+        self.collect_where_clause_bounds(
+            func,
+            &mut func_param_protocol_bounds,
+            &mut func_param_type_bounds,
+        )?;
+        self.extend_source_parameter_premises(&func_param_protocol_bounds, &func_param_type_bounds);
+
         // Build function type from signature
         // Generic parameters will be processed in the function scope
         let param_types: Result<List<_>> = func
@@ -11056,11 +11067,6 @@ impl TypeChecker {
         // the signature pass is overwritten here and never reaches a call
         // site — fixing one place and not the other is inert, which is how
         // the first attempt at this measured.
-        self.collect_where_clause_bounds(
-            func,
-            &mut func_param_protocol_bounds,
-            &mut func_param_type_bounds,
-        )?;
 
         // Create initial function type with contexts and add to environment (for recursive calls)
         let initial_func_type = Type::Function {

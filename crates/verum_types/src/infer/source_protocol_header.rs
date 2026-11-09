@@ -21,6 +21,19 @@ pub(crate) struct SourceProtocolHeader {
     pub dyn_required: Option<Span>,
 }
 
+impl SourceProtocolHeader {
+    pub(super) fn self_bound(&self, span: Span) -> Option<ProtocolBound> {
+        let args = self.owner.clone()?;
+        let protocol = verum_ast::Path::new(
+            self.identity.as_str().split('.')
+                .map(|part| verum_ast::PathSegment::Name(verum_ast::Ident::new(part, span)))
+                .collect(),
+            span,
+        );
+        Some(ProtocolBound { protocol, args, associated_types: Map::new(), is_negative: false })
+    }
+}
+
 fn invalid(span: Span, message: impl Into<Text>) -> TypeError {
     TypeError::OtherWithCodeSpanned {
         code: "E405".into(),
@@ -44,6 +57,7 @@ impl TypeChecker {
         // A recursive source load introduces a different Self. Its method
         // obligations must not inherit the caller's equally-spelled receiver.
         let previous = std::mem::take(&mut self.source_type_registration.projection_assumptions);
+        let callables = std::mem::take(&mut self.source_type_registration.callable_assumptions);
         let result = self.elaborate_protocol_members_in_scope(
             identity,
             parameters,
@@ -52,6 +66,7 @@ impl TypeChecker {
             items,
         );
         self.source_type_registration.projection_assumptions = previous;
+        self.source_type_registration.callable_assumptions = callables;
         result
     }
 
@@ -171,29 +186,15 @@ impl TypeChecker {
                     "associated Self projection has no declaring protocol header",
                 )
             })?;
-            let owner = header.owner.as_ref().ok_or_else(|| {
+            let bound = header.self_bound(span).ok_or_else(|| {
                 invalid(
                     span,
                     "associated projection owner has no represented declaration telescope",
                 )
             })?;
-            let protocol = verum_ast::Path::new(
-                header
-                    .identity
-                    .as_str()
-                    .split('.')
-                    .map(|part| verum_ast::PathSegment::Name(verum_ast::Ident::new(part, span)))
-                    .collect(),
-                span,
-            );
             assumptions.push(WhereClause {
                 ty: receiver.clone(),
-                bounds: List::from_iter([ProtocolBound {
-                    protocol,
-                    args: owner.clone(),
-                    associated_types: Map::new(),
-                    is_negative: false,
-                }]),
+                bounds: List::from_iter([bound]),
             });
         }
         let application = self

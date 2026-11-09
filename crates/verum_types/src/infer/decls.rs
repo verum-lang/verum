@@ -566,7 +566,9 @@ impl TypeChecker {
         // `types_being_registered` in `register_type_declaration_inner`:
         // the immediately-invoked closure captures every `?`, making the
         // parameter cleanup below unconditional.
+        let (previous_premises, premises_result) = self.begin_nominal_declaration_premises(type_decl);
         let body_result: Result<()> = (|| {
+        premises_result?;
         // Defaults share the declaration's lexical parameter frame and owner.
         // Imported signatures cannot postpone a missing name to the consumer.
         self.prepare_type_declaration_parameters(type_decl)?;
@@ -911,6 +913,8 @@ impl TypeChecker {
 
         Ok(())
         })();
+
+        self.finish_nominal_declaration_premises(previous_premises);
 
         // CRITICAL: Pop this declaration's parameter frame —
         // unconditionally, on BOTH success and failure of the body above
@@ -2529,8 +2533,11 @@ impl TypeChecker {
         self.push_decl_param_frame(param_frame);
 
         // Now resolve the actual type definition (similar to register_type_declaration)
-        let result = self.prepare_type_declaration_parameters(type_decl)
+        let (previous_premises, premises_result) = self.begin_nominal_declaration_premises(type_decl);
+        let result = premises_result
+            .and_then(|_| self.prepare_type_declaration_parameters(type_decl))
             .and_then(|_| self.resolve_type_body(type_decl, &type_name));
+        self.finish_nominal_declaration_premises(previous_premises);
 
         self.pop_decl_param_frame();
         let _ = type_param_names;
@@ -6290,10 +6297,14 @@ impl TypeChecker {
         // inherit their exact implementation frame. Flat ambient names are not binders.
         let frame = self.decl_param_frames.last().cloned().unwrap_or_default();
         self.push_decl_param_frame(frame);
+        let assumption_depth = self.source_type_registration.projection_assumptions.len();
+        let callable_depth = self.source_type_registration.callable_assumptions.len();
         let result = self.with_declared_universe_scope("function", &func.name.name, &func.generics, |checker| {
             checker.validate_function_universes(func)?;
             checker.register_function_signature_in_universe_scope(func)
         });
+        self.source_type_registration.projection_assumptions.truncate(assumption_depth);
+        self.source_type_registration.callable_assumptions.truncate(callable_depth);
         self.pop_decl_param_frame();
         result
     }
@@ -6517,6 +6528,8 @@ impl TypeChecker {
             &mut param_protocol_bounds,
             &mut param_type_bounds,
         )?;
+
+        self.extend_source_parameter_premises(&param_protocol_bounds, &param_type_bounds);
 
         // Build parameter types
         let param_types: Result<List<_>> = func

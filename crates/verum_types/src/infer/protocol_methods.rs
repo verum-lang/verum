@@ -82,11 +82,20 @@ impl TypeChecker {
         self.push_decl_param_frame(frame);
         let saved_source_scope = std::mem::replace(&mut self.resolving_source_signature, true);
         let saved_self = self.current_self_type.clone();
-        self.set_current_self_type(Some(Type::Named {
+        let receiver = Type::Named {
             path: verum_ast::Path::single(verum_ast::Ident::new("Self", method.span)),
             args: List::new(),
-        }));
+        };
+        self.set_current_self_type(Some(receiver.clone()));
         let assumption_base = self.source_type_registration.projection_assumptions.len();
+        let callable_base = self.source_type_registration.callable_assumptions.len();
+        if let Some(bound) = self.source_type_registration.headers.last()
+            .and_then(|header| header.self_bound(method.span))
+        {
+            self.source_type_registration.projection_assumptions.push(crate::protocol::WhereClause {
+                ty: receiver, bounds: List::from_iter([bound]),
+            });
+        }
         if let ProtocolConstraints::Declared { parameter_bounds, .. } = constraints {
             self.source_type_registration.projection_assumptions.extend(parameter_bounds.iter().cloned());
         }
@@ -109,10 +118,13 @@ impl TypeChecker {
                                     | verum_ast::TypeKind::Rank2Function { .. }
                             ) =>
                         {
+                            let contract = self.ast_to_type(ty)?;
+                            self.source_type_registration.callable_assumptions
+                                .push((Type::Var(*variable), contract.clone()));
                             type_bounds
                                 .entry(name.name.clone())
                                 .or_insert_with(List::new)
-                                .push(self.ast_to_type(ty)?);
+                                .push(contract);
                         }
                         _ => protocol_bounds.extend(self.convert_type_bounds_for_receiver(
                             std::slice::from_ref(bound),
@@ -204,6 +216,7 @@ impl TypeChecker {
             Ok(signature)
         })();
         self.source_type_registration.projection_assumptions.truncate(assumption_base);
+        self.source_type_registration.callable_assumptions.truncate(callable_base);
         self.set_current_self_type(saved_self);
         self.resolving_source_signature = saved_source_scope;
         self.pop_decl_param_frame();

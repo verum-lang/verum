@@ -393,7 +393,7 @@ impl TypeChecker {
         result
     }
 
-    fn prove_associated_bounds(
+    pub(super) fn prove_associated_bounds(
         &mut self,
         ty: &Type,
         bounds: &[ProtocolBound],

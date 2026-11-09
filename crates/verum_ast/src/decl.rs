@@ -997,6 +997,20 @@ pub enum TypeDeclBodyKind {
 }
 
 impl TypeDecl {
+    /// Bounds on applying this declaration, independently of its runtime layout.
+    pub fn has_application_bounds(&self) -> bool {
+        use crate::ty::GenericParamKind;
+        self.generics.iter().any(|param| match &param.kind {
+            GenericParamKind::Type { bounds, .. }
+            | GenericParamKind::HigherKinded { bounds, .. }
+            | GenericParamKind::KindAnnotated { bounds, .. } => !bounds.is_empty(),
+            _ => false,
+        }) || [&self.generic_where_clause, &self.meta_where_clause]
+            .into_iter()
+            .flatten()
+            .any(|clause| !clause.predicates.is_empty())
+    }
+
     /// Declared constraint only: aggregate components and resolved aliases are
     /// evaluated separately. The absence of a modifier on a real declaration
     /// is known unrestricted usage, not evidence of a Copy implementation.

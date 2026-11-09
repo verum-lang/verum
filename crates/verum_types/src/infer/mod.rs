@@ -24,6 +24,7 @@ mod protocol_default_bodies;
 mod function_body_scope;
 mod source_impl_signatures;
 mod source_type_registration;
+mod nominal_type_obligations;
 mod source_protocol_header;
 mod source_dyn_protocol;
 mod universe_parameters;

@@ -78,17 +78,22 @@ impl ProtocolChecker {
         assumptions: &[WhereClause],
         callables: &verum_common::Map<TypeVar, Type>,
     ) -> Result<(), Text> {
-        let mut context = Obligations {
-            checker: self,
-            assumptions,
-            callables,
-            active: Vec::new(),
-            remaining: 4096,
-        };
+        let mut context = Obligations::new(self, assumptions, callables);
         for bound in bounds {
             context.check(ty, bound)?;
         }
         Ok(())
+    }
+
+    /// A lexical premise can discharge a bound before concrete implementations
+    /// are loaded, including inside the declaring protocol's own method header.
+    pub(crate) fn bound_follows_from_assumptions(
+        &self,
+        subject: &Type,
+        bound: &ProtocolBound,
+        assumptions: &[WhereClause],
+    ) -> Result<bool, Text> {
+        Obligations::new(self, assumptions, &Default::default()).assumption(subject, bound)
     }
 }
 
@@ -100,7 +105,14 @@ struct Obligations<'a> {
     remaining: usize,
 }
 
-impl Obligations<'_> {
+impl<'a> Obligations<'a> {
+    fn new(
+        checker: &'a ProtocolChecker,
+        assumptions: &'a [WhereClause],
+        callables: &'a verum_common::Map<TypeVar, Type>,
+    ) -> Self {
+        Self { checker, assumptions, callables, active: Vec::new(), remaining: 4096 }
+    }
     fn same(&self, a: &Type, b: &Type) -> bool {
         self.checker.types_structurally_equal(a, b)
     }

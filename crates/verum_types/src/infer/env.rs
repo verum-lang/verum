@@ -8968,7 +8968,10 @@ impl TypeChecker {
     /// Key owned by the declaration currently being registered. Never use this
     /// to infer the owner of a reference to an imported type.
     pub(crate) fn declared_type_key(&self, name: &str) -> Text {
-        let owner = self.current_module_path.as_str();
+        Self::source_type_declaration_key(self.current_module_path.as_str(), name)
+    }
+
+    pub(super) fn source_type_declaration_key(owner: &str, name: &str) -> Text {
         if owner.is_empty() || owner == "cog" {
             name.into()
         } else {

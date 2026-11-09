@@ -62,11 +62,9 @@ impl TypeChecker {
     /// Resolve forward types, contexts, protocols and implementations, in order.
     #[must_use]
     pub fn prepare_module_types(&mut self, module: &Module) -> List<TypeError> {
-        let declarations = module.items.iter().filter_map(|item| match &item.kind {
-            ItemKind::Type(declaration) if self.cfg_evaluator.should_include(&item.attributes) => Some(declaration.clone()),
-            _ => None,
-        }).collect();
-        self.source_type_registration.local_declarations.push((self.current_module_path.clone(), declarations));
+        let mut selected = module.clone();
+        selected.items.retain(|item| self.cfg_evaluator.should_include(&item.attributes));
+        self.source_type_registration.local_declarations.push((self.current_module_path.clone(), verum_common::Shared::new(selected)));
         let result = self.prepare_module_types_in_source_scope(module);
         self.source_type_registration.local_declarations.pop();
         result

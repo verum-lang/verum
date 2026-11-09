@@ -374,9 +374,9 @@ impl TypeChecker {
         &self,
         name: &str,
     ) -> Option<(verum_ast::TypeDecl, Text)> {
-        for (owner, declarations) in self.source_type_registration.local_declarations.iter().rev() {
+        for (owner, module) in self.source_type_registration.local_declarations.iter().rev() {
             if owner == &self.current_module_path {
-                if let Some(declaration) = declarations.iter().find(|decl| decl.name.name.as_str() == name) {
+                if let Some(declaration) = Self::local_source_type_declaration(module, name) {
                     return Some((declaration.clone(), owner.clone()));
                 }
             }
@@ -510,7 +510,7 @@ impl TypeChecker {
         owner: &Text,
         span: Span,
     ) -> Result<(Type, Text)> {
-        let key: Text = format!("{owner}.{}", declaration.name.name).into();
+        let key = Self::source_type_declaration_key(owner, &declaration.name.name);
         // A nominal entry may only be a placeholder left by failed source
         // elaboration. Completed loads, and recursive loads in this active
         // transaction, are the only authority for a cache hit.
@@ -612,11 +612,13 @@ impl TypeChecker {
         let assumptions = std::mem::take(
             &mut self.source_type_registration.projection_assumptions,
         );
+        let callables = std::mem::take(&mut self.source_type_registration.callable_assumptions);
         let result = self.import_impl_blocks_for_type_in_module_selected(
             &module.ast, declaration.name.name.as_str(), Some(owner.as_str()), Some(&protocol),
         );
         self.decl_param_frames = frames;
         self.source_type_registration.projection_assumptions = assumptions;
+        self.source_type_registration.callable_assumptions = callables;
         self.source_type_registration.active_impl_bounds.remove(&key);
         result
     }

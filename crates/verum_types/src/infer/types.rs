@@ -1224,6 +1224,7 @@ fn substitute_refinement_binder(
                                 }
                             }
                         }
+                        self.check_nominal_application_bounds(type_name, &type_args, ast_ty.span)?;
                         // A refinement on a META parameter is checked
                         // HERE, where the argument is supplied — the
                         // point of a compile-time parameter being that

@@ -61,19 +61,10 @@ pub fn type_declaration_needs_semantic_carrier(declaration: &crate::TypeDecl) ->
         || scan.uses_rank_two
         || scan.uses_callable_contexts
         || matches!(&declaration.body, crate::TypeDeclBody::Protocol(_) | crate::TypeDeclBody::Coinductive(_))
-        || [&declaration.generic_where_clause, &declaration.meta_where_clause]
-            .into_iter()
-            .flatten()
-            .any(|clause| !clause.predicates.is_empty())
-        || declaration.generics.iter().any(|param| match &param.kind {
-            GenericParamKind::Type { bounds, default, .. } => {
-                !bounds.is_empty() || default.is_some()
-            }
-            GenericParamKind::HigherKinded { bounds, .. }
-            | GenericParamKind::KindAnnotated { bounds, .. } => !bounds.is_empty(),
-            GenericParamKind::Meta { .. } | GenericParamKind::Const { .. } => true,
-            _ => false,
-        }))
+        || declaration.has_application_bounds()
+        || declaration.generics.iter().any(|param| matches!(&param.kind,
+            GenericParamKind::Type { default: Some(_), .. }
+            | GenericParamKind::Meta { .. } | GenericParamKind::Const { .. })))
 }
 
 /// Preserve declaration semantics that the runtime descriptor erases. Protocol
