@@ -2514,7 +2514,7 @@ implement<K: Hash + Eq, V> IntoIterator for Map<K, V> {
 }
 
 // Owning iterator.
-public type MapIntoIter<K, V> is {
+public type MapIntoIter<K: Hash + Eq, V> is {
     map: Map<K, V>,
     idx: Int,
 };
