@@ -125,6 +125,96 @@ fn band_reference_resolves_through_the_one_authority() {
 }
 
 #[test]
+fn strict_validation_checks_the_declared_target_of_a_symbolic_call() {
+    use verum_vbc::validate::validate_module;
+    fn load(with_body: bool) -> VbcModule {
+        let bytes = verum_vbc::serialize::serialize_module(&build_module(with_body)).unwrap();
+        verum_vbc::deserialize::deserialize_module(&bytes).unwrap()
+    }
+    fn invalid_reference(error: &verum_vbc::VbcError, id: u32) -> bool {
+        match error {
+            verum_vbc::VbcError::InvalidFunctionId(found) => *found == id,
+            verum_vbc::VbcError::MultipleErrors(errors) => {
+                errors.iter().any(|e| invalid_reference(e, id))
+            }
+            _ => false,
+        }
+    }
+    let loaded = load(true);
+    validate_module(&loaded).expect("wire loader re-establishes the same target");
+
+    let band = XMOD_CALL_ID_BAND_BASE + 6;
+    let mut wrong_arity = loaded.clone();
+    let call = encode(&[Instruction::Call {
+        dst: Reg(0),
+        func_id: band,
+        args: RegRange {
+            start: Reg(0),
+            count: 1,
+        },
+    }]);
+    wrong_arity.bytecode[..call.len()].copy_from_slice(&call);
+    assert!(
+        validate_module(&wrong_arity)
+            .unwrap_err()
+            .to_string()
+            .contains("arity")
+    );
+
+    let mut forged = loaded.clone();
+    forged.resolved_band_map.insert(band, FunctionId(0));
+    assert!(invalid_reference(
+        &validate_module(&forged).unwrap_err(),
+        band
+    ));
+
+    let mut uncarried = loaded.clone();
+    uncarried.external_function_names.clear();
+    assert!(invalid_reference(
+        &validate_module(&uncarried).unwrap_err(),
+        band
+    ));
+
+    let mut ambiguous = loaded.clone();
+    ambiguous.functions[0].name = ambiguous.functions[1].name;
+    assert!(invalid_reference(
+        &validate_module(&ambiguous).unwrap_err(),
+        band
+    ));
+
+    let mut empty = loaded.clone();
+    empty.functions[1].bytecode_length = 0;
+    assert!(invalid_reference(
+        &validate_module(&empty).unwrap_err(),
+        band
+    ));
+
+    let mut conflicting = loaded.clone();
+    let other = conflicting.functions[0].name;
+    conflicting
+        .external_function_names
+        .push((FunctionId(band), other));
+    assert!(invalid_reference(
+        &validate_module(&conflicting).unwrap_err(),
+        band
+    ));
+
+    let mut renamed = loaded.clone();
+    let foreign = renamed.intern_string("different.owner.orphan_callee");
+    renamed.external_function_names[0].1 = foreign;
+    renamed.resolve_external_bands();
+    assert!(invalid_reference(
+        &validate_module(&renamed).unwrap_err(),
+        band
+    ));
+
+    assert!(invalid_reference(
+        &validate_module(&load(false)).unwrap_err(),
+        band
+    ));
+}
+
+#[test]
 fn orphaned_band_call_dies_loud_naming_the_qualified_callee() {
     let mut module = build_module(false);
     let unresolved = module.resolve_external_bands();

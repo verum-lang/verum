@@ -1230,9 +1230,7 @@ impl VbcModule {
     pub fn mount_alias_shadowed_by_definition(&self, alias: &str) -> bool {
         self.function_indices_named(alias).iter().any(|index| {
             let function = &self.functions[*index as usize];
-            !crate::stub_ranges::is_name_resolved_stub_id(function.id.0)
-                && (function.bytecode_length > 0
-                    || function.instructions.as_ref().is_some_and(|body| !body.is_empty()))
+            function.has_definition()
         })
     }
 
@@ -3013,6 +3011,12 @@ impl Default for FunctionDescriptor {
 }
 
 impl FunctionDescriptor {
+    pub(crate) fn has_definition(&self) -> bool {
+        !crate::stub_ranges::is_name_resolved_stub_id(self.id.0)
+            && (self.bytecode_length > 0
+                || self.instructions.as_ref().is_some_and(|body| !body.is_empty()))
+    }
+
     /// This callable declaration requires an intrinsic implementation.
     /// Instruction shape is not source ownership: an empty source block is a
     /// real body, while a generated forward-declaration return is not. Constant

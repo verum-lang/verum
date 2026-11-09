@@ -18,6 +18,7 @@ use crate::format::{HEADER_SIZE, MAGIC, VERSION_MAJOR, VERSION_MINOR, VbcHeader}
 use crate::instruction::{Instruction, Reg, RegRange};
 use crate::module::{Constant, FunctionDescriptor, VbcModule};
 use crate::types::{TypeDescriptor, TypeId, TypeRef};
+use std::collections::HashMap;
 
 /// Validation options.
 #[derive(Debug, Clone, Default)]
@@ -70,8 +71,60 @@ pub fn validate_module_with_options(
     validator.validate()
 }
 
+/// A symbolic operand is executable only when its carried name has one exact
+/// declaration and the loader selected that same slot. The loader's cache is
+/// derived state; it cannot establish a declaration on its own.
+fn verified_call_targets(module: &VbcModule) -> HashMap<u32, Option<u32>> {
+    if module.external_function_names.is_empty() || module.resolved_band_map.is_empty() {
+        return HashMap::new();
+    }
+    let mut declarations: HashMap<&str, Vec<u32>> = module
+        .external_function_names
+        .iter()
+        .filter_map(|(_, name)| module.get_string(*name).map(|name| (name, Vec::new())))
+        .collect();
+    for (slot, function) in module.functions.iter().enumerate() {
+        if !function.has_definition() {
+            continue;
+        }
+        let Some(name) = module.get_string(function.name) else {
+            continue;
+        };
+        if let Some(candidates) = declarations.get_mut(name) {
+            candidates.push(slot as u32);
+        }
+        if let Some(owner) = function.origin_module.and_then(|id| module.get_string(id)) {
+            let qualified = crate::module::qualify_module_name(owner, name);
+            if qualified != name
+                && let Some(candidates) = declarations.get_mut(qualified.as_str())
+            {
+                candidates.push(slot as u32);
+            }
+        }
+    }
+    let mut targets = HashMap::new();
+    for (reference, name) in &module.external_function_names {
+        let id = reference.0;
+        if !crate::stub_ranges::is_stub_id(id) && !crate::stub_ranges::is_xmod_name_reference(id) {
+            continue;
+        }
+        let exact = module.get_string(*name).and_then(|name| {
+            let [slot] = declarations.get(name)?.as_slice() else {
+                return None;
+            };
+            (module.resolve_band_id(id) == Some(crate::FunctionId(*slot))).then_some(*slot)
+        });
+        let previous = targets.entry(id).or_insert(exact);
+        if *previous != exact {
+            *previous = None;
+        }
+    }
+    targets
+}
+
 /// VBC module validator.
 struct Validator<'a> {
+    call_targets: HashMap<u32, Option<u32>>,
     module: &'a VbcModule,
     options: &'a ValidationOptions,
     errors: Vec<VbcError>,
@@ -83,6 +136,7 @@ impl<'a> Validator<'a> {
         Self {
             module,
             options,
+            call_targets: HashMap::new(),
             errors: Vec::new(),
         }
     }
@@ -429,6 +483,7 @@ impl<'a> Validator<'a> {
     /// trusted-source loads (e.g. self-emitted bytecode in the same
     /// process).
     fn validate_bytecode(&mut self) {
+        self.call_targets = verified_call_targets(self.module);
         // Snapshot the cross-reference table sizes so the per-function
         // walk doesn't need to repeatedly index `self.module`.
         let function_count = self.module.functions.len() as u32;
@@ -622,10 +677,8 @@ impl<'a> Validator<'a> {
             // as the residual defense).
             // -----------------------------------------------------------
             Instruction::Call { dst, func_id, args } => {
-                if *func_id >= function_count {
-                    self.errors.push(VbcError::InvalidFunctionId(*func_id));
-                } else {
-                    self.check_call_arity(*func_id, args.count as u32, &func_name);
+                if let Some(target) = self.call_target(*func_id, function_count) {
+                    self.check_call_arity(target, args.count as u32, &func_name);
                 }
                 self.check_reg(*dst, max_reg, &func_name);
                 self.check_reg_range(*args, max_reg, &func_name);
@@ -636,20 +689,16 @@ impl<'a> Validator<'a> {
                 type_args,
                 args,
             } => {
-                if *func_id >= function_count {
-                    self.errors.push(VbcError::InvalidFunctionId(*func_id));
-                } else {
-                    self.check_call_arity(*func_id, args.count as u32, &func_name);
+                if let Some(target) = self.call_target(*func_id, function_count) {
+                    self.check_call_arity(target, args.count as u32, &func_name);
                 }
                 self.check_reg(*dst, max_reg, &func_name);
                 for ty in type_args { self.validate_type_ref(ty, 0); }
                 self.check_reg_range(*args, max_reg, &func_name);
             }
             Instruction::TailCall { func_id, args } => {
-                if *func_id >= function_count {
-                    self.errors.push(VbcError::InvalidFunctionId(*func_id));
-                } else {
-                    self.check_call_arity(*func_id, args.count as u32, &func_name);
+                if let Some(target) = self.call_target(*func_id, function_count) {
+                    self.check_call_arity(target, args.count as u32, &func_name);
                 }
                 self.check_reg_range(*args, max_reg, &func_name);
             }
@@ -783,9 +832,7 @@ impl<'a> Validator<'a> {
                 lexical_types,
                 ..
             } => {
-                if *func_id >= function_count {
-                    self.errors.push(VbcError::InvalidFunctionId(*func_id));
-                }
+                self.call_target(*func_id, function_count);
                 self.check_reg(*dst, max_reg, &func_name);
                 for r in captures {
                     self.check_reg(*r, max_reg, &func_name);
@@ -871,6 +918,13 @@ impl<'a> Validator<'a> {
                 context: context.to_string(),
             });
         }
+    }
+
+    fn call_target(&mut self, id: u32, function_count: u32) -> Option<u32> {
+        if id < function_count { return Some(id); }
+        let target = self.call_targets.get(&id).copied().flatten();
+        if target.is_none() { self.errors.push(VbcError::InvalidFunctionId(id)); }
+        target
     }
 
     /// Checks a `Call` / `TailCall` / `CallG` instruction's argument
