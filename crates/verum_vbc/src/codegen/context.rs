@@ -4196,7 +4196,12 @@ impl CodegenContext {
         let parent_suffix = parent_type.map(|p| format!(".{}.{}", p, leaf));
         let leaf_suffix = format!(".{}", leaf);
         let mut best: Option<(&String, &FunctionInfo)> = None;
-        for (key, info) in self.functions.iter() {
+        let suffix = if parent_type.is_some() {
+            &leaf_suffix
+        } else {
+            &dotted_suffix
+        };
+        for (key, info) in self.functions.entries_ending_in(suffix) {
             if !accepts(info) {
                 continue;
             }
@@ -4412,8 +4417,8 @@ impl CodegenContext {
                     .unwrap_or(false)
         };
         let mut best: Option<(&String, &FunctionInfo)> = None;
-        for (key, info) in self.functions.iter() {
-            if !key.ends_with(suffix.as_str()) || !accepts(info) {
+        for (key, info) in self.functions.entries_ending_in(&suffix) {
+            if !accepts(info) {
                 continue;
             }
             let better = match best {
@@ -4456,12 +4461,7 @@ impl CodegenContext {
     /// prefers the one whose parent_type_name matches the current function's return
     /// type. If no return type context is available, returns the match only if unique.
     pub fn find_function_by_suffix(&self, suffix: &str) -> Option<&FunctionInfo> {
-        let mut keyed: Vec<(&String, &FunctionInfo)> = Vec::new();
-        for (name, info) in &self.functions {
-            if name.ends_with(suffix) {
-                keyed.push((name, info));
-            }
-        }
+        let mut keyed: Vec<_> = self.functions.entries_ending_in(suffix).collect();
         // ARCH-P2: the disambiguation loops below return the FIRST
         // parent==base entry — hash order made the pick a per-bake dice
         // when a parent has both a bare and a module-rooted registration

@@ -27,6 +27,27 @@ impl FunctionRegistry {
         Self::default()
     }
 
+    fn names_ending_in<'a>(&'a self, suffix: &str) -> impl Iterator<Item = String> + use<'a> {
+        let prefix = reversed(suffix);
+        self.reversed_names
+            .range(prefix.clone()..)
+            .take_while(move |name| name.starts_with(&prefix))
+            .map(|name| reversed(name))
+    }
+
+    /// Live entries whose complete key ends in the literal suffix. Callers
+    /// select the separator and retain their own overload and ranking rules.
+    pub(super) fn entries_ending_in<'a>(
+        &'a self,
+        suffix: &str,
+    ) -> impl Iterator<Item = (&'a String, &'a FunctionInfo)> + use<'a> {
+        self.names_ending_in(suffix).map(|name| {
+            self.entries
+                .get_key_value(&name)
+                .expect("every indexed name has a live function entry")
+        })
+    }
+
     /// Exactly the sorted, deduplicated keys ending in `.{suffix}` or
     /// `::{suffix}`. This includes compound suffixes and overload spellings.
     pub fn qualified_suffix_candidates(&self, suffix: &str) -> Vec<String> {
@@ -37,14 +58,8 @@ impl FunctionRegistry {
     /// call lookup already normalizes its dotted form before suffix matching.
     pub fn qualified_suffix_candidates_with_forms(&self, dotted: &str, colon: &str) -> Vec<String> {
         let mut candidates = Vec::new();
-        for (suffix, separator) in [(dotted, "."), (colon, "::")] {
-            let prefix = format!("{}{separator}", reversed(suffix));
-            for name in self.reversed_names.range(prefix.clone()..) {
-                if !name.starts_with(&prefix) {
-                    break;
-                }
-                candidates.push(reversed(name));
-            }
+        for suffix in [format!(".{dotted}"), format!("::{colon}")] {
+            candidates.extend(self.names_ending_in(&suffix));
         }
         candidates.sort();
         candidates.dedup();
