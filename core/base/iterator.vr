@@ -1334,25 +1334,19 @@ implement FusedIterator for Range<Int> {}
 implement FusedIterator for Range<Int8> {}
 implement FusedIterator for Range<Int16> {}
 implement FusedIterator for Range<Int32> {}
-implement FusedIterator for Range<Int64> {}
 implement FusedIterator for Range<UInt8> {}
 implement FusedIterator for Range<UInt16> {}
 implement FusedIterator for Range<UInt32> {}
 implement FusedIterator for Range<UInt64> {}
-implement FusedIterator for Range<ISize> {}
-implement FusedIterator for Range<USize> {}
 
 implement FusedIterator for RangeInclusive<Int> {}
 implement FusedIterator for RangeInclusive<Int8> {}
 implement FusedIterator for RangeInclusive<Int16> {}
 implement FusedIterator for RangeInclusive<Int32> {}
-implement FusedIterator for RangeInclusive<Int64> {}
 implement FusedIterator for RangeInclusive<UInt8> {}
 implement FusedIterator for RangeInclusive<UInt16> {}
 implement FusedIterator for RangeInclusive<UInt32> {}
 implement FusedIterator for RangeInclusive<UInt64> {}
-implement FusedIterator for RangeInclusive<ISize> {}
-implement FusedIterator for RangeInclusive<USize> {}
 
 // =============================================================================
 // Clone Implementations for Iterator Adapters
