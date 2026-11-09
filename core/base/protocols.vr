@@ -1262,10 +1262,7 @@ implement Atomic for UInt64 {}
 implement Atomic for Int8   {}
 implement Atomic for Int16  {}
 implement Atomic for Int32  {}
-implement Atomic for Int64  {}
 implement Atomic for Int    {}
-implement Atomic for ISize  {}
-implement Atomic for USize  {}
 implement Atomic for Bool   {}
 
 // =============================================================================
@@ -1295,16 +1292,13 @@ implement Integer for UInt16  {}
 implement Integer for UInt32  {}
 implement Integer for UInt64  {}
 implement Integer for UInt128 {}
-implement Integer for USize   {}
 
 // Integer implementations for signed types
 implement Integer for Int8   {}
 implement Integer for Int16  {}
 implement Integer for Int32  {}
-implement Integer for Int64  {}
 implement Integer for Int128 {}
 implement Integer for Int    {}
-implement Integer for ISize  {}
 
 // =============================================================================
 // SignedInteger Protocol
@@ -1320,10 +1314,8 @@ public type SignedInteger is protocol extends Integer {};
 implement SignedInteger for Int8   {}
 implement SignedInteger for Int16  {}
 implement SignedInteger for Int32  {}
-implement SignedInteger for Int64  {}
 implement SignedInteger for Int128 {}
 implement SignedInteger for Int    {}
-implement SignedInteger for ISize  {}
 
 // =============================================================================
 // Numeric Protocol (for generic arithmetic intrinsics)
@@ -1346,19 +1338,15 @@ implement Numeric for UInt16  {}
 implement Numeric for UInt32  {}
 implement Numeric for UInt64  {}
 implement Numeric for UInt128 {}
-implement Numeric for USize   {}
 implement Numeric for Int8    {}
 implement Numeric for Int16   {}
 implement Numeric for Int32   {}
-implement Numeric for Int64   {}
 implement Numeric for Int128  {}
 implement Numeric for Int     {}
-implement Numeric for ISize   {}
 
 // Numeric implementations for floating-point types
 implement Numeric for Float   {}
 implement Numeric for Float32 {}
-implement Numeric for Float64 {}
 
 // =============================================================================
 // SignedNumeric Protocol
@@ -1374,13 +1362,10 @@ public type SignedNumeric is protocol extends Numeric {};
 implement SignedNumeric for Int8    {}
 implement SignedNumeric for Int16   {}
 implement SignedNumeric for Int32   {}
-implement SignedNumeric for Int64   {}
 implement SignedNumeric for Int128  {}
 implement SignedNumeric for Int     {}
-implement SignedNumeric for ISize   {}
 implement SignedNumeric for Float   {}
 implement SignedNumeric for Float32 {}
-implement SignedNumeric for Float64 {}
 
 // =============================================================================
 // TypeId - Runtime type identification
