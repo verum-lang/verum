@@ -1296,7 +1296,19 @@ fn substitute_refinement_binder(
                 // the arms below run unchanged.
                 if let Some(key) = parameter_key.as_ref() {
                     if matches!(form, ApplicationForm::ImplementationHead) {
-                        return Ok(Type::Named { path: Self::text_to_path(key), args: type_args });
+                        // Parameter slots may live under a short archive key. The
+                        // implementation belongs to the descriptor's declaring module.
+                        let owner = if key.as_str().contains('.') {
+                            None
+                        } else {
+                            self.core_metadata.as_ref()
+                                .and_then(|metadata| metadata.types.get(key))
+                                .map(Self::metadata_declaring_key)
+                        };
+                        return Ok(Type::Named {
+                            path: Self::text_to_path(owner.as_ref().unwrap_or(key)),
+                            args: type_args,
+                        });
                     }
                     let unexpanded = Type::Named {
                         path: Self::text_to_path(key),

@@ -4,6 +4,43 @@ use verum_compiler::archive_metadata::archive_to_core_metadata;
 use verum_fast_parser::Parser;
 use verum_vbc::codegen::{CodegenConfig, VbcCodegen};
 
+#[test]
+fn specialized_nominal_receiver_keeps_the_declaring_type_in_metadata() {
+    let owner = "range_probe";
+    let ast = Parser::new(
+        "module range_probe;
+        public type Counter is protocol { fn value(&self)->Int {0} };
+        public type Cursor<A> is { item:A };
+        implement Counter for Cursor<Int> { fn value(&self)->Int {41} }",
+    )
+    .parse_module()
+    .unwrap();
+    let module = VbcCodegen::with_config(CodegenConfig::new(owner))
+        .compile_module(&ast)
+        .unwrap();
+    let mut archive = verum_vbc::archive::ArchiveBuilder::stdlib();
+    archive.add_module(owner, &module, &[]).unwrap();
+    let metadata = archive_to_core_metadata(&archive.finish()).expect("valid specialized receiver");
+    let implementation = metadata
+        .implementations
+        .iter()
+        .find(|item| item.protocol.as_str() == "Counter")
+        .expect("Counter implementation");
+    let target = metadata
+        .types
+        .get(&implementation.target_type)
+        .expect("Cursor declaration");
+    assert_eq!(target.name.as_str(), "Cursor");
+    assert_eq!(
+        target
+            .origin_module_path
+            .as_ref()
+            .unwrap_or(&target.module_path)
+            .as_str(),
+        owner
+    );
+}
+
 fn check(first: &str, second: &str) {
     let source = format!(
         r#"

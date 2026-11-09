@@ -4707,7 +4707,10 @@ impl TypeChecker {
         };
         if !self.protocol_checker.read().types_structurally_equal(&target, expected) {
             return Err(TypeError::OtherWithCodeSpanned { code: "E405".into(),
-                msg: "source implementation differs from its metadata protocol or target owner".into(), span });
+                msg: format!(
+                    "source implementation differs from its metadata protocol or target owner: source `{}`, metadata `{}`",
+                    target.to_text(), expected.to_text()
+                ).into(), span });
         }
         Ok(())
     }

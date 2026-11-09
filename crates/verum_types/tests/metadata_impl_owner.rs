@@ -154,6 +154,8 @@ fn legacy_target_uses_its_descriptor_owner_in_eager_and_lazy_loaders() {
         for lookup in ["Wrapper", "alpha.Wrapper", "export.Renamed"] {
             let mut checker = checker(metadata(false, false), eager);
             checker.ensure_stdlib_type_loaded(&lookup.into(), &mut Vec::new());
+            let errors = checker.take_deferred_errors();
+            assert!(errors.is_empty(), "eager={eager}, key={lookup}: {errors:?}");
             assert_eq!(
                 target(&checker, "alpha.Wrapper"),
                 Some(verum_types::Type::Int),
