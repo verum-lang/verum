@@ -2403,8 +2403,18 @@ impl TypeChecker {
                     Type::Generic { name, .. } => Some(name.clone()),
                     _ => None,
                 };
-                if existing_owner.is_none_or(|owner| {
-                    !owner.contains(".") || owner == Self::metadata_declaring_key(&desc)
+                let declaring_key = Self::metadata_declaring_key(&desc);
+                let nominal = declaring_key != name_text && matches!(
+                    desc.kind,
+                    crate::core_metadata::TypeDescriptorKind::Record { .. }
+                        | crate::core_metadata::TypeDescriptorKind::Variant { .. }
+                        | crate::core_metadata::TypeDescriptorKind::Protocol { .. }
+                );
+                let builtin = existing.primitive_name().is_some()
+                    || existing_owner.as_ref().is_some_and(|name|
+                        verum_common::well_known_types::type_names::is_primitive_value_type(name.as_str()));
+                if !(nominal && builtin) && existing_owner.is_none_or(|owner| {
+                    !owner.contains(".") || owner == declaring_key
                 }) {
                     let ty = existing.clone();
                     self.register_metadata_parameters(&name_text, &desc);

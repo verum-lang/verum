@@ -175,13 +175,7 @@ impl TypeChecker {
                 .map(|(ty, key)| (ty, Some(key)));
         }
 
-        // Keep language primitives and a signature's explicit binders. A
-        // consumer's nominal type or mount alias cannot provide a missing name.
-        if let Some(ty) = self.ctx.lookup_type(name)
-            && (ty.primitive_name().is_some()
-                || matches!(ty, Type::Var(_) | Type::TypeConstructor { .. })
-                || verum_common::well_known_types::type_names::is_primitive_value_type(name))
-        {
+        if let Some(ty @ (Type::Var(_) | Type::TypeConstructor { .. })) = self.ctx.lookup_type(name) {
             return Ok((ty.clone(), None));
         }
         // A lexical declaration in the signature's own file takes precedence.
@@ -195,6 +189,12 @@ impl TypeChecker {
             && let Some((ty, key)) = self.ensure_mounted_type_loaded_with_parameter_key(name, owner.as_str())
         {
             return Ok((ty, Some(key)));
+        }
+        if let Some(ty) = self.ctx.lookup_type(name)
+            && (ty.primitive_name().is_some()
+                || verum_common::well_known_types::type_names::is_primitive_value_type(name))
+        {
+            return Ok((ty.clone(), None));
         }
         let (head, tail) = name.split_once('.').unwrap_or((name, ""));
         if let Some((ty, key)) = self.source_mounted_archive_type(head, tail, span)? {
