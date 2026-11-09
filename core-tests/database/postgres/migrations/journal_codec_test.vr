@@ -1,0 +1,185 @@
+mount core.database.postgres.migrations.journal_codec.{
+    decode_entry, entry_parameters, quote_tracking_table, transactional_sql,
+};
+mount core.database.postgres.wire.typed.TypedValue;
+mount core.database.common.migrations.journal.JournalEntry;
+mount core.database.common.migrations.migration.{MsPending, MsApplied, MsRolledBack, MsFailed};
+
+fn pending_row() -> List<TypedValue> {
+    [TypedValue.TvInt8(9), TypedValue.TvText("entry"), TypedValue.TvText("pending"),
+     TypedValue.TvNull, TypedValue.TvNull, TypedValue.TvInt8(-77)]
+}
+
+fn refused(row: &List<TypedValue>) {
+    match decode_entry(row) {
+        Result.Err(_) => {},
+        Result.Ok(_) => panic("invalid journal row accepted"),
+    }
+}
+
+fn roundtrip(expected: &JournalEntry) {
+    // Adapt SQL parameter absence into the wire's explicit NULL variant; the
+    // production encoder/decoder still own all journal field/status semantics.
+    let mut parameters = entry_parameters(expected);
+    assert_eq(parameters.len(), 6);
+    let mut row: List<TypedValue> = [];
+    while parameters.len() > 0 {
+        row.push(match parameters.remove(0) {
+            Maybe.Some(value) => value,
+            Maybe.None => TypedValue.TvNull,
+        });
+    }
+    match &row[0] {
+        TypedValue.TvInt8(value) => assert_eq(*value, expected.version),
+        _ => panic("version parameter is not int8"),
+    }
+    match &row[5] {
+        TypedValue.TvInt8(value) => assert_eq(*value as Int64, expected.checksum),
+        _ => panic("checksum parameter is not int8"),
+    }
+    let actual = decode_entry(&row).unwrap();
+    assert_eq(actual.version, expected.version);
+    assert_eq(actual.name, expected.name);
+    assert_eq(actual.checksum, expected.checksum);
+    match (&actual.status, &expected.status) {
+        (MsPending, MsPending) => {},
+        (MsApplied(a), MsApplied(b)) => assert_eq(*a, *b),
+        (MsRolledBack(a), MsRolledBack(b)) => assert_eq(*a, *b),
+        (MsFailed(a), MsFailed(b)) => assert_eq(a, b),
+        _ => panic("journal status did not roundtrip"),
+    }
+}
+
+@test
+fn journal_codec_roundtrips_four_statuses_and_full_width_values() {
+    roundtrip(&JournalEntry { version: Int.MIN, name: "O'Reilly \\ λ", status: MsPending,
+                              checksum: Int64.MAX });
+    roundtrip(&JournalEntry { version: Int.MAX, name: "applied", status: MsApplied(0_i64),
+                              checksum: Int64.MIN });
+    roundtrip(&JournalEntry { version: 3, name: "rolled back", status: MsRolledBack(Int64.MIN),
+                              checksum: 4294967296_i64 });
+    roundtrip(&JournalEntry { version: 4, name: "failed", status: MsFailed("SQL 'error' \\ λ"),
+                              checksum: -4294967296_i64 });
+    roundtrip(&JournalEntry { version: 5, name: "empty error is present", status: MsFailed(""),
+                              checksum: 0_i64 });
+    roundtrip(&JournalEntry { version: 6, name: "maximum timestamp", status: MsApplied(Int64.MAX),
+                              checksum: 1_i64 });
+}
+
+@test
+fn journal_codec_requires_exactly_six_columns() {
+    let mut length = 0;
+    while length < 6 {
+        let mut row = pending_row();
+        while row.len() > length { let _ = row.pop(); }
+        refused(&row);
+        length = length + 1;
+    }
+    let mut long = pending_row();
+    long.push(TypedValue.TvNull);
+    refused(&long);
+}
+
+fn bad_field(index: Int, value: TypedValue) {
+    let mut row = pending_row();
+    row[index] = value;
+    refused(&row);
+}
+
+@test
+fn journal_codec_rejects_null_required_fields_and_wrong_wire_types() {
+    for index in [0, 1, 2, 5].iter() { bad_field(*index, TypedValue.TvNull); }
+    bad_field(0, TypedValue.TvInt4(9));
+    bad_field(1, TypedValue.TvInt8(1));
+    bad_field(2, TypedValue.TvInt8(1));
+    bad_field(3, TypedValue.TvText("0"));
+    bad_field(4, TypedValue.TvInt8(0));
+    bad_field(5, TypedValue.TvInt4(-77));
+}
+
+fn bad_status(status: &Text, time: TypedValue, error: TypedValue) {
+    let mut row = pending_row();
+    row[2] = TypedValue.TvText(status.clone());
+    row[3] = time;
+    row[4] = error;
+    refused(&row);
+}
+
+@test
+fn journal_codec_refuses_unknown_and_inconsistent_statuses() {
+    bad_status(&"future", TypedValue.TvNull, TypedValue.TvNull);
+    bad_status(&"Applied", TypedValue.TvInt8(0), TypedValue.TvNull);
+    bad_status(&"", TypedValue.TvNull, TypedValue.TvNull);
+    bad_status(&"pending", TypedValue.TvInt8(0), TypedValue.TvNull);
+    bad_status(&"pending", TypedValue.TvNull, TypedValue.TvText(""));
+    bad_status(&"pending", TypedValue.TvInt8(0), TypedValue.TvText(""));
+    bad_status(&"applied", TypedValue.TvNull, TypedValue.TvNull);
+    bad_status(&"applied", TypedValue.TvNull, TypedValue.TvText(""));
+    bad_status(&"applied", TypedValue.TvInt8(0), TypedValue.TvText(""));
+    bad_status(&"rolled_back", TypedValue.TvNull, TypedValue.TvNull);
+    bad_status(&"rolled_back", TypedValue.TvNull, TypedValue.TvText(""));
+    bad_status(&"rolled_back", TypedValue.TvInt8(0), TypedValue.TvText(""));
+    bad_status(&"failed", TypedValue.TvNull, TypedValue.TvNull);
+    bad_status(&"failed", TypedValue.TvInt8(0), TypedValue.TvNull);
+    bad_status(&"failed", TypedValue.TvInt8(0), TypedValue.TvText(""));
+}
+
+@test
+fn journal_codec_quotes_identifiers_as_identifiers() {
+    assert_eq(quote_tracking_table(&"journal", 63).unwrap(), "\"journal\"");
+    assert_eq(quote_tracking_table(&"public.journal", 63).unwrap(), "\"public\".\"journal\"");
+    assert_eq(quote_tracking_table(&"a\"b", 63).unwrap(), "\"a\"\"b\"");
+    assert_eq(quote_tracking_table(&"x; DROP TABLE y;--", 63).unwrap(), "\"x; DROP TABLE y;--\"");
+    assert_eq(quote_tracking_table(&"éé", 4).unwrap(), "\"éé\"");
+}
+
+@test
+fn journal_codec_rejects_identifier_byte_limits_empty_parts_and_nul() {
+    let mut exact = Text.new();
+    let mut i = 0;
+    while i < 63 { exact.push_byte(0x78_u8); i = i + 1; }
+    assert_eq(quote_tracking_table(&exact, 63).unwrap().len(), 65);
+    exact.push_byte(0x78_u8);
+    assert(quote_tracking_table(&exact, 63) is Result.Err(_));
+    assert(quote_tracking_table(&"éé", 3) is Result.Err(_));
+    assert(quote_tracking_table(&"x", 0) is Result.Err(_));
+    assert(quote_tracking_table(&"x", -1) is Result.Err(_));
+    for invalid in ["", ".x", "x.", "a.b.c"].iter() {
+        assert(quote_tracking_table(invalid, 63) is Result.Err(_));
+    }
+    let mut nul = "x";
+    nul.push_byte(0_u8);
+    assert(quote_tracking_table(&nul, 63) is Result.Err(_));
+}
+
+fn golden_wrapper(fragment: List<Byte>) -> Text {
+    // Fixed independently specified byte snapshots for the two literal layers,
+    // not an escaping implementation or a classifier for SQL statements.
+    let mut expected = "DO LANGUAGE plpgsql E'BEGIN EXECUTE E";
+    for byte in fragment.iter() { expected.push_byte(*byte); }
+    expected.push_str(&"; END'");
+    expected
+}
+
+@test
+fn journal_codec_quotes_sql_single_quote_backslash_and_utf8() {
+    assert_eq(transactional_sql(&"SELECT 1").unwrap(),
+        "DO LANGUAGE plpgsql E'BEGIN EXECUTE E''SELECT 1''; END'");
+    assert_eq(transactional_sql(&"'").unwrap(),
+        golden_wrapper([39_u8, 39_u8, 39_u8, 39_u8, 39_u8, 39_u8, 39_u8, 39_u8]));
+    assert_eq(transactional_sql(&"\\").unwrap(),
+        golden_wrapper([39_u8, 39_u8, 92_u8, 92_u8, 92_u8, 92_u8, 39_u8, 39_u8]));
+    assert_eq(transactional_sql(&"λ").unwrap(),
+        golden_wrapper([39_u8, 39_u8, 0xce_u8, 0xbb_u8, 39_u8, 39_u8]));
+}
+
+@test
+fn journal_codec_refuses_nul_sql_without_keyword_filtering() {
+    let mut nul = "SELECT ";
+    nul.push_byte(0_u8);
+    assert(transactional_sql(&nul) is Result.Err(_));
+    // Transaction control is rejected by PostgreSQL's actual SPI context,
+    // checked separately by the real store fixture, not guessed by this codec.
+    assert_eq(transactional_sql(&"COMMIT").unwrap(),
+        "DO LANGUAGE plpgsql E'BEGIN EXECUTE E''COMMIT''; END'");
+}

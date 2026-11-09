@@ -63,11 +63,11 @@ mount core.database.common.migrations.migration.{
 // -----------------------------------------------------------------------------
 
 public type JournalEntry is {
-    version: Int,
-    name: Text,
-    status: MigrationStatus,
+    public version: Int,
+    public name: Text,
+    public status: MigrationStatus,
     /// FNV-1a hash of `up_sql` — used to detect drift.
-    checksum: Int64,
+    public checksum: Int64,
 };
 
 /// FNV-1a 64-bit fingerprint of an SQL text. Adequate for drift

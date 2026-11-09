@@ -1,0 +1,112 @@
+module core.database.postgres.migrations.journal_codec;
+
+mount core.base.maybe.Maybe;
+mount core.base.result.Result;
+mount core.text.text.Text;
+mount core.collections.list.List;
+mount core.database.common.error.{DbError, AdapterSpecific, AdPostgres};
+mount core.database.common.migrations.journal.JournalEntry;
+mount core.database.common.migrations.migration.{MigrationStatus, MsPending, MsApplied, MsRolledBack, MsFailed};
+mount core.database.postgres.wire.typed.TypedValue;
+
+fn invalid(detail: &Text) -> DbError {
+    DbError.Adapter(AdapterSpecific.new(AdPostgres, "migration_journal_invalid", detail.clone(), false))
+}
+
+/// Decode exactly the selected journal columns, retaining SQL NULL as absence.
+public fn decode_entry(row: &List<TypedValue>) -> Result<JournalEntry, DbError> {
+    if row.len() != 6 { return Result.Err(invalid(&"expected six journal columns")); }
+    let version = match &row[0] {
+        TypedValue.TvInt8(value) => *value,
+        _ => return Result.Err(invalid(&"version must be BIGINT")),
+    };
+    let name = match &row[1] {
+        TypedValue.TvText(value) => value.clone(),
+        _ => return Result.Err(invalid(&"name must be TEXT")),
+    };
+    let status = match &row[2] {
+        TypedValue.TvText(value) => value.clone(),
+        _ => return Result.Err(invalid(&"status must be TEXT")),
+    };
+    let applied_at = match &row[3] {
+        TypedValue.TvInt8(value) => Maybe.Some(*value as Int64),
+        TypedValue.TvNull => Maybe.None,
+        _ => return Result.Err(invalid(&"applied_at must be nullable BIGINT")),
+    };
+    let error = match &row[4] {
+        TypedValue.TvText(value) => Maybe.Some(value.clone()),
+        TypedValue.TvNull => Maybe.None,
+        _ => return Result.Err(invalid(&"error must be nullable TEXT")),
+    };
+    let checksum = match &row[5] {
+        TypedValue.TvInt8(value) => *value as Int64,
+        _ => return Result.Err(invalid(&"checksum must be BIGINT")),
+    };
+    let decoded = match (status.as_str(), applied_at, error) {
+        ("pending", Maybe.None, Maybe.None) => MsPending,
+        ("applied", Maybe.Some(time), Maybe.None) => MsApplied(time),
+        ("rolled_back", Maybe.Some(time), Maybe.None) => MsRolledBack(time),
+        ("failed", Maybe.None, Maybe.Some(message)) => MsFailed(message),
+        _ => return Result.Err(invalid(&"unknown status or inconsistent status fields")),
+    };
+    Result.Ok(JournalEntry { version: version, name: name, status: decoded, checksum: checksum })
+}
+
+/// Parameters have fixed SQL types; text never becomes executable SQL.
+public fn entry_parameters(entry: &JournalEntry) -> List<Maybe<TypedValue>> {
+    let (status, applied_at, error): (Text, Maybe<TypedValue>, Maybe<TypedValue>) = match &entry.status {
+        MsPending => ("pending", Maybe.None, Maybe.None),
+        MsApplied(time) => ("applied", Maybe.Some(TypedValue.TvInt8(*time as Int)), Maybe.None),
+        MsRolledBack(time) => ("rolled_back", Maybe.Some(TypedValue.TvInt8(*time as Int)), Maybe.None),
+        MsFailed(message) => ("failed", Maybe.None, Maybe.Some(TypedValue.TvText(message.clone()))),
+    };
+    [Maybe.Some(TypedValue.TvInt8(entry.version)), Maybe.Some(TypedValue.TvText(entry.name.clone())),
+     Maybe.Some(TypedValue.TvText(status)), applied_at, error,
+     Maybe.Some(TypedValue.TvInt8(entry.checksum as Int))]
+}
+
+/// One table identifier, optionally qualified by one schema identifier.
+/// PostgreSQL's reported identifier limit prevents silent name truncation.
+public fn quote_tracking_table(name: &Text, identifier_limit: Int) -> Result<Text, DbError> {
+    let parts = name.split(&".");
+    if parts.len() == 0 || parts.len() > 2 || identifier_limit < 1 {
+        return Result.Err(invalid(&"expected table or schema.table"));
+    }
+    let mut result = Text.new();
+    let mut position = 0;
+    for part in parts.iter() {
+        if part.len() == 0 || part.len() > identifier_limit {
+            return Result.Err(invalid(&"empty or overlong tracking identifier"));
+        }
+        if position > 0 { result.push_byte(0x2e_u8); }
+        result.push_byte(0x22_u8);
+        for byte in part.bytes() {
+            if byte == 0_u8 { return Result.Err(invalid(&"NUL in tracking identifier")); }
+            if byte == 0x22_u8 { result.push_byte(byte); }
+            result.push_byte(byte);
+        }
+        result.push_byte(0x22_u8);
+        position = position + 1;
+    }
+    Result.Ok(result)
+}
+
+fn escape_literal(value: &Text) -> Result<Text, DbError> {
+    let mut result = "E'".to_text();
+    for byte in value.bytes() {
+        if byte == 0_u8 { return Result.Err(invalid(&"NUL in migration SQL")); }
+        if byte == 0x27_u8 || byte == 0x5c_u8 { result.push_byte(byte); }
+        result.push_byte(byte);
+    }
+    result.push_byte(0x27_u8);
+    Result.Ok(result)
+}
+
+/// SPI executes the original SQL inside the caller's transaction. PostgreSQL
+/// forbids transaction-control commands in this context, including nested CALLs.
+/// SQL is quoted as data twice, not classified with a keyword/semicolon filter.
+public fn transactional_sql(sql: &Text) -> Result<Text, DbError> {
+    let command = escape_literal(sql)?;
+    let block = escape_literal(&f"BEGIN EXECUTE {command}; END")?;
+    Result.Ok(f"DO LANGUAGE plpgsql {block}")
+}
