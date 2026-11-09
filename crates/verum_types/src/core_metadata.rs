@@ -169,6 +169,15 @@ impl NominalSourceOwners {
         let mut incoming: OrderedMap<Text, Option<NominalSourceReceipt>> = OrderedMap::new();
         for descriptor in metadata.types.values() {
             let key = nominal_declaring_key(descriptor);
+            // Rendered generic bounds do not retain a declaration-owned
+            // telescope or its lexical scope. Such a descriptor cannot use
+            // the ABI-only path and silently discard its application domain.
+            if descriptor.source_declaration.is_none()
+                && descriptor.generic_params.iter().any(|parameter|
+                    !parameter.bounds.is_empty() || !parameter.type_bounds.is_empty())
+            {
+                return Err(format!("bounded metadata type {key} lacks its source telescope; rebuild the archive").into());
+            }
             let receipt = if let Some(declaration) = &descriptor.source_declaration {
                 // Bound programmatically constructed ASTs before equality too.
                 verum_ast::source_signature::validate_source_type_declaration(declaration)?;
