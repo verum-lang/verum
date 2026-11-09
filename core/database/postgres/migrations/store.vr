@@ -55,17 +55,21 @@ module core.database.postgres.migrations.store;
 
 mount base.{Text, Bool, Maybe, Some, None, Result, Ok, Err};
 mount collections.List;
-mount core.database.common.error.{DbError};
+mount core.database.common.error.{DbError, AdapterSpecific, AdPostgres};
 mount core.database.common.migrations.store.{
-    MigrationStore, MigrationStoreConfig, advisory_lock_key_for,
+    MigrationStore, MigrationStoreConfig, advisory_lock_key_for, combine_migration_errors,
 };
 mount core.database.common.migrations.migration.{
     MigrationStatus, MsPending, MsApplied, MsRolledBack, MsFailed,
 };
 mount core.database.common.migrations.journal.{
-    MigrationJournal, JournalEntry, journal_new,
+    MigrationJournal, JournalEntry, journal_from_entries, journal_new,
 };
-mount core.database.postgres.connection.{PgConnection};
+mount core.database.postgres.connection.{PgConnection, PgTypedQueryResult};
+mount core.database.postgres.transaction.{PgTransaction, begin_tx_read_only, commit_tx, rollback_tx};
+mount core.database.postgres.wire.backend.TxIdle;
+mount core.database.postgres.wire.typed.TypedValue;
+mount core.database.postgres.migrations.journal_codec.{decode_entry, quote_tracking_table};
 
 // =============================================================================
 // PostgresMigrationStore
@@ -91,6 +95,143 @@ public fn store_new(conn: PgConnection, config: MigrationStoreConfig) -> Postgre
     }
 }
 
+fn state_error(message: &Text) -> DbError {
+    DbError.Adapter(AdapterSpecific.new(AdPostgres, "migration_session_invalid", message.clone(), false))
+}
+
+fn require_idle(conn: &PgConnection) -> Result<(), DbError> {
+    if conn.tx_status() is TxIdle { Result.Ok(()) }
+    else { Result.Err(state_error(&"migration store requires an idle transaction")) }
+}
+
+/// Attempt to close every prepared statement after execution, retaining both
+/// failures if execution and cleanup fail. A failed transport may prevent close.
+fn query_typed(conn: &mut PgConnection, sql: &Text, params: &List<Maybe<TypedValue>>)
+    -> Result<PgTypedQueryResult, DbError>
+{
+    let statement = conn.prepare(sql)?;
+    let result = conn.execute_prepared_typed(&statement, params);
+    let cleanup = conn.close_prepared(&statement);
+    match (result, cleanup) {
+        (Result.Ok(value), Result.Ok(_)) => Result.Ok(value),
+        (Result.Err(error), Result.Ok(_)) => Result.Err(error),
+        (Result.Ok(_), Result.Err(error)) => Result.Err(error),
+        (Result.Err(error), Result.Err(cleanup)) =>
+            Result.Err(combine_migration_errors(AdPostgres, error, &"close prepared statement", cleanup)),
+    }
+}
+
+fn quoted_table(conn: &mut PgConnection, name: &Text) -> Result<Text, DbError> {
+    let params: List<Maybe<TypedValue>> = [];
+    let result = query_typed(conn, &"SELECT pg_catalog.current_setting('max_identifier_length')::bigint", &params)?;
+    if result.rows.len() != 1 || result.rows[0].len() != 1 {
+        return Result.Err(state_error(&"invalid PostgreSQL identifier limit response"));
+    }
+    match result.rows[0][0] {
+        TypedValue.TvInt8(limit) => quote_tracking_table(name, limit),
+        _ => Result.Err(state_error(&"identifier limit is not BIGINT")),
+    }
+}
+
+/// Return the fully qualified name and OID, including for an unqualified alias.
+/// A missing table is a valid first dry run; a different kind of object is not.
+fn lookup_table(conn: &mut PgConnection, table: &Text) -> Result<Maybe<(Text, Int)>, DbError> {
+    let params: List<Maybe<TypedValue>> = [Maybe.Some(TypedValue.TvText(table.clone()))];
+    let sql = "SELECT pg_catalog.quote_ident(n.nspname)||'.'||pg_catalog.quote_ident(c.relname),c.oid::bigint,c.relkind IN ('r','p') FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE c.oid=pg_catalog.to_regclass($1::text)";
+    let result = query_typed(conn, &sql, &params)?;
+    if result.rows.len() == 0 { return Result.Ok(Maybe.None); }
+    if result.rows.len() != 1 || result.rows[0].len() != 3 {
+        return Result.Err(state_error(&"invalid tracking table identity response"));
+    }
+    match (&result.rows[0][0], &result.rows[0][1], &result.rows[0][2]) {
+        (TypedValue.TvText(name), TypedValue.TvInt8(oid), TypedValue.TvBool(true)) =>
+            Result.Ok(Maybe.Some((name.clone(), *oid))),
+        _ => Result.Err(state_error(&"tracking relation is not a table")),
+    }
+}
+
+/// Hold a relation lock until commit, including while waiting for concurrent
+/// DDL. Check the acquired lock as well as the current name: a schema rename
+/// can redirect a qualified name without acquiring locks on its tables.
+fn lock_table(conn: &mut PgConnection, table: &Text, expected: Int, mode: &Text) -> Result<(), DbError> {
+    conn.execute(&f"LOCK TABLE ONLY {table} IN {mode} MODE")?;
+    let params: List<Maybe<TypedValue>> = [Maybe.Some(TypedValue.TvText(table.clone())), Maybe.Some(TypedValue.TvInt8(expected))];
+    let held = "SELECT EXISTS (SELECT FROM pg_catalog.pg_locks WHERE pid=pg_catalog.pg_backend_pid() AND locktype='relation' AND granted AND relation=pg_catalog.to_regclass($1::text) AND relation::bigint=$2::bigint)";
+    let result = query_typed(conn, &held, &params)?;
+    if result.rows.len() == 1 && result.rows[0].len() == 1 && result.rows[0][0] is TypedValue.TvBool(true) {
+        return Result.Ok(());
+    }
+    Result.Err(state_error(&"tracking table was replaced; reinitialize the store"))
+}
+
+fn rollback_if_active(conn: &mut PgConnection, error: DbError) -> DbError {
+    if conn.tx_status() is TxIdle { return error; }
+    match conn.execute(&"ROLLBACK") {
+        Result.Ok(_) => error,
+        Result.Err(cleanup) => combine_migration_errors(AdPostgres, error, &"rollback migration", cleanup),
+    }
+}
+
+fn finish_transaction<T>(conn: &mut PgConnection, tx: PgTransaction, operation: Result<T, DbError>)
+    -> Result<T, DbError>
+{
+    match operation {
+        Result.Ok(value) => match commit_tx(conn, tx) {
+            Result.Ok(_) => Result.Ok(value),
+            Result.Err(error) => Result.Err(rollback_if_active(conn, error)),
+        },
+        Result.Err(error) => match rollback_tx(conn, tx) {
+            Result.Ok(_) => Result.Err(error),
+            Result.Err(cleanup) => Result.Err(combine_migration_errors(AdPostgres, error, &"rollback migration", cleanup)),
+        },
+    }
+}
+
+fn read_locked(conn: &mut PgConnection, table: &Text, expected: Int) -> Result<MigrationJournal, DbError> {
+    lock_table(conn, table, expected, &"ACCESS SHARE")?;
+    // The outer join supplies the source relation's identity even for an empty
+    // journal. The presence flag distinguishes that row from malformed data.
+    let sql = f"SELECT j.version,j.name,j.status,j.applied_at,j.error,j.checksum,j.tableoid IS NOT NULL,(SELECT t.typrelid::bigint FROM pg_catalog.pg_type t WHERE t.oid=pg_catalog.pg_typeof(j.*)::oid) FROM (VALUES (1)) AS seed(x) LEFT JOIN {table} AS j ON true ORDER BY j.version";
+    let params: List<Maybe<TypedValue>> = [];
+    let result = query_typed(conn, &sql, &params)?;
+    let mut entries: List<JournalEntry> = List.with_capacity(result.rows.len());
+    let mut previous: Maybe<Int> = Maybe.None;
+    if result.rows.len() == 0 { return Result.Err(state_error(&"missing journal identity response")); }
+    for mut row in result.rows.into_iter() {
+        match row.pop() {
+            Maybe.Some(TypedValue.TvInt8(oid)) if oid == expected => {},
+            _ => return Result.Err(state_error(&"journal read reached a replacement table")),
+        }
+        match row.pop() {
+            Maybe.Some(TypedValue.TvBool(false)) => continue,
+            Maybe.Some(TypedValue.TvBool(true)) => {},
+            _ => return Result.Err(state_error(&"invalid journal presence response")),
+        }
+        let entry = decode_entry(&row)?;
+        if let Maybe.Some(version) = previous {
+            if entry.version <= version { return Result.Err(state_error(&"duplicate or unordered journal versions")); }
+        }
+        previous = Maybe.Some(entry.version);
+        entries.push(entry);
+    }
+    Result.Ok(journal_from_entries(entries))
+}
+
+fn read_relation(conn: &mut PgConnection, table: &Text, oid: Int) -> Result<MigrationJournal, DbError> {
+    let tx = begin_tx_read_only(conn)?;
+    let result = read_locked(conn, table, oid);
+    finish_transaction(conn, tx, result)
+}
+
+fn read_current_journal(conn: &mut PgConnection, configured: &Text) -> Result<MigrationJournal, DbError> {
+    let name = quoted_table(conn, configured)?;
+    let (table, oid) = match lookup_table(conn, &name)? {
+        Maybe.Some(resolved) => resolved,
+        Maybe.None => return Result.Ok(journal_new()),
+    };
+    read_relation(conn, &table, oid)
+}
+
 implement MigrationStore for PostgresMigrationStore {
     fn dialect(&self) -> Text { "postgres".to_text() }
 
@@ -105,9 +246,8 @@ implement MigrationStore for PostgresMigrationStore {
     }
 
     async fn load_journal(&mut self) -> Result<MigrationJournal, DbError> {
-        let sql = f"SELECT version, name, status, applied_at, error, checksum FROM {self.config.table_name} ORDER BY version";
-        let rows = query_journal_rows(&mut self.conn, &sql).await?;
-        Result.Ok(journal_from_entries_local(rows))
+        require_idle(&self.conn)?;
+        read_current_journal(&mut self.conn, &self.config.table_name)
     }
 
     async fn upsert_entry(&mut self, entry: &JournalEntry) -> Result<(), DbError> {
@@ -176,17 +316,6 @@ fn render_status(s: &MigrationStatus) -> (Text, Maybe<Int64>, Maybe<Text>) {
     }
 }
 
-/// Parse a `(status_text, applied_at?, error?)` row back into `MigrationStatus`.
-fn parse_status(text: &Text, applied_at: Maybe<Int64>, error: Maybe<Text>) -> MigrationStatus {
-    match text.as_str() {
-        "pending"      => MsPending,
-        "applied"      => MsApplied(applied_at.unwrap_or(0_i64)),
-        "rolled_back"  => MsRolledBack(applied_at.unwrap_or(0_i64)),
-        "failed"       => MsFailed(error.unwrap_or_else(|| "".to_text())),
-        _              => MsPending,  // unknown status — treat as pending
-    }
-}
-
 /// SQL string literal — escape single quotes by doubling.
 fn sql_text_literal(t: &Text) -> Text {
     let bs = t.as_bytes();
@@ -217,35 +346,6 @@ async fn execute_raw(conn: &mut PgConnection, sql: &Text) -> Result<(), DbError>
 
 async fn execute_in_tx(tx: &mut PgTransaction, sql: &Text) -> Result<(), DbError> {
     tx.execute_simple(sql).await.map(|_| ())
-}
-
-/// Decode rows of `(version, name, status, applied_at, error, checksum)`
-/// from a SELECT result. Postgres returns BIGINT as Int64 and TEXT as Text.
-async fn query_journal_rows(conn: &mut PgConnection, sql: &Text) -> Result<List<JournalEntry>, DbError> {
-    let raw_rows = conn.query_simple(sql).await?;
-    let mut entries: List<JournalEntry> = List.new();
-    let mut i: Int = 0;
-    while i < raw_rows.len() {
-        let r = &raw_rows[i];
-        let version    = r.get_int64("version")?;
-        let name       = r.get_text("name")?;
-        let status_txt = r.get_text("status")?;
-        let applied_at = r.get_int64_nullable("applied_at")?;
-        let error      = r.get_text_nullable("error")?;
-        let checksum   = r.get_int64("checksum")?;
-        entries.push(JournalEntry {
-            version: version as Int,
-            name: name,
-            status: parse_status(&status_txt, applied_at, error),
-            checksum: checksum,
-        });
-        i = i + 1;
-    }
-    Result.Ok(entries)
-}
-
-fn journal_from_entries_local(entries: List<JournalEntry>) -> MigrationJournal {
-    MigrationJournal { entries: entries }
 }
 
 // =============================================================================

@@ -59,7 +59,7 @@ module core.database.common.migrations.store;
 
 mount base.{Text, Bool, Maybe, Result, Ok, Err};
 mount collections.List;
-mount core.database.common.error.{DbError};
+mount core.database.common.error.{DbError, AdapterId, AdapterSpecific};
 mount core.database.common.migrations.journal.{MigrationJournal, JournalEntry};
 
 // =============================================================================
@@ -70,7 +70,7 @@ mount core.database.common.migrations.journal.{MigrationJournal, JournalEntry};
 /// extend with their own fields (advisory-lock key for Postgres, etc.).
 public type MigrationStoreConfig is {
     /// Name of the persistent tracking table. Default `__verum_migrations`.
-    table_name: Text,
+    public table_name: Text,
     /// If `true`, every migration runs inside a transaction; the
     /// `__verum_migrations` row is updated in the same transaction so
     /// either both succeed or both roll back. SQLite + Postgres support
@@ -138,6 +138,22 @@ public type MigrationStore is protocol {
     /// Drop the entire migration tracking table. Used by tooling
     /// ("reset migrations") and by tests. Idempotent.
     async fn drop_tracking_table(&mut self) -> Result<(), DbError>;
+}
+
+/// Preserve both failures when recovery or lock release also fails. DbError
+/// currently has no typed cause collection: the original Debug diagnostics are
+/// retained, while callers must not infer safe retry from the combined error.
+/// A single failure should be returned unchanged instead of using this helper.
+public fn combine_migration_errors(
+    adapter: AdapterId,
+    primary: DbError,
+    phase: &Text,
+    secondary: DbError,
+) -> DbError {
+    DbError.Adapter(AdapterSpecific.new(
+        adapter, "migration_cleanup_failed",
+        f"primary: {primary:?}; {phase}: {secondary:?}", false,
+    ))
 }
 
 // =============================================================================
