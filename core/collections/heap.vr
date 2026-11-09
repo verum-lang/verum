@@ -29,6 +29,7 @@
 )
 module core.collections.heap;
 
+mount core.base.iterator.{FromIterator, Extend};
 mount core.mem.allocator.AllocError;
 mount super.list.*;
 mount core.intrinsics.memory.{ptr_read, ptr_write};

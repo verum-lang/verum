@@ -30,6 +30,7 @@
 )
 module core.collections.list;
 
+mount core.base.iterator.{FromIterator, Extend};
 mount core.mem.allocator.AllocError;
 mount core.base.coercion.{IntCoercible, Indexable, ArrayCoercible};
 // Allocator primitives for typed-OOM (#65, #68). `mount core.*`
