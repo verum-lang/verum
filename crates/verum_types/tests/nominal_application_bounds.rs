@@ -166,6 +166,32 @@ fn method_callable_premise_cannot_escape_its_signature() {
     }
 }
 
+#[test]
+fn implementation_receiver_must_establish_the_nominal_key_domain() {
+    const DECLS: &str = "type Key is protocol {}; type Hashable is protocol {};
+        implement Key for Int {} implement Hashable for Int {}
+        type Table<K:Key + Hashable,V> is {value:V};
+        type ReadAt<K> is protocol {type Output; fn read(&self, key:K)->&Self.Output;};";
+    const MEMBERS: &str = "type Output=V; fn read(&self, key:K)->&V {&self.value}";
+    for header in [
+        "<K:Key + Hashable,V> ReadAt<K> for Table<K,V>",
+        "<K,V> ReadAt<K> for Table<K,V> where K:Key + Hashable",
+    ] {
+        accepted(&format!("{DECLS} implement{header} {{{MEMBERS}}}"));
+    }
+    refused(&format!(
+        "{DECLS} implement<K:Key,V> ReadAt<K> for Table<K,V> {{{MEMBERS}}}"
+    ));
+}
+
+#[test]
+fn bounded_associated_output_checks_its_receiver_under_the_same_premises() {
+    const DECLS: &str = "type Key is protocol {}; implement Key for Int {}
+        type Table<K:Key> is {value:K}; type Read is protocol {type Output:Key;};";
+    accepted(&format!("{DECLS} implement<K:Key> Read for Table<K> {{type Output=K;}}"));
+    refused(&format!("{DECLS} implement<K:Key,V> Read for Table<K> {{type Output=V;}}"));
+}
+
 fn mounted(source: &str, provider: &str, foreign: Option<&str>) -> Vec<String> {
     use verum_ast::FileId;
     use verum_fast_parser::FastParser;
@@ -252,6 +278,29 @@ fn sibling_protocol_cannot_prove_an_imported_domain() {
     assert!(
         found.iter().any(|e| e.contains("no implementation")),
         "{found:#?}"
+    );
+}
+
+#[test]
+fn imported_receiver_keeps_its_bounds_and_rejects_foreign_evidence() {
+    let provider = "public type Required is protocol {}; public type Table<K:Required> is {key:K};";
+    let consumer = "type Read is protocol {}; implement<K:Required> Read for Table<K> {}";
+    let valid = mounted(
+        &format!("mount demo.lib.{{Table,Required}}; {consumer}"),
+        provider,
+        None,
+    );
+    assert!(valid.is_empty(), "{valid:#?}");
+    let invalid = mounted(
+        &format!("mount demo.lib.Table; mount demo.other.Required; {consumer}"),
+        provider,
+        Some("public type Required is protocol {};"),
+    );
+    assert!(
+        invalid
+            .iter()
+            .any(|e| e.contains("no implementation proves") && e.contains("Required")),
+        "{invalid:#?}"
     );
 }
 #[test]

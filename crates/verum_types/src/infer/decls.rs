@@ -4813,7 +4813,11 @@ impl TypeChecker {
     }
 
     /// Inner implementation of register_impl_block
-    fn register_impl_block_inner(&mut self, impl_decl: &verum_ast::decl::ImplDecl, expected: Option<ExpectedImplementation<'_>>) -> Result<()> {
+    fn register_impl_block_inner(
+        &mut self,
+        impl_decl: &verum_ast::decl::ImplDecl,
+        expected: Option<ExpectedImplementation<'_>>,
+    ) -> Result<()> {
         use verum_ast::decl::{FunctionParamKind, ImplItemKind, ImplKind};
 
         if let ImplKind::Protocol {
@@ -4978,17 +4982,30 @@ impl TypeChecker {
         // declaration frame, just as ordinary declarations do. The receiver,
         // protocol arguments and members must share this exact telescope.
         self.decl_param_frames.push(owner_frame.clone());
-        let result = match &impl_decl.kind {
-            ImplKind::Inherent(target) => (|| {
-                if let Some(ExpectedImplementation::Inherent(expected)) = expected {
-                    let actual = self.ast_to_type(target)?;
-                    self.validate_impl_target(&actual, expected, impl_decl.span)?;
+        let result = self.in_impl_proof_scope(|checker| {
+            let (clauses, callables) =
+                checker.enter_source_impl_conditions(impl_decl, &owner_frame)?;
+            match &impl_decl.kind {
+                ImplKind::Inherent(target) => {
+                    if let Some(ExpectedImplementation::Inherent(expected)) = expected {
+                        let actual = checker.ast_to_type(target)?;
+                        checker.validate_impl_target(&actual, expected, impl_decl.span)?;
+                    }
+                    checker.register_inherent_impl_methods(impl_decl, &type_param_names)
                 }
-                self.register_inherent_impl_methods(impl_decl, &type_param_names)
-            })(),
-            ImplKind::Protocol { .. } => self.register_protocol_impl_methods(impl_decl, &type_param_names, &owner_frame,
-                match expected { Some(ExpectedImplementation::Protocol(protocol, target)) => Some((protocol, target)), _ => None }),
-        };
+                ImplKind::Protocol { .. } => checker.register_protocol_impl_methods(
+                    impl_decl,
+                    &type_param_names,
+                    &owner_frame,
+                    clauses,
+                    callables,
+                    match expected {
+                        Some(ExpectedImplementation::Protocol(protocol, target)) => Some((protocol, target)),
+                        _ => None,
+                    },
+                ),
+            }
+        });
         self.decl_param_frames.pop();
 
         // Restore the binder frame on failed publication as well.
@@ -5593,6 +5610,8 @@ impl TypeChecker {
         impl_decl: &verum_ast::decl::ImplDecl,
         type_param_names: &List<verum_common::Text>,
         owner_frame: &indexmap::IndexMap<Text, Type>,
+        impl_where_clauses: List<crate::protocol::WhereClause>,
+        type_param_fn_bounds: Map<TypeVar, Type>,
         expected: Option<(&Text, &Type)>,
     ) -> Result<()> {
         use verum_ast::decl::{FunctionParamKind, ImplItemKind, ImplKind};
@@ -6096,9 +6115,6 @@ impl TypeChecker {
                     // This enables blanket impls like `implement<S: Stream> StreamExt for S {}`
                     // to be available when type-checking method calls that need to find them.
                     // ═══════════════════════════════════════════════════════════════
-
-                    let (impl_where_clauses, type_param_fn_bounds) =
-                        self.elaborate_source_impl_conditions(impl_decl, owner_frame)?;
 
                     // Collect methods from impl items
                     let mut methods: Map<Text, Type> = Map::new();
@@ -6893,10 +6909,11 @@ impl TypeChecker {
             self.register_impl_block(impl_decl)?;
         }
         self.push_decl_param_frame(indexmap::IndexMap::new());
-        let result = match self.cfg_filtered_impl(impl_decl) {
-            Some(filtered) => self.check_impl_block_inner(&filtered),
-            None => self.check_impl_block_inner(impl_decl),
-        };
+        let result =
+            self.in_impl_proof_scope(|checker| match checker.cfg_filtered_impl(impl_decl) {
+                Some(filtered) => checker.check_impl_block_inner(&filtered),
+                None => checker.check_impl_block_inner(impl_decl),
+            });
         self.pop_decl_param_frame();
         result
     }
@@ -7031,6 +7048,13 @@ impl TypeChecker {
                 }
             }
         }
+
+        let frame = self
+            .decl_param_frames
+            .last()
+            .expect("implementation body parameter scope")
+            .clone();
+        self.enter_source_impl_conditions(impl_decl, &frame)?;
 
         // Process where clause constraints: where type T: Clone, type E: Clone
         // Generic bounds tracking: type parameters carry protocol constraints (e.g., T: Ord) that are checked at instantiation sites
@@ -7314,7 +7338,9 @@ impl TypeChecker {
             }
         };
 
-        if let Err(error) = self.check_associated_type_obligations(impl_decl, &proto_ident) {
+        if let Err(error) = self.in_impl_proof_scope(|checker| {
+            checker.check_associated_type_obligations(impl_decl, &proto_ident)
+        }) {
             self.push_diagnostic_for(error);
         }
 

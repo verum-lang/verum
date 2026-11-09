@@ -21,6 +21,37 @@ fn invalid(span: Span, message: impl Into<Text>) -> TypeError {
 }
 
 impl TypeChecker {
+    /// Lazy and local implementations introduce their own binders. Evidence
+    /// about a suspended caller cannot discharge their receiver constraints.
+    pub(super) fn in_impl_proof_scope<R>(
+        &mut self,
+        check: impl FnOnce(&mut Self) -> Result<R>,
+    ) -> Result<R> {
+        let protocols = std::mem::take(&mut self.source_type_registration.projection_assumptions);
+        let callables = std::mem::take(&mut self.source_type_registration.callable_assumptions);
+        let result = check(self);
+        self.source_type_registration.projection_assumptions = protocols;
+        self.source_type_registration.callable_assumptions = callables;
+        result
+    }
+
+    pub(super) fn enter_source_impl_conditions(
+        &mut self,
+        source: &ImplDecl,
+        owner: &indexmap::IndexMap<Text, Type>,
+    ) -> Result<(List<WhereClause>, Map<TypeVar, Type>)> {
+        let (clauses, callables) = self.elaborate_source_impl_conditions(source, owner)?;
+        self.source_type_registration
+            .projection_assumptions
+            .extend(clauses.iter().cloned());
+        self.source_type_registration.callable_assumptions.extend(
+            callables
+                .iter()
+                .map(|(variable, contract)| (Type::Var(*variable), contract.clone())),
+        );
+        Ok((clauses, callables))
+    }
+
     /// One declaration-owned carrier for conditions at every source impl
     /// publication boundary. A compound subject is an obligation too; it is
     /// never narrowed to just the subset that spells a bare parameter name.

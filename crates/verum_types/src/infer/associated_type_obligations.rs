@@ -148,6 +148,7 @@ impl TypeChecker {
         self.push_decl_param_frame(frame.clone());
         let previous_self = self.current_self_type.clone();
         let result = (|| {
+            let (assumptions, callables) = self.enter_source_impl_conditions(declaration, &frame)?;
             let self_type = self.ast_to_type(for_type)?;
             self.set_current_self_type(Some(self_type.clone()));
             let mut substitution = Substitution::new();
@@ -178,7 +179,6 @@ impl TypeChecker {
                     "too many protocol type arguments",
                 ));
             }
-            let (assumptions, callables) = self.elaborate_source_impl_conditions(declaration, &frame)?;
             for clause in parameter_bounds {
                 let ty = clause
                     .ty
