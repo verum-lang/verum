@@ -360,3 +360,48 @@ fn projected_static_calls_execute_the_implemented_identity_after_serialization()
         .execute_function(entry).unwrap();
     assert_eq!(value.try_as_i64(), Some(1731));
 }
+
+#[test]
+fn a_projected_initializer_types_a_sibling_callback_in_a_generic_method() {
+    let ast = Parser::new(r#"
+        module siblings;
+        type Seed is protocol { fn seed() -> Self; };
+        type Offset is { value: Int };
+        implement Seed for Offset { fn seed() -> Self { Offset { value: 17 } } }
+        type Accumulate is protocol { fn combine(self, rhs: Self) -> Self; };
+        implement Accumulate for Offset { fn combine(self, rhs: Offset) -> Offset {
+            Offset { value: self.value + rhs.value - 10 }
+        } }
+        type Family is protocol {
+            type Item;
+            fn item(&self) -> Self.Item;
+            fn with_seed<T,F:fn(T,Self.Item)->T>(&self, initial:T, combine:F) -> T {
+                combine(initial, self.item())
+            }
+            fn accumulated(&self) -> Self.Item where Self.Item: Seed + Accumulate {
+                self.with_seed(Self.Item.seed(), |a, b| a.combine(b))
+            }
+        };
+        type Cursor is {};
+        implement Family for Cursor {
+            type Item = Offset;
+            fn item(&self) -> Offset { Offset { value: 20 } }
+        }
+        fn probe() -> Int { let value: Offset = Cursor {}.accumulated(); value.value }
+    "#).parse_module().unwrap();
+    let mut codegen = VbcCodegen::with_config(CodegenConfig::new("siblings"));
+    codegen.collect_unit_declarations(&[&ast]).unwrap();
+    codegen.resolve_pending_imports();
+    codegen.compile_default_methods_with_policy(ItemFailurePolicy::Strict).unwrap();
+    codegen.compile_unit_items(&[&ast], ItemFailurePolicy::Strict).unwrap();
+    let compiled = codegen.finalize_module_from_state().unwrap();
+    let mut module = verum_vbc::deserialize::deserialize_module(
+        &verum_vbc::serialize::serialize_module(&compiled).unwrap(),
+    ).unwrap();
+    assert!(module.resolve_external_bands().is_empty());
+    verum_vbc::validate::validate_module(&module).unwrap();
+    let entry = module.find_function_by_name("siblings.probe").unwrap();
+    let value = verum_vbc::interpreter::Interpreter::new(std::sync::Arc::new(module))
+        .execute_function(entry).unwrap();
+    assert_eq!(value.try_as_i64(), Some(27));
+}

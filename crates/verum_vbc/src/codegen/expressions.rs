@@ -12988,6 +12988,32 @@ impl VbcCodegen {
         self.compile_method_call_inner(receiver, method, args, resolved_target, type_args, false)
     }
 
+    pub(super) fn type_parameter_static_receiver(&self, receiver: &Expr) -> CodegenResult<Option<crate::types::TypeRef>> {
+        let type_parameter = |name: &str| {
+            self.current_source_substitution.get(name)
+                .map(|witness| witness.ty.clone())
+                .or_else(|| self.ctx.current_generic_param_id(name).map(crate::types::TypeRef::Generic))
+        };
+        Ok(match &receiver.kind {
+            ExprKind::Path(path) => path.as_ident().and_then(|ident| {
+                self.ctx.get_var_reg(ident.name.as_str()).is_err().then(||
+                    type_parameter(ident.name.as_str())).flatten()
+            }),
+            ExprKind::Field { .. } => {
+                if let Some(ast) = receiver.associated_type_designator(|name| {
+                    (name == "Self" && self.current_impl_receiver.is_some())
+                        || (self.ctx.get_var_reg(name).is_err() && type_parameter(name).is_some())
+                }) {
+                    Some(self.source_type_in_current_scope(&ast)
+                        .ok_or_else(|| CodegenError::with_span(CodegenErrorKind::TypeInference(
+                            "projected static receiver has no declaration-owned type witness".into()
+                        ), receiver.span))?)
+                } else { None }
+            }
+            _ => None,
+        })
+    }
+
     fn compile_method_call_inner(
         &mut self,
         receiver: &Expr,
@@ -13004,7 +13030,7 @@ impl VbcCodegen {
         for (index, arg) in args.iter().enumerate() {
             if matches!(arg.kind, ExprKind::Closure { .. }) {
                 if let Some(hints) = self.declared_method_closure_param_hints(
-                    receiver, method.name.as_str(), index, type_args,
+                    receiver, method.name.as_str(), index, type_args, args,
                 ) {
                     if arg.span.start != 0 || arg.span.end != 0 {
                         self.ctx.closure_param_type_hints.insert(arg.span, hints);
@@ -13467,32 +13493,7 @@ impl VbcCodegen {
 
         // Static calls on declaration-owned type parameters and associated
         // projections use the same witness as a type annotation in this frame.
-        let type_parameter = |name: &str| {
-            self.current_source_substitution.get(name)
-                .map(|witness| witness.ty.clone())
-                .or_else(|| self.ctx.current_generic_param_id(name).map(crate::types::TypeRef::Generic))
-        };
-        let receiver_type = match &receiver.kind {
-            ExprKind::Path(path) => path.as_ident().and_then(|ident| {
-                self.ctx.get_var_reg(ident.name.as_str()).is_err().then(||
-                    type_parameter(ident.name.as_str())).flatten()
-            }),
-            ExprKind::Field { .. } => {
-                if let Some(ast) = receiver.associated_type_designator(|name| {
-                    (name == "Self" && self.current_impl_receiver.is_some())
-                        || (self.ctx.get_var_reg(name).is_err() && type_parameter(name).is_some())
-                }) {
-                    let ids: Vec<_> = self.ctx.current_generic_param_ids.values()
-                        .map(|id| crate::types::TypeParamId(*id)).collect();
-                    Some(self.semantic_formal_type(&ast, &self.ctx.current_generic_param_ids, &ids)
-                        .ok_or_else(|| CodegenError::with_span(CodegenErrorKind::TypeInference(
-                            "projected static receiver has no declaration-owned type witness".into()
-                        ), receiver.span))?)
-                } else { None }
-            }
-            _ => None,
-        };
-        if let Some(type_ref) = receiver_type {
+        if let Some(type_ref) = self.type_parameter_static_receiver(receiver)? {
             let recv_reg = self.ctx.alloc_temp();
             self.ctx.emit(Instruction::LoadT {
                 dst: recv_reg,
@@ -31729,6 +31730,7 @@ impl VbcCodegen {
         method: &str,
         argument: usize,
         explicit: &verum_common::List<verum_ast::ty::GenericArg>,
+        operands: &[Expr],
     ) -> Option<verum_common::List<Option<crate::types::TypeRef>>> {
         use crate::types::TypeRef;
         let receiver_name = self.declared_callable_receiver_name(receiver)?;
@@ -31746,6 +31748,22 @@ impl VbcCodegen {
                 && let Some(ty) = self.explicit_type_witness(&ty, None)
             {
                 substitution.bind(*id, ty);
+            }
+        }
+        // Sibling operands contribute evidence before lowering a closure. An
+        // accumulator determined by a declared constructor can constrain both
+        // callback inputs and its result independently of source argument order.
+        let receiver_slots = usize::from(info.param_names.first().is_some_and(|name| name == "self"));
+        if let Some(formals) = self.ctx.semantic_fn_params.get(&info.id) {
+            for (index, operand) in operands.iter().enumerate() {
+                if index == argument { continue; }
+                let Some(formal) = formals.get(index + receiver_slots).and_then(Option::as_ref) else { continue };
+                if formal.is_generic()
+                    && let Some(actual) = self.declared_expression_result(operand, None, 0, 0)
+                    && !self.bind_source_declaration(formal, &actual, &mut substitution)
+                {
+                    return None;
+                }
             }
         }
         let hints: verum_common::List<_> = params.iter().map(|ty| {

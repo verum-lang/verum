@@ -168,6 +168,11 @@ impl VbcCodegen {
                 },
             }),
             ExprKind::MethodCall { receiver, method, type_args, args } => {
+                if let Some(witness) = self.type_parameter_static_receiver(receiver).ok()? {
+                    let owner = self.resolve_declared_associated_types(&witness)?;
+                    let name = self.declaration_type_name(&owner, depth + 1)?;
+                    return self.declared_method_result_type(&name, method.name.as_str(), type_args);
+                }
                 let selected = emitted.and_then(|(reg, start, end)|
                     self.copy_selected_call_result(reg, start, end, type_args, args, depth));
                 if selected.is_some() { return selected; }
