@@ -9701,6 +9701,7 @@ impl TypeChecker {
 
         // Look up the source module in the registry
         if let Some(module_info) = registry.get_by_path(module_path.as_str()) {
+            self.import_structural_methods(&module_info)?;
             // Pre-register all function signatures to enable forward references
             // within the imported module itself
             self.preregister_module_function_signatures(&module_info, registry);
@@ -19033,6 +19034,7 @@ impl TypeChecker {
             other => other,
         });
 
+        self.check_structural_method_import(recv_ty_raw, &method.name, method.span)?;
         self.load_source_receiver_methods(recv_ty_raw)?;
         self.check_source_method_visibility(recv_ty_raw, method.name.as_str(), span)?;
 

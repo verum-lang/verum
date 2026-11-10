@@ -67,6 +67,7 @@
 )
 module core.signal;
 
+mount core.collections.slice.*;
 mount core.async.broadcast.{
     BroadcastSender, BroadcastReceiver, BroadcastRecvError,
     broadcast_channel,

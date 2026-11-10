@@ -8,6 +8,9 @@ pub(crate) struct SourceTypeRegistration {
     /// Lexical source declarations available while preparing one module.
     pub local_declarations: List<(Text, verum_common::Shared<verum_ast::Module>)>,
     pub active_impl_bounds: verum_common::Set<(Text, Text)>,
+    /// Public sequence methods imported by each source scope. Store the
+    /// actual receiver pattern so a method on [Int] cannot apply to [Bool].
+    pub(super) structural_methods: Map<Text, Vec<super::implementation_sources::ImportedStructuralMethod>>,
     pub headers: Vec<super::source_protocol_header::SourceProtocolHeader>,
     pub projection_assumptions: Vec<crate::protocol::WhereClause>,
     pub callable_assumptions: List<(Type, Type)>,

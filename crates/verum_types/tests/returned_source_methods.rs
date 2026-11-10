@@ -575,3 +575,56 @@ fn a_type_mounted_through_a_module_alias_keeps_its_static_method_owner() {
         assert_eq!(errors.is_empty(), accepted, "{body}: {errors:?}");
     }
 }
+
+#[test]
+fn imported_structural_methods_keep_their_element_and_visibility() {
+    let provider = "implement<T> [T] { public fn sample(&self, item: T) -> T { item } private fn hidden(&self) -> Int { 42 } }";
+    let modules = [("demo.slices", provider)];
+    let positive = check_with_checker(
+        "mount demo.slices.*; fn read(items: &[Int]) -> Int { items.sample(31) }", &modules,
+    ).1;
+    assert!(positive.is_empty(), "{positive:?}");
+    for consumer in [
+        "mount demo.slices.*; fn read(items: &[Int]) -> Int { items.sample(true) }",
+        "mount demo.slices.*; fn read(items: &[Int]) -> Bool { items.sample(31) }",
+        "mount demo.slices.*; fn read(items: &[Int]) -> Int { items.hidden() }",
+        "fn read(items: &[Int]) -> Int { items.sample(31) }",
+    ] {
+        let errors = check_with_checker(consumer, &modules).1;
+        assert!(!errors.is_empty(), "{consumer}");
+    }
+}
+
+#[test]
+fn structural_method_mounts_refuse_conflicts_and_incompatible_carriers() {
+    let generic = "implement<T> [T] { public fn stamp(&self) -> Int { 1 } }";
+    let numbers = "implement [Int] { public fn numeric(&self) -> Int { 1 } }";
+    for modules in [
+        [("demo.first", generic), ("demo.second", generic)],
+        [("demo.second", generic), ("demo.first", generic)],
+    ] {
+        let errors = check_with_checker(
+            "mount demo.first.*; mount demo.second.*; fn f(x: &[Int]) -> Int { x.stamp() }",
+            &modules,
+        ).1;
+        assert!(errors.iter().any(|diagnostic| diagnostic.contains("AmbiguousName") && diagnostic.contains("demo.first") && diagnostic.contains("demo.second")), "{errors:?}");
+    }
+    let ok = check_with_checker("mount demo.ext.*; fn f(x: &[Int]) -> Int { x.numeric() }", &[("demo.ext", numbers)]).1;
+    assert!(ok.is_empty(), "{ok:?}");
+    let errors = check_with_checker("mount demo.ext.*; fn f(x: &[Bool]) -> Int { x.numeric() }", &[("demo.ext", numbers)]).1;
+    assert!(errors.iter().any(|diagnostic| diagnostic.contains("MethodNotFound")), "{errors:?}");
+}
+
+#[test]
+fn a_structural_method_requires_its_receivers_declared_conditions() {
+    let provider = "
+        public type Writable is protocol { fn cookie(&self) -> Int; };
+        implement Writable for Int { fn cookie(&self) -> Int { 67 } }
+        implement<T: Writable> [T] { public fn stamp(&self) -> Int { 71 } }
+    ";
+    let modules = [("demo.ext", provider)];
+    let good = check_with_checker("mount demo.ext.*; fn read(xs: &[Int]) -> Int { xs.stamp() }", &modules).1;
+    assert!(good.is_empty(), "{good:?}");
+    let bad = check_with_checker("mount demo.ext.*; fn read(xs: &[Bool]) -> Int { xs.stamp() }", &modules).1;
+    assert!(bad.iter().any(|diagnostic| diagnostic.contains("E405")), "{bad:?}");
+}

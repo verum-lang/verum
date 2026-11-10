@@ -6030,7 +6030,7 @@ impl ProtocolChecker {
     /// # Returns
     /// * `Some(substitution)` - If match succeeds, with variable bindings
     /// * `None` - If match fails
-    fn try_match_type(&self, pattern: &Type, concrete: &Type) -> Option<Map<Text, Type>> {
+    pub(crate) fn try_match_type(&self, pattern: &Type, concrete: &Type) -> Option<Map<Text, Type>> {
         let mut substitution = Map::new();
         if self.unify_types(pattern, concrete, &mut substitution) {
             Some(substitution)
