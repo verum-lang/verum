@@ -634,17 +634,13 @@ impl VbcCodegen {
             let tr = |value: &TypeRef| remap_type_ref_archive(value, remap);
             copy_remapped_data_type_carriers(&module.types[ti], &mut ty, remap);
             for implementation in &mut ty.protocols {
+                implementation.methods = self.import_protocol_slots(module, &module.types[ti], implementation)?;
                 implementation.protocol.0 = *remap
                     .get(&implementation.protocol.0)
                     .unwrap_or(&implementation.protocol.0);
                 for (_, target) in &mut implementation.associated_types {
                     *target = tr(target);
                 }
-                // Protocol method slots in existing archives have no per-slot
-                // module provenance. Keep their declaration bindings,
-                // and let canonical method lookup select bodies; do not turn
-                // a coincident source-local number into an unrelated method.
-                implementation.methods.clear();
             }
             ty.drop_fn = ty
                 .drop_fn
@@ -874,6 +870,45 @@ impl VbcCodegen {
         // A language scalar spelling has declaration authority in every scope.
         // An unrelated module's bare compatibility entry cannot shadow it.
         TypeId::from_well_known_scalar_name(name).or_else(|| self.exact_nominal_type_id(name))
+    }
+
+    /// A source-local function ID is only a hint. Transfer an explicit slot
+    /// when its protocol member, owning implementation and retained callable
+    /// signature identify the same declaration in the producer.
+    fn import_protocol_slots(
+        &self, module: &VbcModule, receiver: &TypeDescriptor, row: &crate::types::ProtocolImpl,
+    ) -> CodegenResult<Vec<u32>> {
+        let Some(source) = row.source_implementation.as_ref().filter(|_| !row.methods.is_empty()) else {
+            return Ok(Vec::new());
+        };
+        let Some(protocol) = module.get_type(TypeId(row.protocol.0)).filter(|ty| ty.kind == TypeKind::Protocol) else {
+            return Ok(Vec::new());
+        };
+        let declaration = source.declaration().map_err(|message|
+            CodegenError::new(super::CodegenErrorKind::InvalidSourceSignature(message.to_string())))?;
+        let mut slots = vec![u32::MAX; row.methods.len()];
+        for member in &protocol.variants {
+            let slot = member.tag as usize;
+            let Some(&id) = row.methods.get(slot).filter(|id| **id != u32::MAX) else { continue };
+            let Some(function) = module.get_function(FunctionId(id)).filter(|f| f.id.0 == id)
+                .or_else(|| module.functions.iter().find(|f| f.id.0 == id)) else { continue };
+            let Some(signature) = &function.source_signature else { continue };
+            let Some(identity) = &function.declaration_identity else { continue };
+            if function.parent_type != Some(receiver.id) || identity.lexical_parent.is_some()
+                || module.strings.get(identity.source_name) != Some(signature.name.name.as_str())
+                || function.origin_module.and_then(|owner| module.strings.get(owner)) != Some(source.origin_module())
+                || module.strings.get(member.name) != Some(signature.name.name.as_str())
+                || !declaration.items.iter().any(|item| matches!(&item.kind,
+                    verum_ast::decl::ImplItemKind::Function(declared) if declared == signature))
+            {
+                continue;
+            }
+            if let Some(target) = function_identity(module, function).and_then(|key| self.ctx.functions.get(&key)) {
+                slots[slot] = target.id.0;
+            }
+        }
+        if slots.iter().all(|&slot| slot == u32::MAX) { slots.clear(); }
+        Ok(slots)
     }
 
     fn bootstrap_function(&self, module: &VbcModule, id: u32) -> Option<&FunctionInfo> {

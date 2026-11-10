@@ -102,3 +102,31 @@ fn signature_batch_matches_ordered_replay_with_one_live_registry_visit() {
         "no selected sites must not scan the registry"
     );
 }
+
+#[test]
+fn imported_protocol_slots_require_the_explicit_source_member() {
+    let source = Parser::new(r#"
+        module measure;
+        type Measure<T> is protocol { fn measure(value: T) -> Int; };
+        type Score is { n: Int };
+        implement Measure<Int> for Score { fn measure(value: Int) -> Int { value } }
+        implement Measure<Bool> for Score { fn measure(value: Bool) -> Int { 81 } }
+    "#).parse_module().unwrap();
+    let mut producer = VbcCodegen::with_config(CodegenConfig::new("measure"));
+    let module = producer.collect_declaration_interface(&[&source]).unwrap();
+    let score = module.types.iter().find(|d| module.strings.get(d.name) == Some("Score")).unwrap();
+    assert_eq!(score.protocols.len(), 2);
+    let mut registry = producer.export_functions();
+    for info in registry.values_mut() {
+        info.id = crate::module::FunctionId(info.id.0 + 10000);
+    }
+    let mut consumer = VbcCodegen::with_config(CodegenConfig::new("consumer"));
+    consumer.import_functions(&registry);
+    for (index, row) in score.protocols.iter().enumerate() {
+        let slots = consumer.import_protocol_slots(&module, score, row).unwrap();
+        assert_eq!(slots, [row.methods[0] + 10000]);
+        let mut swapped = row.clone();
+        swapped.methods = score.protocols[1 - index].methods.clone();
+        assert!(consumer.import_protocol_slots(&module, score, &swapped).unwrap().is_empty());
+    }
+}
