@@ -6128,47 +6128,37 @@ impl VbcCodegen {
                 let is_heap_deref = inner_type
                     .as_ref()
                     .is_some_and(|t| t.starts_with("Heap<") || self.is_allocating_wrapper(t));
-                // Typed-primitive deref dispatch (#26 codegen tail).
-                //
-
-                // The generic `Deref` instruction reads `sizeof(Value)=8`
-                // bytes regardless of the pointee size — for FFI-returned
-                // references to sub-Value-sized C primitives (`Int32`
-                // errno slot, `UInt8` byte field, `Bool` flag, …) it
-                // leaks 1–7 bytes of adjacent memory into the high half
-                // of the loaded i64. Pre-fix: `errno()` on macOS
-                // returned `0x7E04ED1B 30000002` (high 32 = TLS
-                // bookkeeping leak, low 32 = real errno). Post-fix:
-                // emit `FfiExtended { DerefRawSigned, size=N }` for
-                // signed C primitives or `DerefRaw, size=N` for
-                // unsigned/byte — read exactly N bytes and sign- or
-                // zero-extend per the pointee's signedness.
-                //
-
-                // Heap<T>/Shared<T> derefs always carry full
-                // Value-sized payloads, so they continue through the
-                // existing `Deref` path below.
-                let typed_deref = if !is_heap_deref {
-                    inner_type
-                        .as_ref()
-                        .and_then(|t| typed_primitive_pointee_deref(t))
-                } else {
-                    None
+                // An FFI pointer and a register reference have the same source
+                // pointee. Retain the pointee width before the ABI erases it.
+                let reference = self.source_call_declaration(inner, None, 0)
+                    .or_else(|| self.declared_expression_result(inner, None, 0, 0));
+                let typed_deref = match &reference {
+                    Some(crate::types::TypeRef::Reference { inner, tier, .. }) => match inner.as_ref() {
+                        crate::types::TypeRef::Concrete(id) => Some((*id, *tier == CbgrTier::Tier2)),
+                        _ => None,
+                    },
+                    _ if !is_heap_deref => inner_type.as_deref().and_then(|ty| {
+                        let id = self.nominal_type_id(reference_pointee_type_name(ty)?)?;
+                        Some((id, ty.starts_with("&unsafe ")))
+                    }),
+                    _ => None,
                 };
 
-                if let Some((sub_op, size)) = typed_deref {
-                    let mut operands = Vec::<u8>::with_capacity(5);
+                if let Some((id, native_pointer)) = typed_deref
+                    && let Some((storage, width)) = crate::module::CType::narrow_scalar(id)
+                {
+                    use crate::instruction::MemSubOpcode;
+                    let mut operands = Vec::with_capacity(5);
                     Self::write_reg(&mut operands, dest.0);
                     Self::write_reg(&mut operands, inner_reg.0);
-                    operands.push(size);
-                    // MemExtended carrier — typed_primitive_pointee_deref
-                    // returns MemSubOpcode bytes since the T0852 Mem wave
-                    // (0x10/0x17 on the old FfiExtended channel would
-                    // decode as CallFfiC/CallFfiWin64Arm64).
-                    self.ctx.emit(Instruction::MemExtended {
-                        sub_op: sub_op as u8,
-                        operands,
-                    });
+                    let operation = if native_pointer {
+                        operands.push(width);
+                        if storage.is_signed_integer() { MemSubOpcode::DerefRawSigned } else { MemSubOpcode::DerefRaw }
+                    } else {
+                        operands.push(id.0 as u8);
+                        MemSubOpcode::DerefScalarRef
+                    };
+                    self.ctx.emit(Instruction::MemExtended { sub_op: operation as u8, operands });
                 } else if let Some(deref_qualified) = inner_type
                     .as_ref()
                     .and_then(|ty_name| {
@@ -46070,50 +46060,6 @@ fn reference_pointee_type_name(t: &str) -> Option<&str> {
         return None;
     };
     Some(pointee.trim())
-}
-
-/// Map a typed-reference's pointee name to the matching typed-deref
-/// `(SystemSubOpcode, size)` pair. Returns `Some` when the pointee is a
-/// C primitive smaller than 8 bytes — signals that `*ptr` should emit
-/// a typed deref (`crate::instruction::MemSubOpcode::DerefRawSigned` / `DerefRaw`) rather
-/// than the generic Value-sized `Deref`.
-///
-/// `t` is the inner expression's static type as text, e.g.
-/// `"&mut Int32"`, `"&UInt8"`, `"&Bool"`, `"&unsafe Int8"`.
-///
-/// Closes the codegen tail of #26 — pre-fix `*__error()` (where
-/// `__error: extern fn() -> &mut Int32`) read 8 bytes via `Deref`,
-/// leaking 4 bytes of adjacent TLS bookkeeping into the high half of
-/// `errno()`. Post-fix `compile_unary[UnOp::Deref]` consults this
-/// helper and emits `FfiExtended { DerefRawSigned, size=4 }` for any
-/// `&[mut] Int32` reference.
-///
-/// Pointees ≥ 8 bytes (`Int64`, `UInt64`, `Int`, `Float`, `Float64`)
-/// fall through to `None` — the generic 8-byte `Deref` is correct
-/// for them. `Float32` is currently unhandled (would need a typed
-/// load-and-fpext path); falls through to None as well — if user
-/// code derefs an `&Float32`, the upper 4 bytes leak — but that is
-/// an extremely rare FFI shape (most C `float` returns come back via
-/// register, not pointer).
-fn typed_primitive_pointee_deref(t: &str) -> Option<(crate::instruction::MemSubOpcode, u8)> {
-    let pointee = reference_pointee_type_name(t)?;
-    match pointee {
-        // Signed C primitives — sign-extend.
-        "Int8" | "i8" => Some((crate::instruction::MemSubOpcode::DerefRawSigned, 1)),
-        "Int16" | "i16" => Some((crate::instruction::MemSubOpcode::DerefRawSigned, 2)),
-        "Int32" | "i32" => Some((crate::instruction::MemSubOpcode::DerefRawSigned, 4)),
-        // Unsigned C primitives + bool/char — zero-extend. `DerefRaw`'s
-        // existing default semantics match the unsigned-byte-array
-        // invariant (CRC32 / wire-format reads).
-        "UInt8" | "u8" | "Byte" => Some((crate::instruction::MemSubOpcode::DerefRaw, 1)),
-        "UInt16" | "u16" => Some((crate::instruction::MemSubOpcode::DerefRaw, 2)),
-        "UInt32" | "u32" => Some((crate::instruction::MemSubOpcode::DerefRaw, 4)),
-        "Bool" => Some((crate::instruction::MemSubOpcode::DerefRaw, 1)),
-        "Char" => Some((crate::instruction::MemSubOpcode::DerefRaw, 4)),
-        // 8-byte primitives — generic `Deref` is already correct.
-        // Float32 punted (would need typed load-and-fpext path).
-        _ => None,
-    }
 }
 
 #[cfg(test)]

@@ -28447,16 +28447,19 @@ fn lower_mem_extended<'ctx>(
         // (0x20-0x25), byte/typed arrays (0x30-0x37), static-mut
         // (0x40-0x41) — migrated from lower_ffi_extended.
         // ================================================================
-        0x10 => {
-            // Format: dst:reg, ptr:reg, size:u8
-            if operands.len() < 3 {
-                return Err(LlvmLoweringError::internal(
-                    "DerefRaw: insufficient operands",
-                ));
-            }
-            let dst_reg = op_reg(operands, 0);
-            let ptr_reg = op_reg(operands, 1);
-            let size_bytes = operands[2];
+        0x10 | 0x17 | 0x1F => {
+            let dst_reg = read_reg_varlen(operands, &mut pos)?;
+            let ptr_reg = read_reg_varlen(operands, &mut pos)?;
+            let [representation] = operands[pos..] else {
+                return Err(LlvmLoweringError::internal("invalid scalar dereference representation"));
+            };
+            let (size_bytes, signed) = if sub_op == MemSubOpcode::DerefScalarRef as u8 {
+                let (native, width) = verum_vbc::module::CType::narrow_scalar(verum_vbc::types::TypeId(u32::from(representation)))
+                    .ok_or_else(|| LlvmLoweringError::internal("invalid scalar reference type"))?;
+                (width, native.is_signed_integer())
+            } else {
+                (representation, sub_op == MemSubOpcode::DerefRawSigned as u8)
+            };
 
             // Pass-through ref: Heap<T> is transparent in AOT — no actual allocation.
             // DerefRaw on a pass-through register should just forward the value.
@@ -28517,16 +28520,14 @@ fn lower_mem_extended<'ctx>(
             let ptr = as_ptr(ctx, ctx.get_register(ptr_reg)?, "ptr")?;
             let value = ffi.lower_deref_raw(ctx.builder(), ptr, size_bytes)?;
 
-            // Sign-extend to i64
             let i64_type = ctx.types().i64_type();
-            let value_i64 = if value.get_type().get_bit_width() < 64 {
-                ctx.builder()
-                    .build_int_s_extend(value, i64_type, "deref_sext")
-                    .or_llvm_err()?
-            } else {
+            let value_i64 = if value.get_type().get_bit_width() == 64 {
                 value
+            } else if signed {
+                ctx.builder().build_int_s_extend(value, i64_type, "deref_sext").or_llvm_err()?
+            } else {
+                ctx.builder().build_int_z_extend(value, i64_type, "deref_zext").or_llvm_err()?
             };
-
             ctx.set_register(dst_reg, value_i64.into());
             Ok(())
         }
@@ -28670,18 +28671,6 @@ fn lower_mem_extended<'ctx>(
 
             ctx.set_register(dst_reg, is_null.into());
             Ok(())
-        }
-
-        0x17 => {
-            // The AOT `DerefRaw` lowering above already emits a
-            // `build_int_s_extend` for sub-i64 reads, so the AOT
-            // semantics match `DerefRawSigned`'s contract (the
-            // interpreter is the one that historically chose
-            // zero-extension as `DerefRaw`'s default — see comment
-            // there). Reuse the same path: parse the same
-            // `(dst, ptr, size)` operand layout and recurse into the
-            // existing handler.
-            return lower_mem_extended(ctx, MemSubOpcode::DerefRaw as u8, operands);
         }
 
         0x18 => {

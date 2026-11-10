@@ -17,6 +17,33 @@ use crate::types::TypeId;
 use crate::value::Value;
 
 
+/// An encoded register reference is never a native address, including when
+/// an older archive used a sized raw load for a managed reference.
+fn scalar_register_slot(state: &InterpreterState, value: Value) -> InterpreterResult<Option<Value>> {
+    use super::cbgr_helpers::{decode_cbgr_ref, is_cbgr_ref, validate_cbgr_generation};
+    if !is_cbgr_ref(&value) { return Ok(None); }
+    let (slot, generation) = decode_cbgr_ref(value);
+    if slot as usize >= state.registers.top() {
+        return Err(InterpreterError::InvalidOperand { message: "scalar reference is outside the register stack".into() });
+    }
+    validate_cbgr_generation(state, slot, generation)?;
+    Ok(Some(state.registers.get_absolute(slot)))
+}
+
+fn raw_register_scalar(state: &InterpreterState, value: Value, width: u8, signed: bool) -> InterpreterResult<Option<Value>> {
+    use crate::module::CType;
+    let Some(slot) = scalar_register_slot(state, value)? else { return Ok(None) };
+    let storage = match (width, signed) {
+        (1, false) => CType::U8, (1, true) => CType::I8,
+        (2, false) => CType::U16, (2, true) => CType::I16,
+        (4, false) => CType::U32, (4, true) => CType::I32,
+        (8, false) => return Ok(Some(slot)),
+        (8, true) => CType::I64,
+        _ => return Err(InterpreterError::InvalidOperand { message: "invalid raw scalar width".into() }),
+    };
+    Ok(crate::ffi::read_native_scalar(storage, &slot.bits().to_ne_bytes()[..usize::from(width)]))
+}
+
 /// MemExtended (0xBF) - Memory allocation operations.
 ///
 /// Sub-opcodes:
@@ -393,6 +420,10 @@ fn mem_extended_body(
 
             // Accept both Pointer-tagged and Int-tagged values as raw addresses
             let val = state.get_reg(ptr_reg);
+            if let Some(value) = raw_register_scalar(state, val, size, false)? {
+                state.set_reg(dst, value);
+                return Ok(DispatchResult::Continue);
+            }
             // #54 IS-REGULAR-PTR sweep: a FatRef/ThinRef VALUE is a
             // MARKER — `as_ptr()` on it hands back the marker payload
             // (unmapped). Deref-raw on a reference deref's its REAL
@@ -756,6 +787,10 @@ fn mem_extended_body(
             let size = read_u8(state)?;
 
             let val = state.get_reg(ptr_reg);
+            if let Some(value) = raw_register_scalar(state, val, size, true)? {
+                state.set_reg(dst, value);
+                return Ok(DispatchResult::Continue);
+            }
             // #54 IS-REGULAR-PTR sweep: a FatRef/ThinRef VALUE is a
             // MARKER — `as_ptr()` on it hands back the marker payload
             // (unmapped). Deref-raw on a reference deref's its REAL
@@ -1228,6 +1263,62 @@ unsafe {
                 ptr.wrapping_sub(delta)
             };
             state.set_reg(dst, Value::from_i64(out));
+            Ok(DispatchResult::Continue)
+        }
+
+        0x1F => {
+            use crate::module::CType;
+            use crate::value::Capabilities;
+
+            let dst = read_reg(state)?;
+            let src = read_reg(state)?;
+            let scalar = TypeId(u32::from(read_u8(state)?));
+            let (kind, width) = CType::narrow_scalar(scalar).ok_or_else(|| InterpreterError::InvalidOperand {
+                message: "invalid scalar reference type".into(),
+            })?;
+            let reference = state.get_reg(src);
+            if let Some(value) = scalar_register_slot(state, reference)? {
+                state.set_reg(dst, value);
+                return Ok(DispatchResult::Continue);
+            }
+            let (address, permissions) = if reference.is_thin_ref() {
+                let thin = state.heap.thin_ref(reference)?;
+                (thin.ptr, Some(thin.capabilities()))
+            } else if reference.is_fat_ref() {
+                let fat = reference.as_fat_ref();
+                if fat.len() == 0 { return Err(InterpreterError::NullPointer); }
+                (fat.ptr(), Some(fat.capabilities()))
+            } else if reference.is_regular_ptr() {
+                (reference.as_ptr::<u8>(), None)
+            } else {
+                return Err(InterpreterError::InvalidOperand { message: "expected a scalar reference".into() });
+            };
+            if let Some(permissions) = permissions && !permissions.has(Capabilities::READ) {
+                return Err(InterpreterError::CapabilityDenied {
+                    required: u64::from(Capabilities::READ), actual: u64::from(permissions.0),
+                });
+            }
+            if address.is_null() { return Err(InterpreterError::NullPointer); }
+            // Managed projected fields are complete VM values, including their tags.
+            // A foreign pointer names native storage and has no register/slot identity.
+            let managed_slot = reference.is_projected_slot()
+                || (reference.is_fat_ref() && reference.as_fat_ref().len() == 1 && reference.as_fat_ref().reserved == 0)
+                || (state.cbgr_mutable_ptrs.contains(&(address as usize))
+                    && super::cbgr::bridge_extent_room(state, address as usize).is_none());
+            let value = if managed_slot {
+                // The producer validated a complete, initialized Value slot.
+                unsafe { std::ptr::read_unaligned(address.cast::<Value>()) }
+            } else {
+                // A foreign reference's declaration guarantees exactly these bytes.
+                let bytes = unsafe { std::slice::from_raw_parts(address, usize::from(width)) };
+                let native = crate::ffi::read_native_scalar(kind, bytes)
+                    .ok_or_else(|| InterpreterError::InvalidOperand { message: "invalid scalar reference size".into() })?;
+                if scalar == TypeId::CHAR {
+                    Value::from_char(char::from_u32(native.as_i64() as u32)
+                        .ok_or_else(|| InterpreterError::InvalidOperand { message: "foreign Char is not a Unicode scalar".into() })?)
+                } else { native }
+            };
+            state.set_reg(dst, value);
             Ok(DispatchResult::Continue)
         }
 

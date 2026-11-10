@@ -318,3 +318,13 @@ fn parameter_write_failure_is_checked_before_the_next_instruction() {
     assert!(lower_instruction(&mut ctx, &Instruction::RetV).is_err());
     assert!(entry.get_terminator().is_none());
 }
+
+#[test]
+fn narrow_native_references_keep_signedness_and_width() {
+    let output = ir(r#"
+        fn probe(s: &Int16, u: &UInt8) -> Int { (*s as Int) + (*u as Int) }
+    "#);
+    for instruction in ["load i16", "sext i16", "load i8", "zext i8"] {
+        assert!(output.contains(instruction), "missing {instruction} in {output}");
+    }
+}

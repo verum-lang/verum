@@ -5065,6 +5065,9 @@ pub enum MemSubOpcode {
     /// reader of the same storage that disagreed would be the defect
     /// this opcode exists to remove.
     DerefValue = 0x1E,
+    /// Read a narrow scalar reference from managed value storage or foreign
+    /// pointer storage (destination, reference, scalar TypeId).
+    DerefScalarRef = 0x1F,
     // -- Raw fixed-width leaves (0x20-0x2F), carried over from
     //    SystemSubOpcode 0x53-0x58.
     /// Load u8 (dst, addr).
@@ -5136,6 +5139,7 @@ impl MemSubOpcode {
             0x1C => Some(Self::PtrAddT),
             0x1D => Some(Self::PtrSubT),
             0x1E => Some(Self::DerefValue),
+            0x1F => Some(Self::DerefScalarRef),
             0x20 => Some(Self::RawLoadU8),
             0x21 => Some(Self::RawStoreU8),
             0x22 => Some(Self::RawLoadI32),

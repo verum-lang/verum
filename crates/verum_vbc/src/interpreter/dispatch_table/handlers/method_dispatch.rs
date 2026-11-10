@@ -407,6 +407,7 @@ struct DeclaredNumericMethod {
     function: FunctionId,
     register_count: u16,
     borrows_self: bool,
+    mutable_self: bool,
     float_self: bool,
 }
 
@@ -421,14 +422,21 @@ fn declared_numeric_method(
     {
         return None;
     }
-    let fid = state.module.find_function_by_name(method)?;
-    let function = state.module.get_function(fid)?;
-    // The legacy lookup permits suffixes, which cannot establish this owner.
-    if state.module.get_string(function.name) != Some(method)
-        || !function.has_source_body
-        || function.bytecode_length == 0
-        || function.params.len() != usize::from(argument_count) + 1
-    {
+    // Source modules can retain the local name on disk and its owner in a
+    // separate field. Both forms must identify the same declaration exactly.
+    let (type_name, member) = method.rsplit_once('.')?;
+    let local_name = type_name.rsplit_once('.').map(|(_, leaf)| format!("{leaf}.{member}"));
+    let mut candidates = state.module.functions_named(method)
+        .chain(local_name.as_deref().into_iter().flat_map(|key| state.module.functions_named(key)))
+        .filter(|(_, function)| {
+            let Some(stored) = state.module.get_string(function.name) else { return false };
+            let origin = function.origin_module.and_then(|id| state.module.get_string(id))
+                .unwrap_or(&state.module.name);
+            stored == method || crate::module::qualify_module_name(origin, stored) == method
+        }).filter(|(_, function)| function.has_source_body && function.bytecode_length > 0
+            && function.params.len() == usize::from(argument_count) + 1);
+    let (fid, function) = candidates.next()?;
+    if candidates.any(|(other, _)| other != fid) {
         return None;
     }
     let parameter = function.params.first()?;
@@ -447,6 +455,9 @@ fn declared_numeric_method(
             function: fid,
             register_count: function.register_count,
             borrows_self,
+            mutable_self: matches!(&parameter.type_ref, crate::types::TypeRef::Reference {
+                mutability: crate::types::Mutability::Mutable, ..
+            }),
             float_self: matches!(receiver_type, crate::types::TypeRef::Concrete(id) if id.is_float()),
         })
 }
@@ -875,8 +886,18 @@ fn execute_method_call(
     if let Some(target) = declared_numeric
         && (target.borrows_self || !is_cbgr_ref(&receiver))
     {
-        let receiver_slot = (!target.borrows_self)
-            .then_some(state.reg_base() + u32::from(receiver_reg.0));
+        let slot = state.reg_base() + u32::from(receiver_reg.0);
+        let receiver_slot = (!target.borrows_self).then_some(slot);
+        let receiver = if target.borrows_self && !is_cbgr_ref(&receiver) {
+            let generation = state.registers.get_generation(slot);
+            if target.mutable_self {
+                super::cbgr_helpers::encode_cbgr_ref_mut(slot, generation)
+            } else {
+                super::cbgr_helpers::encode_cbgr_ref(slot, generation)
+            }
+        } else {
+            receiver
+        };
         return enter_declared_numeric_method(
             state, target, receiver, receiver_slot, &args, dst, take_witness(&state.module, target.function)?,
         );

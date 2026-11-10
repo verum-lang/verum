@@ -54,6 +54,30 @@ pub mod platform;
 pub mod marshal;
 #[cfg(feature = "ffi")]
 pub mod runtime;
+
+/// Decode a scalar without assuming that a foreign field is naturally aligned.
+pub(crate) fn read_native_scalar(ty: crate::module::CType, bytes: &[u8]) -> Option<crate::value::Value> {
+    use crate::value::Value;
+    use crate::module::CType::*;
+    Some(match ty {
+        I8 => Value::from_i64(i8::from_ne_bytes(bytes.try_into().ok()?) as i64),
+        U8 => Value::from_i64(u8::from_ne_bytes(bytes.try_into().ok()?) as i64),
+        Bool => Value::from_bool(u8::from_ne_bytes(bytes.try_into().ok()?) != 0),
+        I16 => Value::from_i64(i16::from_ne_bytes(bytes.try_into().ok()?) as i64),
+        U16 => Value::from_i64(u16::from_ne_bytes(bytes.try_into().ok()?) as i64),
+        I32 => Value::from_i64(i32::from_ne_bytes(bytes.try_into().ok()?) as i64),
+        U32 => Value::from_i64(u32::from_ne_bytes(bytes.try_into().ok()?) as i64),
+        I64 | U64 => Value::from_i64(i64::from_ne_bytes(bytes.try_into().ok()?)),
+        Size | Ssize => Value::from_i64(isize::from_ne_bytes(bytes.try_into().ok()?) as i64),
+        F32 => Value::from_f64(f32::from_ne_bytes(bytes.try_into().ok()?) as f64),
+        F64 => Value::from_f64(f64::from_ne_bytes(bytes.try_into().ok()?)),
+        Ptr | CStr | StructPtr | ArrayPtr | FnPtr => {
+            Value::from_ptr(usize::from_ne_bytes(bytes.try_into().ok()?) as *mut u8)
+        }
+        Void | StructValue => return None,
+    })
+}
+
 #[cfg(feature = "ffi")]
 pub mod trampolines;
 

@@ -67,7 +67,7 @@ fn unpack_native_fields(
                 .ok_or_else(|| InterpreterError::FfiRuntimeError("invalid nested native return layout".into()))?;
             unpack_native_fields(state, layouts, nested, raw, depth + 1)?
         } else {
-            crate::ffi::runtime::read_native_scalar(field.c_type, raw)
+            crate::ffi::read_native_scalar(field.c_type, raw)
                 .ok_or_else(|| InterpreterError::FfiRuntimeError("invalid native return field width".into()))?
         };
         // SAFETY: the allocation has one Value slot per declared field; slot is its index.

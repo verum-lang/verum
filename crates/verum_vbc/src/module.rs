@@ -3669,6 +3669,26 @@ pub enum CType {
 }
 
 impl CType {
+    /// Native representation of a language scalar narrower than a VM value.
+    /// The semantic type stays on the wire: Bool and Char use their own VM tags.
+    pub fn narrow_scalar(ty: TypeId) -> Option<(Self, u8)> {
+        Some(match ty {
+            TypeId::I8 => (Self::I8, 1),
+            TypeId::I16 => (Self::I16, 2),
+            TypeId::I32 => (Self::I32, 4),
+            TypeId::U8 => (Self::U8, 1),
+            TypeId::U16 => (Self::U16, 2),
+            TypeId::U32 | TypeId::CHAR => (Self::U32, 4),
+            TypeId::BOOL => (Self::Bool, 1),
+            _ => return None,
+        })
+    }
+
+    /// Whether sign extension preserves this C integer's value.
+    pub fn is_signed_integer(self) -> bool {
+        matches!(self, Self::I8 | Self::I16 | Self::I32 | Self::I64 | Self::Ssize)
+    }
+
     /// Returns true if this C type is a pointer type.
     ///
     /// Pointer types include: Ptr, CStr, StructPtr, ArrayPtr, FnPtr.

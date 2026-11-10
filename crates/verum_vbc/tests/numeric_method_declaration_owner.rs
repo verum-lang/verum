@@ -641,3 +641,80 @@ fn static_scalar_alias_does_not_capture_a_nominal_homonym() {
         fn probe() -> Int { UInt8.stamp() * 100 + records.read() }
     "#, 1791);
 }
+
+#[test]
+fn safe_narrow_receivers_read_the_callers_value_slot() {
+    check(r#"
+        type Read is protocol { fn read(&self) -> Int; };
+        implement Read for Byte { fn read(&self) -> Int { *self as Int } }
+        fn forwarded(value: &UInt8) -> Int { *value as Int }
+        fn probe() -> Int {
+            let direct: UInt8 = 229 as UInt8;
+            direct.read() * 1000 + forwarded(&direct)
+        }
+    "#, 229229);
+}
+
+#[test]
+fn a_numeric_argument_cannot_supply_a_safe_reference_to_native_memory() {
+    let module = compile("public fn read(p: &UInt8) -> Int { *p as Int }");
+    for module in [module.clone(), roundtrip(&module)] {
+        let entry = module.find_function_by_name("numeric_owner.read").expect("read body");
+        let mut vm = Interpreter::new(Shared::new(module).into_arc());
+        let error = vm.execute_function_with_args(entry, &[verum_vbc::Value::from_i64(229)]).unwrap_err();
+        assert!(matches!(error, verum_vbc::interpreter::InterpreterError::InvalidOperand { .. }), "{error:?}");
+    }
+}
+
+#[test]
+fn a_forwarded_native_reference_loads_only_its_declared_scalar() {
+    let module = compile("public fn read(p: &Int32) -> Int { *p as Int }");
+    let mut native = [-12345_i32, 0x11223344_i32];
+    for module in [module.clone(), roundtrip(&module)] {
+        let entry = module.find_function_by_name("numeric_owner.read").expect("read body");
+        let mut vm = Interpreter::new(Shared::new(module).into_arc());
+        let value = vm.execute_function_with_args(entry, &[
+            verum_vbc::Value::from_ptr(native.as_mut_ptr().cast::<u8>()),
+        ]).expect("foreign scalar read");
+        assert_eq!(value.try_as_i64(), Some(-12345));
+    }
+}
+
+#[test]
+fn a_foreign_call_result_keeps_its_declared_reference_width() {
+    let source = compile(r#"
+        @ffi("external") extern { fn source() -> &mut Int32; }
+        fn read() -> Int { unsafe { *source() as Int } }
+    "#);
+    for module in [source.clone(), roundtrip(&source)] {
+        let f = module.get_function(module.find_function_by_name("numeric_owner.read").unwrap()).unwrap();
+        let start = f.bytecode_offset as usize;
+        let code = verum_vbc::bytecode::decode_instructions(
+            &module.bytecode[start..start + f.bytecode_length as usize],
+        ).unwrap();
+        assert!(code.iter().any(|op| matches!(op,
+            Instruction::MemExtended { sub_op, operands }
+                if *sub_op == verum_vbc::instruction::MemSubOpcode::DerefScalarRef as u8
+                    && operands.last() == Some(&(verum_vbc::types::TypeId::I32.0 as u8)))), "{code:?}");
+    }
+}
+
+#[test]
+fn narrow_foreign_references_preserve_bool_and_unicode_value_tags() {
+    let source = compile("public fn bit(p: &Bool) -> Bool { *p } public fn letter(p: &Char) -> Char { *p }");
+    for module in [source.clone(), roundtrip(&source)] {
+        let bit = module.find_function_by_name("numeric_owner.bit").unwrap();
+        let letter = module.find_function_by_name("numeric_owner.letter").unwrap();
+        let mut vm = Interpreter::new(Shared::new(module).into_arc());
+        let mut native_bit = [1u8, 0xCC];
+        let mut native_chars = [u32::from('λ'), 0x12345678];
+        let actual_bit = vm.execute_function_with_args(bit, &[
+            verum_vbc::Value::from_ptr(native_bit.as_mut_ptr()),
+        ]).unwrap();
+        let actual_letter = vm.execute_function_with_args(letter, &[
+            verum_vbc::Value::from_ptr(native_chars.as_mut_ptr().cast::<u8>()),
+        ]).unwrap();
+        assert!(actual_bit.is_bool() && actual_bit.as_bool());
+        assert_eq!(actual_letter.bits(), verum_vbc::Value::from_char('λ').bits());
+    }
+}
