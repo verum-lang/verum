@@ -1202,7 +1202,7 @@ pub struct VbcCodegen {
     /// k-th same-signature LOOKUP pairs with the k-th same-signature
     /// ordinal key.  Keyed by (qualified_name, param_type_names).
     sibling_pairing_counters:
-        std::collections::HashMap<(&'static str, String, Vec<String>), u32>,
+        std::collections::HashMap<(String, Vec<String>), u32>,
 
     /// FN-BOUND-CARRY (T0701 next-leg): the CURRENT impl block's AST
     /// generic params, armed around the impl-item compile loop.  The
@@ -10073,6 +10073,7 @@ impl VbcCodegen {
                     false
                 };
 
+                let mut declared_methods = indexmap::IndexMap::new();
                 for impl_item in selected_items.iter() {
                     match &impl_item.kind {
                         verum_ast::decl::ImplItemKind::Function(func) => {
@@ -10119,6 +10120,10 @@ impl VbcCodegen {
                                 // Fallback: register by simple name if type extraction failed
                                 // This shouldn't happen often now that we handle more type kinds
                                 function_id = self.register_function(func)?;
+                            }
+
+                            if is_protocol_impl {
+                                declared_methods.insert(func.name.name.to_string(), function_id.0);
                             }
 
                             // Recursively collect nested declarations from impl function body
@@ -10215,22 +10220,10 @@ impl VbcCodegen {
                         _ => None,
                     });
                     if let Some(pn) = protocol_name {
-                        // Get methods explicitly implemented
-                        let implemented_methods: std::collections::HashSet<String> = selected_items
-                            .iter()
-                            .filter_map(|item| {
-                                if let verum_ast::decl::ImplItemKind::Function(func) = &item.kind {
-                                    Some(func.name.name.to_string())
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect();
-
                         // Generate default methods from protocol
                         let instance = self.record_concrete_impl_bindings(impl_decl, &selected_items);
                         self.generate_default_protocol_methods(
-                            ty_name, impl_decl, instance.as_ref(), &implemented_methods,
+                            ty_name, impl_decl, instance.as_ref(), &declared_methods.keys().cloned().collect(),
                         )?;
 
                         // Populate TypeDescriptor.protocols for vtable-based dispatch.
@@ -10276,29 +10269,11 @@ impl VbcCodegen {
                             // where the protocol type is declared.
                             let method_names: Vec<String> = {
                                 let mut names = method_names;
-                                // DECLARATION order, not HashSet order:
-                                // iterating `implemented_methods` (a
-                                // HashSet) permuted the appended tail
-                                // per process run — ProtocolImpl.methods
-                                // is position-indexed by consumers
-                                // (`methods[0]` Display probe, vtable-
-                                // style dispatch), and the archive
-                                // serializes the Vec verbatim, so hash
-                                // order broke bake BYTE-IDENTITY (P2)
-                                // and flipped dispatch between bakes
-                                // (task #52: RedisCacheAdapter's 8
-                                // methods reshuffled per bake).  Walk
-                                // the impl block's ordered AST items —
-                                // the same source the HashSet was built
-                                // from — so the union is canonical.
-                                for item in selected_items.iter() {
-                                    if let verum_ast::decl::ImplItemKind::Function(func) =
-                                        &item.kind
-                                    {
-                                        let m = func.name.name.as_str();
-                                        if !names.iter().any(|n| n == m) {
-                                            names.push(m.to_string());
-                                        }
+                                // Append extra impl members in declaration order for imported
+                                // protocols whose interface does not contain the full roster.
+                                for name in declared_methods.keys() {
+                                    if !names.contains(name) {
+                                        names.push(name.clone());
                                     }
                                 }
                                 names
@@ -10306,87 +10281,10 @@ impl VbcCodegen {
                             let method_fn_ids: Vec<u32> = method_names
                                 .iter()
                                 .map(|method_name| {
-                                    let qualified = self.source_impl_method_key(ty_name, method_name);
-                                    // SIBLING-IMPL-MATERIALIZATION-1: when
-                                    // sibling impls exist for this
-                                    // (type, method), THIS impl block's
-                                    // ProtocolImpl must carry ITS OWN
-                                    // method's fid — content-match the
-                                    // registration by the impl item's
-                                    // extracted param-type names (the
-                                    // same vector register_impl_function
-                                    // stored), mirroring
-                                    // compile_function's self-pairing.
-                                    let own_decl_types: Option<Vec<String>> = selected_items
-                                        .iter()
-                                        .find_map(|item| {
-                                            if let verum_ast::decl::ImplItemKind::Function(f) =
-                                                &item.kind
-                                                && f.name.name.as_str() == method_name.as_str()
-                                            {
-                                                Some(
-                                                    f.params
-                                                        .iter()
-                                                        .filter_map(|p| {
-                                                            if let verum_ast::decl::FunctionParamKind::Regular { ty, .. } = &p.kind {
-                                                                let n = Self::extract_type_name_from_ast(ty);
-                                                                let n = Self::substitute_self_in_type_name(&n, ty_name);
-                                                                if !n.is_empty() && n != "()" { Some(n) } else { None }
-                                                            } else {
-                                                                None
-                                                            }
-                                                        })
-                                                        .collect(),
-                                                )
-                                            } else {
-                                                None
-                                            }
-                                        });
-                                    if let Some(decl_types) = own_decl_types
-                                        && self
-                                            .ctx
-                                            .lookup_function(&format!("{}#impl2", qualified))
-                                            .is_some()
-                                    {
-                                        // Same-signature siblings tie-break
-                                        // POSITIONALLY (T0585 ERROR-14) —
-                                        // see `sibling_pairing_counters`.
-                                        let mut matches: Vec<u32> = Vec::new();
-                                        let mut key = qualified.clone();
-                                        let mut n = 1u32;
-                                        loop {
-                                            match self.ctx.lookup_function(&key) {
-                                                Some(cand) => {
-                                                    if cand.param_type_names == decl_types {
-                                                        matches.push(cand.id.0);
-                                                    }
-                                                }
-                                                None if n > 1 => break,
-                                                None => {}
-                                            }
-                                            n += 1;
-                                            key = format!("{}#impl{}", qualified, n);
-                                        }
-                                        if !matches.is_empty() {
-                                            let pick = if matches.len() == 1 {
-                                                0
-                                            } else {
-                                                let c = self
-                                                    .sibling_pairing_counters
-                                                    .entry((
-                                                        "table",
-                                                        qualified.clone(),
-                                                        decl_types.clone(),
-                                                    ))
-                                                    .or_insert(0);
-                                                let k =
-                                                    (*c as usize).min(matches.len() - 1);
-                                                *c += 1;
-                                                k
-                                            };
-                                            return matches[pick];
-                                        }
+                                    if let Some(id) = declared_methods.get(method_name) {
+                                        return *id;
                                     }
+                                    let qualified = self.source_impl_method_key(ty_name, method_name);
                                     self.ctx
                                         .lookup_function(&qualified)
                                         .map(|fi| fi.id.0)
@@ -19576,7 +19474,7 @@ impl VbcCodegen {
                     } else {
                         let c = self
                             .sibling_pairing_counters
-                            .entry(("body", qualified.clone(), decl_param_types.clone()))
+                            .entry((qualified.clone(), decl_param_types.clone()))
                             .or_insert(0);
                         let k = (*c as usize).min(matches.len() - 1);
                         *c += 1;
