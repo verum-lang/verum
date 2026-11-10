@@ -325,3 +325,38 @@ fn foreign_safe_protocol_does_not_impose_dyn_on_current_header() {
         "wrong owner acquired object-safety obligation: {e:#?}"
     );
 }
+
+#[test]
+fn packaging_a_protocol_requires_implementation_evidence() {
+    let declarations = "
+        type Sink is protocol { fn put(&mut self, n: Int); };
+        type Other is protocol { fn tag(&self) -> Int; };
+        type Log is { last: Int };
+        type Wrong is { last: Int };
+        implement Sink for Log { fn put(&mut self, n: Int) { self.last = n; } }
+    ";
+    for protocol in ["dyn Sink", "Sink"] {
+        let signature = format!("{declarations} fn write(s: &mut {protocol}) {{ s.put(37); }}");
+        good(&format!("{signature} fn route(s: &mut Log) {{ write(s); }}"));
+        good(&format!("{signature} fn route<T: Sink>(s: &mut T) {{ write(s); }}"));
+        bad(&format!("{signature} fn route(s: &mut Wrong) {{ write(s); }}"));
+        bad(&format!("{signature} fn route<T>(s: &mut T) {{ write(s); }}"));
+        bad(&format!("{signature} fn immutable(s: &Log) {{ write(s); }}"));
+    }
+    good(&format!("{declarations} fn erase(s: &Log) -> &dyn Sink {{ s as &dyn Sink }}"));
+    bad(&format!("{declarations} fn erase(s: &Wrong) -> &dyn Sink {{ s as &dyn Sink }}"));
+    bad(&format!("{declarations} fn erase(s: &dyn Sink) -> &Log {{ s as &Log }}"));
+    bad(&format!("{declarations} fn both(s: &Log) -> &dyn Sink + Other {{ s }}"));
+}
+
+#[test]
+fn erasure_preserves_declared_associated_equalities() {
+    let declarations = "
+        type Source is protocol { type Item; fn read(&self) -> Int; };
+        type Log is { last: Int };
+        implement Source for Log { type Item = Int; fn read(&self) -> Int { self.last } }
+    ";
+    good(&format!("{declarations} fn get(x: &Log) -> &dyn Source<Item = Int> {{ x }}"));
+    bad(&format!("{declarations} fn get(x: &Log) -> &dyn Source<Item = Bool> {{ x }}"));
+    bad(&format!("{declarations} fn get(x: &Log) -> &dyn Source<Missing = Int> {{ x }}"));
+}

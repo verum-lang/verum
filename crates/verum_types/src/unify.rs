@@ -61,15 +61,8 @@ pub struct Unifier {
     /// Used for stdlib-agnostic Generic<->Variant unification to properly map
     /// type arguments to their corresponding positions in the variant structure.
     original_variant_types: Map<Text, Type>,
-    /// PROTOCOL-PARAM-SUBSUMPTION-1 (#44-B): names registered as
-    /// PROTOCOLS — fed by every protocol-registration path (source
-    /// decls, metadata eager + lazy loaders). A concrete type in
-    /// FOUND position unifies with an EXPECTED type whose name is in
-    /// this set (`fn hash(&self, hasher: &mut Hasher)` receiving
-    /// `&mut DefaultHasher`), mirroring the DynProtocol arm's
-    /// documented trust discipline (impl registration is validated at
-    /// call sites by the protocol checker). Stdlib-agnostic: the set
-    /// carries whatever the program registered; never hardcode.
+    /// Protocol declaration keys retain nominal identity during unification.
+    /// Only the type checker has the evidence needed to erase a carrier.
     protocol_names: std::collections::HashSet<Text>,
     /// Type variable orders for each variant type.
     /// Key is the type name, value is the list of TypeVars in declaration order.
@@ -484,8 +477,7 @@ impl Unifier {
     /// alias-aware lookup eliminates them entirely — the literal
     /// alias name is checked first, and only falls through to
     /// the resolved head when the direct lookup misses.
-    /// PROTOCOL-PARAM-SUBSUMPTION-1: mark `name` as a protocol so the
-    /// concrete→protocol unify arm can subsume (see the field doc).
+    /// Register a protocol's resolved declaration key.
     pub fn register_protocol_name(&mut self, name: &str) {
         self.protocol_names.insert(Text::from(name));
     }
@@ -2783,16 +2775,13 @@ impl Unifier {
                 Ok(subst)
             }
 
-            // Concrete type → dyn Protocol coercion.
-            // A concrete type can be used where &dyn Protocol is expected if it
-            // implements the protocol. We trust the impl-block registration and
-            // allow the coercion — the protocol checker validates at call sites.
-            (_, DynProtocol { .. }) => {
-                // Accept any concrete type as dyn Protocol.
-                // Full protocol impl checking is done at the call site in infer.rs.
-                Ok(Substitution::new())
-            }
-            (DynProtocol { .. }, _) => Ok(Substitution::new()),
+            // Erasing a concrete carrier requires implementation evidence.
+            // Equality cannot establish that evidence or recover an erased carrier.
+            (_, DynProtocol { .. }) | (DynProtocol { .. }, _) => Err(TypeError::Mismatch {
+                expected: t2.to_text(),
+                actual: t1.to_text(),
+                span,
+            }),
 
             // Reference types with coercion rules
             // Unified reference model: &T (managed CBGR ~15ns), &checked T (statically verified 0ns), &unsafe T (unchecked 0ns) — .3.3 - Three-Tier Reference Coercion
@@ -3156,26 +3145,15 @@ impl Unifier {
                 Ok(Substitution::new())
             }
 
-            // PROTOCOL-PARAM-SUBSUMPTION-1 (#44-B): a CONCRETE found
-            // type unifies with an EXPECTED type whose name is a
-            // registered PROTOCOL (`hasher: &mut Hasher` receiving
-            // `&mut DefaultHasher` — reference arms recurse into this
-            // Named-level rule). Same trust as the DynProtocol arm
-            // (impl registration validated at call sites). Asymmetric
-            // by design: only the EXPECTED side being a protocol
-            // grants subsumption; protocol-vs-protocol falls through
-            // to exact matching.
-            (Named { path: p1, .. }, Named { path: p2, .. })
-                if self.protocol_names.contains(p2.last_segment_name())
-                    && !self.protocol_names.contains(p1.last_segment_name()) =>
+            // A named protocol has declaration identity even when its spelling
+            // is also used as the type of an erased receiver. The type checker
+            // establishes the directional coercion from the source implementation.
+            (Named { path: actual, .. }, Named { path: expected, .. })
+                if !crate::ty::same_type_path(actual, expected)
+                    && crate::ty::nominal_path_name(expected)
+                        .is_some_and(|name| self.protocol_names.contains(name.as_ref())) =>
             {
-                Ok(Substitution::new())
-            }
-            (Generic { name: n1, .. }, Named { path: p2, .. })
-                if self.protocol_names.contains(p2.last_segment_name())
-                    && !self.protocol_names.contains(n1.as_str()) =>
-            {
-                Ok(Substitution::new())
+                Err(TypeError::Mismatch { expected: t2.to_text(), actual: t1.to_text(), span })
             }
 
             // META TYPE COERCION: TokenStream ↔ @Expr/@Ident/@Type etc.
