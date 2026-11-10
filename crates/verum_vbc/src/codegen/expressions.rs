@@ -27031,24 +27031,6 @@ impl VbcCodegen {
                     VbcCodegen::strip_generic_args(&resolved).to_string()
                 });
 
-            // Names select conversion declarations below. They do not prove
-            // residual compatibility: that requires the complete TypeRef,
-            // including nested error arguments and their nominal owners.
-            let err_arg_of = |full: Option<&str>| -> Option<String> {
-                full.map(|t| self.extract_inner_types(t))
-                    .and_then(|args| args.get(1).cloned())
-                    .map(|a| {
-                        let stripped = VbcCodegen::strip_generic_args(a.trim()).to_string();
-                        self.resolve_type_alias(&stripped)
-                    })
-            };
-            let inner_err_arg: Option<String> = if is_result_type {
-                err_arg_of(type_name.as_deref())
-            } else {
-                None
-            };
-            let outer_err_arg: Option<String> =
-                err_arg_of(self.ctx.function_return_type_name.as_deref());
             let outer_declared = self.ctx.function_return_declaration.clone()
                 .and_then(|ty| self.expand_declared_alias(ty))
                 .or_else(|| self.ctx.function_return_type_name.as_deref()
@@ -27080,15 +27062,13 @@ impl VbcCodegen {
                 && is_result_type && declared.as_ref().and_then(error_type).is_some();
             if std::env::var("VERUM_TRACE_PAT").is_ok() {
                 eprintln!(
-                    "[try-trace] fn={:?} inner_ty={:?} outer_rtn={:?} outer_base={:?} is_res={} is_maybe={} err_args=({:?},{:?}) declarations=({:?},{:?}) same={}",
+                    "[try-trace] fn={:?} inner_ty={:?} outer_rtn={:?} outer_base={:?} is_res={} is_maybe={} declarations=({:?},{:?}) same={}",
                     self.ctx.current_function,
                     type_name,
                     self.ctx.function_return_type_name,
                     outer_base,
                     is_result_type,
                     is_maybe_type,
-                    inner_err_arg,
-                    outer_err_arg,
                     declared,
                     outer_declared,
                     same_type
@@ -27100,99 +27080,28 @@ impl VbcCodegen {
             };
             if same_type || inferred_result_residual {
                 emit_residual_return(self, inner_reg);
+            } else if (is_result_type || is_maybe_type)
+                && let (Some(input), Some(output)) = (declared.as_ref(), outer_declared.as_ref())
+                && let Some(conversion) = self.declared_residual_conversion(input, output, span)?
+            {
+                let converted = self.emit_residual_conversion(conversion, inner_reg);
+                emit_residual_return(self, converted);
+                self.ctx.free_temp(converted);
             } else if is_result_type
                 && outer_nominal == Some(crate::types::TypeId::RESULT)
-                && let (Some(inner_err), Some(outer_err)) =
-                    (inner_err_arg.as_deref(), outer_err_arg.as_deref())
+                && let (Some(input), Some(output)) = (declared.as_ref().and_then(error_type), outer_declared.as_ref().and_then(error_type))
+                && let Some(conversion) = self.declared_error_conversion(&input, &output, span)?
             {
-                // Result→Result with DIFFERENT error types: the `?`
-                // contract is `Err(e) => return Err(From::from(e))`.
-                // Resolve the CONCRETE `<OuterErr>.from` overload by its
-                // carried parameter type (FunctionInfo.param_type_names —
-                // registration fact, not a name-dice pick among multiple
-                // `From<X> for OuterErr` impls).
-                let from_fid: Option<u32> = {
-                    let exact = self
-                        .ctx
-                        .lookup_function(&format!("{outer_err}.from"))
-                        .filter(|fi| {
-                            fi.param_count == 1
-                                && fi
-                                    .param_type_names
-                                    .first()
-                                    .map(|p| {
-                                        let pb = VbcCodegen::strip_generic_args(p.trim());
-                                        pb == inner_err
-                                    })
-                                    .unwrap_or(true)
-                        })
-                        .map(|fi| fi.id.0);
-                    exact.or_else(|| {
-                        // Param-typed scan across qualified overloads
-                        // (`Outer.from` may live under a dotted module
-                        // prefix): suffix walk constrained by the SAME
-                        // carried param fact — deterministic because the
-                        // param-type filter admits at most the impls the
-                        // typechecker already validated.
-                        let suffix = format!(".{outer_err}.from");
-                        self.ctx
-                            .functions
-                            .iter()
-                            .filter(|(name, _)| name.ends_with(&suffix))
-                            .filter_map(|(_, fi)| {
-                                (fi.param_count == 1
-                                    && fi
-                                        .param_type_names
-                                        .first()
-                                        .map(|pn| {
-                                            VbcCodegen::strip_generic_args(pn.trim())
-                                                == inner_err
-                                        })
-                                        .unwrap_or(false))
-                                .then_some(fi.id.0)
-                            })
-                            .min()
-                    })
-                };
-                if let Some(from_fid) = from_fid {
-                    // Err payload → From::from → Err(_) of the OUTER type.
-                    let err_payload = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::AsVar {
-                        dst: err_payload,
-                        value: inner_reg,
-                        tag: 0,
-                    });
-                    let converted = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::Call {
-                        dst: converted,
-                        func_id: from_fid,
-                        args: crate::instruction::RegRange::new(err_payload, 1),
-                    });
-                    let err_tag = result_success_tag() ^ 1;
-                    // (contract: dst-first, Option<parent> last — the
-                    // typed-or-legacy variant emitter; see fn at 421)
-                    let out_variant = self.ctx.alloc_temp();
-                    self.emit_make_variant(out_variant, err_tag, 1, Some("Result"));
-                    self.ctx.emit(Instruction::SetVariantData {
-                        variant: out_variant,
-                        field: 0,
-                        value: converted,
-                    });
-                    emit_residual_return(self, out_variant);
-                    self.ctx.free_temp(err_payload);
-                    self.ctx.free_temp(converted);
-                    self.ctx.free_temp(out_variant);
-                } else {
-                    // No single carried-fact From target — fall through to
-                    // the from_residual machinery below via direct Ret
-                    // (today's behaviour), leaving a trace for the census.
-                    tracing::trace!(
-                        "compile_try: no param-typed {}.from({}) — direct Ret fallback",
-                        outer_err,
-                        inner_err,
-                    );
-                    emit_residual_return(self, inner_reg);
-                }
+                let error = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::GetVariantData { dst: error, variant: inner_reg, field: 0 });
+                let converted = self.emit_residual_conversion(conversion, error);
+                let returned = self.ctx.alloc_temp();
+                self.emit_make_variant(returned, result_success_tag() ^ 1, 1, Some("Result"));
+                self.ctx.emit(Instruction::SetVariantData { variant: returned, field: 0, value: converted });
+                emit_residual_return(self, returned);
+                self.ctx.free_temp(error);
+                self.ctx.free_temp(converted);
+                self.ctx.free_temp(returned);
             } else {
                 // Cross-type: call `<OuterType>::from_residual(inner_reg)` then Ret.
                 // Look up the registered from_residual function for the outer type.

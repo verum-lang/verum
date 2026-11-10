@@ -102,7 +102,7 @@ impl VbcCodegen {
     }
     /// Forward interfaces and compiled declarations can both describe one
     /// implementation. Only a declared, unambiguous member is evidence.
-    fn associated_binding<'a>(
+    pub(super) fn associated_binding<'a>(
         &'a self,
         implementations: impl Iterator<Item = &'a crate::types::ProtocolImpl>,
         member: &str,

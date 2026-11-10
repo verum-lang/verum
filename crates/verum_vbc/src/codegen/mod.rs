@@ -76,6 +76,7 @@ mod impl_method_registrations;
 mod blanket_impls;
 mod cfg_selection;
 mod protocol_results;
+mod residuals;
 mod constructor_types;
 mod declaration_interface;
 mod forward_declarations;
