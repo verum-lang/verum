@@ -106,6 +106,30 @@ fn a_residual_obligation_finds_only_the_blanket_from_its_own_protocol() {
     assert!(errors.iter().any(|error| error.contains("FromResidual")), "{errors:?}");
 }
 
+#[test]
+fn callable_results_retain_their_declaring_sum_through_type_composition() {
+    let result = format!("{RESULT} {RESIDUAL_IMPL}");
+    let modules = [
+        ("core.base.result", result.as_str()), ("core.base.ops", OPERATIONS),
+        ("core.base.protocols", CONVERSIONS),
+    ];
+    let imports = "mount core.base.result.{Result, Ok};";
+    for body in [
+        "fn call<E,F: fn(Int)->Result<Int,E>>(f:F)->Result<Int,E> { Ok(f(3)?) }",
+        "type Response<T> is Result<T,Int>; fn call(f:fn()->Response<Int>)->Result<Int,Int> { Ok(f()?) }",
+        "fn call(f:fn()->Result<Result<Int,Int>,Int>)->Result<Int,Int> { let v=f()?; Ok(v?) }",
+        "fn call(f:fn()->(Result<Int,Int>,Bool))->Result<Int,Int> { let (v,_) = f(); Ok(v?) }",
+        "fn call(f:fn<T>(T)->Result<T,Int>)->Result<Int,Int> { Ok(f(3)?) }",
+        "fn read()->Result<Int,Int> { Ok(4) } type S is protocol { async fn go(&mut self)->Result<Int,Int>; }; type L is {}; implement S for L { async fn go(&mut self)->Result<Int,Int> { Ok(read()?) } }",
+    ] {
+        let errors = check(&format!("{imports} {body}"), &modules);
+        assert!(errors.is_empty(), "{body}: {errors:?}");
+    }
+    let foreign = "type Shadow<A,E> is Ok(A) | Err(E); fn wrong(f:fn()->Shadow<Int,Int>)->Result<Int,Int> { Ok(f()?) }";
+    let errors = check(&format!("{imports} {foreign}"), &modules);
+    assert!(errors.iter().any(|error| error.contains("NotResultOrMaybe")), "{errors:?}");
+}
+
 fn check_with_checker(consumer: &str, modules: &[(&str, &str)]) -> (TypeChecker, List<Text>) {
     check_with_module_aliases(consumer, modules, &[])
 }

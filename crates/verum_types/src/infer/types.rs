@@ -64,10 +64,11 @@ use verum_common::{Heap, List, Map, Maybe, Set, Shared, Text, ToText};
 #[allow(unused_imports)]
 use verum_modules::{ModulePath, ModuleRegistry, NameResolver, resolver::NameKind};
 
-enum ApplicationForm {
+#[derive(Clone, Copy)]
+pub(super) enum ApplicationForm {
     Expanded,
     Nominal,
-    ProtocolArgument,
+    DeclaredSum,
 }
 
 impl TypeChecker {
@@ -616,6 +617,18 @@ impl TypeChecker {
     }
 
     pub fn ast_to_type(&mut self, ast_ty: &verum_ast::ty::Type) -> Result<Type> {
+        self.ast_to_type_with_form(ast_ty, ApplicationForm::Expanded)
+    }
+
+    /// Keep the identity of sums in source signatures and alias targets.
+    /// Their representation can be expanded when an operation needs the cases.
+    pub(super) fn declared_type(&mut self, ast_ty: &verum_ast::Type) -> Result<Type> {
+        self.ast_to_type_with_form(ast_ty, ApplicationForm::DeclaredSum)
+    }
+
+    pub(super) fn ast_to_type_with_form(
+        &mut self, ast_ty: &verum_ast::Type, form: ApplicationForm,
+    ) -> Result<Type> {
         let head = match &ast_ty.kind {
             verum_ast::ty::TypeKind::Generic { base, .. } => &base.kind,
             kind => kind,
@@ -656,7 +669,7 @@ impl TypeChecker {
             }
         };
 
-        self.ast_to_type_inner(ast_ty)
+        self.ast_to_type_inner(ast_ty, form)
     }
 
     pub(super) fn source_callable_type(
@@ -678,10 +691,10 @@ impl TypeChecker {
         Ok(callable.with_async_property(is_async))
     }
 
-    fn elaborate_array_type(&mut self, ast_ty: &verum_ast::Type) -> Result<Type> {
+    fn elaborate_array_type(&mut self, ast_ty: &verum_ast::Type, form: ApplicationForm) -> Result<Type> {
         let verum_ast::ty::TypeKind::Array { element, size } = &ast_ty.kind else { unreachable!("type constructor dispatch"); };
         if let Some(size) = size { self.check_record_index_expression(size)?; }
-        let elem_ty = self.ast_to_type(element)?;
+        let elem_ty = self.ast_to_type_with_form(element, form)?;
         // Extract array size via const evaluation if size expression is present
         let array_size = if let verum_common::Maybe::Some(size_expr) = size {
             self.checked_array_length(size_expr)?
@@ -691,7 +704,7 @@ impl TypeChecker {
         Ok(Type::array(elem_ty, array_size))
     }
 
-    fn ast_to_type_inner(&mut self, ast_ty: &verum_ast::ty::Type) -> Result<Type> {
+    fn ast_to_type_inner(&mut self, ast_ty: &verum_ast::ty::Type, form: ApplicationForm) -> Result<Type> {
         use verum_ast::ty::TypeKind;
 
         match &ast_ty.kind {
@@ -701,17 +714,17 @@ impl TypeChecker {
 
             TypeKind::Rank2Function { .. } => self.ast_to_rank2_function_type(ast_ty),
 
-            TypeKind::Tuple(_) => self.elaborate_tuple_type(ast_ty),
+            TypeKind::Tuple(_) => self.elaborate_tuple_type(ast_ty, form),
 
-            TypeKind::Array { .. } => self.elaborate_array_type(ast_ty),
+            TypeKind::Array { .. } => self.elaborate_array_type(ast_ty, form),
 
-            TypeKind::Slice(_) => self.elaborate_slice_type(ast_ty),
+            TypeKind::Slice(_) => self.elaborate_slice_type(ast_ty, form),
 
-            TypeKind::Reference { .. } => self.elaborate_reference_type(ast_ty),
+            TypeKind::Reference { .. } => self.elaborate_reference_type(ast_ty, form),
 
-            TypeKind::CheckedReference { .. } => self.elaborate_checked_reference_type(ast_ty),
+            TypeKind::CheckedReference { .. } => self.elaborate_checked_reference_type(ast_ty, form),
 
-            TypeKind::UnsafeReference { .. } => self.elaborate_unsafe_reference_type(ast_ty),
+            TypeKind::UnsafeReference { .. } => self.elaborate_unsafe_reference_type(ast_ty, form),
 
             // Path type: Path<A>(a, b) → Type::Eq { ty: A, lhs, rhs }
             TypeKind::PathType { .. } => self.elaborate_path_identity_type(ast_ty),
@@ -723,20 +736,20 @@ impl TypeChecker {
             // verification passes (see refinement / dependent solver).
             TypeKind::DependentApp { .. } => self.elaborate_dependent_application_type(ast_ty),
 
-            TypeKind::Path(_) => self.elaborate_named_type(ast_ty),
+            TypeKind::Path(_) => self.elaborate_named_type(ast_ty, form),
 
-            TypeKind::Generic { .. } => self.ast_to_generic_type(ast_ty),
+            TypeKind::Generic { .. } => self.elaborate_generic_application(ast_ty, None, form),
 
-            TypeKind::Refined { .. } => self.elaborate_refinement_type(ast_ty),
+            TypeKind::Refined { .. } => self.elaborate_refinement_type(ast_ty, form),
 
 
-            TypeKind::Pointer { .. } => self.elaborate_pointer_type(ast_ty),
+            TypeKind::Pointer { .. } => self.elaborate_pointer_type(ast_ty, form),
 
-            TypeKind::VolatilePointer { .. } => self.elaborate_volatile_pointer_type(ast_ty),
+            TypeKind::VolatilePointer { .. } => self.elaborate_volatile_pointer_type(ast_ty, form),
 
-            TypeKind::Ownership { .. } => self.elaborate_ownership_type(ast_ty),
+            TypeKind::Ownership { .. } => self.elaborate_ownership_type(ast_ty, form),
 
-            TypeKind::GenRef { .. } => self.elaborate_generation_reference_type(ast_ty),
+            TypeKind::GenRef { .. } => self.elaborate_generation_reference_type(ast_ty, form),
 
             TypeKind::Tensor { .. } => self.elaborate_tensor_type(ast_ty),
 
@@ -757,13 +770,13 @@ impl TypeChecker {
 
             TypeKind::AssociatedType { .. } => self.elaborate_associated_projection_type(ast_ty),
 
-            TypeKind::CapabilityRestricted { .. } => self.elaborate_capability_type(ast_ty),
+            TypeKind::CapabilityRestricted { .. } => self.elaborate_capability_type(ast_ty, form),
 
             // Unknown type - a safe top type (like `any` in TypeScript but safe)
             // It represents an unknown concrete type and doesn't unify with other types
 
             // Record types: { field1: Type1, field2: Type2, ... }
-            TypeKind::Record { .. } => self.elaborate_record_type(ast_ty),
+            TypeKind::Record { .. } => self.elaborate_record_type(ast_ty, form),
 
             // Universe variables resolve only through source generic binders.
             TypeKind::Universe { .. } => self.elaborate_universe_type(ast_ty),
@@ -872,8 +885,8 @@ impl TypeChecker {
                     self.register_type_var_bounds(var, bounds);
                 }
             }
-            let inputs = params.iter().map(|p| self.ast_to_type(p)).collect::<Result<List<_>>>()?;
-            let output = self.ast_to_type(return_type)?;
+            let inputs = params.iter().map(|p| self.declared_type(p)).collect::<Result<List<_>>>()?;
+            let output = self.declared_type(return_type)?;
             let function = self.source_callable_type(inputs, output, *is_async, contexts, ast_ty.span)?;
             Ok(if vars.is_empty() { function }
                 else { Type::Forall { vars, body: Box::new(function) } })
@@ -1012,18 +1025,6 @@ fn substitute_refinement_binder(
             |ty| self.normalize_type(ty))
     }
 
-    fn ast_to_generic_type(&mut self, ast_ty: &verum_ast::ty::Type) -> Result<Type> {
-        self.apply_generic_type_arguments(ast_ty, None)
-    }
-
-    pub(super) fn apply_generic_type_arguments(
-        &mut self,
-        ast_ty: &verum_ast::ty::Type,
-        elaborated: Option<List<Type>>,
-    ) -> Result<Type> {
-        self.elaborate_generic_application(ast_ty, elaborated, ApplicationForm::Expanded)
-    }
-
     /// Publication needs the nominal constructor after its complete argument
     /// telescope has been checked, including when the protocol has no members.
     /// Keep a declared sum application available to protocol resolution even
@@ -1083,6 +1084,24 @@ fn substitute_refinement_binder(
         })
     }
 
+    /// Parameter slots may be cached by a short name. The lexical declaration
+    /// owns the sum, including when the name came from the prelude.
+    pub(super) fn declared_sum_key(&self, key: &Text) -> Option<Text> {
+        if !key.as_str().contains('.') {
+            if let Some((declaration, owner)) = self.declaring_source_type_declaration(key) {
+                return declaration.body.is_variant().then(||
+                    Self::source_type_declaration_key(&owner, &declaration.name.name));
+            }
+            if let Some(descriptor) = self.core_metadata.as_ref().and_then(|m| m.types.get(key)) {
+                let declared = Self::metadata_declaring_key(descriptor);
+                if self.declared_variant(&declared) {
+                    return Some(declared);
+                }
+            }
+        }
+        self.declared_variant(key).then(|| key.clone())
+    }
+
     fn residual_proof_carrier(&mut self, value: &Type, span: Span) -> Result<Type> {
         let (mut name, arguments) = match value {
             Type::Generic { name, args } => (name.clone(), args),
@@ -1111,7 +1130,7 @@ fn substitute_refinement_binder(
     pub(super) fn apply_protocol_argument_slots(
         &mut self, annotation: &verum_ast::Type, arguments: List<Type>,
     ) -> Result<Type> {
-        self.elaborate_generic_application(annotation, Some(arguments), ApplicationForm::ProtocolArgument)
+        self.elaborate_generic_application(annotation, Some(arguments), ApplicationForm::DeclaredSum)
     }
 
     pub(super) fn checked_impl_receiver(&mut self, receiver: &verum_ast::ty::Type) -> Result<Type> {
@@ -1171,7 +1190,10 @@ fn substitute_refinement_binder(
                     use verum_ast::ty::GenericArg;
                     match arg {
                         GenericArg::Type(ty) => {
-                            let arg_ty = self.ast_to_type(ty)?;
+                            let arg_ty = match form {
+                                ApplicationForm::DeclaredSum => self.declared_type(ty)?,
+                                _ => self.ast_to_type(ty)?,
+                            };
                             type_args.push(arg_ty);
                         }
                         GenericArg::Const(expr) => {
@@ -1403,9 +1425,12 @@ fn substitute_refinement_binder(
                 // that is not an alias `try_expand_alias` returns None and
                 // the arms below run unchanged.
                 if let Some(key) = parameter_key.as_ref() {
-                    if matches!(form, ApplicationForm::Nominal)
-                        || (matches!(form, ApplicationForm::ProtocolArgument) && self.declared_variant(key))
+                    if matches!(form, ApplicationForm::DeclaredSum)
+                        && let Some(owner) = self.declared_sum_key(key)
                     {
+                        return Ok(Type::Named { path: Self::text_to_path(&owner), args: type_args });
+                    }
+                    if matches!(form, ApplicationForm::Nominal) {
                         // Parameter slots may live under a short archive key. The
                         // implementation belongs to the descriptor's declaring module.
                         let owner = if key.as_str().contains('.') {

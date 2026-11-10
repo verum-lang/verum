@@ -582,7 +582,7 @@ impl TypeChecker {
         match effective_body {
             TypeDeclBody::Alias(aliased_type) => {
                 // Register the type alias in the type context
-                let resolved_type = self.ast_to_type(aliased_type)?;
+                let resolved_type = self.declared_type(aliased_type)?;
 
                 // CRITICAL: Store the RESOLVED type in the alias table, but store a NAMED type
                 // reference in type_defs. This ensures that when `Reducer<Int, Int>` is looked up:
@@ -1640,7 +1640,7 @@ impl TypeChecker {
             if entries.contains_key(name) {
                 return Err(TypeError::Other(format!("duplicate field `{name}` in `{owner}`").into()));
             }
-            let ty = match self.ast_to_type(&field.ty) {
+            let ty = match self.declared_type(&field.ty) {
                 Ok(ty) => ty,
                 Err(TypeError::TypeNotFound { name: missing, span })
                     if allow_forward_declarations && !self.resolving_source_signature =>
@@ -2582,7 +2582,7 @@ impl TypeChecker {
 
         match effective_body {
             TypeDeclBody::Alias(aliased_type) => {
-                let resolved_type = self.ast_to_type(aliased_type)?;
+                let resolved_type = self.declared_type(aliased_type)?;
                 // Register as alias for proper resolution (stores resolved type)
                 self.declare_type_alias_target(type_name.clone(), resolved_type.clone());
                 // Also register in the unifier for transparent alias unification
@@ -6632,7 +6632,7 @@ impl TypeChecker {
             .params
             .iter()
             .map(|p| match &p.kind {
-                FunctionParamKind::Regular { ty, .. } => self.ast_to_type(ty),
+                FunctionParamKind::Regular { ty, .. } => self.declared_type(ty),
                 FunctionParamKind::SelfValue
                 | FunctionParamKind::SelfValueMut
                 | FunctionParamKind::SelfRef
@@ -6649,7 +6649,7 @@ impl TypeChecker {
 
         // Build return type
         let return_type = if let Some(ref ret_ty) = func.return_type {
-            self.ast_to_type(ret_ty)?
+            self.declared_type(ret_ty)?
         } else {
             // No explicit return type - use a fresh type variable
             // This will be unified with the body type during check_function
@@ -6881,7 +6881,7 @@ impl TypeChecker {
             .params
             .iter()
             .map(|p| match &p.kind {
-                FunctionParamKind::Regular { ty, .. } => self.ast_to_type(ty),
+                FunctionParamKind::Regular { ty, .. } => self.declared_type(ty),
                 FunctionParamKind::SelfValue
                 | FunctionParamKind::SelfValueMut
                 | FunctionParamKind::SelfRef
@@ -6898,7 +6898,7 @@ impl TypeChecker {
 
         // Build return type
         let return_type = if let Some(ref ret_ty) = func.return_type {
-            self.ast_to_type(ret_ty)?
+            self.declared_type(ret_ty)?
         } else {
             // No explicit return type - assume Unit
             Type::Unit

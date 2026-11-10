@@ -1943,7 +1943,7 @@ impl TypeChecker {
                 // read like a compiler bug. Say what the field promises
                 // instead; the constant is an implementation detail of the
                 // check, not a type the author can write.
-                let msg = if crate::ty::skolem::is_rendered(expected.as_str()) {
+                let msg = if matches!(expected_field_ty, Type::Forall { .. }) {
                     format!(
                         "Type mismatch in field '{}' of '{}': the field's type is \
                          universally quantified, so a value stored here must work \
@@ -2301,9 +2301,11 @@ impl TypeChecker {
                 // `Self`, and three const-generic tests reported
                 // `expected 'Buf<Int>', found 'Self<Int>'` — the placeholder
                 // escaping under its own name.
-                let resolved_path = match &self_resolved_path {
-                    Some(p) => p.clone(),
-                    None => path.clone(),
+                let resolved_path = match (&self_resolved_path, &declaration_ty) {
+                    (Some(resolved), _) => resolved.clone(),
+                    (None, Type::Named { path: selected, .. }) if path.segments.len() == 1 => selected.clone(),
+                    (None, Type::Generic { name, .. }) if path.segments.len() == 1 => Self::text_to_path(name),
+                    _ => path.clone(),
                 };
                 // VARIANT-RECORD literal under CHECK (T0701 retry leg):
                 // a two-segment `Type.Variant { … }` whose head expands

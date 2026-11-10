@@ -2,6 +2,7 @@
 //! Each rule retains its own temporaries instead of reserving every grammar
 //! constructor's workspace on every recursive conversion.
 use super::helpers::resolve_builtin_meta_type;
+use super::types::ApplicationForm;
 use super::*;
 use verum_ast::ty::TypeKind;
 
@@ -17,9 +18,9 @@ impl TypeChecker {
         else {
             unreachable!("type constructor dispatch");
         };
-        let param_types: Result<List<_>> = params.iter().map(|p| self.ast_to_type(p)).collect();
+        let param_types: Result<List<_>> = params.iter().map(|p| self.declared_type(p)).collect();
         let param_types = param_types?;
-        let ret_type = self.ast_to_type(return_type)?;
+        let ret_type = self.declared_type(return_type)?;
 
         // Check if this is a dependent function (Pi type)
         // Pi types (dependent functions): (x: A) -> B(x) where return type depends on input value, non-dependent functions are special case — Pi Types (Dependent Functions)
@@ -132,7 +133,7 @@ impl TypeChecker {
         Ok(carrier)
     }
 
-    pub(super) fn elaborate_refinement_type(&mut self, ast_ty: &verum_ast::Type) -> Result<Type> {
+    pub(super) fn elaborate_refinement_type(&mut self, ast_ty: &verum_ast::Type, form: ApplicationForm) -> Result<Type> {
         let TypeKind::Refined { base, predicate } = &ast_ty.kind else {
             unreachable!("type constructor dispatch");
         };
@@ -140,7 +141,7 @@ impl TypeChecker {
         use crate::refinement::{RefinementBinding, RefinementPredicate as TyRefinementPredicate};
         use Option;
 
-        let base_ty = self.ast_to_type(base)?;
+        let base_ty = self.ast_to_type_with_form(base, form)?;
         // Post collapse, `TypeKind::Refined` carries all three
         // surface forms. The sigma form reaches us with a
         // `predicate.binding = Some(name)`; preserve that distinction
@@ -395,49 +396,51 @@ impl TypeChecker {
         })
     }
 
-    pub(super) fn elaborate_tuple_type(&mut self, ast_ty: &verum_ast::Type) -> Result<Type> {
+    pub(super) fn elaborate_tuple_type(&mut self, ast_ty: &verum_ast::Type, form: ApplicationForm) -> Result<Type> {
         let TypeKind::Tuple(types) = &ast_ty.kind else {
             unreachable!("type constructor dispatch");
         };
-        let types: Result<List<_>> = types.iter().map(|t| self.ast_to_type(t)).collect();
+        let types: Result<List<_>> = types.iter().map(|t| self.ast_to_type_with_form(t, form)).collect();
         Ok(Type::tuple(types?))
     }
 
-    pub(super) fn elaborate_slice_type(&mut self, ast_ty: &verum_ast::Type) -> Result<Type> {
+    pub(super) fn elaborate_slice_type(&mut self, ast_ty: &verum_ast::Type, form: ApplicationForm) -> Result<Type> {
         let TypeKind::Slice(element) = &ast_ty.kind else {
             unreachable!("type constructor dispatch");
         };
-        let elem_ty = self.ast_to_type(element)?;
+        let elem_ty = self.ast_to_type_with_form(element, form)?;
         Ok(Type::slice(elem_ty))
     }
 
-    pub(super) fn elaborate_reference_type(&mut self, ast_ty: &verum_ast::Type) -> Result<Type> {
+    pub(super) fn elaborate_reference_type(&mut self, ast_ty: &verum_ast::Type, form: ApplicationForm) -> Result<Type> {
         let TypeKind::Reference { mutable, inner } = &ast_ty.kind else {
             unreachable!("type constructor dispatch");
         };
-        let inner_ty = self.ast_to_type(inner)?;
+        let inner_ty = self.ast_to_type_with_form(inner, form)?;
         Ok(Type::reference(*mutable, inner_ty))
     }
 
     pub(super) fn elaborate_checked_reference_type(
         &mut self,
         ast_ty: &verum_ast::Type,
+        form: ApplicationForm,
     ) -> Result<Type> {
         let TypeKind::CheckedReference { mutable, inner } = &ast_ty.kind else {
             unreachable!("type constructor dispatch");
         };
-        let inner_ty = self.ast_to_type(inner)?;
+        let inner_ty = self.ast_to_type_with_form(inner, form)?;
         Ok(Type::checked_reference(*mutable, inner_ty))
     }
 
     pub(super) fn elaborate_unsafe_reference_type(
         &mut self,
         ast_ty: &verum_ast::Type,
+        form: ApplicationForm,
     ) -> Result<Type> {
         let TypeKind::UnsafeReference { mutable, inner } = &ast_ty.kind else {
             unreachable!("type constructor dispatch");
         };
-        let inner_ty = self.ast_to_type(inner)?;
+        let inner_ty = self.ast_to_type_with_form(inner, form)?;
         Ok(Type::unsafe_reference(*mutable, inner_ty))
     }
 
@@ -460,7 +463,7 @@ impl TypeChecker {
         })
     }
 
-    pub(super) fn elaborate_named_type(&mut self, ast_ty: &verum_ast::Type) -> Result<Type> {
+    pub(super) fn elaborate_named_type(&mut self, ast_ty: &verum_ast::Type, form: ApplicationForm) -> Result<Type> {
         let TypeKind::Path(path) = &ast_ty.kind else {
             unreachable!("type constructor dispatch");
         };
@@ -480,14 +483,20 @@ impl TypeChecker {
         // Named type (user-defined type or type alias)
         // Name resolution across modules: qualified paths, import disambiguation, re-exports, path resolution in imports — Cross-module type resolution
         // Use the new resolver for qualified paths
-        self.resolve_value_annotation(path, ast_ty.span)
+        let resolved = self.resolve_value_annotation(path, ast_ty.span)?;
+        if matches!(form, ApplicationForm::DeclaredSum) && matches!(resolved, Type::Variant(_))
+            && let Some(owner) = self.declared_sum_key(&self.path_to_string(path))
+        {
+            return Ok(Type::Named { path: Self::text_to_path(&owner), args: List::new() });
+        }
+        Ok(resolved)
     }
 
-    pub(super) fn elaborate_pointer_type(&mut self, ast_ty: &verum_ast::Type) -> Result<Type> {
+    pub(super) fn elaborate_pointer_type(&mut self, ast_ty: &verum_ast::Type, form: ApplicationForm) -> Result<Type> {
         let TypeKind::Pointer { mutable, inner } = &ast_ty.kind else {
             unreachable!("type constructor dispatch");
         };
-        let inner_ty = self.ast_to_type(inner)?;
+        let inner_ty = self.ast_to_type_with_form(inner, form)?;
         Ok(Type::Pointer {
             mutable: *mutable,
             inner: Box::new(inner_ty),
@@ -497,22 +506,23 @@ impl TypeChecker {
     pub(super) fn elaborate_volatile_pointer_type(
         &mut self,
         ast_ty: &verum_ast::Type,
+        form: ApplicationForm,
     ) -> Result<Type> {
         let TypeKind::VolatilePointer { mutable, inner } = &ast_ty.kind else {
             unreachable!("type constructor dispatch");
         };
-        let inner_ty = self.ast_to_type(inner)?;
+        let inner_ty = self.ast_to_type_with_form(inner, form)?;
         Ok(Type::VolatilePointer {
             mutable: *mutable,
             inner: Box::new(inner_ty),
         })
     }
 
-    pub(super) fn elaborate_ownership_type(&mut self, ast_ty: &verum_ast::Type) -> Result<Type> {
+    pub(super) fn elaborate_ownership_type(&mut self, ast_ty: &verum_ast::Type, form: ApplicationForm) -> Result<Type> {
         let TypeKind::Ownership { mutable, inner } = &ast_ty.kind else {
             unreachable!("type constructor dispatch");
         };
-        let inner_ty = self.ast_to_type(inner)?;
+        let inner_ty = self.ast_to_type_with_form(inner, form)?;
         Ok(Type::Ownership {
             mutable: *mutable,
             inner: Box::new(inner_ty),
@@ -522,11 +532,12 @@ impl TypeChecker {
     pub(super) fn elaborate_generation_reference_type(
         &mut self,
         ast_ty: &verum_ast::Type,
+        form: ApplicationForm,
     ) -> Result<Type> {
         let TypeKind::GenRef { inner } = &ast_ty.kind else {
             unreachable!("type constructor dispatch");
         };
-        let inner_ty = self.ast_to_type(inner)?;
+        let inner_ty = self.ast_to_type_with_form(inner, form)?;
         Ok(Type::genref(inner_ty))
     }
 
@@ -567,7 +578,7 @@ impl TypeChecker {
         })
     }
 
-    pub(super) fn elaborate_capability_type(&mut self, ast_ty: &verum_ast::Type) -> Result<Type> {
+    pub(super) fn elaborate_capability_type(&mut self, ast_ty: &verum_ast::Type, form: ApplicationForm) -> Result<Type> {
         let TypeKind::CapabilityRestricted { base, capabilities } = &ast_ty.kind else {
             unreachable!("type constructor dispatch");
         };
@@ -579,7 +590,7 @@ impl TypeChecker {
         // method filtering. The type system ensures that:
         // - T with [A, B, C] <: T with [A, B] (more caps = subtype of fewer caps)
         // - Method calls requiring capability C are only valid if C is in the set
-        let base_ty = self.ast_to_type(base)?;
+        let base_ty = self.ast_to_type_with_form(base, form)?;
 
         // Convert AST CapabilitySet to structured TypeCapabilitySet
         // This enables proper set operations (subset, superset, intersection)
@@ -592,14 +603,14 @@ impl TypeChecker {
         })
     }
 
-    pub(super) fn elaborate_record_type(&mut self, ast_ty: &verum_ast::Type) -> Result<Type> {
+    pub(super) fn elaborate_record_type(&mut self, ast_ty: &verum_ast::Type, form: ApplicationForm) -> Result<Type> {
         let TypeKind::Record { fields, .. } = &ast_ty.kind else {
             unreachable!("type constructor dispatch");
         };
         use indexmap::IndexMap;
         let mut field_types: IndexMap<Text, Type> = IndexMap::new();
         for f in fields {
-            let ty = self.ast_to_type(&f.ty)?;
+            let ty = self.ast_to_type_with_form(&f.ty, form)?;
             field_types.insert(f.name.name.clone(), ty);
         }
         Ok(Type::Record(field_types))

@@ -10172,7 +10172,7 @@ impl TypeChecker {
                     .filter_map(|p| match &p.kind {
                         FunctionParamKind::Regular { pattern: _, ty, .. } => {
                             // Try to resolve the type
-                            match self.ast_to_type(ty) {
+                            match self.declared_type(ty) {
                                 Ok(t) => Some(t),
                                 Err(_) => {
                                     // Fallback: check if it's a direct type parameter reference
@@ -10205,7 +10205,7 @@ impl TypeChecker {
                 // which creates a Type::Named reference that can be resolved during actual
                 // type checking when prelude types are available.
                 let return_type = if let Some(ref ret_ty) = func.return_type {
-                    match self.ast_to_type(ret_ty) {
+                    match self.declared_type(ret_ty) {
                         Ok(t) => t,
                         Err(_) => {
                             // Fallback: check if it's a direct type parameter reference
@@ -10317,7 +10317,7 @@ impl TypeChecker {
                     .iter()
                     .filter_map(|p| match &p.kind {
                         FunctionParamKind::Regular { pattern: _, ty, .. } => {
-                            match self.ast_to_type(ty) {
+                            match self.declared_type(ty) {
                                 Ok(t) => Some(t),
                                 Err(_) => {
                                     if let verum_ast::ty::TypeKind::Path(path) = &ty.kind
@@ -10342,7 +10342,7 @@ impl TypeChecker {
                     .collect();
 
                 let return_type = match &axiom.return_type {
-                    verum_common::Maybe::Some(ret_ty) => match self.ast_to_type(ret_ty) {
+                    verum_common::Maybe::Some(ret_ty) => match self.declared_type(ret_ty) {
                         Ok(t) => t,
                         Err(_) => {
                             if let verum_ast::ty::TypeKind::Path(path) = &ret_ty.kind
@@ -10419,7 +10419,7 @@ impl TypeChecker {
                                                 }
                                             }
                                             // Fall back to regular type resolution
-                                            self.ast_to_type(ty).ok()
+                                            self.declared_type(ty).ok()
                                         })
                                         .collect()
                                 }
@@ -10919,7 +10919,7 @@ impl TypeChecker {
             .iter()
             .map(|p| {
                 match &p.kind {
-                    FunctionParamKind::Regular { pattern: _, ty, .. } => self.ast_to_type(ty),
+                    FunctionParamKind::Regular { pattern: _, ty, .. } => self.declared_type(ty),
                     FunctionParamKind::SelfValue => {
                         // Self parameter has no explicit type in the signature
                         Ok(Type::unit())
@@ -10941,7 +10941,7 @@ impl TypeChecker {
 
         // Determine if we have an explicit return type annotation
         let explicit_return_type = if let Some(ref ret_ty) = func.return_type {
-            Some(self.ast_to_type(ret_ty)?)
+            Some(self.declared_type(ret_ty)?)
         } else {
             None
         };
