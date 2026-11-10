@@ -538,3 +538,16 @@ fn source_deref_uses_the_declared_target_and_requires_mutable_evidence_for_write
         assert!(errors.iter().any(|error| error.contains(reason)), "{body}: {errors:?}");
     }
 }
+
+#[test]
+fn inherent_calls_must_prove_the_declaring_implementations_conditions() {
+    let declarations = "
+        type Writable is protocol { fn cookie(&self) -> Int; };
+        implement Writable for Int { fn cookie(&self) -> Int { 67 } }
+        implement<T: Writable> [T] { public fn stamp(&self) -> Int { 71 } }
+    ";
+    let valid = check_with_checker(&format!("{declarations} fn use_int(xs: &[Int]) -> Int {{ xs.stamp() }}"), &[]).1;
+    assert!(valid.is_empty(), "{valid:?}");
+    let invalid = check_with_checker(&format!("{declarations} fn use_bool(xs: &[Bool]) -> Int {{ xs.stamp() }}"), &[]).1;
+    assert!(invalid.iter().any(|error| error.contains("E405")), "{invalid:?}");
+}

@@ -5000,7 +5000,7 @@ impl TypeChecker {
                         let actual = checker.ast_to_type(target)?;
                         checker.validate_impl_target(&actual, expected, impl_decl.span)?;
                     }
-                    checker.register_inherent_impl_methods(impl_decl, &type_param_names)
+                    checker.register_inherent_impl_methods(impl_decl, &type_param_names, &clauses, &callables)
                 }
                 ImplKind::Protocol { .. } => checker.register_protocol_impl_methods(
                     impl_decl,
@@ -5112,9 +5112,17 @@ impl TypeChecker {
         &mut self,
         impl_decl: &verum_ast::decl::ImplDecl,
         type_param_names: &List<verum_common::Text>,
+        conditions: &[crate::protocol::WhereClause],
+        callables: &Map<TypeVar, Type>,
     ) -> Result<()> {
         use verum_ast::decl::{FunctionParamKind, ImplItemKind, ImplKind};
         use verum_common::Text;
+        let inherit_domain = |scheme: &mut crate::context::TypeScheme| {
+            scheme.where_clauses.extend(conditions.iter().cloned());
+            for (variable, bound) in callables {
+                scheme.var_type_bounds.entry(*variable).or_default().push(bound.clone());
+            }
+        };
         self.check_no_duplicate_impl_items(impl_decl)?;
         let ImplKind::Inherent(for_type) = &impl_decl.kind
             else { unreachable!() };
@@ -5318,6 +5326,7 @@ impl TypeChecker {
                                         func_scheme =
                                             func_scheme.with_type_bounds(method_type_var_bounds);
                                     }
+                                    inherit_domain(&mut func_scheme);
 
                                     // Clean up method-level generic type parameters AFTER generalize_ordered
                                     for param_name in method_type_param_names {
@@ -5504,6 +5513,7 @@ impl TypeChecker {
                                     method_scheme.receiver_kind =
                                         Some(crate::core_metadata::ReceiverKind::from_declaration(func));
                                     method_scheme.impl_var_count = impl_vars_in_for_type.len();
+                                    method_scheme.impl_self_type = Some(self_type.clone());
                                     checker.record_explicit_method_vars(&mut method_scheme, func);
                                     if std::env::var("VERUM_TRACE_METHOD_LOOKUP").is_ok() { eprintln!("[implvc-set] site=decls.rs:5370 count={}", impl_vars_in_for_type.len()); }
 
@@ -5524,6 +5534,7 @@ impl TypeChecker {
                                     // write-path (T0585 ERROR-14); inherent
                                     // registrations keep last-write-wins and may
                                     // reclaim a protocol-poisoned slot.
+                                    inherit_domain(&mut method_scheme);
                                     checker.register_inherent_method_guarded(
                                         type_name_text.clone(),
                                         method_name_text.clone(),

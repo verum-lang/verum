@@ -23894,8 +23894,7 @@ impl TypeChecker {
 
         let method_info_opt = method_info_opt.map(|scheme| -> Result<_> {
             let instance = self.instantiate_call_scheme(&scheme, span)?;
-            Ok(((instance.ty, instance.fresh_vars, scheme.impl_var_count, instance.explicit_method_vars),
-                instance.type_bounds, scheme.receiver_kind, instance.impl_self_type))
+            Ok((instance, scheme.impl_var_count))
         }).transpose()?;
 
         if let Some(type_name_text) = exact_type_name.or(unwrapped_type_name) {
@@ -23906,9 +23905,11 @@ impl TypeChecker {
             // AND that function type bounds (like F: fn(T) -> U) are preserved for closure checking.
             let _ = type_name_text; // Used in original code but now method_info_opt is computed above
 
-            if let Some(((method_ty, ordered_fresh_vars, impl_var_count, explicit_vars), type_bounds, receiver_kind, impl_self_type)) =
-                method_info_opt
-            {
+            if let Some((instance, impl_var_count)) = method_info_opt {
+                let crate::context::InstantiatedScheme {
+                    ty: method_ty, fresh_vars: ordered_fresh_vars, explicit_method_vars: explicit_vars,
+                    type_bounds, protocol_bounds, where_clauses, receiver_kind, impl_self_type, ..
+                } = instance;
                 // CRITICAL: Register type bounds for fresh type variables
                 // This enables closure type inference for generic methods like map<U, F: fn(T) -> U>
                 // #[cfg(debug_assertions)]
@@ -24121,6 +24122,10 @@ impl TypeChecker {
                                 let subst_param_ty = param_ty.apply_subst(&combined_subst);
                                 self.check_expr(arg, &subst_param_ty)?;
                             }
+
+                            self.enforce_call_where_clauses(&where_clauses, span)?;
+                            self.enforce_call_protocol_bounds(&protocol_bounds, span)?;
+                            self.enforce_call_type_bounds(&type_bounds, span)?;
 
                             // Apply substitution to get the concrete return type
                             let subst_return_type = return_type.apply_subst(&combined_subst);
