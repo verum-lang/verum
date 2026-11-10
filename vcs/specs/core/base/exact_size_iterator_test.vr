@@ -281,18 +281,27 @@ fn test_deque_drain_is_empty() {
 }
 
 // =============================================================================
-// Section 9: Range<Int> ExactSizeIterator
+// Section 9: Range<Int32> ExactSizeIterator
 // =============================================================================
+
+// Every interval in this domain has a cardinality representable by Int.
+fn exact_range(start: Int32, end: Int32) -> Range<Int32> {
+    Range { current: start, end, inclusive: false }
+}
+
+fn exact_range_inclusive(start: Int32, end: Int32) -> RangeInclusive<Int32> {
+    RangeInclusive { current: start, end, done: false }
+}
 
 @test
 fn test_range_len() {
-    let r = range(0, 10);
+    let r = exact_range(0, 10);
     assert_eq(r.len(), 10);
 }
 
 @test
 fn test_range_len_after_next() {
-    let mut r = range(0, 5);
+    let mut r = exact_range(0, 5);
     r.next();
     assert_eq(r.len(), 4);
     r.next();
@@ -302,25 +311,25 @@ fn test_range_len_after_next() {
 
 @test
 fn test_range_len_empty() {
-    let r = range(5, 5);
+    let r = exact_range(5, 5);
     assert_eq(r.len(), 0);
 }
 
 @test
 fn test_range_is_empty() {
-    let r = range(5, 5);
+    let r = exact_range(5, 5);
     assert(r.is_empty());
 }
 
 @test
 fn test_range_is_empty_false() {
-    let r = range(0, 1);
+    let r = exact_range(0, 1);
     assert(!r.is_empty());
 }
 
 @test
 fn test_range_len_exhausted() {
-    let mut r = range(0, 3);
+    let mut r = exact_range(0, 3);
     r.next();
     r.next();
     r.next();
@@ -329,37 +338,37 @@ fn test_range_len_exhausted() {
 }
 
 // =============================================================================
-// Section 10: RangeInclusive<Int> ExactSizeIterator
+// Section 10: RangeInclusive<Int32> ExactSizeIterator
 // =============================================================================
 
 @test
 fn test_range_inclusive_len() {
-    let r = range_inclusive(0, 9);
+    let r = exact_range_inclusive(0, 9);
     assert_eq(r.len(), 10);
 }
 
 @test
 fn test_range_inclusive_len_single() {
-    let r = range_inclusive(5, 5);
+    let r = exact_range_inclusive(5, 5);
     assert_eq(r.len(), 1);
 }
 
 @test
 fn test_range_inclusive_len_after_next() {
-    let mut r = range_inclusive(1, 4);
+    let mut r = exact_range_inclusive(1, 4);
     r.next();
     assert_eq(r.len(), 3);
 }
 
 @test
 fn test_range_inclusive_is_empty_false() {
-    let r = range_inclusive(0, 0);
+    let r = exact_range_inclusive(0, 0);
     assert(!r.is_empty());
 }
 
 @test
 fn test_range_inclusive_is_empty_after_exhaust() {
-    let mut r = range_inclusive(0, 0);
+    let mut r = exact_range_inclusive(0, 0);
     r.next();
     assert(r.is_empty());
     assert_eq(r.len(), 0);
@@ -438,7 +447,7 @@ fn test_len_matches_size_hint_list() {
 
 @test
 fn test_len_matches_size_hint_range() {
-    let r = range(0, 100);
+    let r = exact_range(0, 100);
     assert_eq(r.len(), r.size_hint().0);
 }
 
@@ -462,8 +471,8 @@ fn test_len_matches_count_list() {
 
 @test
 fn test_len_matches_count_range() {
-    let len = range(0, 50).len();
-    let count = range(0, 50).count();
+    let len = exact_range(0, 50).len();
+    let count = exact_range(0, 50).count();
     assert_eq(len, count);
 }
 
@@ -502,14 +511,14 @@ fn test_deque_len_after_next_back() {
 
 @test
 fn test_range_len_after_next_back() {
-    let mut r = range(0, 10);
+    let mut r = exact_range(0, 10);
     r.next_back();
     assert_eq(r.len(), 9);
 }
 
 @test
 fn test_range_inclusive_len_after_next_back() {
-    let mut r = range_inclusive(0, 9);
+    let mut r = exact_range_inclusive(0, 9);
     r.next_back();
     assert_eq(r.len(), 9);
 }
@@ -539,7 +548,7 @@ fn test_large_list_len() {
 
 @test
 fn test_large_range_len() {
-    let r = range(0, 10000);
+    let r = exact_range(0, 10000);
     assert_eq(r.len(), 10000);
 }
 

@@ -1688,6 +1688,36 @@ fn test_range_uint64_size_hint() {
     assert_eq(upper, Maybe.Some(10));
 }
 
+@test
+fn test_full_width_range_cardinalities() {
+    let hi = Int.max_value();
+    let lo = Int.min_value();
+    let signed = range_inclusive(lo, hi);
+    assert_eq(signed.size_hint(), (hi, Maybe.None));
+    assert_eq(range(0, hi).size_hint(), (hi, Maybe.Some(hi)));
+    assert_eq(range_inclusive(0, hi).size_hint(), (hi, Maybe.None));
+    assert_eq(range_inclusive(2, -2).size_hint(), (0, Maybe.Some(0)));
+    let unsigned: Range<UInt64> = Range { current: 0 as UInt64, end: 18446744073709551615_u64, inclusive: false };
+    assert_eq(unsigned.size_hint(), (hi, Maybe.None));
+}
+
+@test
+fn test_ranges_consume_each_endpoint_once() {
+    let hi = Int.max_value();
+    let mut full = range_inclusive(hi, hi);
+    assert_eq(full.next(), Maybe.Some(hi));
+    assert_eq(full.next_back(), Maybe.None);
+    assert_eq(full.size_hint(), (0, Maybe.Some(0)));
+    let mut narrow: Range<Int8> = Range { current: 125 as Int8, end: 127 as Int8, inclusive: true };
+    assert_eq(narrow.next_back(), Maybe.Some(127 as Int8));
+    assert_eq(narrow.next(), Maybe.Some(125 as Int8));
+    assert_eq(narrow.next_back(), Maybe.Some(126 as Int8));
+    assert_eq(narrow.next(), Maybe.None);
+    let mut byte: Range<UInt8> = Range { current: 255 as UInt8, end: 255 as UInt8, inclusive: true };
+    assert_eq(byte.next(), Maybe.Some(255 as UInt8));
+    assert_eq(byte.next(), Maybe.None);
+}
+
 // =============================================================================
 // Section 53: Cloned Adapter
 // =============================================================================
