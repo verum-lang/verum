@@ -361,7 +361,7 @@ fn default_panic_handler(info: &SysInitPanicInfo) {
         let bytes = msg.as_bytes();
         let _ = super.darwin.libsystem.safe_write_raw(
             FileDesc(2), bytes.as_ptr(), bytes.len());
-        super.darwin.libsystem.exit(1);
+        super.darwin.libsystem.safe_exit(1);
     }
 
     @cfg(target_os = "windows")
@@ -450,7 +450,7 @@ public fn panic_impl(message: Text, file: Text, line: Int, column: Int) -> ! {
     { super.linux.syscall.exit_group(134); }  // SIGABRT
 
     @cfg(target_os = "macos")
-    { super.darwin.libsystem.exit(134); }
+    { super.darwin.libsystem.safe_exit(134); }
 
     @cfg(target_os = "windows")
     { super.windows.ExitProcess(134); }
