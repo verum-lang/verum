@@ -1498,6 +1498,11 @@ public fn madvise_free_reuse(addr: &unsafe Byte, len: Int) -> Result<(), OSError
     safe_madvise(addr, len, MADV_FREE_REUSE)
 }
 
+/// Return the host page size in bytes.
+public fn safe_page_size() -> Int {
+    unsafe { getpagesize() as Int }
+}
+
 /// Get process ID (always succeeds)
 @intrinsic("sys_getpid")
 public fn safe_getpid() -> Int {

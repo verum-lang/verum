@@ -793,7 +793,7 @@ public fn page_size() -> Int {
     { return 4096; }  // Standard Linux page size
 
     @cfg(target_os = "macos")
-    { return darwin.libsystem.getpagesize(); }
+    { return darwin.libsystem.safe_page_size(); }
 
     // Fallback for all other platforms
     4096

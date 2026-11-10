@@ -227,3 +227,11 @@ fn test_umbrella_map_flags_anon_field() {
 }
 
 fn main() {}
+
+@cfg(target_os = "macos")
+@test
+fn darwin_page_size_is_a_positive_power_of_two() {
+    let bytes = core.sys.page_size();
+    assert(bytes > 0);
+    assert_eq(bytes & (bytes - 1), 0);
+}
