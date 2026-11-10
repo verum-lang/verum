@@ -1,5 +1,6 @@
 mount core.base.protocols.{PartialEq, Eq};
 mount core.base.primitives.*;
+mount core.text.text.Text;
 
 fn check_partial<T: PartialEq>(left: &T, right: &T) {
     assert(left.eq(left));
@@ -14,6 +15,9 @@ fn check_total<T: Eq>(left: &T, right: &T) {
 
 @test
 fn scalar_equality_keeps_its_partial_and_total_contracts() {
+    check_total(&"data", &"date");
+    check_total(&"ёж", &"ёжик");
+    check_total(&"", &"x");
     check_total(&17, &19);
     check_total(&true, &false);
     check_total(&0x21_u8, &0x4a_u8);

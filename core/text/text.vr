@@ -3753,7 +3753,7 @@ implement Drop for Text {
     }
 }
 
-implement Eq for Text {
+implement PartialEq for Text {
     fn eq(&self, other: &Text) -> Bool {
         let self_bytes = self.as_bytes();
         let other_bytes = other.as_bytes();
@@ -3770,6 +3770,8 @@ implement Eq for Text {
         true
     }
 }
+
+implement Eq for Text {}
 
 implement Ord for Text {
     fn cmp(&self, other: &Text) -> Ordering {
