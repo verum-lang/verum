@@ -187,6 +187,10 @@ public type Signal is
     /// Window size changed
     | Winch;
 
+// Reverse the target-specific entries through the same ABI mapping as to_raw.
+@inline(always)
+fn has_raw_number(signal: Signal, number: Int) -> Bool { signal.to_raw() == number }
+
 implement Signal {
     /// Convert to the platform-specific signal number.
     public fn to_raw(&self) -> Int {
@@ -261,6 +265,12 @@ implement Signal {
                 14 => Maybe.Some(Signal.Alarm),
                 15 => Maybe.Some(Signal.Term),
                 28 => Maybe.Some(Signal.Winch),
+                n if has_raw_number(Signal.Usr1, n) => Maybe.Some(Signal.Usr1),
+                n if has_raw_number(Signal.Usr2, n) => Maybe.Some(Signal.Usr2),
+                n if has_raw_number(Signal.Child, n) => Maybe.Some(Signal.Child),
+                n if has_raw_number(Signal.Cont, n) => Maybe.Some(Signal.Cont),
+                n if has_raw_number(Signal.Stop, n) => Maybe.Some(Signal.Stop),
+                n if has_raw_number(Signal.Tstp, n) => Maybe.Some(Signal.Tstp),
                 _  => Maybe.None,
             };
         }

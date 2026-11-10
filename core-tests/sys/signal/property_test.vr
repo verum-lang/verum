@@ -5,8 +5,7 @@
 // Algebraic / structural laws for `core.sys.signal`.
 //
 // Properties covered:
-//   * Signal.from_raw ∘ Signal.to_raw = id (for variants whose number
-//     is platform-invariant).
+//   * Signal.from_raw ∘ Signal.to_raw = id for all POSIX signal variants.
 //   * is_catchable() partitions the 18-variant signal space exactly
 //     2 / 16 (Kill + Stop are uncatchable; all others catchable).
 //   * Eq is reflexive, symmetric, and consistent with to_raw.
@@ -60,22 +59,14 @@ fn law_signal_to_raw_pairwise_distinct() {
     }
 }
 
+@cfg(any(target_os = "linux", target_os = "macos"))
 @test
-fn law_signal_from_raw_to_raw_round_trip_for_invariant_signals() {
-    // Every signal whose number is platform-invariant
-    // (i.e. excludes the per-platform diverging USR1/USR2/CHILD/
-    // CONT/STOP/TSTP) round-trips through to_raw → from_raw.
-    let invariant: List<Signal> = [
-        Signal.Hup, Signal.Int, Signal.Quit, Signal.Ill, Signal.Abort,
-        Signal.Fpe, Signal.Kill, Signal.Segv, Signal.Pipe, Signal.Alarm,
-        Signal.Term, Signal.Winch,
-    ];
-    for s in invariant.iter() {
-        let raw = (*s).to_raw();
-        match Signal.from_raw(raw) {
-            Maybe.Some(recovered) => assert(recovered.eq(s)),
-            Maybe.None => assert(false),
-        };
+fn law_every_posix_signal_number_round_trips() {
+    for signal in all_signals().iter() {
+        match Signal.from_raw((*signal).to_raw()) {
+            Maybe.Some(actual) => assert(actual.eq(signal)),
+            Maybe.None => panic("supported signal number did not decode"),
+        }
     }
 }
 
