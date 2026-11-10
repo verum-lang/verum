@@ -651,6 +651,24 @@ impl TypeChecker {
         Ok(())
     }
 
+    pub(super) fn resolve_source_future(
+        &mut self,
+        receiver: &Type,
+        span: Span,
+    ) -> Result<Option<crate::protocol::FutureResolution>> {
+        use crate::protocol::{ProtocolBound, ProtocolChecker};
+        use verum_common::well_known_types::WellKnownProtocol;
+
+        if let Some(resolution) = self.protocol_checker.read().resolve_future_protocol(receiver) {
+            return Ok(Some(resolution));
+        }
+        if let Some(name) = ProtocolChecker::operator_protocol_source_name(WellKnownProtocol::Future) {
+            let bound = ProtocolBound::simple(Self::text_to_path(&name));
+            self.load_source_bound_implementations(receiver, &bound, &[], &Default::default(), span)?;
+        }
+        Ok(self.protocol_checker.read().resolve_future_protocol(receiver))
+    }
+
     /// Retain private methods for checking their owner's implementation, but
     /// consult declaration visibility before any caller-side dispatch can win.
     pub(super) fn check_source_method_visibility(

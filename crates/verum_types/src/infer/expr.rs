@@ -6835,11 +6835,7 @@ impl TypeChecker {
 
                                     // Extract awaited type using protocol resolver for comprehensive
                                     // Future type handling (Type::Future, Type::Generic, Type::Named, Type::Var)
-                                    match self
-                                        .protocol_checker
-                                        .read()
-                                        .resolve_future_protocol(&resolved_ty)
-                                    {
+                                    match self.resolve_source_future(&resolved_ty, inner_future.span)? {
                                         Some(resolution) => resolution.output,
                                         None => {
                                             if self.in_async_context {
@@ -6859,11 +6855,7 @@ impl TypeChecker {
                                     // This shouldn't happen with correct parsing, but handle it gracefully
                                     let future_result = self.synth_expr(future_expr)?;
                                     let resolved_ty = self.unifier.apply(&future_result.ty);
-                                    match self
-                                        .protocol_checker
-                                        .read()
-                                        .resolve_future_protocol(&resolved_ty)
-                                    {
+                                    match self.resolve_source_future(&resolved_ty, future_expr.span)? {
                                         Some(resolution) => resolution.output,
                                         None => {
                                             // In async context, be lenient
@@ -7567,11 +7559,7 @@ impl TypeChecker {
                     let arg_result = self.synth_expr(arg)?;
                     // Extract the awaited type from Future<T>
                     let resolved = self.unifier.apply(&arg_result.ty);
-                    let awaited = match self
-                        .protocol_checker
-                        .read()
-                        .resolve_future_protocol(&resolved)
-                    {
+                    let awaited = match self.resolve_source_future(&resolved, arg.span)? {
                         Some(resolution) => resolution.output,
                         None => resolved,
                     };
@@ -11913,11 +11901,8 @@ impl TypeChecker {
         // Protocol-based Future resolution
         // Await desugaring: ".await" desugars to polling Future protocol until completion
         // =========================================================================
-        match self
-            .protocol_checker
-            .read()
-            .resolve_future_protocol(&inner_result.ty)
-        {
+        let receiver = self.unifier.apply(&inner_result.ty);
+        match self.resolve_source_future(&receiver, inner_expr.span)? {
             Some(resolution) => {
                 // `.await` is only valid inside an async context
                 // (async fn body, async {} block, or async
@@ -11944,8 +11929,7 @@ impl TypeChecker {
                 // If the inner expression is inside a spawn block, the await
                 // may have been parsed as spawn({ expr }.await) rather than
                 // (spawn { expr }).await. In async context, treat as identity
-                // (the value is already "ready"). Also handles user types
-                // that may implement Future but aren't registered yet.
+                // (the value is already "ready").
                 // T1478 — the `main` exemption belongs to BOTH arms.
                 //
                 // Thirty lines above, the Future-resolved arm exempts

@@ -44,7 +44,7 @@ use verum_ast::{
     ty::{Ident, Path},
 };
 use verum_common::ToText;
-use verum_common::well_known_types::WellKnownType as WKT;
+use verum_common::well_known_types::{WellKnownProtocol, WellKnownType as WKT};
 use verum_common::{ConstValue, List, Map, Maybe, Set, Text};
 
 // Thread-local recursion guard for implements_optimistic
@@ -9663,41 +9663,24 @@ impl ProtocolChecker {
             _ => {}
         }
 
-        // =========================================================================
-        // Protocol-based resolution (stdlib-agnostic)
-        // Stdlib-agnostic type system: type checker operates without hardcoded knowledge of stdlib types, stdlib types registered from parsed .vr files
-        // =========================================================================
-        // Try to resolve Future via registered protocol implementation.
-        let future_path = Path::single(verum_ast::ty::Ident::new("Future", Span::default()));
-        if let Maybe::Some(impl_) = self.find_impl(ty, &future_path) {
-            // Use try_find_associated_type which correctly handles projection resolution.
-            // For types like Join2<Fut1, Fut2> whose impl declares
-            //  type Output = (Fut1.Output, Fut2.Output);
-            // this resolves each projection to the concrete awaited type and returns
-            // a proper Tuple, enabling tuple-pattern destructuring of join().await results.
-            if let Some(output) = self.try_find_associated_type(ty, &"Output".into()) {
-                return Some(FutureResolution { output });
-            }
+        // Output belongs to the selected Future implementation, even when
+        // another protocol on the same receiver also declares an Output.
+        let protocol = self.operator_protocol_path(WellKnownProtocol::Future);
+        let output = self.resolve_associated_type(ty, &protocol, &"Output".into()).ok()?;
+        Some(FutureResolution { output: self.normalize_projection_type(&output) })
+    }
 
-            // Fallback: build substitution and apply it (handles simpler cases where
-            // apply_type_substitution resolves any remaining deferred projections).
-            let mut subst = Map::new();
-            self.build_type_substitution_for_impl(&impl_.for_type, ty, &mut subst);
+    pub(crate) fn operator_protocol_source_name(role: WellKnownProtocol) -> Option<Text> {
+        role.canonical_archive_modules().first().map(|owner|
+            verum_common::qualified_name::qualify_module_name(owner, role.as_str())
+        )
+    }
 
-            // Extract associated type Output - use apply_type_substitution (not _with_map)
-            // because the latter does not resolve deferred projection types (::Output[...]).
-            if let Some(output) = impl_
-                .ordinary_associated_type(&"Output".into())
-                .ok()?
-                .cloned()
-                .map(|t| self.apply_type_substitution(&t, &subst))
-            {
-                return Some(FutureResolution { output });
-            }
-        }
-
-        // No Future implementation found
-        None
+    fn operator_protocol_path(&self, role: WellKnownProtocol) -> Path {
+        let name = Self::operator_protocol_source_name(role)
+            .filter(|name| self.has_protocol(name))
+            .unwrap_or_else(|| role.as_str().into());
+        Path::single(verum_ast::ty::Ident::new(name, Span::default()))
     }
 
     // =========================================================================
@@ -9960,11 +9943,7 @@ impl ProtocolChecker {
         // Stdlib-agnostic type system: type checker operates without hardcoded knowledge of stdlib types, stdlib types registered from parsed .vr files
         // =========================================================================
         // Try to resolve Index via registered protocol implementation.
-        let index = verum_common::well_known_types::WellKnownProtocol::Index;
-        let owner = index.canonical_archive_modules().first().copied()?;
-        let declared = verum_common::qualified_name::qualify_module_name(owner, index.as_str());
-        let name = if self.has_protocol(&declared) { declared } else { index.as_str().into() };
-        let index_path = Path::single(verum_ast::ty::Ident::new(name, Span::default()));
+        let index_path = self.operator_protocol_path(WellKnownProtocol::Index);
         if let Some((implementation, substitution)) = self.find_impl_with_substitution(ty, &index_path) {
             // The source protocol declares its key as an argument and Output
             // as an associated type. Both belong to the selected impl scope.

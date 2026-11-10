@@ -398,3 +398,49 @@ fn a_source_index_projects_its_key_and_output_through_a_shared_field() {
     let invalid_write = check(&format!(r#"{header} fn write(report:&Report) {{ report.rows["x"] = true; }}"#), &modules);
     assert!(invalid_write.iter().any(|error| error.contains("SharedReferenceWrite")), "{invalid_write:?}");
 }
+
+#[test]
+fn awaiting_a_returned_source_value_projects_the_declared_future_output() {
+    let modules = [
+        ("core.async.future", "public type Future is protocol { type Output; };"),
+        ("demo.foreign", "public type Future is protocol { type Output; };"),
+        ("demo.jobs", r#"
+            mount core.async.future.Future;
+            mount demo.foreign.{Future as ForeignFuture};
+            public type Ticket<T> is { value: T };
+            public fn issue<T>(value: T) -> Ticket<T> { Ticket { value } }
+            public type Other is protocol { type Output; };
+            implement<T> Other for Ticket<T> { type Output = Int; }
+            implement<T> Future for Ticket<T> { type Output = (T, Bool); }
+            public type Noise<T> is { value: T };
+            public fn noise<T>(value: T) -> Noise<T> { Noise { value } }
+            implement<T> ForeignFuture for Noise<T> { type Output = T; }
+        "#),
+    ];
+    let header = "mount demo.jobs.{issue,noise};";
+    let accepted = check(
+        &format!(r#"
+            {header}
+            async fn read() -> Text {{
+                let (value, flag) = issue("ready").await;
+                if flag {{ value }} else {{ "" }}
+            }}
+            async fn choose() -> Text {{
+                select {{ pair = issue("ready").await => pair.0 }}
+            }}
+            async fn together() -> Bool {{
+                let (first, second) = join(issue(7), issue("ready")).await;
+                second.1
+            }}
+        "#),
+        &modules,
+    );
+    assert!(accepted.is_empty(), "{accepted:?}");
+    for expression in [r#"issue("ready").await"#, "noise(7).await"] {
+        let errors = check(
+            &format!("{header} async fn wrong() -> Int {{ {expression} }}"),
+            &modules,
+        );
+        assert!(errors.iter().any(|error| error.contains("Mismatch")), "{expression}: {errors:?}");
+    }
+}
