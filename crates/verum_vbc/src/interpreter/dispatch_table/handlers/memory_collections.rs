@@ -61,7 +61,7 @@ pub(in super::super) fn handle_new_array(
     }
     let init_val = state.get_reg(elem);
 
-    let obj = state.heap.alloc_array(TypeId::UNIT, length)?;
+    let obj = state.heap.alloc_array(TypeId::ARRAY, length)?;
     state.record_allocation();
 
     // Initialize all elements
@@ -941,6 +941,9 @@ pub(in super::super) fn handle_set_field(
     // write side did not, a latent under-/over-check).
     let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
 
+    if header.flags.contains(heap::ObjectFlags::NATIVE_ITERATOR) {
+        return Err(InterpreterError::InvalidOperand { message: "SetF cannot write VM iterator state".into() });
+    }
     let value = state.get_reg(val);
     let field_offset = field_idx
         .checked_mul(std::mem::size_of::<Value>())
@@ -1347,7 +1350,7 @@ pub(in super::super) fn handle_get_index(
                     .heap
                     .backing_view(value_as_addr(unsafe { *data_ptr.add(2) }) as *mut u8)
                     .data;
-                let new_obj = state.heap.alloc_array(TypeId::UNIT, slice_len)?;
+                let new_obj = state.heap.alloc_array(TypeId::ARRAY, slice_len)?;
                 state.record_allocation();
                 let dst_data = unsafe {
                     (new_obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value
@@ -1405,7 +1408,7 @@ pub(in super::super) fn handle_get_index(
                 }
                 state.set_reg(dst, Value::from_ptr(new_obj.as_ptr() as *mut u8));
             } else {
-                let new_obj = state.heap.alloc_array(TypeId::UNIT, slice_len)?;
+                let new_obj = state.heap.alloc_array(TypeId::ARRAY, slice_len)?;
                 state.record_allocation();
                 let src_data = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                 let dst_data = unsafe {

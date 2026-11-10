@@ -626,6 +626,8 @@ bitflags! {
         const VARIANT = 0b1_0000_0000;
         /// Backing allocation created for the VM's flat key/value hash table.
         const HASH_BUCKETS = 0b10_0000_0000;
+        /// Cursor state allocated by the VM's native iterator producers.
+        const NATIVE_ITERATOR = 0b100_0000_0000;
     }
 }
 
@@ -680,6 +682,12 @@ pub struct ObjectHeader {
 const DEFAULT_CAPS: u16 = 0x0003; // READ (0x01) | WRITE (0x02)
 
 impl ObjectHeader {
+    pub(crate) fn is_native_iterator(&self, slots: usize) -> bool {
+        self.flags.contains(ObjectFlags::NATIVE_ITERATOR)
+            && self.is_valid()
+            && self.size as usize == slots * std::mem::size_of::<Value>()
+    }
+
     /// Creates a new object header with CBGR tracking.
     pub fn new(type_id: TypeId, generation: u32, size: u32) -> Self {
         // Get current epoch from global counter
@@ -1272,6 +1280,12 @@ impl Heap {
         })?;
         // SAFETY: fresh tracked object; no references have escaped.
         unsafe { (*object.as_ptr()).flags.insert(ObjectFlags::VARIANT) };
+        Ok(object)
+    }
+
+    pub(crate) fn alloc_native_iterator<const SLOTS: usize>(&mut self) -> InterpreterResult<Object> {
+        let mut object = self.alloc(TypeId::UNIT, SLOTS * std::mem::size_of::<Value>())?;
+        object.header_mut().flags.insert(ObjectFlags::NATIVE_ITERATOR);
         Ok(object)
     }
 

@@ -5586,8 +5586,7 @@ pub(super) fn dispatch_primitive_method(
             // Iterator objects (UNIT type_id, 4-value layout) have builtin iterator methods
             // (next, fold, map, filter, collect, etc.) that must be dispatched even when
             // the static type prefix is a user-defined iterator type like "ListIter".
-            let is_iterator_object = header.type_id == TypeId::UNIT
-                && header.size as usize == 4 * std::mem::size_of::<Value>();
+            let is_iterator_object = header.is_native_iterator(4);
             is_builtin_collection || is_iterator_object
         } else {
             false
@@ -7136,7 +7135,7 @@ pub(super) fn dispatch_primitive_method(
 
                     let iter_obj = state
                         .heap
-                        .alloc(TypeId::UNIT, 4 * std::mem::size_of::<Value>())?;
+                        .alloc_native_iterator::<4>()?;
                     state.record_allocation();
 
                     let iter_ptr = unsafe {
@@ -7164,7 +7163,7 @@ pub(super) fn dispatch_primitive_method(
 
                     let iter_obj = state
                         .heap
-                        .alloc(TypeId::UNIT, 4 * std::mem::size_of::<Value>())?;
+                        .alloc_native_iterator::<4>()?;
                     state.record_allocation();
 
                     let iter_ptr = unsafe {
@@ -7187,8 +7186,7 @@ pub(super) fn dispatch_primitive_method(
 
         // Iterator methods - detect iterator objects by checking for 4-value layout with iter_type
         // Iterator layout: [source_ptr, front_idx, back_idx, iter_type]
-        if header.type_id == TypeId::UNIT
-            && header.size as usize == 4 * std::mem::size_of::<Value>()
+        if header.is_native_iterator(4)
         {
             let iter_data = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
             let iter_type = unsafe { (*iter_data.add(3)).as_i64() };
@@ -7699,7 +7697,7 @@ pub(super) fn dispatch_primitive_method(
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() };
                     let iter_obj = state
                         .heap
-                        .alloc(TypeId::UNIT, 4 * std::mem::size_of::<Value>())?;
+                        .alloc_native_iterator::<4>()?;
                     state.record_allocation();
                     let iter_ptr = unsafe {
                         (iter_obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value

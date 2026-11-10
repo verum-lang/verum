@@ -65,26 +65,14 @@ const ITER_TYPE_FATREF_SLICE: i64 = 8;
 /// inside `Set.from([1, 2, 3])` → SIGSEGV).  Element geometry/decode
 /// authority: `heap::typed_array_element{_spec,}`.
 const ITER_TYPE_TYPED_ARRAY: i64 = 9;
+const ITER_TYPE_TEXT: i64 = 10;
 
 // ============================================================================
 // Iterator + Range Operations
 // ============================================================================
 
-/// IterNew (0xC0) - Create iterator from iterable.
-///
-/// Format: `IterNew dst, src`
-/// Creates an iterator over src and stores in dst.
-///
-/// Type discrimination is performed by examining the ObjectHeader's type_id:
-/// - TypeId::LIST (512) → ITER_TYPE_LIST
-/// - TypeId::MAP (513) → ITER_TYPE_MAP
-/// - TypeId::SET (513) → ITER_TYPE_MAP (same iteration pattern)
-/// - TypeId::ARRAY (518) → ITER_TYPE_ARRAY
-/// - TypeId::RANGE (517) → ITER_TYPE_RANGE (special handling)
-///
-/// Iterator protocol: creates an iterator object from a collection or range. The iterator
-/// holds a type tag (LIST/SET/MAP/ARRAY/RANGE), the source reference, and a cursor index.
-/// Each call to IterNext advances the cursor and returns the next element or nil.
+/// Allocate the cursor used by `IterNext` for a supported source value.
+/// The source representation or its declared iterator method determines access.
 pub(in super::super) fn handle_iter_new(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
@@ -110,7 +98,7 @@ pub(in super::super) fn handle_iter_new(
         // IterNext will detect ITER_TYPE_GENERATOR and resume the generator.
         let iter_obj = state
             .heap
-            .alloc(TypeId::UNIT, 3 * std::mem::size_of::<Value>())?;
+            .alloc_native_iterator::<3>()?;
         state.record_allocation();
         let iter_ptr =
             unsafe { (iter_obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value };
@@ -123,104 +111,72 @@ pub(in super::super) fn handle_iter_new(
         return Ok(DispatchResult::Continue);
     }
 
-    // Pre-built iterator blob conversion — if the source is already a
-    // 4-value iterator blob (TypeId::UNIT + 4 × Value with a valid iter_type
-    // tag in slot 3, produced by explicit `.iter()` on builtin Map/Set/
-    // List/Array), unwrap it to the collection pointer the 3-value blob
-    // layout expects, using the tagged iter_type from slot 3 instead of
-    // re-deriving it from the wrapper blob's own header (which is
-    // `TypeId::UNIT` and would otherwise misclassify as
-    // `ITER_TYPE_LIST`).
-    let (source, forced_iter_type) = if source.is_ptr() {
-        let src_ptr = source.as_ptr::<u8>();
-        if !src_ptr.is_null()
-            && (src_ptr as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
-        {
-            let src_header = unsafe { heap::ObjectHeader::ref_or_stub(src_ptr) };
-            if src_header.type_id == TypeId::UNIT
-                && src_header.size as usize == 4 * std::mem::size_of::<Value>()
-            {
-                let data = unsafe { src_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
-                let tag = unsafe { (*data.add(3)).as_i64() };
-                if (ITER_TYPE_LIST..=ITER_TYPE_BYTE_LIST).contains(&tag) {
-                    let inner_source = unsafe { *data };
-                    (inner_source, Some(tag))
-                } else {
-                    (source, None)
-                }
-            } else {
-                (source, None)
-            }
+    // Native method iterators keep front/back cursors. Ordinary records can
+    // have the same size and contents, so require the producer's layout flag.
+    let source = if source.is_regular_ptr() && state.heap.contains(source.as_ptr()) {
+        let ptr = source.as_ptr::<heap::ObjectHeader>();
+        // SAFETY: the exact allocation belongs to this interpreter.
+        if unsafe { (*ptr).is_native_iterator(4) } {
+            unsafe { *ptr.cast::<u8>().add(heap::OBJECT_HEADER_SIZE).cast::<Value>() }
         } else {
-            (source, None)
+            source
         }
     } else {
-        (source, None)
+        source
     };
 
     // Determine collection type by examining the object header.
     // For non-builtin records, `protocol_next_fid` carries the resolved
     // `<Type>.next` FunctionId into blob slot 1 (see ITER_TYPE_PROTOCOL).
     let mut protocol_next_fid: Option<crate::module::FunctionId> = None;
-    let iter_type = if source.is_fat_ref() {
+    let iter_type = if source.is_small_string() {
+        ITER_TYPE_TEXT
+    } else if source.is_fat_ref() {
         // FATREF-ITER-1 (#40): general slice iteration. FatRefs fail
         // `is_ptr()` and previously fell to the non-pointer LIST
         // default; IterNext then dereferenced the FAT_REF_MARKER
         // payload bits as a List header → SIGSEGV. Keep the encoded
         // Value in slot 0; IterNext resolves per step.
         ITER_TYPE_FATREF_SLICE
-    } else if let Some(tag) = forced_iter_type {
-        // Already-built iterator blob — use the blob's tag rather than
-        // re-deriving from `source`'s (now unwrapped) header.
-        tag
-    } else if source.is_ptr() {
-        let source_ptr = source.as_ptr::<u8>();
-        if !source_ptr.is_null() {
-            // Read object header to get type_id
-            let header = unsafe { heap::ObjectHeader::ref_or_stub(source_ptr) };
-            match header.type_id {
-                TypeId::MAP | TypeId::SET => ITER_TYPE_MAP,
-                TypeId::ARRAY => ITER_TYPE_ARRAY,
-                TypeId::RANGE => ITER_TYPE_RANGE,
-                TypeId::BYTE_LIST => ITER_TYPE_BYTE_LIST,
-                TypeId::BYTE_SLICE => ITER_TYPE_BYTE_SLICE,
-                TypeId::LIST => ITER_TYPE_LIST,
-                // Packed typed arrays — scalar-TypeId raw buffers.
-                TypeId::U8
-                | TypeId::U16
-                | TypeId::U32
-                | TypeId::U64
-                | TypeId::F32
-                | TypeId::F64 => ITER_TYPE_TYPED_ARRAY,
-                // Non-builtin heap object.  If its type is an Iterator
-                // record (resolvable 1-arg `<Type>.next` with a real
-                // body), iterate through the protocol — reading an
-                // arbitrary record as a List header is memory-unsafe
-                // (PROTOCOL-ITER-1).  Types without a `next` keep the
-                // historic list treatment (synthetic list-shaped blobs
-                // from runtime intercepts rely on it).
-                other => match resolve_protocol_next(state, other) {
-                    Some(fid) => {
-                        protocol_next_fid = Some(fid);
-                        ITER_TYPE_PROTOCOL
+    } else if source.is_regular_ptr() && state.heap.contains(source.as_ptr()) {
+        // SAFETY: contains checks an exact allocation base.
+        let header = unsafe { &*source.as_ptr::<heap::ObjectHeader>() };
+        if !header.is_valid() {
+            return Err(InterpreterError::InvalidOperand { message: "IterNew requires a live iterable".into() });
+        }
+        match header.type_id {
+            TypeId::MAP | TypeId::SET => ITER_TYPE_MAP,
+            TypeId::ARRAY => ITER_TYPE_ARRAY,
+            TypeId::RANGE => ITER_TYPE_RANGE,
+            TypeId::BYTE_LIST => ITER_TYPE_BYTE_LIST,
+            TypeId::BYTE_SLICE => ITER_TYPE_BYTE_SLICE,
+            TypeId::LIST => ITER_TYPE_LIST,
+            TypeId::TEXT if header.size as usize >= heap::TEXT_RECORD_SIZE => ITER_TYPE_TEXT,
+            // Packed typed arrays — scalar-TypeId raw buffers.
+            TypeId::U8
+            | TypeId::U16
+            | TypeId::U32
+            | TypeId::U64
+            | TypeId::F32
+            | TypeId::F64 => ITER_TYPE_TYPED_ARRAY,
+            other => {
+                let fid = resolve_protocol_next(state, other).ok_or_else(|| {
+                    InterpreterError::InvalidOperand {
+                        message: format!("IterNew: type {} has no iterable representation or next method", other.0).into(),
                     }
-                    None => ITER_TYPE_LIST,
-                },
+                })?;
+                protocol_next_fid = Some(fid);
+                ITER_TYPE_PROTOCOL
             }
-        } else {
-            // Null pointer - default to list (will fail on IterNext)
-            ITER_TYPE_LIST
         }
     } else {
-        // Non-pointer value - could be a range encoded in value bits
-        // For now, default to list
-        ITER_TYPE_LIST
+        return Err(InterpreterError::InvalidOperand { message: "IterNew requires an iterable value".into() });
     };
 
     // Allocate iterator object: [source_ptr, current_idx, iter_type]
     let iter_obj = state
         .heap
-        .alloc(TypeId::UNIT, 3 * std::mem::size_of::<Value>())?;
+        .alloc_native_iterator::<3>()?;
     state.record_allocation();
 
     let iter_ptr =
@@ -289,9 +245,15 @@ pub(in super::super) fn handle_iter_next(
     let has_next_dst = read_reg(state)?;
     let iter_reg = read_reg(state)?;
 
-    let iter_ptr = state.get_reg(iter_reg).as_ptr::<u8>();
-    if iter_ptr.is_null() {
-        return Err(InterpreterError::NullPointer);
+    let iter = state.get_reg(iter_reg);
+    if !iter.is_regular_ptr() || !state.heap.contains(iter.as_ptr()) {
+        return Err(InterpreterError::InvalidOperand { message: "IterNext requires a VM iterator".into() });
+    }
+    let iter_ptr = iter.as_ptr::<u8>();
+    // SAFETY: exact heap membership was checked, and the flag is set only
+    // when allocating the three-slot state consumed below.
+    if !unsafe { (*iter_ptr.cast::<heap::ObjectHeader>()).is_native_iterator(3) } {
+        return Err(InterpreterError::InvalidOperand { message: "IterNext requires a VM iterator".into() });
     }
 
     // Read iterator state
@@ -487,6 +449,30 @@ pub(in super::super) fn handle_iter_next(
         return Ok(DispatchResult::Continue);
     }
 
+    if iter_type == ITER_TYPE_TEXT {
+        let byte = if source.is_small_string() {
+            source.as_small_string().as_bytes().get(current_idx).copied()
+        } else {
+            let base = source.as_ptr::<u8>();
+            // IterNew checks the tracked TEXT carrier and its record extent.
+            let (data, len) = unsafe { heap::text_record_payload(base) }.ok_or_else(|| {
+                InterpreterError::InvalidOperand { message: "IterNext: invalid Text record".into() }
+            })?;
+            if current_idx >= len { None } else {
+                if data.is_null() { return Err(InterpreterError::NullPointer); }
+                // The Text value owns the live UTF-8 buffer throughout the loop.
+                Some(unsafe { *data.add(current_idx) })
+            }
+        };
+        if let Some(byte) = byte {
+            unsafe { *iter_data.add(1) = Value::from_i64((current_idx + 1) as i64) };
+            state.set_reg(dst, Value::from_i64(i64::from(byte)));
+        } else {
+            state.set_reg(dst, Value::unit());
+        }
+        state.set_reg(has_next_dst, Value::from_bool(byte.is_some()));
+        return Ok(DispatchResult::Continue);
+    }
     let source_ptr = source.as_ptr::<u8>();
     if source_ptr.is_null() {
         state.set_reg(dst, Value::unit());
@@ -692,27 +678,16 @@ pub(in super::super) fn handle_iter_next(
             state.set_reg(has_next_dst, Value::from_bool(false));
         }
         ITER_TYPE_ARRAY => {
-            // Read array length from header (arrays store len in first slot after object header)
-            let array_header = unsafe { source_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
-            // For arrays, we use a simpler layout: elements directly after header
-            // The length is stored separately or passed as metadata
-            // For now, treat similarly to list
-            let len = unsafe { (*array_header).as_i64() } as usize;
-
-            if current_idx >= len {
+            let header = unsafe { &*source_ptr.cast::<heap::ObjectHeader>() };
+            let length = super::super::get_array_length(source_ptr, header)?;
+            if current_idx >= length {
                 state.set_reg(dst, Value::unit());
                 state.set_reg(has_next_dst, Value::from_bool(false));
                 return Ok(DispatchResult::Continue);
             }
-
-            let elem_ptr = unsafe { array_header.add(1 + current_idx) };
-            let element = unsafe { *elem_ptr };
-
-            unsafe {
-                *iter_data.add(1) = Value::from_i64((current_idx + 1) as i64);
-            }
-
-            state.set_reg(dst, element);
+            let value = super::super::get_array_element(state, source_ptr, header, current_idx)?;
+            unsafe { *iter_data.add(1) = Value::from_i64((current_idx + 1) as i64) };
+            state.set_reg(dst, value);
             state.set_reg(has_next_dst, Value::from_bool(true));
         }
         _ => {
