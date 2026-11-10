@@ -301,7 +301,7 @@ check-barename-census: ## Report every colliding (name,arity) pair with its modu
 	python3 scripts/ci/check_barename_collisions.py
 
 gates-source: check-private-types-off-public-surface check-error-code-namespaces check-guard-in-argument-position check-grammar-covers-keywords check-known-tables check-parser-attrs check-gate-tables check-markers check-vr-syntax check-str-alias check-op-bytes check-internal-refs check-rings check-arch-attestation check-type-name-collisions check-barename-collisions check-panic-surface check-per-register-privacy check-early-return-tenants check-dup-emitters check-bake-prepass-parity check-protocol-form check-dead-module-path-calls check-platform-call-parity check-protocol-conformance check-cfg-block-tail check-meta-function-names check-ffi-reference-tiers check-intrinsic-keys-implemented check-diagnostic-levers check-constant-time-duplication check-type-param-name-rule check-implement-generics check-reexport-names \
-            check-gate-aggregates-invoked check-register-rows check-test-mounts \
+            check-gate-aggregates-invoked check-register-rows check-test-mounts check-no-runtime-shims \
             check-verdict-phases check-live-task-citations check-production-claims check-aot-dependency-guard ## Every gate that needs only the SOURCE TREE — no build, no artefacts
 # THREE TARGETS JOINED THAT LIST 2026-09-11 (T1439) after a census of
 # which `check-*` targets any workflow actually invokes: 89 declared, 66
@@ -340,6 +340,10 @@ gates-source: check-private-types-off-public-surface check-error-code-namespaces
 
 gates-source-report: ## Run EVERY source-only gate past the first failure and summarise (make stops at the first; this does not)
 	bash scripts/ci/run_source_gates.sh
+
+.PHONY: check-no-runtime-shims
+check-no-runtime-shims: ## Refuse authored C/C++ runtime sources, shim builds and opaque runtime objects
+	bash scripts/ci/check_no_runtime_shims.sh
 
 check-phantom-mounts: ## Gate (T0780): mounts naming a symbol the module does not export. NEEDS a built verum; ~15 min, NOT in gates-source.
 	@test -n "$(VERUM)" || (echo "usage: make check-phantom-mounts VERUM=/path/to/verum" && false)

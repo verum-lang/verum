@@ -1,5 +1,11 @@
 # Verum Language Platform
 
+**No authored C/C++ interlayers for Verum operations, in any tier.** Implement
+primitives in VBC and lower them directly in the interpreter and native backend.
+Compiling an interlayer to bitcode or linking it statically is also forbidden.
+This source rule applies independently of the host/AOT dependency rules below.
+See [AGENTS.md](AGENTS.md).
+
 ## CRITICAL: No libc in generated AOT programs
 
 **AOT invariant**: Programs, libraries and objects compiled by Verum (Tier 1),
