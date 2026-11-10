@@ -627,3 +627,43 @@ public fn output<N: meta Int>() -> [Int; N] { [] }
         .unwrap();
     assert!(output.semantic_return.is_none());
 }
+
+#[test]
+fn local_raw_pointer_result_reborrows_the_original_record_field() {
+    value(
+        r#"
+implement Cell {
+    fn address(&self) -> *mut Int { unsafe { &self.value as *mut Int } }
+}
+fn change(value: &mut Int) { *value += 3; }
+fn probe() -> Int {
+    let cell = Cell { padding: 40, value: 2 };
+    let pointer = cell.address();
+    unsafe { change(&mut *pointer); }
+    cell.padding + cell.value
+}
+"#,
+        45,
+    );
+}
+
+#[test]
+fn raw_reborrow_evaluates_a_pointer_producer_once() {
+    value(
+        r#"
+implement Cell {
+    fn address(&mut self) -> *mut Int {
+        self.padding += 1;
+        unsafe { &self.value as *mut Int }
+    }
+}
+fn replace_value(value: &mut Int) { *value = 7; }
+fn probe() -> Int {
+    let mut cell = Cell { padding: 0, value: 2 };
+    unsafe { replace_value(&mut *(cell.address())); }
+    cell.padding * 10 + cell.value
+}
+"#,
+        17,
+    );
+}

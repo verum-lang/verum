@@ -457,3 +457,22 @@ fn statement_only_callback_supplies_unit_to_an_inferred_result() {
         assert!(found.iter().any(|e| e.contains("Mismatch") && e.contains("Unit")), "{negative}: {found:?}");
     }
 }
+
+#[test]
+fn raw_pointer_write_permission_survives_an_explicit_dereference() {
+    let read_and_write = r#"
+        fn set(p: &mut Int) { *p = 9; }
+        fn read(p: *const Int) -> Int { unsafe { *p } }
+        fn write(p: *mut Int) { unsafe { set(&mut *p); } }
+    "#;
+    let found = errors("pointer", read_and_write);
+    assert!(found.is_empty(), "{found:?}");
+    for body in [
+        "fn bad(p: *const Int) { unsafe { set(&mut *p); } }",
+        "fn bad(p: *const Int) { unsafe { *p = 9; } }",
+        "fn bad(p: &Int) { set(&mut *p); }",
+    ] {
+        let found = errors("pointer", &format!("{read_and_write}{body}"));
+        assert!(found.iter().any(|error| error.contains("SharedReferenceWrite")), "{body}: {found:?}");
+    }
+}

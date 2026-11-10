@@ -280,6 +280,12 @@ impl TypeChecker {
     fn check_write_through_reference(&self, ty: &Type, auto_deref: bool, span: Span) -> Result<()> {
         let mut current = self.place_reference_head(ty, span)?;
         for _ in 0..64 {
+            if !auto_deref && matches!(
+                current,
+                Type::Pointer { mutable: false, .. } | Type::VolatilePointer { mutable: false, .. }
+            ) {
+                return Err(TypeError::SharedReferenceWrite { span });
+            }
             let (Type::Reference { mutable, inner }
             | Type::CheckedReference { mutable, inner }
             | Type::UnsafeReference { mutable, inner }) = current

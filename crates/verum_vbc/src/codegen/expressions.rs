@@ -5143,28 +5143,17 @@ impl VbcCodegen {
                 self.ctx.free_temp(receiver);
                 return Ok(Some(reference));
             }
-            // Shape gate: Path/Field probe compile-then-check (idempotent
-            // recompile on fall-through). METHOD-CALL operands
-            // (`&*self.ptr.offset(i)` — the List.fmt_debug element loop,
-            // #48) must NOT be recompiled (double side effects), so they
-            // are admitted only when the STATIC return type names a raw
-            // pointer — then the single compile IS the fold result.
-            // Pre-fix the method-call shape fell to the generic path,
-            // which wrapped the ADDRESS in a register-ref: the element
-            // then rendered as the raw pointer-int
-            // (`f"{[1,2]:?}"` printed `[1305670058496]`).
-            let is_probe_shape =
-                matches!(ptr_expr.kind, ExprKind::Path(_) | ExprKind::Field { .. });
-            let is_static_raw_method = matches!(
-                ptr_expr.kind,
-                ExprKind::MethodCall { .. } | ExprKind::Call { .. }
-            ) && self
-                .infer_expr_type_name(ptr_expr)
-                .map(|t| {
-                    let t = t.trim();
-                    t.starts_with('*') || t.starts_with("&unsafe")
-                })
-                .unwrap_or(false);
+            // A binding keeps the source type of a pointer returned by its
+            // initializer, even when the call ABI erased its register marker.
+            // Evaluate effectful calls only when their declaration proves the address.
+            let ptr_expr = Self::normalized_place(ptr_expr);
+            let is_probe_shape = matches!(ptr_expr.kind, ExprKind::Path(_) | ExprKind::Field { .. });
+            let declared_raw_address = (is_probe_shape || matches!(
+                ptr_expr.kind, ExprKind::MethodCall { .. } | ExprKind::Call { .. }
+            )) && self.infer_expr_type_name(ptr_expr).is_some_and(|ty| {
+                let ty = ty.trim();
+                ty.starts_with('*') || ty.starts_with("&unsafe")
+            });
             // `(… as *mut T)` / `(… as *const T)` operands — the guard
             // idiom `&mut *(&self.field as *const T as *mut T)`. The
             // cast's OWN target type names a raw pointer, so the single
@@ -5205,11 +5194,11 @@ impl VbcCodegen {
                 ExprKind::Cast { ty, .. }
                     if matches!(ty.kind, verum_ast::ty::TypeKind::Pointer { .. } | verum_ast::ty::TypeKind::VolatilePointer { .. })
             ) && idempotent_cast_chain(cast_probe);
-            if is_probe_shape || is_static_raw_method || is_raw_cast {
+            if is_probe_shape || declared_raw_address || is_raw_cast {
                 let ptr_reg = self
                     .compile_expr(ptr_expr)?
                     .or_internal("&*p: pointer operand has no value")?;
-                if self.ctx.is_raw_pointer(ptr_reg) || is_static_raw_method || is_raw_cast {
+                if self.ctx.is_raw_pointer(ptr_reg) || declared_raw_address || is_raw_cast {
                     // `&*p` ON A VALUE-SLOT POINTER IS THE PRE-LOADED
                     // VALUE, not the address (T1492).
                     //
@@ -5272,7 +5261,7 @@ impl VbcCodegen {
                     // element-repr carried facts on the buffer (see
                     // task #48 notes / [[session_2026-07-11_glob_mount_
                     // ctor_pattern_rigidity_47]]).
-                    if is_static_raw_method || is_raw_cast {
+                    if declared_raw_address || is_raw_cast {
                         self.ctx.mark_raw_pointer(ptr_reg);
                     }
                     return Ok(Some(ptr_reg));
