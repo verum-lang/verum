@@ -21791,6 +21791,12 @@ impl TypeChecker {
                                 (*ord, ret, instance.clone())
                             })
                             .collect();
+                        // The result type is selected later. A receiver permission
+                        // is already known only if every viable declaration agrees.
+                        let receiver_kind = rets.first()
+                            .and_then(|(_, _, instance)| instance.as_ref()?.receiver_kind)
+                            .filter(|kind| rets.iter().all(|(_, _, instance)|
+                                instance.as_ref().and_then(|i| i.receiver_kind) == Some(*kind)));
                         self.pending_method_overloads.push((
                             span,
                             head,
@@ -21798,7 +21804,7 @@ impl TypeChecker {
                             alpha,
                             rets,
                         ));
-                        return Ok(InferResult::new(Type::Var(alpha)));
+                        return Ok(InferResult::method(Type::Var(alpha), receiver_kind));
                     }
                 }
             }
@@ -21951,7 +21957,7 @@ impl TypeChecker {
                         normalized_return
                     );
                 }
-                Ok(InferResult::new(normalized_return))
+                Ok(InferResult::method(normalized_return, instance.as_ref().and_then(|i| i.receiver_kind)))
             }
             _ => {
                 // Method type is not a function - this shouldn't happen

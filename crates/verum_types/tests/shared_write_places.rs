@@ -31,6 +31,21 @@ fn errors(source: &str) -> Vec<String> {
 }
 
 #[test]
+fn a_selected_protocol_method_preserves_its_receiver_permission_on_a_field() {
+    let definitions = r#"
+        type Cell<T> is { value:T };
+        type Report is { cell:Cell<Int> };
+        type Access is protocol { fn inspect(&self)->Int; fn update(&mut self)->Int; };
+        implement<T> Cell<T> { fn inspect(&self)->Int { 1 } fn update(&mut self)->Int { 2 } }
+        implement<T> Access for Cell<T> { fn inspect(&self)->Int { 1 } fn update(&mut self)->Int { 2 } }
+    "#;
+    let valid = errors(&format!("{definitions} fn read(r:&Report)->Int {{ r.cell.inspect() }} fn write(r:&mut Report)->Int {{ r.cell.update() }}"));
+    assert!(valid.is_empty(), "{valid:?}");
+    let invalid = errors(&format!("{definitions} fn invalid(r:&Report)->Int {{ r.cell.update() }}"));
+    assert!(invalid.iter().any(|message| message.contains("cannot write through a shared reference")), "{invalid:?}");
+}
+
+#[test]
 fn helpers_cannot_write_or_reborrow_shared_referents() {
     for body in [
         "fn change(p: &Boxed, y: Boxed) { *p = y; }",

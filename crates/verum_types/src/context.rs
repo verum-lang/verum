@@ -163,6 +163,8 @@ pub struct TypeScheme {
 pub struct InstantiatedScheme {
     substitution: Substitution,
     pub ty: Type,
+    /// The permission declared on the selected method's implicit receiver.
+    pub(crate) receiver_kind: Option<crate::core_metadata::ReceiverKind>,
     pub fresh_vars: List<TypeVar>,
     pub value_parameters: List<Type>,
     pub implicit_vars: Set<TypeVar>,
@@ -267,6 +269,7 @@ impl TypeScheme {
         }
         Ok(InstantiatedScheme {
             ty: self.ty.try_apply_subst(&subst)?,
+            receiver_kind: self.receiver_kind,
             implicit_vars,
             type_bounds,
             protocol_bounds,
