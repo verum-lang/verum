@@ -61,7 +61,7 @@
 )
 module core.sys.signal;
 
-mount core.intrinsics.atomic.{atomic_store, atomic_load, MemoryOrder};
+mount core.sync.atomic.{AtomicBool, MemoryOrdering};
 
 // =============================================================================
 // Platform-Specific FFI
@@ -569,31 +569,37 @@ fn register_windows_handler() -> Result<(), SignalError> {
 /// }
 /// ```
 public type SignalFlag is {
-    value: Int,
+    value: AtomicBool,
 };
 
 implement SignalFlag {
     /// Create a new unset signal flag.
     public fn new() -> SignalFlag {
-        SignalFlag { value: 0 }
+        SignalFlag { value: AtomicBool.new(false) }
     }
 
     /// Set the flag (signal-safe).
     @inline
     public fn set(&self) {
-        atomic_store(&self.value as &mut Int, 1, MemoryOrder.Release);
+        self.value.store(true, MemoryOrdering.Release);
     }
 
     /// Clear the flag (signal-safe).
     @inline
     public fn clear(&self) {
-        atomic_store(&self.value as &mut Int, 0, MemoryOrder.Release);
+        self.value.store(false, MemoryOrdering.Release);
+    }
+
+    /// Atomically return the previous state and clear it for the next delivery.
+    @inline
+    public fn take(&self) -> Bool {
+        self.value.swap(false, MemoryOrdering.AcqRel)
     }
 
     /// Check if the flag is set (signal-safe).
     @inline
     public fn is_set(&self) -> Bool {
-        atomic_load(&self.value, MemoryOrder.Acquire) != 0
+        self.value.load(MemoryOrdering.Acquire)
     }
 }
 

@@ -341,4 +341,16 @@ fn test_signal_flag_clear_is_idempotent() {
     assert(!f.is_set());
 }
 
+@test
+fn signal_flag_take_consumes_only_the_observed_delivery() {
+    let flag = SignalFlag.new();
+    assert(!flag.take());
+    flag.set();
+    assert(flag.take());
+    assert(!flag.take());
+    flag.set();
+    assert(flag.take());
+    assert(!flag.is_set());
+}
+
 fn main() {}

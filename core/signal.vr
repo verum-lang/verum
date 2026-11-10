@@ -342,8 +342,7 @@ implement SignalRegistry {
                     let entries = self_clone.entries.lock().unwrap_or_else(|p| p.into_inner());
                     let mut fired: List<(Signal, BroadcastSender<Signal>)> = List.new();
                     for e in entries.iter() {
-                        if e.flag.is_set() {
-                            e.flag.clear();
+                        if e.flag.take() {
                             fired.push((e.sig, e.sender.clone()));
                         }
                     }
