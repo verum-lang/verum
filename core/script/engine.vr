@@ -135,7 +135,7 @@ implement Engine {
 
     /// Set a `Map` global the next `eval` can read (via the script-side
     /// `script_global_map(name)`).
-    public fn set_map<K, V>(&self, name: Text, value: Map<K, V>) {
+    public fn set_map<K: Hash + Eq, V>(&self, name: Text, value: Map<K, V>) {
         script_engine_set_global_value(self.raw, name, value);
     }
 
