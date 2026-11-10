@@ -5507,7 +5507,7 @@ impl TypeChecker {
 
                                 // Protocol-based IntoIterator resolution
                                 let elem_ty = match self
-                                    .resolve_into_iterator_with_loading(&iter_result.ty)
+                                    .resolve_into_iterator_with_loading(&iter_result.ty, iter.span)?
                                 {
                                     Some(resolution) => resolution.item,
                                     None => {
@@ -6465,7 +6465,7 @@ impl TypeChecker {
                     // For-loop desugaring: "for x in iter" desugars to IntoIterator protocol calls (into_iter -> next loop)
                     // =========================================================================
                     let elem_ty = match self
-                        .resolve_into_iterator_with_loading(&resolved_iter_ty)
+                        .resolve_into_iterator_with_loading(&resolved_iter_ty, iter.span)?
                     {
                         // T0701 projection leg: the primary arm handed the
                         // binder the RAW resolution item while the sibling
@@ -12141,7 +12141,7 @@ impl TypeChecker {
                     let resolved_comprehension_iter =
                         self.unifier.apply(&iter_result.ty);
                     let elem_ty = match self
-                        .resolve_into_iterator_with_loading(&resolved_comprehension_iter)
+                        .resolve_into_iterator_with_loading(&resolved_comprehension_iter, iter.span)?
                     {
                         Some(resolution) => resolution.item,
                         None => {
@@ -12291,7 +12291,7 @@ impl TypeChecker {
 
                     // Protocol-based IntoIterator resolution for streams
                     let elem_ty = match self
-                        .resolve_into_iterator_with_loading(&iter_result.ty)
+                        .resolve_into_iterator_with_loading(&iter_result.ty, iter.span)?
                     {
                         Some(resolution) => resolution.item,
                         None => {
@@ -12413,7 +12413,7 @@ impl TypeChecker {
 
                     // Protocol-based IntoIterator resolution
                     let elem_ty = match self
-                        .resolve_into_iterator_with_loading(&iter_result.ty)
+                        .resolve_into_iterator_with_loading(&iter_result.ty, iter.span)?
                     {
                         Some(resolution) => resolution.item,
                         None => {
@@ -12494,7 +12494,7 @@ impl TypeChecker {
 
                     // Protocol-based IntoIterator resolution
                     let elem_ty = match self
-                        .resolve_into_iterator_with_loading(&iter_result.ty)
+                        .resolve_into_iterator_with_loading(&iter_result.ty, iter.span)?
                     {
                         Some(resolution) => resolution.item,
                         None => {

@@ -908,3 +908,35 @@ fn imported_primitive_impls_use_the_extensions_private_type_mount() {
         "{errors:?}"
     );
 }
+
+#[test]
+fn imported_for_loop_items_follow_into_iterator_even_with_another_item_first() {
+    let sources = [
+        ("core.base.iterator", "public type IntoIterator is protocol { type Item; type IntoIter; fn into_iter(self) -> Self.IntoIter; };"),
+        ("fixture.batch", r#"
+            mount core.base.iterator.IntoIterator;
+            public type Other is protocol { type Item; };
+            public type Payload is { public amount: Int };
+            public type Batch<T> is { item: T };
+            implement<T> Other for Batch<T> { type Item = Bool; }
+            implement<T> IntoIterator for Batch<T> {
+                type Item = T;
+                type IntoIter = Self;
+                fn into_iter(self) -> Self { self }
+            }
+            public fn batch() -> Batch<Payload> { Batch { item: Payload { amount: 8 } } }
+        "#),
+    ];
+    let source = "mount fixture.batch.batch; fn read() -> Int { let mut value = 0; for item in batch() { value = item.amount; } value }";
+    let errors = check(source, &sources);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    let errors = check(&source.replace("item.amount", "item.foreign"), &sources);
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    assert!(
+        errors[0].contains("UnknownField")
+            && errors[0].contains("fixture.batch.Payload")
+            && errors[0].contains("foreign"),
+        "{errors:?}"
+    );
+}

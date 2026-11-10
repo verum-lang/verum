@@ -2189,31 +2189,14 @@ impl TypeChecker {
         }
     }
 
-    /// ITER-LAZY-LOAD (T0701 root): resolve `IntoIterator` for `ty`,
-    /// first making sure the iterated type is actually LOADED.
-    ///
-    /// The lazy stdlib loader is receiver-driven — a type's protocol
-    /// impls register when a METHOD is called on it
-    /// (`infer_method_call_inner_impl` → `ensure_stdlib_type_loaded`).
-    /// A for-loop's iterand is consumed by the desugar itself: nobody
-    /// calls a method on the `ListIter<T>` that `xs.iter()` returned,
-    /// so its `implement<T> IntoIterator for ListIter<T>` never
-    /// entered `protocol_checker.impls`, `find_impl` MISSed, and the
-    /// binder fell through to the fresh-var heuristic — every
-    /// element-method chain then surfaced as E404 «not fully
-    /// determined» (the fleet's factor-bisected signature: identical
-    /// code green without the loop, red under ANY `.iter()` form).
-    ///
-    /// ONE authority for every iterator-resolution consumer (for /
-    /// for-await / comprehensions): ensure-then-resolve. Reference
-    /// layers unwrap so `for x in &xs` loads the collection too;
-    /// type ARGUMENTS don't need loading here — the impl match is
-    /// head-driven, and argument types that user code can name are
-    /// loaded by the module pre-pass.
+    /// A returned source iterable may have no directly imported methods. Load
+    /// its declared protocol implementation before projecting the element type.
     pub(crate) fn resolve_into_iterator_with_loading(
         &mut self,
         ty: &Type,
-    ) -> Option<crate::protocol::IntoIteratorResolution> {
+        span: Span,
+    ) -> Result<Option<crate::protocol::IntoIteratorResolution>> {
+        use verum_common::well_known_types::WellKnownProtocol;
         let mut head = ty;
         loop {
             match head {
@@ -2224,24 +2207,19 @@ impl TypeChecker {
                 _ => break,
             }
         }
-        let head_name: Option<Text> = match head {
-            Type::Named { path, .. } => path
-                .segments
-                .iter()
-                .rev()
-                .find_map(|s| match s {
-                    verum_ast::ty::PathSegment::Name(id) => {
-                        Some(Text::from(id.name.as_str()))
-                    }
-                    _ => None,
-                }),
+        let head_name = match head {
+            Type::Named { path, .. } => crate::ty::nominal_path_name(path).map(|name| Text::from(name.as_ref())),
             Type::Generic { name, .. } => Some(name.clone()),
             _ => None,
         };
         if let Some(name) = head_name {
             self.ensure_stdlib_type_loaded_transitive(&name);
         }
-        self.protocol_checker.read().resolve_into_iterator_protocol(ty)
+        if let Some(resolution) = self.protocol_checker.read().resolve_into_iterator_protocol(ty) {
+            return Ok(Some(resolution));
+        }
+        self.load_source_operator_implementation(head, WellKnownProtocol::IntoIterator, span)?;
+        Ok(self.protocol_checker.read().resolve_into_iterator_protocol(ty))
     }
 
     /// MOUNT-TYPE-AUTHORITY-1 — mount-scoped lazy type load.

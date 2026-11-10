@@ -9524,64 +9524,15 @@ impl ProtocolChecker {
         // =========================================================================
         // Try to resolve IntoIterator via registered protocol implementation.
         // This is the preferred method as it doesn't require hardcoded type knowledge.
-        let into_iter_path =
-            Path::single(verum_ast::ty::Ident::new("IntoIterator", Span::default()));
-
-        let found = self.find_impl(ty, &into_iter_path);
-        if crate::ctor_trace_enabled() {
-            match &found {
-                Maybe::Some(impl_) => {
-                    let mut keys = String::new();
-                    for k in impl_.associated_types.keys() {
-                        if !keys.is_empty() {
-                            keys.push(',');
-                        }
-                        keys.push_str(k.as_str());
-                    }
-                    eprintln!(
-                        "[ctor-trace] intoiter find_impl HIT ty={} for_type={} assoc_keys=[{}]",
-                        ty, impl_.for_type, keys
-                    );
-                }
-                Maybe::None => {
-                    eprintln!("[ctor-trace] intoiter find_impl MISS ty={}", ty)
-                }
-            }
-        }
-        if let Maybe::Some(impl_) = found {
-            // Build type substitution from impl's generic type to concrete type
-            let mut subst = Map::new();
-            self.build_type_substitution_for_impl(&impl_.for_type, ty, &mut subst);
-
-            // Extract associated types Item and IntoIter
-            let item = impl_
-                .ordinary_associated_type(&"Item".into())
-                .ok()?
-                .cloned()
-                .map(|t| self.apply_type_substitution_with_map(&t, &subst))
-                // CRITICAL: Normalize projection types after substitution
-                // If Item = I.Item and I = ListIter<Int>, the substitution gives
-                // ::Item[ListIter<Int>], which must be resolved to &Int
-                .map(|t| self.normalize_projection_type(&t));
-
-            let iter = impl_
-                .ordinary_associated_type(&"IntoIter".into())
-                .ok()?
-                .cloned()
-                .map(|t| self.apply_type_substitution_with_map(&t, &subst))
-                .map(|t| self.normalize_projection_type(&t));
-
-            if let (Some(item), Some(iter)) = (item, iter) {
-                return Some(IntoIteratorResolution { item, iter });
-            }
-        }
-
-        // No IntoIterator implementation found
-        // NOTE: Duck-typing fallback for custom iterators with has_next()/next()
-        // methods is handled in infer.rs (synth_expr for ForIn), not here,
-        // because user-defined impl methods are stored in inherent_methods
-        // which is not accessible from the ProtocolChecker.
-        None
+        let protocol = self.operator_protocol_path(WellKnownProtocol::IntoIterator);
+        let (implementation, substitution) =
+            self.find_impl_with_substitution(ty, &protocol)?;
+        let member = |name: &str| {
+            let template = implementation.ordinary_associated_type(&name.into()).ok()??;
+            let item = template.try_apply_subst(&substitution).ok()?;
+            Some(self.normalize_projection_type(&item))
+        };
+        Some(IntoIteratorResolution { item: member("Item")?, iter: member("IntoIter")? })
     }
 
     // =========================================================================
