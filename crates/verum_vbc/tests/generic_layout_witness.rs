@@ -642,3 +642,23 @@ fn value_self_fields_never_become_associated_type_properties() {
     let source = r#"type Config is {name:Text}; type Inner is {config:Config}; type Cell is {inner:Inner}; implement Cell {fn name(&self)->Text {self.inner.config.name}} fn probe()->Int {let cell=Cell{inner:Inner{config:Config{name:"root"}}}; assert_eq(cell.name(),"root");37}"#;
     assert_eq!(run(roundtrip(&compile(source)), "probe"), 37);
 }
+
+#[test]
+fn signedness_uses_the_active_callers_type_and_returns_a_boolean() {
+    use verum_vbc::{instruction::LayoutProperty, types::{TypeParamId, TypeRef}};
+    let module = compile(r#"
+        type Positive is UInt64;
+        type Change is Int8;
+        type Record is { value: Int };
+        fn signed<T>() -> Bool { T.is_signed }
+        fn forward<U>() -> Bool { signed<U>() }
+        fn probe() -> Int {
+            if !forward<Int>() || !forward<Change>() || !forward<Float>() || !forward<ISize>() { return 0; }
+            if forward<Positive>() || forward<Byte>() || forward<Record>() || forward<USize>() { return 0; }
+            1
+        }
+    "#);
+    assert_eq!(run(roundtrip(&module), "probe"), 1);
+    assert_eq!(verum_vbc::type_layout::query(&module, &TypeRef::Generic(TypeParamId(77)),
+        LayoutProperty::IsSigned), None);
+}

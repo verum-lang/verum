@@ -2502,7 +2502,12 @@ fn lower_instruction_impl<'ctx>(
         Instruction::TypeLayout { dst, type_ref, property } => {
             let module = ctx.vbc_module().or_internal("TypeLayout requires declaration metadata")?;
             if let Some(value) = verum_vbc::type_layout::query(module, type_ref, *property) {
-                ctx.set_register(dst.0, ctx.types().i64_type().const_int(value, false).into());
+                if *property == verum_vbc::instruction::LayoutProperty::IsSigned {
+                    ctx.set_register(dst.0, ctx.types().bool_type().const_int(value, false).into());
+                    ctx.mark_bool_register(dst.0);
+                } else {
+                    ctx.set_register(dst.0, ctx.types().i64_type().const_int(value, false).into());
+                }
             } else {
                 // Generic bodies can coexist with their specializations. If
                 // an erased body is actually called, refuse the missing fact.

@@ -18613,8 +18613,14 @@ impl VbcCodegen {
         {
             return Ok(TypeRef::Concrete(*id));
         }
-        // Fall back to standard resolution
-        self.ast_type_to_type_ref(ty)
+        let resolved = self.ast_type_to_type_ref(ty)?;
+        if preserve_refs && let TypeKind::Path(path) = &ty.kind
+            && let TypeRef::Concrete(id) = &resolved
+            && let Some(name) = path.as_ident()
+        {
+            return Ok(TypeRef::Concrete(id.declared_scalar_identity(&name.name)));
+        }
+        Ok(resolved)
     }
 
     /// The source spelling of Self keeps the owner's declaration arguments.

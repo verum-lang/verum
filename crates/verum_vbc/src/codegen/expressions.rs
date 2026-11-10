@@ -9335,7 +9335,7 @@ impl VbcCodegen {
             if self.type_by_id(id).is_some_and(|ty| !ty.type_params.is_empty()) {
                 return None;
             }
-            Some(crate::types::TypeRef::Concrete(id))
+            Some(crate::types::TypeRef::Concrete(id.declared_scalar_identity(name)))
         }
     }
 
@@ -44302,9 +44302,16 @@ impl VbcCodegen {
             TypeProperty::Size => Some(crate::instruction::LayoutProperty::Size),
             TypeProperty::Alignment => Some(crate::instruction::LayoutProperty::Alignment),
             TypeProperty::Stride => Some(crate::instruction::LayoutProperty::Stride),
+            TypeProperty::IsSigned => Some(crate::instruction::LayoutProperty::IsSigned),
             _ => None,
         };
         if let Some(property) = property_query {
+            if property == crate::instruction::LayoutProperty::IsSigned && matches!(
+                ty.kind, verum_ast::ty::TypeKind::Pointer { .. } | verum_ast::ty::TypeKind::VolatilePointer { .. }
+            ) {
+                self.ctx.emit(Instruction::LoadFalse { dst: dest });
+                return Ok(Some(dest));
+            }
             let mut count_error = None;
             let type_ref = self.resolve_type_ref_scoped_with_count(
                 ty, &self.ctx.current_generic_param_ids, true, self.ctx.current_source_module.as_deref(), &mut |count| {
@@ -44322,7 +44329,11 @@ impl VbcCodegen {
             if let Some(value) = crate::type_layout::query_with(&type_ref, property, |id| {
                 self.types.iter().find(|descriptor| descriptor.id == id)
             }).and_then(|value| i64::try_from(value).ok()) {
-                self.ctx.emit(Instruction::LoadI { dst: dest, value });
+                if property == crate::instruction::LayoutProperty::IsSigned {
+                    self.ctx.emit(if value != 0 { Instruction::LoadTrue { dst: dest } } else { Instruction::LoadFalse { dst: dest } });
+                } else {
+                    self.ctx.emit(Instruction::LoadI { dst: dest, value });
+                }
             } else {
                 self.ctx.emit(Instruction::TypeLayout { dst: dest, type_ref, property });
             }
@@ -44492,28 +44503,7 @@ impl VbcCodegen {
                     value: type_id,
                 });
             }
-            TypeProperty::IsSigned => {
-                // T0216: signed = signed integer OR float; everything else,
-                // numeric or not, answers false rather than being rejected.
-                //
-                // This loads a BOOL, not 1/0. The typechecker has always
-                // typed `is_signed` as Bool, while the field-access route it
-                // used to take emitted Int(1)/Int(0) — a value whose NaN-box
-                // tag did not match its own declared type.
-                //
-                // Measured, not assumed: the pre-change binary DOES satisfy
-                // `Int8.is_signed == (Int8.min < 0)`, so no law was failing;
-                // the interpreter's equality accepts Int(1) against a Bool.
-                // What is fixed here is the declared-type/emitted-value
-                // disagreement itself, which any consumer comparing tags
-                // rather than values — Tier-1 lowering, a stricter equality,
-                // a `match` on Bool — would have been entitled to trip over.
-                if is_signed || is_float {
-                    self.ctx.emit(Instruction::LoadTrue { dst: dest });
-                } else {
-                    self.ctx.emit(Instruction::LoadFalse { dst: dest });
-                }
-            }
+            TypeProperty::IsSigned => unreachable!("resolved by the declaration query"),
         }
 
         Ok(Some(dest))
@@ -44838,8 +44828,14 @@ impl VbcCodegen {
                 verum_ast::TypeProperty::Size => crate::instruction::LayoutProperty::Size,
                 verum_ast::TypeProperty::Alignment => crate::instruction::LayoutProperty::Alignment,
                 verum_ast::TypeProperty::Stride => crate::instruction::LayoutProperty::Stride,
+                verum_ast::TypeProperty::IsSigned => crate::instruction::LayoutProperty::IsSigned,
                 _ => return Ok(None),
             };
+            if query == crate::instruction::LayoutProperty::IsSigned && matches!(
+                ty.kind, verum_ast::ty::TypeKind::Pointer { .. } | verum_ast::ty::TypeKind::VolatilePointer { .. }
+            ) {
+                return Ok(Some(Scalar::Bool(false)));
+            }
             // Array counts in a property belong to this same constant evaluation.
             // Starting a new evaluator here would erase the active dependency
             // set and recurse forever for `const N = ([Byte; N]).size`.
@@ -44873,7 +44869,11 @@ impl VbcCodegen {
             let ty = self.resolve_declared_associated_types(&ty).unwrap_or(ty);
             return Ok(crate::type_layout::query_with(&ty, query, |id| {
                 self.types.iter().find(|descriptor| descriptor.id == id)
-            }).and_then(|value| i64::try_from(value).ok()).map(Scalar::Int));
+            }).and_then(|value| if query == crate::instruction::LayoutProperty::IsSigned {
+                Some(Scalar::Bool(value != 0))
+            } else {
+                i64::try_from(value).ok().map(Scalar::Int)
+            }));
         }
         match &expr.kind {
             ExprKind::Path(_) | ExprKind::Field { .. } => {

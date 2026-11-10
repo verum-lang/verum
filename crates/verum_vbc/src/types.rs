@@ -373,6 +373,20 @@ impl TypeId {
         matches!(self.0, 2 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 17 | 18)
     }
 
+    /// Preserve a pointer-sized integer's declared numeric identity when the
+    /// source spelling accompanies its shared pointer-width ABI carrier.
+    pub(crate) fn declared_scalar_identity(self, source_name: &str) -> Self {
+        if self == Self::PTR
+            && Self::from_well_known_scalar_name(source_name) == Some(Self::PTR)
+            && let Some(identity) = Self::from_well_known_scalar_name(
+                verum_common::well_known_types::type_names::canonical_identity_name(source_name),
+            )
+        {
+            return identity;
+        }
+        self
+    }
+
     /// Checks if this is a floating point type.
     pub fn is_float(self) -> bool {
         matches!(self.0, 3 | 13)

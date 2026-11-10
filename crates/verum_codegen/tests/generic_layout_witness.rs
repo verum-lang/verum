@@ -163,3 +163,16 @@ fn native_structural_reference_witnesses_survive_nested_calls() {
         16
     );
 }
+
+#[test]
+fn native_signedness_uses_a_boolean_from_the_specialized_declaration() {
+    let source = r#"
+        type Count is UInt64;
+        fn signed<T>() -> Bool { T.is_signed }
+        fn outer<U>() -> Bool { signed<U>() }
+        fn probe() -> Int {
+            if outer<ISize>() && outer<Int8>() && outer<Float>() && !outer<USize>() && !outer<Count>() { 1 } else { 0 }
+        }
+    "#;
+    assert_eq!(execute(source), 1);
+}

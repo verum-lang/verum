@@ -10589,12 +10589,15 @@ pub enum LayoutProperty {
     Alignment = 1,
     /// Aligned element stride.
     Stride = 2,
+    /// Whether a declared scalar is a signed integer or floating-point type.
+    IsSigned = 3,
 }
 
 impl LayoutProperty {
     /// Decode the canonical wire discriminant; unknown queries are rejected.
     pub fn from_byte(value: u8) -> Option<Self> {
-        match value { 0 => Some(Self::Size), 1 => Some(Self::Alignment), 2 => Some(Self::Stride), _ => None }
+        match value { 0 => Some(Self::Size), 1 => Some(Self::Alignment), 2 => Some(Self::Stride),
+            3 => Some(Self::IsSigned), _ => None }
     }
 }
 

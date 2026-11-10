@@ -19,6 +19,9 @@ pub fn query_with<'a>(
     property: LayoutProperty,
     lookup: impl Fn(TypeId) -> Option<&'a TypeDescriptor>,
 ) -> Option<u64> {
+    if property == LayoutProperty::IsSigned {
+        return signedness(ty, &lookup, 0).map(u64::from);
+    }
     let (size, alignment) = layout(ty, &lookup, 0)?;
     if alignment == 0 || !alignment.is_power_of_two() {
         return None;
@@ -29,9 +32,47 @@ pub fn query_with<'a>(
         LayoutProperty::Stride => size
             .checked_add(alignment - 1)
             .map(|n| n & !(alignment - 1)),
+        LayoutProperty::IsSigned => unreachable!("handled before layout"),
     };
     // Source properties return Int; never wrap an extent into a negative count.
     result.filter(|value| i64::try_from(*value).is_ok())
+}
+
+fn alias_target(ty: &TypeRef, descriptor: &TypeDescriptor) -> Option<TypeRef> {
+    let args = match ty {
+        TypeRef::Instantiated { args, .. } => args.as_slice(),
+        _ => &[],
+    };
+    if args.len() != descriptor.type_params.len() {
+        return None;
+    }
+    crate::mono::TypeSubstitution::new(&descriptor.type_params, args)
+        .apply(descriptor.alias_target.as_ref()?).ok()
+}
+
+fn signedness<'a>(
+    ty: &TypeRef,
+    lookup: &impl Fn(TypeId) -> Option<&'a TypeDescriptor>,
+    depth: usize,
+) -> Option<bool> {
+    if depth >= 64 { return None; }
+    match ty {
+        TypeRef::Concrete(id) | TypeRef::Instantiated { base: id, .. } => {
+            if let Some(name) = id.well_known_name() {
+                return Some(id.is_float() || verum_common::well_known_types::type_names::is_signed_integer_type(name));
+            }
+            let descriptor = lookup(*id)?;
+            if descriptor.kind == TypeKind::Alias {
+                signedness(&alias_target(ty, descriptor)?, lookup, depth + 1)
+            } else {
+                Some(false)
+            }
+        }
+        TypeRef::Generic(_) | TypeRef::AssociatedProjection { .. } | TypeRef::RecordFieldProjection { .. }
+        | TypeRef::ConstValue(_) => None,
+        TypeRef::Array { .. } | TypeRef::Slice(_) | TypeRef::Reference { .. } | TypeRef::Tuple(_)
+        | TypeRef::Function { .. } | TypeRef::Rank2Function { .. } => Some(false),
+    }
 }
 
 fn layout<'a>(
@@ -54,17 +95,7 @@ fn layout<'a>(
             }
             let descriptor = lookup(*id)?;
             if descriptor.kind == TypeKind::Alias {
-                let target = descriptor.alias_target.as_ref()?;
-                let args = match ty {
-                    TypeRef::Instantiated { args, .. } => args.as_slice(),
-                    _ => &[],
-                };
-                if args.len() != descriptor.type_params.len() {
-                    return None;
-                }
-                let target =
-                    crate::mono::TypeSubstitution::new(&descriptor.type_params, args).apply(target).ok()?;
-                return layout(&target, lookup, depth + 1);
+                return layout(&alias_target(ty, descriptor)?, lookup, depth + 1);
             }
             descriptor
                 .declared_layout
@@ -123,16 +154,7 @@ fn unsized_pointee<'a>(
             }
             let descriptor = lookup(*id)?;
             if descriptor.kind == TypeKind::Alias {
-                let args = match ty {
-                    TypeRef::Instantiated { args, .. } => args.as_slice(),
-                    _ => &[],
-                };
-                if args.len() != descriptor.type_params.len() {
-                    return None;
-                }
-                let target = crate::mono::TypeSubstitution::new(&descriptor.type_params, args)
-                    .apply(descriptor.alias_target.as_ref()?).ok()?;
-                return unsized_pointee(&target, lookup, depth + 1);
+                return unsized_pointee(&alias_target(ty, descriptor)?, lookup, depth + 1);
             }
             Some(descriptor.kind == TypeKind::Protocol)
         }

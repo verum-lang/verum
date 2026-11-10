@@ -138,7 +138,8 @@ pub const VERSION_MAJOR: u16 = 2;
 // v2.43: callable source name and typed lexical-parent identity.
 // v2.44: distinguish structural slice method owners from nominal records.
 // v2.45: typed scalar references distinguish managed slots from native storage.
-pub const VERSION_MINOR: u16 = 45;
+// v2.46: declaration-owned signedness queries return a Bool.
+pub const VERSION_MINOR: u16 = 46;
 
 /// Minor-version floors for sections whose presence readers gate on.  The
 /// register-type-hints section has been written unconditionally since minor 2,

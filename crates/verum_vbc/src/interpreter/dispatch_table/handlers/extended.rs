@@ -183,7 +183,12 @@ pub(in super::super) fn handle_extended(
             let value = crate::type_layout::query(&state.module, &ty, property).ok_or_else(|| InterpreterError::Panic {
                 message: format!("unresolved declared type layout: {ty:?}"),
             })?;
-            state.set_reg(dst, crate::value::Value::from_i64(value as i64));
+            let value = if property == crate::instruction::LayoutProperty::IsSigned {
+                crate::value::Value::from_bool(value != 0)
+            } else {
+                crate::value::Value::from_i64(value as i64)
+            };
+            state.set_reg(dst, value);
             Ok(DispatchResult::Continue)
         }
         Some(ExtendedSubOpcode::SetCallWitness) => {
