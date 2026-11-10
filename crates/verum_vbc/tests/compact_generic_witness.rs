@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use verum_vbc::bytecode::encode_instruction;
 use verum_vbc::instruction::{Instruction, Reg, RegRange};
-use verum_vbc::interpreter::Interpreter;
+use verum_vbc::interpreter::{Interpreter, InterpreterError};
 use verum_vbc::module::{FunctionDescriptor, FunctionId, VbcModule};
 use verum_vbc::types::{TypeId, TypeParamDescriptor, TypeParamId, TypeRef};
 
@@ -55,7 +55,8 @@ fn returning(type_ref: TypeRef) -> [Instruction; 2] {
     ]
 }
 
-fn direct(ids: &[u16], args: Vec<TypeRef>, result: TypeRef) -> verum_vbc::value::Value {
+fn try_direct(ids: &[u16], args: Vec<TypeRef>, result: TypeRef)
+    -> Result<verum_vbc::value::Value, InterpreterError> {
     let mut module = VbcModule::new("compact_witness".into());
     add_function(
         &mut module,
@@ -63,9 +64,11 @@ fn direct(ids: &[u16], args: Vec<TypeRef>, result: TypeRef) -> verum_vbc::value:
         &[call(1, args), Instruction::Ret { value: Reg(0) }],
     );
     add_function(&mut module, ids, &returning(result));
-    Interpreter::new(Arc::new(module))
-        .execute_function(FunctionId(0))
-        .unwrap()
+    Interpreter::new(Arc::new(module)).execute_function(FunctionId(0))
+}
+
+fn direct(ids: &[u16], args: Vec<TypeRef>, result: TypeRef) -> verum_vbc::value::Value {
+    try_direct(ids, args, result).unwrap()
 }
 
 #[test]
@@ -99,8 +102,11 @@ fn compact_order_comes_from_declaration_ids() {
 
 #[test]
 fn missing_declared_witness_does_not_read_another_slot() {
-    assert!(direct(&[7, 2], vec![TypeRef::Concrete(TypeId::TEXT)], generic(2)).is_nil());
-    assert!(direct(&[7, 2], vec![TypeRef::Concrete(TypeId::TEXT)], generic(0)).is_nil());
+    for slot in [2, 0] {
+        let error = try_direct(&[7, 2], vec![TypeRef::Concrete(TypeId::TEXT)], generic(slot)).unwrap_err();
+        assert!(matches!(error, InterpreterError::InvalidBytecode { ref message, .. }
+            if message == &format!("unresolved generic witness slot {slot}")), "{error}");
+    }
 }
 
 #[test]

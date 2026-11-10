@@ -4,7 +4,7 @@
 use std::sync::Arc;
 use verum_fast_parser::Parser;
 use verum_vbc::{
-    codegen::{CodegenConfig, ItemFailurePolicy, VbcCodegen},
+    codegen::{CodegenConfig, CodegenErrorKind, CodegenResult, ItemFailurePolicy, VbcCodegen},
     deserialize::deserialize_module,
     interpreter::Interpreter,
     serialize::serialize_module,
@@ -20,21 +20,21 @@ implement<T> Sink<T> {
 }
 "#;
 
-fn check(source: &str, unresolved: bool) {
-    let ast = Parser::new(&format!("{TYPES}\n{source}"))
-        .parse_module()
-        .unwrap();
+fn lower(ast: &verum_ast::Module, bootstrap: bool) -> CodegenResult<verum_vbc::module::VbcModule> {
+    let mut codegen = VbcCodegen::with_config(CodegenConfig::new("forwarding"));
+    if bootstrap {
+        codegen.collect_unit_declarations(&[ast])?;
+        codegen.compile_unit_items(&[ast], ItemFailurePolicy::Strict)?;
+        codegen.finalize_module_from_state()
+    } else {
+        codegen.compile_module(ast)
+    }
+}
+
+fn run(source: &str) {
+    let ast = Parser::new(&format!("{TYPES}\n{source}")).parse_module().unwrap();
     for bootstrap in [false, true] {
-        let mut codegen = VbcCodegen::with_config(CodegenConfig::new("forwarding"));
-        let mut module = if bootstrap {
-            codegen.collect_unit_declarations(&[&ast]).unwrap();
-            codegen
-                .compile_unit_items(&[&ast], ItemFailurePolicy::Strict)
-                .unwrap();
-            codegen.finalize_module_from_state().unwrap()
-        } else {
-            codegen.compile_module(&ast).unwrap()
-        };
+        let mut module = lower(&ast, bootstrap).unwrap();
         // The VBC handoff must work independently of optional analysis metadata.
         for function in &mut module.functions {
             function.value_uses = None;
@@ -42,24 +42,11 @@ fn check(source: &str, unresolved: bool) {
         let module = deserialize_module(&serialize_module(&module).unwrap()).unwrap();
         let entry = module.find_function_by_name("forwarding.probe").unwrap();
         let result = Interpreter::new(Arc::new(module)).execute_function(entry);
-        if unresolved {
-            let error = result.unwrap_err().to_string();
-            assert!(
-                error.contains("generic ownership requires a resolved declaration witness"),
-                "{error}"
-            );
-        } else {
-            assert_eq!(
-                result.unwrap().as_i64(),
-                1,
-                "bootstrap={bootstrap}: exactly one resource owner"
-            );
-        }
+        assert_eq!(
+            result.unwrap().as_i64(), 1,
+            "bootstrap={bootstrap}: exactly one resource owner"
+        );
     }
-}
-
-fn run(source: &str) {
-    check(source, false);
 }
 
 #[test]
@@ -102,8 +89,7 @@ fn probe() -> Int {
 
 #[test]
 fn an_unknown_argument_cannot_borrow_an_unrelated_callers_witness() {
-    check(
-        r#"
+    let source = [TYPES, r#"
 fn forward<T>(sink: &Sink<UnboundSlot>, value: T) { sink.consume(value); }
 fn probe() -> Int {
     let mut count = Count { value: 0 };
@@ -112,9 +98,36 @@ fn probe() -> Int {
     forward<Ticket>(&sink, value);
     count.value
 }
-"#,
-        true,
-    );
+"#].join("\n");
+    let ast = Parser::new(&source).parse_module().unwrap();
+    for bootstrap in [false, true] {
+        let error = lower(&ast, bootstrap).expect_err("missing type owner must be rejected at its declaration");
+        assert!(matches!(error.kind, CodegenErrorKind::InvalidSourceSignature(ref message)
+            if message.contains("unresolved nominal type 'UnboundSlot'")), "{error}");
+        let span = error.span.expect("source declaration diagnostic");
+        assert_eq!(&source[span.start as usize..span.end as usize], "UnboundSlot");
+    }
+}
+
+#[test]
+fn an_unbound_method_slot_is_refused_even_with_a_concrete_caller_slot() {
+    let source = r#"
+        type Reader is {};
+        implement Reader { fn inspect<T, U>(&self, value: T) -> Int { U.size } }
+        fn relay<A, B>(a: A, b: B) -> Int {
+            let reader = Reader {};
+            reader.inspect(-8)
+        }
+        fn probe() -> Int { relay(true, 7_i16) }
+    "#;
+    let ast = Parser::new(source).parse_module().unwrap();
+    for bootstrap in [false, true] {
+        let bytes = serialize_module(&lower(&ast, bootstrap).unwrap()).unwrap();
+        let module = deserialize_module(&bytes).unwrap();
+        let id = module.find_function_by_name("forwarding.probe").unwrap();
+        let error = Interpreter::new(Arc::new(module)).execute_function(id).unwrap_err();
+        assert!(error.to_string().contains("unresolved declared type layout"), "{error}");
+    }
 }
 
 #[test]
