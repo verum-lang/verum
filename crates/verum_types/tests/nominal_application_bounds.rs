@@ -64,6 +64,21 @@ fn structural_implementation_receivers_use_their_own_premises() {
         refused(&format!("{DECL} {head} implement<T> {body}"));
     }
 }
+
+#[test]
+fn a_reflexive_implementation_cannot_obscure_a_distinct_nominal_conversion() {
+    let declarations = r#"
+        type Convert<A> is protocol {};
+        type Input is { number: Int };
+        type Output is { number: Int };
+        implement<T> Convert<T> for T {}
+        type Allowed<A, B:Convert<A>> is { value:B };
+    "#;
+    let goal = "type Proof is { item:Allowed<Input,Output> };";
+    refused(&format!("{declarations} {goal}"));
+    accepted(&format!("{declarations} implement Convert<Input> for Output {{}} {goal}"));
+    accepted(&format!("{declarations} type Identity is {{item:Allowed<Input,Input>}};"));
+}
 #[test]
 fn concrete_field_argument_requires_its_bound() {
     refused(&format!("{DECL} type Token is {{value: Requires<Bool>}};"));

@@ -108,6 +108,7 @@ impl ProtocolChecker {
         }
         match self.try_match_candidate(implementation, ty, args, rigid, environment) {
             Some(substitution) => CandidateMatch::Matched(substitution),
+            None if repeated_head_is_disjoint(self, implementation, ty, args) => CandidateMatch::Disjoint,
             None => CandidateMatch::Unknown,
         }
     }
@@ -328,12 +329,46 @@ pub(super) enum CandidateMatch {
 }
 
 fn provably_disjoint(checker: &ProtocolChecker, a: &Type, b: &Type) -> bool {
+    compare_heads(checker, a, b, &mut |_, _| false)
+}
+
+/// All occurrences of a quantified implementation parameter must denote one
+/// type. A clash between two closed occurrences is evidence even when each
+/// receiver or argument, considered on its own, could match the implementation.
+fn repeated_head_is_disjoint(
+    checker: &ProtocolChecker, implementation: &ProtocolImpl, receiver: &Type, args: Option<&[Type]>,
+) -> bool {
+    let mut known = verum_common::Map::<crate::TypeVar, Type>::new();
+    let mut observe = |variable, actual: &Type| {
+        if !implementation.parameters.contains(&crate::context::GenericBinder::Type(variable))
+            || actual.has_value_inference() || !actual.free_vars().is_empty()
+        {
+            return false;
+        }
+        if let Some(prior) = known.get(&variable) {
+            return provably_disjoint(checker, prior, actual);
+        }
+        known.insert(variable, actual.clone());
+        false
+    };
+    std::iter::once((&implementation.for_type, receiver))
+        .chain(implementation.protocol_args.iter().zip(args.into_iter().flatten()))
+        .any(|(pattern, actual)| compare_heads(checker, pattern, actual, &mut observe))
+}
+
+fn compare_heads(
+    checker: &ProtocolChecker,
+    a: &Type,
+    b: &Type,
+    observe: &mut impl FnMut(crate::TypeVar, &Type) -> bool,
+) -> bool {
     let left = checker.expand_declared_alias_head(a);
     let right = checker.expand_declared_alias_head(b);
     if left.is_some() || right.is_some() {
-        return provably_disjoint(checker, left.as_ref().unwrap_or(a), right.as_ref().unwrap_or(b));
+        return compare_heads(checker, left.as_ref().unwrap_or(a), right.as_ref().unwrap_or(b), observe);
     }
     if checker.has_declared_alias_head(a) || checker.has_declared_alias_head(b) { return false; }
+    if let Type::Var(variable) = a { return observe(*variable, b); }
     if checker.types_structurally_equal(a, b) {
         return false;
     }
@@ -345,7 +380,7 @@ fn provably_disjoint(checker: &ProtocolChecker, a: &Type, b: &Type) -> bool {
                 || aa
                     .iter()
                     .zip(ba)
-                    .any(|(a, b)| provably_disjoint(checker, a, b))
+                    .any(|(a, b)| compare_heads(checker, a, b, observe))
         }
 
         (Type::Generic { name: a, args: aa }, Type::Generic { name: b, args: ba })
@@ -356,13 +391,13 @@ fn provably_disjoint(checker: &ProtocolChecker, a: &Type, b: &Type) -> bool {
                 || aa
                     .iter()
                     .zip(ba)
-                    .any(|(a, b)| provably_disjoint(checker, a, b))
+                    .any(|(a, b)| compare_heads(checker, a, b, observe))
         }
         (Type::Tuple(a), Type::Tuple(b)) => {
             a.len() != b.len()
                 || a.iter()
                     .zip(b)
-                    .any(|(a, b)| provably_disjoint(checker, a, b))
+                    .any(|(a, b)| compare_heads(checker, a, b, observe))
         }
         (
             Type::Reference {
@@ -373,7 +408,7 @@ fn provably_disjoint(checker: &ProtocolChecker, a: &Type, b: &Type) -> bool {
                 mutable: b,
                 inner: bi,
             },
-        ) => a != b || provably_disjoint(checker, ai, bi),
+        ) => a != b || compare_heads(checker, ai, bi, observe),
         (
             Type::Unit | Type::Bool | Type::Int | Type::Float | Type::Char | Type::Text,
             Type::Unit | Type::Bool | Type::Int | Type::Float | Type::Char | Type::Text,
