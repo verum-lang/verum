@@ -320,3 +320,43 @@ fn a_default_requires_the_protocol_of_this_applied_receiver() {
         .execute_function(entry).unwrap();
     assert_eq!(result.try_as_i64(), Some(1731));
 }
+
+#[test]
+fn projected_static_calls_execute_the_implemented_identity_after_serialization() {
+    let source = r#"
+        module projected;
+        type Seed is protocol { fn seed() -> Self; };
+        type Family is protocol {
+            type Element;
+            fn starting_value(&self) -> Self.Element where Self.Element: Seed { Self.Element.seed() }
+        };
+        type Offset is { bits: Int }; type Meter is { bits: Int };
+        implement Seed for Offset { fn seed() -> Self { Offset { bits: 17 } } }
+        implement Seed for Meter { fn seed() -> Self { Meter { bits: 31 } } }
+        type Cursor<A> is { value: A };
+        implement<A> Family for Cursor<A> { type Element = A; }
+        fn probe() -> Int {
+            let a: Cursor<Offset> = Cursor { value: Offset {bits: 0} };
+            let b: Cursor<Meter> = Cursor { value: Meter {bits: 0} };
+            let first: Offset = a.starting_value();
+            let second: Meter = b.starting_value();
+            first.bits * 100 + second.bits
+        }
+    "#;
+    let ast = Parser::new(source).parse_module().unwrap();
+    let mut codegen = VbcCodegen::with_config(CodegenConfig::new("projected"));
+    codegen.collect_unit_declarations(&[&ast]).unwrap();
+    codegen.resolve_pending_imports();
+    codegen.compile_default_methods_with_policy(ItemFailurePolicy::Strict).unwrap();
+    codegen.compile_unit_items(&[&ast], ItemFailurePolicy::Strict).unwrap();
+    let compiled = codegen.finalize_module_from_state().unwrap();
+    let mut module = verum_vbc::deserialize::deserialize_module(
+        &verum_vbc::serialize::serialize_module(&compiled).unwrap(),
+    ).unwrap();
+    assert!(module.resolve_external_bands().is_empty());
+    verum_vbc::validate::validate_module(&module).unwrap();
+    let entry = module.find_function_by_name("projected.probe").unwrap();
+    let value = verum_vbc::interpreter::Interpreter::new(std::sync::Arc::new(module))
+        .execute_function(entry).unwrap();
+    assert_eq!(value.try_as_i64(), Some(1731));
+}

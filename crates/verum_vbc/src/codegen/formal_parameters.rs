@@ -301,8 +301,12 @@ impl VbcCodegen {
         ) -> bool {
             if depth > 64 { return false; }
             match &ty.kind {
-                TypeKind::Path(path) => path.is_single() && (scope.contains_key(&path.to_string())
-                    || cg.current_source_substitution.get(&path.to_string()).is_some_and(|witness| witness.semantic)),
+                TypeKind::Path(path) => path.is_single() && (
+                    scope.contains_key(&path.to_string())
+                    || cg.current_source_substitution.get(&path.to_string()).is_some_and(|witness| witness.semantic)
+                    || (VbcCodegen::ast_type_is_bare_self(ty)
+                        && cg.current_impl_receiver.as_ref().is_some_and(|owner| owner.semantic))
+                ),
                 TypeKind::AssociatedType { base, .. } => generic_projection_base(base, scope, depth + 1, cg),
                 TypeKind::Qualified { self_ty, trait_ref, .. } => trait_ref.segments.is_empty()
                     && generic_projection_base(self_ty, scope, depth + 1, cg),

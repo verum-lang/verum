@@ -24600,16 +24600,7 @@ impl VbcCodegen {
             if let Some(clone_fn) = remapped_ty.clone_fn {
                 remapped_ty.clone_fn = func_id_remap.get(&clone_fn).copied();
             }
-            // Remap protocol method FunctionIds from sparse to contiguous 0-based IDs
-            for proto_impl in remapped_ty.protocols.iter_mut() {
-                for fn_id in proto_impl.methods.iter_mut() {
-                    if *fn_id != u32::MAX
-                        && let Some(&new_id) = func_id_remap.get(fn_id)
-                    {
-                        *fn_id = new_id;
-                    }
-                }
-            }
+            protocol_attachments::finish_protocol_slots(&mut remapped_ty, &func_id_remap);
             module.add_type(remapped_ty);
         }
 

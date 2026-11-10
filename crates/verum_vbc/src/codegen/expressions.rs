@@ -13465,68 +13465,34 @@ impl VbcCodegen {
             }
         }
 
-        // ──────────────────────────────────────────────────────────
-        // Phase 0: Task #17/#26 — `T.default()`/`T.zero()`/`T.one()`
-        // on generic type-param. Runs BEFORE the pre-resolved fast path
-        // because the typechecker stamps `T.default()` /etc. as
-        // `StaticCall { qualified_name: "T.default" }` (or via
-        // protocol-Default/Zero/One registry seed), and the pre-resolved
-        // path then emits a plain `Call <fn-id>` which executes a broken
-        // body or auto-stub at runtime. At Tier-0 generic-erasure there
-        // is no runtime witness for T, so the safe primitive identity is
-        // hard-coded: `default → 0`, `zero → 0`, `one → 1`.
-        // T0622 landed the witness channel used just below: a named
-        // fn/impl type param with a known position takes the LoadT
-        // {Generic} + CallM form and resolves to the concrete type when
-        // a CallG witness is delivered.  An associated-type projection
-        // (`Self.Item`) has no witness index and still falls to the
-        // literal — that is the remaining non-primitive-T gap.
-        // ──────────────────────────────────────────────────────────
-        // Phase 0-witness (T1214): a TYPE PARAMETER receiver takes the
-        // witness form for ANY method, with or without arguments.
-        // ──────────────────────────────────────────────────────────
-        //
-        // The witness channel used to live INSIDE the primitive-identity
-        // table below, so it was reachable only for the three names that
-        // have a hardcoded literal AND only when `args.is_empty()`. Two
-        // conditions, neither of which is about witnesses.
-        //
-        // What that cost, measured with the trace this file already
-        // carries (`VERUM_TRACE_TPCALL=1`):
-        //
-        //     method=default              -> task17 witness   (LoadT)
-        //     C.blank(), Q.blank()        -> flat-path branch (LoadK "C")
-        //
-        // The flat-path branch compiles the parameter's NAME to a text
-        // constant and dispatches on it, so the receiver arrives at
-        // runtime as `Text<small>` — raw bits 0x…43 is the letter `C`.
-        // `Iterator.collect`'s `C.from_iter(self)` fails BOTH conditions
-        // at once: `from_iter` has no literal identity, and it has an
-        // argument.
-        //
-        // Order matters: this runs before the identity table so a named
-        // parameter with a known position always takes the witness form.
-        // The table stays as the FALLBACK for receivers with no witness
-        // index — `Self.Item.default()`, the associated-type projection
-        // that has no position to load.
-        if let ExprKind::Path(recv_path) = &receiver.kind
-            && recv_path.segments.len() == 1
-            && let PathSegment::Name(recv_ident) = &recv_path.segments[0]
-            && self.ctx.get_var_reg(recv_ident.name.as_str()).is_err()
-            && let Some(type_ref) = self.current_source_substitution.get(recv_ident.name.as_str())
+        // Static calls on declaration-owned type parameters and associated
+        // projections use the same witness as a type annotation in this frame.
+        let type_parameter = |name: &str| {
+            self.current_source_substitution.get(name)
                 .map(|witness| witness.ty.clone())
-                .or_else(|| self.ctx.current_generic_param_id(recv_ident.name.as_str())
-                    .map(crate::types::TypeRef::Generic))
-        {
-            if std::env::var_os("VERUM_TRACE_TPCALL").is_some() {
-                eprintln!(
-                    "[tpcall] T1214 witness: recv={} method={} type={:?} args={}",
-                    recv_ident.name.as_str(),
-                    method.name.as_str(),
-                    type_ref,
-                    args.len()
-                );
+                .or_else(|| self.ctx.current_generic_param_id(name).map(crate::types::TypeRef::Generic))
+        };
+        let receiver_type = match &receiver.kind {
+            ExprKind::Path(path) => path.as_ident().and_then(|ident| {
+                self.ctx.get_var_reg(ident.name.as_str()).is_err().then(||
+                    type_parameter(ident.name.as_str())).flatten()
+            }),
+            ExprKind::Field { .. } => {
+                if let Some(ast) = receiver.associated_type_designator(|name| {
+                    (name == "Self" && self.current_impl_receiver.is_some())
+                        || (self.ctx.get_var_reg(name).is_err() && type_parameter(name).is_some())
+                }) {
+                    let ids: Vec<_> = self.ctx.current_generic_param_ids.values()
+                        .map(|id| crate::types::TypeParamId(*id)).collect();
+                    Some(self.semantic_formal_type(&ast, &self.ctx.current_generic_param_ids, &ids)
+                        .ok_or_else(|| CodegenError::with_span(CodegenErrorKind::TypeInference(
+                            "projected static receiver has no declaration-owned type witness".into()
+                        ), receiver.span))?)
+                } else { None }
             }
+            _ => None,
+        };
+        if let Some(type_ref) = receiver_type {
             let recv_reg = self.ctx.alloc_temp();
             self.ctx.emit(Instruction::LoadT {
                 dst: recv_reg,
@@ -13571,101 +13537,6 @@ impl VbcCodegen {
             });
             self.ctx.free_temp(recv_reg);
             return Ok(Some(result));
-        }
-
-        let task17_primitive_identity = match method.name.as_str() {
-            "default" | "zero" => Some(0i64),
-            "one" => Some(1i64),
-            _ => None,
-        };
-        if let Some(value) = task17_primitive_identity
-            && args.is_empty()
-        {
-            let matched = match &receiver.kind {
-                // T.default() / T.zero() / T.one() — single-segment Path.
-                ExprKind::Path(path)
-                    if path.segments.len() == 1
-                        && matches!(
-                            &path.segments[0],
-                            PathSegment::Name(ident)
-                                if self.ctx.generic_type_params.contains(ident.name.as_str())
-                        ) =>
-                {
-                    true
-                }
-                // Self.Item.default() / Self.Item.zero() / Self.Item.one()
-                // — Field access whose base is `Self` and field is `Item`.
-                // The associated type Self.Item is generic-erased at Tier-0,
-                // so we hard-code the primitive identity literal.
-                // (PathSegment::SelfValue covers both `Self` type-position
-                // and `self` value-position; both lower to the same variant
-                // at this level — see verum_ast::ty::PathSegment.)
-                ExprKind::Field { expr: base, field } if field.name.as_str() == "Item" => {
-                    matches!(
-                        &base.kind,
-                        ExprKind::Path(p)
-                            if p.segments.len() == 1
-                                && matches!(&p.segments[0], PathSegment::SelfValue)
-                    )
-                }
-                _ => false,
-            };
-            if matched {
-                // #44-B: when the receiver is a NAMED fn/impl type param
-                // with a known position, emit the generic-witness form —
-                // `LoadT { Generic(idx) }` + `CallM` on the loaded
-                // TypeRef. At runtime a CallG-delivered witness resolves
-                // the param to a concrete type and the CallM dispatches
-                // `{ConcreteType}.default` statically; with NO witness
-                // LoadT yields nil and the dispatcher's nil-receiver
-                // fallback reproduces the historical identity (0/0/1) —
-                // strictly-better, never-worse than the old hardcode.
-                let witness_id = match &receiver.kind {
-                    ExprKind::Path(path)
-                        if path.segments.len() == 1 =>
-                    {
-                        match &path.segments[0] {
-                            PathSegment::Name(ident) => self
-                                .ctx
-                                .current_generic_param_id(ident.name.as_str()),
-                            _ => None,
-                        }
-                    }
-                    _ => None,
-                };
-                if let Some(param_id) = witness_id {
-                    if std::env::var_os("VERUM_TRACE_TPCALL").is_some() {
-                        eprintln!("[tpcall] task17 witness: method={} idx={}", method.name.as_str(), param_id.0);
-                    }
-                    let recv = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::LoadT {
-                        dst: recv,
-                        type_ref: crate::types::TypeRef::Generic(param_id),
-                    });
-                        // second witness (LoadT{Generic}) — counted so the fan-out has names (T0753).
-                        crate::codegen::bare_method::record("<witness>", method.name.as_str());
-                    let method_id =
-                        self.ctx.intern_string_raw(method.name.as_str());
-                    let result = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::CallM {
-                        dst: result,
-                        receiver: recv,
-                        method_id,
-                        args: crate::instruction::RegRange {
-                            start: Reg(0),
-                            count: 0,
-                        },
-                    });
-                    self.ctx.free_temp(recv);
-                    return Ok(Some(result));
-                }
-                let result = self.ctx.alloc_temp();
-                self.ctx.emit(Instruction::LoadI {
-                    dst: result,
-                    value,
-                });
-                return Ok(Some(result));
-            }
         }
 
         // ──────────────────────────────────────────────────────────
