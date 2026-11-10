@@ -678,3 +678,39 @@ fn a_structural_method_requires_its_receivers_declared_conditions() {
     let bad = check_with_checker("mount demo.ext.*; fn read(xs: &[Bool]) -> Int { xs.stamp() }", &modules).1;
     assert!(bad.iter().any(|diagnostic| diagnostic.contains("E405")), "{bad:?}");
 }
+
+#[test]
+fn imported_sync_callbacks_follow_only_their_declared_callees_and_atomic_operands() {
+    let modules = [
+        ("demo.ops", r#"
+            public fn observed<T>(cell: &T) -> T { @intrinsic("atomic_load", cell, 0) }
+            public fn update<T>(cell: &mut T, value:T) { @intrinsic("atomic_store", cell, value, 0) }
+            public async fn suspended(cell: &Int) -> Int { *cell }
+        "#),
+        ("demo.jobs", r#"
+            mount demo.ops.{observed as fetch, update};
+            public type Counter is { count:Int };
+            implement Counter {
+                public fn current(&self) -> Int { fetch(&self.count) }
+                public fn set(&mut self, value:Int) { update(&mut self.count, value); }
+                public fn parameter(&self, fetch:async fn(&Int)->Int) -> Int { fetch(&self.count) }
+                public fn shadow(&self, cb:async fn(&Int)->Int) -> Int { let fetch = cb; fetch(&self.count) }
+            }
+        "#),
+    ];
+    let header = "mount demo.jobs.Counter; fn sync<F:fn(Counter)->Int>(c:Counter, handler:F)->Int { handler(c) }";
+    let valid = check(&format!("{header} fn read(c:Counter)->Int {{ sync(c, |item| item.current()) }}"), &modules);
+    assert!(valid.is_empty(), "{valid:?}");
+    for call in ["item.parameter(cb)", "item.shadow(cb)"] {
+        let errors = check(&format!("{header} fn wrong(c:Counter, cb:async fn(&Int)->Int)->Int {{ sync(c, |item| {call}) }}"), &modules);
+        assert!(errors.iter().any(|error| error.contains("Mismatch")), "{call}: {errors:?}");
+    }
+    for (body, reason) in [
+        (r#"fn wrong(a:&Bool)->Int { @intrinsic("atomic_load", a, 0) }"#, "Mismatch"),
+        (r#"fn wrong(a:&mut Bool) { @intrinsic("atomic_store", a, 3, 0); }"#, "Mismatch"),
+        (r#"fn wrong(a:&Bool) { @intrinsic("atomic_store", a, true, 0); }"#, "SharedReferenceWrite"),
+    ] {
+        let errors = check(body, &[]);
+        assert!(errors.iter().any(|error| error.contains(reason)), "{body}: {errors:?}");
+    }
+}

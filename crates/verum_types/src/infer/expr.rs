@@ -13277,12 +13277,15 @@ impl TypeChecker {
                     if let ExprKind::Literal(lit) = &first_arg.kind {
                         if let verum_ast::LiteralKind::Text(name_lit) = &lit.kind {
                             let intrinsic_name = name_lit.as_str();
+                            if let Some(operation) = super::atomic_access::AtomicAccess::from_intrinsic(intrinsic_name) {
+                                return self.atomic_access_type(operation, args, expr.span);
+                            }
                             match intrinsic_name {
                                 // Memory intrinsics
                                 "compare_exchange" | "compare_exchange_weak" => {
                                     Type::bool()
                                 }
-                                "atomic_load" | "atomic_store" | "atomic_swap" => {
+                                "atomic_swap" => {
                                     // Type depends on the pointer type being operated on
                                     // Use last arg (the value being stored) to infer
                                     if args.len() >= 3 {

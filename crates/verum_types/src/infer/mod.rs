@@ -28,6 +28,7 @@ mod nominal_type_obligations;
 mod source_protocol_header;
 mod source_dyn_protocol;
 mod universe_parameters;
+mod atomic_access;
 mod call_obligations;
 mod callable_properties;
 mod preparation;
