@@ -1033,3 +1033,12 @@ fn test_float_gradual_underflow() {
 fn main() {
     print("Float primitive tests loaded successfully");
 }
+
+@test
+fn negation_preserves_ieee_signed_zero_across_aliases() {
+    let positive: Float64 = 0.0;
+    let negative: Float = positive.neg();
+    let twice: Float64 = negative.neg();
+    assert_eq(core.intrinsics.float.f64_to_bits(negative), 0x8000_0000_0000_0000_u64);
+    assert_eq(core.intrinsics.float.f64_to_bits(twice), 0_u64);
+}

@@ -56,7 +56,7 @@ mount core.intrinsics.float.{
     sinh, cosh, tanh, asinh, acosh, atanh,
 };
 mount core.intrinsics.runtime.text.{
-    int_to_text, char_is_alphabetic, char_is_numeric, char_is_whitespace, char_is_control,
+    int_to_text, float_to_text, char_is_alphabetic, char_is_numeric, char_is_whitespace, char_is_control,
     char_is_uppercase, char_is_lowercase,
     char_to_uppercase, char_to_lowercase, char_encode_utf8, char_escape_debug,
 };
@@ -841,6 +841,11 @@ implement Shr for Int {
 // =============================================================================
 
 implement Float {
+    /// Decimal representation of this floating-point number.
+    public fn to_text(self) -> Text {
+        float_to_text(self)
+    }
+
     /// Bare-width f-string padding (`{v:N}` with no explicit
     /// alignment): numbers RIGHT-align by convention; `Text` implements
     /// the left-aligning twin — the default dispatches on the value's
@@ -4636,37 +4641,11 @@ implement Copy for Float32 {}
 // =============================================================================
 implement Copy for Float64 {}
 
-implement Default for Float64 {
-    public fn default() -> Float64 { 0.0 as Float64 }
-}
-
-implement Debug for Float64 {
-    public fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str(&self.to_float().to_text())
-    }
-}
-
-implement Display for Float64 {
-    public fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str(&self.to_float().to_text())
-    }
-}
-
 implement Float64 {
     /// `:.N` precision target (T0604); see `Float.to_precision`.
     public fn to_precision(self, n: Int) -> Text {
         self.to_float().to_precision(n)
     }
-}
-
-implement Zero for Float64 {
-    public fn zero() -> Float64 { 0.0 as Float64 }
-    public fn is_zero(&self) -> Bool { *self == (0.0 as Float64) }
-}
-
-implement One for Float64 {
-    public fn one() -> Float64 { 1.0 as Float64 }
-    public fn is_one(&self) -> Bool { *self == (1.0 as Float64) }
 }
 
 // --- Display for Byte ---
@@ -4906,20 +4885,6 @@ implement Shr for Int32 {
 }
 
 // -----------------------------------------------------------------------------
-// Int64
-// -----------------------------------------------------------------------------
-
-implement Zero for Int64 {
-    public fn zero() -> Int64 { 0 as Int64 }
-    public fn is_zero(&self) -> Bool { *self == 0_i64 }
-}
-
-implement One for Int64 {
-    public fn one() -> Int64 { 1 as Int64 }
-    public fn is_one(&self) -> Bool { *self == 1_i64 }
-}
-
-// -----------------------------------------------------------------------------
 // Int128
 // -----------------------------------------------------------------------------
 
@@ -4991,20 +4956,6 @@ implement Shl for Int128 {
 implement Shr for Int128 {
     type Output = Int128;
     public fn shr(self, rhs: Int128) -> Int128 { shr(self, rhs as UInt32) }
-}
-
-// -----------------------------------------------------------------------------
-// ISize
-// -----------------------------------------------------------------------------
-
-implement Zero for ISize {
-    public fn zero() -> ISize { 0 as ISize }
-    public fn is_zero(&self) -> Bool { *self == (0 as ISize) }
-}
-
-implement One for ISize {
-    public fn one() -> ISize { 1 as ISize }
-    public fn is_one(&self) -> Bool { *self == (1 as ISize) }
 }
 
 // -----------------------------------------------------------------------------
@@ -5350,20 +5301,6 @@ implement Shl for UInt128 {
 implement Shr for UInt128 {
     type Output = UInt128;
     public fn shr(self, rhs: UInt128) -> UInt128 { shr(self, rhs as UInt32) }
-}
-
-// -----------------------------------------------------------------------------
-// USize
-// -----------------------------------------------------------------------------
-
-implement Zero for USize {
-    public fn zero() -> USize { 0 as USize }
-    public fn is_zero(&self) -> Bool { *self == (0 as USize) }
-}
-
-implement One for USize {
-    public fn one() -> USize { 1 as USize }
-    public fn is_one(&self) -> Bool { *self == (1 as USize) }
 }
 
 // -----------------------------------------------------------------------------
@@ -5884,12 +5821,6 @@ implement ShrAssign<UInt128> for UInt128 {
     public fn shr_assign(&mut self, rhs: UInt128) { *self = shr(*self, rhs as UInt32); }
 }
 
-// --- Float64 ---
-
-implement Neg for Float64 {
-    public fn neg(self) -> Float64 { 0.0 as Float64 - self }
-}
-
 // =============================================================================
 // Default Protocol Implementations for Sized Numeric Types
 // =============================================================================
@@ -5906,20 +5837,8 @@ implement Default for Int32 {
     public fn default() -> Int32 { 0 as Int32 }
 }
 
-implement Default for Int64 {
-    public fn default() -> Int64 { 0 as Int64 }
-}
-
 implement Default for Int128 {
     public fn default() -> Int128 { 0 as Int128 }
-}
-
-implement Default for ISize {
-    public fn default() -> ISize { 0 as ISize }
-}
-
-implement Default for UInt8 {
-    public fn default() -> UInt8 { 0 as UInt8 }
 }
 
 implement Default for UInt16 {
@@ -5982,18 +5901,6 @@ implement Debug for Int32 {
     }
 }
 
-implement Display for Int64 {
-    public fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str(&self.to_int().to_text())
-    }
-}
-
-implement Debug for Int64 {
-    public fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str(&self.to_int().to_text())
-    }
-}
-
 implement Display for Int128 {
     public fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         // Full-width render (T0272): `.to_int()` narrows to i64 and would
@@ -6006,30 +5913,6 @@ implement Display for Int128 {
 implement Debug for Int128 {
     public fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         f.write_str(&self.to_text())
-    }
-}
-
-implement Display for ISize {
-    public fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str(&self.to_int().to_text())
-    }
-}
-
-implement Debug for ISize {
-    public fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str(&self.to_int().to_text())
-    }
-}
-
-implement Display for UInt8 {
-    public fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str(&self.to_int().to_text())
-    }
-}
-
-implement Debug for UInt8 {
-    public fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str(&self.to_int().to_text())
     }
 }
 
