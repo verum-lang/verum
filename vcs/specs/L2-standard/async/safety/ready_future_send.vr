@@ -1,0 +1,13 @@
+// @test: typecheck-pass
+// @level: L2
+// @tags: async, send, future
+
+module ready_future.transfer;
+mount core.base.protocols.Send;
+mount core.async.future.ready;
+
+fn require_send<T: Send>(value: T) {}
+
+fn transfer<T: Send>(value: T) {
+    require_send(ready(value));
+}

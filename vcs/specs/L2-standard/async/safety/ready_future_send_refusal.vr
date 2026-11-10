@@ -1,0 +1,15 @@
+// @test: typecheck-fail
+// @level: L2
+// @tags: async, send, future
+// @expected-error: E405
+// @expected-error-count: 1
+
+module ready_future.refusal;
+mount core.base.protocols.Send;
+mount core.async.future.ready;
+
+fn require_send<T: Send>(value: T) {}
+
+fn transfer<T>(value: T) {
+    require_send(ready(value));
+}

@@ -18,6 +18,7 @@
     lifecycle: Lifecycle.Definition
 )
 module core.async.future;
+mount core.base.protocols.Send;
 mount super.poll.*;
 mount super.waker.*;
 
@@ -60,6 +61,8 @@ implement<F: Future> IntoFuture for F {
 public type ReadyFuture<T> is {
     value: Maybe<T>,
 };
+
+implement<T: Send> Send for ReadyFuture<T> {}
 
 implement<T> Future for ReadyFuture<T> {
     type Output = T;
