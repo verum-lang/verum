@@ -101,18 +101,45 @@ impl TypeChecker {
             _ if parameters.is_empty() => Some(List::new()),
             _ => None,
         };
-        self.source_type_registration
-            .headers
-            .push(SourceProtocolHeader {
-                identity,
-                parameters: std::sync::Arc::new(parameters.iter().cloned().collect()),
-                owner,
-                constraints: constraints.clone(),
-                associated: associated.clone(),
-                supers: supers.iter().cloned().collect(),
-                dyn_required: None,
-            });
+        let header = SourceProtocolHeader {
+            identity,
+            parameters: std::sync::Arc::new(parameters.iter().cloned().collect()),
+            owner,
+            constraints: constraints.clone(),
+            associated: associated.clone(),
+            supers: supers.iter().cloned().collect(),
+            dyn_required: None,
+        };
+        let span = items.first().map(|item| item.span).unwrap_or_default();
+        let self_bound = header.self_bound(span);
+        self.source_type_registration.headers.push(header);
         let result = (|| {
+            if let Some(bound) = self_bound {
+                let receiver = Type::Named {
+                    path: verum_ast::Path::single(verum_ast::Ident::new("Self", span)),
+                    args: List::new(),
+                };
+                let mut bounds = List::from_iter([bound]);
+                // This protocol is not published until its signatures succeed.
+                // Its declared edges already constrain the local Self, including
+                // when Self appears as an argument of a superprotocol.
+                if let ProtocolConstraints::Declared { self_type, parameter_bounds, .. } = constraints {
+                    let substitution = [(*self_type, receiver.clone())].into_iter().collect();
+                    for inherited in supers {
+                        bounds.push(inherited.try_apply_subst(&substitution)
+                            .map_err(|message| invalid(inherited.protocol.span, message))?);
+                    }
+                    for clause in parameter_bounds {
+                        self.source_type_registration.projection_assumptions.push(
+                            clause.try_apply_subst(&substitution)
+                                .map_err(|message| invalid(span, message))?
+                        );
+                    }
+                }
+                self.source_type_registration.projection_assumptions.push(WhereClause {
+                    ty: receiver, bounds,
+                });
+            }
             let mut methods = Map::new();
             for item in items {
                 if let ProtocolItemKind::Function { decl, default_impl } = &item.kind {

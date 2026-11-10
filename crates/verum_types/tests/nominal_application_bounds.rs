@@ -363,3 +363,16 @@ fn callable_premise_retains_its_own_parameter_identity() {
         "type Element is Int; type Runner<F:fn(Int)->Int> is {apply:F}; fn wrap<Element,F:fn(Element)->Int>(input:Runner<F>)->Int{42}",
     );
 }
+
+#[test]
+fn protocol_method_self_proves_only_its_instantiated_declared_superprotocols() {
+    let declarations = r#"
+        type Parent<A> is protocol {};
+        type Middle<A> is protocol extends Parent<A> {};
+        type Need<A,S: Parent<A>> is { value: S };
+    "#;
+    accepted(&format!("{declarations} type Good<A> is protocol extends Middle<A> {{ fn make(&self) -> Need<A,Self>; }};"));
+    accepted(&format!("{declarations} type Recursive is protocol extends Parent<Self> {{ fn make(&self) -> Need<Self,Self>; }};"));
+    refused(&format!("{declarations} type Wrong is protocol extends Middle<Bool> {{ fn make(&self) -> Need<Int,Self>; }};"));
+    refused(&format!("{declarations} type Unrelated is protocol {{ fn make(&self) -> Need<Bool,Self>; }};"));
+}

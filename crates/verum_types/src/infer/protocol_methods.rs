@@ -86,19 +86,9 @@ impl TypeChecker {
             path: verum_ast::Path::single(verum_ast::Ident::new("Self", method.span)),
             args: List::new(),
         };
-        self.set_current_self_type(Some(receiver.clone()));
+        self.set_current_self_type(Some(receiver));
         let assumption_base = self.source_type_registration.projection_assumptions.len();
         let callable_base = self.source_type_registration.callable_assumptions.len();
-        if let Some(bound) = self.source_type_registration.headers.last()
-            .and_then(|header| header.self_bound(method.span))
-        {
-            self.source_type_registration.projection_assumptions.push(crate::protocol::WhereClause {
-                ty: receiver, bounds: List::from_iter([bound]),
-            });
-        }
-        if let ProtocolConstraints::Declared { parameter_bounds, .. } = constraints {
-            self.source_type_registration.projection_assumptions.extend(parameter_bounds.iter().cloned());
-        }
         let result = (|| -> Result<_> {
             let mut type_bounds: Map<Text, List<Type>> = Map::new();
             for (parameter, variable) in method.generics.iter().zip(&scope.binders.local) {
