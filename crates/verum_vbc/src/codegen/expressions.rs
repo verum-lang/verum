@@ -56,16 +56,25 @@ mod index_projection;
 
 type FieldWriteback = (Reg, u32, bool, verum_common::Text);
 
-/// Generic IDs in a complete source match refer to the caller. In a partial
-/// inference result the same numeric IDs can be unfilled callee slots.
+/// An empty slot belongs to the callee. A generic inside a populated slot
+/// is actual source evidence in the caller's binder scope.
+#[derive(Default)]
 struct CallInstantiation {
-    arguments: Vec<crate::types::TypeRef>,
-    complete: bool,
+    slots: Vec<Option<crate::types::TypeRef>>,
 }
 
 impl CallInstantiation {
-    fn carries_evidence(&self) -> bool {
-        self.complete || self.arguments.iter().any(|ty| !matches!(ty, crate::types::TypeRef::Generic(_)))
+    fn known(arguments: impl IntoIterator<Item = crate::types::TypeRef>) -> Self {
+        Self {
+            slots: arguments.into_iter().map(Some).collect(),
+        }
+    }
+
+    fn fill(&mut self, index: usize, value: crate::types::TypeRef) {
+        if self.slots.len() <= index {
+            self.slots.resize_with(index + 1, || None);
+        }
+        self.slots[index].get_or_insert(value);
     }
 }
 
@@ -8406,20 +8415,14 @@ impl VbcCodegen {
             } else {
                 final_func_id
             };
-            // VBC-GENERIC-INSTANTIATION: if the callee is generic, record its
-            // concrete instantiation (derived from the argument types) and emit
-            // `CallG` carrying the static type args.  The interpreter dispatches
-            // the same function id and ignores the type args; the AOT
-            // monomorphization pass specializes the callee and (via the merger's
-            // single-instantiation routing) resolves this call to the
-            // specialized body, devirtualizing any protocol-method call on a
-            // type parameter (`future.poll()`).
+            // The callee uses these witnesses for runtime operations on T.
+            // A complete binding can also seed AOT specialization.
             let call_args = crate::instruction::RegRange {
                 start: args_start,
                 count: call_arg_count as u8,
             };
             let type_args_inferred = if final_func_id != UNRESOLVED_FN_ID {
-                self.record_generic_instantiation_with_declarations(final_func_id, None, args, generic_operand_declarations.as_deref()).map(|call| call.arguments)
+                self.infer_call_instantiation_with_declarations(final_func_id, None, args, generic_operand_declarations.as_deref())
             } else {
                 None
             };
@@ -8577,32 +8580,22 @@ impl VbcCodegen {
     }
 
     /// Borrow receiver and operands directly from their source expressions.
-    fn record_generic_instantiation(
-        &mut self,
+    fn infer_call_instantiation(
+        &self,
         func_id: u32,
         receiver: Option<&Expr>,
         args: &[Expr],
     ) -> Option<CallInstantiation> {
-        self.record_generic_instantiation_with_declarations(func_id, receiver, args, None)
+        self.infer_call_instantiation_with_declarations(func_id, receiver, args, None)
     }
 
-    fn record_generic_instantiation_with_declarations(
-        &mut self, func_id: u32, receiver: Option<&Expr>, args: &[Expr], captured: Option<&[Option<crate::types::TypeRef>]>,
+    fn infer_call_instantiation_with_declarations(
+        &self, func_id: u32, receiver: Option<&Expr>, args: &[Expr], captured: Option<&[Option<crate::types::TypeRef>]>,
     ) -> Option<CallInstantiation> {
         let operands = receiver.into_iter().chain(args.iter());
         let count = args.len() + usize::from(receiver.is_some());
-        // #44-B: type-arg DERIVATION always runs — the interpreter's
-        // generic-witness plumbing (CallG → frame witness table →
-        // LoadT(Generic) → CallM-on-TypeRef) needs the static type args
-        // at Tier-0. Only the mono SEED recording (specialize → route →
-        // devirtualize, still under reconstruction #3) stays behind
-        // VERUM_ENABLE_MONO_AOT.
-        let mono_seed = std::env::var_os("VERUM_ENABLE_MONO_AOT").is_some();
         if let Some(declared) = self.declared_argument_witnesses(func_id, count, operands.clone(), captured) {
-            if mono_seed {
-                self.pending_specializations.push((func_id, declared.clone()));
-            }
-            return Some(CallInstantiation { arguments: declared, complete: true });
+            return Some(CallInstantiation::known(declared));
         }
         if self.ctx.lookup_function_by_id(crate::module::FunctionId(func_id))
             .is_some_and(|function| self.callable_has_value_parameters(function)) {
@@ -8968,19 +8961,71 @@ impl VbcCodegen {
         // no declaration roster retain their positional representation.
         let declared_ids = self.ctx.lookup_function_by_id(crate::module::FunctionId(func_id))
             .map(|info| info.type_param_ids.as_slice()).unwrap_or(&[]);
-        let type_args: Vec<crate::types::TypeRef> = if declared_ids.is_empty() {
-            let count = bindings.keys().next_back().map_or(0, |id| *id as usize + 1);
-            (0..count).map(|id| bindings.get(&(id as u32)).cloned()
-                .unwrap_or(crate::types::TypeRef::Generic(crate::types::TypeParamId(id as u16)))).collect()
+        let slots: Vec<_> = if declared_ids.is_empty() {
+            let count = *bindings.keys().next_back()? as usize + 1;
+            (0..count).map(|id| bindings.remove(&(id as u32))).collect()
         } else {
-            declared_ids.iter().map(|id| bindings.get(&u32::from(id.0)).cloned()
-                .unwrap_or(crate::types::TypeRef::Generic(*id))).collect()
+            declared_ids.iter().map(|id| bindings.remove(&u32::from(id.0))).collect()
         };
-        if mono_seed {
-            self.pending_specializations
-                .push((func_id, type_args.clone()));
+        Some(CallInstantiation { slots })
+    }
+
+    fn missing_call_witness(&self, function: Option<u32>, index: usize) -> CodegenError {
+        let mut message = format!("cannot infer generic argument {}", index + 1);
+        if let Some(id) = function {
+            let id = crate::module::FunctionId(id);
+            if let Some(info) = self.ctx.lookup_function_by_id(id)
+                && let Some(slot) = info.type_param_ids.get(index)
+                && let Some(roster) = self.callable_generic_roster(info)
+                && let Some(parameter) = roster.iter().find(|p| p.witness_slot == Some(*slot))
+            {
+                message.push_str(&format!(" `{}`", parameter.name));
+            }
+            let resolved = self.ctx.resolved_name_by_id.borrow();
+            let name = resolved.get(&id.0).or_else(|| {
+                let function = self.functions.iter().find(|f| f.descriptor.id == id)?;
+                self.ctx.strings.get(function.descriptor.name.0 as usize)
+            });
+            if let Some(name) = name {
+                message.push_str(&format!(" of `{name}`"));
+            }
         }
-        Some(CallInstantiation { arguments: type_args, complete: false })
+        CodegenError::new(CodegenErrorKind::TypeInference(message.into()))
+    }
+
+    /// A wire vector can represent a prefix. An interior hole cannot be
+    /// encoded by a reference to a same-numbered parameter of the caller.
+    fn call_witnesses_for(
+        &mut self,
+        function: Option<u32>,
+        mut call: CallInstantiation,
+    ) -> CodegenResult<Option<Vec<crate::types::TypeRef>>> {
+        let Some(last) = call.slots.iter().rposition(Option::is_some) else {
+            return Ok(None);
+        };
+        let slot_count = call.slots.len();
+        call.slots.truncate(last + 1);
+        let arguments = call
+            .slots
+            .into_iter()
+            .enumerate()
+            .map(|(index, slot)| slot.ok_or_else(|| self.missing_call_witness(function, index)))
+            .collect::<CodegenResult<Vec<_>>>()?;
+        // Specialization observes exactly the completed call, including explicit
+        // arguments. A valid runtime prefix cannot specialize an unknown suffix.
+        if let Some(id) = function
+            && arguments.len() == slot_count
+            && std::env::var_os("VERUM_ENABLE_MONO_AOT").is_some()
+            && self
+                .ctx
+                .lookup_function_by_id(crate::module::FunctionId(id))
+                .is_some_and(|info| {
+                    info.type_param_ids.is_empty() || info.type_param_ids.len() == arguments.len()
+                })
+        {
+            self.pending_specializations.push((id, arguments.clone()));
+        }
+        Ok(Some(arguments))
     }
 
     /// Apply source arguments to their declaration-owned slots after inference.
@@ -8990,9 +9035,10 @@ impl VbcCodegen {
         &mut self,
         func_id: Option<u32>,
         explicit: &verum_common::List<verum_ast::ty::GenericArg>,
-        inferred: Option<Vec<crate::types::TypeRef>>,
+        inferred: Option<CallInstantiation>,
     ) -> CodegenResult<Option<Vec<crate::types::TypeRef>>> {
         use crate::types::TypeRef;
+        let inferred = inferred.unwrap_or_default();
         use verum_ast::ty::GenericArg;
         let ambiguous_array = explicit.iter().any(|argument| {
             matches!(argument,
@@ -9010,13 +9056,15 @@ impl VbcCodegen {
             })
             .cloned()
         else {
-            return if explicit.is_empty() { Ok(inferred) } else { Err(missing_slots()) };
+            return if explicit.is_empty() { self.call_witnesses_for(func_id, inferred) } else { Err(missing_slots()) };
         };
+        let mut bindings: std::collections::BTreeMap<u16, TypeRef> = info.type_param_ids.iter()
+            .zip(&inferred.slots)
+            .filter_map(|(id, slot)| slot.as_ref().map(|ty| (id.0, ty.clone())))
+            .collect();
         if explicit.is_empty() {
-            let bindings = info.type_param_ids.iter().enumerate().filter_map(|(index, id)|
-                inferred.as_ref().and_then(|arguments| arguments.get(index)).map(|argument| (id.0, argument.clone()))).collect();
             self.validate_callable_value_bindings(&info, &bindings)?;
-            return Ok(inferred);
+            return self.call_witnesses_for(func_id, inferred);
         }
         if ambiguous_array
             && (info.explicit_type_param_ids.is_empty()
@@ -9050,17 +9098,6 @@ impl VbcCodegen {
         if let (Some(ret), Some(expected)) = (ret, expected.as_ref()) {
             bind_generic_free(ret, expected, &mut expected_bindings);
         }
-        let mut bindings: std::collections::BTreeMap<u16, TypeRef> = info
-            .type_param_ids
-            .iter()
-            .enumerate()
-            .filter_map(|(i, id)| {
-                inferred
-                    .as_ref()
-                    .and_then(|args| args.get(i))
-                    .map(|arg| (id.0, arg.clone()))
-            })
-            .collect();
         for (index, (arg, id)) in explicit.iter().zip(&info.explicit_type_param_ids).enumerate() {
             let Some(id) = id else {
                 if self.callable_argument_witness(&info, index, arg, None)?.is_some() {
@@ -9079,17 +9116,11 @@ impl VbcCodegen {
         let result: Vec<TypeRef> = info
             .type_param_ids
             .iter()
-            .map(|id| bindings.remove(&id.0).unwrap_or(TypeRef::Generic(*id)))
-            .collect();
-        if std::env::var_os("VERUM_ENABLE_MONO_AOT").is_some() {
-            if let Some(old) = inferred.as_ref() {
-                self.pending_specializations
-                    .retain(|(id, args)| *id != info.id.0 || args != old);
-            }
-            self.pending_specializations
-                .push((info.id.0, result.clone()));
-        }
-        Ok(Some(result))
+            .enumerate()
+            .map(|(index, id)| bindings.remove(&id.0)
+                .ok_or_else(|| self.missing_call_witness(func_id, index)))
+            .collect::<CodegenResult<_>>()?;
+        self.call_witnesses_for(func_id, CallInstantiation::known(result))
     }
 
     /// An invalid fixed-array length may not fall back to an unresolved generic
@@ -13722,12 +13753,12 @@ impl VbcCodegen {
         {
             let constructor = self.ctx.lookup_function(&format!("{tn}.new"))
                 .map(|info| info.id.0);
-            let inferred = constructor.and_then(|id| self.record_generic_instantiation(id, None, args)).map(|call| call.arguments);
+            let inferred = constructor.and_then(|id| self.infer_call_instantiation(id, None, args));
             let inner = self
                 .compile_expr(&args[0])?
                 .or_internal("wrapper .new arg has no value")?;
             let inferred = inferred.or_else(|| {
-                self.generic_named_place(&args[0], inner).map(|ty| vec![ty])
+                self.generic_named_place(&args[0], inner).map(|ty| CallInstantiation::known([ty]))
             });
             let witnesses = self.apply_explicit_generic_args(constructor, type_args, inferred)?;
 
@@ -16578,40 +16609,15 @@ impl VbcCodegen {
         // below for the full derivation contract).
         let value_generic_target = resolvable_fid.and_then(|id| self.ctx.lookup_function_by_id(crate::module::FunctionId(id)))
             .is_some_and(|function| self.callable_has_value_parameters(function));
-        let sidecar_args: Option<Vec<crate::types::TypeRef>> = resolvable_fid
-            .and_then(|fid| self.record_generic_instantiation_with_declarations(fid, Some(receiver), args, generic_operand_declarations.as_deref()))
-            .filter(CallInstantiation::carries_evidence)
-            .map(|call| call.arguments)
-            // ARCHIVE-BLIND fallback: user-script codegen has no stdlib
-            // FunctionDescriptors (self.functions is module-local), so
-            // the structural binder above derives nothing for stdlib
-            // methods. For an impl method the witnesses ARE the
-            // receiver's own instantiation args — `implement<T>
-            // Maybe<T>` puts the type's params first in the positional
-            // order (generic_type_params_ordered convention), so
-            // `Maybe<Maybe<Int>>` ⇒ [Maybe<Int>].  Const-generic impls
-            // ride the SAME channel: `StackAllocator<256>` ⇒
-            // [ConstValue(256)] (CONST-GENERIC-VALUE-CARRY-1).  Methods
-            // with extra fn-level generics get only the impl prefix; the
-            // body's out-of-range LoadT(Generic) loads nil and keeps the
-            // legacy fallback.
-            .or_else(|| (!value_generic_target).then(|| self.derive_receiver_witnesses(receiver)).flatten())
-            .filter(|ta| !ta.is_empty());
+        let sidecar_args = resolvable_fid
+            .and_then(|fid| self.infer_call_instantiation_with_declarations(
+                fid, Some(receiver), args, generic_operand_declarations.as_deref()))
+            .or_else(|| (!value_generic_target).then(|| self.derive_receiver_witnesses(receiver))
+                .flatten().map(CallInstantiation::known));
 
-        // T0701 (return-only method witnesses): a protocol method whose
-        // generic appears ONLY in its return (`partition<C: Default +
-        // Extend<..>>(..) -> (C, C)` — `C.default()` in the body) gets
-        // nothing from the chains above: the receiver instantiation
-        // carries [I, F] and the args carry P, so the C slot stays a
-        // placeholder, the callee's `LoadT(Generic(C))` loads nil, and
-        // the legacy default fabricates an Int — `extend_one` then
-        // "not found on Int".  The merged archive descriptor carries
-        // the STRUCTURAL return (`Tuple([Generic(2), Generic(2)])`),
-        // and `compile_let` stashes the annotation in
-        // `current_return_type_name`; bind them and fill ONLY the
-        // still-unbound slots of the sidecar vector (extending it to
-        // the bound pid when the chains produced a shorter one).
-        let sidecar_args: Option<Vec<crate::types::TypeRef>> = if value_generic_target { sidecar_args } else {
+        // A method parameter may appear only in the return type. Its expected
+        // result can fill missing slots independently of the receiver and operands.
+        let sidecar_args = if value_generic_target { sidecar_args } else {
             // Descriptor selection MUST match the runtime dispatch
             // target: `resolvable_fid` is a name-first lookup, so on
             // `range(0,10).partition(..)` it handed back
@@ -16717,25 +16723,13 @@ impl VbcCodegen {
             } else {
                 let roster = resolvable_fid.and_then(|id| self.ctx.lookup_function_by_id(crate::module::FunctionId(id)))
                     .map(|info| info.type_param_ids.as_slice()).unwrap_or(&[]);
-                let mut v = sidecar_args.unwrap_or_default();
-                if roster.is_empty() {
-                    // Pre-carrier synthetic entries retain the legacy positional contract.
-                    let max_pid = *ret_bindings.keys().next_back().unwrap() as usize;
-                    while v.len() <= max_pid {
-                        v.push(crate::types::TypeRef::Generic(crate::types::TypeParamId(v.len() as u16)));
-                    }
-                    for (pid, tr) in ret_bindings {
-                        if matches!(v[pid as usize], crate::types::TypeRef::Generic(_)) { v[pid as usize] = tr; }
-                    }
-                } else {
-                    for id in roster.iter().skip(v.len()) { v.push(crate::types::TypeRef::Generic(*id)); }
-                    for (pid, tr) in ret_bindings {
-                        if let Some(index) = roster.iter().position(|id| u32::from(id.0) == pid) {
-                            if matches!(v[index], crate::types::TypeRef::Generic(_)) { v[index] = tr; }
-                        }
-                    }
+                let mut inferred = sidecar_args.unwrap_or_default();
+                for (pid, ty) in ret_bindings {
+                    let index = if roster.is_empty() { Some(pid as usize) }
+                        else { roster.iter().position(|id| u32::from(id.0) == pid) };
+                    if let Some(index) = index { inferred.fill(index, ty); }
                 }
-                Some(v)
+                Some(inferred)
             }
         };
 
@@ -18199,19 +18193,10 @@ impl VbcCodegen {
             start: args_start,
             count: args.len() as u8,
         };
-        let inferred = self.record_generic_instantiation(func_info.id.0, None, args)
-            .filter(CallInstantiation::carries_evidence);
-        let complete = inferred.as_ref().is_some_and(|call| call.complete);
-        let mut inferred_type_args = inferred.map(|call| call.arguments);
-        if !complete && let Some(staged) = staged_type_args {
-            let inferred = inferred_type_args.get_or_insert_with(Vec::new);
-            for (index, value) in staged.into_iter().enumerate() {
-                if let Some(slot) = inferred.get_mut(index) {
-                    if matches!(slot, crate::types::TypeRef::Generic(_)) { *slot = value; }
-                } else {
-                    inferred.push(value);
-                }
-            }
+        let mut inferred_type_args = self.infer_call_instantiation(func_info.id.0, None, args);
+        if let Some(staged) = staged_type_args {
+            let inferred = inferred_type_args.get_or_insert_with(CallInstantiation::default);
+            for (index, value) in staged.into_iter().enumerate() { inferred.fill(index, value); }
         }
         match self.apply_explicit_generic_args(Some(func_info.id.0), type_args, inferred_type_args)?
         {
@@ -27056,12 +27041,12 @@ impl VbcCodegen {
                     // expected type is the callable result, never a surrounding
                     // record field or let-binding hint.
                     let prior = std::mem::replace(&mut self.ctx.expected_value_type, outer_declared);
-                    let witnesses = self.record_generic_instantiation(fid, None, std::slice::from_ref(inner));
+                    let witnesses = self.infer_call_instantiation(fid, None, std::slice::from_ref(inner));
                     self.ctx.expected_value_type = prior;
                     let args = crate::instruction::RegRange::new(inner_reg, 1);
-                    if let Some(call) = witnesses {
+                    if let Some(type_args) = self.call_witnesses_for(Some(fid), witnesses.unwrap_or_default())? {
                         self.ctx.emit(Instruction::CallG {
-                            dst: from_residual_ret, func_id: fid, args, type_args: call.arguments,
+                            dst: from_residual_ret, func_id: fid, args, type_args,
                         });
                     } else {
                         self.ctx.emit(Instruction::Call { dst: from_residual_ret, func_id: fid, args });
@@ -44091,14 +44076,15 @@ impl VbcCodegen {
             // scalar payloads (the `Some()` empty-payload class). The
             // static type is KNOWN right here, so derive the type args
             // through the ONE derivation authority
-            // (`record_generic_instantiation`, unifying the callee's
+            // (`infer_call_instantiation`, unifying the callee's
             // `self: Maybe<T>` against the receiver expr) and emit
             // `CallG` — the interp witness plumbing and the mono
             // specialization pipeline both key off it. Non-generic
             // callees and unresolved receivers derive nothing and keep
             // the plain `Call` unchanged.
             let fmt_type_args = if type_name.contains('<') {
-                self.record_generic_instantiation(fid, Some(expr), &[]).map(|call| call.arguments)
+                let call = self.infer_call_instantiation(fid, Some(expr), &[]).unwrap_or_default();
+                self.call_witnesses_for(Some(fid), call)?
             } else {
                 None
             };

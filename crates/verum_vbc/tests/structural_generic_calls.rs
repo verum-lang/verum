@@ -111,6 +111,18 @@ fn compile(source: &str) -> verum_vbc::module::VbcModule {
         .expect("source lowering")
 }
 
+fn instructions(
+    module: &verum_vbc::module::VbcModule,
+    id: verum_vbc::module::FunctionId,
+) -> Vec<Instruction> {
+    let function = module.get_function(id).unwrap();
+    let start = function.bytecode_offset as usize;
+    verum_vbc::bytecode::decode_instructions(
+        &module.bytecode[start..start + function.bytecode_length as usize],
+    )
+    .unwrap()
+}
+
 #[test]
 fn signed_literal_arguments_carry_their_declared_or_default_witness() {
     let cases = [
@@ -131,15 +143,79 @@ fn signed_literal_arguments_carry_their_declared_or_default_witness() {
     let mut vm = Interpreter::new(module.clone());
     for (name, _, ty, size) in cases {
         let id = module.find_function_by_name(name).unwrap();
-        let function = module.functions.iter().find(|f| f.id == id).unwrap();
-        let start = function.bytecode_offset as usize;
-        let code = verum_vbc::bytecode::decode_instructions(
-            &module.bytecode[start..start + function.bytecode_length as usize],
-        ).unwrap();
-        assert!(code.iter().any(|op| matches!(op, Instruction::CallG { type_args, .. }
-            if type_args == &[TypeRef::Concrete(ty)])), "{name}: {code:?}");
+        let code = instructions(&module, id);
+        assert!(
+            code.iter()
+                .any(|op| matches!(op, Instruction::CallG { type_args, .. }
+            if type_args == &[TypeRef::Concrete(ty)])),
+            "{name}: {code:?}"
+        );
         assert_eq!(vm.execute_function(id).unwrap().as_i64(), size, "{name}");
     }
+}
+
+#[test]
+fn an_unbound_callee_parameter_cannot_capture_the_same_numbered_caller_slot() {
+    let module = compile(
+        "
+        fn inspect<T, U>(value: T) -> Int { U.size }
+        fn relay<A, B>(a: A, b: B) -> Int { inspect(-8) }
+        fn direct() -> Int { inspect(-8) }
+        fn indirect() -> Int { relay(true, 8_i16) }
+    ",
+    );
+    let bytes = verum_vbc::serialize::serialize_module(&module).unwrap();
+    let module = Arc::new(verum_vbc::deserialize::deserialize_module(&bytes).unwrap());
+    verum_vbc::validate::validate_module(&module).unwrap();
+    for caller in ["direct", "relay"] {
+        let code = instructions(&module, module.find_function_by_name(caller).unwrap());
+        assert!(
+            code.iter()
+                .any(|op| matches!(op, Instruction::CallG { type_args, .. }
+            if type_args == &[TypeRef::Concrete(TypeId::INT)])),
+            "{caller}: {code:?}"
+        );
+    }
+    for name in ["direct", "indirect"] {
+        let id = module.find_function_by_name(name).unwrap();
+        let error = Interpreter::new(module.clone())
+            .execute_function(id)
+            .unwrap_err();
+        assert!(error.to_string().contains("layout"), "{name}: {error}");
+    }
+}
+
+#[test]
+fn explicit_arguments_can_complete_an_interior_hole_before_encoding() {
+    let declaration = "fn pair<A, B>(right: B) -> Int { A.size * 100 + B.size }";
+    let missing = format!("{declaration} fn probe() -> Int {{ pair(-7_i16) }}");
+    let error = VbcCodegen::new()
+        .compile_module(&Parser::new(&missing).parse_module().unwrap())
+        .expect_err("a later witness cannot shift into an earlier slot");
+    let diagnostic = error.to_string();
+    assert!(
+        diagnostic.contains("cannot infer generic argument 1 `A`") && diagnostic.contains("pair"),
+        "{diagnostic}"
+    );
+
+    let module = compile(&format!(
+        "{declaration} fn probe() -> Int {{ pair<Byte>(-7_i16) }}"
+    ));
+    let id = module.find_function_by_name("probe").unwrap();
+    let code = instructions(&module, id);
+    assert!(
+        code.iter()
+            .any(|op| matches!(op, Instruction::CallG { type_args, .. }
+        if type_args == &[TypeRef::Concrete(TypeId::U8), TypeRef::Concrete(TypeId::I16)])),
+        "{code:?}"
+    );
+    assert_eq!(
+        Interpreter::new(Arc::new(module))
+            .execute_function(id)
+            .unwrap()
+            .as_i64(),
+        102
+    );
 }
 
 #[test]
