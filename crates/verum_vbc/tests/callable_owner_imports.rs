@@ -196,6 +196,21 @@ fn absent_extra_slot_implementation_refuses() {
     )
 }
 #[test]
+fn declaration_and_executable_rows_share_one_generic_parameter_owner() {
+    const SOURCE: &str = r#"module api;
+        public type Convert<T> is protocol { fn make(v:T) -> Int; };
+        public type Cell<T> is { marker:Int };
+        implement<T> Convert<T> for Cell<T> { fn make(value:T) -> Int { 42 } }
+    "#;
+    import(SOURCE, "api.Cell", |module| {
+        let parent = module.types.iter_mut().find(|ty| !ty.protocols.is_empty()).unwrap();
+        let mut declaration = parent.protocols[0].clone();
+        declaration.methods.clear();
+        parent.protocols.push(declaration);
+    }, true);
+}
+
+#[test]
 fn ambiguous_static_implementation_refuses() {
     import(
         TYPE_API,

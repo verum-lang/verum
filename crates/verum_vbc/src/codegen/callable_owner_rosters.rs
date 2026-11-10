@@ -165,10 +165,14 @@ impl VbcCodegen {
         let parent = module.types.iter().find(|ty| ty.id == parent_id)
             .ok_or_else(|| invalid("missing declaring nominal descriptor"))?;
         let mut matches = Vec::new();
+        // The declaration interface and the completed module may both carry
+        // this implementation with different local dispatch slots. Generic
+        // parameters belong to its exact source declaration.
+        let mut seen = std::collections::HashSet::new();
         for carrier in parent.source_inherent_implementations.iter().chain(
             parent.protocols.iter().filter_map(|implementation| implementation.source_implementation.as_ref()))
         {
-            if carrier.origin_module() != owner { continue; }
+            if carrier.origin_module() != owner || !seen.insert(carrier) { continue; }
             let declaration = carrier.declaration().map_err(|_| invalid("malformed implementation authority"))?;
             if declaration.items.iter().any(|item| matches!(&item.kind,
                 verum_ast::decl::ImplItemKind::Function(method) if method == source))
