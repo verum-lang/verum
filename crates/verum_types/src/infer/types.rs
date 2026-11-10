@@ -67,6 +67,7 @@ use verum_modules::{ModulePath, ModuleRegistry, NameResolver, resolver::NameKind
 enum ApplicationForm {
     Expanded,
     Nominal,
+    ProtocolArgument,
 }
 
 impl TypeChecker {
@@ -1019,7 +1020,7 @@ fn substitute_refinement_binder(
     /// telescope has been checked, including when the protocol has no members.
     /// Keep a declared sum application available to protocol resolution even
     /// when checking the body also needs its expanded variant payloads.
-    pub(super) fn declared_return_carrier(
+    pub(super) fn declared_sum_carrier(
         &mut self, declaration: Option<&verum_ast::Type>, result: &Type,
     ) -> Result<Type> {
         if let Some(declaration) = declaration
@@ -1031,13 +1032,78 @@ fn substitute_refinement_binder(
         Ok(result.clone())
     }
 
-    fn resolve_try_carrier(&self, mut ty: Type) -> (Type, Option<crate::protocol::TryProtocolResolution>) {
+    pub(super) fn resolve_try_carrier(
+        &mut self, ty: Type, span: Span,
+    ) -> Result<(Type, Option<crate::protocol::TryProtocolResolution>)> {
+        use verum_common::well_known_types::WellKnownProtocol;
+        let role = WellKnownProtocol::Try;
+        if let Some(name) = self.source_operator_name(role) {
+            let path = Self::text_to_path(&name);
+            if let Some(resolution) = self.protocol_checker.read().declared_try_resolution(&ty, &path) {
+                return Ok((ty, Some(resolution)));
+            }
+            self.load_source_operator_implementation(&ty, role, span)?;
+            if let Some(resolution) = self.protocol_checker.read().declared_try_resolution(&ty, &path) {
+                return Ok((ty, Some(resolution)));
+            }
+        }
         let checker = self.protocol_checker.read();
-        let resolution = checker.resolve_try_protocol(&ty).or_else(|| {
-            ty = self.unifier.try_expand_alias(&ty)?;
-            checker.resolve_try_protocol(&ty)
-        });
-        (ty, resolution)
+        if let Some(resolution) = checker.resolve_try_protocol(&ty) {
+            return Ok((ty, Some(resolution)));
+        }
+        if let Some(expanded) = self.unifier.try_expand_alias(&ty) {
+            let resolution = checker.resolve_try_protocol(&expanded);
+            return Ok((expanded, resolution));
+        }
+        Ok((ty, None))
+    }
+
+    fn declared_variant(&self, name: &Text) -> bool {
+        let declaration = self.source_type_registration.pending.get(name)
+            .or_else(|| self.source_type_registration.completed.get(name))
+            .or_else(|| self.core_metadata.as_ref()?.types.get(name)?.source_declaration.as_ref());
+        if let Some(declaration) = declaration {
+            return declaration.body.is_variant();
+        }
+        let Some((owner, leaf)) = name.as_str().rsplit_once('.') else {
+            return false;
+        };
+        self.module_registry.read().get_by_path(owner).is_some_and(|module| {
+            module.ast.items.iter().any(|item| matches!(&item.kind,
+                verum_ast::ItemKind::Type(decl) if decl.name.name.as_str() == leaf && decl.body.is_variant()
+            ))
+        })
+    }
+
+    fn residual_proof_carrier(&mut self, value: &Type, span: Span) -> Result<Type> {
+        let (mut name, arguments) = match value {
+            Type::Generic { name, args } => (name.clone(), args),
+            Type::Named { path, args } => (self.path_to_string(path), args),
+            _ => return Ok(value.clone()),
+        };
+        if !name.as_str().contains('.') {
+            let (_, identity) =
+                self.resolve_qualified_type_with_parameter_key(&Self::text_to_path(&name), span)?;
+            if let Some(identity) = identity {
+                name = identity;
+            }
+        }
+        if !name.as_str().contains('.')
+            && let Some(role) = WKT::from_name(&name)
+            && let Some(owner) = role.canonical_archive_modules().first()
+        {
+            let qualified = verum_common::qualified_name::qualify_module_name(owner, &name);
+            if self.declared_variant(&qualified) {
+                name = qualified;
+            }
+        }
+        Ok(Type::Named { path: Self::text_to_path(&name), args: arguments.clone() })
+    }
+
+    pub(super) fn apply_protocol_argument_slots(
+        &mut self, annotation: &verum_ast::Type, arguments: List<Type>,
+    ) -> Result<Type> {
+        self.elaborate_generic_application(annotation, Some(arguments), ApplicationForm::ProtocolArgument)
     }
 
     pub(super) fn checked_impl_receiver(&mut self, receiver: &verum_ast::ty::Type) -> Result<Type> {
@@ -1329,7 +1395,9 @@ fn substitute_refinement_binder(
                 // that is not an alias `try_expand_alias` returns None and
                 // the arms below run unchanged.
                 if let Some(key) = parameter_key.as_ref() {
-                    if matches!(form, ApplicationForm::Nominal) {
+                    if matches!(form, ApplicationForm::Nominal)
+                        || (matches!(form, ApplicationForm::ProtocolArgument) && self.declared_variant(key))
+                    {
                         // Parameter slots may live under a short archive key. The
                         // implementation belongs to the descriptor's declaring module.
                         let owner = if key.as_str().contains('.') {
@@ -1893,7 +1961,7 @@ fn substitute_refinement_binder(
         // Step 2: Resolve Try protocol for inner type
         // Resolve the declared carrier first. Aliases can delegate to their
         // target; the payload order of an expanded sum cannot establish Try.
-        let (inner_ty, resolution) = self.resolve_try_carrier(inner_ty);
+        let (inner_ty, resolution) = self.resolve_try_carrier(inner_ty, try_span)?;
         let inner_try = match resolution {
             Some(resolution) => resolution,
             None => {
@@ -1957,7 +2025,7 @@ fn substitute_refinement_binder(
         };
 
         // Same canonicalisation as the expression side above.
-        let (function_return_type, resolution) = self.resolve_try_carrier(function_return_type);
+        let (function_return_type, resolution) = self.resolve_try_carrier(function_return_type, try_span)?;
         let outer_try = match resolution {
             Some(resolution) => resolution,
             None => {
@@ -1996,9 +2064,22 @@ fn substitute_refinement_binder(
         // because two runs of the same file disagree and the inputs to this
         // step are byte-identical — so the divergence is one of these four.
         let trace_gates = std::env::var_os("VERUM_TRACE_TRYGATE").is_some();
-        let gate1 = self
-            .protocol_checker
-            .read()
+        let role = verum_common::well_known_types::WellKnownProtocol::FromResidual;
+        if function_return_type.free_vars().is_empty() && inner_try.residual.free_vars().is_empty()
+            && let Some(protocol) = ProtocolChecker::operator_protocol_source_name(role)
+            && self.protocol_checker.read().has_protocol(&protocol)
+        {
+            // The selected implementation, including its own where clause, must
+            // prove a closed conversion before the residual can leave the body.
+            let target = self.residual_proof_carrier(&function_return_type, try_span)?;
+            let residual = self.residual_proof_carrier(&inner_try.residual, try_span)?;
+            let bound = crate::protocol::ProtocolBound::positive(
+                Self::text_to_path(&protocol), List::from(vec![residual]),
+            );
+            self.prove_associated_bounds(&target, &[bound], &[], &Map::new(), try_span)?;
+            return Ok(InferResult::new(inner_try.output));
+        }
+        let gate1 = self.protocol_checker.read()
             .can_convert_residual(&function_return_type, &inner_try.residual);
         if trace_gates {
             eprintln!("[trygate] 1 can_convert_residual = {}", gate1);

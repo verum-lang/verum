@@ -2139,6 +2139,8 @@ pub enum WellKnownProtocol {
     DerefMut,
     Index,
     From,
+    Try,
+    FromResidual,
     Into,
     Iterator,
     IntoIterator,
@@ -2177,6 +2179,8 @@ impl WellKnownProtocol {
             Self::DerefMut => "DerefMut",
             Self::Index => "Index",
             Self::From => "From",
+            Self::Try => "Try",
+            Self::FromResidual => "FromResidual",
             Self::Into => "Into",
             Self::Iterator => "Iterator",
             Self::IntoIterator => "IntoIterator",
@@ -2214,6 +2218,8 @@ impl WellKnownProtocol {
             "DerefMut" => Some(Self::DerefMut),
             "Index" => Some(Self::Index),
             "From" => Some(Self::From),
+            "Try" => Some(Self::Try),
+            "FromResidual" => Some(Self::FromResidual),
             "Into" => Some(Self::Into),
             "Iterator" => Some(Self::Iterator),
             "IntoIterator" => Some(Self::IntoIterator),
@@ -2303,6 +2309,8 @@ impl WellKnownProtocol {
             | Self::Sync
             | Self::From
             | Self::Into => &["core.base.protocols", "core.base"],
+
+            Self::Try | Self::FromResidual => &["core.base.ops", "core.base"],
 
             // `core/base/iterator.vr`
             Self::Iterator

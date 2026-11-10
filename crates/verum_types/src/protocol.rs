@@ -8809,45 +8809,9 @@ impl ProtocolChecker {
             return Some(TryProtocolResolution { output, residual });
         }
 
-        // =========================================================================
-        // Protocol-based resolution (stdlib-agnostic) - PREFERRED
-        // Stdlib-agnostic type system: type checker operates without hardcoded knowledge of stdlib types, stdlib types registered from parsed .vr files
-        // =========================================================================
-        // Try protocol-based resolution first (doesn't require hardcoded type knowledge)
-        let has_try = self.implements_protocol(ty, "Try");
-        if trygate_trace() {
-            eprintln!(
-                "[trygate] resolve_try: implements_protocol(Try) = {}",
-                has_try
-            );
-        }
-        if has_try {
-            let try_path = Path::single(verum_ast::ty::Ident::new("Try", Span::default()));
-            if let Maybe::Some(impl_) = self.find_impl(ty, &try_path) {
-                // Build type substitution from impl's generic type to concrete type
-                let mut subst = Map::new();
-                self.build_type_substitution_for_impl(&impl_.for_type, ty, &mut subst);
-
-                // Resolve Output associated type
-                let output = impl_
-                    .ordinary_associated_type(&"Output".into())
-                    .ok()?
-                    .cloned()
-                    .map(|t| self.apply_type_substitution_with_map(&t, &subst))
-                    .or_else(|| self.try_find_associated_type(ty, &"Output".into()));
-
-                // Resolve Residual associated type
-                let residual = impl_
-                    .ordinary_associated_type(&"Residual".into())
-                    .ok()?
-                    .cloned()
-                    .map(|t| self.apply_type_substitution_with_map(&t, &subst))
-                    .or_else(|| self.try_find_associated_type(ty, &"Residual".into()));
-
-                if let (Some(output), Some(residual)) = (output, residual) {
-                    return Some(TryProtocolResolution { output, residual });
-                }
-            }
+        let path = self.operator_protocol_path(WellKnownProtocol::Try);
+        if let Some(resolution) = self.declared_try_resolution(ty, &path) {
+            return Some(resolution);
         }
 
         // Bootstrap can supply the two core carriers before loading their
@@ -8868,6 +8832,12 @@ impl ProtocolChecker {
         };
         residual[0] = Type::Never;
         Some(TryProtocolResolution { output, residual: ty.clone().apply_arguments(residual) })
+    }
+
+    pub(crate) fn declared_try_resolution(&self, ty: &Type, path: &Path) -> Option<TryProtocolResolution> {
+        let output = self.resolve_associated_type(ty, path, &"Output".into()).ok()?;
+        let residual = self.resolve_associated_type(ty, path, &"Residual".into()).ok()?;
+        Some(TryProtocolResolution { output, residual })
     }
 
     /// Build type substitution from impl's generic type to concrete type.

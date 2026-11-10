@@ -10917,7 +10917,7 @@ impl TypeChecker {
             .or_else(|| return_type_var.clone())
             .unwrap_or_else(Type::unit);
 
-        let return_carrier = self.declared_return_carrier(func.return_type.as_ref(), &initial_return_type)?;
+        let return_carrier = self.declared_sum_carrier(func.return_type.as_ref(), &initial_return_type)?;
 
         // Resolve and expand context requirements
         // Context group expansion: resolving context group names to their constituent contexts recursively — Context group expansion
@@ -11521,7 +11521,8 @@ impl TypeChecker {
         for (i, param) in func.params.iter().enumerate() {
             match &param.kind {
                 FunctionParamKind::Regular { pattern, ty, .. } => {
-                    let param_ty = self.ast_to_type(ty)?;
+                    let expanded = self.ast_to_type(ty)?;
+                    let param_ty = self.declared_sum_carrier(Some(ty), &expanded)?;
 
                     // A parameter pattern is matched against whatever the
                     // caller passes, so it must ALWAYS match. Measured

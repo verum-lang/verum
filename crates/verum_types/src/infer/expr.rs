@@ -12627,11 +12627,7 @@ impl TypeChecker {
         // means "unwrap with ? then access field" — the lexer tokenizes `expr?.field`
         // as OptionalChain rather than Field(Try(expr), field).
         if self.try_recover_depth > 0 {
-            if let Some(try_resolution) = self
-                .protocol_checker
-                .read()
-                .resolve_try_protocol(&obj_result.ty)
-            {
+            if let (_, Some(try_resolution)) = self.resolve_try_carrier(obj_result.ty.clone(), obj.span)? {
                 // This is `result?.field` inside try-recover — unwrap to success type
                 let success_ty = try_resolution.output;
                 self.check_record_field_visibility(&success_ty, field.name.as_str(), expr.span)?;
@@ -12649,14 +12645,11 @@ impl TypeChecker {
             }
         }
 
-        // Use protocol-based Maybe resolution
-        let inner_ty = match self
-            .protocol_checker
-            .read()
-            .resolve_maybe_protocol(&obj_result.ty)
-        {
-            Some(resolution) => resolution.inner,
-            None => obj_result.ty.clone(),
+        let inner_ty = {
+            let checker = self.protocol_checker.read();
+            checker.resolve_maybe_protocol(&obj_result.ty)
+                .or_else(|| checker.resolve_maybe_protocol(&self.expand_generic_to_variant(&obj_result.ty)))
+                .map_or_else(|| obj_result.ty.clone(), |resolution| resolution.inner)
         };
 
         // Unwrap reference types before field access (Maybe<&Point>?.field)

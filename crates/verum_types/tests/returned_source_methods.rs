@@ -39,6 +39,56 @@ fn two_mount_paths_preregister_one_implementation_owner() {
     }
 }
 
+#[test]
+fn a_closed_try_conversion_requires_its_declared_residual_and_error_implementations() {
+    let operations = r#"
+        public type Never is !;
+        public type Try is protocol { type Output; type Residual; };
+        public type FromResidual<R> is protocol { fn from_residual(r: R) -> Self; };
+    "#;
+    let conversions = r#"
+        public type From<T> is protocol { fn from(value: T) -> Self; };
+        implement<T> From<T> for T { fn from(value: T) -> T { value } }
+    "#;
+    let result = r#"
+        mount core.base.ops.{Try, FromResidual, Never};
+        mount core.base.protocols.From;
+        public type Result<T,E> is Ok(T) | Err(E);
+        implement<T,E> Try for Result<T,E> { type Output = T; type Residual = Result<Never,E>; }
+    "#;
+    let residual_impl = r#"
+        implement<T,E,F> FromResidual<Result<Never,F>> for Result<T,E> where E: From<F> {
+            fn from_residual(r: Result<Never,F>) -> Result<T,E> {
+                match r { Err(e) => Err(E.from(e)), Ok(never) => never }
+            }
+        }
+    "#;
+    let error_impl = "implement From<Failure> for Changed { fn from(v: Failure) -> Changed { Changed { code: v.code } } }";
+    for (residual, conversion, admitted) in [
+        (residual_impl, error_impl, true), (residual_impl, "", false), ("", error_impl, false),
+    ] {
+        let declaration = format!("{result} {residual}");
+        let consumer = format!(r#"
+            mount core.base.protocols.From;
+            mount core.base.ops.FromResidual;
+            mount core.base.result.{{Result, Ok, Err}};
+            type Failure is {{ code: Int }};
+            type Changed is {{ code: Int }};
+            {conversion}
+            fn propagate(input: Result<(),Failure>) -> Result<Int,Changed> {{ input?; Ok(41) }}
+        "#);
+        let errors = check(&consumer, &[
+            ("core.base.protocols", conversions), ("core.base.ops", operations),
+            ("core.base.result", &declaration),
+        ]);
+        if admitted {
+            assert!(errors.is_empty(), "{errors:?}");
+        } else {
+            assert!(errors.iter().any(|e| e.contains("FromResidual")), "{errors:?}");
+        }
+    }
+}
+
 fn check_with_checker(consumer: &str, modules: &[(&str, &str)]) -> (TypeChecker, List<Text>) {
     check_with_module_aliases(consumer, modules, &[])
 }
