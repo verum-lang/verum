@@ -2072,6 +2072,32 @@ impl BinOp {
         Self::ShlAssign, Self::ShrAssign,
     ];
 
+    /// The standard declaration selected when this binary operator is overloaded.
+    /// A method with the same spelling on a different protocol is a distinct member.
+    pub const fn standard_protocol_member(self) -> Option<(&'static str, &'static str)> {
+        Some(match self {
+            Self::Add => ("Add", "add"),
+            Self::Sub => ("Sub", "sub"),
+            Self::Mul => ("Mul", "mul"),
+            Self::Div => ("Div", "div"),
+            Self::Rem => ("Rem", "rem"),
+            Self::Pow => ("Pow", "pow"),
+            Self::Eq => ("Eq", "eq"),
+            Self::Ne => ("Eq", "ne"),
+            Self::Lt => ("Ord", "lt"),
+            Self::Le => ("Ord", "le"),
+            Self::Gt => ("Ord", "gt"),
+            Self::Ge => ("Ord", "ge"),
+            Self::BitAnd => ("BitAnd", "bitand"),
+            Self::BitOr => ("BitOr", "bitor"),
+            Self::BitXor => ("BitXor", "bitxor"),
+            Self::Shl => ("Shl", "shl"),
+            Self::Shr => ("Shr", "shr"),
+            Self::Imply => ("Imply", "imply"),
+            _ => return None,
+        })
+    }
+
     /// Returns co-located metadata for this binary operator.
     /// Single source of truth for `as_str` / `category` /
     /// `is_assignment` / `is_comparison` / `is_commutative`.
