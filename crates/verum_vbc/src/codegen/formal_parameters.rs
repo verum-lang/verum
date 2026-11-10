@@ -235,13 +235,6 @@ impl VbcCodegen {
                         .iter().any(|(parent, _)| *parent == name))))
     }
 
-    /// The grammar's explicit existential array extent, distinct from an
-    /// unresolved named constant or a fixed zero-length array.
-    pub(super) fn inferred_array_extent(expr: &verum_ast::Expr) -> bool {
-        matches!(&Self::normalized_place(expr).kind, verum_ast::ExprKind::Path(path)
-            if path.as_ident().is_some_and(|name| name.name.as_str() == "_"))
-    }
-
     fn source_value_binders(function: &FunctionDecl) -> std::collections::HashSet<String> {
         use verum_ast::{visitor::{Visitor, walk_pattern}, Pattern, PatternKind, VariantPatternData};
         #[derive(Default)]

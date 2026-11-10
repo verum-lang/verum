@@ -1623,7 +1623,8 @@ unknown_type    = 'unknown' ;
 
 path_type       = path ;
 tuple_type      = '(' , type_expr , { ',' , type_expr } , ')' ;
-array_type      = '[' , type_expr , ';' , expression , ']' ;
+(* An underscore denotes an unspecified array length. *)
+array_type      = '[' , type_expr , ';' , ( '_' | expression ) , ']' ;
 slice_type      = '[' , type_expr , ']' ;
 
 (* Three-tier reference system — specified in place; runtime types live in crates/verum_cbgr *)

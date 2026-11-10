@@ -80,6 +80,32 @@ fn checked_counts_refuse_executed_invalid_or_unsupported_expressions() {
 }
 
 #[test]
+fn an_explicit_open_extent_accepts_arrays_of_different_lengths() {
+    for extent in ["_", "(_)"] {
+        let source = format!(
+            "fn pick(xs: [Int; {extent}], at: Int) -> Int {{ xs[at] }}
+             fn probe() -> Int {{ pick([2], 0) + pick([5, 8, 9], 2) }}"
+        );
+        let actual = errors(&source);
+        assert!(actual.is_empty(), "{actual:?}");
+    }
+}
+
+#[test]
+fn unresolved_expressions_do_not_become_open_extents() {
+    for count in ["missing", "missing + 1", "_ + 1"] {
+        let source = format!("fn pick(xs: [Int; {count}]) {{}}");
+        let ast = Parser::new(&source).parse_module().expect("array parameter");
+        let ItemKind::Function(function) = &ast.items[0].kind else { unreachable!() };
+        let mut checker = TypeChecker::new();
+        checker.register_primitives();
+        let error = checker.register_function_signature(function).expect_err(count);
+        assert!(matches!(&error, verum_types::TypeError::OtherWithCodeSpanned { code, msg, .. }
+            if code.as_str() == "E400" && msg.contains("array length")), "{error}");
+    }
+}
+
+#[test]
 fn named_checked_counts_keep_invalid_intermediates() {
     for initializer in [
         "9223372036854775807 + 1 - 1",

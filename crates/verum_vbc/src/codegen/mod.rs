@@ -18437,7 +18437,7 @@ impl VbcCodegen {
         if let TypeKind::Array { element, size } = &ty.kind {
             let element = self.resolve_type_ref_in_scope(
                 element, generic_param_map, preserve_refs, declaration_scope, array_count, self_type, values, nominal_defaults)?;
-            if size.as_deref().is_some_and(Self::inferred_array_extent) {
+            if size.as_deref().is_some_and(verum_ast::checked_const::is_inferred_array_extent) {
                 // Existing Array<T> represents the runtime-extent family. It
                 // carries an element declaration but no fixed-length claim.
                 return Ok(TypeRef::Instantiated { base: TypeId::ARRAY, args: vec![element] });

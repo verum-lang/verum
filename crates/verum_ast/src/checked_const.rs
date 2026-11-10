@@ -163,6 +163,15 @@ pub fn validate_i64_expression(expression: &Expr) -> Result<(), Span> {
 }
 
 
+/// An explicit underscore leaves an array's length unspecified.
+pub fn is_inferred_array_extent(mut expression: &Expr) -> bool {
+    while let ExprKind::Paren(inner) = &expression.kind {
+        expression = inner;
+    }
+    matches!(&expression.kind, ExprKind::Path(path)
+        if path.as_ident().is_some_and(|name| name.as_str() == "_"))
+}
+
 /// Evaluate a closed arithmetic term using the shared checked scalar semantics.
 /// Validate every node before evaluation: a dead branch cannot conceal an
 /// unbound identifier or a call. No declaration resolver is available here.

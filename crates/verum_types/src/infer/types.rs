@@ -2668,9 +2668,8 @@ fn substitute_refinement_binder(
         }).collect());
     }
 
-    /// Array lengths currently retain concrete sizes, or an unknown size for
-    /// one declaration-owned integer parameter. Compound symbolic expressions
-    /// need a retained length term; a failed evaluation cannot stand for one.
+    /// A bare underscore leaves the extent open. Other written counts must
+    /// be checked constants or declaration-owned integer parameters.
     fn checked_array_length(&mut self, expr: &Expr) -> Result<Option<usize>> {
         let mut leaf = expr;
         let mut depth = 0;
@@ -2684,6 +2683,9 @@ fn substitute_refinement_binder(
                 });
             }
             leaf = inner;
+        }
+        if verum_ast::checked_const::is_inferred_array_extent(leaf) {
+            return Ok(None);
         }
         if let ExprKind::Path(path) = &leaf.kind
             && let Some(name) = path.as_ident()
