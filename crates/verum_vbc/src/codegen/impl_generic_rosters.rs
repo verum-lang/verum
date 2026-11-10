@@ -42,10 +42,12 @@ pub(super) struct DeclaredGenericParameters {
 fn validate_nominal_default(
     ty: &Type,
     preceding: &[DeclaredGenericParameter],
+    has_receiver: bool,
 ) -> CodegenResult<()> {
     use verum_ast::visitor::{Visitor, walk_expr, walk_type};
     struct DefaultScope<'a> {
         preceding: &'a [DeclaredGenericParameter],
+        has_receiver: bool,
         error: Option<verum_ast::Span>,
         depth: usize,
         budget: usize,
@@ -86,10 +88,8 @@ fn validate_nominal_default(
                 self.preceding.iter().any(|parameter| {
                     parameter.name == name.name.as_str() && parameter.value_parameter().is_some()
                 })
-            }) || path
-                .segments
-                .iter()
-                .any(|part| matches!(part, verum_ast::ty::PathSegment::SelfValue))
+            }) || (!self.has_receiver && path.segments.iter()
+                .any(|part| matches!(part, verum_ast::ty::PathSegment::SelfValue)))
             {
                 self.error = Some(path.span);
             }
@@ -97,6 +97,7 @@ fn validate_nominal_default(
     }
     let mut scope = DefaultScope {
         preceding,
+        has_receiver,
         error: None,
         depth: 0,
         budget: 4096,
@@ -116,6 +117,7 @@ impl VbcCodegen {
         mut arguments: Vec<TypeRef>,
         span: verum_ast::Span,
         active_defaults: &[TypeId],
+        receiver: Option<&TypeRef>,
     ) -> CodegenResult<Vec<TypeRef>> {
         let Some(roster) = self.declaration_generic_roster(nominal) else {
             // This mapper does not synthesize a header for opaque imported
@@ -171,7 +173,7 @@ impl VbcCodegen {
                             parameter.name
                         ))
                     })?;
-                validate_nominal_default(default, &roster[..index])?;
+                validate_nominal_default(default, &roster[..index], receiver.is_some())?;
                 let mut complete = true;
                 let mut active = verum_common::Set::new();
                 let mut cache = verum_common::Map::new();
@@ -199,7 +201,7 @@ impl VbcCodegen {
                         true,
                         Some(&owner),
                         &mut count,
-                        None,
+                        receiver,
                         values,
                         &nested_defaults,
                     )

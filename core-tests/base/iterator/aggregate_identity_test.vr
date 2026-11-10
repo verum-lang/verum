@@ -1,0 +1,60 @@
+mount core.base.iterator.Iterator;
+mount core.base.maybe.Maybe;
+mount core.base.protocols.{Add, Mul, One, Zero};
+
+type OffsetAmount is { bits: Int };
+type CountedAmounts is { remaining: Int };
+type OtherArithmetic is protocol { fn add(self, other: Self) -> Bool; };
+
+implement OtherArithmetic for OffsetAmount {
+    fn add(self, other: Self) -> Bool { self.bits == other.bits }
+}
+
+implement Zero for OffsetAmount {
+    fn zero() -> Self { OffsetAmount { bits: 17 } }
+    fn is_zero(&self) -> Bool { self.bits == 17 }
+}
+
+implement One for OffsetAmount {
+    fn one() -> Self { OffsetAmount { bits: 18 } }
+    fn is_one(&self) -> Bool { self.bits == 18 }
+}
+
+implement Add for OffsetAmount {
+    type Output = Self;
+    fn add(self, other: Self) -> Self { OffsetAmount { bits: self.bits + other.bits - 17 } }
+}
+
+implement Mul for OffsetAmount {
+    type Output = Self;
+    fn mul(self, other: Self) -> Self {
+        OffsetAmount { bits: (self.bits - 17) * (other.bits - 17) + 17 }
+    }
+}
+
+implement Iterator for CountedAmounts {
+    type Item = OffsetAmount;
+    fn next(&mut self) -> Maybe<OffsetAmount> {
+        if self.remaining == 0 { return Maybe.None; }
+        self.remaining = self.remaining - 1;
+        Maybe.Some(OffsetAmount { bits: 20 })
+    }
+}
+
+pure fn bump(amount: &OffsetAmount) -> OffsetAmount { OffsetAmount { bits: amount.bits + 1 } }
+
+@test
+fn aggregation_uses_the_declared_identity_and_operator() {
+    let sum: OffsetAmount = CountedAmounts { remaining: 2 }.sum();
+    let product: OffsetAmount = CountedAmounts { remaining: 2 }.product();
+    let empty_sum: OffsetAmount = CountedAmounts { remaining: 0 }.sum_by(bump);
+    let empty_product: OffsetAmount = CountedAmounts { remaining: 0 }.product_by(bump);
+    let mapped_sum: OffsetAmount = CountedAmounts { remaining: 2 }.sum_by(bump);
+    let mapped_product: OffsetAmount = CountedAmounts { remaining: 2 }.product_by(bump);
+    assert_eq(sum.bits, 23);
+    assert_eq(product.bits, 26);
+    assert_eq(empty_sum.bits, 17);
+    assert_eq(empty_product.bits, 18);
+    assert_eq(mapped_sum.bits, 25);
+    assert_eq(mapped_product.bits, 33);
+}

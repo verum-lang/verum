@@ -31762,8 +31762,10 @@ impl VbcCodegen {
             }
         }
         let hints: verum_common::List<_> = params.iter().map(|ty| {
+            if !super::constructor_types::fully_bound(ty, &substitution) { return None; }
             let ty = self.resolve_declared_associated_types(&substitution.apply(ty).ok()?)?;
-            (!ty.is_generic() && self.callable_type_name(&ty).is_some()).then_some(ty)
+            (self.declared_type_in_scope(&ty)
+                && self.scoped_callable_type_name(&ty, Some(&self.ctx.current_generic_param_ids)).is_some()).then_some(ty)
         }).collect();
         hints.iter().any(Option::is_some).then_some(hints)
     }
@@ -31975,7 +31977,7 @@ impl VbcCodegen {
             .collect::<CodegenResult<_>>()?;
         let param_type_names: Vec<Option<String>> = params.iter().enumerate()
             .map(|(index, p)| p.ty.as_ref().map(|ty| self.type_to_simple_name(ty))
-                .or_else(|| param_type_refs[index].as_ref().and_then(|ty| self.callable_type_name(ty)).map(|name| name.to_string())))
+                .or_else(|| param_type_refs[index].as_ref().and_then(|ty| self.scoped_callable_type_name(ty, Some(&self.ctx.current_generic_param_ids))).map(|name| name.to_string())))
             .collect();
 
         // Preserve existing ABI lowering for all annotation shapes, but only
@@ -32234,7 +32236,12 @@ impl VbcCodegen {
             captures.iter().map(|(name, _)| name.as_str()),
         );
         // Begin closure function compilation
+        let captured_bounds: Vec<_> = capture_types.iter().flatten().filter_map(|ty| {
+            let crate::types::TypeRef::Generic(id) = ty else { return None };
+            self.ctx.registers.callable_bound_results.get(id).map(|result| (*id, result.clone()))
+        }).collect();
         self.ctx.begin_function(&closure_name, &all_params, closure_return_type_ref.clone());
+        self.ctx.registers.callable_bound_results.extend(captured_bounds);
         self.ctx.bind_captured_array_facts(captured_arrays);
         self.bind_capture_declarations(captures, capture_types);
 
@@ -32389,7 +32396,8 @@ impl VbcCodegen {
                 .and_then(|index| param_type_refs.get(index)).cloned().flatten(),
             _ => None,
         };
-        let inferred_return_type = parameter_result.or_else(|| self.extract_expr_type_name(body)
+        let inferred_return_type = parameter_result.or_else(||
+            self.declared_expression_result(tail, None, 0, 0)).or_else(|| self.extract_expr_type_name(body)
             .or_else(|| self.infer_expr_type_name(body))
             .or_else(|| Self::literal_default_type_name(body))
             .and_then(|name| self.type_name_to_type_ref_mono(&name)));

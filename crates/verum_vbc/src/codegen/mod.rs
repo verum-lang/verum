@@ -1205,7 +1205,7 @@ pub struct VbcCodegen {
     /// The implementation's where predicates travel with its inline bounds.
     current_impl_where_clause: Option<verum_ast::ty::WhereClause>,
     /// Protocol instantiations guaranteed by the current callable's binder IDs.
-    current_protocol_bounds: std::collections::HashMap<crate::types::TypeParamId, Vec<TypeRef>>,
+    current_protocol_bounds: std::collections::HashMap<crate::types::TypeParamId, Vec<protocol_results::BoundProtocol>>,
     /// Exact resolved source impl target, shared by ABI and semantic lowering.
     current_impl_receiver: Option<ImplReceiverWitness>,
     current_source_substitution: source_substitution::SourceTypeSubstitution,
@@ -16561,7 +16561,8 @@ impl VbcCodegen {
                 // (PartialOrd `lt`/`le`/etc, Iterator return types,
                 // …).  Bind Self to an out-of-range synthetic ID so
                 // it round-trips as `__generic_N` → fresh TypeVar.
-                let self_synthetic_id = type_decl.generics.len() as u16 + 0x4000;
+                let self_synthetic_id = crate::types::TypeParamId::protocol_self(type_decl.generics.len())
+                    .ok_or_else(|| CodegenError::internal("protocol binder exceeds the encoded Self slot"))?.0;
                 proto_param_map
                     .entry("Self".to_string())
                     .or_insert(self_synthetic_id);
@@ -18238,7 +18239,7 @@ impl VbcCodegen {
                         _ => Err(CodegenError::with_span(CodegenErrorKind::InvalidSourceSignature(
                             "nominal argument has no scoped witness representation".into()), ty.span)),
                     }}).collect::<CodegenResult<_>>()?;
-                let arg_refs = self.complete_nominal_arguments(base_id, arg_refs, ty.span, nominal_defaults)?;
+                let arg_refs = self.complete_nominal_arguments(base_id, arg_refs, ty.span, nominal_defaults, None)?;
                 if arg_refs.is_empty() { return Ok(TypeRef::Concrete(base_id)); }
                 return Ok(TypeRef::Instantiated {
                     base: base_id,

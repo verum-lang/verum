@@ -533,6 +533,14 @@ impl TypeId {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub struct TypeParamId(pub u16);
 
+impl TypeParamId {
+    /// The protocol signature ABI reserves Self outside the ordinary owner
+    /// parameters; the declaration and its call sites use this same slot.
+    pub(crate) fn protocol_self(owner_arity: usize) -> Option<Self> {
+        u16::try_from(owner_arity).ok()?.checked_add(0x4000).map(Self)
+    }
+}
+
 /// Protocol identifier - index into type table (protocols are types).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub struct ProtocolId(pub u32);

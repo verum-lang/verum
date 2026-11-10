@@ -107,6 +107,12 @@ impl VbcCodegen {
                 if binding.is_pattern_alias && !matches!(ty, TypeRef::Reference { .. }) { return None; }
                 (fact.id == binding.binding_id).then(|| ty.clone())
             }
+            ExprKind::Binary { op, left, right } => {
+                let (protocol, member) = op.standard_protocol_member()?;
+                let left = nested(left, None)?;
+                let right = nested(right, None)?;
+                self.bounded_binary_output(&left, protocol, member, &right)
+            }
             ExprKind::Record { path, .. } => {
                 if let Some(declared) = self.constructor_declaration(expr, None, None, depth + 1) {
                     return Some(declared);
@@ -169,6 +175,9 @@ impl VbcCodegen {
             }),
             ExprKind::MethodCall { receiver, method, type_args, args } => {
                 if let Some(witness) = self.type_parameter_static_receiver(receiver).ok()? {
+                    if let TypeRef::Generic(id) = witness {
+                        return type_args.is_empty().then(|| self.bounded_static_output(id, method.name.as_str(), args.len())).flatten();
+                    }
                     let owner = self.resolve_declared_associated_types(&witness)?;
                     let name = self.declaration_type_name(&owner, depth + 1)?;
                     return self.declared_method_result_type(&name, method.name.as_str(), type_args);
