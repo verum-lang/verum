@@ -710,12 +710,13 @@ impl<'s> CompilationPipeline<'s> {
                 stdlib_entries.len()
             );
             for (module_path, stdlib_mod) in &stdlib_entries {
-                checker.set_current_module_path(module_path.clone());
-                for item in &stdlib_mod.items {
-                    if let verum_ast::ItemKind::Impl(impl_decl) = &item.kind {
-                        let _ = checker.register_impl_block(impl_decl);
+                checker.with_source_signature_scope(module_path.as_str(), |checker| {
+                    for item in &stdlib_mod.items {
+                        if let verum_ast::ItemKind::Impl(impl_decl) = &item.kind {
+                            let _ = checker.register_impl_block(impl_decl);
+                        }
                     }
-                }
+                });
             }
 
             // Collect any unresolved placeholder names from stdlib so we can

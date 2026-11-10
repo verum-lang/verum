@@ -1107,14 +1107,15 @@ impl<'s> CompilationPipeline<'s> {
                     stdlib_entries.len()
                 );
                 for (module_path, stdlib_mod) in &stdlib_entries {
-                    checker.set_current_module_path(module_path.clone());
-                    for item in &stdlib_mod.items {
-                        if let ItemKind::Impl(impl_decl) = &item.kind {
-                            if let Err(e) = checker.register_impl_block(impl_decl) {
-                                debug!("Stdlib impl registration error: {:?}", e);
+                    checker.with_source_signature_scope(module_path.as_str(), |checker| {
+                        for item in &stdlib_mod.items {
+                            if let ItemKind::Impl(impl_decl) = &item.kind {
+                                if let Err(e) = checker.register_impl_block(impl_decl) {
+                                    debug!("Stdlib impl registration error: {:?}", e);
+                                }
                             }
                         }
-                    }
+                    });
                 }
 
                 debug!("analyze_module: Stdlib registration complete");

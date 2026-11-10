@@ -16,8 +16,8 @@
 //! with a dedicated PID-suffixed name to avoid cross-test contamination
 //! when run in parallel.
 
-use std::path::PathBuf;
-use std::process::Command;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output};
 
 fn binary() -> &'static str {
     env!("CARGO_BIN_EXE_verum")
@@ -222,17 +222,16 @@ fn only_the_explicit_parse_option_can_omit_type_checking() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
-#[test]
-fn protocol_signatures_resolve_the_entry_files_source_mounts() {
-    let directory = tempfile::tempdir().unwrap();
-    let root = directory.path();
+fn write_source_core(root: &Path, modules: &[(&str, &str)]) -> PathBuf {
     let core = root.join("core");
     std::fs::create_dir_all(core.join("base")).unwrap();
-    std::fs::write(
-        core.join("mod.vr"),
-        "module core; public module base; public module source_provider; public module prelude {}",
-    )
-    .unwrap();
+    let mut declarations =
+        String::from("module core; public module base; public module prelude {}");
+    for (name, source) in modules {
+        declarations.push_str(&format!(" public module {name};"));
+        std::fs::write(core.join(format!("{name}.vr")), source).unwrap();
+    }
+    std::fs::write(core.join("mod.vr"), declarations).unwrap();
     std::fs::write(
         core.join("base/mod.vr"),
         "module core.base; public module protocols;",
@@ -243,8 +242,32 @@ fn protocol_signatures_resolve_the_entry_files_source_mounts() {
         "module core.base.protocols;",
     )
     .unwrap();
-    std::fs::write(core.join("source_provider.vr"), "module core.source_provider; public type EntryTag is Ready | Busy; type PrivateTag is Hidden;").unwrap();
+    core
+}
 
+fn check_with_source_core(core: &Path, file: &Path, source: &str) -> Output {
+    std::fs::write(file, source).unwrap();
+    Command::new(binary())
+        .arg("check")
+        .arg(file)
+        .current_dir(file.parent().unwrap())
+        .env("VERUM_STDLIB_PATH", core)
+        .env("VERUM_ALLOW_STDLIB_SOURCE_FALLBACK", "1")
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn protocol_signatures_resolve_the_entry_files_source_mounts() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    let core = write_source_core(
+        root,
+        &[(
+            "source_provider",
+            "module core.source_provider; public type EntryTag is Ready | Busy; type PrivateTag is Hidden;",
+        )],
+    );
     let project = root.join("app");
     std::fs::create_dir_all(project.join("src")).unwrap();
     std::fs::write(
@@ -253,17 +276,6 @@ fn protocol_signatures_resolve_the_entry_files_source_mounts() {
     )
     .unwrap();
 
-    let check = |file: &std::path::Path, source: &str| {
-        std::fs::write(file, source).unwrap();
-        Command::new(binary())
-            .arg("check")
-            .arg(file)
-            .current_dir(file.parent().unwrap())
-            .env("VERUM_STDLIB_PATH", &core)
-            .env("VERUM_ALLOW_STDLIB_SOURCE_FALLBACK", "1")
-            .output()
-            .unwrap()
-    };
     let standalone = root.join("standalone.vr");
     let entry = project.join("src/main.vr");
     for name in ["EntryTag", "core.source_provider.EntryTag"] {
@@ -275,7 +287,7 @@ fn protocol_signatures_resolve_the_entry_files_source_mounts() {
              fn main() {{}}"
         );
         for path in [&standalone, &entry] {
-            let output = check(path, &source);
+            let output = check_with_source_core(&core, path, &source);
             assert!(
                 output.status.success(),
                 "{}",
@@ -284,7 +296,8 @@ fn protocol_signatures_resolve_the_entry_files_source_mounts() {
         }
     }
 
-    let hidden = check(
+    let hidden = check_with_source_core(
+        &core,
         &standalone,
         "mount core.source_provider.EntryTag; type Provider is protocol { fn tag(&self) -> core.source_provider.PrivateTag; }; fn main() {}",
     );
@@ -292,6 +305,60 @@ fn protocol_signatures_resolve_the_entry_files_source_mounts() {
     assert!(!hidden.status.success());
     assert!(
         error.contains("PrivateTag") && error.contains("visibility error"),
+        "{error}"
+    );
+}
+
+#[test]
+fn inherent_signatures_resolve_types_in_their_defining_source_module() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    let events = r#"
+        module core.events;
+        public type Event<T> is { public content: T };
+        public type Closed is { public bytes: Int };
+    "#;
+    let worker = r#"
+        module core.worker;
+        mount core.events.Event as ImportedEvent;
+        public type Outcome<T> is { public sample: T };
+        public type Failure is Closed;
+        public type Worker<T> is { public value: T };
+        implement<T> Worker<T> {
+            public fn failure(&self) -> Failure { Closed }
+            public fn local(&self, x: T) -> Outcome<T> { Outcome { sample: x } }
+            public fn foreign(&self, x: T) -> ImportedEvent<T> { ImportedEvent { content: x } }
+        }
+    "#;
+    let user = r#"
+        mount core.events.Closed;
+        mount core.worker.Worker;
+        type Outcome<T> is { mistaken: T };
+        type ImportedEvent<T> is { mistaken: T };
+        type ConsumerOnly<T> is { content: T };
+        fn main() {
+            let worker = Worker { value: 17 };
+            let failure = worker.failure();
+            assert_eq(worker.local(31).sample, 31);
+            assert_eq(worker.foreign(37).content, 37);
+        }
+    "#;
+    let core = write_source_core(root, &[("events", events), ("worker", worker)]);
+    let entry = root.join("entry.vr");
+    let checked = check_with_source_core(&core, &entry, user);
+    assert!(
+        checked.status.success(),
+        "{}",
+        String::from_utf8_lossy(&checked.stderr)
+    );
+
+    let invalid_worker = worker.replace("-> ImportedEvent<T>", "-> ConsumerOnly<T>");
+    std::fs::write(core.join("worker.vr"), invalid_worker).unwrap();
+    let missing = check_with_source_core(&core, &entry, user);
+    let error = String::from_utf8_lossy(&missing.stderr);
+    assert!(!missing.status.success());
+    assert!(
+        error.contains("type not found: ConsumerOnly") && error.contains("core/worker.vr"),
         "{error}"
     );
 }

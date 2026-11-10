@@ -157,6 +157,35 @@ impl TypeChecker {
         })
     }
 
+    /// A signature from a different source module resolves nominal declarations
+    /// and private mounts through its defining file, in the caller's registry.
+    pub fn with_source_signature_scope<T>(
+        &mut self,
+        owner: &str,
+        operation: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        // A single nullary variant can also spell an alias. Its defining
+        // module supplies the type names visible for that decision.
+        let aliases = self.source_type_registration.local_declarations.iter().rev()
+            .find(|(path, _)| path.as_str() == owner)
+            .map(|(_, module)| Self::compute_alias_scope(&module.items))
+            .or_else(|| self.inline_modules.get(&Text::from(owner))?.items.as_ref()
+                .map(|items| Self::compute_alias_scope(items)))
+            .or_else(|| {
+                let registry = self.module_registry.read();
+                let module = self.get_module_with_path_aliases(owner, &registry)?;
+                Some(Self::compute_alias_scope(&module.ast.items))
+            });
+        let previous_owner = std::mem::replace(&mut self.current_module_path, owner.into());
+        let previous_scope = std::mem::replace(&mut self.resolving_source_signature, true);
+        let previous_aliases = std::mem::replace(&mut self.alias_scope, aliases);
+        let result = operation(self);
+        self.alias_scope = previous_aliases;
+        self.resolving_source_signature = previous_scope;
+        self.current_module_path = previous_owner;
+        result
+    }
+
     /// An imported signature belongs to the declaring file, including its
     /// private mounts. Re-export targets still need their own public authority.
     pub(super) fn resolve_declaring_source_type(&mut self, name: &str, span: Span) -> Result<Type> {
