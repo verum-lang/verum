@@ -548,7 +548,13 @@ fn qualified_calls_follow_the_owned_source_exports_and_aliases() {
     "#;
     for (body, valid) in [
         ("core.intrinsics.runtime.time.count()", true),
+        ("super.intrinsics.cpu_count()", true),
+        ("super.intrinsics.takes(9)", true),
+        ("super.intrinsics.takes()", false),
+        ("super.intrinsics.runtime.time.secret()", false),
         ("core.intrinsics.cpu_count()", true),
+        ("intrinsics.runtime.time.count()", true),
+        ("intrinsics.runtime.time.secret()", false),
         ("core.sys.api.reexport()", true),
         ("core.intrinsics.takes(9)", true),
         ("core.intrinsics.takes()", false),
@@ -563,6 +569,7 @@ fn qualified_calls_follow_the_owned_source_exports_and_aliases() {
             ("core.intrinsics", api),
             ("core.sys.api", "module core.sys.api; public mount core.intrinsics.cpu_count as reexport;"),
             ("core.consumer", client.as_str()),
+            ("core", "module core; public module intrinsics;"),
         ];
         let modules: Vec<_> = files.iter().enumerate().map(|(i, (owner, source))| {
             let ast = FastParser::new().parse_module_str(source, FileId::new(i as u32)).unwrap();

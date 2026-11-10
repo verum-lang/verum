@@ -25933,25 +25933,8 @@ bake to have this verified.",
         false
     }
 
-    /// Resolve `<dotted.module.path>.fn(args)` against the global
-    /// registries: env, module function tables, and (lazily) the
-    /// CoreMetadata free-fn descriptors registered under file-declared
-    /// module keys.  Probes progressively-stripped prefixes,
-    /// most-qualified first.  Guarded on the base segment not being a
-    /// bound VALUE so genuine field chains
-    /// (`self.cfg.parser.parse(...)`) are never hijacked.
-    /// Resolve `a.b.c.f(args)` against the global registry / archive
-    /// metadata, where `a.b.c` is a module path rather than a value.
-    ///
-    /// The arity comparison below is a FILTER, and a filter that finds
-    /// nothing answers `None` — which the caller reads as "not a module
-    /// call", falls through to leniency, and lets the call satisfy any
-    /// declared type. So a real callee invoked with the wrong number of
-    /// arguments was indistinguishable from a name that does not exist,
-    /// and both were silent (T0806). The name-hit is remembered: if no
-    /// candidate matches exactly and some candidate matched by NAME,
-    /// that is an arity error and is reported as one.
-    fn source_qualified_function(
+    /// Follow source export edges under each declaring namespace's visibility.
+    pub(super) fn source_qualified_function(
         &mut self,
         mut module: Shared<verum_modules::ModuleInfo>,
         mut name: Text,
@@ -25978,6 +25961,24 @@ bake to have this verified.",
         }
     }
 
+    /// Resolve `<dotted.module.path>.fn(args)` against the global
+    /// registries: env, module function tables, and (lazily) the
+    /// CoreMetadata free-fn descriptors registered under file-declared
+    /// module keys.  Probes progressively-stripped prefixes,
+    /// most-qualified first.  Guarded on the base segment not being a
+    /// bound VALUE so genuine field chains
+    /// (`self.cfg.parser.parse(...)`) are never hijacked.
+    /// Resolve `a.b.c.f(args)` against the global registry / archive
+    /// metadata, where `a.b.c` is a module path rather than a value.
+    ///
+    /// The arity comparison below is a FILTER, and a filter that finds
+    /// nothing answers `None` — which the caller reads as "not a module
+    /// call", falls through to leniency, and lets the call satisfy any
+    /// declared type. So a real callee invoked with the wrong number of
+    /// arguments was indistinguishable from a name that does not exist,
+    /// and both were silent (T0806). The name-hit is remembered: if no
+    /// candidate matches exactly and some candidate matched by NAME,
+    /// that is an arity error and is reported as one.
     fn try_resolve_global_module_fn_call(
         &mut self,
         segments: &[&str],
@@ -26041,7 +26042,19 @@ bake to have this verified.",
                     }
                     registry.get_by_path(&path)
                 }
-                None => registry.get_by_path(&joined),
+                None => registry.get_by_path(&joined).or_else(|| {
+                    // A root-qualified path may start with a child of the
+                    // caller's project root, e.g. sys.darwin inside core.
+                    let caller = owner.as_ref()?;
+                    let root = registry.get_by_path(caller.path.segments().first()?)?;
+                    let child = root.exports.get(&head)?;
+                    if child.kind != verum_modules::ExportKind::Module
+                        || !root.exports.is_visible_from_path(&head, &caller.path)
+                    {
+                        return None;
+                    }
+                    registry.get_by_path(&format!("{}.{}", root.path, joined))
+                }),
             }
         };
         let source_scheme = if let Some(module) = source_module {

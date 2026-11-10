@@ -1662,6 +1662,19 @@ impl TypeChecker {
     pub(crate) fn resolve_super_path(&mut self, path: &Path, span: Span) -> Result<InferResult> {
         use verum_ast::ty::PathSegment;
 
+        // File-based modules share the same export graph as mounted calls.
+        // Resolve every leading parent step before selecting the callable.
+        let current = verum_modules::ModulePath::from_str(&self.current_module_path);
+        let target = verum_modules::imports::path_to_module_path_resolved(path, &current);
+        if let (Some(owner), Some(name)) = (target.parent(), target.segments().last()) {
+            let source = self.module_registry.read().get_by_path(&owner.to_string());
+            if let Some(module) = source
+                && let Some(scheme) = self.source_qualified_function(module, name.clone())
+            {
+                return Ok(InferResult::new(self.instantiate_value_scheme(&scheme, span)?));
+            }
+        }
+
         // The module resolver handles super:: resolution via resolve_path
         if let Maybe::Some(current_module) = self.current_module() {
             // resolve_path handles super:: prefix by looking at module_parents
