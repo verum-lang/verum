@@ -317,28 +317,19 @@ implement TokenStream {
     // =========================================================================
 
     /// Map over token trees
-    public fn map<F>(self, f: F) -> Self
-    where
-        F: Fn(TokenTree) -> TokenTree,
-    {
+    public fn map<F: fn(TokenTree) -> TokenTree>(self, f: F) -> Self {
         let tokens = self.tokens.into_iter().map(f).collect();
         Self.from_trees(tokens)
     }
 
     /// Filter token trees
-    public fn filter<P>(self, predicate: P) -> Self
-    where
-        P: Fn(&TokenTree) -> Bool,
-    {
+    public fn filter<P: fn(&TokenTree) -> Bool>(self, predicate: P) -> Self {
         let tokens = self.tokens.into_iter().filter(predicate).collect();
         Self.from_trees(tokens)
     }
 
     /// Map and filter token trees
-    public fn filter_map<F>(self, f: F) -> Self
-    where
-        F: Fn(TokenTree) -> Maybe<TokenTree>,
-    {
+    public fn filter_map<F: fn(TokenTree) -> Maybe<TokenTree>>(self, f: F) -> Self {
         let tokens = self.tokens.into_iter().filter_map(f).collect();
         Self.from_trees(tokens)
     }
