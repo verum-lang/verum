@@ -1985,6 +1985,17 @@ impl Type {
         }
     }
 
+    /// Pointee, mutability and safety tier of a Verum reference.
+    pub(crate) fn reference_parts(&self) -> Option<(&Type, bool, verum_ast::expr::ReferenceKind)> {
+        use verum_ast::expr::ReferenceKind;
+        match self {
+            Type::Reference { inner, mutable } => Some((inner, *mutable, ReferenceKind::Managed)),
+            Type::CheckedReference { inner, mutable } => Some((inner, *mutable, ReferenceKind::Checked)),
+            Type::UnsafeReference { inner, mutable } => Some((inner, *mutable, ReferenceKind::Unsafe)),
+            _ => None,
+        }
+    }
+
     /// Create a refinement type
     pub fn refined(base: Type, predicate: RefinementPredicate) -> Self {
         Type::Refined {

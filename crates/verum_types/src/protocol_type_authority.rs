@@ -15,6 +15,7 @@ pub(super) struct TypeAuthority {
 enum HeadIdentity {
     Builtin(Text),
     Nominal,
+    Reference,
 }
 
 fn nominal_key(ty: &Type) -> Option<(Text, usize)> {
@@ -114,6 +115,9 @@ impl ProtocolChecker {
     }
 
     fn head_identity(&self, ty: &Type) -> Option<HeadIdentity> {
+        if ty.reference_parts().is_some() {
+            return Some(HeadIdentity::Reference);
+        }
         if !matches!(ty, Type::Unknown)
             && let Some(name) = ty.primitive_name()
         {
@@ -175,7 +179,7 @@ impl ProtocolChecker {
     pub(crate) fn builtin_source_receiver_name(&self, ty: &Type) -> Option<Text> {
         match self.head_identity(ty)? {
             HeadIdentity::Builtin(identity) => Some(identity),
-            HeadIdentity::Nominal => None,
+            HeadIdentity::Nominal | HeadIdentity::Reference => None,
         }
     }
 
@@ -200,8 +204,22 @@ impl ProtocolChecker {
             }
             (Some(HeadIdentity::Nominal), Some(HeadIdentity::Builtin(_)))
             | (Some(HeadIdentity::Builtin(_)), Some(HeadIdentity::Nominal)) => true,
+            // Borrowing and dereferencing convert values at use sites. An
+            // implementation is selected for its declared receiver itself.
+            (Some(HeadIdentity::Reference), Some(HeadIdentity::Builtin(_) | HeadIdentity::Nominal))
+            | (Some(HeadIdentity::Builtin(_) | HeadIdentity::Nominal), Some(HeadIdentity::Reference)) => true,
             _ => false,
         }
+    }
+
+    pub(super) fn compare_reference_applications(
+        left: &Type,
+        right: &Type,
+        compare_pointees: impl FnOnce(&Type, &Type) -> bool,
+    ) -> Option<bool> {
+        let (left, left_mutable, left_tier) = left.reference_parts()?;
+        let (right, right_mutable, right_tier) = right.reference_parts()?;
+        Some(left_tier == right_tier && left_mutable == right_mutable && compare_pointees(left, right))
     }
 
     /// Reuse the unifier's existing recursive transparent-alias substitution.

@@ -70,6 +70,64 @@ fn heads(extra: &str, first: &str, second: Option<(&str, &str)>, query: &str) ->
 fn distinct_sized_builtin_is_disjoint_from_int() {
     accept(&heads("", "Int", Some(("Int8", "Bool")), "Int"));
 }
+
+const BORROWED_RECEIVERS: &str = r#"module families;
+    type Mark is protocol {};
+    type Allowed is protocol {};
+    type Bag<T> is { value: T };
+    type Need<T: Mark> is { value: T };
+    implement Allowed for Int {}
+"#;
+
+#[test]
+fn borrowed_and_owned_implementations_prove_their_own_receivers() {
+    for tier in ["&", "&checked ", "&unsafe "] {
+        let declarations = format!(
+            "{BORROWED_RECEIVERS}
+            implement Mark for Float {{}}
+            implement<T: Allowed> Mark for {tier}Bag<T> {{}}"
+        );
+        for receiver in ["Float".to_owned(), format!("{tier}Bag<Int>")] {
+            accept(&format!("{declarations} fn probe(value: Need<{receiver}>) {{}}"));
+        }
+        for receiver in ["Bool".to_owned(), "Bag<Int>".to_owned(), format!("{tier}Bag<Bool>")] {
+            reject(&format!("{declarations} fn probe(value: Need<{receiver}>) {{}}"));
+        }
+    }
+}
+
+#[test]
+fn reference_aliases_preserve_the_actual_implementation_receiver() {
+    let declarations = format!(
+        "{BORROWED_RECEIVERS}
+        type Borrow<T> is &Bag<T>;
+        type Scalar is Float;
+        implement<T> Mark for Borrow<T> {{}}"
+    );
+    accept(&format!(
+        "{declarations} implement Mark for Float {{}}
+        fn probe(scalar: Need<Scalar>, borrowed: Need<&Bag<Int>>) {{}}"
+    ));
+    reject(&format!("{declarations} fn probe(value: Need<Bag<Int>>) {{}}"));
+    reject(&format!("{declarations} fn probe<T>(value: Need<T>) {{}}"));
+    reject(&format!("{declarations} implement<T> Mark for &Bag<T> {{}}"));
+}
+
+#[test]
+fn reference_tier_and_mutability_select_the_implementation() {
+    let constraints = format!(
+        "{BORROWED_RECEIVERS}
+        implement Mark for Float {{}}
+        implement Mark for &Float {{}}
+        implement Mark for &checked mut Float {{}}"
+    );
+    accept(&format!(
+        "{constraints} fn probe(a: Need<Float>, b: Need<&Float>, c: Need<&checked mut Float>) {{}}"
+    ));
+    for missing in ["&mut Float", "&checked Float", "&unsafe Float"] {
+        reject(&format!("{constraints} fn probe(value: Need<{missing}>) {{}}"));
+    }
+}
 #[test]
 fn same_identity_int64_alias_uses_the_existing_implementation() {
     for (head, alias) in [

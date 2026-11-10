@@ -373,6 +373,9 @@ fn compare_heads(
         return false;
     }
     if checker.declared_heads_are_disjoint(a, b) { return true; }
+    if let Some(compatible) = ProtocolChecker::compare_reference_applications(a, b,
+        |left, right| !compare_heads(checker, left, right, observe))
+    { return !compatible; }
     match (a, b) {
         (Type::Named { path: a, args: aa }, Type::Named { path: b, args: ba }) => {
             !checker.paths_equal(a, b)
@@ -399,16 +402,6 @@ fn compare_heads(
                     .zip(b)
                     .any(|(a, b)| compare_heads(checker, a, b, observe))
         }
-        (
-            Type::Reference {
-                mutable: a,
-                inner: ai,
-            },
-            Type::Reference {
-                mutable: b,
-                inner: bi,
-            },
-        ) => a != b || compare_heads(checker, ai, bi, observe),
         (
             Type::Unit | Type::Bool | Type::Int | Type::Float | Type::Char | Type::Text,
             Type::Unit | Type::Bool | Type::Int | Type::Float | Type::Char | Type::Text,

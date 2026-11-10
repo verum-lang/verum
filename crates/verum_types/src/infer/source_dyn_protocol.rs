@@ -93,23 +93,8 @@ impl TypeChecker {
         expected: &Type,
         registry: &ProtocolChecker,
     ) -> bool {
-        fn referent(ty: &Type) -> Option<(&Type, bool, verum_ast::expr::ReferenceKind)> {
-            use verum_ast::expr::ReferenceKind;
-            match ty {
-                Type::Reference { inner, mutable } => {
-                    Some((inner, *mutable, ReferenceKind::Managed))
-                }
-                Type::CheckedReference { inner, mutable } => {
-                    Some((inner, *mutable, ReferenceKind::Checked))
-                }
-                Type::UnsafeReference { inner, mutable } => {
-                    Some((inner, *mutable, ReferenceKind::Unsafe))
-                }
-                _ => None,
-            }
-        }
-        if let Some((inner, mutable, kind)) = referent(expected) {
-            return referent(actual).is_some_and(|(source, writable, tier)| {
+        if let Some((inner, mutable, kind)) = expected.reference_parts() {
+            return actual.reference_parts().is_some_and(|(source, writable, tier)| {
                 tier == kind
                     && (!mutable || writable)
                     && self.check_protocol_coercion_with(source, inner, registry)

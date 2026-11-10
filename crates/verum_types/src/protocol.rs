@@ -6644,6 +6644,9 @@ impl ProtocolChecker {
         if let Some(equal) = self.compare_nominal_applications(ty1, ty2,
             |left, right| self.types_structurally_equal(left, right))
         { return equal; }
+        if let Some(equal) = Self::compare_reference_applications(ty1, ty2,
+            |left, right| self.types_structurally_equal(left, right))
+        { return equal; }
         match (ty1, ty2) {
             (Type::Named { path, args }, primitive) | (primitive, Type::Named { path, args })
                 if args.is_empty()
@@ -6690,16 +6693,6 @@ impl ProtocolChecker {
             (Type::Slice { element: e1 }, Type::Slice { element: e2 }) => {
                 self.types_structurally_equal(e1, e2)
             }
-            (
-                Type::Reference {
-                    inner: i1,
-                    mutable: m1,
-                },
-                Type::Reference {
-                    inner: i2,
-                    mutable: m2,
-                },
-            ) => m1 == m2 && self.types_structurally_equal(i1, i2),
             _ => false,
         }
     }
@@ -11770,6 +11763,9 @@ impl ProtocolChecker {
         if let Some(equal) = self.builtin_types_equal(ty1, ty2) { return equal; }
         if self.declared_heads_are_disjoint(ty1, ty2) { return false; }
         if let Some(overlap) = self.compare_nominal_applications(ty1, ty2,
+            |left, right| self.types_could_unify(left, right))
+        { return overlap; }
+        if let Some(overlap) = Self::compare_reference_applications(ty1, ty2,
             |left, right| self.types_could_unify(left, right))
         { return overlap; }
         match (ty1, ty2) {
