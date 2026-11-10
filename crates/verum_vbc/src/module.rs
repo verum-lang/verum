@@ -3943,7 +3943,8 @@ impl FfiSymbol {
 /// FFI struct field descriptor.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FfiStructField {
-    /// Field name.
+    /// Codegen's interned field key. Runtime marshalling uses the field's
+    /// declaration position and C byte offset.
     pub name: StringId,
     /// Field type.
     pub c_type: CType,

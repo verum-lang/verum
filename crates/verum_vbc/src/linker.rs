@@ -61,6 +61,8 @@
 use std::collections::HashMap;
 
 use crate::archive::VbcArchive;
+mod ffi;
+
 use crate::bytecode::{decode_instruction, encode_instructions};
 use crate::cfg_key::CfgKey;
 use crate::module::{
@@ -144,6 +146,7 @@ struct RemapTable {
     source_function_ids: HashMap<u32, FunctionId>,
     legacy_function_ids: std::sync::Arc<HashMap<u32, Option<FunctionId>>>,
     missing_function_operand: std::cell::Cell<Option<u32>>,
+    ffi: ffi::ForeignTables,
     constant: Vec<ConstId>,
     protocol: HashMap<u32, ProtocolId>,
     /// Flat index into `VbcModule.context_names`; the linker extends
@@ -460,6 +463,7 @@ impl VbcLinker {
             ..RemapTable::default()
         };
 
+        remap.ffi = ffi::ForeignTables::new(&self.out, &src)?;
         // Each baked entry numbers its own functions and constants from zero.
         // A cross-entry call has a carried symbol, not an ordinal in another entry.
         remap.legacy_function_ids = shared.legacy_function_ids.clone();
@@ -690,10 +694,7 @@ impl VbcLinker {
             });
         }
 
-        // FFI passthrough.
-        self.out.ffi_libraries.extend(src.ffi_libraries.iter().cloned());
-        self.out.ffi_symbols.extend(src.ffi_symbols.iter().cloned());
-        self.out.ffi_layouts.extend(src.ffi_layouts.iter().cloned());
+        ffi::append(&mut self.out, src, remap)?;
 
         // Global ctors / dtors.
         for (fid, prio) in &src.global_ctors {
@@ -1047,6 +1048,7 @@ impl VbcLinker {
         crate::bytecode::jump_offsets_to_instr_indices(&mut instructions);
         for instr in instructions.iter_mut() {
             crate::bytecode_remap::rewrite_instruction_ids(instr, remap);
+            remap.ffi.relocate_instruction(instr)?;
             if let Some(source_id) = remap.missing_function_operand.take() {
                 return Err(LinkError::DanglingReference { kind: "function operand", source_id });
             }
