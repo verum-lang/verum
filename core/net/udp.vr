@@ -72,6 +72,7 @@
 module core.net.udp;
 mount io.*;
 mount super.addr.*;
+mount core.net.resolve.ToSocketAddrs;
 
 // =============================================================================
 // V-LLSI Native Socket Imports
