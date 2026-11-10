@@ -141,6 +141,9 @@ struct RemapTable {
     string: HashMap<u32, StringId>,
     type_: HashMap<u32, TypeId>,
     function: Vec<FunctionId>,
+    source_function_ids: HashMap<u32, FunctionId>,
+    legacy_function_ids: std::sync::Arc<HashMap<u32, Option<FunctionId>>>,
+    missing_function_operand: std::cell::Cell<Option<u32>>,
     constant: Vec<ConstId>,
     protocol: HashMap<u32, ProtocolId>,
     /// Flat index into `VbcModule.context_names`; the linker extends
@@ -150,13 +153,11 @@ struct RemapTable {
 
 impl RemapTable {
     fn map_string(&self, src: StringId) -> Result<StringId, LinkError> {
-        // StringId::EMPTY is the sentinel for "no string"; identity-map.
-        if src == StringId::EMPTY {
-            return Ok(src);
-        }
         self.string
             .get(&src.0)
             .copied()
+            // Offset zero can hold the first real string, including a module owner.
+            .or_else(|| (src == StringId::EMPTY).then_some(src))
             .ok_or(LinkError::DanglingReference {
                 kind: "string",
                 source_id: src.0,
@@ -204,12 +205,15 @@ impl RemapTable {
         if src.0 == u32::MAX {
             return Ok(src);
         }
-        Ok(self
-            .function
-            .get(src.0 as usize)
-            .copied()
-            .filter(|fid| fid.0 != u32::MAX) // skip placeholder slots
-            .unwrap_or(src))
+        if let Some(mapped) = self.source_function_ids.get(&src.0) {
+            return Ok(*mapped);
+        }
+        if crate::stub_ranges::is_stub_id(src.0) || crate::stub_ranges::is_xmod_name_reference(src.0) {
+            return Err(LinkError::DanglingReference { kind: "symbolic function name", source_id: src.0 });
+        }
+        self.function.get(src.0 as usize).copied().filter(|id| id.0 != u32::MAX)
+            .or_else(|| self.legacy_function_ids.get(&src.0).copied().flatten())
+            .ok_or(LinkError::DanglingReference { kind: "function operand", source_id: src.0 })
     }
 
     fn map_const(&self, src: ConstId) -> Result<ConstId, LinkError> {
@@ -259,7 +263,10 @@ impl crate::bytecode_remap::IdRemap for RemapTable {
         RemapTable::map_string_lenient(self, src)
     }
     fn map_function(&self, src: FunctionId) -> FunctionId {
-        RemapTable::map_function(self, src).unwrap_or(src)
+        RemapTable::map_function(self, src).unwrap_or_else(|_| {
+            self.missing_function_operand.set(Some(src.0));
+            src
+        })
     }
     fn map_type_id(&self, src: TypeId) -> TypeId {
         RemapTable::map_type_id(self, src).unwrap_or(src)
@@ -282,6 +289,7 @@ pub struct VbcLinker {
     /// Linker output state — populated incrementally by `add_*`,
     /// finalised by `finalize`.
     out: VbcModule,
+    external_ids: HashMap<StringId, FunctionId>,
 }
 
 impl VbcLinker {
@@ -295,6 +303,7 @@ impl VbcLinker {
         Self {
             cfg,
             out,
+            external_ids: HashMap::new(),
         }
     }
 
@@ -363,21 +372,27 @@ impl VbcLinker {
         Ok(module_count)
     }
 
-    /// First pass of [`add_archive`]: walk every module in the
-    /// archive, allocate output IDs in deterministic order
-    /// (path-sorted by module name; per-module-table position within
-    /// a single module), and populate `shared` with the full union
-    /// of cross-module references.
-    ///
-    /// Functions and constants are also archive-wide pooled here, by
-    /// `(module_index, source_id)` keys, so a `Call { func_id: 372 }`
-    /// inside module A pointing at function 372 of module B resolves
-    /// to the linker-side FunctionId allocated for B's slot 372.
+    /// Gather cross-entry type and protocol references before copying any bodies.
     fn populate_archive_wide_remap(
         &mut self,
         modules: &[VbcModule],
         shared: &mut RemapTable,
     ) -> Result<(), LinkError> {
+        // Older global-registration archives can reference a sibling by its
+        // original ordinal. Only a unique declaration can supply that ordinal.
+        let mut global = HashMap::new();
+        let mut slot = self.out.functions.len();
+        for module in modules {
+            for function in &module.functions {
+                let target = u32::try_from(slot).map_err(|_| LinkError::DanglingReference {
+                    kind: "function table overflow", source_id: function.id.0,
+                })?;
+                global.entry(function.id.0).and_modify(|candidate| *candidate = None)
+                    .or_insert(Some(FunctionId(target)));
+                slot += 1;
+            }
+        }
+        shared.legacy_function_ids = std::sync::Arc::new(global);
         // Types and protocols can be referenced across archive entries.
         for src in modules {
             for src_desc in &src.types {
@@ -404,40 +419,6 @@ impl VbcLinker {
         // each source FunctionId / ConstId to a linker-allocated ID;
         // the same source ID coming from different modules of the
         // same archive collapse to one linker entry.
-        let mut next_function = self.out.functions.len() as u32;
-        let mut next_constant = self.out.constants.len() as u32;
-        for src in modules {
-            for desc in &src.functions {
-                let src_id = desc.id.0;
-                let needed_size = (src_id as usize).saturating_add(1);
-                if shared.function.len() < needed_size {
-                    shared
-                        .function
-                        .resize(needed_size, FunctionId(u32::MAX));
-                }
-                if shared.function[src_id as usize].0 == u32::MAX {
-                    shared.function[src_id as usize] = FunctionId(next_function);
-                    next_function = next_function.saturating_add(1);
-                }
-            }
-            // Constants are allocated by sequential index within the
-            // module — but since modules of the same archive may
-            // share constants by index (they're emitted from the same
-            // global pool), we treat them archive-wide too.
-            for (idx, _) in src.constants.iter().enumerate() {
-                let src_id = idx as u32;
-                let needed_size = (src_id as usize).saturating_add(1);
-                if shared.constant.len() < needed_size {
-                    shared
-                        .constant
-                        .resize(needed_size, ConstId(u32::MAX));
-                }
-                if shared.constant[src_id as usize].0 == u32::MAX {
-                    shared.constant[src_id as usize] = ConstId(next_constant);
-                    next_constant = next_constant.saturating_add(1);
-                }
-            }
-        }
         Ok(())
     }
 
@@ -475,10 +456,55 @@ impl VbcLinker {
             }).collect(),
             type_: shared.type_.clone(),
             protocol: shared.protocol.clone(),
-            function: shared.function.clone(),
-            constant: shared.constant.clone(),
+
             ..RemapTable::default()
         };
+
+        // Each baked entry numbers its own functions and constants from zero.
+        // A cross-entry call has a carried symbol, not an ordinal in another entry.
+        remap.legacy_function_ids = shared.legacy_function_ids.clone();
+        remap.function.resize(src.functions.len(), FunctionId(u32::MAX));
+        for (slot, function) in src.functions.iter().enumerate() {
+            let target = u32::try_from(self.out.functions.len() + slot)
+                .map(FunctionId).map_err(|_| LinkError::DanglingReference {
+                    kind: "function table overflow", source_id: function.id.0,
+                })?;
+            let previous = if let Some(local) = remap.function.get_mut(function.id.0 as usize) {
+                (std::mem::replace(local, target).0 != u32::MAX).then_some(())
+            } else {
+                remap.source_function_ids.insert(function.id.0, target).map(|_| ())
+            };
+            if previous.is_some() {
+                return Err(LinkError::DanglingReference { kind: "duplicate local function", source_id: function.id.0 });
+            }
+        }
+        for slot in 0..src.constants.len() {
+            let index = u32::try_from(self.out.constants.len() + slot)
+                .map_err(|_| LinkError::DanglingReference { kind: "constant table overflow", source_id: u32::MAX })?;
+            remap.constant.push(ConstId(index));
+        }
+        for &(source, name) in &src.external_function_names {
+            if !crate::stub_ranges::is_stub_id(source.0) && !crate::stub_ranges::is_xmod_name_reference(source.0) {
+                return Err(LinkError::DanglingReference { kind: "symbolic function band", source_id: source.0 });
+            }
+            let name = remap.map_string(name)?;
+            let target = match self.external_ids.get(&name) {
+                Some(&previous) => previous,
+                None => {
+                    let ordinal = u32::try_from(self.external_ids.len())
+                        .ok().and_then(|n| crate::module::XMOD_CALL_ID_BAND_BASE.checked_add(n))
+                        .filter(|n| crate::stub_ranges::in_xmod_call_band(*n))
+                        .ok_or(LinkError::DanglingReference { kind: "external function table overflow", source_id: source.0 })?;
+                    let target = FunctionId(ordinal);
+                    self.external_ids.insert(name, target);
+                    self.out.external_function_names.push((target, name));
+                    target
+                }
+            };
+            if remap.source_function_ids.insert(source.0, target).is_some_and(|previous| previous != target) {
+                return Err(LinkError::DanglingReference { kind: "conflicting symbolic function", source_id: source.0 });
+            }
+        }
 
         // Context remap: extend output's context_names, build a
         // remap.context vec.
@@ -533,45 +559,21 @@ impl VbcLinker {
         src: &VbcModule,
         remap: &RemapTable,
     ) -> Result<(), LinkError> {
-        // Constants — archive-wide pool. Skip already-appended
-        // constants (the SAME source-ConstId appearing in multiple
-        // modules of the archive).
         for (idx, src_const) in src.constants.iter().enumerate() {
             let linker_id = remap.map_const(ConstId(idx as u32))?;
-            if (linker_id.0 as usize) < self.out.constants.len() {
-                continue; // already appended by an earlier module
-            }
-            // Pad with placeholder constants if the linker ID is
-            // ahead of the table (sparse allocation guard).
-            while self.out.constants.len() < linker_id.0 as usize {
-                self.out.constants.push(Constant::Int(0));
+            if linker_id.0 as usize != self.out.constants.len() {
+                return Err(LinkError::DanglingReference { kind: "constant allocation order", source_id: idx as u32 });
             }
             let mapped = self.remap_constant(src_const, remap)?;
             self.out.constants.push(mapped);
         }
 
-        // Functions — per-function bytecode rewrite, archive-wide ID
-        // pool. Same dedup-skip pattern as constants. Track per-func
-        // offsets via map keyed on source-function-id so the
-        // specialisation / variant fix-up can find them without
-        // assuming module-local indexing.
         let mut per_func_offsets: HashMap<u32, (u32, u32)> = HashMap::new();
         for src_desc in &src.functions {
             let linker_id = remap.map_function(src_desc.id)?;
-            if (linker_id.0 as usize) < self.out.functions.len() {
-                // Already appended by an earlier module — but record
-                // its offset/length for spec/variant fix-up.
-                let existing = &self.out.functions[linker_id.0 as usize];
-                per_func_offsets
-                    .insert(src_desc.id.0, (existing.bytecode_offset, existing.bytecode_length));
-                continue;
+            if linker_id.0 as usize != self.out.functions.len() {
+                return Err(LinkError::DanglingReference { kind: "function allocation order", source_id: src_desc.id.0 });
             }
-            // Pad with placeholder descriptors if the linker ID is
-            // ahead of the table.
-            while self.out.functions.len() < linker_id.0 as usize {
-                self.out.functions.push(FunctionDescriptor::default());
-            }
-
             let src_start = src_desc.bytecode_offset as usize;
             let src_end = src_start.saturating_add(src_desc.bytecode_length as usize);
             let region: &[u8] = if src_start < src.bytecode.len() && src_end <= src.bytecode.len() {
@@ -723,6 +725,7 @@ impl VbcLinker {
         self.out.header.function_table_count = self.out.functions.len() as u32;
         self.out.header.constant_pool_count = self.out.constants.len() as u32;
         self.out.update_flags();
+        self.out.resolve_external_bands();
         self.out
     }
 
@@ -1041,11 +1044,15 @@ impl VbcLinker {
                 }
             }
         }
+        crate::bytecode::jump_offsets_to_instr_indices(&mut instructions);
         for instr in instructions.iter_mut() {
             crate::bytecode_remap::rewrite_instruction_ids(instr, remap);
+            if let Some(source_id) = remap.missing_function_operand.take() {
+                return Err(LinkError::DanglingReference { kind: "function operand", source_id });
+            }
         }
         let mut out = Vec::with_capacity(src_bytes.len());
-        encode_instructions(&instructions, &mut out);
+        crate::bytecode::encode_instructions_with_fixup(&instructions, &mut out);
         Ok(out)
     }
 }

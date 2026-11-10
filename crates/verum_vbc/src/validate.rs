@@ -75,48 +75,11 @@ pub fn validate_module_with_options(
 /// declaration and the loader selected that same slot. The loader's cache is
 /// derived state; it cannot establish a declaration on its own.
 fn verified_call_targets(module: &VbcModule) -> HashMap<u32, Option<u32>> {
-    if module.external_function_names.is_empty() || module.resolved_band_map.is_empty() {
-        return HashMap::new();
-    }
-    let mut declarations: HashMap<&str, Vec<u32>> = module
-        .external_function_names
-        .iter()
-        .filter_map(|(_, name)| module.get_string(*name).map(|name| (name, Vec::new())))
-        .collect();
-    for (slot, function) in module.functions.iter().enumerate() {
-        if !function.has_definition() {
-            continue;
-        }
-        let Some(name) = module.get_string(function.name) else {
-            continue;
-        };
-        if let Some(candidates) = declarations.get_mut(name) {
-            candidates.push(slot as u32);
-        }
-        if let Some(owner) = function.origin_module.and_then(|id| module.get_string(id)) {
-            let qualified = crate::module::qualify_module_name(owner, name);
-            if qualified != name
-                && let Some(candidates) = declarations.get_mut(qualified.as_str())
-            {
-                candidates.push(slot as u32);
-            }
-        }
-    }
-    let mut targets = HashMap::new();
-    for (reference, name) in &module.external_function_names {
-        let id = reference.0;
-        if !crate::stub_ranges::is_stub_id(id) && !crate::stub_ranges::is_xmod_name_reference(id) {
-            continue;
-        }
-        let exact = module.get_string(*name).and_then(|name| {
-            let [slot] = declarations.get(name)?.as_slice() else {
-                return None;
-            };
-            (module.resolve_band_id(id) == Some(crate::FunctionId(*slot))).then_some(*slot)
-        });
-        let previous = targets.entry(id).or_insert(exact);
-        if *previous != exact {
-            *previous = None;
+    if module.resolved_band_map.is_empty() { return HashMap::new(); }
+    let mut targets = module.external_declaration_targets();
+    for (&reference, slot) in &mut targets {
+        if slot.map(crate::FunctionId) != module.resolve_band_id(reference) {
+            *slot = None;
         }
     }
     targets

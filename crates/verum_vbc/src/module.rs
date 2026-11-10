@@ -1167,33 +1167,67 @@ impl VbcModule {
         self.find_function_by_name(name)
     }
 
-    /// **T0144** — compute the carried-fact band-resolution map for
-    /// this ASSEMBLED module: every `(band/stub id, qualified name)`
-    /// entry in [`Self::external_function_names`] is resolved against
-    /// the final function table via
-    /// [`Self::resolve_function_by_name_ranked`] (exact → head-strip
-    /// → ranked qualified-suffix). Call ONCE after the module reaches
-    /// its final shape (post archive/mono merge); consumers then use
-    /// [`Self::resolve_band_id`]. Returns the entries that did NOT
-    /// resolve — callers surface them loudly (they are calls whose
-    /// target body is genuinely absent from the module).
-    pub fn resolve_external_bands(&mut self) -> Vec<(u32, String)> {
-        let mut unresolved: Vec<(u32, String)> = Vec::new();
-        let mut resolved: std::collections::HashMap<u32, FunctionId> =
-            std::collections::HashMap::with_capacity(self.external_function_names.len());
-        let entries: Vec<(u32, String)> = self
+    /// Derive symbolic function slots from exact declarations and source owners.
+    /// A conflicting carried name or more than one definition leaves the operand unresolved.
+    pub(crate) fn external_declaration_targets(&self) -> HashMap<u32, Option<u32>> {
+        if self.external_function_names.is_empty() { return HashMap::new(); }
+        let mut declarations: HashMap<&str, Vec<u32>> = self
             .external_function_names
             .iter()
-            .filter_map(|(fid, sid)| {
-                self.get_string(*sid).map(|n| (fid.0, n.to_string()))
-            })
+            .filter_map(|(_, name)| self.get_string(*name).map(|name| (name, Vec::new())))
             .collect();
-        for (band_id, name) in entries {
-            match self.resolve_function_by_name_ranked(&name) {
-                Some(target) if target.0 != band_id => {
-                    resolved.insert(band_id, target);
+        for (slot, function) in self.functions.iter().enumerate() {
+            if !function.has_definition() {
+                continue;
+            }
+            let Some(name) = self.get_string(function.name) else {
+                continue;
+            };
+            if let Some(candidates) = declarations.get_mut(name) {
+                candidates.push(slot as u32);
+            }
+            if let Some(owner) = function.origin_module.and_then(|id| self.get_string(id)) {
+                let qualified = crate::module::qualify_module_name(owner, name);
+                if qualified != name
+                    && let Some(candidates) = declarations.get_mut(qualified.as_str())
+                {
+                    candidates.push(slot as u32);
                 }
-                _ => unresolved.push((band_id, name)),
+            }
+        }
+        let mut targets = HashMap::new();
+        for (reference, name) in &self.external_function_names {
+            let id = reference.0;
+            if !crate::stub_ranges::is_stub_id(id) && !crate::stub_ranges::is_xmod_name_reference(id) {
+                continue;
+            }
+            let exact = self.get_string(*name).and_then(|name| {
+                let [slot] = declarations.get(name)?.as_slice() else {
+                    return None;
+                };
+                Some(*slot)
+            });
+            let previous = targets.entry(id).or_insert(exact);
+            if *previous != exact {
+                *previous = None;
+            }
+        }
+        targets
+    }
+
+    /// Bind each carried symbol to the unique definition in the completed module.
+    pub fn resolve_external_bands(&mut self) -> Vec<(u32, String)> {
+        let targets = self.external_declaration_targets();
+        let mut unresolved = Vec::new();
+        let mut resolved = HashMap::with_capacity(targets.len());
+        for &(id, name) in &self.external_function_names {
+            match targets.get(&id.0).copied().flatten() {
+                Some(slot) => { resolved.insert(id.0, FunctionId(slot)); }
+                None => {
+                    let name = self.get_string(name).map(str::to_owned)
+                        .unwrap_or_else(|| format!("<invalid string {}>", name.0));
+                    unresolved.push((id.0, name));
+                }
             }
         }
         self.resolved_band_map = resolved;
