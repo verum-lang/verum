@@ -5844,6 +5844,14 @@ impl TypeChecker {
                     }
                 }
             }
+            if matches!(impl_decl.kind, verum_ast::decl::ImplKind::Inherent(_)) {
+                // The imported receiver must expose the same quantified method
+                // and call obligations as the implementation's own module.
+                if let Err(error) = self.register_impl_block(impl_decl) {
+                    registration_error.get_or_insert(error);
+                }
+                continue;
+            }
             // Value scopes do not own type definitions. Lazy imports can run
             // inside a generic body, so preserve every name they temporarily bind.
             let implicit = match self.implicit_impl_receiver_parameters(impl_decl) {
@@ -14552,7 +14560,22 @@ impl TypeChecker {
                     // already handles it.
                     //
                     // `VERUM_NO_QUALIFIED_SELFREF=1` — A/B kill switch.
-                    let plain = self.lookup_type_mount_scoped(name, "");
+                    let selected = self.lookup_type_mount_scoped_with_key(name, "");
+                    if let Some((ty, key)) = &selected
+                        && matches!(self.ctx.lookup_type(&format!("__struct_fields_{key}")), Some(Type::Record(_)))
+                    {
+                        // An exported layout can retain its bare local spelling.
+                        // Construct the nominal record selected by this mount.
+                        let arguments = match ty {
+                            Type::Record(_) => Some(List::new()),
+                            Type::Named { path, args } if path.segments.len() == 1 => Some(args.clone()),
+                            _ => None,
+                        };
+                        if let Some(args) = arguments {
+                            return Ok(Type::Named { path: Self::text_to_path(key), args });
+                        }
+                    }
+                    let plain = selected.map(|(ty, _)| ty);
                     let plain_is_redirect = plain.as_ref().is_some_and(|ty| {
                         std::env::var_os("VERUM_NO_QUALIFIED_SELFREF").is_none()
                             && matches!(ty, Type::Named { path, args }
@@ -24804,11 +24827,10 @@ bake to have this verified.",
             // Also check for variant constructors like Maybe<Int>.Some(42)
             let qualified_name = format!("{}.{}", type_name, method_name);
             if let Some(scheme) = self.lookup_static_or_load_from_metadata(&qualified_name) {
-                let instance = self.instantiate_call_scheme(&scheme, span)?;
-                let constructor_ty = instance.ty;
-                let fresh_vars = instance.fresh_vars;
-                let receiver_pattern = instance.impl_self_type;
-                if let Some(pattern) = &receiver_pattern {
+                let instance = scheme.try_instantiate()
+                    .map_err(|message| TypeError::UniverseBinding { message, span })?;
+                let receiver_pattern = &instance.impl_self_type;
+                if let Some(pattern) = receiver_pattern {
                     // The impl head is the receiver authority. It can reorder
                     // or nest variables, and its method may return another type.
                     self.unifier.unify(pattern, &receiver_ty, span)?;
@@ -24818,7 +24840,7 @@ bake to have this verified.",
                     params,
                     return_type,
                     ..
-                } = &constructor_ty
+                } = &instance.ty
                 {
                     // Pre-check argument compatibility (same as Path block below)
                     let mut args_pre_compatible = true;
@@ -24835,6 +24857,7 @@ bake to have this verified.",
                     }
 
                     if args_pre_compatible {
+                        self.retain_value_instance_obligations(&instance, span)?;
                         // Allow ±1 tolerance for self-param counting
                         // T1270: a ±1 tolerance is not the self-parameter rule.
                         let params = match Self::effective_params(params.as_slice(), args.len(), None) {
@@ -26383,13 +26406,14 @@ bake to have this verified.",
                 // Try to look up the qualified variant constructor or static method.
                 let mut env_resolved = false;
                 if let Some(scheme) = self.lookup_static_or_load_from_metadata(&qualified_name) {
-                    let constructor_ty = scheme.instantiate();
+                    let instance = scheme.try_instantiate()
+                        .map_err(|message| TypeError::UniverseBinding { message, span })?;
 
                     if let Type::Function {
                         params,
                         return_type,
                         ..
-                    } = &constructor_ty
+                    } = &instance.ty
                     {
                         // The `List.of` / `Set.of` special case stood here and
                         // is gone (T1093). It type-checked a call to a
@@ -26426,6 +26450,7 @@ bake to have this verified.",
                             }
                         };
 
+                        self.retain_value_instance_obligations(&instance, span)?;
                         for (arg, param_ty) in args.iter().zip(params.iter()) {
                             let resolved_param = self.unifier.apply(param_ty);
                             self.check_expr(arg, &resolved_param)?;
@@ -26447,19 +26472,17 @@ bake to have this verified.",
                     // Fallback: Check inherent_methods for static methods
                     let static_key = verum_common::Text::from(format!("$static${}", method_name));
                     let type_name_text = verum_common::Text::from(type_name);
-                    let method_ty_opt = {
+                    let method_scheme = {
                         let methods_guard = self.inherent_methods.read();
                         methods_guard
                             .get(&type_name_text)
                             .and_then(|methods| methods.get(&static_key).cloned())
-                            // Instantiate the TypeScheme to create fresh type variables
-                            .map(|scheme| scheme.instantiate())
                     };
 
                     // TASK #21 FIX: If not found, try resolving type alias
                     // For `Vec4f.splat()` where `type Vec4f = Vec<Float32, 4>`,
                     // we need to look up methods on `Vec` instead of `Vec4f`.
-                    let method_ty_opt = if method_ty_opt.is_none() {
+                    let method_scheme = if method_scheme.is_none() {
                         if let Some(resolved_type) = self.ctx.resolve_alias(type_name) {
                             // Extract base type name from resolved type
                             // For `Vec<Float32, 4>`, extract `Vec`
@@ -26469,21 +26492,22 @@ bake to have this verified.",
                             methods_guard
                                 .get(&base_type_text)
                                 .and_then(|methods| methods.get(&static_key).cloned())
-                                .map(|scheme| scheme.instantiate())
                         } else {
                             None
                         }
                     } else {
-                        method_ty_opt
+                        method_scheme
                     };
 
-                    if let Some(method_ty) = method_ty_opt {
+                    if let Some(scheme) = method_scheme {
+                        let instance = scheme.try_instantiate()
+                            .map_err(|message| TypeError::UniverseBinding { message, span })?;
                         // Method found in inherent_methods - proceed with call
                         if let Type::Function {
                             params,
                             return_type,
                             ..
-                        } = &method_ty
+                        } = &instance.ty
                         {
                             // Pre-check argument type compatibility before committing.
                             // When multiple protocol impls (e.g., TryFrom<Int>, TryFrom<Int32>,
@@ -26512,6 +26536,7 @@ bake to have this verified.",
                                     }
                                 };
 
+                                self.retain_value_instance_obligations(&instance, span)?;
                                 // Type check each argument and accumulate substitution
                                 for (arg, param_ty) in args.iter().zip(params.iter()) {
                                     let resolved_param = self.unifier.apply(param_ty);

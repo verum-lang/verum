@@ -380,3 +380,76 @@ fn inherent_signatures_resolve_types_in_their_defining_source_module() {
         );
     }
 }
+
+#[test]
+fn inherent_method_conditions_cover_signatures_and_calls() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    let core = write_source_core(root, &[("model", "module core.model;")]);
+    let header = r#"
+        module core.model;
+        public type Ordered is protocol { fn rank(&self) -> Int; };
+        public type Key is { public number: Int };
+        public type Unordered is { public number: Int };
+        implement Ordered for Key { fn rank(&self) -> Int { self.number } }
+        public type Table<K: Ordered, V> is { public key: K, public value: V };
+    "#;
+    let methods = r#"
+        public fn flip(self) -> Table<V,K> where V: Ordered { Table { key: self.value, value: self.key } }
+        public fn exchange(pair: Table<K,V>) -> Table<V,K> where V: Ordered { Table { key: pair.value, value: pair.key } }
+        public fn replace<W: Ordered>(&self, value: W) -> Table<W,K> { Table { key: value, value: self.key } }
+        public fn marker(&self) -> Int where V: Ordered { 31 }
+        public fn stamp(pair: Table<K,V>) -> Int where V: Ordered { 31 }
+    "#;
+    let entry = root.join("main.vr");
+    let check = |members: &str, value: &str, body: &str| {
+        std::fs::write(
+            core.join("model.vr"),
+            format!("{header}\nimplement<K: Ordered,V> Table<K,V> {{ {members} }}"),
+        )
+        .unwrap();
+        let user = format!(
+            "mount core.model.{{Key, Unordered, Table}}; fn main() {{\n\
+             let pair = Table {{ key: Key {{ number: 1 }}, value: {value} {{ number: 2 }} }};\n\
+             {body} }}"
+        );
+        check_with_source_core(&core, &entry, &user)
+    };
+    for body in [
+        "assert_eq(pair.flip().key.number, 2);",
+        "assert_eq(Table.exchange(pair).key.number, 2);",
+        "assert_eq(pair.replace(Key { number: 8 }).key.number, 8);",
+        "assert_eq(Table<Key,Key>.stamp(pair), 31);",
+    ] {
+        let output = check(methods, "Key", body);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    for body in [
+        "assert_eq(pair.marker(), 31);",
+        "assert_eq(Table.stamp(pair), 31);",
+        "assert_eq(Table<Key,Unordered>.stamp(pair), 31);",
+    ] {
+        let output = check(methods, "Unordered", body);
+        let diagnostics = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success(),
+            "accepted {body} for an unordered value"
+        );
+        assert!(diagnostics.contains("Ordered"), "{diagnostics}");
+    }
+    // An adjacent method cannot borrow the gated member's premise.
+    let missing = format!(
+        "{methods}\npublic fn unchecked(self) -> Table<V,K> {{ Table {{ key: self.value, value: self.key }} }}"
+    );
+    let output = check(&missing, "Key", "assert_eq(pair.marker(), 31);");
+    let diagnostics = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success());
+    assert!(
+        diagnostics.contains("Ordered") && diagnostics.contains("unchecked"),
+        "{diagnostics}"
+    );
+}
