@@ -24,19 +24,7 @@ pub(crate) fn argument_satisfies_domain(
     let actual = domain(actual, known);
     if expected.base() != actual.base() { return false; }
     if let ValueTerm::Constant(value) = value {
-        if !constant_in_carrier(value, actual.base()) { return false; }
-        for domain in [&actual, &expected] {
-            let mut current = domain;
-            while let Type::Refined { base, predicate } = current {
-                let mut evaluator = crate::const_eval::ConstEvaluator::new();
-                evaluator.bind(predicate.bound_variable(), value.clone());
-                if predicate.binds_subject("self") { evaluator.bind("self", value.clone()); }
-                if !matches!(evaluator.eval(&predicate.predicate),
-                    Ok(verum_common::ConstValue::Bool(true))) { return false; }
-                current = base;
-            }
-        }
-        true
+        constant_in_carrier(value, &actual) && (expected == actual || constant_in_carrier(value, &expected))
     } else {
         let mut required_domain = &expected;
         while let Type::Refined { base, predicate } = required_domain {
@@ -62,6 +50,18 @@ pub(crate) fn argument_satisfies_domain(
 /// primitive aliases come from the language's common numeric authority.
 fn constant_in_carrier(value: &verum_common::ConstValue, carrier: &Type) -> bool {
     use verum_common::{ConstValue, well_known_types::type_names};
+    if let Type::Refined { base, predicate } = carrier {
+        let mut evaluator = crate::const_eval::ConstEvaluator::new();
+        evaluator.bind(predicate.bound_variable(), value.clone());
+        if predicate.binds_subject("self") { evaluator.bind("self", value.clone()); }
+        return matches!(evaluator.eval(&predicate.predicate), Ok(ConstValue::Bool(true)))
+            && constant_in_carrier(value, base);
+    }
+    if let Some((element, size)) = carrier.sequence_domain() {
+        return matches!(value, ConstValue::Array(values)
+            if size.is_none_or(|count| count == values.len())
+                && values.iter().all(|item| constant_in_carrier(item, element)));
+    }
     match (value, carrier) {
         (ConstValue::Unit, Type::Unit)
         | (ConstValue::Bool(_), Type::Bool)

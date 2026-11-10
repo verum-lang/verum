@@ -535,16 +535,12 @@ impl TypeChecker {
             // This enables: `let bytes: [Byte; 8] = [0x01, 0x02, ...]` with coercion
             Array(arr_expr) => {
                 // Extract element type from expected type
-                if let Type::Array {
-                    element: expected_elem,
-                    size: expected_size,
-                } = expected
-                {
+                if let Some((expected_elem, expected_size)) = expected.sequence_domain() {
                     match arr_expr {
                         verum_ast::expr::ArrayExpr::List(exprs) => {
                             // Check size matches if both are known
                             if let Some(expected_n) = expected_size {
-                                if *expected_n != exprs.len() {
+                                if expected_n != exprs.len() {
                                     return Err(TypeError::Mismatch {
                                         expected: format!("[_; {}]", expected_n).into(),
                                         actual: format!("[_; {}]", exprs.len()).into(),
@@ -570,6 +566,15 @@ impl TypeChecker {
                             self.unifier
                                 .unify(&count_result.ty, &Type::int(), count.span)?;
 
+                            if let Some(expected_size) = expected_size
+                                && self.checked_array_length(count)? != Some(expected_size)
+                            {
+                                return Err(TypeError::OtherWithCodeSpanned {
+                                    code: "E405".into(),
+                                    msg: format!("array repeat must produce exactly {expected_size} elements").into(),
+                                    span: count.span,
+                                });
+                            }
                             Ok(InferResult::new(expected.clone()))
                         }
                     }
@@ -4559,7 +4564,7 @@ impl TypeChecker {
                 if let Some(ctor_fn) = self.bare_payload_ctor_as_fn(name, &resolved_ty) {
                     return Ok(ctor_fn);
                 }
-                Ok(resolved_ty)
+                Ok(resolved_ty.into_expression_type())
             } else {
                 // Try module-level function lookup
                 if let Maybe::Some(scheme) = self.lookup_function_in_module(name) {
@@ -6825,7 +6830,7 @@ impl TypeChecker {
                     if let Some(ctor_fn) = self.bare_payload_ctor_as_fn(name, &resolved_ty) {
                         return Ok(InferResult::new(ctor_fn));
                     }
-                    Ok(InferResult::new(resolved_ty))
+                    Ok(InferResult::new(resolved_ty.into_expression_type()))
                 }
                 None => {
                     // Try module-level function lookup for cross-function inference

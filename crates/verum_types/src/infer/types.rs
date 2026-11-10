@@ -2701,7 +2701,7 @@ fn substitute_refinement_binder(
 
     /// A bare underscore leaves the extent open. Other written counts must
     /// be checked constants or declaration-owned integer parameters.
-    fn checked_array_length(&mut self, expr: &Expr) -> Result<Option<usize>> {
+    pub(super) fn checked_array_length(&mut self, expr: &Expr) -> Result<Option<usize>> {
         let mut leaf = expr;
         let mut depth = 0;
         while let ExprKind::Paren(inner) = &leaf.kind {
@@ -2858,23 +2858,7 @@ fn substitute_refinement_binder(
                 combined = combined.compose(&inferred)
                     .map_err(|message| TypeError::UniverseBinding { message, span })?;
             } else if let Some(crate::context::GenericBinder::Value(expected)) = slot {
-                let provided = match argument {
-                    verum_ast::ty::GenericArg::Const(expression) => {
-                        let symbolic = match &expression.kind {
-                            ExprKind::Path(path) => path.as_ident().and_then(|id| self.lookup_decl_param(&id.name))
-                                .filter(|ty| matches!(ty, Type::Meta { .. })).cloned(),
-                            _ => None,
-                        };
-                        symbolic.or_else(|| self.eval_const_arg(expression))
-                    }
-                    verum_ast::ty::GenericArg::Type(annotation) => {
-                        let candidate = self.ast_to_type(annotation)?;
-                        matches!(candidate, Type::Meta { .. }).then_some(candidate)
-                    }
-                    _ => None,
-                }.ok_or_else(|| TypeError::OtherWithCodeSpanned {
-                    code: "E405".into(), msg: "a value argument needs an exact compile-time identity".into(), span,
-                })?;
+                let provided = self.explicit_value_argument(argument, expected, span)?;
                 let inferred = self.unifier.unify(expected, &provided, span)?;
                 use crate::ty::SubstitutionExt;
                 combined = combined.compose(&inferred)
@@ -2886,6 +2870,37 @@ fn substitute_refinement_binder(
             }
         }
         Ok(combined)
+    }
+
+    fn explicit_value_argument(
+        &mut self, argument: &verum_ast::ty::GenericArg, parameter: &Type, span: Span,
+    ) -> Result<Type> {
+        let missing = || TypeError::OtherWithCodeSpanned {
+            code: "E405".into(), msg: "a value argument needs an exact compile-time identity".into(), span,
+        };
+        let expression = argument.value_for_declared_slot().ok_or_else(missing)?;
+        if let ExprKind::Path(path) = &expression.kind
+            && let Some(symbolic @ Type::Meta { .. }) = path.as_ident().and_then(|id| self.lookup_decl_param(&id.name))
+        {
+            return Ok(symbolic.clone());
+        }
+        let Type::Meta { ty, .. } = parameter else { return Err(missing()); };
+        let carrier = self.normalize_type(ty);
+        if !matches!(carrier.base(), Type::Array { .. } | Type::Slice { .. }) {
+            return self.eval_const_arg(&expression).ok_or_else(missing);
+        }
+        self.check_expr(&expression, carrier.base())?;
+        let value = self.source_argument_value(&expression).map_err(|error| TypeError::OtherWithCodeSpanned {
+            code: "E405".into(), msg: format!("cannot evaluate constant sequence: {error}").into(), span: expression.span,
+        })?;
+        let provided = Type::meta_value(value, carrier.base().clone());
+        if !self.meta_argument_satisfies_domain(parameter, &provided) {
+            return Err(TypeError::OtherWithCodeSpanned {
+                code: "E405".into(), msg: format!("constant sequence does not inhabit the declared domain {carrier}").into(),
+                span: expression.span,
+            });
+        }
+        Ok(provided)
     }
 
     /// Instantiate a method's type parameters and optionally unify with explicit type arguments.

@@ -2374,7 +2374,7 @@ impl TypeChecker {
                         // Only full value transfer (let x = handle) consumes the value.
                         self.affine_tracker.borrow_value(name, expr.span)?;
 
-                        return Ok(InferResult::new(resolved_ty));
+                        return Ok(InferResult::new(resolved_ty.into_expression_type()));
                     }
                     // Fall through to full synth_expr for module lookups
                 }
@@ -4854,21 +4854,25 @@ impl TypeChecker {
     /// This is stdlib-agnostic: the base type is derived from the `ConstValue`
     /// kind through its built-in primitive mapping, never by inspecting type
     /// names or hardcoding stdlib knowledge.
-    pub(super) fn eval_const_arg(&self, expr: &verum_ast::expr::Expr) -> Option<Type> {
-        let mut evaluator = crate::const_eval::ConstEvaluator::new();
-        let value = evaluator.eval(expr).ok()?;
+    pub(super) fn eval_const_arg(&mut self, expr: &verum_ast::expr::Expr) -> Option<Type> {
+        let value = self.source_argument_value(expr).ok()?;
         let base_ty = match &value {
             verum_common::ConstValue::Bool(_) => Type::Bool,
             verum_common::ConstValue::Int(_) | verum_common::ConstValue::UInt(_) => Type::Int,
             verum_common::ConstValue::Float(_) => Type::Float,
             verum_common::ConstValue::Char(_) => Type::Char,
             verum_common::ConstValue::Text(_) => Type::Text,
-            // Non-scalar compile-time values (aggregates, optionals, byte literals,
-            // unit) aren't yet carried through type-level unification; defer to
-            // the caller's fallback so their existing behavior is preserved.
+            verum_common::ConstValue::Array(_) => self.synth_expr(expr).ok()?.ty,
             _ => return None,
         };
         Some(Type::meta_value(value, base_ty))
+    }
+
+    pub(super) fn source_argument_value(&mut self, expr: &Expr) -> crate::const_eval::Result<verum_common::ConstValue> {
+        self.const_eval.eval_source(
+            expr, self.current_module_path.as_str(), !self.resolving_source_signature,
+            &self.ctx.env.unavailable_constant_names(),
+        )
     }
 
     /// where N is a unique counter.

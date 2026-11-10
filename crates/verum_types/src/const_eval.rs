@@ -69,6 +69,9 @@ pub enum ConstEvalError {
     #[error("cannot evaluate non-constant expression")]
     NotConstant,
 
+    #[error("constant sequence exceeds the permitted extent or nesting depth")]
+    SequenceLimit,
+
     /// Undefined function call
     ///
     /// Raised when calling a function that is not registered in the meta interpreter.
@@ -252,6 +255,7 @@ pub struct ConstEvaluator {
     functions: Map<Text, MetaFunction>,
     /// Current recursion depth for meta function calls
     recursion_depth: usize,
+    sequence_depth: usize,
     /// Maximum permitted recursion depth (#303). Pre-fix the limit
     /// was hardcoded to `MAX_RECURSION_DEPTH = 256` — embedders
     /// running compile-time-heavy meta programs could not relax it,
@@ -278,6 +282,7 @@ impl ConstEvaluator {
             count_file_headers: Map::new(),
             functions: Map::new(),
             recursion_depth: 0,
+            sequence_depth: 0,
             max_depth: MAX_RECURSION_DEPTH,
         }
     }
@@ -688,26 +693,15 @@ impl ConstEvaluator {
             }
 
             // Arrays
-            ExprKind::Array(arr_expr) => match arr_expr {
-                verum_ast::expr::ArrayExpr::List(elements) => {
-                    let mut values = List::with_capacity(elements.len());
-                    for elem in elements {
-                        values.push(self.eval(elem)?);
-                    }
-                    Ok(ConstValue::Array(values))
+            ExprKind::Array(array) => {
+                if self.sequence_depth >= verum_common::const_value::MAX_SEQUENCE_DEPTH {
+                    return Err(ConstEvalError::SequenceLimit);
                 }
-                verum_ast::expr::ArrayExpr::Repeat { value, count } => {
-                    let val = self.eval(value)?;
-                    let count_val = self.eval(count)?;
-                    let n = count_val
-                        .as_u128()
-                        .ok_or_else(|| ConstEvalError::TypeError {
-                            expected: Text::from("usize"),
-                            actual: format!("{}", count_val).into(),
-                        })? as usize;
-                    Ok(ConstValue::Array(List::from_iter(vec![val; n])))
-                }
-            },
+                self.sequence_depth += 1;
+                let result = self.eval_array(array);
+                self.sequence_depth -= 1;
+                result
+            }
 
             // Array indexing
             ExprKind::Index { expr, index } => {
@@ -1134,6 +1128,46 @@ impl ConstEvaluator {
     }
 
     /// Evaluate a literal
+    fn eval_array(&mut self, array: &verum_ast::ArrayExpr) -> Result<ConstValue> {
+        use verum_common::const_value::{MAX_SEQUENCE_DEPTH, MAX_SEQUENCE_ELEMENTS};
+        // Count descendants before cloning a repeated value. A named constant
+        // and a literal have the same expansion cost.
+        fn slots(value: &ConstValue, depth: usize) -> Result<usize> {
+            let children = match value {
+                ConstValue::Array(items) | ConstValue::Tuple(items) => items,
+                _ => return Ok(1),
+            };
+            if depth >= MAX_SEQUENCE_DEPTH { return Err(ConstEvalError::SequenceLimit); }
+            children.iter().try_fold(1usize, |total, child| {
+                total.checked_add(slots(child, depth + 1)?).ok_or(ConstEvalError::SequenceLimit)
+            })
+        }
+        let values = match array {
+            verum_ast::ArrayExpr::List(items) => {
+                if items.len() > MAX_SEQUENCE_ELEMENTS { return Err(ConstEvalError::SequenceLimit); }
+                let mut remaining = MAX_SEQUENCE_ELEMENTS;
+                let mut values = List::with_capacity(items.len());
+                for item in items {
+                    let value = self.eval(item)?;
+                    remaining = remaining.checked_sub(slots(&value, self.sequence_depth)?)
+                        .ok_or(ConstEvalError::SequenceLimit)?;
+                    values.push(value);
+                }
+                values
+            }
+            verum_ast::ArrayExpr::Repeat { value, count } => {
+                let count = self.eval(count)?.as_u128().and_then(|n| usize::try_from(n).ok())
+                    .ok_or(ConstEvalError::SequenceLimit)?;
+                let value = self.eval(value)?;
+                if count > MAX_SEQUENCE_ELEMENTS / slots(&value, self.sequence_depth)? {
+                    return Err(ConstEvalError::SequenceLimit);
+                }
+                vec![value; count].into()
+            }
+        };
+        Ok(ConstValue::Array(values))
+    }
+
     fn eval_literal(&self, lit: &Literal) -> Result<ConstValue> {
         use verum_ast::literal::LiteralKind;
         match &lit.kind {

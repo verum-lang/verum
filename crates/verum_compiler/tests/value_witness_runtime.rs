@@ -14,12 +14,18 @@ fn checked(source: &str) -> verum_ast::Module {
 }
 fn checked_with_universes(source: &str, universes: bool) -> verum_ast::Module {
     let module = Parser::new(source).parse_module().expect("source grammar");
+    let errors = source_errors(&module, universes);
+    assert!(errors.is_empty(), "source typing: {errors:?}");
+    module
+}
+
+fn source_errors(module: &verum_ast::Module, universes: bool) -> Vec<String> {
     let mut checker = TypeChecker::new();
     checker.register_primitives();
     checker.set_universe_poly_enabled(universes);
     checker.set_current_module_path("witness_calls");
     let mut errors: Vec<_> = checker
-        .prepare_module_declarations(&module)
+        .prepare_module_declarations(module)
         .into_iter()
         .map(|e| format!("{e:?}"))
         .collect();
@@ -41,8 +47,7 @@ fn checked_with_universes(source: &str, universes: bool) -> verum_ast::Module {
             .filter(|d| d.is_error())
             .map(|d| format!("{d:?}")),
     );
-    assert!(errors.is_empty(), "source typing: {errors:?}");
-    module
+    errors
 }
 fn execute(definitions: &str, body: &str, expected: i64) {
     execute_with_universes(definitions, body, expected, false);
@@ -233,6 +238,38 @@ fn absent_value_witness_is_not_defaulted_to_an_unrelated_caller_slot() {
         "value parameter requires an exact declaration-owned call witness",
     );
 }
+#[test]
+fn sequence_value_arguments_execute_through_the_typed_source_pipeline() {
+    execute(
+        "const W: Int = 3; fn get<const S: [Int]>() -> Int { S[0] * 10 + S[1] }
+         fn outer<const Row: [Int]>() -> Int { get<Row>() }",
+        "outer<[W; 2]>() + get<[4, -1]>()",
+        72,
+    );
+    execute(
+        "const ROW: [Int; 2] = [4, 2]; fn pair<const S: [Int; 2]>() -> Int { S[0] * 10 + S[1] }
+         fn element<const S: [[Int]]>() -> Int { S[1][0] } fn empty<const S: [Int; 0]>() -> Int { 1 }",
+        "pair<ROW>() + element<[[], [7, 9]]>() + empty<[]>()",
+        50,
+    );
+}
+
+#[test]
+fn invalid_sequence_arguments_are_refused_before_bytecode() {
+    for (domain, value, reason) in [
+        ("[Int; 2]", "[1; 1]", "exactly 2"),
+        ("[Int]", "[false; 0]", "Bool"),
+        ("[[Int]]", "[[1; 8192]; 8192]", "permitted extent"),
+        ("[Int]", "[runtime, 3]", "constant"),
+    ] {
+        let source = format!("module witness_calls; fn read<const S: {domain}>() -> Int {{ 1 }}
+            fn probe(runtime: Int) -> Int {{ read<{value}>() }}");
+        let module = Parser::new(&source).parse_module().expect("negative grammar");
+        let errors = source_errors(&module, false);
+        assert!(errors.iter().any(|error| error.contains(reason)), "{value}: {errors:?}");
+    }
+}
+
 #[test]
 fn unsupported_selected_scalar_carrier_is_not_reinterpreted_as_integer() {
     refused(

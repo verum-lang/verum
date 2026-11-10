@@ -2004,6 +2004,24 @@ impl Type {
         }
     }
 
+    /// Reading a value binder in a term observes its declared carrier and
+    /// refinement. Type applications still use the binder's exact identity.
+    pub(crate) fn into_expression_type(self) -> Self {
+        match self {
+            Type::Meta { ty, refinement: Some(predicate), .. } => Self::refined(*ty, predicate),
+            Type::Meta { ty, .. } => *ty,
+            other => other,
+        }
+    }
+
+    pub(crate) fn sequence_domain(&self) -> Option<(&Type, Option<usize>)> {
+        match self {
+            Self::Array { element, size } => Some((element, *size)),
+            Self::Slice { element } => Some((element, None)),
+            _ => None,
+        }
+    }
+
     /// Create a meta parameter type (declaration-site or unresolved).
     /// Meta system: unified compile-time computation via "meta fn", "meta" parameters, @derive macros, tagged literals, all under single "meta" concept — Unified meta-system for compile-time computation
     pub fn meta(name: Text, ty: Type, refinement: Option<RefinementPredicate>) -> Self {
