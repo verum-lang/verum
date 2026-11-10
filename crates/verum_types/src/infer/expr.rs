@@ -4820,13 +4820,8 @@ impl TypeChecker {
                         (None, Some(end_expr)) => self.synth_expr(end_expr)?.ty,
                         (None, None) => Type::Var(TypeVar::fresh()),
                     };
-                    let range_type_name = if *inclusive {
-                        verum_common::Text::from("RangeInclusive")
-                    } else {
-                        verum_common::Text::from(WKT::Range.as_str())
-                    };
                     Ok(InferResult::new(Type::Generic {
-                        name: range_type_name,
+                        name: Self::range_literal_constructor(*inclusive).into(),
                         args: vec![elem_ty].into(),
                     }))
                 }
@@ -5504,34 +5499,7 @@ impl TypeChecker {
                         match &clause.kind {
                             ComprehensionClauseKind::For { pattern, iter } => {
                                 let iter_result = self.synth_expr(iter)?;
-
-                                // Protocol-based IntoIterator resolution
-                                let elem_ty = match self
-                                    .resolve_into_iterator_with_loading(&iter_result.ty, iter.span)?
-                                {
-                                    Some(resolution) => resolution.item,
-                                    None => {
-                                        // Fallback: Try Iterator protocol's Item associated type
-                                        let resolved_iter_ty = self.unifier.apply(&iter_result.ty);
-                                        let iter_item =
-                                            self.protocol_checker.read().try_find_associated_type(
-                                                &resolved_iter_ty,
-                                                &verum_common::Text::from("Item"),
-                                            );
-                                        if let Some(item_ty) = iter_item {
-                                            self.protocol_checker
-                                                .read()
-                                                .normalize_projection_type(&item_ty)
-                                        } else {
-                                            return Err(TypeError::Other(
-                                                verum_common::Text::from(format!(
-                                                    "Cannot iterate over type in map comprehension: {}",
-                                                    resolved_iter_ty
-                                                )),
-                                            ));
-                                        }
-                                    }
-                                };
+                                let elem_ty = self.synchronous_iteration_item(iter, &iter_result.ty)?;
 
                                 let elem_scheme = TypeScheme::mono(elem_ty);
                                 self.bind_pattern_scheme(pattern, elem_scheme)?;
@@ -6445,9 +6413,64 @@ impl TypeChecker {
                     Ok(InferResult::new(func_ty))
     }
 
-    /// Type-infer a `for` loop expression.
-    /// Synthesizes the iterator type, resolves the Iterator protocol to get Item,
-    /// binds the pattern, checks the body, and returns unit.
+    fn range_literal_constructor(inclusive: bool) -> &'static str {
+        if inclusive { "RangeInclusive" } else { WKT::Range.as_str() }
+    }
+
+    /// Resolve the same synchronous iteration contract for loops and comprehensions.
+    fn synchronous_iteration_item(&mut self, iter: &Expr, ty: &Type) -> Result<Type> {
+        let ty = self.unifier.apply(ty);
+        if let Some(iterable) = self.resolve_into_iterator_with_loading(&ty, iter.span)? {
+            return Ok(iterable.item);
+        }
+        if let Some(item) = self.declared_iterator_item(&ty, iter.span)? {
+            return Ok(item);
+        }
+        if let Some(item) = self.structural_iteration_item(&ty) {
+            return Ok(item);
+        }
+        // Grammar-produced ranges retain their endpoint type across bindings.
+        // Imported nominal declarations carry their owner and cannot claim this constructor.
+        if let Type::Generic { name, args } = &ty
+            && [Self::range_literal_constructor(false), Self::range_literal_constructor(true)]
+                .contains(&name.as_str())
+            && let [element] = args.as_slice()
+        {
+            return Ok(element.clone());
+        }
+        Err(TypeError::OtherWithCodeSpanned {
+            code: "E405".into(),
+            msg: format!("type `{ty}` has no proven iteration protocol").into(),
+            span: iter.span,
+        })
+    }
+
+    fn structural_iteration_item(&self, receiver: &Type) -> Option<Type> {
+        use crate::core_metadata::ReceiverKind::{SelfMut, SelfRef};
+
+        let name = self.get_type_name(receiver)?;
+        let inherent = self.inherent_methods.read();
+        let methods = inherent.get(&name)?;
+        let next = methods.get(&Text::from("next"))?;
+        let available = methods.get(&Text::from("has_next"))?;
+        if !matches!(next.receiver_kind, Some(SelfRef | SelfMut))
+            || !matches!(available.receiver_kind, Some(SelfRef | SelfMut))
+        {
+            return None;
+        }
+        let Type::Function { params, return_type, .. } = available.instantiate() else {
+            return None;
+        };
+        if !params.is_empty() || *return_type != Type::Bool {
+            return None;
+        }
+        match next.instantiate() {
+            Type::Function { params, return_type, .. } if params.is_empty() => Some(*return_type),
+            _ => None,
+        }
+    }
+
+    /// Infer a for-loop body under the element type selected for its iterand.
     fn infer_for_loop(&mut self, expr: &Expr) -> Result<InferResult> {
         let ExprKind::For { label: _, pattern, iter, body, invariants: _, decreases: _ } = &expr.kind
             else { unreachable!() };
@@ -6456,273 +6479,7 @@ impl TypeChecker {
         }
                     let iter_result = self.synth_expr(iter)?;
 
-                    // CRITICAL: Apply current substitution to resolve type variables
-                    // This fixes: for (a, b) in pairs where pairs: List<(A, B)>
-                    let resolved_iter_ty = self.unifier.apply(&iter_result.ty);
-
-                    // =========================================================================
-                    // Protocol-based IntoIterator resolution
-                    // For-loop desugaring: "for x in iter" desugars to IntoIterator protocol calls (into_iter -> next loop)
-                    // =========================================================================
-                    let elem_ty = match self
-                        .resolve_into_iterator_with_loading(&resolved_iter_ty, iter.span)?
-                    {
-                        // T0701 projection leg: the primary arm handed the
-                        // binder the RAW resolution item while the sibling
-                        // fallback arm normalizes — an unreduced
-                        // `Item<ListIter<T>>` projection then binds `ord`,
-                        // `*ord` types as a residual var, and every
-                        // let-bound method-chain result over iterator
-                        // elements surfaced as the E404 fleet
-                        // (factor-bisected: identical code green without
-                        // the loop, red under ANY .iter() form).
-                        Some(resolution) => {
-                            let normalized = self
-                                .protocol_checker
-                                .read()
-                                .normalize_projection_type(&resolution.item);
-                            if crate::ctor_trace_enabled() {
-                                eprintln!(
-                                    "[ctor-trace] for-binder iter_ty={} raw_item={} elem={}",
-                                    resolved_iter_ty,
-                                    resolution.item,
-                                    normalized
-                                );
-                            }
-                            normalized
-                        }
-                        None => {
-                            if crate::ctor_trace_enabled() {
-                                eprintln!(
-                                    "[ctor-trace] for-binder NO-INTOITER iter_ty={}",
-                                    resolved_iter_ty
-                                );
-                            }
-                            // =========================================================================
-                            // Fallback 1: Try Iterator protocol's Item associated type
-                            // If the type implements Iterator directly (not IntoIterator),
-                            // extract the Item type from the Iterator protocol impl.
-                            // This handles types like RangeIterator, MapIterator, etc. that
-                            // implement Iterator but not IntoIterator.
-                            // =========================================================================
-                            let iter_item = self.protocol_checker.read().try_find_associated_type(
-                                &resolved_iter_ty,
-                                &verum_common::Text::from("Item"),
-                            );
-                            if let Some(item_ty) = iter_item {
-                                // Normalize projection types (e.g., ::Item[SomeType] -> ConcreteType)
-                                let n = self
-                                    .protocol_checker
-                                    .read()
-                                    .normalize_projection_type(&item_ty);
-                                if crate::ctor_trace_enabled() {
-                                    eprintln!(
-                                        "[ctor-trace] for-binder FALLBACK1 item={} norm={}",
-                                        item_ty, n
-                                    );
-                                }
-                                n
-                            } else {
-                                // Duck-typing fallback: extract type name from any type representation
-                                // and check if it has has_next/next methods in inherent_methods.
-                                // This enables `for v in CustomIter { ... }` without requiring
-                                // an explicit IntoIterator implementation.
-                                let try_duck_type_iter = |ty: &Type| -> Option<Type> {
-                                    let type_name: Option<&str> = match ty {
-                                        Type::Named { path, .. } => Self::path_type_name(path)
-                                            .or_else(|| Self::path_last_type_name(path)),
-                                        Type::Generic { name, .. } => Some(name.as_str()),
-                                        _ => None,
-                                    };
-                                    type_name.and_then(|tn| {
-                                        let methods_guard = self.inherent_methods.read();
-                                        let methods =
-                                            methods_guard.get(&verum_common::Text::from(tn))?;
-                                        let _has_next =
-                                            methods.get(&verum_common::Text::from("has_next"))?;
-                                        let next_scheme =
-                                            methods.get(&verum_common::Text::from("next"))?;
-                                        let next_ty = next_scheme.instantiate();
-                                        if let Type::Function { return_type, .. } = &next_ty {
-                                            Some(*return_type.clone())
-                                        } else {
-                                            None
-                                        }
-                                    })
-                                };
-
-                                // Special case for known iterator types and path-like types
-                                if let Type::Named { path, .. } = &resolved_iter_ty {
-                                    let tname = Self::path_type_name(path)
-                                        .or_else(|| Self::path_last_type_name(path))
-                                        .unwrap_or("");
-                                    if tname == "PathIter" {
-                                        Type::Text
-                                    } else if tname.contains("Iter")
-                                        || tname.contains("iter")
-                                        || matches!(
-                                            tname,
-                                            "Components"
-                                                | "ReadDir"
-                                                | "Range"
-                                                | "Entries"
-                                                | "Chunks"
-                                                | "Windows"
-                                                | "Lines"
-                                                | "Chars"
-                                                | "Bytes"
-                                                | "Keys"
-                                                | "Values"
-                                                | "Items"
-                                                | "DirEntry"
-                                        )
-                                    {
-                                        // Known iterator-like types: return a fresh type variable
-                                        // for the element type
-                                        if crate::ctor_trace_enabled() {
-                                            eprintln!(
-                                                "[ctor-trace] for-binder FRESH-VAR tname={} iter_ty={}",
-                                                tname, resolved_iter_ty
-                                            );
-                                        }
-                                        Type::Var(TypeVar::fresh())
-                                    } else if let Some(elem) = try_duck_type_iter(&resolved_iter_ty)
-                                    {
-                                        elem
-                                    } else {
-                                        // Try expanding Named type to its variant definition
-                                        // to detect linked-list patterns like Cons/Nil
-                                        let expanded =
-                                            self.expand_generic_to_variant(&resolved_iter_ty);
-                                        if let Type::Variant(ref variants) = expanded {
-                                            if let Some(elem) =
-                                                Self::infer_linked_list_element_type(variants)
-                                            {
-                                                elem
-                                            } else {
-                                                // Named variant type without linked-list pattern:
-                                                // allow iteration with a fresh element type for types
-                                                // that may implement IntoIterator via protocol impls
-                                                Type::Var(TypeVar::fresh())
-                                            }
-                                        } else {
-                                            // Custom named type: assume it implements IntoIterator
-                                            // via protocol implementations. Use a fresh element type.
-                                            // If it truly isn't iterable, a runtime error will catch it.
-                                            Type::Var(TypeVar::fresh())
-                                        }
-                                    }
-                                } else if let Some(elem) = try_duck_type_iter(&resolved_iter_ty) {
-                                    // Handles Type::Generic and other types with duck-typed iteration
-                                    elem
-                                } else if let Type::Generic { name, args } = &resolved_iter_ty {
-                                    // Well-known collection types: List<T>->T, Set<T>->T, Map<K,V>->(K,V)
-                                    match name.as_str() {
-                                        "List" | "Set" | "Deque" | "PriorityQueue" | "BTreeSet"
-                                        | "HashSet" | "Queue" | "Stack" | "Stream" => args
-                                            .first()
-                                            .cloned()
-                                            .unwrap_or(Type::Var(TypeVar::fresh())),
-                                        "Map" | "BTreeMap" | "HashMap" | "OrderedMap" => {
-                                            if args.len() >= 2 {
-                                                Type::Tuple(List::from(vec![
-                                                    args[0].clone(),
-                                                    args[1].clone(),
-                                                ]))
-                                            } else {
-                                                Type::Var(TypeVar::fresh())
-                                            }
-                                        }
-                                        _ => Type::Var(TypeVar::fresh()),
-                                    }
-                                } else {
-                                    // Try unwrapping reference types (&T, &mut T) for duck-typing
-                                    let inner_ty = match &resolved_iter_ty {
-                                        Type::Reference { inner, .. }
-                                        | Type::CheckedReference { inner, .. }
-                                        | Type::UnsafeReference { inner, .. } => {
-                                            Some(inner.as_ref())
-                                        }
-                                        _ => None,
-                                    };
-                                    if let Some(inner) = inner_ty {
-                                        if let Some(elem) = try_duck_type_iter(inner) {
-                                            elem
-                                        } else if let Type::Generic { name, args } = inner {
-                                            // Collection types behind references: &List<T>->T, &Set<T>->T
-                                            match name.as_str() {
-                                                "List" | "Set" | "Deque" | "PriorityQueue"
-                                                | "BTreeSet" | "HashSet" | "Queue" | "Stack"
-                                                | "Stream" => args
-                                                    .first()
-                                                    .cloned()
-                                                    .unwrap_or(Type::Var(TypeVar::fresh())),
-                                                "Map" | "BTreeMap" | "HashMap" | "OrderedMap" => {
-                                                    if args.len() >= 2 {
-                                                        Type::Tuple(List::from(vec![
-                                                            args[0].clone(),
-                                                            args[1].clone(),
-                                                        ]))
-                                                    } else {
-                                                        Type::Var(TypeVar::fresh())
-                                                    }
-                                                }
-                                                _ => Type::Var(TypeVar::fresh()),
-                                            }
-                                        } else {
-                                            // For other reference types, use fresh var
-                                            Type::Var(TypeVar::fresh())
-                                        }
-                                    } else if let Type::Variant(variants) = &resolved_iter_ty {
-                                        // Heuristic for user-defined linked list types:
-                                        // If the variant type has a Cons-like variant with a tuple payload
-                                        // and a Nil-like variant with Unit payload, treat it as iterable.
-                                        // The element type is inferred from the first element of the Cons tuple.
-                                        if let Some(elem) =
-                                            Self::infer_linked_list_element_type(variants)
-                                        {
-                                            elem
-                                        } else {
-                                            // Fallback: for Variant types, infer element as the variant type itself
-                                            // This allows `for x in variant_value { }` to type-check
-                                            // (the runtime semantics depend on the user's iterator impl)
-                                            return Err(TypeError::Other(
-                                                verum_common::Text::from(format!(
-                                                    "Cannot iterate over non-iterable type: {}. Type must implement IntoIterator or provide has_next()/next() methods.",
-                                                    resolved_iter_ty
-                                                )),
-                                            ));
-                                        }
-                                    } else {
-                                        // Last resort: try expanding to variant for Generic/other types
-                                        let expanded =
-                                            self.expand_generic_to_variant(&resolved_iter_ty);
-                                        if let Type::Variant(ref variants) = expanded {
-                                            if let Some(elem) =
-                                                Self::infer_linked_list_element_type(variants)
-                                            {
-                                                elem
-                                            } else {
-                                                // For Named/Generic iterator-like types, allow iteration
-                                                // with a fresh element type rather than hard-erroring
-                                                Type::Var(TypeVar::fresh())
-                                            }
-                                        } else {
-                                            // Fallback: assume custom iterator type, use fresh element type
-                                            // This handles types like ZipIter, ∃_. _, etc.
-                                            Type::Var(TypeVar::fresh())
-                                        }
-                                    }
-                                }
-                            } // end else: no Iterator Item found, duck-typing fallback
-                        } // end None branch
-                    };
-
-                    // Apply the current substitution to resolve any type variables
-                    // that were already unified during iterable expression inference
-                    // (e.g., the closure return type in `items.map(|x| x.cmp(0))`
-                    // unifies the Item TypeVar with Ordering before we reach here,
-                    // so `ord` in the for body must be Ordering, not an opaque TypeVar).
+                    let elem_ty = self.synchronous_iteration_item(iter, &iter_result.ty)?;
                     let elem_ty = self.unifier.apply(&elem_ty);
 
                     // Enter loop context for affine tracking
@@ -12136,92 +11893,7 @@ impl TypeChecker {
                 ComprehensionClauseKind::For { pattern, iter } => {
                     // Infer the iterator type
                     let iter_result = self.synth_expr(iter)?;
-
-                    // Protocol-based IntoIterator resolution
-                    let resolved_comprehension_iter =
-                        self.unifier.apply(&iter_result.ty);
-                    let elem_ty = match self
-                        .resolve_into_iterator_with_loading(&resolved_comprehension_iter, iter.span)?
-                    {
-                        Some(resolution) => resolution.item,
-                        None => {
-                            // Fallback: Try Iterator protocol's Item associated type
-                            let iter_item =
-                                self.protocol_checker.read().try_find_associated_type(
-                                    &resolved_comprehension_iter,
-                                    &verum_common::Text::from("Item"),
-                                );
-                            if let Some(item_ty) = iter_item {
-                                self.protocol_checker
-                                    .read()
-                                    .normalize_projection_type(&item_ty)
-                            } else {
-                                // COMPREHENSION-RANGE-ITER-1: mirror
-                                // infer_for_loop's iterator resolution.
-                                // Iterator-like Named/Generic types (name
-                                // contains "Iter", or Range/Chars/Keys/...)
-                                // yield an element type inferred from the
-                                // body. Without this, `[x*x for x in 1..5]`
-                                // (Range<Int>) failed "Cannot iterate" even
-                                // though the `for x in 1..5` loop form
-                                // resolves it. Prefer a carried element type
-                                // arg (Range<Int> -> Int); else a fresh var.
-                                let iter_name: Option<&str> =
-                                    match &resolved_comprehension_iter {
-                                        Type::Named { path, .. } => {
-                                            Self::path_type_name(path)
-                                                .or_else(|| Self::path_last_type_name(path))
-                                        }
-                                        Type::Generic { name, .. } => Some(name.as_str()),
-                                        _ => None,
-                                    };
-                                let is_iter_like = iter_name.is_some_and(|n| {
-                                    n.contains("Iter")
-                                        || n.contains("iter")
-                                        || matches!(
-                                            n,
-                                            "Range"
-                                                | "Components"
-                                                | "ReadDir"
-                                                | "Entries"
-                                                | "Chunks"
-                                                | "Windows"
-                                                | "Lines"
-                                                | "Chars"
-                                                | "Bytes"
-                                                | "Keys"
-                                                | "Values"
-                                                | "Items"
-                                                | "DirEntry"
-                                        )
-                                });
-                                if is_iter_like {
-                                    match &resolved_comprehension_iter {
-                                        Type::Generic { name, args }
-                                            if name.as_str() == "Range" && !args.is_empty() =>
-                                        {
-                                            args[0].clone()
-                                        }
-                                        Type::Named { path, args }
-                                            if !args.is_empty()
-                                                && Self::path_last_type_name(path)
-                                                    == Some("Range") =>
-                                        {
-                                            args[0].clone()
-                                        }
-                                        _ => Type::Var(TypeVar::fresh()),
-                                    }
-                                } else {
-                                    return Err(TypeError::Other(
-                                        verum_common::Text::from(format!(
-                                            "Cannot iterate over type in comprehension: {}",
-                                            resolved_comprehension_iter
-                                        )),
-                                    ));
-                                }
-                            }
-                        }
-                    };
+                    let elem_ty = self.synchronous_iteration_item(iter, &iter_result.ty)?;
 
                     // Bind pattern to element type
                     let elem_scheme = TypeScheme::mono(elem_ty);
@@ -12298,10 +11970,7 @@ impl TypeChecker {
                             // Fallback 1: Try Iterator protocol's Item associated type
                             let resolved_iter_ty = self.unifier.apply(&iter_result.ty);
                             let iter_item =
-                                self.protocol_checker.read().try_find_associated_type(
-                                    &resolved_iter_ty,
-                                    &verum_common::Text::from("Item"),
-                                );
+                                self.declared_iterator_item(&resolved_iter_ty, iter.span)?;
                             if let Some(item_ty) = iter_item {
                                 self.protocol_checker
                                     .read()
@@ -12410,34 +12079,7 @@ impl TypeChecker {
             match &clause.kind {
                 ComprehensionClauseKind::For { pattern, iter } => {
                     let iter_result = self.synth_expr(iter)?;
-
-                    // Protocol-based IntoIterator resolution
-                    let elem_ty = match self
-                        .resolve_into_iterator_with_loading(&iter_result.ty, iter.span)?
-                    {
-                        Some(resolution) => resolution.item,
-                        None => {
-                            // Fallback: Try Iterator protocol's Item associated type
-                            let resolved_iter_ty = self.unifier.apply(&iter_result.ty);
-                            let iter_item =
-                                self.protocol_checker.read().try_find_associated_type(
-                                    &resolved_iter_ty,
-                                    &verum_common::Text::from("Item"),
-                                );
-                            if let Some(item_ty) = iter_item {
-                                self.protocol_checker
-                                    .read()
-                                    .normalize_projection_type(&item_ty)
-                            } else {
-                                return Err(TypeError::Other(
-                                    verum_common::Text::from(format!(
-                                        "Cannot iterate over type in set comprehension: {}",
-                                        resolved_iter_ty
-                                    )),
-                                ));
-                            }
-                        }
-                    };
+                    let elem_ty = self.synchronous_iteration_item(iter, &iter_result.ty)?;
 
                     let elem_scheme = TypeScheme::mono(elem_ty);
                     self.bind_pattern_scheme(pattern, elem_scheme)?;
@@ -12491,34 +12133,7 @@ impl TypeChecker {
             match &clause.kind {
                 ComprehensionClauseKind::For { pattern, iter } => {
                     let iter_result = self.synth_expr(iter)?;
-
-                    // Protocol-based IntoIterator resolution
-                    let elem_ty = match self
-                        .resolve_into_iterator_with_loading(&iter_result.ty, iter.span)?
-                    {
-                        Some(resolution) => resolution.item,
-                        None => {
-                            // Fallback: Try Iterator protocol's Item associated type
-                            let resolved_iter_ty = self.unifier.apply(&iter_result.ty);
-                            let iter_item =
-                                self.protocol_checker.read().try_find_associated_type(
-                                    &resolved_iter_ty,
-                                    &verum_common::Text::from("Item"),
-                                );
-                            if let Some(item_ty) = iter_item {
-                                self.protocol_checker
-                                    .read()
-                                    .normalize_projection_type(&item_ty)
-                            } else {
-                                return Err(TypeError::Other(
-                                    verum_common::Text::from(format!(
-                                        "Cannot iterate over type in generator: {}",
-                                        resolved_iter_ty
-                                    )),
-                                ));
-                            }
-                        }
-                    };
+                    let elem_ty = self.synchronous_iteration_item(iter, &iter_result.ty)?;
 
                     let elem_scheme = TypeScheme::mono(elem_ty);
                     self.bind_pattern_scheme(pattern, elem_scheme)?;

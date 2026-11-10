@@ -2222,6 +2222,17 @@ impl TypeChecker {
         Ok(self.protocol_checker.read().resolve_into_iterator_protocol(ty))
     }
 
+    pub(super) fn declared_iterator_item(&mut self, ty: &Type, span: Span) -> Result<Option<Type>> {
+        use verum_common::well_known_types::WellKnownProtocol;
+        let role = WellKnownProtocol::Iterator;
+        self.load_source_operator_implementation(ty, role, span)?;
+        let Some(name) = self.source_operator_name(role) else { return Ok(None); };
+        let protocol = Self::text_to_path(&name);
+        let checker = self.protocol_checker.read();
+        Ok(checker.resolve_associated_type(ty, &protocol, &Text::from("Item")).ok()
+            .map(|item| checker.normalize_projection_type(&item)))
+    }
+
     /// MOUNT-TYPE-AUTHORITY-1 — mount-scoped lazy type load.
     ///
     /// Load the stdlib type that the file's `mount <module>.{Name}`

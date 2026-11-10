@@ -940,3 +940,31 @@ fn imported_for_loop_items_follow_into_iterator_even_with_another_item_first() {
         "{errors:?}"
     );
 }
+
+#[test]
+fn a_nominal_with_an_unrelated_item_member_is_not_an_iterable() {
+    let sources = [("fixture.pretend", r#"
+        public type Other is protocol { type Item; };
+        public type RecordIter is { public n: Int };
+        implement Other for RecordIter { type Item = Int; }
+        public fn record() -> RecordIter { RecordIter { n: 9 } }
+    "#)];
+    for body in [
+        "for _ in record() {}",
+        "let _ = [n for n in record()];",
+    ] {
+        let errors = check(&format!("mount fixture.pretend.record; fn check_record() {{ {body} }}"), &sources);
+        assert!(errors.iter().any(|error| error.contains("E405") && error.contains("fixture.pretend.RecordIter")), "{body}: {errors:?}");
+    }
+}
+
+#[test]
+fn bound_range_literals_and_foreign_nominals_keep_distinct_iteration_semantics() {
+    let source = "fn total() -> Int { let domain = 2..5; let inclusive = 1..=3; let mut sum = 0;
+        for n in domain { sum = sum + n; } for n in inclusive { sum = sum + n; } sum }";
+    let errors = check(source, &[]);
+    assert!(errors.is_empty(), "{errors:?}");
+    let modules = [("fixture.foreign", "public type Range<T> is { public value: T }; public fn range() -> Range<Int> { Range { value: 8 } }")];
+    let errors = check("mount fixture.foreign.range; fn rejected() { for _ in range() {} }", &modules);
+    assert!(errors.iter().any(|e| e.contains("E405") && e.contains("fixture.foreign.Range")), "{errors:?}");
+}

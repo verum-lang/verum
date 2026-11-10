@@ -27156,65 +27156,6 @@ bake to have this verified.",
         })
     }
 
-    /// Infer element type from a linked-list-style Variant type.
-    ///
-    /// Detects patterns like:
-    ///  Cons((T, Heap<List<T>>)) | Nil(Unit)
-    ///  Cons((T, Heap<Self>)) | Nil(Unit)
-    ///
-    /// Returns Some(T) if the pattern matches, None otherwise.
-    pub(super) fn infer_linked_list_element_type(
-        variants: &indexmap::IndexMap<verum_common::Text, Type>,
-    ) -> Option<Type> {
-        // Must have exactly 2 variants
-        if variants.len() != 2 {
-            return None;
-        }
-
-        // Find the "Cons"-like variant (non-unit payload) and "Nil"-like variant (unit payload)
-        let mut cons_payload = None;
-        let mut has_nil = false;
-
-        for (name, ty) in variants {
-            let name_lower = name.to_lowercase();
-            match ty {
-                Type::Unit => {
-                    has_nil = true;
-                }
-                _ if name_lower == "nil" || name_lower == "empty" || name_lower == "end" => {
-                    has_nil = true;
-                }
-                _ => {
-                    cons_payload = Some(ty.clone());
-                }
-            }
-        }
-
-        if !has_nil {
-            return None;
-        }
-
-        let payload = cons_payload?;
-
-        // Extract element type from the Cons payload.
-        // Pattern 1: Cons((T, Heap<...>)) - tuple with element + recursive pointer
-        // Pattern 2: Cons(T) - simple element (less common)
-        match &payload {
-            Type::Tuple(elements) if elements.len() >= 2 => {
-                // First element of the tuple is the iteration element type
-                Some(elements[0].clone())
-            }
-            Type::Tuple(elements) if elements.len() == 1 => {
-                // Single-element tuple wrapping a tuple: Cons(((K,V), Heap<...>))
-                Some(elements[0].clone())
-            }
-            _ => {
-                // Non-tuple Cons payload - use the payload itself as element type
-                Some(payload)
-            }
-        }
-    }
-
     /// Infer tensor literal structure from string representation
     ///
     /// Parses a tensor literal like "[[[1,2],[3,4]],[[5,6],[7,8]]]" to extract:
