@@ -509,3 +509,21 @@ fn probe() -> Int {
     assert_eq!(witnesses, expected);
     assert_eq!(Interpreter::new(Arc::new(module)).execute_function(entry).unwrap().as_i64(), 917);
 }
+
+#[test]
+fn free_function_callable_bound_supplies_result_and_function_witnesses() {
+    let source = Parser::new(r#"
+module functions;
+fn apply<I, O, F: fn(I) -> O>(value: I, transform: F) -> O { transform(value) }
+fn truth(value: Int) -> Bool { value == 7 }
+fn number(value: Bool) -> Int { if value { 87 } else { 2 } }
+fn probe() -> Int { apply(apply(7, truth), number) }
+"#).parse_module().unwrap();
+    let mut codegen = VbcCodegen::with_config(CodegenConfig::new("functions"));
+    let module = codegen.compile_module(&source).unwrap();
+    let mut module = deserialize_module(&serialize_module(&module).unwrap()).unwrap();
+    assert!(module.resolve_external_bands().is_empty());
+    verum_vbc::validate::validate_module(&module).unwrap();
+    let entry = module.find_function_by_name("functions.probe").unwrap();
+    assert_eq!(Interpreter::new(Arc::new(module)).execute_function(entry).unwrap().as_i64(), 87);
+}

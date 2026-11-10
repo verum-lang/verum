@@ -11245,6 +11245,7 @@ impl VbcCodegen {
         let semantic_params = self.source_semantic_parameters(
             func, &signature_scope, &dense, &Self::ordered_generic_param_ids(&dense, &shadow),
         );
+        self.record_source_callable_bounds(id, func, &signature_scope, &semantic_params)?;
         self.ctx.semantic_fn_params.insert(id, semantic_params);
         let callable_signature = self.source_callable_signature(
             func, &signature_scope, &dense, &Self::ordered_generic_param_ids(&dense, &shadow),

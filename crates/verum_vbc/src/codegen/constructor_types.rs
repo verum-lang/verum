@@ -439,10 +439,11 @@ impl VbcCodegen {
             if !formal.is_generic() { continue; }
             let actual = if let Some(actual) = captured.and_then(|arguments| arguments.get(index)).and_then(Option::as_ref) {
                 actual.clone()
-            } else if fully_bound(formal, &bindings) && matches!(
+            } else if matches!(
                 Self::normalized_place(arg).kind, ExprKind::Call { .. } | ExprKind::MethodCall { .. }
             ) {
-                self.source_expression_declaration(arg, Some(&bindings.apply(formal).ok()?), 0)?
+                let expected = fully_bound(formal, &bindings).then(|| bindings.apply(formal).ok()).flatten();
+                self.source_expression_declaration(arg, expected.as_ref(), 0)?
             } else {
                 self.compiled_callable_signature(arg).cloned().or_else(||
                     self.declared_expression_result(arg, None, 0, 0)).or_else(|| {
@@ -464,15 +465,21 @@ impl VbcCodegen {
                     if let TypeRef::Reference { inner, .. } = actual { actual = inner; }
                 }
             }
-            if !self.bind_source_declaration(formal, actual, &mut bindings) { return None; }
-            if matches!(formal, TypeRef::Generic(_)) && matches!(actual, TypeRef::Function { .. })
-                && let Some(bound) = self.callable_parameter_bound(info, index)
-                && !self.bind_source_declaration(bound, actual, &mut bindings)
-            {
-                return None;
-            }
+            self.bind_declared_operand(info, index, formal, actual, &mut bindings)?;
         }
         info.type_param_ids.iter().map(|id| bindings.get(*id).cloned()).collect()
+    }
+
+    fn bind_declared_operand(&self, function: &FunctionInfo, index: usize, formal: &TypeRef,
+        actual: &TypeRef, bindings: &mut TypeSubstitution) -> Option<()> {
+        self.bind_source_declaration(formal, actual, bindings).then_some(())?;
+        if matches!(formal, TypeRef::Generic(_)) && matches!(actual, TypeRef::Function { .. })
+            && let Some(bound) = self.callable_parameter_bound(function, index)
+        {
+            let bound = self.resolve_declared_associated_types(bound).unwrap_or_else(|| bound.clone());
+            self.bind_source_declaration(&bound, actual, bindings).then_some(())?;
+        }
+        Some(())
     }
 
     /// Only the callable's explicit slots are named at the call site. An
@@ -580,16 +587,14 @@ impl VbcCodegen {
                 return None;
             }
         }
-        for (formal, argument) in params.iter().zip(args) {
+        for (index, (formal, argument)) in params.iter().zip(args).enumerate() {
             let contextual = bindings.apply(formal).ok()?;
-            let actual = self.source_expression_declaration(
+            let actual = self.compiled_callable_signature(argument).cloned().or_else(|| self.source_expression_declaration(
                 argument,
                 fully_bound(formal, &bindings).then_some(&contextual),
                 depth + 1,
-            )?;
-            if !self.bind_source_declaration(formal, &actual, &mut bindings) {
-                return None;
-            }
+            ))?;
+            self.bind_declared_operand(function, index, formal, &actual, &mut bindings)?;
         }
         fully_bound(return_type, &bindings).then(|| bindings.apply(return_type).ok()).flatten()
     }
