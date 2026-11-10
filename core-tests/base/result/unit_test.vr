@@ -48,6 +48,7 @@ mount core.base.result.{
 // there.
 mount core.base.retry.{RetryBackoff, RetryOptions};
 mount core.base.maybe.{Maybe, Some, None};
+mount core.base.protocols.PartialEq;
 mount core.base.ordering.{Ordering, Less, Equal, Greater};
 mount core.collections.list.{List};
 
@@ -908,6 +909,30 @@ fn test_recover_with_ok() {
 // =============================================================================
 
 /// Test contains on Ok with matching value
+type ResultComparisonToken is { number: Int };
+
+implement PartialEq for ResultComparisonToken {
+    fn eq(&self, other: &Self) -> Bool {
+        (self.number % 10) == (other.number % 10)
+    }
+}
+
+@test
+fn test_contains_uses_payload_equality() {
+    let ok: Result<ResultComparisonToken, ResultComparisonToken> = Ok(ResultComparisonToken { number: 11 });
+    let err: Result<ResultComparisonToken, ResultComparisonToken> = Err(ResultComparisonToken { number: 13 });
+    let equal_ok = ResultComparisonToken { number: 21 };
+    let equal_err = ResultComparisonToken { number: 23 };
+    let other = ResultComparisonToken { number: 35 };
+
+    assert(ok.contains(&equal_ok));
+    assert(!ok.contains(&other));
+    assert(!err.contains(&equal_err));
+    assert(err.contains_err(&equal_err));
+    assert(!err.contains_err(&other));
+    assert(!ok.contains_err(&equal_ok));
+}
+
 @test
 fn test_contains_match() {
     let result: Result<Int, Text> = Result.Ok(42);

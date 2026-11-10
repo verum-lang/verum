@@ -649,7 +649,9 @@ implement<T, E> Result<T, E> {
     // =========================================================================
 
     /// Check if Result is Ok and contains the given value.
-    public fn contains<U: PartialEq<T>>(&self, value: &U) -> Bool {
+    public fn contains(&self, value: &T) -> Bool
+    where T: PartialEq
+    {
         match self {
             Ok(ref v) => *value == *v,
             Err(_) => false,
@@ -657,7 +659,9 @@ implement<T, E> Result<T, E> {
     }
 
     /// Check if Result is Err and contains the given error.
-    public fn contains_err<F: PartialEq<E>>(&self, error: &F) -> Bool {
+    public fn contains_err(&self, error: &E) -> Bool
+    where E: PartialEq
+    {
         match self {
             Ok(_) => false,
             Err(ref e) => *error == *e,
