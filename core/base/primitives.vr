@@ -4496,10 +4496,6 @@ implement Clone for Int32 {
 }
 implement Copy for Int32 {}
 
-// --- Int64 ---
-implement Hash for Int64 {
-    public fn hash(&self, hasher: &mut Hasher) { hasher.write_int(*self as Int); }
-}
 // --- Int128 ---
 implement Eq for Int128 {
     public fn eq(&self, other: &Int128) -> Bool { eq(*self, *other) }
@@ -4519,14 +4515,7 @@ implement Clone for Int128 {
 }
 implement Copy for Int128 {}
 
-// --- ISize ---
-implement Hash for ISize {
-    public fn hash(&self, hasher: &mut Hasher) { hasher.write_int(*self as Int); }
-}
 // --- UInt8 ---
-implement Hash for UInt8 {
-    public fn hash(&self, hasher: &mut Hasher) { hasher.write_int(*self as Int); }
-}
 implement Copy for UInt8 {}
 
 // --- UInt16 ---
