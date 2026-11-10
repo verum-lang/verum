@@ -231,6 +231,7 @@ fn format_type_ref(module: &VbcModule, tr: &TypeRef) -> String {
         }
         // Const-generic VALUE argument — renders as its literal.
         TypeRef::ConstValue(v) => v.to_string(),
+            TypeRef::ConstSequence(values) => values.to_string(),
         TypeRef::RecordFieldProjection { owner, ordinal } =>
             format!("<record-field {}#{ordinal}>", format_type_id(module, *owner)),
     }

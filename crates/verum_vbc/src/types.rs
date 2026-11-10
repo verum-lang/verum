@@ -691,6 +691,8 @@ pub enum TypeRef {
     /// or a projection from an arbitrary runtime receiver. `ordinal` is the
     /// declaration ordinal (not a global field-name index).
     RecordFieldProjection { owner: TypeId, ordinal: u32 },
+    /// A closed generic value argument. Its shape and elements survive the wire.
+    ConstSequence(crate::const_sequence::ConstSequence),
 }
 
 pub(crate) const MAX_TYPE_APPLICATION_ARGUMENTS: usize = 64;
@@ -735,7 +737,7 @@ impl TypeRef {
     pub fn contains_record_field_projection(&self) -> bool {
         match self {
             Self::RecordFieldProjection { .. } => true,
-            Self::Concrete(_) | Self::Generic(_) | Self::ConstValue(_) => false,
+            Self::Concrete(_) | Self::Generic(_) | Self::ConstValue(_) | Self::ConstSequence(_) => false,
             Self::Instantiated { args, .. } | Self::Tuple(args) =>
                 args.iter().any(Self::contains_record_field_projection),
             Self::Function { params, return_type, .. }
@@ -806,7 +808,7 @@ impl TypeRef {
                 || args.iter().any(Self::is_generic)
                 || qualifier.as_ref().is_some_and(|application| application.args.iter().any(Self::is_generic)),
             // A carried const VALUE is fully concrete.
-            TypeRef::ConstValue(_) => false,
+            TypeRef::ConstValue(_) | TypeRef::ConstSequence(_) => false,
             TypeRef::RecordFieldProjection { .. } => true,
         }
     }

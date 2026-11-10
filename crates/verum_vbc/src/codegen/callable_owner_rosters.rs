@@ -271,7 +271,7 @@ impl VbcCodegen {
                 for (parameter, argument) in header.into_iter().zip(args) {
                     if let Some(source) = parameter.value_parameter() {
                         let TypeRef::Generic(id) = argument else {
-                            if !matches!(argument, TypeRef::ConstValue(_)) {
+                            if !matches!(argument, TypeRef::ConstValue(_) | TypeRef::ConstSequence(_)) {
                                 return Err(invalid(
                                     "receiver value slot has no represented witness",
                                 ));

@@ -452,7 +452,7 @@ fn remapped_declaration_type(
         match ty {
             TypeRef::Concrete(id) => id_known(*id),
             TypeRef::RecordFieldProjection { owner, .. } => map.contains_key(&owner.0),
-            TypeRef::Generic(_) | TypeRef::ConstValue(_) => true,
+            TypeRef::Generic(_) | TypeRef::ConstValue(_) | TypeRef::ConstSequence(_) => true,
             TypeRef::Reference { inner, .. }
             | TypeRef::Slice(inner)
             | TypeRef::Array { element: inner, .. } => known(inner, map, depth + 1),
@@ -500,7 +500,7 @@ fn resolved_in_scope(ty: &TypeRef, declared_ids: &[TypeParamId], depth: usize, b
             let index = u32::from(id.0);
             index < binders || declared_ids.contains(&TypeParamId((index - binders) as u16))
         }
-        TypeRef::ConstValue(_) => true,
+        TypeRef::ConstValue(_) | TypeRef::ConstSequence(_) => true,
         // The record telescope supplies this binder, not the callable's scope.
         TypeRef::RecordFieldProjection { .. } => false,
         TypeRef::AssociatedProjection { base, qualifier, assoc, args } => !assoc.is_empty()

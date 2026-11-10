@@ -232,21 +232,23 @@ impl VbcCodegen {
     }
 
     pub(super) fn runtime_value_carrier(&self, domain: &TypeRef) -> Option<TypeRef> {
-        let mut carrier = domain;
-        let mut seen = verum_common::Set::new();
-        while let TypeRef::Concrete(id) = carrier {
-            if !seen.insert(*id) {
-                return None;
+        fn resolve(cg: &VbcCodegen, domain: &TypeRef, active: &mut verum_common::Set<TypeId>, depth: usize) -> Option<TypeRef> {
+            if depth > verum_common::const_value::MAX_SEQUENCE_DEPTH { return None; }
+            match domain {
+                TypeRef::Concrete(id) => {
+                    let Some(target) = cg.type_by_id(*id).and_then(|descriptor| descriptor.alias_target.as_ref())
+                    else { return Some(domain.clone()); };
+                    if !active.insert(*id) { return None; }
+                    resolve(cg, target, active, depth + 1)
+                }
+                TypeRef::Slice(element) => Some(TypeRef::Slice(Box::new(resolve(cg, element, active, depth + 1)?))),
+                TypeRef::Array { element, length } => Some(TypeRef::Array {
+                    element: Box::new(resolve(cg, element, active, depth + 1)?), length: *length
+                }),
+                _ => None,
             }
-            let Some(target) = self
-                .type_by_id(*id)
-                .and_then(|descriptor| descriptor.alias_target.as_ref())
-            else {
-                return Some(carrier.clone());
-            };
-            carrier = target;
         }
-        None
+        resolve(self, domain, &mut Default::default(), 0)
     }
 
     pub(super) fn descriptor_generic_roster<'a>(
@@ -316,17 +318,6 @@ impl VbcCodegen {
         .map(Cow::Owned)
     }
 
-    pub(super) fn declared_value_expression(argument: &GenericArg) -> Option<Expr> {
-        match argument {
-            GenericArg::Const(expression) => Some(expression.clone()),
-            GenericArg::Type(ty) => match &ty.kind {
-                TypeKind::Path(path) => Some(Expr::new(ExprKind::Path(path.clone()), ty.span)),
-                _ => None,
-            },
-            _ => None,
-        }
-    }
-
     /// Both executable CallG and declaration inference consume this conversion.
     pub(super) fn callable_argument_witness(
         &self,
@@ -371,12 +362,15 @@ impl VbcCodegen {
             };
         }
         if parameter.value_parameter().is_some() {
-            if parameter.value_carrier != Some(TypeRef::Concrete(TypeId::INT)) {
-                return Err(invalid(
-                    "selected value parameter has no supported runtime scalar carrier",
-                ));
+            let unsupported = || invalid("selected value parameter has no supported runtime scalar carrier");
+            let carrier = parameter.value_carrier.as_ref().ok_or_else(unsupported)?;
+            if *carrier != TypeRef::Concrete(TypeId::INT) {
+                if crate::const_sequence::sequence_domain(carrier).is_none() { return Err(unsupported()); }
+                if !crate::const_sequence::ConstSequence::supported_domain(carrier) {
+                    return Err(invalid("unsupported element domain in constant sequence"));
+                }
             }
-            let expression = Self::declared_value_expression(argument)
+            let expression = argument.value_for_declared_slot()
                 .ok_or_else(|| invalid("value parameter received a type argument"))?;
             let expression = Self::normalized_place(&expression);
             if let ExprKind::Path(path) = &expression.kind
@@ -386,7 +380,7 @@ impl VbcCodegen {
                     .current_source_substitution
                     .get_value(name.name.as_str())
                 {
-                    if self.runtime_value_carrier(domain) != Some(TypeRef::Concrete(TypeId::INT)) {
+                    if self.runtime_value_carrier(domain).as_ref() != Some(carrier) {
                         return Err(invalid(
                             "runtime value argument has no supported scalar witness representation",
                         ));
@@ -401,10 +395,7 @@ impl VbcCodegen {
                     return Err(invalid("type parameter cannot occupy a value slot"));
                 }
             }
-            return super::source_substitution::checked_scalar_expression(expression, &mut |_| {
-                Ok(None)
-            })
-            .map(|value| Some(TypeRef::ConstValue(value)));
+            return self.closed_value_argument(expression, carrier).map(Some);
         }
         let projected = argument
             .type_for_declared_slot()
@@ -441,18 +432,18 @@ impl VbcCodegen {
         let Some(roster) = self.callable_generic_roster(function) else {
             return Ok(());
         };
-        Self::check_value_bindings(&roster, bindings, |argument| {
+        Self::check_value_bindings(&roster, bindings, |argument, carrier| {
             self.current_source_substitution
                 .value_witness_domain(argument)
                 .and_then(|domain| self.runtime_value_carrier(domain))
-                == Some(TypeRef::Concrete(TypeId::INT))
+                .as_ref() == Some(carrier)
         })
     }
 
     fn check_value_bindings(
         roster: &[DeclaredGenericParameter],
         bindings: &std::collections::BTreeMap<u16, TypeRef>,
-        caller_value: impl Fn(&TypeRef) -> bool,
+        caller_value: impl Fn(&TypeRef, &TypeRef) -> bool,
     ) -> CodegenResult<()> {
         for parameter in roster
             .iter()
@@ -464,13 +455,14 @@ impl VbcCodegen {
                         parameter.name, parameter.witness_slot, parameter.value_carrier, bindings),
                 ))
             };
-            if parameter.value_carrier != Some(TypeRef::Concrete(TypeId::INT)) {
-                return Err(invalid());
-            }
+            let carrier = parameter.value_carrier.as_ref().ok_or_else(invalid)?;
+            let scalar = *carrier == TypeRef::Concrete(TypeId::INT);
+            if !scalar && !crate::const_sequence::ConstSequence::supported_domain(carrier) { return Err(invalid()); }
             let slot = parameter.witness_slot.ok_or_else(invalid)?;
             match bindings.get(&slot.0).ok_or_else(invalid)? {
-                TypeRef::ConstValue(_) => (),
-                argument @ TypeRef::Generic(_) if caller_value(argument) => (),
+                TypeRef::ConstValue(_) if scalar => (),
+                TypeRef::ConstSequence(sequence) if sequence.matches_domain(carrier) => (),
+                argument @ TypeRef::Generic(_) if caller_value(argument, carrier) => (),
                 _ => return Err(invalid()),
             }
         }
@@ -521,7 +513,7 @@ impl VbcCodegen {
                     .zip(arguments)
                     .map(|(id, argument)| (id.0, argument.clone()))
                     .collect();
-                Self::check_value_bindings(roster, &bindings, |argument| {
+                Self::check_value_bindings(roster, &bindings, |argument, carrier| {
                     let TypeRef::Generic(id) = argument else {
                         return false;
                     };
@@ -529,7 +521,7 @@ impl VbcCodegen {
                         roster.iter().any(|parameter| {
                             parameter.witness_slot == Some(*id)
                                 && parameter.value_parameter().is_some()
-                                && parameter.value_carrier == Some(TypeRef::Concrete(TypeId::INT))
+                                && parameter.value_carrier.as_ref() == Some(carrier)
                         })
                     })
                 })?;

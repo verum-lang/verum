@@ -699,6 +699,11 @@ impl Serializer {
                 encode_u32(owner.0, &mut self.output);
                 encode_u32(*ordinal, &mut self.output);
             }
+            TypeRef::ConstSequence(values) => {
+                values.validate()?;
+                self.output.push(0x0F);
+                values.encode(&mut self.output);
+            }
             TypeRef::ConstValue(v) => {
                 // CONST-GENERIC-VALUE-CARRY-1 (format 2.8): const-generic
                 // value argument.  Fixed 8-byte two's-complement payload —

@@ -98,7 +98,12 @@ impl VbcCodegen {
                     [verum_ast::PathSegment::SelfValue] => "self",
                     _ => return None,
                 };
-                let binding = self.ctx.lookup_var(name)?;
+                let Some(binding) = self.ctx.lookup_var(name) else {
+                    // Reading a const/meta parameter produces a value of its
+                    // declared carrier. This also establishes index projections.
+                    return self.current_source_substitution.get_value(name)
+                        .and_then(|(witness, domain)| witness.semantic.then(|| domain.clone()));
+                };
                 if binding.is_cell { return None; }
                 let fact = self.ctx.registers.value_uses.active.get(&binding.reg)?;
                 let ty = fact.declaration_type.as_ref()?;

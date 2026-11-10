@@ -2528,6 +2528,13 @@ fn lower_instruction_impl<'ctx>(
         }
 
         Instruction::LoadT { dst, type_ref } => {
+            if let TypeRef::ConstSequence(sequence) = type_ref {
+                let list = lower_const_sequence(ctx, sequence)?;
+                ctx.set_register(dst.0, list.into());
+                ctx.mark_list_register(dst.0);
+                return Ok(());
+            }
+
             // CONST-GENERIC-VALUE-CARRY-1 (task #19): a const-generic
             // VALUE payload (post-specialization, or a direct
             // `ConstValue` emission) lowers to the integer constant —
@@ -38292,6 +38299,24 @@ fn check_packed_array_index<'ctx>(
 ///
 /// Generates GEP + load for array element access.
 /// Array is assumed to be a pointer to elements.
+fn lower_const_sequence<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    sequence: &verum_vbc::const_sequence::ConstSequence,
+) -> Result<verum_llvm::values::PointerValue<'ctx>> {
+    use verum_vbc::const_sequence::ConstSequence;
+    let runtime = RuntimeLowering::new(ctx.llvm_context());
+    let arrays = match sequence {
+        ConstSequence::Integers(values) => return runtime.lower_constant_int_list(ctx.builder(), ctx.get_module(), values),
+        ConstSequence::Arrays(arrays) => arrays,
+    };
+    let list = runtime.lower_new_list_with_capacity(ctx.builder(), ctx.get_module(), arrays.len() as u64)?;
+    for array in arrays.iter() {
+        let row = lower_const_sequence(ctx, array)?;
+        runtime.lower_list_push(ctx.builder(), ctx.get_module(), list, row.into())?;
+    }
+    Ok(list)
+}
+
 fn lower_get_element<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
     dst: Reg,

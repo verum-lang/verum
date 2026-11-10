@@ -457,7 +457,7 @@ fn validate_record_projections(descriptor: &TypeDescriptor) -> Result<(), Text> 
                     pending.extend(application.args.iter().map(|argument| (argument, scope)));
                 }
             },
-            TypeRef::Concrete(_) | TypeRef::Generic(_) | TypeRef::ConstValue(_) => {}
+            TypeRef::Concrete(_) | TypeRef::Generic(_) | TypeRef::ConstValue(_) | TypeRef::ConstSequence(_) => {}
         }
     }
     Ok(())

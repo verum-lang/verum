@@ -216,7 +216,7 @@ pub(super) fn concrete_call(
         && !func.return_type.is_generic()
         && !type_args
             .iter()
-            .any(|t| matches!(t, TypeRef::ConstValue(_)))
+            .any(|t| matches!(t, TypeRef::ConstValue(_) | TypeRef::ConstSequence(_)))
     {
         return None;
     }

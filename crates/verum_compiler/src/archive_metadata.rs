@@ -2244,6 +2244,7 @@ fn render_type_ref(
         // as its literal so `StackAllocator<256>` round-trips through the
         // metadata text form instead of degrading to `__opaque_typeref`.
         TypeRef::ConstValue(v) => v.to_string(),
+            TypeRef::ConstSequence(values) => values.to_string(),
         TypeRef::RecordFieldProjection { owner, ordinal } =>
             format!("<record-field {}#{ordinal}>", owner.0),
         // T0190 (same root as the TypeId table below, structural half):

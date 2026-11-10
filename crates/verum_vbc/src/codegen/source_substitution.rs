@@ -290,7 +290,7 @@ fn reserve_indices(ty: &TypeRef, reserved: &mut BTreeSet<u16>) {
                 for argument in &application.args { reserve_indices(argument, reserved); }
             }
         },
-        TypeRef::Concrete(_) | TypeRef::ConstValue(_) | TypeRef::RecordFieldProjection { .. } => {}
+        TypeRef::Concrete(_) | TypeRef::ConstValue(_) | TypeRef::ConstSequence(_) | TypeRef::RecordFieldProjection { .. } => {}
     }
 }
 

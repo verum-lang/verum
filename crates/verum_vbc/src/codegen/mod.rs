@@ -82,6 +82,7 @@ mod declaration_interface;
 mod forward_declarations;
 mod default_arguments;
 mod callable_generic_rosters;
+mod const_arguments;
 mod callable_owner_rosters;
 mod field_visibility;
 
@@ -18180,7 +18181,7 @@ impl VbcCodegen {
                         if roster.as_ref().and_then(|parameters| parameters.get(index))
                             .is_some_and(|parameter| parameter.value_parameter().is_some())
                         {
-                            let expression = Self::declared_value_expression(argument).ok_or_else(|| CodegenError::with_span(
+                            let expression = argument.value_for_declared_slot().ok_or_else(|| CodegenError::with_span(
                                 CodegenErrorKind::InvalidSourceSignature("nominal value parameter received a type argument".into()), ty.span))?;
                             return values.argument(&expression, generic_param_map);
                         }
@@ -25384,37 +25385,10 @@ impl VbcCodegen {
         if !self.pending_specializations.is_empty() {
             use std::collections::HashSet;
             let trace = std::env::var_os("VERUM_TRACE_MONO").is_some();
-            // Structural dedup key: a bare `Concrete(id)` keys on the id, but a
-            // monomorphized `Instantiated{base,[args]}` (e.g. ReadyFuture<Text>)
-            // must fold its args in — else ReadyFuture<Text> and ReadyFuture<Int>
-            // both collapse to one key and only one specialization is seeded.
-            fn mono_type_key(t: &crate::types::TypeRef) -> u32 {
-                use crate::types::TypeRef;
-                match t {
-                    TypeRef::Concrete(id) => id.0,
-                    TypeRef::Instantiated { base, args } => {
-                        let mut h = base.0.wrapping_mul(0x9E37_79B1) ^ 0x8000_0000;
-                        for a in args {
-                            h = h.wrapping_mul(31).wrapping_add(mono_type_key(a));
-                        }
-                        h
-                    }
-                    TypeRef::Generic(tp) => (tp.0 as u32) ^ 0x4000_0000,
-                    // CONST-GENERIC-VALUE-CARRY-1: distinct const values are
-                    // distinct specializations — StackAllocator<256> and
-                    // StackAllocator<1024> must not collapse to one key.
-                    TypeRef::ConstValue(v) => {
-                        ((*v as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 32) as u32
-                            ^ 0x2000_0000
-                    }
-                    _ => u32::MAX,
-                }
-            }
-            let mut seen: HashSet<(u32, Vec<u32>)> = HashSet::new();
+            let mut seen = HashSet::new();
             for (raw_fn_id, type_args) in std::mem::take(&mut self.pending_specializations) {
                 let fn_id = func_id_remap.get(&raw_fn_id).copied().unwrap_or(raw_fn_id);
-                let key_ids: Vec<u32> = type_args.iter().map(mono_type_key).collect();
-                if !seen.insert((fn_id, key_ids)) {
+                if !seen.insert((fn_id, type_args.clone())) {
                     continue;
                 }
                 if trace {

@@ -302,7 +302,7 @@ const MAX_FN_TYPE_REF_CONTEXTS: usize = 32;
 /// Constant-pool / specialization / source-map bounds. Each
 /// driver is a varint that, post the cf1cff4c canonicality fix,
 /// can decode to `u64::MAX`.
-const MAX_CONSTANT_ARRAY_LEN: usize = 1 << 20; // 1 048 576
+const MAX_CONSTANT_ARRAY_LEN: usize = verum_common::const_value::MAX_SEQUENCE_ELEMENTS;
 const MAX_SPECIALIZATION_TYPE_ARGS: usize = 64;
 const MAX_SOURCE_MAP_FILES: usize = 1 << 16; // 65 536
 const MAX_SOURCE_MAP_ENTRIES: usize = 1 << 22; // 4 194 304
@@ -1525,6 +1525,8 @@ impl<'a> Deserializer<'a> {
      if assoc.is_empty() { return Err(VbcError::InvalidTypeRefTag(tag)); }
      Ok(TypeRef::AssociatedProjection { base, qualifier, assoc, args })
  }
+ 0x0F if self.header.as_ref().is_some_and(|header| header.version_minor >= 48) =>
+     crate::const_sequence::ConstSequence::decode(self.data, &mut self.offset).map(TypeRef::ConstSequence),
  0x0B => {
      // ConstValue(i64) — CONST-GENERIC-VALUE-CARRY-1 (format 2.8).
      let v = decode_u64(self.data, &mut self.offset)? as i64;

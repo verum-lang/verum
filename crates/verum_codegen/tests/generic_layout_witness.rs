@@ -14,9 +14,7 @@ use verum_vbc::{
     mono::{InstantiationGraph, discover_call_instantiations, monomorphize_minimal},
 };
 
-fn execute(source: &str) -> i64 {
-    let ast = Parser::new(source).parse_module().expect("source grammar");
-    let mut module = VbcCodegen::new().compile_module(&ast).expect("source VBC");
+fn specialize(mut module: verum_vbc::VbcModule) -> verum_vbc::VbcModule {
     // The compiler phase recovers this derived flag from the declaration roster.
     for function in &mut module.functions {
         function.is_generic = !function.type_params.is_empty();
@@ -31,11 +29,16 @@ fn execute(source: &str) -> i64 {
     }
     assert!(
         !graph.is_empty(),
-        "source must require actual generic specialization: {source}"
+        "source must require actual generic specialization"
     );
-    let module = monomorphize_minimal(module, &graph)
+    monomorphize_minimal(module, &graph)
         .expect("source mono")
-        .module;
+        .module
+}
+
+fn execute(source: &str) -> i64 {
+    let ast = Parser::new(source).parse_module().expect("source grammar");
+    let module = specialize(VbcCodegen::new().compile_module(&ast).expect("source VBC"));
     let context = Context::create();
     let mut lowering = VbcToLlvmLowering::new(
         &context,
@@ -175,4 +178,49 @@ fn native_signedness_uses_a_boolean_from_the_specialized_declaration() {
         }
     "#;
     assert_eq!(execute(source), 1);
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn sequence_witnesses_execute_in_a_native_image_after_serialization() {
+    use std::process::Command;
+    use verum_llvm::targets::{CodeModel, FileType, RelocMode, TargetMachine};
+    use verum_vbc::{deserialize::deserialize_module, serialize::serialize_module};
+
+    let source = "fn digits<const Shape: [Int]>() -> Int { Shape[0] * 10 + Shape[1] }
+                  fn via<const Values: [Int]>() -> Int { digits<Values>() }
+                  fn main() -> Int { via<[3; 2]>() + digits<[4,-1]>() }";
+    let ast = Parser::new(source).parse_module().unwrap();
+    let encoded = serialize_module(&VbcCodegen::new().compile_module(&ast).unwrap()).unwrap();
+    let mut wire = deserialize_module(&encoded).unwrap();
+    for function in &mut wire.functions {
+        let start = function.bytecode_offset as usize;
+        let mut instructions = verum_vbc::bytecode::decode_instructions(
+            &wire.bytecode[start..start + function.bytecode_length as usize],
+        ).unwrap();
+        verum_vbc::bytecode::jump_offsets_to_instr_indices(&mut instructions);
+        function.instructions = Some(instructions);
+    }
+    let specialized = specialize(wire);
+    Target::initialize_native(&InitializationConfig::default()).unwrap();
+    let triple = TargetMachine::get_default_triple();
+    let machine = Target::from_triple(&triple).unwrap().create_target_machine(
+        &triple, "generic", "", OptimizationLevel::Default, RelocMode::PIC, CodeModel::Default,
+    ).unwrap();
+    let context = Context::create();
+    let mut lowering = VbcToLlvmLowering::new(&context, LoweringConfig::debug("sequence_witness").with_debug_info(false));
+    lowering.lower_module(&specialized).unwrap();
+    let native = lowering.module();
+    native.set_triple(&triple);
+    native.set_data_layout(&machine.get_target_data().get_data_layout());
+    native.verify().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let object = dir.path().join("sequence.o");
+    let executable = dir.path().join("sequence");
+    machine.write_to_file(native, FileType::Object, &object).unwrap();
+    let link = Command::new("cc").arg(object).args(["-Wl,-dead_strip", "-nostdlib", "-lSystem", "-o"])
+        .arg(&executable).output().unwrap();
+    assert!(link.status.success(), "{}", String::from_utf8_lossy(&link.stderr));
+    let run = Command::new(executable).output().unwrap();
+    assert_eq!(run.status.code(), Some(72), "{}", String::from_utf8_lossy(&run.stderr));
 }

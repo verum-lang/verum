@@ -142,7 +142,7 @@ fn map_free_parameters(
         }
         TypeRef::Concrete(_)
         | TypeRef::Generic(_)
-        | TypeRef::ConstValue(_)
+        | TypeRef::ConstValue(_) | TypeRef::ConstSequence(_)
         | TypeRef::RecordFieldProjection { .. } => ty.clone(),
         TypeRef::Instantiated { base, args } => TypeRef::Instantiated {
             base: *base,

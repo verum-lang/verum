@@ -219,6 +219,39 @@ fn explicit_arguments_can_complete_an_interior_hole_before_encoding() {
 }
 
 #[test]
+fn closed_sequences_keep_elements_extents_and_caller_identity_after_serialization() {
+    let module = compile(r#"
+        const N: Int = 4;
+        const COUNT: Int = 3;
+        fn digit<const Values: [Int]>() -> Int { Values[0] * 10 + Values[1] }
+        fn forward<const Shape: [Int]>() -> Int { digit<Shape>() }
+        fn nested<const Rows: [[Int; 2]; 2]>() -> Int { Rows[1][0] }
+        fn probe() -> Int {
+            forward<[N; COUNT]>() + forward<[2,-3]>() + nested<[[2,3],[7,8]]>()
+        }
+    "#);
+    let bytes = verum_vbc::serialize::serialize_module(&module).unwrap();
+    let module = verum_vbc::deserialize::deserialize_module(&bytes).unwrap();
+    verum_vbc::validate::validate_module(&module).unwrap();
+    let entry = module.find_function_by_name("probe").unwrap();
+    assert_eq!(Interpreter::new(Arc::new(module)).execute_function(entry).unwrap().as_i64(), 68);
+}
+
+#[test]
+fn const_sequences_reject_wrong_elements_extents_and_unbounded_repeats() {
+    for (domain, argument) in [
+        ("[Int; 2]", "[1]"), ("[Int]", "[1, false]"), ("[Int]", "[1_u8,2]"),
+        ("[Int]", "[false; 0]"), ("[Int]", "[2; -1]"), ("[Int]", "[0; 1048577]"),
+        ("[[Int]]", "[[1; 8192]; 8192]"), ("[Int]", "[Bad]"),
+    ] {
+        let source = format!("const Bad: Bool = true; fn size<const S: {domain}>() -> Int {{ 1 }} fn probe() -> Int {{ size<{argument}>() }}");
+        let ast = Parser::new(&source).parse_module().unwrap();
+        let error = VbcCodegen::new().compile_module(&ast).expect_err(&source);
+        assert!(error.span.is_some(), "{argument}: {error}");
+    }
+}
+
+#[test]
 fn named_lengths_and_non_type_slots_preserve_the_selected_witness() {
     for source in [
         "type Element is Byte; fn size<T>() -> Int {T.size} fn probe()->Int {size<[Element; 5]>()}",

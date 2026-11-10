@@ -43,6 +43,11 @@
 use crate::{Heap, List, Maybe, Text};
 use std::fmt;
 
+/// Maximum total element slots in one expanded compile-time sequence.
+pub const MAX_SEQUENCE_ELEMENTS: usize = 1 << 20;
+/// Maximum nested sequence containers in a compile-time value or its wire form.
+pub const MAX_SEQUENCE_DEPTH: usize = 64;
+
 /// A compile-time constant value (base type)
 ///
 /// This is the unified representation of constant values used throughout

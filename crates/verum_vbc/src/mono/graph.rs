@@ -254,6 +254,10 @@ fn hash_type_ref<H: Hasher>(type_ref: &TypeRef, hasher: &mut H) {
             owner.0.hash(hasher);
             ordinal.hash(hasher);
         }
+        TypeRef::ConstSequence(values) => {
+            14u8.hash(hasher);
+            values.hash(hasher);
+        }
         TypeRef::ConstValue(v) => {
             // Const-generic VALUE — distinct values are distinct
             // specializations (CONST-GENERIC-VALUE-CARRY-1).

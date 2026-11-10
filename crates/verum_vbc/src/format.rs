@@ -140,7 +140,8 @@ pub const VERSION_MAJOR: u16 = 2;
 // v2.45: typed scalar references distinguish managed slots from native storage.
 // v2.46: declaration-owned signedness queries return a Bool.
 // v2.47: EXT_PANIC_VALUE carries a runtime Text operand.
-pub const VERSION_MINOR: u16 = 47;
+// v2.48: closed sequence values in generic witness vectors.
+pub const VERSION_MINOR: u16 = 48;
 
 /// Minor-version floors for sections whose presence readers gate on.  The
 /// register-type-hints section has been written unconditionally since minor 2,

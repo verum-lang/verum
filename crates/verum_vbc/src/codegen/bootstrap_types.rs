@@ -84,7 +84,7 @@ fn type_ids(ty: &TypeRef, ids: &mut Vec<TypeId>) {
                 type_ids(element, ids);
             }
         }
-        TypeRef::Generic(_) | TypeRef::ConstValue(_) => {}
+        TypeRef::Generic(_) | TypeRef::ConstValue(_) | TypeRef::ConstSequence(_) => {}
     }
 }
 

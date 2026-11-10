@@ -3233,6 +3233,10 @@ pub(crate) fn encode_type_ref(type_ref: &TypeRef, output: &mut Vec<u8>) {
             encode_varint(args.len() as u64, output);
             for argument in args { encode_type_ref(argument, output); }
         }
+        TypeRef::ConstSequence(values) => {
+            output.push(0x0F);
+            values.encode(output);
+        }
         TypeRef::ConstValue(v) => {
             // CONST-GENERIC-VALUE-CARRY-1: const-generic value argument.
             // Two's-complement round-trip through u64 (negatives take the
@@ -6260,6 +6264,7 @@ pub(crate) fn decode_type_ref(data: &[u8], offset: &mut usize) -> VbcResult<Type
             if assoc.is_empty() { return Err(VbcError::InvalidTypeRef { offset: *offset as u32, discriminant }); }
             Ok(TypeRef::AssociatedProjection { base, qualifier, assoc, args })
         }
+        0x0F => crate::const_sequence::ConstSequence::decode(data, offset).map(TypeRef::ConstSequence),
         0x0A => {
             // ConstValue(i64) — CONST-GENERIC-VALUE-CARRY-1
             let v = decode_varint(data, offset)? as i64;

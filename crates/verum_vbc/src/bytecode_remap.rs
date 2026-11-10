@@ -251,7 +251,7 @@ pub fn rewrite_type_ref_ids(ty: &mut crate::types::TypeRef, remap: &dyn IdRemap)
             }
             for arg in args { rewrite_type_ref_ids(arg, remap); }
         }
-        TypeRef::Generic(_) | TypeRef::ConstValue(_) => {}
+        TypeRef::Generic(_) | TypeRef::ConstValue(_) | TypeRef::ConstSequence(_) => {}
     }
 }
 

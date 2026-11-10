@@ -923,7 +923,7 @@ impl VbcLinker {
                 args: args.iter().map(|ty| self.remap_type_ref(ty, remap)).collect::<Result<_, _>>()?,
             },
             // Const-generic VALUE — no ids to remap.
-            TypeRef::ConstValue(v) => TypeRef::ConstValue(*v),
+            TypeRef::ConstValue(_) | TypeRef::ConstSequence(_) => src.clone(),
             TypeRef::RecordFieldProjection { owner, ordinal } => TypeRef::RecordFieldProjection {
                 owner: remap.map_type_id(*owner)?, ordinal: *ordinal,
             },

@@ -380,6 +380,9 @@ impl<'a> Validator<'a> {
                     }
                 }
             }
+            TypeRef::ConstSequence(values) => {
+                if let Err(error) = values.validate() { self.errors.push(error); }
+            }
             TypeRef::ConstValue(_) => {
                 // Const-generic VALUE — nothing to validate (no ids).
             }

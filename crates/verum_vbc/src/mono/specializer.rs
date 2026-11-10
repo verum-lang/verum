@@ -976,7 +976,7 @@ impl<'a> BytecodeSpecializer<'a> {
             TypeRef::Function { .. } => 8,             // function pointer
             TypeRef::Rank2Function { .. } => 8,        // function pointer (rank-2 polymorphic)
             TypeRef::Generic(id) => return Err(SpecializationError::UnresolvedTypeParam(*id)),
-            TypeRef::AssociatedProjection { .. } | TypeRef::RecordFieldProjection { .. } => {
+            TypeRef::AssociatedProjection { .. } | TypeRef::RecordFieldProjection { .. } | TypeRef::ConstSequence(_) => {
                 return Err(SpecializationError::UnresolvedTypeLayout(type_ref.clone()));
             }
             TypeRef::ConstValue(_) => 8,               // integer value slot
@@ -1009,7 +1009,7 @@ impl<'a> BytecodeSpecializer<'a> {
             TypeRef::Function { .. } => 8,
             TypeRef::Rank2Function { .. } => 8,
             TypeRef::Generic(id) => return Err(SpecializationError::UnresolvedTypeParam(*id)),
-            TypeRef::AssociatedProjection { .. } | TypeRef::RecordFieldProjection { .. } => {
+            TypeRef::AssociatedProjection { .. } | TypeRef::RecordFieldProjection { .. } | TypeRef::ConstSequence(_) => {
                 return Err(SpecializationError::UnresolvedTypeLayout(type_ref.clone()));
             }
             TypeRef::ConstValue(_) => 8,               // integer value slot

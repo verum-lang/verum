@@ -17380,7 +17380,7 @@ impl VbcCodegen {
                     return_type,
                     ..
                 } => params.iter().any(has_shadow) || has_shadow(return_type),
-                TypeRef::Concrete(_) | TypeRef::ConstValue(_) | TypeRef::RecordFieldProjection { .. } => false,
+                TypeRef::Concrete(_) | TypeRef::ConstValue(_) | TypeRef::ConstSequence(_) | TypeRef::RecordFieldProjection { .. } => false,
             }
         }
         let structural_return = self
@@ -31580,6 +31580,7 @@ impl VbcCodegen {
                 .map(|name| format!("[{name}; {length}]").into()),
             TypeRef::Slice(inner) => render(inner).map(|name| format!("[{name}]").into()),
             TypeRef::ConstValue(value) => Some(value.to_string().into()),
+            TypeRef::ConstSequence(value) => Some(value.to_string().into()),
             _ => None,
         }
     }
@@ -44610,6 +44611,13 @@ impl VbcCodegen {
                 match &expr.kind {
                     ExprKind::Paren(inner) | ExprKind::Unary { expr: inner, .. } => collect(inner, names),
                     ExprKind::Binary { left, right, .. } => { collect(left, names); collect(right, names); }
+                    ExprKind::Array(verum_ast::ArrayExpr::List(items)) => {
+                        for item in items { collect(item, names); }
+                    }
+                    ExprKind::Array(verum_ast::ArrayExpr::Repeat { value, count }) => {
+                        collect(value, names);
+                        collect(count, names);
+                    }
                     _ => {}
                 }
             }
@@ -44653,6 +44661,33 @@ impl VbcCodegen {
         }
         self.ctx.lookup_function(name).cloned()
             .filter(|info| !self.constant_initializers.contains_key(&info.id))
+    }
+
+    pub(super) fn scoped_constant_binding(
+        &self, name: &str, scope: Option<&str>,
+        bindings: Option<&verum_common::Map<verum_common::Text, super::context::FunctionInfo>>,
+        inspect_runtime_bindings: bool,
+    ) -> Option<super::context::FunctionInfo> {
+        let root = name.split('.').next().unwrap_or(name);
+        if inspect_runtime_bindings
+            && (self.ctx.lookup_var(root).is_some()
+                || self.ctx.const_generic_params.contains(root))
+        {
+            return None;
+        }
+        let info = if name.contains('.') {
+            self.constant_integer_binding(name, scope)
+        } else { inspect_runtime_bindings.then(|| self.lexical_constant(name).cloned()).flatten().or_else(|| bindings.and_then(|bindings| bindings.get(&verum_common::Text::from(name))).cloned())
+            .or_else(|| {
+                (!inspect_runtime_bindings).then(|| {
+                    self.module_constant_bindings.get(&(
+                        verum_common::Text::from(scope.unwrap_or_default()),
+                        verum_common::Text::from(name),
+                    )).cloned()
+                }).flatten()
+            })
+            .or_else(|| self.constant_integer_binding(name, scope)) };
+        info.filter(|info| info.is_const && info.param_count == 0)
     }
 
     pub(super) fn const_eval_i64(&self, expr: &verum_ast::expr::Expr) -> CodegenResult<Option<i64>> {
@@ -44769,26 +44804,7 @@ impl VbcCodegen {
         match &expr.kind {
             ExprKind::Path(_) | ExprKind::Field { .. } => {
                 let Some(name) = Self::constant_integer_name(expr) else { return Ok(None) };
-                let root = name.split('.').next().unwrap_or(&name);
-                if inspect_runtime_bindings
-                    && (self.ctx.lookup_var(root).is_some()
-                        || self.ctx.const_generic_params.contains(root))
-                {
-                    return Ok(None);
-                }
-                let info = if name.contains('.') {
-                    self.constant_integer_binding(&name, scope)
-                } else { inspect_runtime_bindings.then(|| self.lexical_constant(&name).cloned()).flatten().or_else(|| bindings.and_then(|bindings| bindings.get(&verum_common::Text::from(name.as_str()))).cloned())
-                    .or_else(|| {
-                        (!inspect_runtime_bindings).then(|| {
-                            self.module_constant_bindings.get(&(
-                                verum_common::Text::from(scope.unwrap_or_default()),
-                                verum_common::Text::from(name.as_str()),
-                            )).cloned()
-                        }).flatten()
-                    })
-                    .or_else(|| self.constant_integer_binding(&name, scope)) };
-                let Some(info) = info.filter(|info| info.is_const && info.param_count == 0)
+                let Some(info) = self.scoped_constant_binding(&name, scope, bindings, inspect_runtime_bindings)
                 else { return Ok(None) };
                 // Source initializers retain their scalar type and checked
                 // intermediates. A legacy inline integer carrier alone loses

@@ -472,7 +472,7 @@ impl VbcCodegen {
                 TypeRef::Slice(inner) => Some(TypeRef::Slice(Box::new(nested(inner, active)?))),
                 // Rank-2 signatures are not certified as ordinary callables.
                 TypeRef::Rank2Function { .. } => None,
-                TypeRef::Concrete(_) | TypeRef::Generic(_) | TypeRef::ConstValue(_) => {
+                TypeRef::Concrete(_) | TypeRef::Generic(_) | TypeRef::ConstValue(_) | TypeRef::ConstSequence(_) => {
                     Some(ty.clone())
                 }
             }

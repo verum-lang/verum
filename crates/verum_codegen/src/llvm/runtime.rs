@@ -233,6 +233,33 @@ impl<'ctx> RuntimeLowering<'ctx> {
         )
     }
 
+    /// Materialize a closed integer sequence in the same mutable value-slot
+    /// storage as a source list literal. Only the initializer is static.
+    pub fn lower_constant_int_list(
+        &self, builder: &Builder<'ctx>, module: &Module<'ctx>, values: &[i64],
+    ) -> Result<PointerValue<'ctx>> {
+        let count = values.len() as u64;
+        let list = self.lower_new_list_with_capacity(builder, module, count)?;
+        if values.is_empty() { return Ok(list); }
+        let scalar = self.context.i64_type();
+        let words: Vec<_> = values.iter().map(|&value| scalar.const_int(value as u64, true)).collect();
+        let literal = scalar.const_array(&words);
+        let data = module.add_global(scalar.array_type(values.len() as u32), None, "const_sequence_data");
+        data.set_linkage(verum_llvm::module::Linkage::Private);
+        data.set_initializer(&literal);
+        data.set_constant(true);
+        let address = self.list_field_address(builder, list, LIST_PTR_OFFSET, "sequence_data_slot")?;
+        let backing = builder.build_load(scalar, address, "sequence_backing").or_llvm_err()?.into_int_value();
+        let backing = builder.build_int_to_ptr(backing, self.context.ptr_type(AddressSpace::default()), "sequence_data").or_llvm_err()?;
+        builder.build_call(self.get_or_declare_memcpy(module), &[
+            backing.into(), data.as_pointer_value().into(),
+            scalar.const_int(count * std::mem::size_of::<i64>() as u64, false).into()
+        ], "").or_llvm_err()?;
+        let length = self.list_field_address(builder, list, LIST_LEN_OFFSET, "sequence_length")?;
+        builder.build_store(length, scalar.const_int(count, false)).or_llvm_err()?;
+        Ok(list)
+    }
+
     fn lower_new_list_storage(
         &self,
         builder: &Builder<'ctx>,

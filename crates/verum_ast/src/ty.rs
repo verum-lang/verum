@@ -817,6 +817,23 @@ pub enum GenericArg {
 }
 
 impl GenericArg {
+    /// A bare name may denote a constant or a caller's value binder. Only
+    /// the selected declaration can assign the value role to this syntax.
+    pub fn value_for_declared_slot(&self) -> Option<std::borrow::Cow<'_, crate::Expr>> {
+        use std::borrow::Cow;
+        match self {
+            Self::Const(expression) => Some(Cow::Borrowed(expression)),
+            Self::Type(ty) => match &ty.kind {
+                TypeKind::Path(path) => Some(Cow::Owned(crate::Expr::new(
+                    crate::ExprKind::Path(path.clone()),
+                    ty.span,
+                ))),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
     /// Project syntax only after a declaration assigns this argument a universe
     /// slot. Names remain unresolved: the consumer must prove lexical ownership.
     /// An inference hole is distinct from an invalid or unbound argument.

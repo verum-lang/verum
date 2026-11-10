@@ -95,6 +95,7 @@ impl<'ctx> TypeLowering<'ctx> {
             // CONST-GENERIC-VALUE-CARRY-1: a const-generic VALUE argument
             // is an integer at the value level.
             TypeRef::ConstValue(_) => Ok(self.i64_type.into()),
+            TypeRef::ConstSequence(_) => Ok(self.ptr_type.into()),
         }
     }
 

@@ -944,6 +944,7 @@ impl VbcModule {
             // Const-generic VALUE argument renders as its literal —
             // `StackAllocator<256>` round-trips as written.
             TypeRef::ConstValue(v) => v.to_string(),
+            TypeRef::ConstSequence(values) => values.to_string(),
             TypeRef::RecordFieldProjection { owner, ordinal } =>
                 format!("<record-field {}#{ordinal}>", self.display_type_id(*owner)),
         }

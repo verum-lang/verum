@@ -623,7 +623,7 @@ impl ModuleMerger {
                 element: Box::new(resolve(element)?), length: *length,
             },
             TypeRef::Slice(element) => TypeRef::Slice(Box::new(resolve(element)?)),
-            TypeRef::Concrete(_) | TypeRef::Generic(_) | TypeRef::ConstValue(_)
+            TypeRef::Concrete(_) | TypeRef::Generic(_) | TypeRef::ConstValue(_) | TypeRef::ConstSequence(_)
                 | TypeRef::RecordFieldProjection { .. } => ty.clone(),
         })
     }

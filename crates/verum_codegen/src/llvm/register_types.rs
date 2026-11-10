@@ -468,6 +468,7 @@ impl RegisterType {
             // CONST-GENERIC-VALUE-CARRY-1: a const-generic VALUE argument
             // is an integer at the value level.
             TypeRef::ConstValue(_) => Self::Int,
+            TypeRef::ConstSequence(_) => Self::List { element: None },
         }
     }
 

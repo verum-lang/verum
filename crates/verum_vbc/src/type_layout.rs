@@ -69,7 +69,7 @@ fn signedness<'a>(
             }
         }
         TypeRef::Generic(_) | TypeRef::AssociatedProjection { .. } | TypeRef::RecordFieldProjection { .. }
-        | TypeRef::ConstValue(_) => None,
+        | TypeRef::ConstValue(_) | TypeRef::ConstSequence(_) => None,
         TypeRef::Array { .. } | TypeRef::Slice(_) | TypeRef::Reference { .. } | TypeRef::Tuple(_)
         | TypeRef::Function { .. } | TypeRef::Rank2Function { .. } => Some(false),
     }
@@ -130,7 +130,7 @@ fn layout<'a>(
         | TypeRef::Slice(_)
         | TypeRef::AssociatedProjection { .. }
         | TypeRef::RecordFieldProjection { .. }
-        | TypeRef::ConstValue(_) => None,
+        | TypeRef::ConstValue(_) | TypeRef::ConstSequence(_) => None,
     }
 }
 

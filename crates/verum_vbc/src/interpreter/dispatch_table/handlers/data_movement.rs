@@ -121,6 +121,11 @@ pub(in super::super) fn handle_loadt(
         state.set_reg(dst, Value::from_i64(value));
         return Ok(DispatchResult::Continue);
     }
+    if let crate::types::TypeRef::ConstSequence(sequence) = tr {
+        let value = load_const_sequence(state, &sequence)?;
+        state.set_reg(dst, value);
+        return Ok(DispatchResult::Continue);
+    }
     fn dispatch_head(module: &crate::module::VbcModule, ty: &crate::types::TypeRef, depth: usize)
         -> Result<Option<crate::types::TypeId>, String>
     {
@@ -139,7 +144,7 @@ pub(in super::super) fn handle_loadt(
             TypeRef::Function { .. } | TypeRef::Rank2Function { .. } | TypeRef::Tuple(_) => Ok(Some(crate::types::TypeId::UNIT)),
             TypeRef::Generic(id) => Err(format!("unresolved generic witness slot {}", id.0)),
             TypeRef::RecordFieldProjection { .. } => Err("unresolved dependent field witness".into()),
-            TypeRef::ConstValue(_) => Err("a value witness cannot be used as a type head".into()),
+            TypeRef::ConstValue(_) | TypeRef::ConstSequence(_) => Err("a value witness cannot be used as a type head".into()),
         }
     }
     let resolved = dispatch_head(&state.module, &tr, 0).map_err(|message|
@@ -151,6 +156,16 @@ pub(in super::super) fn handle_loadt(
         }),
     }
     Ok(DispatchResult::Continue)
+}
+
+fn load_const_sequence(state: &mut InterpreterState, value: &crate::const_sequence::ConstSequence) -> InterpreterResult<Value> {
+    use crate::const_sequence::ConstSequence;
+    let elements = match value {
+        ConstSequence::Integers(values) => values.iter().copied().map(Value::from_i64).collect(),
+        ConstSequence::Arrays(arrays) => arrays.iter().map(|array| load_const_sequence(state, array))
+            .collect::<InterpreterResult<_>>()?,
+    };
+    super::super::alloc_list_from_values(state, elements)
 }
 
 pub(in super::super) fn handle_load_smalli(
