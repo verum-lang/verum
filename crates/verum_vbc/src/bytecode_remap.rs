@@ -21,6 +21,56 @@ use crate::instruction::Instruction;
 use crate::module::{ConstId, FunctionId};
 use crate::types::{ProtocolId, StringId, TypeId};
 
+#[derive(Debug)]
+pub(crate) enum NamedOperandError {
+    Missing(u32),
+    Malformed,
+}
+
+/// Resolve only string operands. Function and type slots have independent namespaces.
+pub(crate) fn rewrite_named_operands(
+    instruction: &mut Instruction,
+    mut lookup: impl FnMut(u32) -> Option<u32>,
+) -> Result<(), NamedOperandError> {
+    use crate::encoding::{decode_reg, decode_varint, encode_varint};
+
+    let mut map = |id: u32| lookup(id).ok_or(NamedOperandError::Missing(id));
+    match instruction {
+        Instruction::CallM { method_id: id, .. }
+        | Instruction::GetFieldNamed { name: id, .. }
+        | Instruction::SetFieldNamed { name: id, .. }
+        | Instruction::Panic { message_id: id }
+        | Instruction::Assert { message_id: id, .. }
+        | Instruction::CtxGet { ctx_type: id, .. }
+        | Instruction::CtxProvide { ctx_type: id, .. } => *id = map(*id)?,
+        Instruction::CtxCheckNegative { ctx_type, func_name } => {
+            *ctx_type = map(*ctx_type)?;
+            *func_name = map(*func_name)?;
+        }
+        // A nonzero comparison hint carries the encoded receiver-name offset plus one.
+        Instruction::CmpG { protocol_id, .. } if *protocol_id != 0 => {
+            *protocol_id = map(*protocol_id - 1)?.checked_add(1).ok_or(NamedOperandError::Malformed)?;
+        }
+        Instruction::CbgrExtended { sub_op, operands }
+            if *sub_op == crate::instruction::CbgrSubOpcode::RefFieldNamed as u8 =>
+        {
+            let mut offset = 0;
+            for _ in 0..2 {
+                decode_reg(operands, &mut offset).map_err(|_| NamedOperandError::Malformed)?;
+            }
+            let start = offset;
+            let name = decode_varint(operands, &mut offset).map_err(|_| NamedOperandError::Malformed)?;
+            let name = u32::try_from(name).map_err(|_| NamedOperandError::Malformed)?;
+            if offset != operands.len() { return Err(NamedOperandError::Malformed); }
+            let mapped = map(name)?;
+            operands.truncate(start);
+            encode_varint(u64::from(mapped), operands);
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
 /// Cross-module ID remap surface. Each method takes a source-module
 /// ID and returns the destination-module ID it should be rewritten
 /// to. The default implementation is identity, so an implementor only
@@ -144,8 +194,7 @@ pub fn rewrite_instruction_ids(instr: &mut Instruction, remap: &dyn IdRemap) {
             *return_type_id = remap.map_type_id(TypeId(*return_type_id)).0;
         }
         // --- Protocol table index ---
-        Instruction::BinaryG { protocol_id, .. }
-        | Instruction::CmpG { protocol_id, .. } => {
+        Instruction::BinaryG { protocol_id, .. } => {
             *protocol_id = remap.map_protocol(ProtocolId(*protocol_id)).0;
         }
         // --- FfiExtended::CreateCallback embedded func_id ---
@@ -238,6 +287,17 @@ mod tests {
             Instruction::Call { func_id, .. } => assert_eq!(func_id, 42),
             _ => unreachable!(),
         }
+    }
+
+    #[test]
+    fn negative_context_ir_preserves_both_declaration_names() {
+        let mut instr = Instruction::CtxCheckNegative { ctx_type: 2, func_name: 5 };
+        rewrite_named_operands(&mut instr, |id| match id {
+            2 => Some(22),
+            5 => Some(55),
+            _ => None,
+        }).unwrap();
+        assert!(matches!(instr, Instruction::CtxCheckNegative { ctx_type: 22, func_name: 55 }));
     }
 
     #[test]

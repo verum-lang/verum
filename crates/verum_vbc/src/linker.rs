@@ -63,7 +63,9 @@ use std::collections::HashMap;
 use crate::archive::VbcArchive;
 mod ffi;
 
-use crate::bytecode::{decode_instruction, encode_instructions};
+use crate::bytecode::decode_instruction;
+#[cfg(test)]
+use crate::bytecode::encode_instructions;
 use crate::cfg_key::CfgKey;
 use crate::module::{
     ConstId, Constant, FunctionDescriptor, FunctionId, FunctionVariantSet, SpecializationEntry,
@@ -994,14 +996,7 @@ impl VbcLinker {
     /// Caller must update `FunctionDescriptor.bytecode_offset` /
     /// `bytecode_length` to point at the linker-side location.
     ///
-    /// Sixteen id-bearing instruction variants are handled here, the
-    /// canonical list per `crates/verum_vbc/src/instruction.rs`:
-    /// `LoadK / MetaQuote` (const_id), `Call / CallG / TailCall /
-    /// CallM / NewClosure / Spawn / GenCreate` (func_id / method_id),
-    /// `New / NewG / MetaReflect / MakeVariantTyped / MakePi`
-    /// (type_id / return_type_id), `BinaryG / CmpG` (protocol_id).
-    /// Every other variant (~200 of them) carries no module-local ID
-    /// and passes through untouched.
+    /// Function, type, constant, string and FFI operands use separate local namespaces.
     fn rewrite_function_bytecode(
         &self,
         src_bytes: &[u8],
@@ -1047,6 +1042,14 @@ impl VbcLinker {
         }
         crate::bytecode::jump_offsets_to_instr_indices(&mut instructions);
         for instr in instructions.iter_mut() {
+            crate::bytecode_remap::rewrite_named_operands(instr, |id| {
+                remap.map_string(StringId(id)).ok().map(|mapped| mapped.0)
+            }).map_err(|error| match error {
+                crate::bytecode_remap::NamedOperandError::Missing(source_id) =>
+                    LinkError::DanglingReference { kind: "string operand", source_id },
+                crate::bytecode_remap::NamedOperandError::Malformed =>
+                    LinkError::TruncatedBytecode { offset: 0, want: src_bytes.len() },
+            })?;
             crate::bytecode_remap::rewrite_instruction_ids(instr, remap);
             remap.ffi.relocate_instruction(instr)?;
             if let Some(source_id) = remap.missing_function_operand.take() {

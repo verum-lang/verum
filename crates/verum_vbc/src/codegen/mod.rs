@@ -24972,96 +24972,10 @@ impl VbcCodegen {
             // Remap string IDs and func_ids in instructions
             let remapped_instructions: Vec<Instruction> = func.instructions.iter().map(|instr| {
                 let mut i = instr.clone();
+                crate::bytecode_remap::rewrite_named_operands(&mut i, |id| {
+                    string_id_map.get(id as usize).map(|mapped| mapped.0)
+                }).map_err(|error| CodegenError::internal(format!("invalid string operand in function body: {error:?}")))?;
                 match &mut i {
-                    Instruction::CallM { method_id, .. } => {
-                        if let Some(mapped) = string_id_map.get(*method_id as usize) {
-                            *method_id = mapped.0;
-                        }
-                    }
-                    // FIELD-ACCESS-BYNAME-1: `name` is a STRING id
-                    // (field name) — same codegen-index → module
-                    // StringId rebase as CallM.method_id. Without
-                    // this, the runtime resolves the codegen-local
-                    // index against the final string table and the
-                    // by-name lookup misses (or hits an arbitrary
-                    // string) — the RETNAME-CARRY lesson.
-                    Instruction::GetFieldNamed { name, .. }
-                    | Instruction::SetFieldNamed { name, .. } => {
-                        if let Some(mapped) = string_id_map.get(*name as usize) {
-                            *name = mapped.0;
-                        } else if std::env::var("VERUM_TRACE_BYNAME").is_ok() {
-                            eprintln!(
-                                "[byname-encode-miss] sid={} map_len={}",
-                                *name,
-                                string_id_map.len()
-                            );
-                        }
-                    }
-                    // #42/#47: RefFieldNamed's varint string id gets the
-                    // same codegen-index → module StringId rebase.
-                    Instruction::CbgrExtended { sub_op, operands }
-                        if *sub_op
-                            == crate::instruction::CbgrSubOpcode::RefFieldNamed as u8 =>
-                    {
-                        if let Some(new_ops) =
-                            remap_ref_field_named_operands(operands, |sid| {
-                                string_id_map
-                                    .get(sid as usize)
-                                    .map(|m| m.0)
-                                    .unwrap_or(sid)
-                            })
-                        {
-                            *operands = new_ops;
-                        }
-                    }
-                    // Remap protocol_id in CmpG from codegen string index to module StringId.
-                    // protocol_id encodes (codegen_string_index + 1), with 0 meaning no protocol.
-                    Instruction::CmpG { protocol_id, .. }
-                        if *protocol_id > 0 => {
-                            let codegen_idx = (*protocol_id - 1) as usize;
-                            if let Some(mapped) = string_id_map.get(codegen_idx) {
-                                *protocol_id = mapped.0 + 1;
-                            }
-                        }
-                    // Note: IsVar/AsVar tag fields are numeric variant/field indices, NOT string IDs
-                    Instruction::Panic { message_id } => {
-                        if let Some(mapped) = string_id_map.get(*message_id as usize) {
-                            *message_id = mapped.0;
-                        }
-                    }
-                    Instruction::Assert { message_id, .. } => {
-                        if let Some(mapped) = string_id_map.get(*message_id as usize) {
-                            *message_id = mapped.0;
-                        }
-                    }
-                    // Context type identifiers carry interned names through the
-                    // codegen→runtime boundary the same way method/protocol names
-                    // do — without remapping, the runtime resolves the codegen-
-                    // local index against the byte-offset string table and prints
-                    // `Context unknown not provided` instead of the actual
-                    // context name (e.g. `Database`).
-                    Instruction::CtxGet { ctx_type, .. } => {
-                        if let Some(mapped) = string_id_map.get(*ctx_type as usize) {
-                            *ctx_type = mapped.0;
-                        }
-                    }
-                    Instruction::CtxProvide { ctx_type, .. } => {
-                        if let Some(mapped) = string_id_map.get(*ctx_type as usize) {
-                            *ctx_type = mapped.0;
-                        }
-                    }
-                    Instruction::CtxCheckNegative { ctx_type, func_name } => {
-                        if let Some(mapped) = string_id_map.get(*ctx_type as usize) {
-                            *ctx_type = mapped.0;
-                        }
-                        if let Some(mapped) = string_id_map.get(*func_name as usize) {
-                            *func_name = mapped.0;
-                        }
-                    }
-                    // Remap func_id references to contiguous 0-based IDs.
-                    // Cross-module references re-home into the reserved
-                    // XMOD band instead (XMOD-CALL-ID-BAND-1) so the two
-                    // id spaces stay disjoint in the emitted bytecode.
                     Instruction::Call { func_id, .. }
                     | Instruction::TailCall { func_id, .. }
                     | Instruction::NewClosure { func_id, .. }
@@ -25106,8 +25020,8 @@ impl VbcCodegen {
                     }
                     _ => {}
                 }
-                i
-            }).collect();
+                Ok(i)
+            }).collect::<CodegenResult<_>>()?;
 
             // Encode instructions to bytecode (with jump offset fixup)
             let mut bytecode = Vec::new();
@@ -27880,138 +27794,23 @@ impl VbcCodegen {
 }
 
 impl VbcCodegen {
-    /// Per-instruction string-id remap from archive's byte-offset
-    /// StringId space to the codegen-internal sequential string
-    /// index. Called as a SECOND pass after
-    /// [`crate::bytecode_remap::rewrite_instruction_ids`] which
-    /// (deliberately, for linker compatibility) leaves these fields
-    /// untouched.
-    ///
-    /// `archive_module` provides the source string table — every
-    /// archive StringId resolves to a UTF-8 text via
-    /// `archive_module.strings.get(StringId)` and we re-intern that
-    /// text into `ctx.strings` to obtain the codegen-internal index
-    /// the finalize-time `string_id_map` will resolve to a final
-    /// module-level StringId.
+    /// Intern a serialized body's string operands into the current codegen string table.
     fn remap_archive_string_operands(
         &mut self,
         instr: &mut crate::instruction::Instruction,
         archive_module: &crate::module::VbcModule,
     ) {
-        use crate::instruction::Instruction;
-        let intern_archive = |this: &mut Self, archive_sid: u32| -> u32 {
-            let text = match archive_module.strings.get(crate::types::StringId(archive_sid))
-            {
-                Some(s) => s.to_string(),
-                None => {
-                    // #47 oracle: a silent passthrough here leaks a
-                    // foreign-scheme sid straight into the final module.
-                    if std::env::var("VERUM_TRACE_BYNAME").is_ok() {
-                        eprintln!(
-                            "[archive-intern-miss] sid={} archive_strings_len={}",
-                            archive_sid,
-                            archive_module.strings.len(),
-                        );
-                    }
-                    return archive_sid;
-                }
-            };
-            this.ctx.intern_string_raw(&text)
-        };
-        match instr {
-            Instruction::CallM { method_id, .. } => {
-                let new_id = intern_archive(self, *method_id);
-                *method_id = new_id;
-            }
-            // FIELD-ACCESS-BYNAME-1: field-name string rides the same
-            // archive→codegen intern rebase as CallM.method_id.
-            Instruction::GetFieldNamed { name, .. }
-            | Instruction::SetFieldNamed { name, .. } => {
-                let new_id = intern_archive(self, *name);
-                *name = new_id;
-            }
-            // #42/#47 third by-name door: RefFieldNamed rides a raw
-            // CbgrExtended operand vector — its varint STRING id needs
-            // the same archive→codegen intern rebase or the raw id
-            // leaks into the final module (the 82-warn no-name class).
-            Instruction::CbgrExtended { sub_op, operands }
-                if *sub_op == crate::instruction::CbgrSubOpcode::RefFieldNamed as u8 =>
-            {
-                if let Some(new_ops) =
-                    remap_ref_field_named_operands(operands, |sid| intern_archive(self, sid))
-                {
-                    *operands = new_ops;
-                }
-            }
-            Instruction::Panic { message_id } => {
-                let new_id = intern_archive(self, *message_id);
-                *message_id = new_id;
-            }
-            Instruction::Assert { message_id, .. } => {
-                let new_id = intern_archive(self, *message_id);
-                *message_id = new_id;
-            }
-            Instruction::CtxGet { ctx_type, .. } => {
-                let new_id = intern_archive(self, *ctx_type);
-                *ctx_type = new_id;
-            }
-            Instruction::CtxProvide { ctx_type, .. } => {
-                let new_id = intern_archive(self, *ctx_type);
-                *ctx_type = new_id;
-            }
-            Instruction::CtxCheckNegative { ctx_type, func_name } => {
-                let new_ctx = intern_archive(self, *ctx_type);
-                *ctx_type = new_ctx;
-                let new_fn = intern_archive(self, *func_name);
-                *func_name = new_fn;
-            }
-            // CmpG.protocol_id uses (string_idx + 1) encoding when
-            // > 0 — pass through the +1 offset.
-            Instruction::CmpG { protocol_id, .. } if *protocol_id > 0 => {
-                let archive_sid = *protocol_id - 1;
-                let new_id = intern_archive(self, archive_sid);
-                *protocol_id = new_id + 1;
-            }
-            _ => {}
+        let result = crate::bytecode_remap::rewrite_named_operands(instr, |id| {
+            archive_module
+                .get_string(crate::types::StringId(id))
+                .map(|name| self.intern_string(name))
+        });
+        if let Err(error) = result {
+            self.record_source_declaration_error(CodegenError::internal(format!(
+                "invalid string operand in imported {} body: {error:?}", archive_module.name
+            )));
         }
     }
-}
-
-
-/// #42/#47 — remap the varint STRING id inside a serialized
-/// `CbgrExtended{ sub_op: RefFieldNamed (0x0E) }` operand vector.
-/// Layout: `[reg:dst][reg:base][varint:name]` where regs are 1 byte
-/// (<0x80) or 2 bytes (0x80|hi, lo). Returns None when the vector is
-/// malformed (leave untouched — the interpreter will produce its loud
-/// typed error rather than us guessing).
-fn remap_ref_field_named_operands(
-    operands: &[u8],
-    mut map: impl FnMut(u32) -> u32,
-) -> Option<Vec<u8>> {
-    let mut cursor = 0usize;
-    for _ in 0..2 {
-        cursor += if *operands.get(cursor)? & 0x80 != 0 { 2 } else { 1 };
-    }
-    let mut sid: u64 = 0;
-    let mut shift = 0u32;
-    let mut i = cursor;
-    loop {
-        let b = *operands.get(i)?;
-        sid |= ((b & 0x7F) as u64) << shift;
-        i += 1;
-        if b & 0x80 == 0 {
-            break;
-        }
-        shift += 7;
-        if shift >= 64 {
-            return None;
-        }
-    }
-    let new_sid = map(sid as u32) as u64;
-    let mut out = operands[..cursor].to_vec();
-    crate::encoding::encode_varint(new_sid, &mut out);
-    out.extend_from_slice(&operands[i..]);
-    Some(out)
 }
 
 /// Helper IdRemap implementation used by [`VbcCodegen::merge_archive_function_bodies`]
