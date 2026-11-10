@@ -263,6 +263,56 @@ fn check_with_source_core(core: &Path, entry: &Path, source: &str) -> Output {
 }
 
 #[test]
+fn recursive_protocol_bounds_use_the_selected_source_parameters() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    let entry = root.join("main.vr");
+    let core = write_source_core(
+        root,
+        &[
+            ("source", ""),
+            ("foreign", "module core.foreign; public type Feed is { value: Int };"),
+        ],
+    );
+    let feed = "public type Feed<T> is protocol {
+        type Item;
+        type Output: Pipeline<Item = Self.Item>;
+        fn produce(self) -> Self.Output;
+    };";
+    for (application, diagnostic) in [
+        ("Feed<Int, Output = U>", None),
+        ("Feed<Output = U>", Some("missing type argument")),
+        ("Feed<3, Output = U>", Some("requires a type argument")),
+        ("Missing<Output = U>", Some("type not found: Missing")),
+        ("Foreign<Output = U>", Some("core.foreign.Feed")),
+    ] {
+        let pipeline = format!(
+            "public type Pipeline is protocol {{
+            type Item;
+            fn flatten<U: Pipeline>(self) -> Int where Self.Item: {application} {{ 7 }}
+        }};"
+        );
+        for declarations in [format!("{feed}\n{pipeline}"), format!("{pipeline}\n{feed}")] {
+            std::fs::write(
+                core.join("source.vr"),
+                format!("module core.source; mount core.foreign.Feed as Foreign;\n{declarations}"),
+            )
+            .unwrap();
+            let out = check_with_source_core(&core, &entry, "mount core.source.Feed; fn main() {}");
+            let log = format!(
+                "{}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            assert_eq!(out.status.success(), diagnostic.is_none(), "{application}: {log}");
+            if let Some(diagnostic) = diagnostic {
+                assert!(log.contains(diagnostic), "{application}: {log}");
+            }
+        }
+    }
+}
+
+#[test]
 fn protocol_signatures_resolve_the_entry_files_source_mounts() {
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path();

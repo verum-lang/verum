@@ -83,6 +83,16 @@ impl TypeChecker {
         let (parameters, arity) = if let Some(header) = self.source_type_registration.headers.iter().rev()
             .find(|header| header.identity == identity) {
             (Some(header.parameters.clone()), header.parameters.len())
+        } else if let Some(declaration) = self.source_type_registration.pending.get(&identity)
+            && matches!(declaration.body, verum_ast::TypeDeclBody::Protocol(_))
+        {
+            // An associated bound can reach this protocol before its members
+            // have finished elaborating. Its selected source already owns its
+            // parameters. Conformance still requires the completed protocol.
+            (
+                Some(std::sync::Arc::new(declaration.generics.clone())),
+                declaration.generics.len(),
+            )
         } else {
             let checker = self.protocol_checker.read();
             let declaration = checker
