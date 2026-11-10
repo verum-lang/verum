@@ -1,0 +1,22 @@
+module core.database.sqlite.native.migrations.journal_codec;
+
+mount core.base.maybe.Maybe;
+mount core.base.result.Result;
+mount core.text.text.Text;
+mount core.database.common.error.{DbError, AdapterSpecific, AdSqlite};
+mount core.database.common.migrations.migration.{MigrationStatus, MsPending, MsApplied, MsRolledBack, MsFailed};
+
+fn invalid(detail: Text) -> DbError {
+    DbError.Adapter(AdapterSpecific.new(AdSqlite, "migration_journal_invalid", detail, false))
+}
+
+/// A journal status is defined jointly by its tag, timestamp and failure text.
+public fn decode_status(tag: Text, applied_at: Maybe<Int64>, error: Maybe<Text>) -> Result<MigrationStatus, DbError> {
+    match (tag, applied_at, error) {
+        ("pending", Maybe.None, Maybe.None) => Result.Ok(MsPending),
+        ("applied", Maybe.Some(t), Maybe.None) => Result.Ok(MsApplied(t)),
+        ("rolled_back", Maybe.Some(t), Maybe.None) => Result.Ok(MsRolledBack(t)),
+        ("failed", Maybe.None, Maybe.Some(message)) => Result.Ok(MsFailed(message)),
+        _ => Result.Err(invalid("unknown status or inconsistent status fields")),
+    }
+}

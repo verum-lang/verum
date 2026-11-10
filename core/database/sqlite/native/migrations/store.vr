@@ -43,6 +43,7 @@ mount core.database.common.migrations.migration.{
 mount core.database.common.migrations.journal.{
     MigrationJournal, JournalEntry,
 };
+mount core.database.sqlite.native.migrations.journal_codec.decode_status;
 mount core.database.sqlite.native.l6_session.connection.{SqliteNativeConnection};
 
 // =============================================================================
@@ -150,16 +151,6 @@ fn render_status(s: &MigrationStatus) -> (Text, Maybe<Int64>, Maybe<Text>) {
     }
 }
 
-fn parse_status(text: &Text, applied_at: Maybe<Int64>, error: Maybe<Text>) -> MigrationStatus {
-    match text.as_str() {
-        "pending"      => MsPending,
-        "applied"      => MsApplied(applied_at.unwrap_or(0_i64)),
-        "rolled_back"  => MsRolledBack(applied_at.unwrap_or(0_i64)),
-        "failed"       => MsFailed(error.unwrap_or_else(|| "".to_text())),
-        _              => MsPending,
-    }
-}
-
 fn sql_text_literal(t: &Text) -> Text {
     let bs = t.as_bytes();
     let mut out = Text.new();
@@ -197,7 +188,7 @@ async fn query_journal_rows(conn: &mut SqliteNativeConnection, sql: &Text) -> Re
         entries.push(JournalEntry {
             version: version as Int,
             name: name,
-            status: parse_status(&status_txt, applied_at, error),
+            status: decode_status(status_txt, applied_at, error)?,
             checksum: checksum,
         });
         i = i + 1;

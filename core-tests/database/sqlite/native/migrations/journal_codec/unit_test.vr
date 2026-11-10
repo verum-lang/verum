@@ -1,0 +1,40 @@
+mount core.database.sqlite.native.migrations.journal_codec.decode_status;
+mount core.database.common.migrations.migration.MigrationStatus;
+mount core.database.common.error.DbError;
+mount core.base.result.Result;
+mount core.base.maybe.Maybe;
+
+@test
+fn test_journal_status_retains_the_payload_declared_by_each_tag() {
+    match decode_status("pending", Maybe.None, Maybe.None) {
+        Result.Ok(MigrationStatus.MsPending) => {}, _ => panic("pending status"),
+    }
+    match decode_status("applied", Maybe.Some(0_i64), Maybe.None) {
+        Result.Ok(MigrationStatus.MsApplied(t)) => assert_eq(t, 0_i64), _ => panic("applied timestamp"),
+    }
+    match decode_status("rolled_back", Maybe.Some(19_i64), Maybe.None) {
+        Result.Ok(MigrationStatus.MsRolledBack(t)) => assert_eq(t, 19_i64), _ => panic("rollback timestamp"),
+    }
+    match decode_status("failed", Maybe.None, Maybe.Some("disk-full")) {
+        Result.Ok(MigrationStatus.MsFailed(message)) => assert_eq(message, "disk-full"), _ => panic("failure text"),
+    }
+}
+
+fn assert_invalid_journal_status(tag: Text, stamp: Maybe<Int64>, detail: Maybe<Text>) {
+    match decode_status(tag, stamp, detail) {
+        Result.Err(DbError.Adapter(_)) => {}, _ => panic("corrupt journal status accepted"),
+    }
+}
+
+@test
+fn test_unknown_and_inconsistent_journal_statuses_return_adapter_errors() {
+    assert_invalid_journal_status("unknown", Maybe.None, Maybe.None);
+    assert_invalid_journal_status("applied", Maybe.None, Maybe.None);
+    assert_invalid_journal_status("rolled_back", Maybe.None, Maybe.None);
+    assert_invalid_journal_status("failed", Maybe.None, Maybe.None);
+    assert_invalid_journal_status("pending", Maybe.Some(0_i64), Maybe.None);
+    assert_invalid_journal_status("applied", Maybe.Some(19_i64), Maybe.Some("conflicting"));
+    assert_invalid_journal_status("failed", Maybe.Some(19_i64), Maybe.Some("conflicting"));
+}
+
+fn main() {}
