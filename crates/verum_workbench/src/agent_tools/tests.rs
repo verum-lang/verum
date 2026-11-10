@@ -36,6 +36,15 @@ fn an_analysis_approval_cannot_select_another_operation() {
 }
 
 #[test]
+fn project_tool_forwards_source_continuations_to_the_project_inspector() {
+    let args = json!({"after":"packages/io/src/main.vr","limit":128});
+    let (method, params) = operation(&json!({"tool":"verum_project","arguments":args})).unwrap();
+    assert_eq!(method, "project.inspect");
+    assert_eq!(params, args);
+    assert_eq!(Role::Reviewer.review_kind("verum_project"), Some("read"));
+}
+
+#[test]
 fn saved_and_unsaved_analysis_keep_their_revision_and_default_operation() {
     for args in [
         json!({"path":"module.vr"}),

@@ -1,6 +1,7 @@
 // English keys are also the English catalog. Values are the Russian catalog.
 // Interpolate named placeholders only; never translate source or evidence payloads.
 export const translations = {
+  'Load more source files': 'Загрузить ещё исходники',
   'The recorded location does not match this source revision.': 'Этой позиции соответствует другая версия исходника.',
   'Error': 'Ошибка',
   'Warning': 'Предупреждение',

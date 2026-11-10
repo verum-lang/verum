@@ -1,5 +1,5 @@
 import { Conversation } from './conversation';
-import { projectSourceIndex, workspaceFilePath } from './project-tree';
+import { continueSourcePage, projectSourceIndex, workspaceFilePath, type SourcePage } from './project-tree';
 import './style.css';
 import { runtimeSourceLine, runtimeSourceRange } from './runtime';
 import { lintPage, type LintFile, type LintFinding, type LintReport } from './lint';
@@ -511,20 +511,43 @@ async function inspectProject() {
   const list = $('project-content');
   list.setAttribute('aria-busy', 'true');
   try {
-    const project = await api<{ workspace: { root: string; files: FileRecord[] }; analysis: ProjectAnalysis }>('project.inspect');
+    const limit = 128;
+    const project = await api<{ workspace: SourcePage; analysis: ProjectAnalysis }>('project.inspect', { limit });
     if (request !== projectRequest) return;
     lastProject = { root: project.workspace.root, analysis: project.analysis }; drawTopology();
     const index = projectSourceIndex(project.workspace.root, project.analysis.sources ?? [], project.analysis.documents);
-    const rows = document.createDocumentFragment();
-    for (const issue of project.analysis.issues ?? []) rows.append(node('p', 'muted', issue));
-    for (const file of project.workspace.files) {
-      const digest = index.get(file.path);
-      const status = digest === undefined ? m('Not analyzed') : digest === null ? m('Indexed source') : digest.slice(0, 10);
-      const entry = button('', () => openFile(file.path), 'project-file');
-      entry.append(node('span', '', file.path), node('span', 'muted', status));
-      rows.append(entry);
+    function appendPage(page: SourcePage, previous?: HTMLButtonElement) {
+      const rows = document.createDocumentFragment();
+      for (const file of page.files) {
+        const digest = index.get(file.path);
+        const status = digest === undefined ? m('Not analyzed') : digest === null ? m('Indexed source') : digest.slice(0, 10);
+        const entry = button('', () => openFile(file.path), 'project-file');
+        entry.append(node('span', '', file.path), node('span', 'muted', status));
+        rows.append(entry);
+      }
+      const first = rows.firstElementChild as HTMLButtonElement | null;
+      const after = page.next;
+      if (after) {
+        const more = button(m('Load more source files'), async () => {
+          if (more.getAttribute('aria-busy') === 'true') return;
+          more.setAttribute('aria-busy', 'true');
+          try {
+            const next = await continueSourcePage(page, cursor => api<SourcePage>('workspace.list', { after: cursor, limit }),
+              () => request === projectRequest);
+            if (next) appendPage(next, more);
+          } finally { more.removeAttribute('aria-busy'); }
+        });
+        rows.append(more);
+      }
+      if (previous) {
+        const focused = previous === document.activeElement;
+        const target = first ?? previous.previousElementSibling;
+        previous.replaceWith(rows);
+        if (focused && target instanceof HTMLButtonElement) target.focus({ preventScroll: true });
+      } else list.append(rows);
     }
-    list.replaceChildren(rows);
+    list.replaceChildren(...(project.analysis.issues ?? []).map(issue => node('p', 'muted', issue)));
+    appendPage(project.workspace);
   } finally {
     if (request === projectRequest) list.removeAttribute('aria-busy');
   }

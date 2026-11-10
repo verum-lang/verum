@@ -37,6 +37,58 @@ fn symlink_sources_and_directories_are_not_workspace_capabilities() {
     assert!(workspace.read("link.vr").is_err());
     assert_eq!(workspace.list().unwrap()["files"], json!([]));
 }
+
+#[test]
+fn paged_inventory_crosses_the_old_file_and_depth_limits_in_path_order() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    let deep = "nested/".repeat(24) + "end.vr";
+    let mut expected = vec![
+        "a.vr".to_owned(),
+        "a/b.vr".into(),
+        "a0.vr".into(),
+        deep.clone(),
+    ];
+    for i in 0..2050 {
+        expected.push(format!("pkg/{:02}/part{i:04}.vr", i % 16));
+    }
+    for file in expected
+        .iter()
+        .map(String::as_str)
+        .chain([".hidden/private.vr", "pkg/target/build.vr"])
+    {
+        let path = root.join(file);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, "").unwrap();
+    }
+    expected.sort();
+    let workspace = Workspace::open(root).unwrap();
+    let first = workspace.list().unwrap();
+    let paths = |page: &serde_json::Value| {
+        page["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entry| entry["path"].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(paths(&first), expected[..2000]);
+    let cursor = first["next"].as_str().unwrap();
+    assert_eq!(cursor, expected[1999]);
+    std::fs::remove_file(root.join(cursor)).unwrap();
+    let second = workspace.source_page(Some(cursor), 2000).unwrap();
+    assert_eq!(paths(&second), expected[2000..]);
+    assert!(second["next"].is_null());
+    assert_eq!(
+        paths(&workspace.source_page(Some("a.vr"), 1).unwrap()),
+        ["a/b.vr"]
+    );
+    for cursor in ["../x.vr", "/x.vr", ".hidden/file.vr", "a//b.vr"] {
+        assert!(workspace.source_page(Some(cursor), 1).is_err());
+    }
+    assert!(workspace.source_page(None, 0).is_err());
+    assert!(workspace.source_page(None, 2001).is_err());
+}
 #[test]
 fn local_api_rejects_cross_origin_and_dns_rebinding() {
     assert!(authorized(

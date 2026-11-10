@@ -194,8 +194,8 @@ fn define_tools() -> Vec<Tool> {
         ),
         (
             "verum_project", Route::Project,
-            "Inspect workspace source inventory and revision-bound analyzed documents shared with Studio. Coverage is analyzed documents only, not a whole-project build or proof.",
-            json!({}),
+            "Inspect a page of workspace sources and the revision-bound analysis shared with Studio. Pass workspace.next as after to continue in path order. Compiler coverage is reported for analyzed documents.",
+            json!({"after":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":crate::workspace::Workspace::MAX_SOURCE_PAGE}}),
             json!([]),
         ),
         (

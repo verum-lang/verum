@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { projectSourceIndex, workspaceFilePath, projectedTree, visibleTree, changedDirectories, retainedTreeFocus, type ProjectEntry } from '../src/project-tree.ts';
+import { continueSourcePage, projectSourceIndex, workspaceFilePath, projectedTree, visibleTree, changedDirectories, retainedTreeFocus, type ProjectEntry } from '../src/project-tree.ts';
 
 test('filtered and deleted paths retain ancestors, folders first and exact sibling positions', () => {
   const files: ProjectEntry[] = ['README.md', 'src/api/request.vr', 'src/main.vr', 'tests/api.vr'].map(path => ({ path, kind: 'file', size: 0 }));
@@ -39,4 +39,23 @@ test('analysis snapshots and definition links use the same workspace-relative pa
   assert.equal(index.get('src/publish cog.vr'), 'verified');
   assert.equal(index.get('src/server.vr'), null);
   assert.equal(index.has('src/unseen.vr'), false);
+});
+test('source pages bind to their workspace and discard a superseded response', async () => {
+  const first = { root: '/project', files: [{ path: 'a.vr' }], next: 'a.vr' };
+  const page = { root: '/project', files: [{ path: 'b.vr' }], next: null };
+  const current = () => true;
+  assert.equal(await continueSourcePage(first, async cursor => { assert.equal(cursor, 'a.vr'); return page; }, current), page);
+  for (const invalid of [{ ...page, root: '/other' }, { ...page, files: first.files }, { ...page, next: 'missing.vr' },
+    { ...page, files: [{ path: '0.vr' }] }, { ...page, files: [{ path: 'd.vr' }, { path: 'b.vr' }] }]) {
+    await assert.rejects(continueSourcePage(first, async () => invalid, current));
+  }
+  const unicode = { ...page, files: [{ path: '\uE000.vr' }, { path: '𐀀.vr' }] };
+  assert.equal(await continueSourcePage(first, async () => unicode, current), unicode);
+  let generation = 1, release!: () => void;
+  const waiting = new Promise<void>(resolve => { release = resolve; });
+  const old = continueSourcePage(first, async () => { await waiting; return page; }, () => generation === 1);
+  const failed = continueSourcePage(first, async () => { await waiting; throw new Error('old project closed'); }, () => generation === 1);
+  generation++; release();
+  assert.equal(await old, null);
+  assert.equal(await failed, null);
 });

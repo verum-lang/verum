@@ -1,5 +1,36 @@
 export type ProjectEntry = { path: string; kind: 'directory' | 'file'; size: number };
 export type ProjectListing = { root: string; entries: ProjectEntry[]; truncated: boolean };
+export type SourcePage = { root: string; files: { path: string }[]; next?: string | null };
+
+// The server orders UTF-8 paths by Unicode scalar value. JavaScript's default
+// string comparison instead orders the two halves of supplementary characters.
+function precedesPath(left: string, right: string): boolean {
+  let offset = 0;
+  for (const character of left) {
+    const other = right.codePointAt(offset);
+    if (other === undefined) return false;
+    const scalar = character.codePointAt(0)!;
+    if (scalar !== other) return scalar < other;
+    offset += character.length;
+  }
+  return offset < right.length;
+}
+
+export async function continueSourcePage(page: SourcePage, load: (after: string) => Promise<SourcePage>,
+  current: () => boolean): Promise<SourcePage | null> {
+  const cursor = page.next;
+  if (!cursor || !current()) return null;
+  let next: SourcePage;
+  try { next = await load(cursor); }
+  catch (error) { if (!current()) return null; throw error; }
+  if (!current()) return null;
+  if (next.root !== page.root || next.files.some((file, index, files) =>
+    !precedesPath(index ? files[index - 1].path : cursor, file.path))
+    || (next.next != null && next.next !== next.files.at(-1)?.path)) {
+    throw new Error('Invalid project source continuation');
+  }
+  return next;
+}
 export type GitChange = { path: string; index: string; worktree: string; original_path: string | null };
 export type GitSnapshot = { state: 'ready' | 'not_repository' | 'unavailable'; branch: string | null; entries: GitChange[]; error: string | null };
 export type TreeRow = ProjectEntry & { depth: number; position: number; siblings: number };

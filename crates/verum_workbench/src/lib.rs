@@ -248,7 +248,7 @@ impl Studio {
                     expected_hash(&params)?,
                 )
             }
-            "workspace.list" => self.workspace.lock().await.list(),
+            "workspace.list" => self.source_page(&params).await,
             "workspace.lint" => {
                 let report = verum_lsp::lint_report::inspect(&self.config.verum, &self.config.workspace, None).await?;
                 for document in &report.files {
@@ -258,7 +258,7 @@ impl Studio {
                 Ok(serde_json::to_value(report.as_ref())?)
             }
             "language.request" => self.language_request(&params).await,
-            "project.inspect" => self.project().await,
+            "project.inspect" => self.project(&params).await,
             "evidence.packet" => self.evidence_packet(params).await,
             "workspace.read" => self.workspace.lock().await.read(field(&params, "path")?),
             "workspace.write" => {
@@ -330,8 +330,29 @@ impl Studio {
             )
             .await
     }
-    async fn project(&self) -> Result<Value> {
-        let files = self.workspace.lock().await.list()?;
+    async fn source_page(&self, params: &Value) -> Result<Value> {
+        let root = self.config.workspace.clone();
+        let after = params
+            .get("after")
+            .map(|_| field(params, "after").map(str::to_owned))
+            .transpose()?;
+        let limit = params
+            .get("limit")
+            .map(|value| {
+                value
+                    .as_u64()
+                    .and_then(|n| usize::try_from(n).ok())
+                    .context("Expected a positive source page limit")
+            })
+            .transpose()?
+            .unwrap_or(workspace::Workspace::MAX_SOURCE_PAGE);
+        tokio::task::spawn_blocking(move || {
+            workspace::Workspace::open(&root)?.source_page(after.as_deref(), limit)
+        })
+        .await?
+    }
+    async fn project(&self, params: &Value) -> Result<Value> {
+        let files = self.source_page(params).await?;
         let analysis = self
             .language
             .request(

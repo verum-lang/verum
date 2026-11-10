@@ -1,12 +1,12 @@
 //! Workspace paths and compare-and-swap edits shared by UI and agent tools.
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{Context, Result, ensure};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
     io::{Read, Write},
     path::{Component, Path, PathBuf},
 };
-use verum_common::{List, Text};
+use verum_common::Text;
 
 pub const SOURCE_LIMIT: usize = 512 * 1024;
 pub fn digest(bytes: &[u8]) -> Text {
@@ -176,42 +176,115 @@ impl Workspace {
         Ok(json!({"path":relative,"source":source,"hash":digest(source.as_bytes())}))
     }
     pub fn list(&self) -> Result<Value> {
-        let mut files = List::new();
-        self.walk(&self.root, &mut files, 0)?;
-        files.sort_by(|a, b| a["path"].as_str().cmp(&b["path"].as_str()));
-        Ok(json!({"root":self.root, "files":files}))
+        self.source_page(None, Self::MAX_SOURCE_PAGE)
     }
-    fn walk(&self, directory: &Path, files: &mut List<Value>, depth: usize) -> Result<()> {
-        if depth > 16 {
-            return Ok(());
+
+    pub(crate) const MAX_SOURCE_PAGE: usize = 2000;
+
+    /// Names are workspace-relative UTF-8. A trailing slash on a directory
+    /// gives its descendants their correct position among sibling file names.
+    pub fn source_page(&self, after: Option<&str>, limit: usize) -> Result<Value> {
+        ensure!(
+            (1..=Self::MAX_SOURCE_PAGE).contains(&limit),
+            "Source page limit must be 1..2000"
+        );
+        if let Some(cursor) = after {
+            ensure!(
+                crate::project_files::exposed(cursor)
+                    && cursor
+                        .split('/')
+                        .all(|part| !part.is_empty() && part != ".")
+                    && Path::new(cursor).extension().is_some_and(|ext| ext == "vr"),
+                "Source cursor must be a workspace-relative .vr path"
+            );
         }
-        for entry in std::fs::read_dir(directory)? {
-            let entry = entry?;
-            let name = entry.file_name();
-            let name = name.to_string_lossy();
-            if name.starts_with('.') || matches!(name.as_ref(), "target" | "node_modules" | "llvm")
+        let disappeared = |e: &std::io::Error| {
+            matches!(e.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory)
+        };
+        let mut pending = vec![String::new()];
+        let mut files = Vec::with_capacity(limit);
+        let mut has_more = false;
+        while let Some(key) = pending.pop() {
+            let directory = key.is_empty() || key.ends_with('/');
+            if let Some(cursor) = after
+                && key.as_str() <= cursor
+                && !(directory && cursor.starts_with(&key))
             {
                 continue;
             }
-            let ty = entry.file_type()?;
-            if ty.is_symlink() {
+            if !directory {
+                if files.len() == limit {
+                    has_more = true;
+                    break;
+                }
+                files.push(key);
                 continue;
             }
-            if ty.is_dir() {
-                self.walk(&entry.path(), files, depth + 1)?;
-            } else if entry.path().extension().is_some_and(|e| e == "vr") {
-                if files.len() == 2000 {
-                    bail!("Workspace exceeds 2000 files; open a smaller project");
+            let mut children = Vec::new();
+            // Strip the sort-key suffix so symlink_metadata inspects the
+            // directory entry itself on Unix.
+            let path = self.root.join(key.trim_end_matches('/'));
+            // A queued directory can be removed or replaced between reads.
+            // Check its current entry before opening it. Other I/O failures
+            // carry the directory name instead of returning an incomplete page.
+            let label = if key.is_empty() { "." } else { key.as_str() };
+            if !key.is_empty() {
+                match std::fs::symlink_metadata(&path) {
+                    Ok(meta) if meta.is_dir() => {}
+                    Ok(_) => continue,
+                    Err(e) if disappeared(&e) => continue,
+                    Err(e) => anyhow::bail!("Inspect source directory {label}: {e}"),
                 }
-                let path: Text = entry
-                    .path()
-                    .strip_prefix(&self.root)?
-                    .to_string_lossy()
-                    .replace('\\', "/")
-                    .into();
-                files.push(json!({"path":path}));
             }
+            let entries = match std::fs::read_dir(&path) {
+                Ok(entries) => entries,
+                Err(e) if !key.is_empty() && disappeared(&e) => continue,
+                Err(e) => anyhow::bail!("Read source directory {label}: {e}"),
+            };
+            for entry in entries {
+                let entry = match entry {
+                    Ok(entry) => entry,
+                    Err(e) if disappeared(&e) => continue,
+                    Err(e) => anyhow::bail!("Read entry in source directory {label}: {e}"),
+                };
+                let name = entry.file_name();
+                if name.as_encoded_bytes().starts_with(b".") {
+                    continue;
+                }
+                let ty = match entry.file_type() {
+                    Ok(ty) => ty,
+                    Err(e) if disappeared(&e) => continue,
+                    Err(e) => {
+                        anyhow::bail!("Inspect entry {name:?} in source directory {label}: {e}")
+                    }
+                };
+                if !ty.is_dir()
+                    && !(ty.is_file()
+                        && Path::new(&name).extension().is_some_and(|ext| ext == "vr"))
+                {
+                    continue;
+                }
+                let name = name
+                    .to_str()
+                    .with_context(|| format!("Source path {name:?} in {label} must be UTF-8"))?;
+                if !crate::project_files::exposed(name) {
+                    continue;
+                }
+                if ty.is_dir() {
+                    children.push(format!("{key}{name}/"));
+                } else {
+                    children.push(format!("{key}{name}"));
+                }
+            }
+            children.sort_unstable_by(|a, b| b.cmp(a));
+            pending.extend(children);
         }
-        Ok(())
+        let next = if has_more {
+            files.last().cloned()
+        } else {
+            None
+        };
+        let files: Vec<_> = files.into_iter().map(|path| json!({"path":path})).collect();
+        Ok(json!({"root":self.root,"files":files,"next":next}))
     }
 }
