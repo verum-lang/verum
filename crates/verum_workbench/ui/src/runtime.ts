@@ -56,17 +56,22 @@ export function cbgrObservationState(report: RuntimeReport): 'unavailable' | 're
 // Navigate only an exact entry-source mapping for the current editor revision.
 // Dependency paths and cached bytecode without source identity remain inspectable
 // as evidence, but must never be guessed into the current editor buffer.
-export function runtimeSourceRange(receipt: Receipt, event: CbgrEvent, path: string, hash: string | null, source: string) {
+export function runtimeSourceLine(receipt: Receipt, event: CbgrEvent): number | null {
   const report = receipt.runtime, location = event.source;
   if (!report || !location || report.observation !== 'captured'
     || report.run_id !== receipt.id || report.source_sha256 !== receipt.source_hash
-    || path !== receipt.path || hash !== receipt.source_hash
     || !report.entry_source_path || location.path !== report.entry_source_path
     || !Number.isInteger(report.wrapper_lines) || report.wrapper_lines < 0 || report.wrapper_lines > 1
     || !Number.isInteger(location.line) || !Number.isInteger(location.column) || location.column < 1) return null;
   const line = location.line - report.wrapper_lines - 1;
+  return line < 0 ? null : line;
+}
+
+export function runtimeSourceRange(receipt: Receipt, event: CbgrEvent, path: string, hash: string | null, source: string) {
+  const line = runtimeSourceLine(receipt, event);
+  if (line === null || path !== receipt.path || hash !== receipt.source_hash) return null;
   const lines = source.split('\n');
-  if (line < 0 || line >= lines.length) return null;
+  if (line >= lines.length) return null;
   // Source-map column units are not specified as LSP UTF-16. Select the exact
   // line instead of silently treating byte/scalar columns as editor offsets.
   return { start: { line, character: 0 }, end: { line, character: lines[line].replace(/\r$/, '').length } };

@@ -1,7 +1,9 @@
 import { Conversation } from './conversation';
 import { projectSourceIndex, workspaceFilePath } from './project-tree';
 import './style.css';
-import { runtimeSourceRange } from './runtime';
+import { runtimeSourceLine, runtimeSourceRange } from './runtime';
+import { lintPage, type LintFile, type LintFinding, type LintReport } from './lint';
+import { textEditChanges } from './language';
 import { proofSourceRange } from './proof';
 import { ProofTargets, declarationProfile, type ProofProfile } from './proof-targets';
 import { sourceHash as sha256, sourceRevision } from './source';
@@ -121,7 +123,7 @@ document.addEventListener('scroll', event => {
   target.dataset.scrolling = '';
   scrolling.set(target, window.setTimeout(() => { delete target.dataset.scrolling; scrolling.delete(target); }, 900));
 }, { capture: true, passive: true });
-function dirty() { return savedSource === null || editor.source() !== savedSource; }
+function dirty() { return savedSource === null || editor.fileSource() !== savedSource; }
 function updateDocumentState() {
   $('execution-plan').hidden = true;
   setText($('current-path'), currentPath);
@@ -271,7 +273,7 @@ async function replaceDocument(prepare: () => Promise<{ path: string; source: st
 }
 async function save() {
   if (isSaving || !dirty()) return;
-  const source = editor.source(), path = currentPath, expected_hash = savedHash;
+  const source = editor.fileSource(), path = currentPath, expected_hash = savedHash;
   isSaving = true; updateDocumentState();
   try {
     const result = await api<SourceFile>('document.write', { path, source, expected_hash });
@@ -541,7 +543,102 @@ for (const id of ['operations-tab', 'diagnostics-tab']) $(id).addEventListener('
   const diagnostics = event.key === 'End' || (event.key !== 'Home' && id === 'operations-tab');
   resultView(diagnostics); $(diagnostics ? 'diagnostics-tab' : 'operations-tab').focus();
 });
-bind('language-status', () => { resultView(true); setPane('results'); });
+const lintScope = $<HTMLSelectElement>('diagnostics-scope');
+let lintReport: LintReport | null = null, lintRun = 0, lintBusy = false, lintLimit = 60;
+let fileCount = '…', lintCount = '…';
+function updateFindingCount(count = fileCount) {
+  fileCount = count;
+  setText($('diagnostics-count'), lintScope.value === 'project' ? lintCount : fileCount);
+}
+function showDiagnosticScope(project: boolean) {
+  lintScope.value = project ? 'project' : 'file';
+  $('file-findings').hidden = project; $('project-findings').hidden = !project;
+  $('inspect-project').hidden = !project; $('lint-filter').hidden = !project;
+  updateFindingCount();
+}
+async function openFinding(file: LintFile, finding: LintFinding | null, review = false) {
+  if (!(await openFile(file.path))) return;
+  const revision = documentRevision(), source = editor.source();
+  const current = () => isConnected() && sameDocumentRevision(revision, documentRevision());
+  const stale = () => new Error(t(m('Source changed since inspection. Run project lint again.')));
+  if (await sha256(editor.fileSource()) !== file.source_hash || !current()) throw stale();
+  if (finding?.position) showRange({ start: finding.position, end: finding.position });
+  if (!review || !finding) return;
+  const changes = textEditChanges(source, finding.edits);
+  if (!changes?.length) throw new Error(t(m('Invalid lint edit range')));
+  const preview = node('div', 'lint-preview');
+  preview.append(node('code', 'muted', file.path), node('p', '', finding.message));
+  for (const change of changes) {
+    const fragment = node('div', 'lint-patch');
+    if (change.to > change.from) {
+      const remove = node('pre', 'lint-remove', source.slice(change.from, change.to));
+      setAttribute(remove, 'aria-label', m('Removed text')); fragment.append(remove);
+    }
+    if (change.insert) {
+      const add = node('pre', 'lint-add', change.insert);
+      setAttribute(add, 'aria-label', m('Inserted text')); fragment.append(add);
+    }
+    preview.append(fragment);
+  }
+  if (await dialog(finding.rule, preview, [{ value: 'cancel', label: m('Cancel') },
+    { value: 'apply', label: m('Apply to editor'), primary: true }]) !== 'apply') return;
+  if (!current() || editor.source() !== source) throw stale();
+  editor.applyLintFix(changes);
+}
+function renderLint() {
+  if (!lintReport) return;
+  const page = lintPage(lintReport, input('lint-filter').value, lintLimit);
+  lintCount = String(page.total); updateFindingCount();
+  setText($('lint-summary'), m('{findings} findings · {parsed}/{files} files parsed', {
+    findings: page.total, parsed: page.parsed, files: lintReport.files.length }));
+  const list = $('lint-results'); list.replaceChildren();
+  for (const { file, findings } of page.groups) {
+    const group = node('section', 'lint-file'), heading = node('h3', '', file.path);
+    group.append(heading);
+    for (const finding of findings) {
+      const row = node('div', 'lint-row');
+      const entry = button('', () => openFinding(file, finding), 'diagnostic-item');
+      const marker = node('span', 'diagnostic-marker severity-' + (finding?.severity ?? 1), finding?.severity === 1 ? '●' : '◇');
+      const severity = m((['Error', 'Warning', 'Information', 'Hint'] as const)[(finding?.severity ?? 1) - 1]);
+      setText(marker, severity); marker.classList.add('lint-severity');
+      const description = node('span', 'diagnostic-message');
+      if (finding) description.append(node('code', 'lint-rule', finding.rule));
+      description.append(node('span', '', finding?.message ?? m('Source could not be parsed')));
+      entry.append(marker, description);
+      if (finding?.position) entry.append(node('span', 'muted', `${finding.position.line + 1}:${finding.position.character + 1}`));
+      row.append(entry);
+      if (finding?.edits.length) row.append(iconButton('changes', m('Review suggested edit'), () => openFinding(file, finding, true)));
+      group.append(row);
+    }
+    list.append(group);
+  }
+  if (!page.matched) list.append(node('p', 'muted', input('lint-filter').value ? m('No matching findings') : m('No findings in saved sources')));
+  if (page.matched > lintLimit) list.append(button(m('Show more findings'), () => { lintLimit += 60; renderLint(); }));
+}
+async function inspectProjectLint() {
+  showDiagnosticScope(true); resultView(true); setPane('results');
+  if (lintBusy) return;
+  const run = ++lintRun; lintBusy = true; lintReport = null; lintLimit = 60;
+  lintCount = '…'; updateFindingCount();
+  const refresh = $<HTMLButtonElement>('inspect-project'); refresh.disabled = true;
+  $('lint-results').replaceChildren(); setText($('lint-summary'), m('Inspecting saved sources…'));
+  try {
+    const report = await api<LintReport>('workspace.lint');
+    if (run !== lintRun) return;
+    lintReport = report; renderLint();
+  } catch (error) {
+    if (run === lintRun && !sessionFailure(error)) {
+      lintCount = '—'; updateFindingCount(); setText($('lint-summary'), errorText(error));
+    }
+  } finally { if (run === lintRun) { lintBusy = false; refresh.disabled = false; } }
+}
+bind('inspect-project', inspectProjectLint);
+lintScope.addEventListener('change', () => {
+  const project = lintScope.value === 'project'; showDiagnosticScope(project);
+  if (project && !lintReport) void inspectProjectLint().catch(fail);
+});
+input('lint-filter').addEventListener('input', () => { lintLimit = 60; renderLint(); });
+bind('language-status', () => { showDiagnosticScope(false); resultView(true); setPane('results'); });
 function scheduleAnalysis() {
   ++analysisGeneration; currentAnalysis = null; $('module-topology').replaceChildren();
   proofTargets.begin(languageRevision()); renderProofTargets();
@@ -551,12 +648,12 @@ function scheduleAnalysis() {
   if (!currentPath.endsWith('.vr')) {
     analysisPending = false;
     setText($('language-status'), m('Plain text · no Verum analysis'));
-    setText($('diagnostics-count'), '0');
+    updateFindingCount('0');
     $('diagnostics-list').replaceChildren(node('p', 'muted', m('Plain text · no Verum analysis')));
     $('architecture-content').replaceChildren(); closeSettings(); return;
   }
   setText($('language-status'), m('Analyzing…'));
-  setText($('diagnostics-count'), '…');
+  updateFindingCount('…');
   $('diagnostics-list').replaceChildren(node('p', 'muted', m('Waiting for current source analysis…')));
   $('architecture-content').replaceChildren(node('p', 'muted', m('Waiting for current source analysis…')));
   analysisPending = true; analysisTimer = window.setTimeout(analyzeSource, 350);
@@ -620,7 +717,7 @@ function renderAnalysis(snapshot: Analysis) {
   editor.diagnostics(editor.source(), snapshot.diagnostics);
   const count = snapshot.diagnostics.length;
   setText($('language-status'), count ? m('{count} diagnostics', { count }) : m('No module diagnostics'));
-  setText($('diagnostics-count'), String(count));
+  updateFindingCount(String(count));
   const scope = $('analysis-scope'), label = analysisScopeLabel(snapshot.analysis_scope);
   if (snapshot.library_metadata && snapshot.analysis_scope === 'project-sources-with-library-metadata') {
     const { sha256, format_version } = snapshot.library_metadata;
@@ -838,17 +935,29 @@ function restoreFocusAfterRender(container: HTMLElement) {
     else { container.tabIndex = -1; container.focus({ preventScroll: true }); }
   };
 }
+async function revealRecordedSource(receipt: Receipt, locate: (path: string, hash: string, source: string) => Range | null | Promise<Range | null>) {
+  const path = relativeVerumPath(receipt.path);
+  if (path === null || path !== receipt.path) return;
+  const unavailable = () => new Error(t(m('The recorded location does not match this source revision.')));
+  if (path !== currentPath) {
+    const before = documentRevision();
+    const file = await api<SourceFile>('document.read', { path });
+    const source = file.source.replace(/\r\n?/g, '\n');
+    if (!await locate(path, await sha256(source), source)) throw unavailable();
+    if (!sameDocumentRevision(before, documentRevision()) || selectedReceipt !== receipt.id || !await openFile(path)) return;
+  }
+  const revision = documentRevision(), source = editor.source();
+  const range = await locate(path, await sha256(source), source);
+  if (!sameDocumentRevision(revision, documentRevision()) || selectedReceipt !== receipt.id || !isConnected()) return;
+  if (!range) throw unavailable();
+  showRange(range);
+}
 function appendProofLocation(parent: HTMLElement, receipt: Receipt, span: unknown, key: string) {
   if (typeof parseArguments(span).start !== 'number') return;
-  const reveal = iconButton('source', m('Reveal proof location'), async () => {
-    const revision = documentRevision();
-    const range = await proofSourceRange(receipt, span, currentPath, currentHash, editor.source());
-    if (range && sameDocumentRevision(revision, documentRevision())) {
-      showRange(range);
-    } else announce(m('Proof location is unavailable for the current source.'));
-  });
+  const reveal = iconButton('source', m('Reveal proof location'), () => revealRecordedSource(receipt,
+    (path, hash, source) => proofSourceRange(receipt, span, path, hash, source)));
   reveal.dataset.focusKey = key;
-  reveal.disabled = isStale(receipt, currentPath, currentHash) || !['succeeded', 'failed', 'unsupported'].includes(receipt.status);
+  reveal.disabled = !relativeVerumPath(receipt.path) || !['succeeded', 'failed', 'unsupported'].includes(receipt.status);
   parent.classList.add('proof-location'); parent.append(reveal);
 }
 function renderResults() {
@@ -946,11 +1055,9 @@ function renderResults() {
   if (receipt.stderr) appendStream(detail, m('Diagnostics / standard error'), receipt.stderr, 'stderr');
   if (!receipt.stdout && !receipt.stderr) detail.append(node('p', 'muted', receipt.status === 'running' ? m('Waiting for process output…') : m('The process produced no text output.')));
   const runtime = runtimeView(receipt,
-    event => runtimeSourceRange(receipt, event, currentPath, currentHash, editor.source()) !== null,
-    event => {
-      const range = runtimeSourceRange(receipt, event, currentPath, currentHash, editor.source());
-      if (range) { showRange(range); }
-    });
+    event => relativeVerumPath(receipt.path) !== null && runtimeSourceLine(receipt, event) !== null,
+    event => { void revealRecordedSource(receipt, (path, hash, source) =>
+      runtimeSourceRange(receipt, event, path, hash, source)).catch(fail); });
   if (runtime) detail.append(runtime);
   detail.append(context); appendDetails(detail, m('Full operation receipt'), receipt, 'receipt');
   if (oldId === receipt.id) { detail.querySelectorAll<HTMLDetailsElement>('details').forEach(item => { item.open = expanded.has(item.dataset.key); }); detail.scrollTop = scroll; }
@@ -1314,6 +1421,7 @@ const commandRegistry = new CommandRegistry([
   control('run-settings', m('Execution options')), control('preview-run', m('Inspect run plan')),
   control('architecture-toggle', m('Source architecture')), control('project-refresh', m('Refresh project')),
   control('language-status', m('Show module diagnostics')), control('theme', m('Change color theme')),
+  command('lint.project', m('Inspect project with linter'), '', inspectProjectLint, everywhere, () => !lintBusy),
   control('agent-connect', m('Connect agent')), control('agent-login', m('Sign in'), '', everywhere, () => connected),
   control('new-thread', m('New conversation')),
   command('agent.switchConversation', m('Switch conversation'), '', () => { setPane('agent'); picker.focus(); }, everywhere, () => conversations.size > 1), control('agent-stop', m('Stop agent turn'), '', everywhere, () => selected.turn !== null),
@@ -1370,6 +1478,9 @@ onSessionChange(state => {
     updateDocumentState();
   }
   if (!unlocked) {
+    ++lintRun; lintReport = null; lintBusy = false; showDiagnosticScope(false);
+    $<HTMLButtonElement>('inspect-project').disabled = false;
+    $('lint-summary').replaceChildren(); $('lint-results').replaceChildren(); input('lint-filter').value = '';
     navigationRequests.invalidate(); navigation.clear(); updateNavigation();
     projectRequest++; lastProject = null; currentAnalysis = null; $('module-topology').replaceChildren();
     proofTargets.clear(); renderProofTargets();

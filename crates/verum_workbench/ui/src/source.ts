@@ -1,5 +1,25 @@
 import { positionAt, type Range } from './language.ts';
 
+/** Project editor changes onto the original separators, including mixed-EOL files. */
+export function editFileText(source: string, changes: { from: number; to: number; insert: string }[]): string {
+  const newline = source.match(/\r\n|\r|\n/)?.[0] ?? '\n';
+  let raw = 0, editor = 0, retained = 0;
+  const segments: string[] = [];
+  function advance(to: number) {
+    while (editor < to) {
+      if (source[raw] === '\r' && source[raw + 1] === '\n') raw++;
+      raw++; editor++;
+    }
+    return raw;
+  }
+  for (const change of changes) {
+    segments.push(source.slice(retained, advance(change.from)), change.insert.replaceAll('\n', newline));
+    retained = advance(change.to);
+  }
+  segments.push(source.slice(retained));
+  return segments.join('');
+}
+
 export async function sourceHash(source: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(source));
   return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('');

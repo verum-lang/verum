@@ -9,6 +9,7 @@ import { tags } from '@lezer/highlight';
 import { translations } from './translations';
 import { currentLocale, m, t } from './i18n';
 import { languageRequest, sameRevision, positionAt, rangeOffsets, textEditChanges, type DocumentRevision, type Diagnostic, type Range } from './language';
+import { editFileText } from './source';
 
 type Location = { uri: string; range: Range };
 type LanguageHooks = { revision: () => DocumentRevision; navigate: (location: Location) => Promise<void>; failure: (error: unknown) => void };
@@ -84,6 +85,7 @@ function editorTheme(dark: boolean) {
 
 export function makeEditor(parent: HTMLElement, source: string, onChange: (source: string, mapPosition: (position: number, association: -1 | 1) => number) => void, onSelection: (line: number, column: number) => void) {
   let hooks: LanguageHooks | null = null;
+  let originalSeparators = source.includes('\r') ? source : null;
   let verumEnabled = true;
   const syntax = new Compartment();
   // These bindings belong to Studio's editable registry, including their removal.
@@ -152,7 +154,14 @@ export function makeEditor(parent: HTMLElement, source: string, onChange: (sourc
       language.of(editorLanguage(verumEnabled)),
       theme.of(editorTheme(document.documentElement.dataset.theme === 'dark')),
       EditorView.updateListener.of(update => {
-        if (update.docChanged) onChange(update.state.doc.toString(), (position, association) => update.changes.mapPos(position, association));
+        if (update.docChanged) {
+          if (originalSeparators !== null) {
+            const edits: { from: number; to: number; insert: string }[] = [];
+            update.changes.iterChanges((from, to, _from, _to, insert) => edits.push({ from, to, insert: insert.toString() }));
+            originalSeparators = editFileText(originalSeparators, edits);
+          }
+          onChange(update.state.doc.toString(), (position, association) => update.changes.mapPos(position, association));
+        }
         if (update.selectionSet || update.docChanged) {
           const offset = update.state.selection.main.head;
           const line = update.state.doc.lineAt(offset);
@@ -164,10 +173,15 @@ export function makeEditor(parent: HTMLElement, source: string, onChange: (sourc
   return {
     view,
     source: () => view.state.doc.toString(),
+    fileSource: () => originalSeparators ?? view.state.doc.toString(),
     connectLanguage(value: LanguageHooks) { hooks = value; },
     document(path: string) { verumEnabled = path.endsWith('.vr'); view.dispatch({ effects: [syntax.reconfigure(verumEnabled ? verum : []), language.reconfigure(editorLanguage(verumEnabled))] }); },
     definition,
     format,
+    applyLintFix(changes: { from: number; to: number; insert: string }[]) {
+      view.dispatch({ changes, annotations: isolateHistory.of('full'), userEvent: 'input.lint' });
+      view.focus();
+    },
     selection: () => ({ anchor: view.state.selection.main.anchor, head: view.state.selection.main.head }),
     restoreSelection(anchor: number, head: number) {
       const end = view.state.doc.length;
@@ -188,6 +202,7 @@ export function makeEditor(parent: HTMLElement, source: string, onChange: (sourc
       if (offsets) { view.dispatch({ selection: { anchor: offsets.from, head: offsets.to }, scrollIntoView: true }); view.focus(); }
     },
     replace(source: string) {
+      originalSeparators = source.includes('\r') ? source : null;
       // Each opened file owns its undo history; an undo must never restore another file.
       view.setState(stateFor(source)); onSelection(1, 1);
     },

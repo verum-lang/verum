@@ -814,6 +814,22 @@ dialog:has(.change-review) h2 { font-size: 15px; overflow-wrap: anywhere; }
 .result-tabs button[aria-selected=true] { color: var(--accent-text); border-color: var(--accent-text); }
 .result-tabs button:focus-visible { outline: none; border-bottom-width: 3px; border-bottom-color: var(--accent-text); padding-bottom: 1px; }
 .diagnostics-panel { flex: 1; min-height: 0; overflow: auto; padding: 12px; }
+.lint-toolbar, .lint-row { display: flex; align-items: center; gap: 8px; }
+.lint-toolbar { flex-wrap: wrap; margin-block-end: 10px; }
+.lint-toolbar select { width: auto; }
+.lint-toolbar input { flex: 1 1 12ch; min-width: 8ch; }
+.lint-file h3, .lint-rule, .lint-preview code, .lint-patch pre { font-family: var(--font-code); overflow-wrap: anywhere; }
+.lint-file h3 { font-size: 12px; margin: 14px 0 4px; }
+.lint-rule { display: block; color: var(--accent-text); font-size: 11px; }
+.lint-row { border-top: 1px solid var(--subtle-border); }
+.lint-row .diagnostic-item { border: 0; min-width: 0; }
+.lint-row .icon-button { flex: none; }
+.lint-severity { min-width: 1ch; font-size: 0; }
+.lint-severity::before { content: '◇'; font-size: var(--font-size-caption); }
+.lint-severity.severity-1::before { content: '●'; color: var(--danger); }
+.lint-patch pre { white-space: pre-wrap; padding: 6px 10px; margin: 0; border-inline-start: 2px solid currentColor; }
+.lint-remove { color: var(--danger); }
+.lint-add { color: var(--accent-text); }
 #analysis-scope { margin-bottom: 10px; }
 #analysis-scope summary { cursor: pointer; }
 #analysis-scope code { display: block; overflow-wrap: anywhere; user-select: all; }
