@@ -184,3 +184,13 @@ fn an_aliased_extern_uses_its_declaring_signature_across_a_reexport() {
     );
     assert!(invalid.iter().any(|error| error.contains("Mismatch") && error.contains("Bool")), "{invalid:?}");
 }
+
+#[test]
+fn a_foreign_function_restricted_to_its_enclosing_module_checks_the_importer() {
+    let modules = [("demo.platform.native", "extern { public(in super) fn yield_thread() -> Int; }")];
+    let caller = "mount demo.platform.native.yield_thread as yielding; fn run() -> Int { unsafe { yielding() } }";
+    let legal = check("demo.platform.thread", caller, &modules);
+    assert!(legal.is_empty(), "{legal:?}");
+    let denied = check("demo.application", caller, &modules);
+    assert!(denied.iter().any(|error| error.contains("yield_thread") && error.contains("Visib")), "{denied:?}");
+}

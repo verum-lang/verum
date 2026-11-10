@@ -3206,6 +3206,23 @@ impl TypeChecker {
         outcome
     }
 
+    fn visible_import<'a>(
+        &self, module: &'a verum_modules::ModuleInfo, name: &Text, span: Option<Span>,
+    ) -> Result<Option<&'a verum_modules::ExportedItem>> {
+        let Some(item) = module.exports.get(name) else { return Ok(None) };
+        if item.visibility != verum_ast::Visibility::Public
+            && !module.exports.is_visible_from_path(
+                name, &verum_modules::ModulePath::from_str(&self.current_module_path),
+            )
+        {
+            return Err(TypeError::VisibilityError {
+                name: name.clone(), visibility: item.visibility.as_str().into(),
+                module_path: module.path.to_string().into(), span: span.unwrap_or(item.span),
+            });
+        }
+        Ok(Some(item))
+    }
+
     /// Inner body of `import_item_from_module_impl` — extracted purely so
     /// the cycle-guard insert/remove pair can sit around a single call.
     /// Do NOT add additional callers; this is a private helper.
@@ -3270,7 +3287,7 @@ impl TypeChecker {
             // Find the exported item
             // Note: ExportTable.get expects &Text (verum_common::Text)
             let item_name_text: Text = item_name.to_string().into();
-            if let Some(exported) = module_info.exports.get(&item_name_text) {
+            if let Some(exported) = self.visible_import(&module_info, &item_name_text, import_span)? {
                 // IMPORTANT: For re-exports, the ExportKind may be incorrect (defaulted to Type).
                 // When a module uses `pub import .submodule.{Item}`, the re-export gets
                 // ExportKind::Type by default. We need to resolve the actual kind by
@@ -3901,7 +3918,7 @@ impl TypeChecker {
 
                     // Look for the item in exports (exports.get expects &Text)
                     let item_name_text: Text = item_name.to_string().into();
-                    if let Some(export) = module_info.exports.get(&item_name_text) {
+                    if let Some(export) = self.visible_import(&module_info, &item_name_text, import_span)? {
                         match export.kind {
                             ExportKind::Type | ExportKind::Protocol => {
                                 // Find and register the type from the module's AST

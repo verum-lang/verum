@@ -1010,16 +1010,19 @@ pub fn extract_exports_with_policy(
             // via `mount core.sys.darwin.libsystem.{mach_absolute_time}`.
             ItemKind::ExternBlock(extern_block) => {
                 for func in &extern_block.functions {
-                    if exports_it(&func.visibility) {
-                        let exported = ExportedItem::new(
-                            func.name.name.as_str(),
-                            ExportKind::Function,
-                            Visibility::Public,
-                            module_id,
-                            func.span,
-                        );
-                        export_table.add_export(exported)?;
-                    }
+                    let visibility = match policy {
+                        ExportVisibilityPolicy::WholeSurface => Visibility::Public,
+                        ExportVisibilityPolicy::AsDeclared => match &func.visibility {
+                            AstVisibility::Private | AstVisibility::Internal | AstVisibility::Protected => continue,
+                            visibility => visibility.resolve_declared_scope(&module_path.to_string())
+                                .map_err(|reason| ModuleError::InvalidPath {
+                                    path: module_path.to_string().into(), reason, span: Some(func.span),
+                                })?,
+                        },
+                    };
+                    export_table.add_export(ExportedItem::new(
+                        func.name.as_str(), ExportKind::Function, visibility, module_id, func.span,
+                    ))?;
                 }
             }
         }
