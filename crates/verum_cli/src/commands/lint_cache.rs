@@ -20,8 +20,8 @@
 //! verum_cli crate version. Any change to severity_map / presets /
 //! custom rules / verum_cli itself produces a new directory; old
 //! directories become unreachable and are cleaned up by the GC step
-//! (see [`gc`]). `<source-hash>` is `blake3(content)` and is the only
-//! thing the per-file lookup keys on.
+//! (see [`gc`]). The per-file key hashes the source path and bytes because
+//! diagnostics retain their locations and custom rules can be path-sensitive.
 //!
 //! ## Why JSON, not bincode
 //!
@@ -39,7 +39,7 @@ use super::lint::{LintConfig, LintIssue, LintLevel};
 use verum_common::Text;
 
 /// Bumped when the on-disk format changes in a breaking way.
-const CACHE_FORMAT_VERSION: u32 = 1;
+const CACHE_FORMAT_VERSION: u32 = 2;
 
 /// Per-issue cache record. Mirrors `LintIssue` but uses `String`
 /// for the rule name so it survives a serialisation round-trip;
@@ -179,10 +179,14 @@ impl LintCache {
     }
 }
 
-/// Hash the file content. Used as the key inside one config bucket.
-pub fn source_hash(content: &str) -> String {
-    let hash = blake3::hash(content.as_bytes());
-    hash.to_hex().to_string()
+/// A path is part of rule evaluation and of the resulting edit targets.
+pub fn source_key(path: &Path, content: &str) -> String {
+    let path_bytes = path.as_os_str().as_encoded_bytes();
+    let mut hash = Hasher::new();
+    hash.update(&(path_bytes.len() as u64).to_le_bytes());
+    hash.update(path_bytes);
+    hash.update(content.as_bytes());
+    hash.finalize().to_hex().to_string()
 }
 
 /// Hash the resolved config + the verum_cli crate version. Two runs
@@ -329,10 +333,11 @@ mod tests {
     }
 
     #[test]
-    fn source_hash_differs_per_content() {
-        let a = source_hash("fn main() { let x = 1; }");
-        let b = source_hash("fn main() { let x = 2; }");
+    fn source_key_distinguishes_paths_and_content() {
+        let a = source_key(Path::new("a.vr"), "fn main() { let x = 1; }");
+        let b = source_key(Path::new("a.vr"), "fn main() { let x = 2; }");
         assert_ne!(a, b);
+        assert_ne!(a, source_key(Path::new("b.vr"), "fn main() { let x = 1; }"));
     }
 
     #[test]
@@ -340,7 +345,7 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let cfg = empty_config();
         let cache = LintCache::new(tmp.path(), &cfg, true);
-        let sh = source_hash("fn main() {}");
+        let sh = source_key(Path::new("a.vr"), "fn main() {}");
         let issues = vec![LintIssue {
             rule: "todo-in-code",
             level: LintLevel::Warning,
@@ -363,7 +368,7 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let cfg = empty_config();
         let cache = LintCache::new(tmp.path(), &cfg, false);
-        let sh = source_hash("fn main() {}");
+        let sh = source_key(Path::new("a.vr"), "fn main() {}");
         cache.store(&sh, &[]);
         assert!(cache.load(&sh).is_none());
     }

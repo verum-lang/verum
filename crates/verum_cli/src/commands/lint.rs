@@ -3085,7 +3085,7 @@ fn lint_one_with_cache(
             return (Vec::new(), None);
         }
     };
-    let sh = super::lint_cache::source_hash(&content);
+    let sh = super::lint_cache::source_key(path, &content);
     if let Some(cached) = cache.load(&sh) {
         return (cached, None);
     }
