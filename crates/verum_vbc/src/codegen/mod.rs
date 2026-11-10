@@ -2847,6 +2847,15 @@ impl VbcCodegen {
         (seeded, skipped)
     }
 
+    /// Share checked source headers and default bodies without allocating
+    /// descriptor IDs. A complete declaration interface owns nominal IDs
+    /// in the receiving unit's type pool.
+    pub fn import_protocol_declarations(&mut self, protocols: &HashMap<String, ProtocolInfo>) {
+        for (name, info) in protocols {
+            self.protocol_registry.entry(name.clone()).or_insert_with(|| info.clone());
+        }
+    }
+
     /// Imports protocols from previously compiled modules.
     ///
     /// This is used during stdlib compilation to make protocol default
@@ -2858,14 +2867,11 @@ impl VbcCodegen {
         &mut self,
         protocols: &std::collections::HashMap<String, ProtocolInfo>,
     ) {
+        self.import_protocol_declarations(protocols);
         let mut sorted: Vec<&String> = protocols.keys().collect();
         sorted.sort();
         for name in sorted {
             let info = &protocols[name];
-            self.protocol_registry
-                .entry(name.clone())
-                .or_insert_with(|| info.clone());
-
             // #130 — also allocate a TypeId + stub TypeDescriptor for
             // each imported protocol.  Without this, when a later
             // module declares `implement Iterator for IntoList<T>`,

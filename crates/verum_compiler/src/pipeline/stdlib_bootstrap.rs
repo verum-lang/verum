@@ -1239,6 +1239,10 @@ one module and therefore never seeded",
             .collect();
         let interface = declarations.collect_owned_declaration_interface(&sources)
             .map_err(|error| anyhow::anyhow!("collecting stdlib declaration graph: {error}"))?;
+        // All units elaborate against the same selected protocol declarations.
+        // Generic headers and inherited bodies can be used before their owner
+        // reaches the executable compilation pass.
+        self.global_protocol_registry.extend(declarations.export_protocols());
         declarations.export_foreign_interfaces(&interface, &mut foreign);
         // The declaring compiler selects the method (including protocol
         // implementations). Consumer-pool signatures come from the interface
@@ -2059,7 +2063,7 @@ one module and therefore never seeded",
 
         // Import functions and protocols from previously compiled modules
         codegen.import_functions(&self.global_function_registry);
-        codegen.import_protocols(&self.global_protocol_registry);
+        codegen.import_protocol_declarations(&self.global_protocol_registry);
         // D2b: seed this module's codegen with the field layouts of all
         // record types compiled in earlier (dependency-ordered) modules,
         // so cross-module record construction/read resolves positional

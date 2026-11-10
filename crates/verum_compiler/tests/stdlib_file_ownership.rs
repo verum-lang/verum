@@ -214,3 +214,26 @@ fn file_mount_cannot_escape_the_declared_cog_root() {
     );
     assert!(!output.exists());
 }
+
+#[test]
+fn a_forward_module_supplies_the_protocol_parameter_header_to_the_archive() {
+    let module = produce(&[
+        ("mod.vr", "module core; public module base; public module service;"),
+        ("base/mod.vr", "module core.base; public module protocols;"),
+        ("base/protocols.vr", r#"
+            module core.base.protocols;
+            public type Measure<T> is protocol { fn measure(value: T) -> Self; };
+        "#),
+        ("service.vr", r#"
+            module core.service;
+            mount core.base.protocols.Measure;
+            public type Sample is { public code: Int };
+            public type Score is { public code: Int };
+            implement Measure<Sample> for Score {
+                fn measure(value: Sample) -> Score { Score { code: 100 + value.code } }
+            }
+            public fn probe() -> Int { Score.measure(Sample { code: 31 }).code }
+        "#),
+    ]).unwrap();
+    execute(module, "core.service.probe", 131);
+}
