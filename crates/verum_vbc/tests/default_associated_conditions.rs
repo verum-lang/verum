@@ -269,3 +269,54 @@ fn a_referenced_protocol_does_not_own_the_implementors_module_scope() {
         assert!(!phase.declaration_type_bindings.contains_key(&"app".into()));
     }
 }
+
+#[test]
+fn a_default_requires_the_protocol_of_this_applied_receiver() {
+    let source = r#"
+        module bounded;
+        type SizedCursor is protocol { fn count(&self) -> Int; };
+        type Walking is protocol {
+            fn report(&self) -> Int where Self: SizedCursor { self.count() }
+        };
+        type Cursor<T> is { value: T };
+        implement Walking for Cursor<Int> {}
+        implement Walking for Cursor<Bool> {}
+        implement Walking for Cursor<Text> {}
+        implement SizedCursor for Cursor<Bool> { fn count(&self) -> Int { 17 } }
+        implement SizedCursor for Cursor<Text> { fn count(&self) -> Int { 31 } }
+        fn probe() -> Int {
+            let b: Cursor<Bool> = Cursor { value: true };
+            let t: Cursor<Text> = Cursor { value: "t" };
+            b.report() * 100 + t.report()
+        }
+    "#;
+    let build = |source: &str| {
+        let ast = Parser::new(source).parse_module().unwrap();
+        let mut cg = VbcCodegen::with_config(CodegenConfig::new("bounded"));
+        cg.collect_unit_declarations(&[&ast])?;
+        cg.resolve_pending_imports();
+        cg.compile_default_methods_with_policy(ItemFailurePolicy::Strict)?;
+        cg.compile_unit_items(&[&ast], ItemFailurePolicy::Strict)?;
+        cg.finalize_module_from_state()
+    };
+    let compiled = build(source).expect("unavailable default is omitted for the wide cursor");
+    let module = verum_vbc::deserialize::deserialize_module(
+        &verum_vbc::serialize::serialize_module(&compiled).unwrap(),
+    ).unwrap();
+    let entry = module.find_function_by_name("bounded.probe").unwrap();
+    let result = verum_vbc::interpreter::Interpreter::new(std::sync::Arc::new(module))
+        .execute_function(entry).unwrap();
+    assert_eq!(result.try_as_i64(), Some(1731));
+    assert!(build(&format!("{source} fn denied(c: Cursor<Int>) -> Int {{ c.report() }}")).is_err());
+
+    let blanket = source.replace(
+        "implement SizedCursor for Cursor<Bool> { fn count(&self) -> Int { 17 } }",
+        "type Mark is protocol {}; implement Mark for Cursor<Bool> {} \
+         implement<C: Mark> SizedCursor for C { fn count(&self) -> Int { 17 } }",
+    ).replace("implement Walking for Cursor<Int> {}", "");
+    let module = build(&blanket).expect("a blanket declaration can supply the missing sibling");
+    let entry = module.find_function_by_name("bounded.probe").unwrap();
+    let result = verum_vbc::interpreter::Interpreter::new(std::sync::Arc::new(module))
+        .execute_function(entry).unwrap();
+    assert_eq!(result.try_as_i64(), Some(1731));
+}

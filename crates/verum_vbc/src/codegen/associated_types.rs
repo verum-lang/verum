@@ -28,6 +28,19 @@ pub(super) enum ConcreteImplType {
 }
 
 impl ConcreteImplType {
+    fn disjoint(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Resolved(ty), head) | (head, Self::Resolved(ty)) => head.contradicts(ty),
+            (Self::Applied(a, xs), Self::Applied(b, ys)) =>
+                a != b || xs.iter().zip(ys).any(|(x, y)| x.disjoint(y)),
+            (Self::PointerWidthInteger { signed: a }, Self::PointerWidthInteger { signed: b }) =>
+                a != b,
+            // A pointer-width scalar cannot have a nominal type application.
+            (Self::PointerWidthInteger { .. }, Self::Applied(..))
+            | (Self::Applied(..), Self::PointerWidthInteger { .. }) => true,
+        }
+    }
+
     fn contradicts(&self, expected: &TypeRef) -> bool {
         match self {
             Self::Resolved(actual) => VbcCodegen::disjoint_nominal_types(actual, expected),
@@ -188,6 +201,78 @@ impl VbcCodegen {
             })
             .or_insert(facts);
         Some(receiver)
+    }
+
+    /// A default on one closed specialization cannot use the protocol
+    /// implementations of its siblings. A generic or unavailable head leaves
+    /// the condition open for the ordinary obligation checker.
+    pub(super) fn default_self_bound_contradicts(
+        &mut self,
+        function: &verum_ast::FunctionDecl,
+        receiver: TypeId,
+        instance: Option<&ConcreteImplType>,
+    ) -> super::CodegenResult<bool> {
+        use verum_ast::{decl::ImplKind, ty::{TypeBoundKind, WherePredicateKind}};
+        let (Some(clause), Some(instance)) = (&function.generic_where_clause, instance) else {
+            return Ok(false);
+        };
+        for predicate in &clause.predicates {
+            let WherePredicateKind::Type { ty, bounds } = &predicate.kind else { continue };
+            if !Self::ast_type_is_bare_self(ty) { continue; }
+            for bound in bounds {
+                let path = match &bound.kind {
+                    TypeBoundKind::Protocol(path) => path,
+                    TypeBoundKind::GenericProtocol(ty) => Self::protocol_application_parts(ty)?.0,
+                    _ => continue,
+                };
+                let Some(required) = self.nominal_type_id(&Self::format_type_path(path)) else {
+                    continue;
+                };
+                let Some(descriptor) = self.type_by_id(receiver) else { continue };
+                let sources: Vec<_> = descriptor.protocols.iter()
+                    .filter(|row| row.protocol.0 == required.0)
+                    .map(|row| row.source_implementation.clone()).collect();
+                if sources.is_empty() { continue; }
+                let mut disjoint = true;
+                for source in sources {
+                    let Some(source) = source else { disjoint = false; break };
+                    let declaration = source.declaration().map_err(|error| super::CodegenError::with_span(
+                        super::CodegenErrorKind::InvalidSourceSignature(error.to_string()), bound.span,
+                    ))?;
+                    let ImplKind::Protocol { for_type, .. } = &declaration.kind else {
+                        return Err(super::CodegenError::internal("protocol evidence requires an implementation head"));
+                    };
+                    if !declaration.generics.is_empty() { disjoint = false; break; }
+                    let head = self.with_protocol_source_scope(
+                        Some(source.origin_module().to_owned()), Default::default(), None,
+                        |cg| Ok(cg.concrete_impl_type(for_type, 0)),
+                    )?;
+                    if head.as_ref().is_none_or(|head| !head.disjoint(instance)) {
+                        disjoint = false;
+                        break;
+                    }
+                }
+                if disjoint && !self.has_blanket_for_protocol(required)? {
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
+    }
+
+    fn has_blanket_for_protocol(&mut self, required: TypeId) -> super::CodegenResult<bool> {
+        use verum_ast::decl::ImplKind;
+        for index in 0..self.blanket_impls.len() {
+            let blanket = &self.blanket_impls[index];
+            let ImplKind::Protocol { protocol, .. } = &blanket.declaration.kind else { continue };
+            let path = Self::format_type_path(protocol);
+            let selected = self.with_protocol_source_scope(
+                blanket.source_module.clone(), Default::default(), None,
+                |cg| Ok(cg.nominal_type_id(&path)),
+            )?;
+            if selected == Some(required) { return Ok(true); }
+        }
+        Ok(false)
     }
 
     /// A method slot may cover several specializations of the same nominal receiver.

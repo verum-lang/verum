@@ -3868,7 +3868,9 @@ impl VbcCodegen {
             }
             if let Some(constraints) = &method.constraints {
                 let contradicts = self.with_deferred_method_scope(&method, |codegen| {
-                    Ok(codegen.default_binding_contradicts(
+                    Ok(codegen.default_self_bound_contradicts(
+                        default_func, constraints.receiver, constraints.instance.as_ref(),
+                    )? || codegen.default_binding_contradicts(
                         default_func, type_name, constraints.receiver,
                         constraints.protocol, constraints.instance.as_ref(),
                     ))
