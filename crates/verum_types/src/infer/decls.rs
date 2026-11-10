@@ -446,7 +446,11 @@ impl TypeChecker {
             ),
             args: List::new(),
         };
-        let constructor = Type::function(params, nominal);
+        let constructor = Type::function_with_properties(
+            params,
+            nominal,
+            crate::computational_properties::PropertySet::pure(),
+        );
         self.ctx.env.insert_mono(name.as_str(), constructor.clone());
         self.ctx.env.insert_mono(owner, constructor);
     }

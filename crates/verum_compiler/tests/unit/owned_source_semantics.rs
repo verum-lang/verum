@@ -639,3 +639,26 @@ fn forward_type_aliases_reach_their_declaring_constructor() {
         assert_eq!(result.is_ok(), valid, "{source}: {result:?}");
     }
 }
+
+#[test]
+fn declared_tuple_construction_adds_no_effects_to_its_arguments() {
+    for (declarations, allowed) in [
+        ("type Wrapped is (Int); pure fn wrap(x:Int)->Wrapped { Wrapped(x) }", true),
+        ("type Pair is (Int,Bool); pure fn wrap(x:Int)->Pair { Pair(x,true) }", true),
+        ("type Wrapped is (Int); pure fn wrap(f:fn()->Int)->Wrapped { Wrapped(f()) }", false),
+        ("pure fn wrap(Wrapped:fn(Int)->Int)->Int { Wrapped(5) }", false),
+    ] {
+        let source = format!("module code; {declarations}");
+        let module = Parser::new(&source).parse_module().unwrap();
+        let registry = source_registry([("code", "code.vr", &module)]).unwrap();
+        let mut checker = TypeChecker::with_minimal_context();
+        checker.register_builtins();
+        let result = check_source_module(&mut checker, "code", &module, &registry);
+        if allowed {
+            result.unwrap_or_else(|errors| panic!("{source}: {errors:?}"));
+        } else {
+            let errors = result.expect_err("arbitrary callback admitted as pure");
+            assert!(errors.iter().any(|error| error.code() == Some("E503")), "{source}: {errors:?}");
+        }
+    }
+}
