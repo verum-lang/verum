@@ -62,6 +62,12 @@ mount core.sys.common.{SysMemoryOrdering};
 // Section 1: Constants re-exported at the umbrella level
 // =============================================================================
 
+@cfg(target_arch = "x86_64")
+mount core.sys.IdtEntry;
+
+@cfg(target_arch = "x86_64")
+fn descriptor_entry_from_umbrella(entry: IdtEntry) -> core.sys.interrupt.IdtEntry { entry }
+
 @test
 fn test_umbrella_page_size_is_positive() {
     // PAGE_SIZE must be positive and a power of two on every Verum

@@ -225,12 +225,14 @@ public mount .interrupt.{
     CriticalSection,
     InterruptCell,
     CpuContext,
-    IdtEntry,
     disable_interrupts,
     restore_interrupts,
     enable_interrupts,
     context_switch,
 };
+
+@cfg(target_arch = "x86_64")
+public mount .interrupt.IdtEntry;
 
 // =============================================================================
 // Embedded Runtime Exports
