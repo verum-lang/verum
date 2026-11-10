@@ -1142,6 +1142,31 @@ fn substitute_refinement_binder(
         }
     }
 
+    /// Classification uses the retained parameter of the selected declaration.
+    /// A bracket expression in a value slot keeps its original syntax.
+    fn nominal_argument_is_type(&self, owner: &Text, index: usize) -> bool {
+        if let Some(Type::Record(parameters)) =
+            self.ctx.lookup_type(&format!("__type_params_{owner}"))
+        {
+            return parameters
+                .get_index(index)
+                .is_some_and(|(name, parameter)| match parameter {
+                    Type::Var(_) | Type::TypeConstructor { .. } => true,
+                    Type::Named { path, args } => {
+                        args.is_empty() && path.as_ident().is_some_and(|id| &id.name == name)
+                    }
+                    Type::Generic {
+                        name: declared,
+                        args,
+                    } => args.is_empty() && declared == name,
+                    _ => false,
+                });
+        }
+        matches!(self.ctx.lookup_type(&format!("__type_var_order_{owner}")),
+            Some(Type::Tuple(parameters)) if matches!(parameters.get(index),
+                Some(Type::Var(_) | Type::TypeConstructor { .. })))
+    }
+
     fn elaborate_generic_application(
         &mut self,
         ast_ty: &verum_ast::ty::Type,
@@ -1188,7 +1213,13 @@ fn substitute_refinement_binder(
                 } else {
                 for arg in args {
                     use verum_ast::ty::GenericArg;
-                    match arg {
+                    let projected = match arg {
+                        GenericArg::Const(_) if parameter_key.as_ref().is_some_and(|owner|
+                            self.nominal_argument_is_type(owner, type_args.len())
+                        ) => arg.type_for_declared_slot().map(GenericArg::Type),
+                        _ => None,
+                    };
+                    match projected.as_ref().unwrap_or(arg) {
                         GenericArg::Type(ty) => {
                             let arg_ty = match form {
                                 ApplicationForm::DeclaredSum => self.declared_type(ty)?,

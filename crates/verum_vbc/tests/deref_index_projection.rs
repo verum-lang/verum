@@ -454,6 +454,23 @@ fn probe() -> Int {
 }
 
 #[test]
+fn a_generic_variant_pattern_preserves_its_array_argument_for_indexing() {
+    value(
+        r#"
+type Choice<T> is Hit(T) | Miss;
+fn middle(choice: Choice<[Int; 3]>) -> Int {
+    match choice { Hit(items) => items[1], Miss => 0 }
+}
+fn probe() -> Int {
+    let choice: Choice<[Int; 3]> = Hit([2, 27, 9]);
+    middle(choice)
+}
+"#,
+        27,
+    );
+}
+
+#[test]
 fn wildcard_array_parameters_keep_element_identity_without_an_extent() {
     value(
         r#"

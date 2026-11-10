@@ -761,23 +761,16 @@ impl VbcCodegen {
         };
         let mut substitution = crate::mono::TypeSubstitution::empty();
         if !descriptor.type_params.is_empty() {
-            let Ok(parsed) = verum_fast_parser::Parser::new(scrutinee).parse_type() else {
+            let Some(crate::types::TypeRef::Instantiated { base, args }) =
+                self.semantic_type_in_current_scope(scrutinee)
+            else {
                 return Some(None);
             };
-            let verum_ast::TypeKind::Generic { args, .. } = &parsed.kind else {
-                return Some(None);
-            };
-            if args.len() != descriptor.type_params.len() {
+            if base != descriptor.id || args.len() != descriptor.type_params.len() {
                 return Some(None);
             }
-            for (parameter, argument) in descriptor.type_params.iter().zip(args.iter()) {
-                if let verum_ast::GenericArg::Type(ty) = argument
-                    && let Some(actual) = self.source_type_in_current_scope(ty)
-                {
-                    substitution.bind(parameter.id, actual);
-                } else {
-                    return Some(None);
-                }
+            for (parameter, argument) in descriptor.type_params.iter().zip(args) {
+                substitution.bind(parameter.id, argument);
             }
         }
         let Ok(payload) = substitution.apply(payload) else { return Some(None); };
@@ -31708,6 +31701,8 @@ impl VbcCodegen {
             TypeRef::Reference { inner, tier, mutability } => Some(format!("&{}{}{}",
                 match tier { CbgrTier::Tier0 => "", CbgrTier::Tier1 => "checked ", CbgrTier::Tier2 => "unsafe " },
                 if *mutability == Mutability::Mutable { "mut " } else { "" }, render(inner)?).into()),
+            TypeRef::Array { element, length } => render(element)
+                .map(|name| format!("[{name}; {length}]").into()),
             TypeRef::Slice(inner) => render(inner).map(|name| format!("[{name}]").into()),
             TypeRef::ConstValue(value) => Some(value.to_string().into()),
             _ => None,

@@ -194,3 +194,57 @@ fn a_foreign_function_restricted_to_its_enclosing_module_checks_the_importer() {
     let denied = check("demo.application", caller, &modules);
     assert!(denied.iter().any(|error| error.contains("yield_thread") && error.contains("Visib")), "{denied:?}");
 }
+
+#[test]
+fn bracket_arguments_follow_the_selected_nominal_parameter_kind() {
+    let modules = [
+        (
+            "demo.payload",
+            "public type Packet<T> is { public value: T };",
+        ),
+        (
+            "demo.count",
+            "public type Packet<N: meta Int> is { public value: Int };",
+        ),
+        (
+            "demo.mixed",
+            "public type Frame<N: meta Int, T> is { public value: T };",
+        ),
+    ];
+    let imports = "mount demo.payload.Packet as Payload; mount demo.count.Packet as Count;";
+    let accepted = check(
+        "demo.main",
+        &format!(
+            "{imports}
+            fn read(packet: Payload<[Int; 3]>) -> Int {{ packet.value[2] }}
+            fn count(packet: Count<3>) -> Int {{ packet.value }}
+            fn frame(value: demo.mixed.Frame<3, [Int; 3]>) -> Int {{ value.value[1] }}"
+        ),
+        &modules,
+    );
+    assert!(accepted.is_empty(), "{accepted:?}");
+
+    let bad_value = check(
+        "demo.main",
+        &format!("{imports} fn bad(packet: Count<[Int; 3]>) -> Int {{ 0 }}"),
+        &modules,
+    );
+    assert!(
+        bad_value.iter().any(|error| (error.contains("E405")
+            && error.contains("compile-time identity"))
+            || (error.contains("E407") && error.contains("wrong kind"))),
+        "array accepted in the value slot: {bad_value:?}"
+    );
+
+    let unknown_size = check(
+        "demo.main",
+        &format!("{imports} fn bad(packet: Payload<[Int; absent]>) -> Int {{ 0 }}"),
+        &modules,
+    );
+    assert!(
+        unknown_size
+            .iter()
+            .any(|error| error.contains("E400") && error.contains("array length")),
+        "{unknown_size:?}"
+    );
+}
