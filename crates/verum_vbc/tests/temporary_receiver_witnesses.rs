@@ -104,8 +104,54 @@ fn imported_temporary_receiver_and_callback_supply_all_declared_witnesses() {
     }
 }
 
+/// Supply the nominal signatures a cold source bundle can read before the
+/// other bundles' callables have been published. Preserve file/inline module
+/// ownership, mounts, generic binders, protocol methods, and actual layouts.
+fn cold_text_nominal_sources() -> Vec<verum_ast::Module> {
+    fn retain_nominal_declarations(items: &mut verum_common::List<verum_ast::Item>) {
+        items.retain_mut(|item| match &mut item.kind {
+            verum_ast::ItemKind::Module(module) => {
+                if let Some(children) = &mut module.items {
+                    retain_nominal_declarations(children);
+                }
+                true
+            }
+            verum_ast::ItemKind::Type(_)
+            | verum_ast::ItemKind::Protocol(_)
+            | verum_ast::ItemKind::Mount(_) => true,
+            _ => false,
+        });
+    }
+    [
+        include_str!("../../../core/mod.vr"),
+        include_str!("../../../core/base/ops.vr"),
+        include_str!("../../../core/base/error.vr"),
+        include_str!("../../../core/base/protocols.vr"),
+        include_str!("../../../core/base/ordering.vr"),
+        include_str!("../../../core/base/maybe.vr"),
+        include_str!("../../../core/base/iterator.vr"),
+        include_str!("../../../core/base/coercion.vr"),
+        include_str!("../../../core/base/memory.vr"),
+        include_str!("../../../core/base/primitives.vr"),
+        include_str!("../../../core/collections/list.vr"),
+        include_str!("../../../core/mem/allocator.vr"),
+        include_str!("../../../core/mem/header.vr"),
+    ].iter().map(|source| {
+        let mut module = Parser::new(source).parse_module().expect("physical signature owner");
+        retain_nominal_declarations(&mut module.items);
+        module
+    }).collect()
+}
+
 #[test]
 fn cold_constructor_signature_imports_its_reserved_result_declaration() {
+    // Parsing the full standard-library owners exceeds libtest's 2 MiB stack.
+    std::thread::Builder::new().stack_size(32 << 20)
+        .spawn(check_cold_text_constructor)
+        .unwrap().join().unwrap();
+}
+
+fn check_cold_text_constructor() {
     let result = Parser::new(r#"
 module core.base.result;
 public type Result<T, E> is Ok(T) | Err(E);
@@ -120,7 +166,11 @@ implement<T, E> Result<T, E> {
     let mut results = VbcCodegen::with_config(CodegenConfig::new("core.base"));
     let result_interface = results.collect_declaration_interface(&[&result]).unwrap();
     let mut texts = VbcCodegen::with_config(CodegenConfig::new("core.text"));
-    let text_interface = texts.collect_declaration_interface(&[&text]).unwrap();
+    let nominal_sources = cold_text_nominal_sources();
+    let text_sources: Vec<_> = std::iter::once(("core.text", &text))
+        .chain(nominal_sources.iter().map(|module| ("core", module)))
+        .collect();
+    let text_interface = texts.collect_owned_declaration_interface(&text_sources).unwrap();
     assert!(!text_interface.types.iter().any(|ty| ty.id == TypeId::RESULT),
         "a cold producer references Result before importing its descriptor");
 
@@ -156,6 +206,17 @@ fn shadow(Text: Result<Text, Int>) -> Int {
     }
     let text_interface = deserialize_module(&serialize_module(&text_interface).unwrap()).unwrap();
     let result_interface = deserialize_module(&serialize_module(&result_interface).unwrap()).unwrap();
+    let allocator_error = text_interface.types.iter().find(|ty|
+        text_interface.strings.get(ty.name) == Some("AllocError")
+            && ty.origin_module.and_then(|origin| text_interface.strings.get(origin)) == Some("core.mem.allocator")
+    ).expect("the declared allocation error must survive the wire");
+    let capacity = text_interface.functions.iter().find(|function|
+        text_interface.strings.get(function.name).is_some_and(|name| name.ends_with("Text.try_with_capacity"))
+    ).unwrap();
+    assert_eq!(capacity.semantic_return, Some(TypeRef::Instantiated {
+        base: TypeId::RESULT,
+        args: vec![TypeRef::Concrete(TypeId::TEXT), TypeRef::Concrete(allocator_error.id)],
+    }));
     let impostor = Parser::new("module unrelated; type Result<T, E> is Ok(T) | Err(E);")
         .parse_module().unwrap();
     let impostor = VbcCodegen::with_config(CodegenConfig::new("unrelated"))
