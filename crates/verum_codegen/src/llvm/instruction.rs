@@ -10642,6 +10642,14 @@ fn lower_permission_assert<'ctx>(
     scope_tag: u8,
     target_id: Reg,
 ) -> Result<()> {
+    lower_permission_assert_with(ctx, scope_tag, |ctx| as_i64(ctx, ctx.get_register(target_id.0)?, "perm_target"))
+}
+
+fn lower_permission_assert_with<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>,
+    scope_tag: u8,
+    target: impl FnOnce(&mut FunctionContext<'_, 'ctx>) -> Result<IntValue<'ctx>>,
+) -> Result<()> {
     let policy = match ctx.permission_policy() {
         Some(p) => p.clone(),
         None => return Ok(()),
@@ -10651,9 +10659,8 @@ fn lower_permission_assert<'ctx>(
         return Ok(());
     }
 
+    let target_i64 = target(ctx)?;
     if policy.is_scope_fully_denied(scope_tag) {
-        let target_val = ctx.get_register(target_id.0)?;
-        let target_i64 = as_i64(ctx, target_val, "perm_target_denied")?;
         emit_permission_panic(ctx, scope_tag, target_i64)?;
         // Continuation block — anything after a fully-denied assert
         // is unreachable, but downstream lowering still emits into
@@ -10674,9 +10681,6 @@ fn lower_permission_assert<'ctx>(
     }
 
     let allowed_targets = policy.specific_targets_for_scope(scope_tag);
-
-    let target_val = ctx.get_register(target_id.0)?;
-    let target_i64 = as_i64(ctx, target_val, "perm_target")?;
 
     let parent = ctx
         .builder()
@@ -33912,6 +33916,30 @@ fn lower_sys_extended<'ctx>(
 ) -> Result<()> {
     let sub_opcode = SysSubOpcode::from_byte(sub_op);
     match sub_opcode {
+        Some(SysSubOpcode::LinuxSignalWatch) => {
+            use verum_vbc::signal_watch::SignalWatchOp;
+            let (op, registers) = operands.split_first().and_then(|(&byte, regs)| Some((SignalWatchOp::decode(byte)?, regs)))
+                .ok_or_else(|| LlvmLoweringError::internal("invalid Linux signal operation"))?;
+            let mut pos = 0;
+            let dst = read_reg_varlen(registers, &mut pos)?;
+            let arg = read_reg_varlen(registers, &mut pos)?;
+            let value = as_i64(ctx, ctx.get_register(arg)?, "signal_operand")?;
+            let scope = verum_vbc::interpreter::permission::PermissionScope::Process.to_wire_tag();
+            lower_permission_assert_with(ctx, scope, |ctx| {
+                if op == SignalWatchOp::Install { return Ok(value); }
+                let int = ctx.types().i64_type();
+                let one = int.const_int(1, false);
+                let index = ctx.builder().build_int_sub(value, one, "ticket_index").or_llvm_err()?;
+                let slot = ctx.builder().build_and(index, int.const_int(63, false), "slot").or_llvm_err()?;
+                ctx.builder().build_int_add(slot, one, "signal").or_llvm_err()
+            })?;
+            let runtime = super::linux_signal::runtime(ctx)?;
+            let tag = ctx.llvm_context().i8_type().const_int(op as u64, false);
+            let result = ctx.builder().build_call(runtime, &[tag.into(), value.into()], "watch_result")
+                .or_llvm_err()?.basic_value_or("signal observation returned void")?;
+            ctx.set_register(dst, result);
+            Ok(())
+        }
         Some(SysSubOpcode::GetPid) => {
             if operands.is_empty() {
                 return Err(LlvmLoweringError::internal(

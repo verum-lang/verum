@@ -310,7 +310,7 @@ impl IntrinsicLowering {
             // Runtime calls require the selected source declaration and its
             // executable ABI. This inline MLIR interface has neither, so it
             // cannot fabricate an operation or a result for the caller.
-            CodegenStrategy::RuntimeCall => None,
+            CodegenStrategy::RuntimeCall | CodegenStrategy::LinuxSignal(_) => None,
             CodegenStrategy::ArithExtendedOpcode(sub_op) => {
                 self.lower_arith_extended_opcode(intrinsic, *sub_op, operands)
             }

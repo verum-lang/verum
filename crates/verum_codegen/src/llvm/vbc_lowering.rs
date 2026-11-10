@@ -568,6 +568,7 @@ pub struct VbcToLlvmLowering<'ctx> {
     config: LoweringConfig,
     /// Function map (VBC function ID → LLVM function).
     functions: HashMap<u32, FunctionValue<'ctx>>,
+    signal_runtime: std::cell::OnceCell<FunctionValue<'ctx>>,
     native_calls: super::native_call::NativeCallAuthority<'ctx>,
     array_returns: verum_common::Shared<super::array_storage::ArrayReturns<'ctx>>,
     /// Capture kinds per closure func-id (T0241 facet-2), harvested from each
@@ -865,6 +866,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             types,
             config,
             functions: HashMap::new(),
+            signal_runtime: Default::default(),
             native_calls: super::native_call::NativeCallAuthority::default(),
             array_returns: verum_common::Shared::new(Map::new()),
             closure_capture_kinds: std::cell::RefCell::new(HashMap::new()),
@@ -1179,6 +1181,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             }
         }
 
+        let mut opcode_declarations = Set::new();
         let mut skipped_unreachable = 0usize;
         for (_idx, func_desc) in vbc_module.functions.iter().enumerate() {
             // T0682 — do not build IR for code that cannot run. The
@@ -1212,8 +1215,23 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             // A declared intrinsic has no source body to lower. Native runtime
             // emitters may supply its implementation below; an empty declaration
             // must never become an implicit successful return.
-            if func_desc.requires_intrinsic_implementation()
-            {
+            if func_desc.requires_intrinsic_implementation() {
+                // Derive a first-class intrinsic body from the registry, never
+                // from instructions or a private symbol supplied by the caller.
+                if let Some(intr) = func_desc.intrinsic_name.and_then(|id| vbc_module.strings.get(id))
+                    .and_then(verum_vbc::intrinsics::lookup_intrinsic)
+                    && let verum_vbc::intrinsics::registry::CodegenStrategy::LinuxSignal(op) = intr.intrinsic.strategy
+                {
+                    if !op.accepts_declaration(func_desc) {
+                        return Err(LlvmLoweringError::TypeLowering(format!("{} requires (Int) -> Int", intr.intrinsic.name).into()));
+                    }
+                    let body = verum_vbc::intrinsics::expand::expand_intrinsic_wrapper(intr.intrinsic)
+                        .ok_or_else(|| LlvmLoweringError::internal("missing signal opcode expansion"))?;
+                    let mut desc = func_desc.clone();
+                    desc.register_count = body.register_count;
+                    self.lower_vbc_function(vbc_module, &VbcFunction::new(desc, body.instructions))?;
+                    opcode_declarations.insert(func_desc.id);
+                }
                 continue;
             }
             if let Some(ref instructions) = func_desc.instructions {
@@ -1506,7 +1524,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         // no lowering phase may manufacture a replacement body.
         for descriptor in &vbc_module.functions {
             let Some(intrinsic_id) = descriptor.intrinsic_name else { continue };
-            if !descriptor.requires_intrinsic_implementation()
+            if !descriptor.requires_intrinsic_implementation() || opcode_declarations.contains(&descriptor.id)
             {
                 continue;
             }
@@ -2630,6 +2648,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             llvm_fn,
             func_name,
         );
+        ctx.signal_runtime = Some(&self.signal_runtime);
 
         // Hand the AOT permission policy to the function context so
         // `PermissionAssert` lowering can resolve it. Cloned `Arc` —

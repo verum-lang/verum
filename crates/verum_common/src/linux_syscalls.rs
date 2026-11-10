@@ -57,6 +57,7 @@ pub mod x86_64 {
 
     // ---- Process / signals ------------------------------------------------
     pub const SYS_RT_SIGACTION: u64 = 13;
+    pub const SYS_RT_SIGRETURN: u64 = 15;
     pub const SYS_IOCTL: u64 = 16;
     pub const SYS_SCHED_YIELD: u64 = 24;
     pub const SYS_NANOSLEEP: u64 = 35;
@@ -125,6 +126,7 @@ pub mod aarch64 {
 
     // ---- Process / signals ------------------------------------------------
     pub const SYS_RT_SIGACTION: u64 = 134;
+    pub const SYS_RT_SIGRETURN: u64 = 139;
     pub const SYS_IOCTL: u64 = 29;
     pub const SYS_SCHED_YIELD: u64 = 124;
     pub const SYS_NANOSLEEP: u64 = 101;
@@ -205,6 +207,7 @@ pub fn syscall_x86_64(name: &str) -> Option<u64> {
         "SYS_BRK" => Some(x86_64::SYS_BRK),
         "SYS_MADVISE" => Some(x86_64::SYS_MADVISE),
         "SYS_RT_SIGACTION" => Some(x86_64::SYS_RT_SIGACTION),
+        "SYS_RT_SIGRETURN" => Some(x86_64::SYS_RT_SIGRETURN),
         "SYS_IOCTL" => Some(x86_64::SYS_IOCTL),
         "SYS_SCHED_YIELD" => Some(x86_64::SYS_SCHED_YIELD),
         "SYS_NANOSLEEP" => Some(x86_64::SYS_NANOSLEEP),
@@ -259,6 +262,7 @@ pub fn syscall_aarch64(name: &str) -> Option<u64> {
         "SYS_BRK" => Some(aarch64::SYS_BRK),
         "SYS_MADVISE" => Some(aarch64::SYS_MADVISE),
         "SYS_RT_SIGACTION" => Some(aarch64::SYS_RT_SIGACTION),
+        "SYS_RT_SIGRETURN" => Some(aarch64::SYS_RT_SIGRETURN),
         "SYS_IOCTL" => Some(aarch64::SYS_IOCTL),
         "SYS_SCHED_YIELD" => Some(aarch64::SYS_SCHED_YIELD),
         "SYS_NANOSLEEP" => Some(aarch64::SYS_NANOSLEEP),

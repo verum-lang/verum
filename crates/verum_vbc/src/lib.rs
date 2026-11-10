@@ -86,6 +86,7 @@ pub mod prim_mangle;
 pub mod encoding;
 pub mod reachability;
 pub mod serialize;
+pub mod signal_watch;
 mod source_signature_codec;
 mod declaration_bindings_codec;
 pub mod source_declaration_integrity;

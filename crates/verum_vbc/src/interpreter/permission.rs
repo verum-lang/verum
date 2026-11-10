@@ -604,6 +604,11 @@ pub(crate) fn intrinsic_permission_request(
     if !intrinsic.hints.contains(&IntrinsicHint::RequiresPermission) {
         return Ok(None);
     }
+    // The opcode gates the signal decoded from the ticket, including on raw
+    // bytecode. The ticket itself is not a permission target.
+    if matches!(intrinsic.strategy, crate::intrinsics::registry::CodegenStrategy::LinuxSignal(_)) {
+        return Ok(None);
+    }
     match intrinsic.category {
         IntrinsicCategory::Syscall => Ok(Some((PermissionScope::Syscall, 0))),
         category => Err(format!("intrinsic '{}' requires permission but category {category:?} has no permission request", intrinsic.name).into()),

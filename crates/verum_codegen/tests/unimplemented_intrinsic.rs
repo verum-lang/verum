@@ -26,6 +26,104 @@ fn source_and_wire(source: VbcModule) -> [VbcModule; 2] {
     [source, wire]
 }
 
+#[test]
+fn signal_opcode_refuses_an_unavailable_target() {
+    for module in routes(
+        r#"@intrinsic("linux_signal_take") fn poll(t: Int) -> Int;
+        fn main() -> Int { let read = poll; read(10) }"#,
+    ) {
+        let context = Context::create();
+        let mut lower = VbcToLlvmLowering::new(
+            &context,
+            LoweringConfig::debug("signal").with_target("aarch64-apple-darwin"),
+        );
+        let err = lower.lower_module(&module).unwrap_err().to_string();
+        assert!(
+            err.contains("requires Linux x86-64 or AArch64 LP64"),
+            "{err}"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[path = "support/linux_elf.rs"]
+mod linux_elf;
+
+#[cfg(unix)]
+#[test]
+fn linux_signal_program_links_freestanding_for_both_lanes() {
+    for (arch, getpid, kill) in [("aarch64", 172, 129), ("x86_64", 39, 62)] {
+        // SIGWINCH is ignored by default. Its post-restore delivery must be
+        // harmless. The VM test independently inspects a non-default action.
+        let source = format!(
+            r#"
+            @intrinsic("linux_signal_install") fn acquire(s: Int) -> Int;
+            @intrinsic("linux_signal_take") fn drain(t: Int) -> Int;
+            @intrinsic("linux_signal_restore") fn release(t: Int) -> Int;
+            fn deliver() -> Int {{
+                let pid = @intrinsic("syscall0", {getpid});
+                @intrinsic("syscall2", {kill}, pid, 28)
+            }}
+            fn main() -> Int {{
+                if acquire(9) != -22 {{ return 1; }}
+                let ticket = acquire(28);
+                if ticket < 1 {{ return 2; }}
+                if acquire(28) != -16 {{ return 3; }}
+                if deliver() != 0 || deliver() != 0 {{ return 4; }}
+                let take = drain;
+                if take(ticket) != 2 || take(ticket) != 0 {{ return 5; }}
+                if release(ticket) != 0 {{ return 6; }}
+                let next = acquire(28);
+                if next <= ticket || release(ticket) != -9 {{ return 7; }}
+                if deliver() != 0 || take(next) != 1 {{ return 8; }}
+                if release(next) != 0 || deliver() != 0 {{ return 9; }}
+                73
+            }}
+        "#
+        );
+        let [_, wire] = routes(&source);
+        let context = Context::create();
+        let mut lower = VbcToLlvmLowering::new(
+            &context,
+            LoweringConfig::debug("linux_signals")
+                .with_debug_info(false)
+                .with_target(format!("{arch}-unknown-linux-gnu")),
+        );
+        lower
+            .lower_module(&wire)
+            .expect("wire -> production native lowering");
+        linux_elf::check(lower.module(), arch, "verum_main", "watch", 73, b"");
+
+        // Ticket 74 belongs to signal 10. Allow only signal 28: neither a
+        // first-class call nor a stale ticket may evade the process policy.
+        let [_, denied] = routes(
+            r#"@intrinsic("linux_signal_take") fn drain(t: Int) -> Int;
+            fn main() -> Int { let op = drain; op(74) }"#,
+        );
+        let mut policy = verum_codegen::llvm::permissions::AotPermissionPolicy::default();
+        policy.specific.insert((
+            verum_vbc::interpreter::permission::PermissionScope::Process.to_wire_tag(),
+            28,
+        ));
+        let mut lower = VbcToLlvmLowering::new(
+            &context,
+            LoweringConfig::debug("signal_deny")
+                .with_debug_info(false)
+                .with_target(format!("{arch}-unknown-linux-gnu"))
+                .with_permission_policy(Some(policy)),
+        );
+        lower.lower_module(&denied).unwrap();
+        linux_elf::check(
+            lower.module(),
+            arch,
+            "verum_main",
+            "denied",
+            143,
+            b"permission denied: script lacks `process` grant for this operation\n",
+        );
+    }
+}
+
 fn assert_refused(source: &str, declaration: &str, intrinsic: &str) {
     for module in routes(source) {
         let context = Context::create();

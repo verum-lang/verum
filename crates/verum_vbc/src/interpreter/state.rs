@@ -385,6 +385,7 @@ pub struct HostCallContext {
 
 /// Mutable execution state of one interpreter instance: registers, frames, heap, contexts and the CBGR bookkeeping shared by every dispatch handler.
 pub struct InterpreterState {
+    linux_signal_watches: super::linux_signal::OwnedWatches,
     /// Current module being executed.
     pub module: Arc<VbcModule>,
 
@@ -2728,6 +2729,7 @@ impl InterpreterState {
             escape_cells: Vec::new(),
             global_instruction_count: 0,
             coop_pump_depth: 0,
+            linux_signal_watches: Default::default(),
             permission_router: Box::new(
                 crate::interpreter::permission::PermissionRouter::allow_all(),
             ),
@@ -3210,6 +3212,7 @@ impl InterpreterState {
         // honest: every test starts with cell-default zero instead of
         // whatever the previous test left behind.
         self.static_mut_cells.clear();
+        self.linux_signal_watches = Default::default();
         self.cbgr_epoch = 1;
         self.cbgr_bypass_depth = 0;
         self.cbgr_allocations.clear();
@@ -3223,6 +3226,15 @@ impl InterpreterState {
         // a previous run. The configured policy callback is
         // preserved.
         self.permission_router.clear_cache();
+    }
+
+    /// Gate and perform a native signal operation for this guest.
+    pub(crate) fn execute_signal_watch(&mut self, op: crate::signal_watch::SignalWatchOp, value: Value) -> super::InterpreterResult<Value> {
+        let operand = value.try_as_i64().ok_or_else(|| super::InterpreterError::InvalidBytecode {
+            pc: self.pc() as usize, message: "Linux signal operand must be Int".into(),
+        })?;
+        super::permission::assert_permission(self, super::permission::PermissionScope::Process, op.permission_target(operand))?;
+        self.linux_signal_watches.execute(op, operand).map(Value::from_i64)
     }
 
     /// Records an instruction execution (for profiling).

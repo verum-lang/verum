@@ -120,6 +120,10 @@ pub fn expand_intrinsic_wrapper(intr: &Intrinsic) -> Option<WrapperBody> {
     };
 
     let emitted = match &intr.strategy {
+        CodegenStrategy::LinuxSignal(op) => {
+            e.emit(op.instruction(dest, args[0]));
+            true
+        }
         CodegenStrategy::DirectOpcode(op) => expand_direct(&mut e, *op, &args, dest),
         CodegenStrategy::OpcodeWithMode(op, mode) => {
             expand_with_mode(&mut e, *op, *mode, &args, dest)

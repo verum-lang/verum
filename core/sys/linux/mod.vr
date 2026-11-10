@@ -47,6 +47,9 @@ public module arch;
 /// Raw syscall intrinsic and basic wrappers
 public module syscall;
 
+/// Process-wide, nonblocking observation of delivered signals.
+public module signal_watch;
+
 /// Error number constants
 public module errno;
 

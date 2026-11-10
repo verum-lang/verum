@@ -660,6 +660,7 @@ pub struct FunctionContext<'a, 'ctx> {
     /// elide, panic unconditionally, or emit a per-target switch.
     /// Shared via `Arc` so every lowered function in the module sees
     /// the same policy without any cloning of the underlying tables.
+    pub(super) signal_runtime: Option<&'a std::cell::OnceCell<FunctionValue<'ctx>>>,
     permission_policy: Option<Arc<super::permissions::AotPermissionPolicy>>,
 
     /// Manifest-driven `[runtime].futures` gate (#262-AOT, task #281).
@@ -965,6 +966,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             pending_loop_hints: None,
             pending_branch_hint: None,
             vbc_escape_tiers: HashMap::new(),
+            signal_runtime: None,
             permission_policy: None,
             futures_enabled: true,
             nurseries_enabled: true,
@@ -1085,6 +1087,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             pending_loop_hints: None,
             pending_branch_hint: None,
             vbc_escape_tiers: HashMap::new(),
+            signal_runtime: None,
             permission_policy: None,
             futures_enabled: true,
             nurseries_enabled: true,

@@ -69,6 +69,21 @@ pub mod lenient;
 pub use heap::variant_tag;
 pub mod io_engine;
 pub mod kernel;
+#[cfg(all(target_os = "linux", target_pointer_width = "64", any(target_arch = "x86_64", target_arch = "aarch64")))]
+mod linux_signal;
+#[cfg(not(all(target_os = "linux", target_pointer_width = "64", any(target_arch = "x86_64", target_arch = "aarch64"))))]
+mod linux_signal {
+    #[derive(Default)]
+    pub(super) struct OwnedWatches;
+    impl OwnedWatches {
+        pub(super) fn execute(&mut self, _: crate::signal_watch::SignalWatchOp, _: i64) -> super::InterpreterResult<i64> {
+            Err(super::InterpreterError::UnsupportedRuntimeOperation {
+                operation: "Linux signal observation".into(),
+                reason: "requires Linux x86-64 or AArch64 LP64".into(),
+            })
+        }
+    }
+}
 pub mod permission;
 pub mod reactor;
 mod registers;

@@ -29,6 +29,17 @@ fn sys_extended_body(
     sub_op_byte: u8,
 ) -> InterpreterResult<DispatchResult> {
     match SysSubOpcode::from_byte(sub_op_byte) {
+        Some(SysSubOpcode::LinuxSignalWatch) => {
+            let byte = super::bytecode_io::read_u8(state)?;
+            let op = crate::signal_watch::SignalWatchOp::decode(byte).ok_or_else(|| InterpreterError::InvalidBytecode {
+                pc: state.pc() as usize, message: format!("invalid Linux signal operation {byte}"),
+            })?;
+            let dst = read_reg(state)?;
+            let operand = read_reg(state)?;
+            let value = state.execute_signal_watch(op, state.get_reg(operand))?;
+            state.set_reg(dst, value);
+            Ok(DispatchResult::Continue)
+        }
         Some(SysSubOpcode::GetPid) => {
             let dst = read_reg(state)?;
             let pid = std::process::id();

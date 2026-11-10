@@ -1,0 +1,48 @@
+module core.sys.linux.signal_watch;
+
+mount core.sys.common.OSError;
+mount core.sys.linux.errno.{EBADF, EBUSY, EINVAL};
+
+@intrinsic("linux_signal_install") unsafe fn reserve(number: Int) -> Int;
+@intrinsic("linux_signal_take") unsafe fn drain(ticket: Int) -> Int;
+@intrinsic("linux_signal_restore") unsafe fn release(ticket: Int) -> Int;
+
+/// Owns one process disposition. Counts completed handler invocations across
+/// threads; ordinary Linux signals may coalesce before delivery.
+public type affine SignalWatch is { ticket: Int };
+
+implement SignalWatch {
+    public fn new() -> SignalWatch { SignalWatch { ticket: 0 } }
+
+    /// The caller owns changes to this signal's disposition for this interval.
+    /// Restore before unloading native code or handing the signal to another handler.
+    /// To separate already-dispatched deliveries across registrations, quiesce
+    /// the sending/receiving threads: rt_sigaction does not join running handlers.
+    public unsafe fn install(&mut self, number: Int32) -> Result<(), OSError> {
+        if number < 1 || number > 64 { return Result.Err(OSError.from_code(EINVAL)); }
+        if self.ticket > 0 {
+            if ((self.ticket - 1) % 64) + 1 == number as Int { return Result.Ok(()); }
+            return Result.Err(OSError.from_code(EBUSY));
+        }
+        let ticket = unsafe { reserve(number as Int) };
+        if ticket < 0 { return Result.Err(OSError.from_code(-ticket)); }
+        self.ticket = ticket;
+        Result.Ok(())
+    }
+
+    public fn take(&self) -> Result<Int, OSError> {
+        if self.ticket == 0 { return Result.Err(OSError.from_code(EBADF)); }
+        let count = unsafe { drain(self.ticket) };
+        if count < 0 { return Result.Err(OSError.from_code(-count)); }
+        Result.Ok(count)
+    }
+
+    /// Restore the handler, flags, restorer and mask; keep ownership on error.
+    public fn restore(&mut self) -> Result<(), OSError> {
+        if self.ticket == 0 { return Result.Ok(()); }
+        let result = unsafe { release(self.ticket) };
+        if result < 0 { return Result.Err(OSError.from_code(-result)); }
+        self.ticket = 0;
+        Result.Ok(())
+    }
+}

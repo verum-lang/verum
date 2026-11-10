@@ -42,6 +42,15 @@ use crate::instruction::{
 /// Thread-safe lazy initialization ensures the registry is built exactly once.
 pub static INTRINSIC_REGISTRY: LazyLock<IntrinsicRegistry> = LazyLock::new(IntrinsicRegistry::new);
 
+const fn signal_watch(name: &'static str, op: crate::signal_watch::SignalWatchOp) -> Intrinsic {
+    Intrinsic {
+        name, category: IntrinsicCategory::Platform,
+        hints: &[IntrinsicHint::IoEffect, IntrinsicHint::Unsafe, IntrinsicHint::RequiresPermission],
+        param_count: 1, return_count: 1, strategy: CodegenStrategy::LinuxSignal(op),
+        mlir_op: None, doc: "Observe Linux process signal deliveries under an exclusive disposition ticket",
+    }
+}
+
 /// Intrinsic category for dispatch optimization.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum IntrinsicCategory {
@@ -165,6 +174,8 @@ pub enum IntrinsicHint {
 #[derive(Debug, Clone)]
 #[allow(missing_docs)]
 pub enum CodegenStrategy {
+    /// Permission-checked Linux signal operation with a fixed (Int) -> Int ABI.
+    LinuxSignal(crate::signal_watch::SignalWatchOp),
     /// Maps directly to a single VBC opcode.
     DirectOpcode(Opcode),
 
@@ -12970,6 +12981,9 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     // =========================================================================
     // System Call Intrinsics (darwin/libsystem safe wrappers)
     // =========================================================================
+    signal_watch("linux_signal_install", crate::signal_watch::SignalWatchOp::Install),
+    signal_watch("linux_signal_take", crate::signal_watch::SignalWatchOp::Take),
+    signal_watch("linux_signal_restore", crate::signal_watch::SignalWatchOp::Restore),
     Intrinsic {
         name: "sys_getpid",
         category: IntrinsicCategory::Platform,

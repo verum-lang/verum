@@ -8,6 +8,14 @@ and is load-bearing for production semantics.
 A re-introduction of any forbidden pattern is a regression. The pin
 tests are the canary; this document explains *why*.
 
+Linux signal observation uses the same VBC instruction for a direct call and a
+call through a function value. `SysExtended.LinuxSignalWatch` checks process
+permission for the signal number and operates on the kernel disposition. A
+registration ticket cannot drain or restore a later registration. The kernel
+callback only increments an atomic counter; neither the VM nor the AOT path
+calls a C shim. The public API and its concurrency contract live in
+[`SignalWatch`](../../core/sys/linux/signal_watch.vr).
+
 ## 1. Body `@intrinsic` macro authority
 
 > **Every public stdlib function whose body is a single `@intrinsic("...",

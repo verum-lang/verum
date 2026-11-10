@@ -90,6 +90,7 @@ pub mod cbgr;
 // Per-function lowering context
 pub mod context;
 mod native_call;
+mod linux_signal;
 mod array_storage;
 mod return_representation;
 

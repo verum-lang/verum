@@ -5242,7 +5242,9 @@ pub enum SysSubOpcode {
     RandomU64 = 0x06,
     /// Fast non-crypto random f64 in [0, 1).
     RandomFloat = 0x07,
-    // 0x08-0x1F  RESERVED for syscalls
+    /// Linux signal observation: operation byte, destination and operand registers.
+    LinuxSignalWatch = 0x08,
+    // 0x09-0x1F  RESERVED for syscalls
     //              (fork, exec*, signal, sigaction, waitpid,
     //               prctl, ptrace, etc.).
     /// Which execution tier is running: 0 = interpreter, 1 = AOT.
@@ -5273,6 +5275,7 @@ impl SysSubOpcode {
             0x05 => Some(Self::GetEntropy),
             0x06 => Some(Self::RandomU64),
             0x07 => Some(Self::RandomFloat),
+            0x08 => Some(Self::LinuxSignalWatch),
             0x20 => Some(Self::ExecutionTier),
             0x21 => Some(Self::IsInterpreted),
             0x30 => Some(Self::EnvGet),

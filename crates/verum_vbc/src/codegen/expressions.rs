@@ -35841,6 +35841,12 @@ impl VbcCodegen {
         }
 
         match &intrinsic.strategy {
+            CodegenStrategy::LinuxSignal(op) => {
+                let [operand] = args else {
+                    return Err(CodegenError::unsupported_expr(format!("{} requires one Int", intrinsic.name)));
+                };
+                self.ctx.emit(op.instruction(dest, *operand));
+            }
             CodegenStrategy::RuntimeCall => {
                 return Err(CodegenError::unsupported_expr(format!(
                     "runtime intrinsic '{}' requires a declaration-owned callable",

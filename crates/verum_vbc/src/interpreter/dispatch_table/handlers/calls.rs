@@ -1459,6 +1459,14 @@ fn try_dispatch_intrinsic_function(
                     ),
                 });
             }
+            if let crate::intrinsics::registry::CodegenStrategy::LinuxSignal(op) = intrinsic.strategy {
+                if !op.accepts_declaration(descriptor) {
+                    return Err(InterpreterError::InvalidBytecode { pc: state.pc() as usize,
+                        message: format!("intrinsic '{name}' requires (Int) -> Int") });
+                }
+                let arg = state.registers.get(caller_base, args_start);
+                return state.execute_signal_watch(op, arg).map(Some);
+            }
             if let Some((scope, operand)) =
                 crate::interpreter::permission::intrinsic_permission_request(intrinsic).map_err(
                     |message| InterpreterError::InvalidBytecode {
