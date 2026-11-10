@@ -1,0 +1,31 @@
+mount core.sys.darwin.signal_watch.SignalWatch;
+
+@cfg(target_os = "macos")
+@ffi("libSystem.B.dylib")
+extern {
+    fn getpid() -> Int32;
+    fn kill(pid: Int32, sig: Int32) -> Int32;
+}
+
+// SIGWINCH has an ignored default disposition. The sender is independent of the watch.
+@cfg(target_os = "macos")
+fn round_trip(watch: &mut SignalWatch, number: Int32) -> Bool {
+    match unsafe { watch.install(number) } { Result.Ok(()) => {}, _ => return false, }
+    match unsafe { watch.install(number) } { Result.Ok(()) => {}, _ => return false, }
+    match unsafe { watch.install(number + 1) } { Result.Err(_) => {}, _ => return false, }
+    if unsafe { kill(getpid(), number) } != 0 { return false; }
+    match watch.take() { Result.Ok(1) => {}, _ => return false, }
+    match watch.take() { Result.Ok(0) => {}, _ => return false, }
+    match watch.restore() { Result.Ok(()) => {}, _ => return false, }
+    match watch.restore() { Result.Ok(()) => true, _ => false, }
+}
+
+@cfg(target_os = "macos")
+@test
+fn test_kernel_delivery_drain_restore_and_resubscribe() {
+    let mut watch = SignalWatch.new();
+    match watch.take() { Result.Err(_) => {}, _ => panic("inactive watch yielded an event"), }
+    match unsafe { watch.install(-1) } { Result.Err(_) => {}, _ => panic("invalid signal registered"), }
+    assert(round_trip(&mut watch, 28));
+    assert(round_trip(&mut watch, 28));
+}

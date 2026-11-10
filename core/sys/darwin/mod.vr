@@ -51,6 +51,8 @@ public module tls;
 // Completion-based I/O (kqueue)
 public module io;
 
+public module signal_watch;
+
 // Thread creation and synchronization
 public module thread;
 

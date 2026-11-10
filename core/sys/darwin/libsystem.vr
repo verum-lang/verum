@@ -266,7 +266,7 @@ extern {
     /// Single writable record at the FFI boundary. The compiler can marshal
     /// and write it back without treating a list of boxed records as a C array.
     @ffi_name("kevent")
-    fn receive_kevent(
+    public fn receive_kevent(
         kq: Int32, changelist: &unsafe KEvent, nchanges: Int32,
         event: &mut KEvent, nevents: Int32, timeout: &unsafe DarwinTimespec,
     ) -> Int32;
@@ -596,7 +596,7 @@ extern {
 
     /// Signal action. C: `int sigaction(int signum, const struct sigaction
     /// *act, struct sigaction *oldact);`.
-    fn sigaction(signum: Int32, act: &Sigaction, oldact: &mut Sigaction) -> Int32;
+    public fn sigaction(signum: Int32, act: &Sigaction, oldact: &mut Sigaction) -> Int32;
 
     /// Signal mask. C: `int sigprocmask(int how, const sigset_t *set,
     /// sigset_t *oldset);`.
@@ -730,8 +730,8 @@ implement IntCoercible for MachPort {}
 
 /// timespec structure
 public type DarwinTimespec is {
-    tv_sec: Int,
-    tv_nsec: Int,
+    public tv_sec: Int,
+    public tv_nsec: Int,
 };
 
 /// timeval structure
@@ -748,12 +748,12 @@ public type MachTimebaseInfo is {
 
 /// Darwin kevent with a pointer-width identifier and data field.
 public type KEvent is {
-    ident: Int,
-    filter: Int16,
-    flags: UInt16,
-    fflags: UInt32,
-    data: Int,
-    udata: &unsafe Byte,
+    public ident: Int,
+    public filter: Int16,
+    public flags: UInt16,
+    public fflags: UInt32,
+    public data: Int,
+    public udata: &unsafe Byte,
 };
 
 /// A zero-initialized kevent for an input or output slot.
@@ -942,9 +942,10 @@ public type Dirent is {
 
 /// sigaction structure
 public type Sigaction is {
-    sa_handler: fn(Int),
-    sa_mask: Sigset,
-    sa_flags: Int,
+    // Darwin exposes a union of native handler addresses, including SIG_DFL and SIG_IGN.
+    public sa_handler: USize,
+    public sa_mask: UInt32,
+    public sa_flags: Int32,
 };
 
 /// sigset_t

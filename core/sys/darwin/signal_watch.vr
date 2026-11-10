@@ -1,0 +1,95 @@
+module core.sys.darwin.signal_watch;
+
+mount core.sys.common.OSError;
+mount core.sys.darwin.errno.{EBADF, EBUSY, EIO};
+mount core.sys.darwin.libsystem.{
+    DarwinTimespec, KEvent, Sigaction,
+    EV_ADD, EV_CLEAR, EV_ERROR, EVFILT_SIGNAL,
+    close, errno, kevent, kevent_zeroed, kqueue, receive_kevent, sigaction,
+};
+
+// A watch owns the process disposition for one signal along with its kqueue.
+// Callers serialize installation and restoration of the same process disposition.
+public type affine SignalWatch is {
+    descriptor: Int32,
+    number: Int32,
+    previous: Sigaction,
+};
+
+fn empty_action() -> Sigaction {
+    Sigaction { sa_handler: 0, sa_mask: 0, sa_flags: 0 }
+}
+
+implement SignalWatch {
+    public fn new() -> SignalWatch {
+        SignalWatch { descriptor: -1, number: 0, previous: empty_action() }
+    }
+
+    /// The caller must own this disposition exclusively and restore it before dropping the watch.
+    public unsafe fn install(&mut self, number: Int32) -> Result<(), OSError> {
+        if self.descriptor >= 0 {
+            if self.number == number { return Result.Ok(()); }
+            return Result.Err(OSError.from_code(EBUSY));
+        }
+
+        let fd = unsafe { kqueue() };
+        if fd < 0 { return Result.Err(OSError.from_code(errno())); }
+        let change = KEvent {
+            ident: number as Int, filter: EVFILT_SIGNAL, flags: EV_ADD | EV_CLEAR,
+            fflags: 0, data: 0, udata: 0 as &unsafe Byte,
+        };
+        let timeout = DarwinTimespec { tv_sec: 0, tv_nsec: 0 };
+        if unsafe { kevent(fd, &change, 1, 0 as &unsafe KEvent, 0, &timeout) } < 0 {
+            let code = errno();
+            let _ = unsafe { close(fd) };
+            return Result.Err(OSError.from_code(code));
+        }
+
+        // Install after the queue filter. From the successful exchange onward,
+        // a process-directed signal is observable while its normal disposition is suspended.
+        let ignored = Sigaction { sa_handler: 1, sa_mask: 0, sa_flags: 0 };
+        let mut previous = empty_action();
+        if unsafe { sigaction(number, &ignored, &mut previous) } < 0 {
+            let code = errno();
+            let _ = unsafe { close(fd) };
+            return Result.Err(OSError.from_code(code));
+        }
+        self.previous = previous;
+        self.number = number;
+        self.descriptor = fd;
+        Result.Ok(())
+    }
+
+    /// Return the kernel's delivery count, or zero if no event is pending.
+    public fn take(&self) -> Result<Int, OSError> {
+        if self.descriptor < 0 { return Result.Err(OSError.from_code(EBADF)); }
+        let mut event = kevent_zeroed();
+        let timeout = DarwinTimespec { tv_sec: 0, tv_nsec: 0 };
+        let count = unsafe {
+            receive_kevent(self.descriptor, 0 as &unsafe KEvent, 0, &mut event, 1, &timeout)
+        };
+        if count < 0 { return Result.Err(OSError.from_code(errno())); }
+        if count == 0 { return Result.Ok(0); }
+        if (event.flags & EV_ERROR) != 0 {
+            return Result.Err(OSError.from_code(event.data));
+        }
+        if event.filter != EVFILT_SIGNAL || event.ident != self.number as Int || event.data < 1 {
+            return Result.Err(OSError.from_code(EIO));
+        }
+        Result.Ok(event.data)
+    }
+
+    /// A failed disposition exchange keeps the registration available for retry.
+    public fn restore(&mut self) -> Result<(), OSError> {
+        if self.descriptor < 0 { return Result.Ok(()); }
+        let mut replaced = empty_action();
+        if unsafe { sigaction(self.number, &self.previous, &mut replaced) } < 0 {
+            return Result.Err(OSError.from_code(errno()));
+        }
+        let fd = self.descriptor;
+        self.descriptor = -1;
+        self.number = 0;
+        if unsafe { close(fd) } < 0 { return Result.Err(OSError.from_code(errno())); }
+        Result.Ok(())
+    }
+}
