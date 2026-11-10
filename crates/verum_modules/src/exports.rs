@@ -1062,13 +1062,14 @@ fn add_reexports_from_link(
                 };
                 // Re-exports are treated as Type by default (we don't know the actual kind yet)
                 // The actual kind will be resolved when the link is processed
-                let exported = ExportedItem::new(
+                let mut exported = ExportedItem::new(
                     item_name,
                     ExportKind::Type, // Default to Type for re-exports
                     Visibility::Public,
                     module_id,
                     span,
                 );
+                exported.original_name = tree.alias.as_ref().map(|_| ident.name.clone());
                 export_table.add_export(exported)?;
             }
         }
@@ -1092,13 +1093,14 @@ fn add_reexports_from_link(
                             } else {
                                 ident.name.as_str()
                             };
-                            let exported = ExportedItem::new(
+                            let mut exported = ExportedItem::new(
                                 item_name,
                                 ExportKind::Type, // Default to Type for re-exports
                                 Visibility::Public,
                                 module_id,
                                 subtree.span,
                             );
+                            exported.original_name = subtree.alias.as_ref().map(|_| ident.name.clone());
                             export_table.add_export(exported)?;
                         }
                     }
@@ -1472,8 +1474,11 @@ pub fn resolve_specific_reexport_kinds(
 
             // Update the export kind if we have the item
             if let Some(existing_export) = updated.exports.exports.get(&item_name) {
-                // Only update if the current kind is the default Type and we have a better kind
-                if existing_export.kind == ExportKind::Type && correct_kind != ExportKind::Type {
+                // Type is also the initial kind of an unresolved mount. The
+                // source edge is needed even when its current kind is Type.
+                if existing_export.kind == ExportKind::Type
+                    && (correct_kind != existing_export.kind || source_module != existing_export.source_module)
+                {
                     let mut updated_export = existing_export.clone();
                     updated_export.kind = correct_kind;
                     updated_export.source_module = source_module;
@@ -1546,7 +1551,7 @@ fn collect_specific_links_for_kind_resolution(
                             {
                                 result.push((
                                     target_module_id,
-                                    Text::from(item_name),
+                                    tree.alias.as_ref().map_or_else(|| Text::from(item_name), |alias| alias.name.clone()),
                                     source_export.kind,
                                     source_info.id,
                                 ));
@@ -1579,7 +1584,7 @@ fn collect_specific_links_for_kind_resolution(
                                     {
                                         result.push((
                                             target_module_id,
-                                            Text::from(item_name),
+                                            subtree.alias.as_ref().map_or_else(|| Text::from(item_name), |alias| alias.name.clone()),
                                             source_export.kind,
                                             source_info.id,
                                         ));

@@ -25929,6 +25929,33 @@ bake to have this verified.",
     /// and both were silent (T0806). The name-hit is remembered: if no
     /// candidate matches exactly and some candidate matched by NAME,
     /// that is an arity error and is reported as one.
+    fn source_qualified_function(
+        &mut self,
+        mut module: Shared<verum_modules::ModuleInfo>,
+        mut name: Text,
+    ) -> Option<TypeScheme> {
+        let mut caller = verum_modules::ModulePath::from_str(&self.current_module_path);
+        let mut visited = std::collections::HashSet::new();
+        loop {
+            if !visited.insert((module.id, name.clone()))
+                || !module.exports.is_visible_from_path(&name, &caller)
+            {
+                return None;
+            }
+            let export = module.exports.get(&name)?;
+            let original = export.original_name.clone().unwrap_or_else(|| name.clone());
+            if export.source_module == module.id {
+                return self.extract_function_type_from_module(
+                    &module.ast, &original, &module.path.to_string(),
+                );
+            }
+            let source = self.module_registry.read().get(export.source_module)?;
+            caller = module.path.clone();
+            module = source;
+            name = original;
+        }
+    }
+
     fn try_resolve_global_module_fn_call(
         &mut self,
         segments: &[&str],
@@ -25974,9 +26001,38 @@ bake to have this verified.",
         for root in self.metadata_module_roots() {
             candidates.push(format!("{}.{}.{}", root, joined, method.name));
         }
+        let source_module = {
+            let registry = self.module_registry.read();
+            let head = Text::from(segments[0]);
+            let owner = registry.get_by_path(&self.current_module_path);
+            let lexical = self.module_aliases.get(&head).cloned().or_else(|| {
+                let owner = owner.as_ref()?;
+                let item = owner.exports.get(&head)?;
+                (item.kind == verum_modules::ExportKind::Module)
+                    .then(|| Text::from(format!("{}.{}", owner.path, head)))
+            });
+            match lexical {
+                Some(mut path) => {
+                    for part in &segments[1..] {
+                        path.push('.');
+                        path.push_str(part);
+                    }
+                    registry.get_by_path(&path)
+                }
+                None => registry.get_by_path(&joined),
+            }
+        };
+        let source_scheme = if let Some(module) = source_module {
+            // An exact source namespace owns this spelling even when its
+            // member is absent or private. Do not retry a shorter namespace.
+            candidates.truncate(1);
+            Some(self.source_qualified_function(module, method.name.clone()))
+        } else {
+            None
+        };
         let mut arity_mismatch: Option<usize> = None;
         for cand in &candidates {
-            let scheme = self
+            let scheme = source_scheme.clone().unwrap_or_else(|| self
                 .ctx
                 .env
                 .lookup(cand.as_str())
@@ -26036,7 +26092,7 @@ bake to have this verified.",
                     meta.functions
                         .get(&key)
                         .and_then(|fd| self.scheme_from_function_descriptor(fd, &meta))
-                });
+                }));
             if std::env::var("VERUM_TRACE_QUALPATH").is_ok() {
                 eprintln!("[qualpath]   cand={} hit={}", cand, scheme.is_some());
                 if let Some(s) = &scheme {

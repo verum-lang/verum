@@ -532,3 +532,46 @@ fn catch_unwind_uses_the_declared_callee_and_callback_result() {
         }
     }
 }
+
+#[test]
+fn qualified_calls_follow_the_owned_source_exports_and_aliases() {
+    use verum_fast_parser::FastParser;
+
+    let time = r#"module core.intrinsics.runtime.time;
+        public fn count()->Int { 73 }
+        private fn secret()->Int { 1 }
+        public fn takes(n: Int)->Int { n }
+    "#;
+    let api = r#"module core.intrinsics;
+        public mount .runtime.time.{count as cpu_count, takes};
+        mount .runtime.time.secret;
+    "#;
+    for (body, valid) in [
+        ("core.intrinsics.runtime.time.count()", true),
+        ("core.intrinsics.cpu_count()", true),
+        ("core.sys.api.reexport()", true),
+        ("core.intrinsics.takes(9)", true),
+        ("core.intrinsics.takes()", false),
+        ("core.intrinsics.secret()", false),
+        ("core.intrinsics.runtime.time.secret()", false),
+        ("core.intrinsics.missing()", false),
+        ("{ let core = true; core.intrinsics.cpu_count() }", false),
+    ] {
+        let client = format!("module core.consumer; fn probe()->Int {{ {body} }}");
+        let files = [
+            ("core.intrinsics.runtime.time", time),
+            ("core.intrinsics", api),
+            ("core.sys.api", "module core.sys.api; public mount core.intrinsics.cpu_count as reexport;"),
+            ("core.consumer", client.as_str()),
+        ];
+        let modules: Vec<_> = files.iter().enumerate().map(|(i, (owner, source))| {
+            let ast = FastParser::new().parse_module_str(source, FileId::new(i as u32)).unwrap();
+            (*owner, ast)
+        }).collect();
+        let registry = source_registry(modules.iter().map(|(owner, ast)| (*owner, *owner, ast))).unwrap();
+        let mut checker = TypeChecker::with_minimal_context();
+        checker.register_builtins();
+        let result = check_source_module(&mut checker, "core.consumer", &modules[3].1, &registry);
+        assert_eq!(result.is_ok(), valid, "{body}: {result:?}");
+    }
+}
