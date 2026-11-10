@@ -1532,7 +1532,12 @@ public type ParseError is {
 
 implement ParseError {
     fn new(msg: &Text) -> ParseError {
-        ParseError { message: msg.clone() }
+        ParseError.from_message(msg.clone())
+    }
+
+    /// Keep an owned diagnostic message without copying its bytes.
+    public fn from_message(message: Text) -> ParseError {
+        ParseError { message }
     }
 }
 

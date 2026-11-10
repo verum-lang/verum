@@ -2042,97 +2042,54 @@ implement Text {
     /// assert_eq("777".parse_int_radix(8), Result.Ok(511));
     /// ```
     public fn parse_int_radix(&self, radix: Int) -> Result<Int, ParseError> {
-        if radix < 2 || radix > 36 {
-            return Result.Err(ParseError.new("radix must be between 2 and 36"));
-        }
-        if self.is_empty() {
-            return Result.Err(ParseError.new("empty string"));
-        }
-
-        let mut negative = false;
-        let mut start = 0;
-        let the_bytes = self.as_bytes();
-
-        // Check for sign
-        if the_bytes[0] == 45 { // '-'
-            negative = true;
-            start = 1;
-        } else if the_bytes[0] == 43 { // '+'
-            start = 1;
-        }
-
-        if start >= the_bytes.len() {
-            return Result.Err(ParseError.new("no digits"));
-        }
-
-        // Accumulate magnitude in UInt64. The historical signed-Int
-        // accumulator with post-loop `0 - result` could not represent
-        // Int.MIN (= -9223372036854775808): the unsigned magnitude
-        // 9223372036854775808 is one greater than Int.MAX so the
-        // multiply-add overflowed before the negation, and "Int.MIN"
-        // could never round-trip through `from_int` ⇄ `parse_int`.
-        // UInt64 covers magnitudes up to 2^64 - 1, with explicit
-        // bounds checks on the negate / cast at the end.
-        let mut mag: UInt64 = 0_u64;
-        let radix_u: UInt64 = radix as UInt64;
-        for i in range(start, the_bytes.len()) {
-            let b = the_bytes[i] as Int;
-            let digit: Int = if b >= 48 && b <= 57 {
-                // '0'-'9'
-                b - 48
-            } else if b >= 65 && b <= 90 {
-                // 'A'-'Z'
-                b - 65 + 10
-            } else if b >= 97 && b <= 122 {
-                // 'a'-'z'
-                b - 97 + 10
-            } else {
-                return Result.Err(ParseError.new("invalid character"));
-            };
-
-            if digit >= radix {
-                return Result.Err(ParseError.new("digit out of range for radix"));
-            }
-
-            // Per-step overflow guard against UInt64.MAX.
-            // mag * radix + digit must fit in UInt64. The canonical
-            // Knuth pre-check is back in service after VBC-side
-            // `BinaryIntOp.UDiv` / `UModI` landed (commits adding
-            // 0x1B/0x1C opcodes + handler wiring) — `(UInt64.MAX) /
-            // radix` now yields the correct unsigned quotient
-            // (1844674407370955161 for radix=10) instead of 0 from
-            // the previous signed-i64 division.
-            let max_div: UInt64 = 18_446_744_073_709_551_615_u64 / radix_u;
-            if mag > max_div {
-                return Result.Err(ParseError.new("integer overflow"));
-            }
-            let next = mag * radix_u + (digit as UInt64);
-            if next < mag {
-                return Result.Err(ParseError.new("integer overflow"));
-            }
-            mag = next;
-        }
-
-        // Range-check before signed cast.
+        let (negative, magnitude) = self.integer_magnitude(radix)?;
         if negative {
-            // Int.MIN's magnitude is 2^63 = 9223372036854775808.
-            if mag > 9_223_372_036_854_775_808_u64 {
-                return Result.Err(ParseError.new("integer underflow"));
+            if magnitude > 0x8000_0000_0000_0000_u64 {
+                return Result.Err(ParseError.from_message("integer underflow"));
             }
-            // Special-case Int.MIN: its magnitude doesn't fit in
-            // positive Int range. Reconstruct via two's complement.
-            if mag == 9_223_372_036_854_775_808_u64 {
-                Result.Ok(-9_223_372_036_854_775_808)
-            } else {
-                Result.Ok(0 - (mag as Int))
+            if magnitude == 0x8000_0000_0000_0000_u64 {
+                return Result.Ok(-9_223_372_036_854_775_808);
             }
+            Result.Ok(-(magnitude as Int))
+        } else if magnitude > 0x7FFF_FFFF_FFFF_FFFF_u64 {
+            Result.Err(ParseError.from_message("integer overflow"))
         } else {
-            // Int.MAX = 2^63 - 1 = 9223372036854775807.
-            if mag > 9_223_372_036_854_775_807_u64 {
-                return Result.Err(ParseError.new("integer overflow"));
-            }
-            Result.Ok(mag as Int)
+            Result.Ok(magnitude as Int)
         }
+    }
+
+    /// The sign and full-width unsigned magnitude of a signed or unsigned literal.
+    fn integer_magnitude(&self, radix: Int) -> Result<(Bool, UInt64), ParseError> {
+        if radix < 2 || radix > 36 {
+            return Result.Err(ParseError.from_message("radix must be between 2 and 36"));
+        }
+        let bytes = self.as_bytes();
+        let length = bytes.len();
+        if length == 0 { return Result.Err(ParseError.from_message("empty string")); }
+        let negative = bytes[0] == 45;
+        let mut index: Int = if negative || bytes[0] == 43 { 1 } else { 0 };
+        if index == length { return Result.Err(ParseError.from_message("no digits")); }
+
+        let base = radix as UInt64;
+        let max = 0xFFFF_FFFF_FFFF_FFFF_u64;
+        let cutoff = max / base;
+        let last_digit = max % base;
+        let mut magnitude: UInt64 = 0_u64;
+        while index < length {
+            let b = bytes[index] as Int;
+            let digit = if b >= 48 && b <= 57 { b - 48 }
+                else if b >= 65 && b <= 90 { b - 65 + 10 }
+                else if b >= 97 && b <= 122 { b - 97 + 10 }
+                else { return Result.Err(ParseError.from_message("invalid character")); };
+            if digit >= radix { return Result.Err(ParseError.from_message("digit out of range for radix")); }
+            let d = digit as UInt64;
+            if magnitude > cutoff || (magnitude == cutoff && d > last_digit) {
+                return Result.Err(ParseError.from_message("integer overflow"));
+            }
+            magnitude = magnitude * base + d;
+            index = index + 1;
+        }
+        Result.Ok((negative, magnitude))
     }
 
     /// Parse to Float.
@@ -4060,29 +4017,11 @@ implement FromStr for UInt64 {
     type ParseError = ParseError;
 
     fn from_str(s: &Text) -> Result<UInt64, ParseError> {
-        let n = s.parse_int();
-        match n {
-            Result.Err(e) => Result.Err(e),
-            Result.Ok(val) => {
-                let converted = UInt64.try_from(val);
-                match converted {
-                    Result.Ok(v) => Result.Ok(v),
-                    Result.Err(_) => Result.Err(ParseError.new(&"value out of range for UInt64")),
-                }
-            },
+        let (negative, magnitude) = s.integer_magnitude(10)?;
+        if negative && magnitude != 0_u64 {
+            return Result.Err(ParseError.from_message("value out of range for UInt64"));
         }
-    }
-}
-
-implement FromStr for Int64 {
-    type ParseError = ParseError;
-
-    fn from_str(s: &Text) -> Result<Int64, ParseError> {
-        let n = s.parse_int();
-        match n {
-            Result.Err(e) => Result.Err(e),
-            Result.Ok(val) => Result.Ok(val as Int64),
-        }
+        Result.Ok(magnitude)
     }
 }
 
@@ -4116,36 +4055,6 @@ implement FromStr for UInt128 {
     }
 }
 
-implement FromStr for ISize {
-    type ParseError = ParseError;
-
-    fn from_str(s: &Text) -> Result<ISize, ParseError> {
-        let n = s.parse_int();
-        match n {
-            Result.Err(e) => Result.Err(e),
-            Result.Ok(val) => Result.Ok(val as ISize),
-        }
-    }
-}
-
-implement FromStr for USize {
-    type ParseError = ParseError;
-
-    fn from_str(s: &Text) -> Result<USize, ParseError> {
-        let n = s.parse_int();
-        match n {
-            Result.Err(e) => Result.Err(e),
-            Result.Ok(val) => {
-                if val < 0 {
-                    Result.Err(ParseError.new(&"value out of range for USize"))
-                } else {
-                    Result.Ok(val as USize)
-                }
-            },
-        }
-    }
-}
-
 implement FromStr for Float32 {
     type ParseError = ParseError;
 
@@ -4154,18 +4063,6 @@ implement FromStr for Float32 {
         match f {
             Result.Err(e) => Result.Err(e),
             Result.Ok(val) => Result.Ok(val as Float32),
-        }
-    }
-}
-
-implement FromStr for Float64 {
-    type ParseError = ParseError;
-
-    fn from_str(s: &Text) -> Result<Float64, ParseError> {
-        let f = s.parse_float();
-        match f {
-            Result.Err(e) => Result.Err(e),
-            Result.Ok(val) => Result.Ok(val as Float64),
         }
     }
 }
