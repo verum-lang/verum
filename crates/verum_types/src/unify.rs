@@ -371,6 +371,13 @@ impl Unifier {
         self.rigid_vars.contains_key(&var)
     }
 
+    /// Callable contracts declared by universally quantified callers in scope.
+    pub(crate) fn rigid_callable_bounds(&self) -> impl Iterator<Item = (TypeVar, &Type)> {
+        self.rigid_vars.iter().filter_map(|(var, entry)| {
+            entry.fn_bound.as_ref().map(|contract| (*var, contract))
+        })
+    }
+
     /// The function type a rigid parameter is bounded by, if it has one.
     ///
     /// A call site asks this instead of inventing a shape out of fresh

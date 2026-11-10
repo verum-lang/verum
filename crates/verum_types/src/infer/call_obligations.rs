@@ -175,7 +175,7 @@ impl TypeChecker {
         Ok(instance)
     }
 
-    /// Conditional method requirements remain obligations of this call. They
+    /// Conditional requirements remain obligations of this call. They
     /// are proved from the caller's declared assumptions and actual impls, not
     /// introduced as new assumptions or attached to every implementation.
     pub(super) fn enforce_call_where_clauses(
@@ -212,6 +212,9 @@ impl TypeChecker {
                     .collect::<Result<_>>()?,
             });
         }
+        let callables = self.unifier.rigid_callable_bounds()
+            .map(|(variable, contract)| Ok((variable, normalize(self, contract)?)))
+            .collect::<Result<Map<_, _>>>()?;
         for clause in clauses {
             let subject = normalize(self, &clause.ty)?;
             if let Some(owner) = self.get_type_name(&subject) {
@@ -238,13 +241,11 @@ impl TypeChecker {
             for bound in &bounds {
                 self.ensure_stdlib_type_loaded_transitive(&self.path_to_string(&bound.protocol));
             }
-            self.protocol_checker
-                .read()
-                .check_universal_bounds(&subject, &bounds, &assumptions)
+            self.prove_associated_bounds(&subject, &bounds, &assumptions, &callables, span)
                 .map_err(|reason| TypeError::OtherWithCodeSpanned {
                     code: "E405".into(),
                     msg: format!(
-                        "cannot establish method call requirement for `{subject}`: {reason}"
+                        "cannot establish call requirement for `{subject}`: {reason}"
                     )
                     .into(),
                     span,
@@ -254,9 +255,8 @@ impl TypeChecker {
     }
 
     /// Shared legacy protocol-bound check for calls and value instances.
-    /// Unresolved variables retain the existing deferral behavior; returning
-    /// Ok is not a certificate that every unresolved protocol bound was proved.
-    /// Concrete failures continue to emit error diagnostics as before.
+    /// Inference holes defer checking until their arguments are resolved.
+    /// Universally quantified caller variables require declaration evidence.
     pub(super) fn enforce_call_protocol_bounds(
         &mut self,
         protocol_bounds: &Map<TypeVar, List<crate::protocol::ProtocolBound>>,
@@ -271,10 +271,21 @@ impl TypeChecker {
                 .map(|bound| bound.apply_subst(&substitution))
                 .collect();
             let bounds = &resolved_bounds;
-            // Only check bounds when the type var resolved to a concrete type
-            // (not still a type variable — those are checked at their own call sites)
-            //
-            // "Still a type variable" has to look THROUGH reference
+            let variables = resolved_ty.free_vars();
+            if !variables.is_empty() && variables.iter().all(|variable| self.unifier.is_rigid(*variable)) {
+                // A universally bound caller chooses its arguments. Check the
+                // complete type, including any reference or nominal constructor,
+                // before the surrounding function leaves its declaration scope.
+                self.enforce_call_where_clauses(
+                    &[crate::protocol::WhereClause {
+                        ty: resolved_ty.clone(),
+                        bounds: bounds.clone(),
+                    }],
+                    span,
+                )?;
+                continue;
+            }
+            // Checking for an inference variable has to look THROUGH reference
             // layers. `&_` is `Reference { inner: Var }`, which is not
             // `Type::Var(_)`, so a top-level-only test let it past and
             // the checker announced that `&_` does not implement `Fn`

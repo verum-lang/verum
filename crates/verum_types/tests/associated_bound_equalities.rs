@@ -115,6 +115,55 @@ fn concrete_protocol_argument_is_part_of_associated_equality_evidence() {
 const EXACT: &str = "fn exact<T, F: Channel<Item = T>>(value: F) -> T { value.get() }";
 
 #[test]
+fn forwarded_rigid_arguments_require_the_callers_declared_evidence() {
+    let protocols = "
+        type Key is protocol {};
+        type Strong is protocol extends Key {};
+        type Driver is protocol { fn take<K: Key>(&mut self) -> Int; };
+    ";
+    let free = "fn free<K: Key>() -> Int { 7 }";
+    for call in ["value.take<K>()", "free<K>()"] {
+        for (parameter, accepted) in [("K", false), ("K: Key", true), ("K: Strong", true)] {
+            let caller = format!(
+                "fn probe<D: Driver, {parameter}>(value: &mut D) {{ let discarded = {call}; }}"
+            );
+            check_with_protocol(protocols, free, &caller, accepted);
+        }
+        let blanket = format!("implement<T> Key for T {{}} {free}");
+        let caller = format!("fn probe<K, D: Driver>(value: &mut D) -> Int {{ {call} }}");
+        check_with_protocol(protocols, &blanket, &caller, true);
+        let callable = format!("implement<F: fn(Int) -> Int> Key for F {{}} {free}");
+        for (input, accepted) in [("Int", true), ("Text", false)] {
+            let caller = format!(
+                "fn probe<K: fn({input}) -> Int, D: Driver>(value: &mut D) -> Int {{ {call} }}"
+            );
+            check_with_protocol(protocols, &callable, &caller, accepted);
+        }
+    }
+}
+
+#[test]
+fn inference_can_resolve_a_bounded_argument_before_discharge() {
+    let declarations = "type Key is protocol {}; implement Key for Int {}";
+    let identity = "fn identity<K: Key>(value: K) -> K { value }";
+    check_with_protocol(declarations, identity, "fn probe() -> Int { identity(7) }", true);
+    check_with_protocol(declarations, identity, "fn probe() -> Bool { identity(true) }", false);
+    let source = "type Source is protocol { fn get<K: Key>(&self) -> K; };";
+    check_with_protocol(declarations, source, "fn probe<S: Source>(source: &S) -> Int { source.get() }", true);
+    check_with_protocol(declarations, source, "fn probe<S: Source>(source: &S) -> Bool { source.get() }", false);
+}
+
+#[test]
+fn a_bound_for_the_owner_does_not_supply_a_borrowed_implementation() {
+    let protocol = "type Key is protocol {}; type Bag<T> is { value: T };
+        type Driver is protocol { fn take<K: Key>(&self) -> Int; };";
+    let caller = "fn probe<K: Key, D: Driver>(value: &D) -> Int { value.take<&K>() }";
+    check_with_protocol(protocol, "", caller, false);
+    let borrowed = "fn probe<K: Key, D: Driver>(value: &D) -> Int { value.take<&Bag<K>>() }";
+    check_with_protocol(protocol, "implement<T: Key> Key for &Bag<T> {}", borrowed, true);
+}
+
+#[test]
 fn independent_calls_freshen_the_associated_equality_with_the_scheme() {
     check(
         EXACT,
