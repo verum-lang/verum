@@ -1505,10 +1505,7 @@ impl VbcCodegen {
                 // later captures; contextual literals at other value boundaries
                 // must not acquire a default from this binding-only rule.
                 if ty.is_some() { return None; }
-                let expr = Self::normalized_place(value?);
-                if !matches!(expr.kind, verum_ast::ExprKind::Literal(_)) { return None; }
-                let name = self.infer_expr_type_name(expr)
-                    .or_else(|| Self::literal_default_type_name(expr))?;
+                let name = Self::literal_default_type_name(value?)?;
                 self.semantic_type_in_current_scope(&name)
             });
         // Block locals and callable bodies establish result types during

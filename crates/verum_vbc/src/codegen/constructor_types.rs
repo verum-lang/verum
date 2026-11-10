@@ -449,11 +449,8 @@ impl VbcCodegen {
                     self.declared_expression_result(arg, None, 0, 0)).or_else(|| {
                     // A literal binding a still-free formal has the language's
                     // literal type. No register or rendered variable hint is evidence.
-                    matches!(Self::normalized_place(arg).kind, ExprKind::Literal(_))
-                        .then(|| self.infer_expr_type_name(arg)
-                            .or_else(|| Self::literal_default_type_name(arg))
-                            .and_then(|name| self.semantic_type_in_current_scope(&name)))
-                        .flatten()
+                    Self::literal_default_type_name(arg)
+                        .and_then(|name| self.semantic_type_in_current_scope(&name))
                 })?
             };
             let (mut formal, mut actual) = (formal, &actual);
@@ -707,6 +704,14 @@ fn fully_bound_at(ty: &TypeRef, bindings: &TypeSubstitution, depth: u32) -> bool
 mod binder_tests {
     use super::*;
     use crate::types::TypeParamId;
+
+    #[test]
+    fn negation_does_not_supply_literal_evidence_for_other_domains() {
+        for source in ["-true", "-\"text\"", "-2_u16", "-(3_km)", "-x"] {
+            let expression = verum_fast_parser::Parser::new(source).parse_expr().unwrap();
+            assert_eq!(VbcCodegen::literal_default_type_name(&expression), None, "{source}");
+        }
+    }
 
     #[test]
     fn record_projection_requires_a_receiver_not_a_generic_binding() {

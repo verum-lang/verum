@@ -112,6 +112,37 @@ fn compile(source: &str) -> verum_vbc::module::VbcModule {
 }
 
 #[test]
+fn signed_literal_arguments_carry_their_declared_or_default_witness() {
+    let cases = [
+        ("positive", "8", TypeId::INT, 8),
+        ("negative", "-8", TypeId::INT, 8),
+        ("narrow", "-(8_i16)", TypeId::I16, 2),
+        ("precise", "-1.25_f32", TypeId::F32, 4),
+        ("floating", "-1.25", TypeId::FLOAT, 8),
+        ("local", "{ let x = -8_i8; x }", TypeId::I8, 1),
+    ];
+    let mut source = String::from("fn width<T>(value: T) -> Int { T.size }\n");
+    for (name, value, _, _) in &cases {
+        source.push_str(&format!("fn {name}() -> Int {{ width({value}) }}\n"));
+    }
+    let bytes = verum_vbc::serialize::serialize_module(&compile(&source)).unwrap();
+    let module = Arc::new(verum_vbc::deserialize::deserialize_module(&bytes).unwrap());
+    verum_vbc::validate::validate_module(&module).expect("valid generic calls after serialization");
+    let mut vm = Interpreter::new(module.clone());
+    for (name, _, ty, size) in cases {
+        let id = module.find_function_by_name(name).unwrap();
+        let function = module.functions.iter().find(|f| f.id == id).unwrap();
+        let start = function.bytecode_offset as usize;
+        let code = verum_vbc::bytecode::decode_instructions(
+            &module.bytecode[start..start + function.bytecode_length as usize],
+        ).unwrap();
+        assert!(code.iter().any(|op| matches!(op, Instruction::CallG { type_args, .. }
+            if type_args == &[TypeRef::Concrete(ty)])), "{name}: {code:?}");
+        assert_eq!(vm.execute_function(id).unwrap().as_i64(), size, "{name}");
+    }
+}
+
+#[test]
 fn named_lengths_and_non_type_slots_preserve_the_selected_witness() {
     for source in [
         "type Element is Byte; fn size<T>() -> Int {T.size} fn probe()->Int {size<[Element; 5]>()}",

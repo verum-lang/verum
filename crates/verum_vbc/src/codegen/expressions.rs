@@ -8448,34 +8448,50 @@ impl VbcCodegen {
         Ok(Some(result))
     }
 
-    /// Language-default type of a bare literal, for the FREE-generic
-    /// binding position only. `infer_expr_type_name`'s Literal arm
-    /// deliberately answers `None` for unsuffixed `Int`/`Float`
-    /// literals (their type can be context-driven — an annotated
-    /// binding can make `1.5` a `Float32`); but when a literal is the
-    /// argument BINDING a free type parameter (`gzero(9.0)` against
-    /// `fn gzero<T: Zero>(x: T)`), there is no external constraint by
-    /// construction, so the literal takes its language default. Without
-    /// this, literal-argument calls emitted plain `Call` (no witness
-    /// table) and every `T.zero()`-style static in the callee loaded
-    /// nil.
+    /// A literal in a free binding position takes its suffix type or its language
+    /// default. Parentheses and arithmetic negation preserve a signed scalar's
+    /// type. Unit suffixes and overloaded operators need their own declaration.
     pub(super) fn literal_default_type_name(expr: &Expr) -> Option<String> {
-        use verum_ast::expr::ExprKind;
-        use verum_ast::literal::{FloatSuffix, LiteralKind};
-        let ExprKind::Literal(lit) = &expr.kind else {
-            return None;
-        };
-        match &lit.kind {
-            LiteralKind::Float(fl) => match fl.suffix {
-                Some(FloatSuffix::F32) => Some("Float32".to_string()),
-                Some(FloatSuffix::F64) | None => Some("Float".to_string()),
-                // Custom unit suffix (`1.5_km`) — dimensional typing
-                // owns it, not the plain float default.
-                Some(FloatSuffix::Custom(_)) => None,
+        let mut operand = Self::normalized_place(expr);
+        let mut negated = false;
+        while let ExprKind::Unary { op: UnOp::Neg, expr: inner } = &operand.kind {
+            negated = true;
+            operand = Self::normalized_place(inner);
+        }
+        let ExprKind::Literal(literal) = &operand.kind else { return None };
+        let name = Self::literal_type_name(literal, true)?;
+        (!negated || type_names::is_signed_integer_type(name) || type_names::is_float_type(name))
+            .then(|| name.to_owned())
+    }
+
+    fn literal_type_name(literal: &verum_ast::literal::Literal, use_numeric_defaults: bool) -> Option<&'static str> {
+        use verum_ast::literal::{FloatSuffix, IntSuffix, LiteralKind};
+        match &literal.kind {
+            LiteralKind::Int(value) => match &value.suffix {
+                Some(IntSuffix::I8) => Some("Int8"),
+                Some(IntSuffix::I16) => Some("Int16"),
+                Some(IntSuffix::I32) => Some("Int32"),
+                Some(IntSuffix::I64) => Some("Int64"),
+                Some(IntSuffix::I128) => Some("Int128"),
+                Some(IntSuffix::Isize) => Some("ISize"),
+                Some(IntSuffix::U8) => Some("UInt8"),
+                Some(IntSuffix::U16) => Some("UInt16"),
+                Some(IntSuffix::U32) => Some("UInt32"),
+                Some(IntSuffix::U64) => Some("UInt64"),
+                Some(IntSuffix::U128) => Some("UInt128"),
+                Some(IntSuffix::Usize) => Some("USize"),
+                Some(IntSuffix::Custom(_)) => None,
+                None => use_numeric_defaults.then_some("Int"),
             },
-            // Suffixed ints already resolve in `infer_expr_type_name`;
-            // an unsuffixed one defaults to `Int` in this free position.
-            LiteralKind::Int(il) if il.suffix.is_none() => Some("Int".to_string()),
+            LiteralKind::Float(value) => match &value.suffix {
+                Some(FloatSuffix::F32) => Some("Float32"),
+                Some(FloatSuffix::F64) => Some("Float"),
+                Some(FloatSuffix::Custom(_)) => None,
+                None => use_numeric_defaults.then_some("Float"),
+            },
+            LiteralKind::Bool(_) => Some("Bool"),
+            LiteralKind::Char(_) => Some("Char"),
+            LiteralKind::Text(_) => Some("Text"),
             _ => None,
         }
     }
@@ -30215,50 +30231,7 @@ impl VbcCodegen {
                 op: UnOp::RefMut,
                 expr: inner,
             } => self.infer_expr_type_name(inner).map(|t| format!("&mut {}", t)),
-            // Suffix-typed literal — `123_u64`, `-1_i32`, `4_usize`, etc.
-            // Without this arm, `18_446_744_073_709_551_615_u64 / 10_u64`
-            // inferred neither operand as `UInt64`, so the
-            // `BinOp::Div` path's unsigned-aware gate
-            // (`is_unsigned_int_type_name`) chose signed `Div` and
-            // `(u64::MAX) / 10` collapsed back to `0` even though the
-            // `BinaryIntOp::UDiv` opcode existed. The real fix is to
-            // surface the suffix at type-inference time.
-            //
-
-            // Float literals carry the same shape via `FloatLit.suffix`;
-            // Bool / Char / Text are never unsigned-intish, so they
-            // fall through to `None` (no suffix → no narrower type).
-            ExprKind::Literal(lit) => {
-                use verum_ast::literal::{IntSuffix, LiteralKind};
-                match &lit.kind {
-                    LiteralKind::Int(int_lit) => {
-                        match int_lit.suffix.as_ref() {
-                            Some(IntSuffix::I8) => Some("Int8".to_string()),
-                            Some(IntSuffix::I16) => Some("Int16".to_string()),
-                            Some(IntSuffix::I32) => Some("Int32".to_string()),
-                            Some(IntSuffix::I64) => Some("Int64".to_string()),
-                            Some(IntSuffix::I128) => Some("Int128".to_string()),
-                            Some(IntSuffix::Isize) => Some("ISize".to_string()),
-                            Some(IntSuffix::U8) => Some("UInt8".to_string()),
-                            Some(IntSuffix::U16) => Some("UInt16".to_string()),
-                            Some(IntSuffix::U32) => Some("UInt32".to_string()),
-                            Some(IntSuffix::U64) => Some("UInt64".to_string()),
-                            Some(IntSuffix::U128) => Some("UInt128".to_string()),
-                            Some(IntSuffix::Usize) => Some("USize".to_string()),
-                            // Custom unit suffix (e.g. `5_km`, `100_ms`) —
-                            // not an integer-precision tag; let downstream
-                            // dimensional-typing handle it.
-                            Some(IntSuffix::Custom(_)) => None,
-                            None => None,
-                        }
-                    }
-                    LiteralKind::Float(_) => None,
-                    LiteralKind::Bool(_) => Some("Bool".to_string()),
-                    LiteralKind::Char(_) => Some("Char".to_string()),
-                    LiteralKind::Text(_) => Some("Text".to_string()),
-                    _ => None,
-                }
-            }
+            ExprKind::Literal(literal) => Self::literal_type_name(literal, false).map(str::to_owned),
             // Field access: look up field type in type_field_type_names
             ExprKind::Field { expr: base, field } => {
                 let field_name = field.name.to_string();
