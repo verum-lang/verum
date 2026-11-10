@@ -145,9 +145,17 @@ public type KqueueBackend is {
 }
 
 @cfg(target_os = "macos")
+fn watch_result<T>(result: Result<T, OSError>) -> Result<T, Text> {
+    match result {
+        Result.Ok(value) => Result.Ok(value),
+        Result.Err(error) => Result.Err(error.to_string()),
+    }
+}
+
+@cfg(target_os = "macos")
 implement KqueueBackend {
     public fn new() -> Result<KqueueBackend, Text> {
-        let fd = safe_kqueue().map_err(|error| error.to_string())?;
+        let fd = watch_result(safe_kqueue())?;
         Result.Ok(KqueueBackend { kq_fd: fd, watches: [] })
     }
 
@@ -155,7 +163,7 @@ implement KqueueBackend {
         // Open the path so we can register its fd with kqueue.
         // O_RDONLY = 0, O_EVTONLY = 0x8000 — kernel-level "open just to watch".
         const O_EVTONLY: Int = 0x8000;
-        let fd = safe_open(path.as_bytes(), O_EVTONLY, 0).map_err(|error| error.to_string())?;
+        let fd = watch_result(safe_open(path.as_bytes(), O_EVTONLY, 0))?;
         let mask = NOTE_WRITE | NOTE_EXTEND | NOTE_DELETE | NOTE_ATTRIB | NOTE_RENAME;
         if let Result.Err(error) = watch_vnode(self.kq_fd, fd, mask) {
             let _ = safe_close(fd);
@@ -172,12 +180,12 @@ implement KqueueBackend {
         }
         if idx < 0 { return Result.Ok(()); }
         let (fd, _) = self.watches.remove(idx as usize);
-        safe_close(fd).map_err(|error| error.to_string())
+        watch_result(safe_close(fd))
     }
 
     public fn wait(&mut self, timeout_ms: Int) -> Result<List<FsEvent>, Text> {
         let mut events: List<FsEvent> = [];
-        let ready = wait_vnode(self.kq_fd, timeout_ms).map_err(|error| error.to_string())?;
+        let ready = watch_result(wait_vnode(self.kq_fd, timeout_ms))?;
         if let Maybe.Some((ident, flags)) = ready {
             for (fd, path) in self.watches.iter() {
                 if fd.as_raw() == ident {
