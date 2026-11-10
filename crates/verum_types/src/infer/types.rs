@@ -66,7 +66,7 @@ use verum_modules::{ModulePath, ModuleRegistry, NameResolver, resolver::NameKind
 
 enum ApplicationForm {
     Expanded,
-    ImplementationHead,
+    Nominal,
 }
 
 impl TypeChecker {
@@ -1017,10 +1017,33 @@ fn substitute_refinement_binder(
 
     /// Publication needs the nominal constructor after its complete argument
     /// telescope has been checked, including when the protocol has no members.
+    /// Keep a declared sum application available to protocol resolution even
+    /// when checking the body also needs its expanded variant payloads.
+    pub(super) fn declared_return_carrier(
+        &mut self, declaration: Option<&verum_ast::Type>, result: &Type,
+    ) -> Result<Type> {
+        if let Some(declaration) = declaration
+            && matches!(declaration.kind, verum_ast::TypeKind::Generic { .. })
+            && matches!(result, Type::Variant(_))
+        {
+            return self.elaborate_generic_application(declaration, None, ApplicationForm::Nominal);
+        }
+        Ok(result.clone())
+    }
+
+    fn resolve_try_carrier(&self, mut ty: Type) -> (Type, Option<crate::protocol::TryProtocolResolution>) {
+        let checker = self.protocol_checker.read();
+        let resolution = checker.resolve_try_protocol(&ty).or_else(|| {
+            ty = self.unifier.try_expand_alias(&ty)?;
+            checker.resolve_try_protocol(&ty)
+        });
+        (ty, resolution)
+    }
+
     pub(super) fn checked_impl_receiver(&mut self, receiver: &verum_ast::ty::Type) -> Result<Type> {
         match &receiver.kind {
             verum_ast::ty::TypeKind::Generic { .. } =>
-                self.elaborate_generic_application(receiver, None, ApplicationForm::ImplementationHead),
+                self.elaborate_generic_application(receiver, None, ApplicationForm::Nominal),
             verum_ast::ty::TypeKind::Path(_) => self.ast_to_type_for_protocol_impl(receiver),
             _ => self.ast_to_type(receiver),
         }
@@ -1306,7 +1329,7 @@ fn substitute_refinement_binder(
                 // that is not an alias `try_expand_alias` returns None and
                 // the arms below run unchanged.
                 if let Some(key) = parameter_key.as_ref() {
-                    if matches!(form, ApplicationForm::ImplementationHead) {
+                    if matches!(form, ApplicationForm::Nominal) {
                         // Parameter slots may live under a short archive key. The
                         // implementation belongs to the descriptor's declaring module.
                         let owner = if key.as_str().contains('.') {
@@ -1868,23 +1891,10 @@ fn substitute_refinement_binder(
         };
 
         // Step 2: Resolve Try protocol for inner type
-        // Protocol-based Try resolution: ? operator uses Carrier protocol to convert between error types
-        // The protocol checker now handles all cases:
-        // - Type variables: returns fresh type variables for Output/Residual
-        // - Variant types: recognizes Ok/Err and Some/None patterns
-        // - Named/Generic types: queries protocol implementations
-        // CANONICALISE BEFORE ASKING.  `resolve_try_protocol`'s structural
-        // fallback matches on NAME plus ARITY, so it cannot see through a
-        // type alias — `IoResult<T>` (= `Result<T, StreamError>`) is not
-        // `Result` to it.  The unifier owns alias expansion; the protocol
-        // checker should be handed a canonical type rather than growing its
-        // own copy of the rule (which is how `Result<Unit>` was born one
-        // layer up).
-        let inner_ty = self
-            .unifier
-            .try_expand_alias(&inner_ty)
-            .unwrap_or(inner_ty);
-        let inner_try = match self.protocol_checker.read().resolve_try_protocol(&inner_ty) {
+        // Resolve the declared carrier first. Aliases can delegate to their
+        // target; the payload order of an expanded sum cannot establish Try.
+        let (inner_ty, resolution) = self.resolve_try_carrier(inner_ty);
+        let inner_try = match resolution {
             Some(resolution) => resolution,
             None => {
                 // Type does not implement Try protocol
@@ -1947,16 +1957,8 @@ fn substitute_refinement_binder(
         };
 
         // Same canonicalisation as the expression side above.
-        let function_return_type = self
-            .unifier
-            .try_expand_alias(&function_return_type)
-            .unwrap_or(function_return_type);
-        // Step 4: Resolve Try protocol for return type
-        let outer_try = match self
-            .protocol_checker
-            .read()
-            .resolve_try_protocol(&function_return_type)
-        {
+        let (function_return_type, resolution) = self.resolve_try_carrier(function_return_type);
+        let outer_try = match resolution {
             Some(resolution) => resolution,
             None => {
                 // #[cfg(debug_assertions)]
@@ -6288,6 +6290,23 @@ fn substitute_refinement_binder(
             Refined { base, .. } => base.as_ref(),
             other => other,
         };
+        // A cast involving an erased protocol needs the same declaration
+        // evidence as an assignment, while both nominal carriers are intact.
+        let is_protocol_object = |ty: &Type| match ty {
+            Reference { inner, .. } | CheckedReference { inner, .. } | UnsafeReference { inner, .. } =>
+                matches!(inner.as_ref(), DynProtocol { .. }),
+            other => matches!(other, DynProtocol { .. }),
+        };
+        if is_protocol_object(from_ty) || is_protocol_object(to_ty) {
+            if self.subtyping.is_subtype(from_ty, to_ty) || self.check_protocol_coercion(from_ty, to_ty) {
+                return Ok(());
+            }
+            return Err(TypeError::InvalidCast {
+                from: from_ty.to_text(), to: to_ty.to_text(), span,
+                reason: "protocol object cast requires implementation evidence".into(),
+            });
+        }
+
         // Also normalize Named types that are refinement aliases
         let from_ty = &self.normalize_type(from_ty);
         let from_ty = match from_ty {
@@ -6692,10 +6711,7 @@ fn substitute_refinement_binder(
             // The opposite direction is forbidden
             (Reference { inner: inner1, .. }, Reference { inner: inner2, .. })
             | (CheckedReference { inner: inner1, .. }, CheckedReference { inner: inner2, .. }) => {
-                // Allow when target is dyn Protocol (protocol object cast)
-                // Allow when either inner is a type variable
-                if matches!(inner2.as_ref(), Type::DynProtocol { .. })
-                    || matches!(inner1.as_ref(), Type::Var(_))
+                if matches!(inner1.as_ref(), Type::Var(_))
                     || matches!(inner2.as_ref(), Type::Var(_))
                 {
                     return Ok(());

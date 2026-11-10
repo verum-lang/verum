@@ -8850,149 +8850,24 @@ impl ProtocolChecker {
             }
         }
 
-        // =========================================================================
-        // Structural fallback for Result/Maybe-like types
-        // When no Try protocol is registered, recognize common patterns:
-        // - Generic/Named "Result" with 2 args: Output=T, Residual=Result<Never,E>
-        // - Generic/Named "Maybe" with 1 arg: Output=T, Residual=Maybe<Never>
-        // - Variant types with Ok/Err or Some/None patterns
-        // =========================================================================
-        match ty {
-            Type::Generic { name, args } => {
-                let n = name.as_str();
-                if (WKT::Result.matches(n) || n == "IoResult") && args.len() == 2 {
-                    return Some(TryProtocolResolution {
-                        output: args[0].clone(),
-                        residual: Type::Generic {
-                            name: name.clone(),
-                            args: vec![Type::Never, args[1].clone()].into(),
-                        },
-                    });
-                }
-                if WKT::Maybe.matches(n) && args.len() == 1 {
-                    return Some(TryProtocolResolution {
-                        output: args[0].clone(),
-                        residual: Type::Generic {
-                            name: name.clone(),
-                            args: vec![Type::Never].into(),
-                        },
-                    });
-                }
-            }
-            Type::Named { path, args } => {
-                // Check both single-segment paths (as_ident) and multi-segment paths (last segment)
-                let n_opt = path.as_ident().map(|id| id.as_str()).or_else(|| {
-                    path.segments.last().and_then(|seg| {
-                        if let verum_ast::ty::PathSegment::Name(id) = seg {
-                            Some(id.name.as_str())
-                        } else {
-                            None
-                        }
-                    })
-                });
-                if let Some(n) = n_opt {
-                    if (WKT::Result.matches(n) || n == "IoResult") && args.len() == 2 {
-                        return Some(TryProtocolResolution {
-                            output: args[0].clone(),
-                            residual: Type::Named {
-                                path: path.clone(),
-                                args: vec![Type::Never, args[1].clone()].into(),
-                            },
-                        });
-                    }
-                    if WKT::Maybe.matches(n) && args.len() == 1 {
-                        return Some(TryProtocolResolution {
-                            output: args[0].clone(),
-                            residual: Type::Named {
-                                path: path.clone(),
-                                args: vec![Type::Never].into(),
-                            },
-                        });
-                    }
-                    // Handle user-defined Result-like types with different names but same structure
-                    // by checking if the type resolves to a type alias for Result/Maybe
-                }
-            }
-            Type::Variant(variants) => {
-                // Generic structural Try resolution for variant types.
-                // Look up the named type for this variant via the registry,
-                // then check if it implements Try. If not, use structural heuristic:
-                // - Output = first variant with non-Unit payload
-                // - Residual = same variant structure with output variant replaced by Never
-                let variant_sig = {
-                    let mut parts: Vec<&str> = variants.keys().map(|k| k.as_str()).collect();
-                    parts.sort();
-                    parts.join("|")
-                };
-                let named_type = self
-                    .variant_type_names
-                    .get(&verum_common::Text::from(variant_sig.as_str()))
-                    .cloned();
-
-                // If the named type implements Try, we already handled it above
-                // in the protocol-based resolution. This is the structural fallback.
-
-                // For 2-variant types, treat as Try-able: one variant carries
-                // the "success" value, the other carries the "error"/"empty" value.
-                if variants.len() == 2 {
-                    // Find the "output" variant: first variant with non-Unit, non-Never payload
-                    let output_entry = variants
-                        .iter()
-                        .find(|(_, ty)| !matches!(ty, Type::Unit | Type::Never));
-
-                    if let Some((output_name, output_ty)) = output_entry {
-                        return Some(TryProtocolResolution {
-                            output: output_ty.clone(),
-                            residual: Type::Variant(
-                                variants
-                                    .iter()
-                                    .map(|(name, ty)| {
-                                        if name == output_name {
-                                            (name.clone(), Type::Never)
-                                        } else {
-                                            (name.clone(), ty.clone())
-                                        }
-                                    })
-                                    .collect(),
-                            ),
-                        });
-                    }
-                }
-
-                // For variant types with explicit Try protocol impl via named type
-                if let Some(ref type_name) = named_type {
-                    let named_ty = Type::Generic {
-                        name: type_name.clone(),
-                        args: List::new(),
-                    };
-                    if self.implements_protocol(&named_ty, "Try") {
-                        let try_path =
-                            Path::single(verum_ast::ty::Ident::new("Try", Span::default()));
-                        if let Maybe::Some(impl_) = self.find_impl(&named_ty, &try_path) {
-                            let mut subst = Map::new();
-                            self.build_type_substitution_for_impl(&impl_.for_type, ty, &mut subst);
-                            let output = impl_
-                                .ordinary_associated_type(&"Output".into())
-                                .ok()?
-                                .cloned()
-                                .map(|t| self.apply_type_substitution_with_map(&t, &subst));
-                            let residual = impl_
-                                .ordinary_associated_type(&"Residual".into())
-                                .ok()?
-                                .cloned()
-                                .map(|t| self.apply_type_substitution_with_map(&t, &subst));
-                            if let (Some(output), Some(residual)) = (output, residual) {
-                                return Some(TryProtocolResolution { output, residual });
-                            }
-                        }
-                    }
-                }
-            }
-            _ => {}
-        }
-
-        // No Try implementation found
-        None
+        // Bootstrap can supply the two core carriers before loading their
+        // protocol declarations. A qualified source type must own that role.
+        let (name, arguments): (std::borrow::Cow<'_, str>, _) = match ty {
+            Type::Generic { name, args } => (name.as_str().into(), args),
+            Type::Named { path, args } => (crate::ty::nominal_path_name(path)?, args),
+            _ => return None,
+        };
+        let carrier = match name.rsplit_once('.') {
+            Some((owner, leaf)) => WKT::from_declaration(leaf, owner),
+            None => WKT::from_name(&name),
+        };
+        let mut residual = arguments.clone();
+        let output = match (carrier, arguments.as_slice()) {
+            (Some(WKT::Result), [output, _]) | (Some(WKT::Maybe), [output]) => output.clone(),
+            _ => return None,
+        };
+        residual[0] = Type::Never;
+        Some(TryProtocolResolution { output, residual: ty.clone().apply_arguments(residual) })
     }
 
     /// Build type substitution from impl's generic type to concrete type.

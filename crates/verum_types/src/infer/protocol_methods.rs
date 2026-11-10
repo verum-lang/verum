@@ -175,6 +175,7 @@ impl TypeChecker {
                 .map(|ty| self.ast_to_type(ty))
                 .transpose()?
                 .unwrap_or(Type::Unit);
+            let output = self.declared_return_carrier(method.return_type.as_ref(), &output)?;
             let output = self.wrap_return_type_for_sig_full(
                 output,
                 &method.throws_clause,

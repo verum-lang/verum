@@ -10912,6 +10912,8 @@ impl TypeChecker {
             .or_else(|| return_type_var.clone())
             .unwrap_or_else(Type::unit);
 
+        let return_carrier = self.declared_return_carrier(func.return_type.as_ref(), &initial_return_type)?;
+
         // Resolve and expand context requirements
         // Context group expansion: resolving context group names to their constituent contexts recursively — Context group expansion
         //
@@ -11837,7 +11839,7 @@ impl TypeChecker {
         // Save previous context (for nested functions)
         let prev_return_type = self
             .current_function_return_type
-            .replace(initial_return_type.clone());
+            .replace(return_carrier);
         let prev_name = self.current_function_name.replace(func.name.name.clone());
         let prev_span = std::mem::replace(
             &mut self.current_function_return_span,

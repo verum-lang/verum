@@ -31,12 +31,43 @@
 
 use verum_ast::span::{FileId, Span};
 use verum_ast::ty::{Ident, Path, PathSegment};
-use verum_common::{List, Map, Maybe};
+use verum_common::{List, Map, Maybe, Text};
 use verum_types::protocol::{ProtocolChecker, ProtocolImpl};
 use verum_types::{Type, TypeChecker, TypeError};
 
 // For test_e0204_diagnostic_quality
 use verum_common::span::LineColSpan;
+
+#[test]
+fn structural_alternatives_alone_do_not_declare_try() {
+    let checker = ProtocolChecker::new();
+    for success in [Type::Unit, Type::Int] {
+        let cases = indexmap::IndexMap::from_iter([
+            (Text::from("Accepted"), success),
+            (Text::from("Rejected"), Type::Bool),
+        ]);
+        assert!(checker.resolve_try_protocol(&Type::Variant(cases)).is_none());
+    }
+}
+
+#[test]
+fn bootstrap_result_keeps_unit_success_and_requires_its_declaring_module() {
+    let checker = ProtocolChecker::new();
+    let applied = |segments: &[&str]| {
+        let span = Span::default();
+        Type::Named {
+            path: Path::new(segments.iter().map(|s| PathSegment::Name(Ident::new(*s, span))).collect(), span),
+            args: vec![Type::Unit, Type::Bool].into(),
+        }
+    };
+    for segments in [&["core.base.result.Result"][..], &["core", "base", "result", "Result"]] {
+        let carrier = applied(segments);
+        let proof = checker.resolve_try_protocol(&carrier).unwrap();
+        assert_eq!(proof.output, Type::Unit);
+        assert_eq!(proof.residual, carrier.apply_arguments(vec![Type::Never, Type::Bool].into()));
+    }
+    assert!(checker.resolve_try_protocol(&applied(&["foreign", "Result"])).is_none());
+}
 
 /// Helper to create a test span
 fn test_span(line: usize, col: usize) -> Span {
