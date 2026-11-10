@@ -54,6 +54,16 @@ fn refused(source: &str) {
 }
 const DECL: &str =
     "type P is protocol {}; implement P for Int {} type Requires<T:P> is { value:T };";
+
+#[test]
+fn structural_implementation_receivers_use_their_own_premises() {
+    let head = "type PairWith<R> is protocol { type Output; };";
+    for receiver in ["&Requires<T>", "&mut Requires<T>", "(&Requires<T>, T)"] {
+        let body = format!("PairWith<{receiver}> for {receiver} {{ type Output = Requires<T>; }}");
+        accepted(&format!("{DECL} {head} implement<T: P> {body}"));
+        refused(&format!("{DECL} {head} implement<T> {body}"));
+    }
+}
 #[test]
 fn concrete_field_argument_requires_its_bound() {
     refused(&format!("{DECL} type Token is {{value: Requires<Bool>}};"));

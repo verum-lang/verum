@@ -281,6 +281,20 @@ impl TypeChecker {
                 Ok(resolved)
             }
 
+            // Self is bound while its own implementation premises are being
+            // elaborated. Keep the nominal head through structural wrappers.
+            // checked_impl_receiver subsequently checks the entire application.
+            TypeKind::Reference { mutable, inner } =>
+                Ok(Type::reference(*mutable, self.ast_to_type_for_protocol_impl(inner)?)),
+            TypeKind::CheckedReference { mutable, inner } =>
+                Ok(Type::checked_reference(*mutable, self.ast_to_type_for_protocol_impl(inner)?)),
+            TypeKind::UnsafeReference { mutable, inner } =>
+                Ok(Type::unsafe_reference(*mutable, self.ast_to_type_for_protocol_impl(inner)?)),
+            TypeKind::Tuple(items) => Ok(Type::tuple(items.iter()
+                .map(|item| self.ast_to_type_for_protocol_impl(item)).collect::<Result<_>>()?)),
+            TypeKind::Slice(element) =>
+                Ok(Type::slice(self.ast_to_type_for_protocol_impl(element)?)),
+
             // For Generic types, create a Named/Generic type without expansion
             TypeKind::Generic { base, args } => {
                 // Recursively resolve the base type
@@ -292,11 +306,7 @@ impl TypeChecker {
                     use verum_ast::ty::GenericArg;
                     match arg {
                         GenericArg::Type(ty) => {
-                            // Use regular ast_to_type for arguments since they may be type variables
-                            let arg_ty = self
-                                .ast_to_type(ty)
-                                .unwrap_or_else(|_| self.ast_to_type_lenient(ty));
-                            type_args.push(arg_ty);
+                            type_args.push(self.ast_to_type_for_protocol_impl(ty)?);
                         }
                         GenericArg::Const(expr) => {
                             // See eval_const_arg: we preserve the compile-time value so
@@ -1008,10 +1018,11 @@ fn substitute_refinement_binder(
     /// Publication needs the nominal constructor after its complete argument
     /// telescope has been checked, including when the protocol has no members.
     pub(super) fn checked_impl_receiver(&mut self, receiver: &verum_ast::ty::Type) -> Result<Type> {
-        if matches!(receiver.kind, verum_ast::ty::TypeKind::Generic { .. }) {
-            self.elaborate_generic_application(receiver, None, ApplicationForm::ImplementationHead)
-        } else {
-            self.ast_to_type_for_protocol_impl(receiver)
+        match &receiver.kind {
+            verum_ast::ty::TypeKind::Generic { .. } =>
+                self.elaborate_generic_application(receiver, None, ApplicationForm::ImplementationHead),
+            verum_ast::ty::TypeKind::Path(_) => self.ast_to_type_for_protocol_impl(receiver),
+            _ => self.ast_to_type(receiver),
         }
     }
 
