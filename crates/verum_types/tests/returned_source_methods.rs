@@ -19,6 +19,37 @@ const PROVIDER: &str = r#"
 "#;
 
 #[test]
+fn plain_call_bounds_load_the_returned_values_own_implementation() {
+    let modules = [
+        ("demo.capability", "public type Stamp is protocol { fn stamp(&self) -> Int; };"),
+        ("demo.tickets", r#"
+            mount demo.capability.Stamp;
+            public type Ticket<T> is { value: T };
+            implement Stamp for Ticket<Int> { fn stamp(&self) -> Int { self.value } }
+            public fn issue() -> Ticket<Int> { Ticket { value: 42 } }
+        "#),
+        ("demo.foreign", r#"
+            public type Ticket<T> is { value: T };
+            public fn issue() -> Ticket<Int> { Ticket { value: 7 } }
+        "#),
+        ("demo.api", r#"
+            mount demo.capability.Stamp;
+            mount demo.tickets.{Ticket, issue};
+            public fn issued() -> Ticket<Int> { issue() }
+            public fn accept<T: Stamp>(value: T) -> Int { value.stamp() }
+        "#),
+    ];
+    let accepted = check("mount demo.api.{accept, issued}; fn probe() -> Int { accept(issued()) }", &modules);
+    assert!(accepted.is_empty(), "{accepted:?}");
+
+    let refused = check(
+        "mount demo.api.accept; mount demo.foreign.issue; fn probe() -> Int { accept(issue()) }",
+        &modules,
+    );
+    assert!(refused.iter().any(|error| error.contains("Stamp")), "{refused:?}");
+}
+
+#[test]
 fn two_mount_paths_preregister_one_implementation_owner() {
     let library = r#"
         public type Stamp is protocol { fn stamp(&self) -> Int; };

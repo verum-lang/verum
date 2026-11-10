@@ -399,6 +399,11 @@ impl TypeChecker {
                                 .unwrap_or(rendered.as_str())
                                 .into();
                             self.ensure_stdlib_type_loaded_transitive(&proto_leaf);
+                            // A mounted producer may return a type whose owning
+                            // module the caller never mounted directly.
+                            self.load_source_bound_implementations(
+                                &resolved_ty, b, &[], &Map::new(), span,
+                            )?;
                         }
                         self.protocol_checker
                             .read()
