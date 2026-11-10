@@ -172,6 +172,13 @@ impl ProtocolChecker {
         changed.then_some(current)
     }
 
+    pub(crate) fn builtin_source_receiver_name(&self, ty: &Type) -> Option<Text> {
+        match self.head_identity(ty)? {
+            HeadIdentity::Builtin(identity) => Some(identity),
+            HeadIdentity::Nominal => None,
+        }
+    }
+
     pub(super) fn requires_unfiltered_type_candidates(&self, ty: &Type) -> bool {
         self.has_declared_alias_head(ty)
             || matches!(self.head_identity(ty), Some(HeadIdentity::Builtin(_)))

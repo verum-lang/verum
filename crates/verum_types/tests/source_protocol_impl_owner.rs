@@ -563,3 +563,26 @@ fn inherited_methods_keep_distinct_same_leaf_protocol_owners() {
         }
     }
 }
+
+#[test]
+fn scalar_bounds_load_the_actual_implementation_from_its_source_module() {
+    let types = ("demo.lib", "public type Key is protocol {}; public type Table<K:Key> is { key:K };");
+    let integers = ("core.base.primitives", "mount demo.lib.Key; implement Key for Int {}");
+    let texts = ("core.text.text", "mount demo.lib.Key; implement Key for Text {}");
+    let query = "mount demo.lib.Table; type Cache is { numbers:Table<Int>, names:Table<Text> };";
+    let (_, errors) = check(query, &[types, integers, texts]);
+    assert!(errors.is_empty(), "{errors:#?}");
+
+    for modules in [
+        vec![types, integers],
+        vec![types, texts],
+        vec![types, integers, ("other.text", texts.1)],
+    ] {
+        let (_, errors) = check(query, &modules);
+        assert!(!errors.is_empty(), "a scalar gained an implementation without its source: {modules:?}");
+    }
+
+    let shadow = "mount demo.lib.Table; type Int64 is { flag:Bool }; type Cache is { key:Table<Int64> };";
+    let (_, errors) = check(shadow, &[types, integers]);
+    assert!(!errors.is_empty(), "a local Int64 borrowed a scalar implementation");
+}

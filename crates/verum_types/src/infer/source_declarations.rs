@@ -612,8 +612,8 @@ impl TypeChecker {
         Some((module, declaration))
     }
 
-    /// Load only the exact nominal owner's implementations of this required
-    /// protocol before asking the immutable proof engine for evidence. An
+    /// Load the required protocol from the receiver's declaration sources
+    /// before asking the immutable proof engine for evidence. An
     /// in-progress module import is not evidence, and unrelated implementations
     /// must not be checked first merely because they appear earlier in source.
     pub(super) fn load_source_bound_implementations(
@@ -624,12 +624,49 @@ impl TypeChecker {
         callables: &verum_common::Map<crate::ty::TypeVar, Type>,
         span: Span,
     ) -> Result<()> {
-        let Some((module, declaration)) = self.source_receiver_declaration(receiver) else {
+        use verum_common::well_known_types::{WellKnownType, type_names};
+
+        let protocol = self.path_to_string(&bound.protocol);
+        let mut owners = Vec::new();
+        let (key_name, names) = if let Some((module, declaration)) =
+            self.source_receiver_declaration(receiver)
+        {
+            let name = declaration.name.name;
+            let key = Self::source_type_declaration_key(module.path.to_string().as_str(), &name);
+            owners.push(module);
+            (key, vec![name])
+        } else if let Some(name) = self.protocol_checker.read().builtin_source_receiver_name(receiver)
+        {
+            // A language scalar has no nominal TypeDecl to mount. Only source
+            // declarations can supply implementations, including those in the
+            // protocol owner, the scalar library and the value's own module.
+            let scalar_module = WellKnownType::Int.canonical_archive_modules().first().copied();
+            let protocol_module = protocol.rsplit_once('.').map(|(owner, _)| owner);
+            let value_module = WellKnownType::from_name(&name)
+                .and_then(|kind| kind.canonical_archive_modules().first().copied());
+            let registry = self.module_registry.read();
+            for owner in [protocol_module, scalar_module, value_module].into_iter().flatten() {
+                if let Some(module) = registry.get_by_path(owner)
+                    && module.path.to_string() == owner
+                    && !owners.iter().any(|prior| prior.id == module.id)
+                {
+                    owners.push(module);
+                }
+            }
+            let spellings = type_names::primitive_identity_spellings(&name);
+            let names = if spellings.is_empty() {
+                vec![name.clone()]
+            } else {
+                spellings.iter().map(|spelling| Text::from(*spelling)).collect()
+            };
+            (name, names)
+        } else {
             return Ok(());
         };
-        let owner = module.path.to_string();
-        let protocol = self.path_to_string(&bound.protocol);
-        let key = (format!("{owner}.{}", declaration.name.name).into(), protocol.clone());
+        if owners.is_empty() {
+            return Ok(());
+        }
+        let key = (key_name, protocol.clone());
         if !self.source_type_registration.active_impl_bounds.insert(key.clone()) {
             // An active declaration is not evidence. A previously published
             // implementation or an explicit caller assumption may still prove
@@ -649,9 +686,14 @@ impl TypeChecker {
             &mut self.source_type_registration.projection_assumptions,
         );
         let callables = std::mem::take(&mut self.source_type_registration.callable_assumptions);
-        let result = self.import_impl_blocks_for_type_in_module_selected(
-            &module.ast, declaration.name.name.as_str(), Some(owner.as_str()), Some(&protocol),
-        );
+        let result = owners.iter().try_for_each(|module| {
+            let owner = module.path.to_string();
+            names.iter().try_for_each(|name| {
+                self.import_impl_blocks_for_type_in_module_selected(
+                    &module.ast, name.as_str(), Some(owner.as_str()), Some(&protocol),
+                )
+            })
+        });
         self.decl_param_frames = frames;
         self.source_type_registration.projection_assumptions = assumptions;
         self.source_type_registration.callable_assumptions = callables;
