@@ -714,3 +714,31 @@ fn imported_sync_callbacks_follow_only_their_declared_callees_and_atomic_operand
         assert!(errors.iter().any(|error| error.contains(reason)), "{body}: {errors:?}");
     }
 }
+
+#[test]
+fn a_selected_protocol_method_projects_its_item_inside_variant_payloads() {
+    let modules = [("demo.streams", r#"
+        public type Stage<T> is | Pending | Ready(T);
+        public type Message<T> is | Empty | Value(T);
+        public type Pollable is protocol {
+            type Item;
+            fn pull(&self) -> Stage<Message<Self.Item>> { Stage.Pending }
+        };
+        public type Other is protocol { type Item; };
+        public type Handle<T> is { item:T };
+        implement<T> Other for Handle<T> { type Item = Int; }
+        implement<T> Pollable for Handle<T> { type Item = T; }
+        public fn obtain<T>(item:T)->Handle<T> { Handle { item } }
+    "#)];
+    let header = "mount demo.streams.{Stage,Message,Pollable,Other,obtain};";
+    for (wanted, otherwise, accepted) in [("Text", r#""""#, true), ("Int", "0", false)] {
+        let body = format!(r#"{header} fn read() -> {wanted} {{
+            match obtain("ok").pull() {{
+                Stage.Ready(Message.Value(value)) => value,
+                _ => {otherwise},
+            }}
+        }}"#);
+        let errors = check(&body, &modules);
+        assert_eq!(errors.is_empty(), accepted, "{body}: {errors:?}");
+    }
+}

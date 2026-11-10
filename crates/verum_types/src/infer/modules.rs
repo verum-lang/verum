@@ -21977,6 +21977,9 @@ impl TypeChecker {
                 // CRITICAL FIX: Normalize the return type to resolve associated type projections.
                 // After unifier.apply(), we may still have projections like ::Item[SliceIter<Int>]
                 // that need to be resolved to &Int by looking up the associated type definition.
+                let resolved_return = self.resolve_method_output_projections(
+                    &resolved_return, &recv_ty, protocol_path,
+                );
                 let normalized_return = self.normalize_type(&resolved_return);
                 if crate::ctor_trace_enabled() {
                     eprintln!(

@@ -7064,6 +7064,23 @@ impl TypeChecker {
     /// it either — this walk is the single place the nested case is driven.
     /// Stdlib-agnostic: resolution flows through `try_find_associated_type`.
     pub(super) fn resolve_assoc_projections_deep(&self, ty: &Type) -> Type {
+        self.resolve_assoc_projections_in_scope(ty, None, 0)
+    }
+
+    pub(super) fn resolve_method_output_projections(
+        &self, ty: &Type, receiver: &Type, protocol: &verum_ast::Path,
+    ) -> Type {
+        self.resolve_assoc_projections_in_scope(ty, Some((receiver, protocol)), 0)
+    }
+
+    fn resolve_assoc_projections_in_scope(
+        &self,
+        ty: &Type,
+        selected: Option<(&Type, &verum_ast::Path)>,
+        depth: usize,
+    ) -> Type {
+        if depth >= 64 { return ty.clone(); }
+        let nested = |child: &Type| self.resolve_assoc_projections_in_scope(child, selected, depth + 1);
         if let Type::Generic { name, args } = ty {
             // Recognise BOTH the `::Assoc` form the VBC serializer emits AND
             // the LEGACY bare-name form (`Generic{"Item",[Iter]}`) the
@@ -7079,7 +7096,7 @@ impl TypeChecker {
                     .is_associated_type_name(name.as_str());
             if is_projection && !args.is_empty() {
                 let assoc_name = name.as_str().strip_prefix("::").unwrap_or(name.as_str());
-                let base = self.resolve_assoc_projections_deep(&args[0]);
+                let base = nested(&args[0]);
                 // The projected-over base may be a reference: a `&mut F`
                 // parameter is stored in the descriptor as the bare generic (the
                 // producer strips the reference wrapper), so at the call site the
@@ -7092,12 +7109,16 @@ impl TypeChecker {
                     other => other.clone(),
                 };
                 let assoc_text: Text = assoc_name.into();
-                let found = self
-                    .protocol_checker
-                    .read()
-                    .try_find_associated_type(&base_deref, &assoc_text);
-                if let Some(resolved) = found {
-                    return self.resolve_assoc_projections_deep(&resolved);
+                let checker = self.protocol_checker.read();
+                let found = match selected {
+                    Some((receiver, protocol)) if checker.types_structurally_equal(receiver, &base_deref) => {
+                        checker.resolve_selected_method_association(&base_deref, protocol, &assoc_text)
+                    }
+                    _ => checker.try_find_associated_type(&base_deref, &assoc_text),
+                };
+                drop(checker);
+                if let Some(resolved) = found && resolved != *ty {
+                    return nested(&resolved);
                 }
             }
         }
@@ -7106,44 +7127,50 @@ impl TypeChecker {
                 name: name.clone(),
                 args: args
                     .iter()
-                    .map(|a| self.resolve_assoc_projections_deep(a))
+                    .map(nested)
                     .collect(),
             },
             Type::Named { path, args } => Type::Named {
                 path: path.clone(),
                 args: args
                     .iter()
-                    .map(|a| self.resolve_assoc_projections_deep(a))
+                    .map(nested)
                     .collect(),
             },
             Type::Tuple(parts) => Type::Tuple(
                 parts
                     .iter()
-                    .map(|p| self.resolve_assoc_projections_deep(p))
+                    .map(nested)
                     .collect(),
             ),
             Type::Reference { mutable, inner } => Type::Reference {
                 mutable: *mutable,
-                inner: Box::new(self.resolve_assoc_projections_deep(inner)),
+                inner: Box::new(nested(inner)),
             },
             Type::CheckedReference { mutable, inner } => Type::CheckedReference {
                 mutable: *mutable,
-                inner: Box::new(self.resolve_assoc_projections_deep(inner)),
+                inner: Box::new(nested(inner)),
             },
             Type::UnsafeReference { mutable, inner } => Type::UnsafeReference {
                 mutable: *mutable,
-                inner: Box::new(self.resolve_assoc_projections_deep(inner)),
+                inner: Box::new(nested(inner)),
             },
             Type::Future { output } => Type::Future {
-                output: Box::new(self.resolve_assoc_projections_deep(output)),
+                output: Box::new(nested(output)),
             },
             Type::Array { element, size } => Type::Array {
-                element: Box::new(self.resolve_assoc_projections_deep(element)),
+                element: Box::new(nested(element)),
                 size: *size,
             },
             Type::Slice { element } => Type::Slice {
-                element: Box::new(self.resolve_assoc_projections_deep(element)),
+                element: Box::new(nested(element)),
             },
+            Type::Variant(variants) if selected.is_some() => Type::Variant(
+                variants.iter().map(|(tag, payload)| (tag.clone(), nested(payload))).collect(),
+            ),
+            Type::Record(fields) if selected.is_some() => Type::Record(
+                fields.iter().map(|(name, field)| (name.clone(), nested(field))).collect(),
+            ),
             _ => ty.clone(),
         }
     }

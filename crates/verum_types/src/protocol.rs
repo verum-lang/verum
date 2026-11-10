@@ -7636,6 +7636,28 @@ impl ProtocolChecker {
         self.resolve_associated_type_matching(ty, protocol, None, assoc_name)
     }
 
+    /// The method candidate identifies its protocol owner. Without an explicit
+    /// protocol argument vector, reduce only when all applicable heads agree
+    /// on that vector, so a sibling instantiation cannot supply the result.
+    pub(crate) fn resolve_selected_method_association(
+        &self, ty: &Type, protocol: &Path, name: &Text,
+    ) -> Option<Type> {
+        let (selected, substitution) = self.find_impl_with_substitution(ty, protocol)?;
+        let arguments: List<Type> = selected.protocol_args.iter()
+            .map(|arg| arg.try_apply_subst(&substitution)).collect::<Result<_, _>>().ok()?;
+        if !arguments.is_empty() {
+            for candidate in &self.impls {
+                if !self.paths_equal(&candidate.protocol, protocol) { continue; }
+                let Some(instance) = self.instantiate_applicable_implementation(candidate, ty, None) else { continue; };
+                if candidate.protocol_args.len() != arguments.len() || !candidate.protocol_args.iter().zip(&arguments)
+                    .all(|(arg, expected)| arg.try_apply_subst(&instance).is_ok_and(|actual|
+                        self.types_structurally_equal(&actual, expected)))
+                { return None; }
+            }
+        }
+        self.resolve_associated_type_for_instantiation(ty, protocol, &arguments, name).ok()
+    }
+
     pub fn resolve_associated_type_for_instantiation(
         &self,
         ty: &Type,
