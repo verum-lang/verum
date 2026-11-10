@@ -136,7 +136,9 @@ impl TypeChecker {
         let mut methods_guard = self.inherent_methods.write();
         let methods = methods_guard.entry(type_name).or_default();
         if let Some(existing) = methods.get(&method_name) {
-            if existing.ty != scheme.ty {
+            if existing.ty != scheme.ty
+                || (from_protocol_impl && existing.impl_self_type != scheme.impl_self_type)
+            {
                 if from_protocol_impl {
                     methods.remove(&method_name);
                     drop(methods_guard);
@@ -2820,6 +2822,7 @@ impl TypeChecker {
         metadata: std::sync::Arc<crate::core_metadata::CoreMetadata>,
     ) -> Result<()> {
         let mut checker = Self::new_with_core(metadata.clone());
+        if let Some(error) = checker.take_deferred_errors().into_iter().next() { return Err(error); }
         checker.register_primitives();
         checker.set_universe_poly_enabled(true);
         for owner in metadata.inherent_implementations.keys() {
@@ -3472,6 +3475,12 @@ impl TypeChecker {
                     None => continue,
                 },
             };
+            // The implementation header admits every source member with its
+            // actual receiver pattern. Reinstalling the first ABI signature
+            // here would make that specialization callable on every sibling.
+            if fn_desc.source_signature.is_some() {
+                continue;
+            }
             // An index key does not override the descriptor's declaring
             // parent. Share static selection's owner authority before placing
             // a method into this type's inherent bucket. Legacy descriptors

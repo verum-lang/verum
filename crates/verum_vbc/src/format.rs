@@ -136,7 +136,8 @@ pub const VERSION_MAJOR: u16 = 2;
 /// Every concrete protocol implementation retains its exact source declaration.
 /// Protocol descriptors' super-protocol edges remain edges, not implementations.
 // v2.43: callable source name and typed lexical-parent identity.
-pub const VERSION_MINOR: u16 = 43;
+// v2.44: distinguish structural slice method owners from nominal records.
+pub const VERSION_MINOR: u16 = 44;
 
 /// Minor-version floors for sections whose presence readers gate on.  The
 /// register-type-hints section has been written unconditionally since minor 2,

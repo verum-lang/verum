@@ -738,6 +738,7 @@ fn test_roundtrip_all_type_kinds() {
         TypeKind::Tuple,
         TypeKind::Array,
         TypeKind::Tensor,
+        TypeKind::Slice,
     ];
 
     for (i, kind) in kinds.iter().enumerate() {

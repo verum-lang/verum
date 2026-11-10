@@ -271,3 +271,205 @@ implement<A> Rel for Owner<A> { type Out<A> = Pair<Bool,A>; }
         );
     }
 }
+
+const SPECIALIZED: &str = r#"
+module core.family_archive;
+public type ReadValue is protocol { type Value; fn read_value(&self)->Self.Value; };
+public type ReadMore is protocol extends ReadValue {};
+public type Tray<A> is { value:A };
+implement ReadValue for Tray<Int> { type Value = Int; fn read_value(&self)->Int { self.value } }
+implement ReadValue for Tray<Bool> { type Value = Bool; fn read_value(&self)->Bool { self.value } }
+"#;
+
+#[test]
+fn specialized_members_and_superprotocols_survive_the_sidecar() {
+    let metadata = publish(&source_module(SPECIALIZED)).unwrap();
+    let child = metadata.protocols.get(&Text::from("ReadMore")).unwrap();
+    assert_eq!(child.super_protocols.as_slice(), &[Text::from("ReadValue")]);
+    assert!(
+        metadata
+            .implementations
+            .iter()
+            .all(|implementation| implementation.target_type == "Tray"
+                && implementation.source_implementation.is_some())
+    );
+    let tray = metadata
+        .types
+        .get(&Text::from("core.family_archive.Tray"))
+        .unwrap();
+    assert_eq!(tray.methods.as_slice(), &[Text::from("read_value")]);
+    for eager in [false, true] {
+        for (receiver, result) in [
+            ("Bool", "Bool"),
+            ("Int", "Int"),
+            ("Bool", "Int"),
+            ("Int", "Bool"),
+        ] {
+            let consumer = format!(
+                "mount core.family_archive.{{Tray,ReadValue}}; fn consume(value:Tray<{receiver}>)->{result} {{ value.read_value() }}"
+            );
+            let errors = consumer_errors(&metadata, &consumer, eager);
+            assert_eq!(
+                errors.is_empty(),
+                receiver == result,
+                "eager={eager}: {consumer}: {errors:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_sibling_member_with_a_forged_signature_cannot_publish() {
+    let mut module = source_module(SPECIALIZED);
+    let method = module
+        .functions
+        .iter_mut()
+        .find(|function| {
+            function.source_signature.as_ref().is_some_and(|signature| {
+                signature.name.name == "read_value"
+                    && signature
+                        .return_type
+                        .as_ref()
+                        .is_some_and(|ty| verum_ast::pretty::format_type(ty) == "Bool")
+            })
+        })
+        .unwrap();
+    let signature = method.source_signature.as_mut().unwrap();
+    signature.return_type = None;
+    let error = publish(&module).unwrap_err();
+    assert!(
+        error.contains("implementation header") || error.contains("implementation signature"),
+        "{error}"
+    );
+}
+
+#[test]
+fn a_sibling_body_cannot_certify_another_implementation() {
+    let mut module = source_module(SPECIALIZED);
+    let int_method = module
+        .functions
+        .iter()
+        .find(|function| {
+            function.source_signature.as_ref().is_some_and(|signature| {
+                signature.name.name == "read_value"
+                    && signature
+                        .return_type
+                        .as_ref()
+                        .is_some_and(|ty| verum_ast::pretty::format_type(ty) == "Int")
+            })
+        })
+        .unwrap()
+        .id
+        .0;
+    let other = module
+        .types
+        .iter_mut()
+        .flat_map(|ty| &mut ty.protocols)
+        .find(|implementation| {
+            implementation.methods.len() == 1 && implementation.methods[0] != int_method
+        })
+        .expect("concrete Bool implementation has a materialized method");
+    other.methods[0] = int_method;
+    let error = publish(&module).unwrap_err();
+    assert!(error.contains("implementation signature"), "{error}");
+}
+
+#[test]
+fn removing_a_concrete_telescope_does_not_create_an_inheritance_edge() {
+    let mut module = source_module(SPECIALIZED);
+    let target = module
+        .types
+        .iter_mut()
+        .find(|ty| ty.kind == verum_vbc::types::TypeKind::Record)
+        .unwrap();
+    target.protocols[0].source_implementation = None;
+    let error = publish(&module).unwrap_err();
+    assert!(
+        error.contains("declaration-owned source telescope"),
+        "{error}"
+    );
+}
+
+#[test]
+fn structural_methods_retain_their_own_catalogue_and_receiver_shape() {
+    for (name, target, other) in [
+        ("Slice", "[Int]", "[Int; 4]"),
+        ("Array", "[Int; 4]", "[Int]"),
+    ] {
+        let source = format!(
+            "module {OWNER}; implement {target} {{ public fn archived_marker(&self)->Bool {{ true }} }}"
+        );
+        let module = source_module(&source);
+        let metadata = publish(&module).unwrap();
+        let descriptor = metadata
+            .functions
+            .get(&Text::from(format!("{name}.archived_marker")))
+            .unwrap();
+        assert_eq!(descriptor.parent_type.as_deref(), Some(name));
+        assert!(
+            metadata
+                .inherent_implementations
+                .contains_key(&Text::from(name))
+        );
+        if name == "Array" {
+            let mut forged = metadata.clone();
+            forged
+                .functions
+                .get_mut(&Text::from("Array.archived_marker"))
+                .unwrap()
+                .params[0]
+                .ty = "&[Int; 5]".into();
+            let error = verum_types::core_metadata::encode_metadata(&forged).unwrap_err();
+            assert!(
+                error.contains("source array extent 4 disagrees with archive extent 5"),
+                "{error}"
+            );
+        }
+
+        let mut wrong = module.clone();
+        let other_source = Parser::new(&format!(
+            "implement {other} {{ public fn archived_marker(&self)->Bool {{ true }} }}"
+        ))
+        .parse_module()
+        .unwrap();
+        let verum_ast::ItemKind::Impl(other_block) = &other_source.items[0].kind else {
+            panic!("implementation")
+        };
+        let owner = wrong
+            .types
+            .iter_mut()
+            .find(|ty| !ty.source_inherent_implementations.is_empty())
+            .unwrap();
+        let mut block = owner.source_inherent_implementations[0]
+            .declaration()
+            .unwrap();
+        block.kind = other_block.kind.clone();
+        owner.source_inherent_implementations[0] =
+            verum_ast::source_implementation::AssociatedImplementationSource::new(
+                OWNER.into(),
+                &block,
+            )
+            .unwrap();
+        assert!(publish(&wrong).is_err(), "{other} was admitted on {name}");
+    }
+}
+
+#[test]
+fn an_inherited_default_retains_the_declaring_protocol_signature() {
+    let source = r#"
+        module core.family_archive;
+        public type Advertise is protocol { fn message(&self)->Int { 9 } };
+        public type Detailed is protocol extends Advertise {};
+        public type Entry is { id:Int };
+        implement Advertise for Entry {}
+        implement Detailed for Entry {}
+    "#;
+    let metadata = publish(&source_module(source)).unwrap();
+    for eager in [false, true] {
+        let source = "mount core.family_archive.{Entry,Advertise}; fn read(entry:Entry)->Int { entry.message() }";
+        assert!(
+            consumer_errors(&metadata, source, eager).is_empty(),
+            "eager={eager}"
+        );
+    }
+}

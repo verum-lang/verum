@@ -13558,11 +13558,8 @@ impl VbcCodegen {
     /// associated-type carry, and the bare-`Self` projection fidelity
     /// all apply to structural targets exactly as to named ones.
     ///
-    /// The descriptor is a field-less Record — mirroring the
-    /// primitive method-catalogue stubs synthesized by
-    /// `archive_metadata` Pass 2.5 — because slices/arrays are
-    /// built-in VALUES at the VM layer; the descriptor exists to
-    /// anchor methods, impls, and generic-param facts.
+    /// The structural kind distinguishes this method catalogue from a
+    /// user record with the same name. Values retain their own TypeRef.
     fn ensure_structural_impl_target_type(
         &mut self,
         impl_decl: &verum_ast::decl::ImplDecl,
@@ -13573,19 +13570,21 @@ impl VbcCodegen {
             ImplKind::Inherent(ty) => ty,
             ImplKind::Protocol { for_type, .. } => for_type,
         };
-        let is_structural = matches!(
-            &target_ty.kind,
-            verum_ast::ty::TypeKind::Slice(_) | verum_ast::ty::TypeKind::Array { .. }
-        );
-        if !is_structural || self.type_name_to_id.contains_key(type_name) {
-            return;
-        }
-        let type_id = self.alloc_user_type_id();
+        let kind = match &target_ty.kind {
+            verum_ast::ty::TypeKind::Slice(_) => crate::types::TypeKind::Slice,
+            verum_ast::ty::TypeKind::Array { .. } => crate::types::TypeKind::Array,
+            _ => return,
+        };
+        let type_id = match self.type_name_to_id.get(type_name).copied() {
+            Some(id) if self.type_by_id(id).is_some() => return,
+            Some(reserved) => reserved,
+            None => self.alloc_user_type_id(),
+        };
         let name_sid = StringId(self.ctx.intern_string_raw(type_name));
         let mut td = crate::types::TypeDescriptor::default();
         td.id = type_id;
         td.name = name_sid;
-        td.kind = crate::types::TypeKind::Record;
+        td.kind = kind;
         for g in impl_decl.generics.iter() {
             if let verum_ast::ty::GenericParamKind::Type { name, .. } = &g.kind {
                 let pname = StringId(self.ctx.intern_string_raw(name.name.as_str()));
@@ -20400,7 +20399,15 @@ impl VbcCodegen {
         // `parent_type` at None, which is the correct fallback.
         if let Some(type_name) = impl_type_name {
             descriptor.parent_type = match &self.current_impl_receiver {
-                Some(receiver) => receiver.ty.base_type_id(),
+                Some(receiver) => receiver.ty.base_type_id().or_else(|| {
+                    // Structural values have no nominal TypeId. Their method
+                    // catalogue was selected when this declaration was registered.
+                    let parent = self.declared_callable_descriptors.get(&func_info.id)?.parent_type?;
+                    let catalogue = self.type_by_id(parent)?;
+                    matches!((&receiver.ty, catalogue.kind),
+                        (TypeRef::Slice(_), crate::types::TypeKind::Slice)
+                        | (TypeRef::Array { .. }, crate::types::TypeKind::Array)).then_some(parent)
+                }),
                 None => self.type_name_to_id.get(type_name.as_str()).copied()
                     .or_else(|| self.get_well_known_type_id(type_name)),
             };

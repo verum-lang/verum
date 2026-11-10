@@ -7,6 +7,17 @@ use verum_common::{List, Text};
 
 impl TypeChecker {
     pub(super) fn metadata_implementation_target(descriptor: &TypeDescriptor) -> Type {
+        // Only the global opaque catalogue represents a structural receiver.
+        // Its element and extent are bound by the implementation header.
+        if descriptor.module_path.is_empty() && descriptor.origin_module_path.is_none()
+            && matches!(descriptor.kind, crate::core_metadata::TypeDescriptorKind::Opaque)
+        {
+            match descriptor.name.as_str() {
+                "Slice" => return Type::Slice { element: Box::new(Type::Unknown) },
+                "Array" => return Type::Array { element: Box::new(Type::Unknown), size: None },
+                _ => {}
+            }
+        }
         let represented = super::helpers::parse_descriptor_type_string(&descriptor.name);
         if !matches!(represented, Type::Unknown)
             && represented.primitive_name().is_some_and(|name|
@@ -59,12 +70,19 @@ impl TypeChecker {
                 let verum_ast::decl::ImplItemKind::Function(function) = &item.kind else { continue; };
                 let qualified: Text = format!("{}.{}", owner, function.name.name).into();
                 let unqualified: Text = format!("{}.{}", descriptor.name, function.name.name).into();
-                let method = metadata.functions.get(&qualified).or_else(|| metadata.functions.get(&unqualified))
-                    .filter(|method| Self::metadata_function_owner(method, &metadata)
-                        .is_some_and(|target| Self::metadata_declaring_key(target) == owner))
+                let owned = |method: &crate::core_metadata::FunctionDescriptor|
+                    Self::metadata_function_owner(method, &metadata)
+                        .is_some_and(|target| Self::metadata_declaring_key(target) == owner);
+                let primary = metadata.functions.get(&qualified).or_else(|| metadata.functions.get(&unqualified))
+                    .filter(|method| owned(method))
                     .ok_or_else(|| TypeError::Other(format!("inherent declaration has no owned method descriptor: {qualified}").into()))?;
-                if let Some(signature) = &method.source_signature {
-                    if signature != function {
+                if let Some(signature) = &primary.source_signature && signature != function {
+                    // The single lookup slot can represent a sibling. Replay
+                    // the current header only with its own retained declaration.
+                    let matches = metadata.functions.values().any(|method|
+                        method.source_signature.as_ref() == Some(function) && owned(method)
+                            && method.origin_module_path.as_ref().unwrap_or(&method.module_path).as_str() == source.origin_module());
+                    if !matches {
                         return Err(TypeError::Other(format!("inherent method declaration disagrees with its signature: {qualified}").into()));
                     }
                 }

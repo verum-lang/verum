@@ -105,34 +105,81 @@ fn validate_metadata_descriptors(metadata: &CoreMetadata) -> Result<(), Text> {
 /// Build the owner index once; admission never guesses quantifiers from a
 /// nominal type's arity or from runtime parameter spellings.
 pub fn validate_source_callable_owners(metadata: &CoreMetadata) -> Result<(), Text> {
-    let mut owners = verum_common::Set::new();
-    let mut record = |target: Text, source: &verum_ast::source_implementation::AssociatedImplementationSource| -> Result<(), Text> {
+    // Keep references to pending signatures. Implementation declarations are
+    // decoded one at a time, including for large multi-module archives.
+    let mut pending = std::collections::HashMap::new();
+    for descriptor in metadata.functions.values() {
+        let (Some(signature), Some(parent)) = (&descriptor.source_signature, &descriptor.parent_type) else { continue };
+        let target = metadata.types.get(parent).ok_or_else(|| Text::from("source method has no declared parent type"))?;
+        if matches!(target.kind, TypeDescriptorKind::Protocol { .. })
+            && protocol_declares_signature(metadata, &[parent], signature)
+        {
+            continue;
+        }
+        let origin = descriptor.origin_module_path.as_ref().unwrap_or(&descriptor.module_path);
+        pending.entry((nominal_declaring_key(target), origin.clone(), signature.span))
+            .or_insert_with(Vec::new).push(signature);
+    }
+    let mut record = |target: &Text, source: &verum_ast::source_implementation::AssociatedImplementationSource| -> Result<(), Text> {
+        let origin = Text::from(source.origin_module());
         for item in source.declaration()?.items {
-            if let verum_ast::decl::ImplItemKind::Function(function) = item.kind {
-                owners.insert((target.clone(), function.name.name));
+            if let verum_ast::decl::ImplItemKind::Function(method) = item.kind
+                && let Some(signatures) = pending.get_mut(&(target.clone(), origin.clone(), method.span))
+            {
+                signatures.retain(|signature| **signature != method);
             }
         }
         Ok(())
     };
     for (target, sources) in &metadata.inherent_implementations {
-        for source in sources { record(target.clone(), source)?; }
+        for source in sources { record(target, source)?; }
     }
+    let mut protocols = std::collections::HashMap::new();
     for implementation in &metadata.implementations {
         if let Some(source) = &implementation.source_implementation {
             let target = metadata.types.get(&implementation.target_type)
                 .map(nominal_declaring_key).unwrap_or_else(|| implementation.target_type.clone());
-            record(target, source)?;
+            record(&target, source)?;
+            protocols.entry((target, Text::from(source.origin_module())))
+                .or_insert_with(Vec::new).push(&implementation.protocol);
         }
     }
-    for descriptor in metadata.functions.values() {
-        let (Some(signature), Some(parent)) = (&descriptor.source_signature, &descriptor.parent_type) else { continue; };
-        let target = metadata.types.get(parent).ok_or_else(|| Text::from("source method has no declared parent type"))?;
-        if matches!(target.kind, TypeDescriptorKind::Protocol { .. }) && target.source_declaration.is_some() { continue; }
-        if !owners.contains(&(nominal_declaring_key(target), signature.name.name.clone())) {
-            return Err("source method lacks its declaration-owned implementation header; rebuild the archive".into());
+    for ((target, origin, _), signatures) in pending {
+        if signatures.is_empty() { continue; }
+        let implemented = protocols.get(&(target.clone(), origin));
+        for signature in signatures {
+            if !implemented.is_some_and(|protocols| protocol_declares_signature(metadata, protocols, signature)) {
+                return Err(format!("source method {target}.{} lacks its declaration-owned implementation header; rebuild the archive", signature.name.name).into());
+            }
         }
     }
     Ok(())
+}
+
+/// A materialized default retains the declaration from its applied protocol,
+/// possibly through an extends edge. Its name alone cannot identify a default.
+fn protocol_declares_signature(
+    metadata: &CoreMetadata,
+    protocols: &[&Text],
+    signature: &verum_ast::FunctionDecl,
+) -> bool {
+    use verum_ast::decl::{ProtocolItemKind, TypeDeclBody};
+    let mut pending = protocols.to_vec();
+    let mut visited = std::collections::HashSet::new();
+    while let Some(name) = pending.pop() {
+        if !visited.insert(name) { continue; }
+        let Some(ty) = metadata.types.get(name) else { continue };
+        let Some(TypeDeclBody::Protocol(body)) = ty.source_declaration.as_ref().map(|decl| &decl.body) else { continue };
+        if body.items.iter().any(|item| matches!(&item.kind,
+            ProtocolItemKind::Function { decl, .. } if decl == signature))
+        {
+            return true;
+        }
+        if let TypeDescriptorKind::Protocol { super_protocols, .. } = &ty.kind {
+            pending.extend(super_protocols.iter());
+        }
+    }
+    false
 }
 
 /// Canonical declaration identity shared by wire validation and type loading.

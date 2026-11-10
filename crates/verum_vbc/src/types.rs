@@ -948,6 +948,8 @@ pub enum TypeKind {
     /// silently lost the alias relation through VBC, leaving
     /// `IoResult<X>` un-unifiable with the underlying Result.
     Alias = 9,
+    /// Method owner for the structural slice type `[T]`.
+    Slice = 10,
 }
 
 impl TryFrom<u8> for TypeKind {
@@ -965,6 +967,7 @@ impl TryFrom<u8> for TypeKind {
             7 => Ok(TypeKind::Array),
             8 => Ok(TypeKind::Tensor),
             9 => Ok(TypeKind::Alias),
+            10 => Ok(TypeKind::Slice),
             _ => Err(value),
         }
     }
@@ -2097,6 +2100,8 @@ mod tests {
         assert_eq!(TypeKind::Unit as u8, 6);
         assert_eq!(TypeKind::Array as u8, 7);
         assert_eq!(TypeKind::Tensor as u8, 8);
+        assert_eq!(TypeKind::Alias as u8, 9);
+        assert_eq!(TypeKind::Slice as u8, 10);
     }
 
     #[test]
@@ -2115,14 +2120,13 @@ mod tests {
         assert_eq!(TypeKind::try_from(6), Ok(TypeKind::Unit));
         assert_eq!(TypeKind::try_from(7), Ok(TypeKind::Array));
         assert_eq!(TypeKind::try_from(8), Ok(TypeKind::Tensor));
+        assert_eq!(TypeKind::try_from(9), Ok(TypeKind::Alias));
+        assert_eq!(TypeKind::try_from(10), Ok(TypeKind::Slice));
     }
 
     #[test]
     fn test_type_kind_try_from_invalid() {
-        // 9 = Alias was added after this test was written; the
-        // first invalid discriminant is now 10.
-        assert_eq!(TypeKind::try_from(9), Ok(TypeKind::Alias));
-        assert_eq!(TypeKind::try_from(10), Err(10));
+        assert_eq!(TypeKind::try_from(11), Err(11));
         assert_eq!(TypeKind::try_from(100), Err(100));
         assert_eq!(TypeKind::try_from(255), Err(255));
     }
@@ -2854,6 +2858,8 @@ mod tests {
             TypeKind::Unit,
             TypeKind::Array,
             TypeKind::Tensor,
+            TypeKind::Alias,
+            TypeKind::Slice,
         ] {
             let json = serde_json::to_string(&kind).unwrap();
             let deserialized: TypeKind = serde_json::from_str(&json).unwrap();

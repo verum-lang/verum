@@ -4698,7 +4698,13 @@ impl TypeChecker {
     }
 
     fn validate_impl_target(&self, actual: &Type, expected: &Type, span: Span) -> Result<()> {
-        let target = match Self::implementation_attachment_type(actual) {
+        let attachment = Self::implementation_attachment_type(actual);
+        if matches!((attachment, expected),
+            (Type::Slice { .. }, Type::Slice { .. }) | (Type::Array { .. }, Type::Array { .. }))
+        {
+            return Ok(());
+        }
+        let target = match attachment {
             Type::Named { path, .. } => Type::Named { path: path.clone(), args: List::new() },
             Type::Generic { name, .. } if !name.starts_with("::") => Type::Generic { name: name.clone(), args: List::new() },
             ty if !matches!(ty, Type::Unknown) && ty.primitive_name().is_some() => ty.clone(),

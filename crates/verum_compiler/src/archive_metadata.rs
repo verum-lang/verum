@@ -48,6 +48,56 @@ use verum_vbc::archive::VbcArchive;
 use verum_vbc::module::VbcModule;
 use verum_vbc::types::{TypeKind, TypeRef, VariantKind};
 
+fn structural_method_owner(kind: TypeKind) -> Option<&'static str> {
+    match kind {
+        TypeKind::Slice => Some("Slice"),
+        TypeKind::Array => Some("Array"),
+        _ => None,
+    }
+}
+
+/// VBC uses the protocol's own table for `extends` edges. Such an edge
+/// carries only a protocol ID. An actual implementation has its own header.
+fn is_superprotocol_edge(
+    target: &verum_vbc::types::TypeDescriptor,
+    entry: &verum_vbc::types::ProtocolImpl,
+) -> bool {
+    target.kind == TypeKind::Protocol
+        && entry.source_implementation.is_none()
+        && entry.methods.is_empty()
+        && entry.associated_types.is_empty()
+        && entry.protocol_args_text.is_empty()
+        && entry.type_param_fn_bounds.is_empty()
+}
+
+/// Bootstrap interfaces can omit function bodies. When an implementation
+/// names a materialized source member, its ID must select that declaration,
+/// including the receiver's specialization and lexical module.
+fn validate_implementation_method_ids(module: &VbcModule) -> Result<(), Text> {
+    use verum_ast::decl::ImplItemKind;
+    let functions: HashMap<_, _> = module.functions.iter().map(|f| (f.id.0, f)).collect();
+    for target in &module.types {
+        for implementation in target.protocols.iter().filter(|entry| !entry.methods.is_empty()) {
+            let Some(source) = &implementation.source_implementation else { continue };
+            let declaration = source.declaration()?;
+            let members: HashMap<_, _> = declaration.items.iter().filter_map(|item| match &item.kind {
+                ImplItemKind::Function(method) => Some((&method.name.name, method)),
+                _ => None,
+            }).collect();
+            for id in &implementation.methods {
+                let Some(function) = functions.get(id) else { continue };
+                let Some(signature) = &function.source_signature else { continue };
+                // A default supplied by the protocol has its own declaration.
+                let Some(member) = members.get(&signature.name.name) else { continue };
+                let owner = function.origin_module.and_then(|id| module.get_string(id)).unwrap_or(&module.name);
+                if function.parent_type != Some(target.id) || owner != source.origin_module() || *member != signature {
+                    return Err(format!("implementation signature for {} on its declared receiver disagrees with method ID {id}", signature.name.name).into());
+                }
+            }
+        }
+    }
+    Ok(())
+}
 
 fn validate_projection_metadata_carriers(module: &VbcModule) -> Result<(), Text> {
     fn contains(ty: &TypeRef, depth: usize, qualified_only: bool) -> bool {
@@ -208,8 +258,8 @@ pub fn archive_to_core_metadata(archive: &VbcArchive) -> Result<CoreMetadata, Te
         }
         validate_projection_metadata_carriers(&module)?;
         let descriptors: HashMap<_, _> = module.types.iter().map(|ty| (ty.id, ty)).collect();
-        for ty in module.types.iter().filter(|ty| ty.kind != verum_vbc::types::TypeKind::Protocol) {
-            for implementation in &ty.protocols {
+        for ty in &module.types {
+            for implementation in ty.protocols.iter().filter(|entry| !is_superprotocol_edge(ty, entry)) {
                 if implementation.source_implementation.is_none()
                     && verum_vbc::types::protocol_uses_associated_families(implementation.protocol, |id| descriptors.get(&id).copied()) {
                     return Err("associated family implementation lacks its declaration-owned source telescope".into());
@@ -249,7 +299,7 @@ pub fn archive_to_core_metadata(archive: &VbcArchive) -> Result<CoreMetadata, Te
             if ty.source_inherent_implementations.is_empty() { continue; }
             let name = module.strings.get(ty.name).ok_or_else(|| Text::from("inherent implementation target has no name"))?;
             let owner = ty.origin_module.and_then(|id| module.strings.get(id)).unwrap_or(&entry.name);
-            let key: Text = if ty.canonical_scalar_type_id(name).is_some() { name.into() }
+            let key: Text = if ty.canonical_scalar_type_id(name).is_some() || structural_method_owner(ty.kind) == Some(name) { name.into() }
                 else { verum_vbc::module::qualify_module_name(owner, name).into() };
             let target = meta.inherent_implementations.entry(key).or_default();
             for source in &ty.source_inherent_implementations {
@@ -266,6 +316,7 @@ pub fn archive_to_core_metadata(archive: &VbcArchive) -> Result<CoreMetadata, Te
             }
         }
         verum_vbc::callable_identity::validate_module(&module)?;
+        validate_implementation_method_ids(&module)?;
         for function in &module.functions {
             if let Some(signature) = &function.source_signature {
                 verum_ast::source_signature::validate_source_signature(signature, function.parent_type.is_some())?;
@@ -283,6 +334,12 @@ pub fn archive_to_core_metadata(archive: &VbcArchive) -> Result<CoreMetadata, Te
                     true
                 } else if function.parent_type.is_none() {
                     free_function_name_matches_declaration(name, owner, signature.name.name.as_str())
+                } else if function.declaration_identity.is_some() {
+                    // validate_module checked the actual FunctionDecl name and
+                    // arity. Sibling implementations have distinct linkage
+                    // names for the same source member. Their signatures are
+                    // checked against the receiver's implementation headers.
+                    true
                 } else {
                     name.rsplit('.').next() == Some(signature.name.name.as_str())
                 };
@@ -605,7 +662,7 @@ fn register_module_metadata(
     let declaration_names: verum_common::Map<u32, Text> = module.types.iter()
         .filter_map(|ty| {
             let name = module.get_string(ty.name)?;
-            let declared = if ty.canonical_scalar_type_id(name).is_some() {
+            let declared = if ty.canonical_scalar_type_id(name).is_some() || structural_method_owner(ty.kind) == Some(name) {
                 Text::from(name)
             } else {
                 let owner = ty.origin_module.and_then(|id| module.get_string(id)).unwrap_or(module_name);
@@ -955,6 +1012,7 @@ fn register_module_metadata(
                 let super_protocols: List<Text> = ty
                     .protocols
                     .iter()
+                    .filter(|entry| is_superprotocol_edge(ty, entry))
                     .filter_map(|pi| {
                         type_id_to_name
                             .get(&pi.protocol.0)
@@ -1027,7 +1085,7 @@ fn register_module_metadata(
                 }
             }
             TypeKind::Newtype | TypeKind::Tuple | TypeKind::Unit
-            | TypeKind::Primitive | TypeKind::Array | TypeKind::Tensor => {
+            | TypeKind::Primitive | TypeKind::Array | TypeKind::Slice | TypeKind::Tensor => {
                 TypeDescriptorKind::Opaque
             }
             TypeKind::Alias => {
@@ -1093,6 +1151,7 @@ fn register_module_metadata(
         let implements: List<Text> = ty
             .protocols
             .iter()
+            .filter(|entry| !is_superprotocol_edge(ty, entry))
             .filter_map(|pi| {
                 type_id_to_name
                     .get(&pi.protocol.0)
@@ -1102,7 +1161,8 @@ fn register_module_metadata(
 
         // A built-in scalar can carry protocol implementations from many files.
         // Those files own the implementations, never the scalar declaration.
-        let scalar = ty.canonical_scalar_type_id(type_name.as_str()).is_some();
+        let builtin = ty.canonical_scalar_type_id(type_name.as_str()).is_some()
+            || structural_method_owner(ty.kind) == Some(type_name.as_str());
         let descriptor = TypeDescriptor {
             source_declaration: ty.source_declaration.clone(),
             is_public: matches!(
@@ -1110,13 +1170,13 @@ fn register_module_metadata(
                 verum_vbc::types::Visibility::Public
             ),
             name: type_name.clone(),
-            module_path: if scalar { Text::default() } else { module_path.clone() },
+            module_path: if builtin { Text::default() } else { module_path.clone() },
             // v2.12: the precise declaring file submodule rides in its own
             // field — `module_path` stays the entry path every existing
             // resolver route (variant registration, protocol loading,
             // reexport chains) keys on. Only module-surface queries read
             // the origin.
-            origin_module_path: if !scalar && ty_module_path.as_str() != module_path.as_str() {
+            origin_module_path: if !builtin && ty_module_path.as_str() != module_path.as_str() {
                 Maybe::Some(ty_module_path.clone())
             } else {
                 Maybe::None
@@ -1272,7 +1332,7 @@ fn register_module_metadata(
         let existing = meta.types.get(&type_name);
         let canonical_record = builtin_record_declaration(&descriptor)
             && !existing.is_some_and(builtin_record_declaration);
-        let canonical_scalar = scalar && existing.is_some_and(|other|
+        let canonical_scalar = builtin && existing.is_some_and(|other|
             !other.module_path.is_empty() && !builtin_record_declaration(other));
         if !simple_slot_was_occupied || simple_needs_repair || canonical_record || canonical_scalar {
             meta.types.insert(type_name.clone(), descriptor);
@@ -1401,6 +1461,8 @@ fn register_module_metadata(
         let declaring_parent = parent_type.as_ref().map(|parent| {
             if scalar_receiver.is_some() {
                 scalar_method_owners.insert(parent.clone());
+                parent.clone()
+            } else if receiver.is_some_and(|ty| structural_method_owner(ty.kind) == Some(parent.as_str())) {
                 parent.clone()
             } else {
                 let owner = receiver.and_then(|ty| ty.origin_module)
@@ -1716,13 +1778,22 @@ fn register_module_metadata(
             .map(Text::from)
             .unwrap_or_else(|| module_path.clone());
 
+        // Type checking consumes source member names. The original VBC name
+        // remains an index key for impl records that refer to this exact body.
+        let source_member = declaring_parent.as_ref().and_then(|_| fn_desc.declaration_identity.as_ref())
+            .and_then(|identity| module.get_string(identity.source_name));
+        let descriptor_name = match (&declaring_parent, source_member) {
+            (Some(parent), Some(member)) if simple_name.as_str().rsplit('.').next() != Some(member) =>
+                format!("{parent}.{member}").into(),
+            _ => simple_name.clone(),
+        };
         let descriptor = FunctionDescriptor {
             source_signature: fn_desc.source_signature.clone(),
             is_public: matches!(
                 fn_desc.visibility,
                 verum_vbc::types::Visibility::Public
             ),
-            name: simple_name.clone(),
+            name: descriptor_name,
             module_path: module_path.clone(),
             origin_module_path: if fn_module_path.as_str() != module_path.as_str() {
                 Maybe::Some(fn_module_path.clone())
@@ -1760,11 +1831,8 @@ fn register_module_metadata(
         // never matched — every `text.with_capacity(n)` call site
         // failed `no method named with_capacity found for type Text`.
         if let (Some(parent_name), Some(declaring_parent)) = (&parent_type, &declaring_parent) {
-            let simple_method_name = if let Some(idx) = simple_name.as_str().rfind('.') {
-                Text::from(&simple_name.as_str()[idx + 1..])
-            } else {
-                simple_name.clone()
-            };
+            let simple_method_name: Text = source_member
+                .unwrap_or_else(|| simple_name.as_str().rsplit('.').next().unwrap_or(simple_name.as_str())).into();
             // Preserve the declaring type in a collision-immune method key.
             // A bare Container.new slot cannot distinguish alpha.Container from
             // beta.Container, even when both type descriptors survived import.
@@ -1926,7 +1994,7 @@ fn collect_type_impls(
         Some(s) => Text::from(s),
         None => return,
     };
-    for proto_impl in ty.protocols.iter() {
+    for proto_impl in ty.protocols.iter().filter(|entry| !is_superprotocol_edge(ty, entry)) {
         // #130 — resolve ProtocolId → protocol name via the
         // module's type table.  Pre-fix this was hardcoded empty
         // and the typechecker's `metadata.implementations` consumer

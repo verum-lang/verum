@@ -256,6 +256,7 @@ fn callable(
     params: &[super::ParamDescriptor],
     result: &str,
     scope: &Scope,
+    receiver: Option<&verum_ast::Type>,
 ) -> Result<(), Text> {
     if !result.contains(';')
         && !params
@@ -268,9 +269,20 @@ fn callable(
         return Err("source argument count disagrees with its archive descriptor".into());
     }
     for (param, abi) in source_params.iter().zip(params) {
+        let self_type = receiver.and_then(|target| {
+            use FunctionParamKind::*;
+            let inner = || Box::new(target.clone());
+            Some(verum_ast::Type::new(match &param.kind {
+                SelfRef | SelfRefMut => TypeKind::Reference { mutable: matches!(param.kind, SelfRefMut), inner: inner() },
+                SelfRefChecked | SelfRefCheckedMut => TypeKind::CheckedReference { mutable: matches!(param.kind, SelfRefCheckedMut), inner: inner() },
+                SelfRefUnsafe | SelfRefUnsafeMut => TypeKind::UnsafeReference { mutable: matches!(param.kind, SelfRefUnsafeMut), inner: inner() },
+                SelfValue | SelfValueMut | SelfOwn | SelfOwnMut => return Some(target.clone()),
+                Regular { .. } => return None,
+            }, param.span))
+        });
         let ty = match &param.kind {
             FunctionParamKind::Regular { ty, .. } => Some(ty),
-            _ => None,
+            _ => self_type.as_ref(),
         };
         compare_spelling(ty, &abi.ty, scope)?;
         compare_spelling(ty, &abi.declared_ty, scope)?;
@@ -305,12 +317,36 @@ pub(super) fn function(
     if let Some(err) = arrays.error {
         return Err(err);
     }
+    let needs_receiver = source.params.first().is_some_and(|p| p.is_self())
+        && descriptor.params.first().is_some_and(|p| p.ty.contains(";") || p.declared_ty.contains(";"));
+    let receiver = if needs_receiver && let Some(parent) = &descriptor.parent_type {
+        let mut receiver = None;
+        let inherent = metadata.inherent_implementations.get(parent).into_iter().flatten();
+        let implementations = metadata.implementations.iter().filter_map(|implementation| {
+            let target = metadata.types.get(&implementation.target_type)?;
+            (super::nominal_declaring_key(target) == *parent).then_some(implementation.source_implementation.as_ref()).flatten()
+        });
+        for header in inherent.chain(implementations).filter(|header| header.origin_module() == scope.module) {
+            let block = header.declaration()?;
+            if !block.items.iter().any(|item| matches!(&item.kind,
+                verum_ast::decl::ImplItemKind::Function(method) if method == source)) { continue; }
+            let target = match block.kind {
+                verum_ast::decl::ImplKind::Inherent(ty) | verum_ast::decl::ImplKind::Protocol { for_type: ty, .. } => ty,
+            };
+            if receiver.as_ref().is_some_and(|previous| previous != &target) {
+                return Err("array receiver has conflicting implementation declarations".into());
+            }
+            receiver = Some(target);
+        }
+        receiver
+    } else { None };
     callable(
         source,
         &source.params,
         &descriptor.params,
         &descriptor.return_type,
         &scope,
+        receiver.as_ref(),
     )
 }
 
@@ -437,7 +473,7 @@ fn protocol_methods<'a>(
                 }
                 _ => original.params.as_slice(),
             };
-            callable(original, params, &method.params, &method.return_type, scope)?;
+            callable(original, params, &method.params, &method.return_type, scope, None)?;
         } else {
             for param in &method.params {
                 compare_spelling(None, &param.ty, scope)?;
