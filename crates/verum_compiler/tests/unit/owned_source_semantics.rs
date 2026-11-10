@@ -1,6 +1,7 @@
 use super::*;
 use std::sync::Arc;
 use verum_ast::FileId;
+use verum_diagnostics::Diagnostic;
 use verum_fast_parser::Parser;
 
 fn check(
