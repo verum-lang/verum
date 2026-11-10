@@ -79,12 +79,32 @@ mount core.async.stream.{Stream};
 mount core.async.async_iterator.{AsyncIterator};
 mount core.async.poll.{Poll};
 mount core.async.waker.{Context};
-mount core.sync.atomic.{AtomicBool, AtomicInt, MemoryOrdering};
+mount core.sync.atomic.{AtomicBool, MemoryOrdering};
 mount core.sync.mutex.Mutex;
 mount base.memory.Shared;
 mount core.time.duration.Duration;
 
 mount core.sys.signal.{Signal, SignalFlag, on_signal};
+
+// One process-wide registry owns signal entries and the poller start flag.
+type SignalRegistry is {
+    entries: Mutex<List<SignalEntry>>,
+    poller_started: AtomicBool,
+};
+
+type SignalEntry is {
+    sig: Signal,
+    flag: Shared<SignalFlag>,
+    sender: BroadcastSender<Signal>,
+};
+
+const POLL_INTERVAL_MS: Int = 20;
+const BROADCAST_CAPACITY: Int = 64;
+
+static REGISTRY: SignalRegistry = SignalRegistry {
+    entries: Mutex.new(List.new()),
+    poller_started: AtomicBool.new(false),
+};
 
 // =============================================================================
 // Public API — convenience shortcuts
@@ -152,10 +172,9 @@ public fn signal_stream(sigs: &[Signal]) -> SignalStream {
     if sigs.is_empty() {
         return SignalStream { recv: Maybe.None };
     }
-    let registry = ensure_registry();
     let mut sender: Maybe<BroadcastSender<Signal>> = Maybe.None;
     for sig in sigs {
-        let tx = registry.ensure_signal_registered(*sig);
+        let tx = REGISTRY.ensure_signal_registered(*sig);
         sender = Maybe.Some(tx);
     }
     match sender {
@@ -209,65 +228,6 @@ implement AsyncIterator for SignalStream {
     }
 }
 
-// =============================================================================
-// SignalRegistry — internal singleton managing per-signal flags + broadcasters
-// =============================================================================
-//
-
-// Lazily initialized on first subscribe. Owns:
-//  - Per-signal SignalFlag (atomic-only touch from OS handler)
-//  - Per-signal BroadcastSender<Signal> for fan-out to subscribers
-//  - A running background poller task (spawned once) that scans the flags
-//  and broadcasts any that are set.
-//
-
-// The registry state lives in a process-global `Mutex<Maybe<Shared<...>>>`.
-// All mutable access is via the mutex; broadcast-sender clones are cheap
-// (atomic refcount bump) so subscribe can release the mutex quickly.
-
-type SignalRegistry is {
-    entries: Mutex<List<SignalEntry>>,
-    poller_started: AtomicBool,
-};
-
-type SignalEntry is {
-    sig: Signal,
-    flag: Shared<SignalFlag>,
-    sender: BroadcastSender<Signal>,
-};
-
-// Poll interval — 20 ms is the cross-platform sweet spot:
-// - Fast enough for human-perceptible shutdown latency (< 100 ms is fine).
-// - Slow enough to cost < 0.1% CPU on an idle system.
-// - Aligns with typical reactor tick budget.
-const POLL_INTERVAL_MS: Int = 20;
-
-// Broadcast capacity per signal. 64 should be more than enough — in
-// practice there are 1-5 subscribers, each drains immediately.
-const BROADCAST_CAPACITY: Int = 64;
-
-static REGISTRY: Mutex<Maybe<Shared<SignalRegistry>>> = Mutex.new(Maybe.None);
-
-fn ensure_registry() -> Shared<SignalRegistry> {
-    // Poison-tolerant: signal infrastructure must keep running even
-    // if an unrelated panic poisoned the registry mutex. The lock-
-    // protected state (REGISTRY: Maybe<Shared<...>>) is always either
-    // Maybe.None (uninitialized) or Maybe.Some(reg); both observable values are
-    // safe to keep using even if an unrelated thread panicked.
-    let mut guard = REGISTRY.lock().unwrap_or_else(|p| p.into_inner());
-    match &*guard {
-        Maybe.Some(r) => r.clone(),
-        Maybe.None => {
-            let reg = Shared.new(SignalRegistry {
-                entries: Mutex.new(List.new()),
-                poller_started: AtomicBool.new(false),
-            });
-            *guard = Maybe.Some(reg.clone());
-            reg
-        }
-    }
-}
-
 implement SignalRegistry {
     /// Register OS-level signal handler (idempotent) and return a
     /// BroadcastSender that fans out to all subscribers of `sig`.
@@ -275,7 +235,7 @@ implement SignalRegistry {
 
     /// Spawns the background poller on first-ever call.
     public fn ensure_signal_registered(&self, sig: Signal) -> BroadcastSender<Signal> {
-        // Poison-tolerant: see ensure_registry above for rationale.
+        // The entries remain usable if a previous holder poisoned the mutex.
         let mut entries = self.entries.lock().unwrap_or_else(|p| p.into_inner());
 
         // Fast path — already registered.
@@ -311,35 +271,15 @@ implement SignalRegistry {
         tx
     }
 
-    /// Background polling loop. Cleared-and-broadcast under the registry
-    /// lock to keep flag-state consistent across observers.
+    /// The process owns REGISTRY for the entire lifetime of this detached task.
     fn spawn_poller(&self) {
-        // The poller captures a clone of Shared<SignalRegistry>. It runs
-        // until the registry drops (never, in current design) or process
-        // exits. That's fine — it's detached, low-priority.
-        let self_clone = {
-            // Build a strong ref via the static REGISTRY. Poison-
-            // tolerant lock; the `expect` guards a structural
-            // invariant — `spawn_poller` is only ever reached via
-            // `ensure_signal_registered`, which is only callable
-            // through `ensure_registry()`, and that fn ALWAYS stores
-            // Maybe.Some(reg) before returning. A Maybe.None here would mean
-            // someone bypassed the API contract; surface that with
-            // a descriptive panic instead of a generic unwrap.
-            let g = REGISTRY.lock().unwrap_or_else(|p| p.into_inner());
-            g.as_ref()
-                .expect("signal.spawn_poller — REGISTRY must be Some by API contract; called outside ensure_registry?")
-                .clone()
-        };
-
         let _ = spawn_detached(async move {
             loop {
                 sleep(Duration.from_millis(POLL_INTERVAL_MS)).await;
 
                 // Scan + drain.
                 let snapshot: List<(Signal, BroadcastSender<Signal>)> = {
-                    // Poison-tolerant — see ensure_registry above.
-                    let entries = self_clone.entries.lock().unwrap_or_else(|p| p.into_inner());
+                    let entries = REGISTRY.entries.lock().unwrap_or_else(|p| p.into_inner());
                     let mut fired: List<(Signal, BroadcastSender<Signal>)> = List.new();
                     for e in entries.iter() {
                         if e.flag.take() {
