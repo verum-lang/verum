@@ -1,0 +1,31 @@
+mount core.base.protocols.{PartialEq, Eq};
+mount core.base.primitives.*;
+
+fn check_partial<T: PartialEq>(left: &T, right: &T) {
+    assert(left.eq(left));
+    assert(!left.eq(right));
+}
+
+fn check_total<T: Eq>(left: &T, right: &T) {
+    assert(right.eq(right));
+    assert(!right.eq(left));
+    check_partial(left, right);
+}
+
+@test
+fn scalar_equality_keeps_its_partial_and_total_contracts() {
+    check_total(&17, &19);
+    check_total(&true, &false);
+    check_total(&0x21_u8, &0x4a_u8);
+    check_total(&'x', &'y');
+    check_total(&17_i8, &19_i8);
+    check_total(&17_i16, &19_i16);
+    check_total(&17_i32, &19_i32);
+    check_total(&17_i128, &19_i128);
+    check_total(&17_u16, &19_u16);
+    check_total(&17_u32, &19_u32);
+    check_total(&17_u64, &19_u64);
+    check_total(&17_u128, &19_u128);
+}
+
+fn main() {}

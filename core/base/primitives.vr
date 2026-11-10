@@ -703,12 +703,14 @@ fn format_radix_signed(n: Int, radix: Int) -> Text {
 }
 
 // Int protocol implementations
-implement Eq for Int {
+implement PartialEq for Int {
     @inline(always)
     public fn eq(&self, other: &Int) -> Bool {
         eq(*self, *other)
     }
 }
+
+implement Eq for Int {}
 
 implement Ord for Int {
     @inline(always)
@@ -1505,12 +1507,14 @@ implement Bool {
     }
 }
 
-implement Eq for Bool {
+implement PartialEq for Bool {
     @inline(always)
     public fn eq(&self, other: &Bool) -> Bool {
         eq(*self, *other)
     }
 }
+
+implement Eq for Bool {}
 
 implement Ord for Bool {
     @inline(always)
@@ -1674,12 +1678,14 @@ implement Byte {
     }
 }
 
-implement Eq for Byte {
+implement PartialEq for Byte {
     @inline(always)
     public fn eq(&self, other: &Byte) -> Bool {
         eq(*self, *other)
     }
 }
+
+implement Eq for Byte {}
 
 implement Ord for Byte {
     @inline(always)
@@ -1872,12 +1878,14 @@ implement Char {
     }
 }
 
-implement Eq for Char {
+implement PartialEq for Char {
     @inline(always)
     public fn eq(&self, other: &Char) -> Bool {
         (*self as Int) == (*other as Int)
     }
 }
+
+implement Eq for Char {}
 
 implement Ord for Char {
     @inline(always)
@@ -4440,9 +4448,11 @@ implement From<UInt32> for UInt64 {
 // =============================================================================
 
 // --- Int8 ---
-implement Eq for Int8 {
+implement PartialEq for Int8 {
     public fn eq(&self, other: &Int8) -> Bool { eq(*self, *other) }
 }
+
+implement Eq for Int8 {}
 implement Ord for Int8 {
     public fn cmp(&self, other: &Int8) -> Ordering {
         if *self < *other { Less }
@@ -4459,9 +4469,11 @@ implement Clone for Int8 {
 implement Copy for Int8 {}
 
 // --- Int16 ---
-implement Eq for Int16 {
+implement PartialEq for Int16 {
     public fn eq(&self, other: &Int16) -> Bool { eq(*self, *other) }
 }
+
+implement Eq for Int16 {}
 implement Ord for Int16 {
     public fn cmp(&self, other: &Int16) -> Ordering {
         if *self < *other { Less }
@@ -4478,9 +4490,11 @@ implement Clone for Int16 {
 implement Copy for Int16 {}
 
 // --- Int32 ---
-implement Eq for Int32 {
+implement PartialEq for Int32 {
     public fn eq(&self, other: &Int32) -> Bool { eq(*self, *other) }
 }
+
+implement Eq for Int32 {}
 implement Ord for Int32 {
     public fn cmp(&self, other: &Int32) -> Ordering {
         if *self < *other { Less }
@@ -4497,9 +4511,11 @@ implement Clone for Int32 {
 implement Copy for Int32 {}
 
 // --- Int128 ---
-implement Eq for Int128 {
+implement PartialEq for Int128 {
     public fn eq(&self, other: &Int128) -> Bool { eq(*self, *other) }
 }
+
+implement Eq for Int128 {}
 implement Ord for Int128 {
     public fn cmp(&self, other: &Int128) -> Ordering {
         if *self < *other { Less }
@@ -4519,9 +4535,11 @@ implement Copy for Int128 {}
 implement Copy for UInt8 {}
 
 // --- UInt16 ---
-implement Eq for UInt16 {
+implement PartialEq for UInt16 {
     public fn eq(&self, other: &UInt16) -> Bool { eq(*self, *other) }
 }
+
+implement Eq for UInt16 {}
 implement Ord for UInt16 {
     public fn cmp(&self, other: &UInt16) -> Ordering {
         if *self < *other { Less }
@@ -4538,9 +4556,11 @@ implement Clone for UInt16 {
 implement Copy for UInt16 {}
 
 // --- UInt32 ---
-implement Eq for UInt32 {
+implement PartialEq for UInt32 {
     public fn eq(&self, other: &UInt32) -> Bool { eq(*self, *other) }
 }
+
+implement Eq for UInt32 {}
 implement Ord for UInt32 {
     public fn cmp(&self, other: &UInt32) -> Ordering {
         if *self < *other { Less }
@@ -4557,9 +4577,11 @@ implement Clone for UInt32 {
 implement Copy for UInt32 {}
 
 // --- UInt64 ---
-implement Eq for UInt64 {
+implement PartialEq for UInt64 {
     public fn eq(&self, other: &UInt64) -> Bool { eq(*self, *other) }
 }
+
+implement Eq for UInt64 {}
 implement Ord for UInt64 {
     public fn cmp(&self, other: &UInt64) -> Ordering {
         if *self < *other { Less }
@@ -4576,9 +4598,11 @@ implement Clone for UInt64 {
 implement Copy for UInt64 {}
 
 // --- UInt128 ---
-implement Eq for UInt128 {
+implement PartialEq for UInt128 {
     public fn eq(&self, other: &UInt128) -> Bool { eq(*self, *other) }
 }
+
+implement Eq for UInt128 {}
 implement Ord for UInt128 {
     public fn cmp(&self, other: &UInt128) -> Ordering {
         if *self < *other { Less }
