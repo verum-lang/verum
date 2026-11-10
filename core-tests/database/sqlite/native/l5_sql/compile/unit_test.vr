@@ -1,0 +1,22 @@
+mount core.database.sqlite.native.l5_sql.compile.compile_raw;
+mount core.database.sqlite.native.l4_vdbe.program.{VdbeProgram, ConstantEntry};
+
+@test
+fn test_compiled_literal_retains_the_constant_referenced_by_its_opcode() {
+    let program = compile_raw(&"SELECT 'kept'").unwrap();
+    assert(program.register_count() > 0);
+    assert(program.instruction_count() > 0);
+    match program.constant_at(0) {
+        ConstantEntry.KText(value) => assert_eq(value, "kept"),
+        _ => panic("compiled SELECT lost its text constant"),
+    }
+}
+
+@test
+fn test_compiled_write_retains_its_cursor_declaration() {
+    let program = compile_raw(&"INSERT INTO sample (value) VALUES (17)").unwrap();
+    assert_eq(program.cursor_count(), 1);
+    assert(program.get_cursor_decl(0).is_some());
+}
+
+fn main() {}

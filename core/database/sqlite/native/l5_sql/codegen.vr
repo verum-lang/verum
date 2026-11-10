@@ -143,7 +143,6 @@ implement RegAlloc {
 public type CgState is {
     program: VdbeProgram,
     regs: RegAlloc,
-    sql: Text,
 
     // LIMIT plumbing — flat fields so the inner emitters can cheaply
     // probe state without match/unwrap on a nested record. All four
@@ -171,9 +170,8 @@ public type CgState is {
 
 fn cg_state_new(sql: Text) -> CgState {
     CgState {
-        program: program_new(sql.clone(), 0),
+        program: program_new(sql, 0),
         regs: reg_alloc_new(),
-        sql: sql,
         limit_reg: -1,
         limit_one_reg: -1,
         limit_count_reg: -1,
@@ -210,22 +208,9 @@ fn emit_result_row(st: &mut CgState, start: Int, n: Int) {
 
 /// Seal the state — bake the final register count into the program
 /// before returning it to the caller.
-fn cg_finalize(mut st: CgState) -> VdbeProgram {
-    // Re-emit the program with the register count now known. The
-    // builder API doesn't let us set num_registers retroactively, so
-    // we clone the emitted opcodes / constants / cursors / result
-    // columns into a fresh program with the right size.
-    let mut out = program_new(st.sql.clone(), st.regs.used());
-    // Copy each instruction via `replace`-style emit.
-    let mut i: Int = 0;
-    while i < st.program.instruction_count() {
-        match st.program.get_opcode(i) {
-            Maybe.Some(op) => { let _ = out.emit(op); }
-            Maybe.None     => {}
-        }
-        i = i + 1;
-    }
-    out
+fn cg_finalize(st: CgState) -> VdbeProgram {
+    let CgState { program, regs, .. } = st;
+    program.with_register_count(regs.used())
 }
 
 // -----------------------------------------------------------------------------
@@ -2529,7 +2514,7 @@ public fn emit_expr(st: &mut CgState, e: &Expr, dst: Int) -> Result<(), CodegenE
             // Named parameter `:name` / `@name` / `$name` — parser
             // strips the sigil before reaching codegen. Intern the
             // name into the constant pool, emit `VariableNamed`.
-            let idx = st.program.constants.add(KText(name.clone()));
+            let idx = st.program.add_constant(KText(name.clone()));
             let _ = st.program.emit(VariableNamed(dst, idx));
             Result.Ok(())
         }
@@ -2853,18 +2838,18 @@ fn emit_literal(st: &mut CgState, lit: &SqlLiteral, dst: Int) -> Result<(), Code
             if i >= -2147483648_i64 && i <= 2147483647_i64 {
                 let _ = st.program.emit(Integer(i as Int, dst));
             } else {
-                let idx = st.program.constants.add(KInt(i));
+                let idx = st.program.add_constant(KInt(i));
                 let _ = st.program.emit(Int64(idx, dst));
             }
             Result.Ok(())
         }
         LReal(x) => {
-            let idx = st.program.constants.add(KReal(x));
+            let idx = st.program.add_constant(KReal(x));
             let _ = st.program.emit(Real(idx, dst));
             Result.Ok(())
         }
         LText(ref s) => {
-            let idx = st.program.constants.add(KText(s.clone()));
+            let idx = st.program.add_constant(KText(s.clone()));
             let _ = st.program.emit(String8(idx, dst));
             Result.Ok(())
         }
@@ -2872,7 +2857,7 @@ fn emit_literal(st: &mut CgState, lit: &SqlLiteral, dst: Int) -> Result<(), Code
             let mut out: List<Byte> = List.new();
             let mut i: Int = 0;
             while i < b.len() { out.push(b[i]); i = i + 1; }
-            let idx = st.program.constants.add(KBlob(out));
+            let idx = st.program.add_constant(KBlob(out));
             let _ = st.program.emit(BlobLit(idx, dst));
             Result.Ok(())
         }

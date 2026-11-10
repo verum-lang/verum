@@ -153,6 +153,13 @@ implement VdbeProgram {
     public fn sql_text(&self) -> &Text { &self.sql }
     public fn instruction_count(&self) -> Int { self.instructions.len() }
     public fn register_count(&self) -> Int { self.num_registers }
+
+    /// Seal the builder with the register allocator's final high-water mark.
+    public(in core.database.sqlite.native) fn with_register_count(mut self, count: Int) -> VdbeProgram {
+        self.num_registers = count;
+        self
+    }
+
     public fn cursor_count(&self) -> Int { self.cursors.len() }
 
     /// Look up a cursor declaration by cursor_id. Returns Maybe.None when
@@ -168,6 +175,12 @@ implement VdbeProgram {
         })
     }
     public fn result_column_count(&self) -> Int { self.result_columns.len() }
+
+    public fn constant_at(&self, index: Int) -> ConstantEntry { self.constants.get(index) }
+    public(in core.database.sqlite.native) fn add_constant(&mut self, value: ConstantEntry) -> Int {
+        self.constants.add(value)
+    }
+
 
     /// Append an opcode; returns its instruction index (useful for
     /// back-patching `jump_target` operands after emission).

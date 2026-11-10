@@ -408,7 +408,7 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
         }
 
         Int64(const_idx, d) => {
-            match program.constants.get(const_idx) {
+            match program.constant_at(const_idx) {
                 KInt(i) => state.regs.set(d, RInt(i)),
                 _       => state.regs.set(d, RNull),
             }
@@ -417,7 +417,7 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
         }
 
         Real(const_idx, d) => {
-            match program.constants.get(const_idx) {
+            match program.constant_at(const_idx) {
                 KReal(x) => state.regs.set(d, RReal(x)),
                 _        => state.regs.set(d, RNull),
             }
@@ -426,7 +426,7 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
         }
 
         String8(const_idx, d) => {
-            match program.constants.get(const_idx) {
+            match program.constant_at(const_idx) {
                 KText(s) => state.regs.set(d, RText(s)),
                 _        => state.regs.set(d, RNull),
             }
@@ -597,7 +597,7 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
         }
 
         VariableNamed(reg_dst, name_const_idx) => {
-            let v = match program.constants.get(name_const_idx) {
+            let v = match program.constant_at(name_const_idx) {
                 KText(ref nm) => state.bindings.get_named(nm),
                 _ => RNull,
             };
