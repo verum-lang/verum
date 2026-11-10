@@ -92,7 +92,7 @@ pub mod nanbox {
 
     // Tag values (0-7, fits in 3 bits). `pub` so external crates can
     // construct typed values without re-deriving the bit layout.
-    /// Heap pointer — payload is the 48-bit heap address.
+    /// Heap pointer, or an indexed handle when its payload marker is set.
     pub const TAG_POINTER: u64 = 0x0;
     /// Integer — payload is a 48-bit signed value.
     pub const TAG_INTEGER: u64 = 0x1;
@@ -124,6 +124,35 @@ pub mod nanbox {
 
     /// `Value` header for heap-pointer tag: `0x7FF8_0000_0000_0000`.
     pub const NAN_POINTER_HEADER: u64 = make_header(TAG_POINTER);
+    // The marker in payload bit 47 belongs to VM handles. Linux AArch64
+    // may use that same bit in an actual address. Store the address bit in
+    // the IEEE sign position, which from_f64 never uses for a boxed NaN.
+    const ADDRESS_BIT: u64 = 1 << 47;
+    const LOW_ADDRESS: u64 = ADDRESS_BIT - 1;
+    const SIGN: u64 = 1 << 63;
+    pub(super) const fn encode_pointer(addr: u64) -> u64 {
+        assert!(addr <= PAYLOAD_MASK, "VBC requires a representable 48-bit address");
+        NAN_POINTER_HEADER | (addr & LOW_ADDRESS) | ((addr & ADDRESS_BIT) << 16)
+    }
+
+    #[inline]
+    pub(super) const fn raw_pointer(bits: u64) -> bool {
+        bits & !(SIGN | LOW_ADDRESS) == NAN_POINTER_HEADER
+    }
+
+    #[inline]
+    pub(super) const fn pointer_address(bits: u64) -> Option<u64> {
+        if raw_pointer(bits) {
+            Some((bits & LOW_ADDRESS) | ((bits >> 16) & ADDRESS_BIT))
+        } else {
+            None
+        }
+    }
+    #[inline]
+    pub(super) const fn high_pointer(bits: u64) -> bool {
+        bits & !LOW_ADDRESS == (SIGN | NAN_POINTER_HEADER)
+    }
+
     /// `Value` header for boxed-integer tag: `0x7FF9_0000_0000_0000`.
     pub const NAN_INTEGER_HEADER: u64 = make_header(TAG_INTEGER);
     /// `Value` header for Bool tag: `0x7FFA_0000_0000_0000`.
@@ -149,8 +178,8 @@ pub const MIN_SMALL_INT: i64 = -(1 << 47);
 /// High marker bit (bit 47) used for non-pointer special values.
 ///
 /// Both generators and boxed integers have this bit set to distinguish them
-/// from real heap pointers. User-space addresses on x86-64/ARM64 have bit 47 = 0
-/// due to canonical addressing, so this bit is always safe to use as a marker.
+/// from encoded heap pointers. The address codec moves address bit 47 out of
+/// the payload, so the marker is never inferred from a host address.
 const SPECIAL_VALUE_MARKER: u64 = 1u64 << 47;
 
 /// Marker bit for generator values (bit 47 set, bit 46 NOT set).
@@ -180,7 +209,7 @@ const BOXED_INT_SUB_MARKER: u64 = 1u64 << 46;
 /// This is used for integers outside the 48-bit inline range (-2^47 to 2^47-1).
 ///
 /// This encoding guarantees no collision with:
-/// - Real heap pointers: bit 47 = 0 (canonical addressing)
+/// - Encoded heap pointers: payload bit 47 is clear
 /// - Generators: bit 47 = 1, bit 46 = 0
 const BOXED_INT_MARKER: u64 = SPECIAL_VALUE_MARKER | BOXED_INT_SUB_MARKER; // bits 47 and 46
 
@@ -822,13 +851,7 @@ impl Value {
     /// lifetime of this value.
     #[inline]
     pub fn from_ptr<T>(ptr: *mut T) -> Self {
-        let addr = ptr as u64;
-        debug_assert!(
-            addr & !PAYLOAD_MASK == 0,
-            "Pointer {:p} doesn't fit in 48 bits",
-            ptr
-        );
-        Value(NAN_BITS | (TAG_POINTER << TAG_SHIFT) | addr)
+        Value(nanbox::encode_pointer(ptr as u64))
     }
 
     /// Creates a small string value (up to 6 non-NUL bytes).
@@ -874,7 +897,7 @@ impl Value {
     /// Returns true if this value is nil (null pointer).
     #[inline]
     pub fn is_nil(&self) -> bool {
-        self.is_ptr() && (self.0 & PAYLOAD_MASK) == 0
+        self.0 == nanbox::NAN_POINTER_HEADER
     }
 
     /// Returns the raw 64-bit NaN-box bit-pattern of this Value.
@@ -998,8 +1021,8 @@ impl Value {
     #[inline]
     pub fn is_float(&self) -> bool {
         // It's a float if it's not our tagged NaN pattern
-        // Check: not (starts with 0x7FF8)
-        (self.0 & 0xFFF8_0000_0000_0000) != 0x7FF8_0000_0000_0000
+        // IEEE NaNs passed through from_f64 are canonicalized before tagging.
+        (self.0 & 0xFFF8_0000_0000_0000) != NAN_BITS && !nanbox::high_pointer(self.0)
     }
 
     /// True for a NaN-boxed float — the `TAG_NAN` value `from_f64(NaN)` produces.
@@ -1040,10 +1063,9 @@ impl Value {
     ///
     /// Boxed integers are stored with both bit 47 and bit 46 set, plus an index
     /// into a global table. This encoding guarantees no collision with:
-    /// - Real heap pointers: bit 47 = 0 (canonical addressing)
+    /// - Encoded heap pointers: payload bit 47 is clear
     /// - Generators: bit 47 = 1, bit 46 = 0
     ///
-    /// On x86-64/ARM64, user-space addresses have bits 47-63 all-zero.
     #[inline]
     pub fn is_boxed_int(&self) -> bool {
         self.tag() == Some(TAG_POINTER as u8)
@@ -1167,7 +1189,7 @@ impl Value {
     ///
     /// Generators use TAG_POINTER with bit 47 set and bit 46 clear.
     /// This distinguishes them from:
-    /// - Real heap pointers: bit 47 = 0
+    /// - Encoded heap pointers: payload bit 47 is clear
     /// - Boxed integers: bit 47 = 1, bit 46 = 1
     ///
     /// Checks if this value is a generator reference. Distinguished from other pointer-tagged
@@ -1184,7 +1206,7 @@ impl Value {
     ///
     /// ThinRef values use TAG_POINTER with bit 47 set, bit 46 clear, and bit 45 set.
     /// This distinguishes them from:
-    /// - Real heap pointers: bit 47 = 0
+    /// - Encoded heap pointers: payload bit 47 is clear
     /// - Generators: bit 47 = 1, bit 46 = 0, bit 45 = 0
     /// - Boxed integers: bit 47 = 1, bit 46 = 1, bit 45 = 0
     /// - FatRef: bit 47 = 1, bit 46 = 1, bit 45 = 1
@@ -1204,7 +1226,7 @@ impl Value {
     ///
     /// FatRef values use TAG_POINTER with bits 47, 46, and 45 all set.
     /// This distinguishes them from:
-    /// - Real heap pointers: bit 47 = 0
+    /// - Encoded heap pointers: payload bit 47 is clear
     /// - Generators: bit 47 = 1, bit 46 = 0, bit 45 = 0
     /// - ThinRef: bit 47 = 1, bit 46 = 0, bit 45 = 1
     /// - Boxed integers: bit 47 = 1, bit 46 = 1, bit 45 = 0
@@ -1221,14 +1243,10 @@ impl Value {
 
     /// Returns true if this is a regular pointer (not a generator, boxed int, ThinRef, FatRef, or nil).
     ///
-    /// Real heap pointers have bit 47 = 0 due to canonical addressing on x86-64/ARM64.
-    /// Generators and boxed integers both have bit 47 = 1, so checking SPECIAL_VALUE_MARKER
-    /// is sufficient to exclude them.
+    /// Address classification uses only the encoded value, before projection.
     #[inline]
     pub fn is_regular_ptr(&self) -> bool {
-        self.tag() == Some(TAG_POINTER as u8)
-            && (self.0 & SPECIAL_VALUE_MARKER) == 0  // bit 47 clear = real pointer
-            && !self.is_nil()
+        nanbox::raw_pointer(self.0) && !self.is_nil()
     }
 
     // ========================================================================
@@ -1433,7 +1451,8 @@ impl Value {
         char::from_u32(codepoint as u32).expect("Invalid character codepoint")
     }
 
-    /// Extracts as pointer.
+    /// Extracts the address of a raw pointer. Managed references and generators
+    /// have no raw address; their typed accessors resolve them separately.
     ///
     /// # Panics
     ///
@@ -1441,7 +1460,7 @@ impl Value {
     #[inline]
     pub fn as_ptr<T>(&self) -> *mut T {
         debug_assert!(self.is_ptr(), "Expected pointer, got {:?}", self.tag());
-        (self.0 & PAYLOAD_MASK) as *mut T
+        nanbox::pointer_address(self.0).unwrap_or(0) as *mut T
     }
 
     /// Extracts as small string.
@@ -1689,7 +1708,7 @@ impl fmt::Debug for Value {
                 }
                 Some(tag) if tag == TAG_UNIT as u8 => write!(f, "Value::Unit"),
                 Some(tag) if tag == TAG_POINTER as u8 => {
-                    write!(f, "Value::Ptr({:#x})", self.0 & PAYLOAD_MASK)
+                    write!(f, "Value::Ptr({:p})", self.as_ptr::<u8>())
                 }
                 Some(tag) if tag == TAG_SMALL_STRING as u8 => {
                     write!(f, "Value::SmallStr({:?})", self.as_small_string())

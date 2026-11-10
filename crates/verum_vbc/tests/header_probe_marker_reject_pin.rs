@@ -1,55 +1,47 @@
-//! #54 IS-REGULAR-PTR-CONTRACT pin — the ONE structural guard that makes
-//! every `is_ptr() → as_ptr() → header-probe` site safe against
-//! NaN-box special-value markers (FatRef / ThinRef / …):
-//! `ObjectHeader::try_from_ptr` MUST reject any address with the
-//! special-value marker bit (bit 47) set, and `ref_or_stub` MUST return
-//! the TypeId(0) stub for it, so every `header.type_id == X` dispatch
-//! deterministically takes its else branch.
-//!
-//! History: char_extended's EncodeUtf8 wrote an `&mut [Byte]` scratch
-//! through `is_ptr` — the FatRef marker passed the gate and the store
-//! went to marker+offset (deterministic SIGSEGV in the text-mix interp
-//! run, fixed 4eb1a4c6b). The probe layer was already safe because of
-//! THIS invariant; the raw-else arm was not. If this pin ever fails,
-//! ~200 `is_ptr` call sites become latently unsafe at once.
-
-use verum_vbc::interpreter::ObjectHeader;
-
-const SPECIAL_VALUE_MARKER: u64 = 1u64 << 47;
-const FAT_REF_MARKER_PAYLOAD: u64 = 0xE000_0000_0000;
+//! Address bit 47 is legal on Linux AArch64. A managed handle with the
+//! same payload must never escape into the header probe as an address.
+#![cfg(target_pointer_width = "64")]
+use verum_vbc::{
+    interpreter::ObjectHeader,
+    value::{FatRef, ThinRef, Value},
+};
 
 #[test]
-fn try_from_ptr_rejects_marker_bit_addresses() {
-    // The FatRef marker payload itself (8-aligned, non-null, unmapped).
-    let marker = FAT_REF_MARKER_PAYLOAD as *const u8;
-    assert!(
-        (marker as u64) & SPECIAL_VALUE_MARKER != 0,
-        "test premise: the FatRef marker payload carries bit 47"
-    );
-    // SAFETY: try_from_ptr's contract is exactly that this call is safe
-    // for ANY bit pattern — it must classify, never dereference, a
-    // marker-tagged address.
-    let probed = unsafe { ObjectHeader::try_from_ptr(marker) };
-    assert!(
-        probed.is_none(),
-        "try_from_ptr must reject special-value marker addresses"
-    );
-
-    // A marker-bit address with arbitrary low bits (ThinRef-style).
-    let thin = (SPECIAL_VALUE_MARKER | 0x1234_5678) as *const u8;
-    let probed = unsafe { ObjectHeader::try_from_ptr(thin) };
-    assert!(probed.is_none(), "any bit-47 address must be rejected");
+fn high_addresses_and_handle_payloads_are_disjoint() {
+    for handle in [
+        Value::from_generator(0),
+        Value::from_thin_ref(ThinRef::null()),
+        Value::from_fat_ref(FatRef::null()),
+    ] {
+        let addr = (handle.bits() & verum_vbc::value::PAYLOAD_MASK) as usize;
+        // No fabricated address is dereferenced: check only its encoding.
+        let ptr = std::ptr::without_provenance_mut::<u8>(addr);
+        let object = Value::from_ptr(ptr);
+        assert_ne!(object, handle);
+        assert!(object.is_regular_ptr() && object.is_tagged() && !object.is_nil());
+        assert!(!object.is_cbgr_ref() && !object.is_int() && !object.is_generator());
+        assert_eq!(Value::from_bits(object.bits()).as_ptr::<u8>(), ptr);
+        assert!(!handle.is_regular_ptr());
+        let absent = handle.as_ptr::<u8>();
+        assert!(absent.is_null());
+        // SAFETY: null is explicitly accepted by both probe APIs.
+        assert!(unsafe { ObjectHeader::try_from_ptr(absent) }.is_none());
+        let fallback = unsafe { ObjectHeader::ref_or_stub(absent) };
+        assert_eq!((fallback.type_id.0, fallback.size), (0, 0));
+    }
 }
 
 #[test]
-fn ref_or_stub_returns_type_zero_stub_for_markers() {
-    let marker = FAT_REF_MARKER_PAYLOAD as *const u8;
-    // SAFETY: same classification-only contract as above.
-    let header = unsafe { ObjectHeader::ref_or_stub(marker) };
-    assert_eq!(
-        header.type_id.0, 0,
-        "marker addresses must yield the TypeId(0) stub so every \
-         `header.type_id == X` dispatch falls through benignly"
-    );
-    assert_eq!(header.size, 0, "stub must carry size 0 (size-gated arms)");
+fn every_address_bit_round_trips_without_aliasing_scalar_values() {
+    for addr in [0, 1, (1 << 47) - 1, 1 << 47, (1 << 47) + 1, (1 << 48) - 1] {
+        let pointer = std::ptr::without_provenance_mut::<u8>(addr);
+        let value = Value::from_ptr(pointer);
+        assert_eq!(value.is_nil(), addr == 0);
+        assert_eq!(value.is_regular_ptr(), addr != 0);
+        assert!(!value.is_float() && !value.is_boxed_i128());
+        assert_eq!(value.as_ptr(), pointer);
+        // A floating load with exactly those raw bits is a NaN, never a pointer.
+        let nan = Value::from_f64(f64::from_bits(value.bits()));
+        assert!(nan.is_nan_float() && !nan.is_ptr());
+    }
 }

@@ -448,12 +448,11 @@ pub unsafe fn typed_array_store_element(
 
 /// Byte-buffer view `(ptr, len)` of `v` when it is a byte-backed value.
 pub fn value_as_byte_slice(v: &Value) -> Option<(*mut u8, u64)> {
-    if !v.is_ptr() || v.is_nil() || v.is_boxed_int() {
+    if !v.is_regular_ptr() {
         return None;
     }
     let base = v.as_ptr::<u8>();
-    // SAFETY: try_type_id rejects null / misaligned / special-marker
-    // payloads; a BYTE_SLICE-stamped header implies the 16-byte raw
+    // SAFETY: a raw object address was established above; a BYTE_SLICE-stamped header implies the 16-byte raw
     // payload contract documented on `byte_slice_payload`.
     match unsafe { ObjectHeader::try_type_id(base) } {
         Some(TypeId::BYTE_SLICE) => Some(unsafe { byte_slice_payload(base) }),
@@ -588,12 +587,11 @@ pub unsafe fn text_record_cap(base: *const u8) -> i64 {
 /// no site re-implements the header probe or the field-0 tolerance.
 #[inline]
 pub fn value_as_text_record(v: &Value) -> Option<(*const u8, usize)> {
-    if !v.is_ptr() || v.is_nil() || v.is_boxed_int() {
+    if !v.is_regular_ptr() {
         return None;
     }
     let base = v.as_ptr::<u8>();
-    // SAFETY: try_type_id rejects null / misaligned / special-marker
-    // payloads; a TEXT-stamped header implies the record contract
+    // SAFETY: a raw object address was established above; a TEXT-stamped header implies the record contract
     // documented on `text_record_payload`.
     match unsafe { ObjectHeader::try_type_id(base) } {
         Some(TypeId::TEXT) => unsafe { text_record_payload(base) },
@@ -865,26 +863,9 @@ impl ObjectHeader {
     /// still live for the duration of the returned reference.
     #[inline(always)]
     pub unsafe fn try_from_ptr<'a>(ptr: *const u8) -> Option<&'a Self> {
-        // Reject NaN-box special-value marker payloads (FatRef / ThinRef /
-        // Generator / boxed-int).  A real heap pointer is a canonical
-        // user-space address with bit 47 clear; EVERY special-value marker
-        // sets bit 47 (`SPECIAL_VALUE_MARKER`, value.rs) — that invariant is
-        // exactly what `Value::is_regular_ptr` relies on to tell a real
-        // pointer from a marker.  `as_ptr()` on a FatRef/ThinRef VALUE hands
-        // back its marker payload (e.g. `FAT_REF_MARKER = 0xe00000000000`),
-        // which is 8-aligned but points at an unmapped address, so reading a
-        // header there SIGSEGVs.  This single guard makes EVERY
-        // `is_ptr()`→`as_ptr()`→header-deref site (there are ~200 `is_ptr`
-        // call sites) safe against the FatRef-as-pointer class in one place:
-        // a special-value reaching a header-deref site is a mis-dispatch, and
-        // None/stub is the correct benign result — identical to how a
-        // misaligned pointer is already handled.  Legitimate interior derefs
-        // go through `FatRef::ptr()` / `ThinRef.ptr`, which are real
-        // bit-47-clear addresses and are unaffected.
-        const SPECIAL_VALUE_MARKER: u64 = 1u64 << 47;
-        if (ptr as u64) & SPECIAL_VALUE_MARKER != 0 {
-            return None;
-        }
+        // Value::as_ptr rejects managed handles before extracting an address.
+        // Here the argument is a raw pointer; its bit 47 can legitimately
+        // be set, and tells us nothing about whether it points to an object.
         if Self::ptr_is_aligned(ptr) {
             // SAFETY: alignment proven above; lifetime is caller's
             // responsibility as documented in the trait-level Safety
