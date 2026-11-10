@@ -36,6 +36,18 @@ mount core.intrinsics.{
 // Section 1: explicit re-export lists resolve and compute
 // =============================================================================
 
+mount core.intrinsics.RecoveryError;
+mount core.intrinsics.runtime.async_ops.RawRecoveryError;
+
+fn raw_recovery_error(value: RecoveryError) -> RawRecoveryError { value }
+
+@test
+fn test_umbrella_recovery_error_keeps_the_runtime_variants() {
+    let from_runtime: RecoveryError = RawRecoveryError.Timeout;
+    assert(raw_recovery_error(from_runtime) is RawRecoveryError.Timeout);
+    assert(raw_recovery_error(RecoveryError.CircuitOpen) is RawRecoveryError.CircuitOpen);
+}
+
 @test
 fn test_umbrella_atomic_memory_order_resolves() {
     let m: MemoryOrder = MemoryOrder.SeqCst;

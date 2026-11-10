@@ -165,7 +165,7 @@ public mount .runtime.async_ops.{
     default_executor,
     async_sleep_ms,
     async_sleep_ns,
-    RecoveryError,
+    RawRecoveryError as RecoveryError,
     spawn_supervised,
     supervisor_log_escalation,
     supervisor_set_parent,
