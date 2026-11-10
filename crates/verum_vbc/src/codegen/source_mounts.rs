@@ -401,6 +401,13 @@ impl VbcCodegen {
             use DeclarationCategory::{Callable, Namespace, Type, Value};
             match &item.kind {
                 ItemKind::Function(d) => declare(&d.name, &d.visibility, Callable),
+                ItemKind::ExternBlock(block) => {
+                    for function in &block.functions {
+                        if self.cfg_evaluator.should_include(&function.attributes) {
+                            declare(&function.name, &function.visibility, Callable);
+                        }
+                    }
+                }
                 ItemKind::Type(d) => {
                     declare(&d.name, &d.visibility, Type);
                     if let verum_ast::TypeDeclBody::Variant(variants)
