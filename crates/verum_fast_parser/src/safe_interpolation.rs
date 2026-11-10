@@ -157,7 +157,7 @@ pub fn parse_interpolated_content(
 /// Special directives supported:
 /// - `@raw expr`: Marks the expression as raw (no escaping) for HTML-safe strings
 fn parse_interpolation_expr(
-    _parser: &mut RecursiveParser,
+    parser: &mut RecursiveParser,
     expr_str: &str,
     file_id: verum_ast::FileId,
     mut start_pos: usize,
@@ -219,8 +219,7 @@ fn parse_interpolation_expr(
     }
 
     // The fragment parser borrows the tokens only while they are alive.
-    let (expr, format_spec) = {
-        let mut temp_parser = RecursiveParser::new(&tokens, file_id);
+    let (expr, format_spec) = parser.with_fragment(&tokens, file_id, |temp_parser| {
         temp_parser
             .parse_expr()
             .and_then(|expr| {
@@ -245,8 +244,8 @@ fn parse_interpolation_expr(
                     format!("invalid expression in interpolation: {}", e),
                     e.span,
                 )
-            })?
-    };
+            })
+    })?;
     // tokens is dropped here, no memory leak
 
     // Apply format spec by wrapping in a method call (e.g.

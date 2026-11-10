@@ -357,6 +357,22 @@ pub struct RecursiveParser<'a> {
 }
 
 impl<'a> RecursiveParser<'a> {
+    /// An embedded expression owns its token stream and shares the source's
+    /// nesting and operation limits, including work done before an error.
+    pub(crate) fn with_fragment<T>(
+        &mut self, tokens: &[Token], file_id: FileId,
+        parse: impl FnOnce(&mut RecursiveParser<'_>) -> ParseResult<T>,
+    ) -> ParseResult<T> {
+        let mut fragment = RecursiveParser::new(tokens, file_id);
+        fragment.recursion_depth = self.recursion_depth;
+        fragment.operation_count = self.operation_count;
+        fragment.aborted = self.aborted;
+        let result = parse(&mut fragment);
+        self.operation_count = fragment.operation_count;
+        self.aborted |= fragment.aborted;
+        result
+    }
+
     /// Create a new parser from a token slice.
     pub fn new(tokens: &'a [Token], file_id: FileId) -> Self {
         Self {
@@ -1417,6 +1433,21 @@ pub fn span_from_tokens(start_token: &Token, end_token: &Token) -> Span {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn interpolation_inherits_depth_and_accounts_for_fragment_work() {
+        let id = FileId::new(3);
+        let mut parser = RecursiveParser::new(&[], id);
+        parser.recursion_depth = MAX_RECURSION_DEPTH;
+        let err = crate::safe_interpolation::parse_interpolated_content(&mut parser, "{42}", id, false, 0)
+            .expect_err("interpolation cannot reset nesting depth");
+        assert!(err.to_string().contains("Maximum nesting depth"), "{err}");
+        let mut parser = RecursiveParser::new(&[], id);
+        parser.operation_count = MAX_PARSER_OPERATIONS;
+        parser.with_fragment(&[], id, |child| { assert!(!child.tick()); Ok(()) }).unwrap();
+        assert!(parser.is_aborted());
+        assert!(!parser.tick());
+    }
 
     fn make_token(kind: TokenKind, start: u32, end: u32) -> Token {
         Token::new(kind, Span::new(start, end, FileId::new(0)))
