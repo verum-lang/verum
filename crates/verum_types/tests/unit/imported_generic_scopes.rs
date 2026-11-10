@@ -29,7 +29,7 @@ fn lazy_import_preserves_the_enclosing_type_parameters_and_self() {
     checker.ctx.define_type("T", outer.clone());
     checker.ctx.define_type("Self", Type::Bool);
     checker
-        .import_impl_blocks_for_type(&module, "Imported")
+        .import_impl_blocks_for_type_in_module(&module, "Imported", "")
         .unwrap();
     assert_eq!(checker.ctx.lookup_type("T"), Some(&outer));
     assert_eq!(checker.ctx.lookup_type("Self"), Some(&Type::Bool));
@@ -41,7 +41,7 @@ fn lazy_import_does_not_leave_new_parameter_names_in_the_caller() {
     checker.ctx.remove_type(&Text::from("T"));
     checker.ctx.remove_type(&Text::from("Self"));
     checker
-        .import_impl_blocks_for_type(&module, "Imported")
+        .import_impl_blocks_for_type_in_module(&module, "Imported", "")
         .unwrap();
     assert!(checker.ctx.lookup_type("T").is_none());
     assert!(checker.ctx.lookup_type("Self").is_none());
@@ -51,7 +51,7 @@ fn lazy_import_does_not_leave_new_parameter_names_in_the_caller() {
 fn method_shadowing_preserves_impl_and_method_quantifier_identity() {
     let (mut checker, module) = declarations();
     checker
-        .import_impl_blocks_for_type(&module, "Imported")
+        .import_impl_blocks_for_type_in_module(&module, "Imported", "")
         .unwrap();
     let methods = checker.inherent_methods.read();
     let methods = methods
