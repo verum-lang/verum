@@ -356,8 +356,9 @@ implement CpuContext {
         unreachable("CpuContext.zero: no register layout for this target architecture")
     }
 
-    /// Initialize context to start at a function with a given stack.
-    public fn init(&mut self, entry: fn(), stack_top: *mut ()) {
+    /// Initialize a context with the native address of an entry point.
+    /// The caller supplies executable code and a stack meeting this architecture's ABI.
+    public unsafe fn init(&mut self, entry: *const (), stack_top: *mut ()) {
         @cfg(target_arch = "x86_64") {
             self.rip = entry as UInt64;
             self.rsp = stack_top as UInt64;
