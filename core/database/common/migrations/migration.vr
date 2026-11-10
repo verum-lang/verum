@@ -54,12 +54,12 @@ mount collections.List;
 // -----------------------------------------------------------------------------
 
 public type Migration is {
-    version: Int,
-    name: Text,
-    up_sql: Text,
-    down_sql: Maybe<Text>,
-    depends_on: List<Int>,
-    is_idempotent: Bool,
+    public version: Int,
+    public name: Text,
+    public up_sql: Text,
+    public down_sql: Maybe<Text>,
+    public depends_on: List<Int>,
+    public is_idempotent: Bool,
 };
 
 public fn migration_new(version: Int, name: Text, up_sql: Text) -> Migration {

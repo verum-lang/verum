@@ -1,0 +1,26 @@
+// @test: run-interpreter
+// @level: L2
+// @tags: database, sqlite, migrations
+module sqlite_migration_contract.main;
+
+mount core.database.common.error.AdSqlite;
+mount core.database.common.migrations.journal.JournalEntry;
+mount core.database.common.migrations.migration.MsPending;
+mount core.database.common.migrations.store.{MigrationStore, store_config_default};
+mount core.database.sqlite.native.l6_session.connection.open_admin_memory;
+mount core.database.sqlite.native.migrations.store.store_new;
+
+async fn main() {
+    let conn = open_admin_memory().unwrap();
+    let mut store = store_new(conn, store_config_default());
+    assert(store.adapter_id() is AdSqlite);
+    let entry = JournalEntry { version: 1, name: "refusal", status: MsPending, checksum: 1_i64 };
+    match store.execute_step(&"CREATE TABLE refused(value INTEGER)", &entry).await {
+        Result.Err(error) => {
+            assert(error.message().contains(&"native SQLite migration rollback does not restore schema and row changes"));
+            assert(!error.is_retryable());
+        }
+        Result.Ok(_) => panic("native SQLite incorrectly promised atomicity"),
+    }
+    print("PASS native adapter refuses unsupported atomic steps");
+}

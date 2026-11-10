@@ -84,10 +84,10 @@ implement Eq for MigrationPlanError {
 // -----------------------------------------------------------------------------
 
 public type MigrationPlan is {
-    ordered: List<Migration>,
-    min_version: Int,
-    max_version: Int,
-    is_reversible: Bool,
+    public ordered: List<Migration>,
+    public min_version: Int,
+    public max_version: Int,
+    public is_reversible: Bool,
 };
 
 public fn build(steps: List<Migration>) -> Result<MigrationPlan, MigrationPlanError> {

@@ -1,0 +1,425 @@
+// @test: run-interpreter
+// @level: L2
+// @tags: database, postgres, migrations
+module postgres_migrations.main;
+
+mount core.base.env.var;
+mount core.database.common.error.{DbError, AdPostgres};
+mount core.database.common.migrations.store.{MigrationStore, store_config_default};
+mount core.database.common.migrations.journal.{JournalEntry, MigrationJournal};
+mount core.database.common.migrations.plan.build;
+mount core.database.common.migrations.runner.{runner_new, RmStrict, RmDryRun};
+mount core.database.common.migrations.migration.{migration_new, MsPending, MsApplied, MsRolledBack, MsFailed};
+mount core.database.postgres.config.{PgConfig, PgTlsMode};
+mount core.database.postgres.connection.{PgConnection, PgTypedQueryResult, connect};
+mount core.database.postgres.migrations.store.{PostgresMigrationStore, store_new};
+mount core.database.postgres.wire.typed.{TypedValue, TvInt8};
+
+fn connection(config: &PgConfig) -> PgConnection {
+    let mut conn = connect(config).unwrap();
+    conn.set_recv_timeout_ms(Maybe.Some(15000)).unwrap();
+    conn.simple_query(&"SET statement_timeout = '10s'; SET lock_timeout = '5s'; SET standard_conforming_strings = off").unwrap();
+    conn
+}
+
+fn scalar_rows(conn: &mut PgConnection, sql: &Text) -> List<List<TypedValue>> {
+    let prepared = conn.prepare(sql).unwrap();
+    let result: PgTypedQueryResult = conn.execute_prepared_typed(&prepared, &[]).unwrap();
+    conn.close_prepared(&prepared).unwrap();
+    assert_eq(result.rows.len(), 1);
+    let row: &List<TypedValue> = &result.rows[0];
+    assert_eq(row.len(), 1);
+    result.rows
+}
+
+fn integer(conn: &mut PgConnection, sql: &Text) -> Int {
+    let rows = scalar_rows(conn, sql);
+    match &rows[0][0] {
+        TvInt8(value) => *value,
+        _ => panic("observer expected PostgreSQL int8"),
+    }
+}
+
+fn lock_count(observer: &mut PgConnection, pid: Int) -> Int {
+    integer(observer, &f"SELECT count(*) FROM pg_catalog.pg_locks WHERE pid={pid} AND locktype='advisory' AND granted")
+}
+
+fn expect_error(result: Result<(), DbError>, label: &Text) {
+    match result {
+        Result.Err(_) => {},
+        Result.Ok(_) => panic(label.clone()),
+    }
+}
+
+fn assert_entry(journal: &MigrationJournal, expected: &JournalEntry) {
+    let actual: JournalEntry = journal.lookup(expected.version).unwrap();
+    assert_eq(actual.version, expected.version);
+    assert_eq(actual.name, expected.name);
+    assert_eq(actual.checksum, expected.checksum);
+    match &expected.status {
+        MsPending => match actual.status { MsPending => {}, _ => panic("pending changed") },
+        MsApplied(want) => match actual.status {
+            MsApplied(got) => assert_eq(got, *want), _ => panic("applied changed"),
+        },
+        MsRolledBack(want) => match actual.status {
+            MsRolledBack(got) => assert_eq(got, *want), _ => panic("rolled_back changed"),
+        },
+        MsFailed(want) => match actual.status {
+            MsFailed(got) => assert_eq(got, *want), _ => panic("failed changed"),
+        },
+    }
+}
+
+fn applied(version: Int, name: &Text) -> JournalEntry {
+    JournalEntry { version: version, name: name.clone(), status: MsApplied(9876543210123_i64), checksum: -991_i64 }
+}
+
+async fn malformed(store: &mut PostgresMigrationStore, observer: &mut PgConnection, change: &Text) {
+    store.drop_tracking_table().await.unwrap();
+    // Owned legacy/admin-damaged state: retain the canonical column types but
+    // omit the new status CHECK so malformed rows reach the actual decoder.
+    // Normal positive paths always use the adapter's real CREATE TABLE.
+    observer.simple_query(&"CREATE TABLE t2194_journal (version BIGINT PRIMARY KEY,name TEXT NOT NULL,status TEXT NOT NULL,applied_at BIGINT,error TEXT,checksum BIGINT NOT NULL)").unwrap();
+    store.init().await.unwrap();
+    store.upsert_entry(&applied(1, &"bad-row")).await.unwrap();
+    observer.simple_query(change).unwrap();
+    match store.load_journal().await {
+        Result.Err(_) => {},
+        Result.Ok(_) => panic("malformed journal silently accepted"),
+    }
+    // A decode or server error must not strand this same connection in a
+    // failed transaction or busy protocol state.
+    store.drop_tracking_table().await.unwrap();
+    store.init().await.unwrap();
+    assert_eq(store.load_journal().await.unwrap().entry_count(), 0);
+}
+
+async fn relation_replacement(config: &PgConfig, observer: &mut PgConnection) {
+    let mut atomic_conn = connection(config);
+    let atomic_pid = integer(&mut atomic_conn, &"SELECT pg_backend_pid()::bigint");
+    let mut atomic = store_new(atomic_conn, store_config_default().with_table_name("t2194_identity_atomic"));
+    atomic.init().await.unwrap();
+    let atomic_oid = integer(observer, &"SELECT 't2194_identity_atomic'::regclass::oid::bigint");
+    atomic.acquire_lock().await.unwrap();
+    expect_error(atomic.execute_step(&"INSERT INTO t2194_effects VALUES (70); ALTER TABLE t2194_identity_atomic RENAME TO t2194_identity_atomic_old; CREATE TABLE t2194_identity_atomic (LIKE t2194_identity_atomic_old INCLUDING ALL)",
+        &applied(70, &"transactional identity replacement")).await, &"transactional replacement accepted");
+    assert_eq(integer(observer, &"SELECT 't2194_identity_atomic'::regclass::oid::bigint"), atomic_oid);
+    assert_eq(integer(observer, &"SELECT count(*) FROM pg_catalog.pg_class WHERE relname='t2194_identity_atomic_old'"), 0);
+    assert_eq(integer(observer, &"SELECT count(*) FROM t2194_effects WHERE version=70"), 0);
+    assert_eq(integer(observer, &"SELECT count(*) FROM t2194_identity_atomic"), 0);
+    assert_eq(lock_count(observer, atomic_pid), 1);
+    atomic.upsert_entry(&applied(71, &"same identity after rollback")).await.unwrap();
+    atomic.acquire_lock().await.unwrap();
+    assert_entry(&atomic.load_journal().await.unwrap(), &applied(71, &"same identity after rollback"));
+    assert_eq(lock_count(observer, atomic_pid), 1);
+    atomic.release_lock().await.unwrap();
+    assert_eq(lock_count(observer, atomic_pid), 0);
+    atomic.drop_tracking_table().await.unwrap();
+
+    let mut original_conn = connection(config);
+    let original_pid = integer(&mut original_conn, &"SELECT pg_backend_pid()::bigint");
+    let mut original = store_new(original_conn, store_config_default()
+        .with_table_name("t2194_identity_sequential").with_transactional(false));
+    original.init().await.unwrap();
+    let original_oid = integer(observer, &"SELECT 't2194_identity_sequential'::regclass::oid::bigint");
+    original.acquire_lock().await.unwrap();
+    expect_error(original.execute_step(&"INSERT INTO t2194_effects VALUES (80); ALTER TABLE t2194_identity_sequential RENAME TO t2194_identity_sequential_old; CREATE TABLE t2194_identity_sequential (LIKE t2194_identity_sequential_old INCLUDING ALL)",
+        &applied(80, &"nontransactional identity replacement")).await, &"nontransactional replacement journal accepted");
+    // The migration SQL committed. The refusal must not invent its rollback or
+    // write an Applied entry under the replacement relation's different lock.
+    let replacement_oid = integer(observer, &"SELECT 't2194_identity_sequential'::regclass::oid::bigint");
+    assert(replacement_oid != original_oid);
+    assert_eq(integer(observer, &"SELECT 't2194_identity_sequential_old'::regclass::oid::bigint"), original_oid);
+    assert_eq(integer(observer, &"SELECT count(*) FROM t2194_effects WHERE version=80"), 1);
+    assert_eq(integer(observer, &"SELECT count(*) FROM t2194_identity_sequential"), 0);
+    expect_error(original.upsert_entry(&applied(81, &"stale direct upsert")).await, &"stale direct upsert accepted");
+    match original.load_journal().await {
+        Result.Err(_) => {},
+        Result.Ok(_) => panic("stale initialized journal read accepted"),
+    }
+    expect_error(original.acquire_lock().await, &"stale held-lock reacquisition accepted");
+    expect_error(original.init().await, &"locked store silently rebound to replacement");
+    expect_error(original.execute_step(&"INSERT INTO t2194_effects VALUES (82)",
+        &applied(82, &"stale step preflight")).await, &"stale step executed SQL");
+    assert_eq(integer(observer, &"SELECT count(*) FROM t2194_effects WHERE version=82"), 0);
+    assert_eq(integer(observer, &"SELECT count(*) FROM t2194_identity_sequential"), 0);
+    assert_eq(integer(observer, &"SELECT count(*) FROM t2194_identity_sequential_old"), 0);
+    assert_eq(lock_count(observer, original_pid), 1);
+
+    // A fresh store owns the new relation, independently of the stale old lock.
+    let mut replacement_conn = connection(config);
+    let replacement_pid = integer(&mut replacement_conn, &"SELECT pg_backend_pid()::bigint");
+    let mut replacement = store_new(replacement_conn, store_config_default()
+        .with_table_name("public.t2194_identity_sequential"));
+    replacement.init().await.unwrap();
+    replacement.acquire_lock().await.unwrap();
+    assert_eq(lock_count(observer, replacement_pid), 1);
+    assert_eq(lock_count(observer, original_pid), 1);
+    original.release_lock().await.unwrap();
+    original.release_lock().await.unwrap();
+    assert_eq(lock_count(observer, original_pid), 0);
+    assert_eq(lock_count(observer, replacement_pid), 1);
+    expect_error(original.acquire_lock().await, &"stale unlocked acquisition accepted");
+    assert_eq(lock_count(observer, original_pid), 0);
+    expect_error(original.drop_tracking_table().await, &"stale store dropped replacement relation");
+    assert_eq(integer(observer, &"SELECT 't2194_identity_sequential'::regclass::oid::bigint"), replacement_oid);
+    assert_eq(lock_count(observer, original_pid), 0);
+    replacement.release_lock().await.unwrap();
+    assert_eq(lock_count(observer, replacement_pid), 0);
+
+    original.init().await.unwrap();
+    original.acquire_lock().await.unwrap();
+    original.upsert_entry(&applied(83, &"explicitly rebound")).await.unwrap();
+    assert_entry(&original.load_journal().await.unwrap(), &applied(83, &"explicitly rebound"));
+    original.release_lock().await.unwrap();
+    assert_eq(lock_count(observer, original_pid), 0);
+    original.drop_tracking_table().await.unwrap();
+    observer.simple_query(&"DROP TABLE t2194_identity_sequential_old").unwrap();
+    print("t2194: relation replacement refused; committed sequential effects preserved; original lock released");
+}
+
+async fn transaction_refusal(store: &mut PostgresMigrationStore, observer: &mut PgConnection, sql: &Text, version: Int) {
+    expect_error(store.execute_step(sql, &applied(version, &"transaction escape")).await,
+                 &"migration escaped the store-owned transaction");
+    assert_eq(integer(observer, &f"SELECT count(*) FROM t2194_effects WHERE version={version}"), 0);
+    assert_eq(integer(observer, &f"SELECT count(*) FROM t2194_journal WHERE version={version}"), 0);
+    let reused = version + 100;
+    store.execute_step(&f"INSERT INTO t2194_effects VALUES ({reused})", &applied(reused, &"after transaction refusal")).await.unwrap();
+    assert_eq(integer(observer, &f"SELECT count(*) FROM t2194_effects WHERE version={reused}"), 1);
+    assert_entry(&store.load_journal().await.unwrap(), &applied(reused, &"after transaction refusal"));
+}
+
+async fn runner_lifecycle(config: &PgConfig, observer: &mut PgConnection) {
+    let mut conn = connection(config);
+    let pid = integer(&mut conn, &"SELECT pg_backend_pid()::bigint");
+    let mut store = store_new(conn, store_config_default().with_table_name("t2194_runner_journal"));
+    let first = migration_new(1, "first", "INSERT INTO t2194_effects VALUES (401)")
+        .with_down("DELETE FROM t2194_effects WHERE version=401");
+    let plan = build([first]).unwrap();
+    let preview = runner_new(RmDryRun).execute(&plan, &mut store, 1_i64).await.unwrap();
+    assert_eq(preview.skipped, 1);
+    assert_eq(integer(observer, &"SELECT count(*) FROM pg_catalog.pg_class WHERE oid=pg_catalog.to_regclass('t2194_runner_journal')"), 0);
+    let runner = runner_new(RmStrict);
+    assert_eq(runner.execute(&plan, &mut store, 2_i64).await.unwrap().applied, 1);
+    assert_eq(runner.execute(&plan, &mut store, 3_i64).await.unwrap().skipped, 1);
+    assert_eq(integer(observer, &"SELECT count(*) FROM t2194_effects WHERE version=401"), 1);
+    assert_eq(integer(observer, &"SELECT count(*) FROM t2194_runner_journal WHERE version=1 AND status='applied' AND applied_at=2"), 1);
+
+    let failing = build([
+        migration_new(2, "second", "INSERT INTO t2194_effects VALUES (402)")
+            .with_down("DELETE FROM t2194_effects WHERE version=402"),
+        migration_new(3, "failed", "INSERT INTO t2194_effects VALUES (403); SELECT 1/0"),
+    ]).unwrap();
+    assert(runner.execute(&failing, &mut store, 4_i64).await is Result.Err(_));
+    assert_eq(integer(observer, &"SELECT count(*) FROM t2194_effects WHERE version IN (402,403)"), 0);
+    assert_eq(integer(observer, &"SELECT count(*) FROM t2194_runner_journal WHERE (version=2 AND status='rolled_back') OR (version=3 AND status='failed')"), 2);
+    assert_eq(lock_count(observer, pid), 0);
+    store.drop_tracking_table().await.unwrap();
+}
+
+async fn main() {
+    let config = PgConfig.new(
+        var(&"VERUM_PG_TEST_HOST").unwrap_or("127.0.0.1"), var(&"VERUM_PG_TEST_PORT").unwrap_or("55432").parse_int().unwrap(),
+        var(&"VERUM_PG_TEST_USER").unwrap_or("spindle_admin"), var(&"VERUM_PG_TEST_PASSWORD").unwrap_or("spindle_admin_pw"),
+        var(&"VERUM_PG_TEST_DATABASE").unwrap_or("spindle_test"),
+    ).with_tls(PgTlsMode.PtmDisable).with_application_name("t2194-actual-store");
+    let mut observer = connection(&config);
+    let table = "t2194_journal";
+    let mut owned = connection(&config);
+    let owned_pid = integer(&mut owned, &"SELECT pg_backend_pid()::bigint");
+    let mut store = store_new(owned, store_config_default().with_table_name(table.clone()));
+    assert_eq(store.dialect(), "postgres");
+    match store.adapter_id() { AdPostgres => {}, _ => panic("wrong migration adapter identity") }
+    assert(store.config().transactional);
+    store.init().await.unwrap();
+    store.init().await.unwrap();
+    assert_eq(store.load_journal().await.unwrap().entry_count(), 0);
+
+    let pending = JournalEntry { version: 1, name: "O'Reilly \\ λ", status: MsPending, checksum: -17_i64 };
+    let applied_entry = applied(2, &"applied");
+    let rolled = JournalEntry { version: 3, name: "rolled", status: MsRolledBack(8765432109876_i64), checksum: 27_i64 };
+    let failed = JournalEntry { version: 4, name: "failed", status: MsFailed("SQL 'failure' \\ λ"), checksum: 37_i64 };
+    store.upsert_entry(&pending).await.unwrap();
+    store.upsert_entry(&applied_entry).await.unwrap();
+    store.upsert_entry(&rolled).await.unwrap();
+    store.upsert_entry(&failed).await.unwrap();
+    let journal = store.load_journal().await.unwrap();
+    assert_eq(journal.entry_count(), 4);
+    assert_entry(&journal, &pending);
+    assert_entry(&journal, &applied_entry);
+    assert_entry(&journal, &rolled);
+    assert_entry(&journal, &failed);
+    let changed = applied(1, &"updated 'name'");
+    store.upsert_entry(&changed).await.unwrap();
+    let updated = store.load_journal().await.unwrap();
+    assert_eq(updated.entry_count(), 4);
+    assert_entry(&updated, &changed);
+    assert_eq(integer(&mut observer, &"SELECT count(*) FROM t2194_journal"), 4);
+
+    // This entire string must be one identifier, including whitespace, the
+    // embedded quote and text that would be SQL if it escaped the identifier.
+    let quoted_name = "t2194 journal\";CREATE TABLE t2194_x(x int);--";
+    let mut quoted = store_new(connection(&config), store_config_default().with_table_name(quoted_name));
+    quoted.init().await.unwrap();
+    quoted.init().await.unwrap();
+    quoted.upsert_entry(&pending).await.unwrap();
+    assert_entry(&quoted.load_journal().await.unwrap(), &pending);
+    assert_eq(integer(&mut observer, &"SELECT count(*) FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname='t2194 journal\";CREATE TABLE t2194_x(x int);--'"), 1);
+    assert_eq(integer(&mut observer, &"SELECT count(*) FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname='t2194_x'"), 0);
+    quoted.drop_tracking_table().await.unwrap();
+    quoted.drop_tracking_table().await.unwrap();
+    let mut nul_name = "t2194_nul";
+    nul_name.push_byte(0_u8);
+    nul_name.push_str(&"_must_not_exist");
+    let mut invalid = store_new(connection(&config), store_config_default().with_table_name(nul_name));
+    expect_error(invalid.init().await, &"NUL table identifier was accepted");
+    assert_eq(integer(&mut observer, &"SELECT count(*) FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname LIKE 't2194_nul%'"), 0);
+    print("t2194: init, quoted identifiers, upsert and all four statuses persisted exactly");
+
+    let changes = [
+        "UPDATE t2194_journal SET status='future'",
+        "UPDATE t2194_journal SET status='applied', applied_at=NULL",
+        "UPDATE t2194_journal SET status='rolled_back', applied_at=NULL",
+        "UPDATE t2194_journal SET status='failed', applied_at=NULL, error=NULL",
+        "UPDATE t2194_journal SET status='pending', applied_at=1",
+        "UPDATE t2194_journal SET status='pending', applied_at=NULL, error='unexpected'",
+        "UPDATE t2194_journal SET status='applied', error='unexpected'",
+        "UPDATE t2194_journal SET status='failed', applied_at=1, error='failure'",
+        "ALTER TABLE t2194_journal ALTER COLUMN name DROP NOT NULL; UPDATE t2194_journal SET name=NULL",
+        "ALTER TABLE t2194_journal ALTER COLUMN checksum DROP NOT NULL; UPDATE t2194_journal SET checksum=NULL",
+        "ALTER TABLE t2194_journal ALTER COLUMN applied_at TYPE text USING applied_at::text",
+        "ALTER TABLE t2194_journal ALTER COLUMN version TYPE text USING version::text",
+        "ALTER TABLE t2194_journal ALTER COLUMN checksum TYPE text USING checksum::text",
+        "ALTER TABLE t2194_journal ALTER COLUMN error TYPE bigint USING NULL; UPDATE t2194_journal SET status='failed', applied_at=NULL, error=1",
+        "CREATE TYPE t2194_unsupported_journal AS ENUM ('bad-row'); ALTER TABLE t2194_journal ALTER COLUMN name TYPE t2194_unsupported_journal USING name::text::t2194_unsupported_journal",
+        "ALTER TABLE t2194_journal DROP COLUMN error",
+    ];
+    let mut index = 0;
+    while index < changes.len() {
+        malformed(&mut store, &mut observer, &changes[index]).await;
+        index = index + 1;
+    }
+    print("t2194: 16 malformed journal controls refused; connection reused");
+
+    observer.simple_query(&"CREATE TABLE t2194_effects (version bigint PRIMARY KEY)").unwrap();
+    store.execute_step(&"INSERT INTO t2194_effects VALUES (10)", &applied(10, &"atomic success")).await.unwrap();
+    assert_eq(integer(&mut observer, &"SELECT count(*) FROM t2194_effects WHERE version=10"), 1);
+    assert_eq(integer(&mut observer, &"SELECT count(*) FROM t2194_journal WHERE version=10 AND status='applied'"), 1);
+    expect_error(store.execute_step(&"INSERT INTO t2194_effects VALUES (20); SELECT 1/0", &applied(20, &"SQL failure")).await, &"failed SQL step accepted");
+    assert_eq(integer(&mut observer, &"SELECT count(*) FROM t2194_effects WHERE version=20"), 0);
+    assert_eq(integer(&mut observer, &"SELECT count(*) FROM t2194_journal WHERE version=20"), 0);
+    store.execute_step(&"INSERT INTO t2194_effects VALUES (21)", &applied(21, &"after SQL failure")).await.unwrap();
+    assert_eq(integer(&mut observer, &"SELECT count(*) FROM t2194_effects WHERE version=21"), 1);
+    assert_entry(&store.load_journal().await.unwrap(), &applied(21, &"after SQL failure"));
+
+    observer.simple_query(&"ALTER TABLE t2194_journal ADD CONSTRAINT refuse_fixture_entry CHECK (name <> 'reject')").unwrap();
+    expect_error(store.execute_step(&"INSERT INTO t2194_effects VALUES (30)", &applied(30, &"reject")).await, &"failed journal write accepted");
+    assert_eq(integer(&mut observer, &"SELECT count(*) FROM t2194_effects WHERE version=30"), 0);
+    assert_eq(integer(&mut observer, &"SELECT count(*) FROM t2194_journal WHERE version=30"), 0);
+    store.execute_step(&"INSERT INTO t2194_effects VALUES (31)", &applied(31, &"after journal failure")).await.unwrap();
+    assert_eq(integer(&mut observer, &"SELECT count(*) FROM t2194_effects WHERE version=31"), 1);
+    assert_entry(&store.load_journal().await.unwrap(), &applied(31, &"after journal failure"));
+    store.execute_sql(&"INSERT INTO t2194_effects VALUES (40)").await.unwrap();
+    assert_eq(integer(&mut observer, &"SELECT count(*) FROM t2194_effects WHERE version=40"), 1);
+    assert_eq(integer(&mut observer, &"SELECT count(*) FROM t2194_journal WHERE version=40"), 0);
+    observer.execute(&"CREATE FUNCTION t2194_skip_row() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NULL; END $$; CREATE TRIGGER skip_entry BEFORE INSERT ON t2194_journal FOR EACH ROW WHEN (NEW.name='suppressed') EXECUTE FUNCTION t2194_skip_row()").unwrap();
+    expect_error(store.execute_step(&"INSERT INTO t2194_effects VALUES (42)", &applied(42, &"suppressed")).await,
+        &"trigger suppressed journal persistence but migration committed");
+    assert_eq(integer(&mut observer, &"SELECT count(*) FROM t2194_effects WHERE version=42"), 0);
+    observer.execute(&"DROP TRIGGER skip_entry ON t2194_journal; DROP FUNCTION t2194_skip_row()").unwrap();
+
+    observer.execute(&"CREATE TABLE t2194_partitioned (LIKE t2194_journal INCLUDING ALL) PARTITION BY RANGE(version); CREATE TABLE t2194_partition_child PARTITION OF t2194_partitioned DEFAULT").unwrap();
+    let mut partitioned = store_new(connection(&config), store_config_default().with_table_name("t2194_partitioned"));
+    partitioned.init().await.unwrap();
+    partitioned.upsert_entry(&applied(43, &"partition")).await.unwrap();
+    partitioned.upsert_entry(&applied(43, &"updated partition")).await.unwrap();
+    assert_entry(&partitioned.load_journal().await.unwrap(), &applied(43, &"updated partition"));
+    partitioned.drop_tracking_table().await.unwrap();
+    print("t2194: transactional SQL and journal commit together; both error paths roll back and reuse");
+
+    store.execute_step(&"CREATE TABLE t2194_ddl (value bigint, label text); INSERT INTO t2194_ddl VALUES (7,E'quote'' slash\\\\ λ'); CREATE INDEX t2194_ddl_value ON t2194_ddl(value)",
+                       &applied(60, &"multiple DDL statements")).await.unwrap();
+    assert_eq(integer(&mut observer, &"SELECT count(*) FROM t2194_ddl WHERE value=7 AND label=E'quote'' slash\\\\ λ'"), 1);
+    assert_eq(integer(&mut observer, &"SELECT count(*) FROM pg_catalog.pg_indexes WHERE tablename='t2194_ddl' AND indexname='t2194_ddl_value'"), 1);
+    assert_entry(&store.load_journal().await.unwrap(), &applied(60, &"multiple DDL statements"));
+    observer.simple_query(&"CREATE PROCEDURE t2194_commit_attempt() LANGUAGE plpgsql AS $$ BEGIN COMMIT; END $$; CREATE PROCEDURE t2194_rollback_attempt() LANGUAGE plpgsql AS $$ BEGIN ROLLBACK; END $$").unwrap();
+    let escapes = [
+        "INSERT INTO t2194_effects VALUES (61); COMMIT",
+        "INSERT INTO t2194_effects VALUES (62); ROLLBACK",
+        "INSERT INTO t2194_effects VALUES (63); DO $$ BEGIN COMMIT; END $$",
+        "INSERT INTO t2194_effects VALUES (64); DO $$ BEGIN ROLLBACK; END $$",
+        "INSERT INTO t2194_effects VALUES (65); CALL t2194_commit_attempt()",
+        "INSERT INTO t2194_effects VALUES (66); CALL t2194_rollback_attempt()",
+    ];
+    let mut escape_index = 0;
+    while escape_index < escapes.len() {
+        transaction_refusal(&mut store, &mut observer, &escapes[escape_index], 61 + escape_index).await;
+        escape_index = escape_index + 1;
+    }
+    print("t2194: multi-statement DDL committed; six direct/nested transaction escapes refused atomically");
+
+    let mut sequential = store_new(connection(&config), store_config_default()
+        .with_table_name("t2194_sequential_journal").with_transactional(false));
+    sequential.init().await.unwrap();
+    observer.simple_query(&"ALTER TABLE t2194_sequential_journal ADD CONSTRAINT refuse_sequential_entry CHECK (name <> 'reject')").unwrap();
+    expect_error(sequential.execute_step(&"INSERT INTO t2194_effects VALUES (50)", &applied(50, &"reject")).await, &"sequential journal failure accepted");
+    assert_eq(integer(&mut observer, &"SELECT count(*) FROM t2194_effects WHERE version=50"), 1);
+    assert_eq(integer(&mut observer, &"SELECT count(*) FROM t2194_sequential_journal WHERE version=50"), 0);
+    sequential.execute_step(&"INSERT INTO t2194_effects VALUES (51)", &applied(51, &"sequential reuse")).await.unwrap();
+    assert_entry(&sequential.load_journal().await.unwrap(), &applied(51, &"sequential reuse"));
+    expect_error(sequential.execute_sql(&"BEGIN; INSERT INTO t2194_effects VALUES (52)").await,
+                 &"unclosed migration transaction accepted");
+    expect_error(sequential.execute_step(&"BEGIN; INSERT INTO t2194_effects VALUES (53); SELECT 1/0",
+                 &applied(53, &"failed open transaction")).await, &"failed transaction accepted");
+    sequential.acquire_lock().await.unwrap();
+    sequential.release_lock().await.unwrap();
+    assert_eq(integer(&mut observer, &"SELECT count(*) FROM t2194_effects WHERE version IN (52,53)"), 0);
+    print("t2194: transactional=false exposes sequential failure without inventing rollback");
+
+    let mut alias_connection = connection(&config);
+    let alias_pid = integer(&mut alias_connection, &"SELECT pg_backend_pid()::bigint");
+    alias_connection.simple_query(&"SET statement_timeout = '250ms'").unwrap();
+    let mut alias = store_new(alias_connection, store_config_default().with_table_name("public.t2194_journal"));
+    alias.init().await.unwrap();
+    store.release_lock().await.unwrap();
+    assert_eq(lock_count(&mut observer, owned_pid), 0);
+    store.acquire_lock().await.unwrap();
+    store.acquire_lock().await.unwrap();
+    assert_eq(lock_count(&mut observer, owned_pid), 1);
+    expect_error(alias.acquire_lock().await, &"aliases of one actual relation used different locks");
+    assert_eq(lock_count(&mut observer, alias_pid), 0);
+    assert_eq(lock_count(&mut observer, owned_pid), 1);
+    // Another actual relation must remain independently lockable.
+    sequential.acquire_lock().await.unwrap();
+    sequential.release_lock().await.unwrap();
+    store.release_lock().await.unwrap();
+    assert_eq(lock_count(&mut observer, owned_pid), 0);
+    alias.acquire_lock().await.unwrap();
+    alias.acquire_lock().await.unwrap();
+    assert_eq(lock_count(&mut observer, alias_pid), 1);
+    store.release_lock().await.unwrap();
+    assert_eq(lock_count(&mut observer, alias_pid), 1);
+    alias.release_lock().await.unwrap();
+    assert_eq(lock_count(&mut observer, alias_pid), 0);
+    alias.release_lock().await.unwrap();
+    store.acquire_lock().await.unwrap();
+    expect_error(alias.acquire_lock().await, &"alias lock failed after reuse");
+    assert_eq(lock_count(&mut observer, owned_pid), 1);
+    store.release_lock().await.unwrap();
+    alias.acquire_lock().await.unwrap();
+    alias.release_lock().await.unwrap();
+    assert_eq(lock_count(&mut observer, alias_pid), 0);
+    assert_eq(lock_count(&mut observer, owned_pid), 0);
+    print("t2194: second connection observed alias exclusion, independent tables and idempotent locks");
+
+    relation_replacement(&config, &mut observer).await;
+    runner_lifecycle(&config, &mut observer).await;
+
+    sequential.drop_tracking_table().await.unwrap();
+    sequential.drop_tracking_table().await.unwrap();
+    store.drop_tracking_table().await.unwrap();
+    store.drop_tracking_table().await.unwrap();
+    observer.simple_query(&"DROP TABLE t2194_effects; DROP TABLE t2194_ddl; DROP PROCEDURE t2194_commit_attempt(); DROP PROCEDURE t2194_rollback_attempt(); DROP TYPE t2194_unsupported_journal").unwrap();
+    observer.close().unwrap();
+    print("t2194: all actual PostgreSQL MigrationStore controls passed");
+}

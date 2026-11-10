@@ -6,12 +6,10 @@
 //               sqlite/native/connection
 // =============================================================================
 //
-// SQLite-specific implementation of `MigrationStore`. SQLite's
-// concurrency model (write-ahead log + reader/writer lock at the
-// database level) already serialises concurrent writers, so the
-// `acquire_lock` / `release_lock` operations are no-ops. SQLite also
-// supports DDL inside transactions, so `transactional = true` works
-// the same way as on Postgres.
+// Native SQLite migration adapter. Its current transaction state does not
+// restore schema/rows on rollback, so transactional execute_step refuses before
+// SQL. The existing raw execution helpers remain a separate unqualified path;
+// no-op lock methods do not guarantee serialization of migration runners.
 // =============================================================================
 
 @arch_module(
@@ -35,7 +33,7 @@ module core.database.sqlite.native.migrations.store;
 
 mount base.{Text, Bool, Maybe, Some, None, Result, Ok, Err};
 mount collections.List;
-mount core.database.common.error.{DbError};
+mount core.database.common.error.{DbError, AdapterId, AdSqlite, AdapterSpecific};
 mount core.database.common.migrations.store.{
     MigrationStore, MigrationStoreConfig,
 };
@@ -61,6 +59,8 @@ public fn store_new(conn: SqliteNativeConnection, config: MigrationStoreConfig) 
 }
 
 implement MigrationStore for SqliteMigrationStore {
+    fn adapter_id(&self) -> AdapterId { AdSqlite }
+
     fn dialect(&self) -> Text { "sqlite".to_text() }
 
     fn config(&self) -> &MigrationStoreConfig { &self.config }
@@ -92,14 +92,15 @@ implement MigrationStore for SqliteMigrationStore {
         execute_raw(&mut self.conn, &sql).await
     }
 
-    /// SQLite's WAL-mode + database-level locking already serialises
-    /// concurrent writers; no advisory-lock equivalent is needed.
+    /// No native runner-level lock is implemented here. These no-op methods
+    /// do not provide serialization across separate migration statements.
     async fn acquire_lock(&mut self) -> Result<(), DbError> { Result.Ok(()) }
     async fn release_lock(&mut self) -> Result<(), DbError> { Result.Ok(()) }
 
     async fn execute_sql(&mut self, sql: &Text) -> Result<(), DbError> {
         if self.config.transactional {
-            // SQLite supports DDL in transactions. Wrap in BEGIN/COMMIT.
+            // Existing raw transaction wrapper; this path does not establish
+            // the stronger execute_step atomicity contract.
             execute_raw(&mut self.conn, &"BEGIN".to_text()).await?;
             let exec_res = execute_raw(&mut self.conn, sql).await;
             match exec_res {
@@ -112,6 +113,22 @@ implement MigrationStore for SqliteMigrationStore {
         } else {
             execute_raw(&mut self.conn, sql).await
         }
+    }
+
+    async fn execute_step(&mut self, sql: &Text, entry: &JournalEntry) -> Result<(), DbError> {
+        // The current native connection resets transaction state on rollback
+        // but does not restore its schema/table store. Do not execute any SQL
+        // while promising atomic migration+journal persistence.
+        if self.config.transactional {
+            return Result.Err(DbError.Adapter(AdapterSpecific.new(
+                AdSqlite, "migration_atomicity_unavailable",
+                "native SQLite migration rollback does not restore schema and row changes", false,
+            )));
+        }
+        // This retains the existing nontransactional execution path; it is not
+        // an atomic fallback and its SQL/journal failures remain observable.
+        execute_raw(&mut self.conn, sql).await?;
+        self.upsert_entry(entry).await
     }
 
     async fn drop_tracking_table(&mut self) -> Result<(), DbError> {

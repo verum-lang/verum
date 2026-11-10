@@ -6,36 +6,11 @@
 //               common/migrations/{migration, journal}
 // =============================================================================
 //
-// **The vendor-neutralisation pivot.** `MigrationStore` is the protocol
-// that decouples the universal `MigrationRunner` from any specific
-// database. Every vendor adapter (sqlite / postgres / mysql / future)
-// implements `MigrationStore` to provide:
-//
-//   1. **Schema bootstrap** (`init`) — create the persistent migration
-//      tracking table if it does not exist. Adapter chooses column types
-//      and naming dialect.
-//
-//   2. **Journal load** (`load_journal`) — read all rows of the tracking
-//      table back into a `MigrationJournal` aggregate.
-//
-//   3. **Journal persist** (`upsert_entry`) — write one journal entry
-//      (INSERT or UPDATE on conflict).
-//
-//   4. **Concurrency lock** (`acquire_lock` / `release_lock`) — vendor
-//      may serialise concurrent migration runners. Postgres uses
-//      `pg_advisory_lock`; SQLite uses a no-op (write-ahead log
-//      already serialises); MySQL uses `GET_LOCK`.
-//
-//   5. **DDL execution** (`execute_sql`) — run a vendor-dialect SQL
-//      statement. Used by the runner to apply the migration's
-//      `up_sql` / `down_sql`.
-//
-// **Categorical structure.** `MigrationStore` is the right side of an
-// adjunction with the abstract `Migration` plan: the runner's
-// "compute what to do" lives in the universal category; the store's
-// "do it on this vendor" lives in the vendor-specific category. The
-// adjunction unit is `init`; the counit is `release_lock` after a
-// completed run.
+// MigrationRunner uses this protocol for tracking-table initialization,
+// journal reads/writes, runner lock ownership and migration execution.
+// execute_step is the boundary for SQL and its resulting journal entry.
+// Adapters must report unsupported transaction or concurrency guarantees;
+// database write locks alone do not serialize a multi-step migration runner.
 // =============================================================================
 
 @arch_module(
@@ -71,11 +46,12 @@ mount core.database.common.migrations.journal.{MigrationJournal, JournalEntry};
 public type MigrationStoreConfig is {
     /// Name of the persistent tracking table. Default `__verum_migrations`.
     public table_name: Text,
-    /// If `true`, every migration runs inside a transaction; the
-    /// `__verum_migrations` row is updated in the same transaction so
-    /// either both succeed or both roll back. SQLite + Postgres support
-    /// this; MySQL has caveats with non-transactional DDL.
-    transactional: Bool,
+    /// If true, execute_step commits transactional database changes and its
+    /// resulting journal entry in the same transaction. Unsupported adapters
+    /// must refuse before SQL. Sequence increments and external effects are
+    /// not necessarily transactional and are outside this rollback guarantee.
+    /// If false, SQL and journal persistence are explicitly sequential.
+    public transactional: Bool,
 };
 
 public fn store_config_default() -> MigrationStoreConfig {
@@ -102,6 +78,9 @@ implement MigrationStoreConfig {
 // =============================================================================
 
 public type MigrationStore is protocol {
+    /// Structured vendor identity for diagnostics; never inferred from a label.
+    fn adapter_id(&self) -> AdapterId;
+
     /// Adapter dialect identifier (e.g., "sqlite", "postgres"). Used in
     /// diagnostics and run-report headers.
     fn dialect(&self) -> Text;
@@ -120,10 +99,9 @@ public type MigrationStore is protocol {
     /// Persist a journal entry (INSERT or UPDATE on `(version)` conflict).
     async fn upsert_entry(&mut self, entry: &JournalEntry) -> Result<(), DbError>;
 
-    /// Acquire a process/cluster-wide lock that serialises concurrent
-    /// migration runners. Postgres: `pg_advisory_lock`. SQLite: no-op.
-    /// MySQL: `GET_LOCK`. Returns immediately on acquire; blocks while
-    /// lock is held by another runner.
+    /// Acquire the adapter's runner lock. PostgreSQL uses a session advisory
+    /// lock tied to the tracking relation. Native SQLite currently has no
+    /// equivalent runner lock and cannot promise multi-step serialization.
     async fn acquire_lock(&mut self) -> Result<(), DbError>;
 
     /// Release the lock acquired in `acquire_lock`. Called even on
@@ -134,6 +112,15 @@ public type MigrationStore is protocol {
     /// The store decides whether to wrap in a transaction (per
     /// `config.transactional`).
     async fn execute_sql(&mut self, sql: &Text) -> Result<(), DbError>;
+
+    /// Execute one migration statement and persist its resulting journal entry.
+    /// With transactional=true transactional database changes and this entry
+    /// share one commit. Nontransactional SQL effects (such as sequence
+    /// increments or external calls) are outside this rollback guarantee.
+    /// An adapter without that capability must fail before executing SQL.
+    /// With transactional=false the statement precedes the journal write; a
+    /// journal failure can therefore leave SQL effects committed.
+    async fn execute_step(&mut self, sql: &Text, entry: &JournalEntry) -> Result<(), DbError>;
 
     /// Drop the entire migration tracking table. Used by tooling
     /// ("reset migrations") and by tests. Idempotent.
@@ -172,9 +159,9 @@ public fn canonical_columns_doc() -> Text {
      checksum INTEGER NOT NULL".to_text()
 }
 
-/// FNV-1a 64-bit hash of the table-name string, used as the advisory-lock
-/// key on Postgres (`pg_advisory_lock(<key>)`) so that multiple cogs
-/// using different tracking tables on the same database do not contend.
+/// FNV-1a 64-bit hash of a table-name string. This does not identify a
+/// database relation: qualified/unqualified aliases can name the same table.
+/// PostgreSQL migration locking resolves the actual relation identity instead.
 public fn advisory_lock_key_for(table_name: &Text) -> Int64 {
     let mut h: Int64 = -3750763034362895579 as Int64;
     let bs = table_name.as_bytes();

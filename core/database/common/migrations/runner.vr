@@ -21,15 +21,9 @@
 // and delegates ALL database interaction to it. The runner contains zero
 // SQL, zero connection handling, zero vendor-specific code.
 //
-// **Categorical structure.** The runner is the **fold** functor over
-// the migration plan: a sequence of `Migration` is folded against the
-// store's `(load_journal, upsert_entry, execute_sql)` tuple, producing
-// a `RunReport`. The fold is morally
-//
-//   foldM_left
-//     (RunReport.zero)
-//     (decide_then_apply)
-//     plan.ordered
+// Each successful step is recorded through execute_step. Execution failures
+// return DbError after attempted recovery and lock release. A known journal
+// drift aborts the plan before any migration statement is executed.
 // =============================================================================
 
 @arch_module(
@@ -55,13 +49,13 @@ mount base.{Text, Bool, Maybe, Result, Ok, Err};
 mount collections.List;
 mount core.database.common.error.{DbError};
 mount core.database.common.migrations.migration.{
-    Migration, MigrationStatus, MsApplied, MsPending, clone_migration,
+    Migration, MigrationStatus, MsApplied, MsPending, MsRolledBack, MsFailed, clone_migration,
 };
 mount core.database.common.migrations.plan.{MigrationPlan};
 mount core.database.common.migrations.journal.{
     MigrationJournal, JournalEntry, journal_new, checksum_for_sql,
 };
-mount core.database.common.migrations.store.{MigrationStore};
+mount core.database.common.migrations.store.{MigrationStore, combine_migration_errors};
 
 // -----------------------------------------------------------------------------
 // Modes
@@ -101,14 +95,14 @@ public fn decision_kind_name(d: &RunDecision) -> Text {
 // -----------------------------------------------------------------------------
 
 public type RunReport is {
-    dialect: Text,                  // store.dialect() at run start
-    applied: Int,
-    skipped: Int,
-    failed: Int,
-    rolled_back: Int,
-    aborted: Bool,
-    abort_reason: Maybe<Text>,
-    decisions: List<RunDecision>,
+    public dialect: Text,                  // store.dialect() at run start
+    public applied: Int,
+    public skipped: Int,
+    public failed: Int,
+    public rolled_back: Int,
+    public aborted: Bool,
+    public abort_reason: Maybe<Text>,
+    public decisions: List<RunDecision>,
 };
 
 public fn report_zero(dialect: Text) -> RunReport {
@@ -170,29 +164,71 @@ implement MigrationRunner {
         out
     }
 
-    /// Execute the plan against the supplied `MigrationStore`. The
-    /// store handles ALL database interaction; the runner is pure
-    /// orchestration.
+    /// Execute through the store's atomic step boundary. Once acquired, the
+    /// lock is released on every Result path, including journal/recovery errors.
     public async fn execute(
         &self,
         plan: &MigrationPlan,
         store: &mut dyn MigrationStore,
         clock_ns: Int64,
     ) -> Result<RunReport, DbError> {
-        let mut report = report_zero(store.dialect());
-
-        // 1. Bootstrap the persistent tracking table.
+        if self.mode is RmDryRun {
+            // Preview reads existing state but never creates a tracking table,
+            // writes a journal entry or acquires a migration lock.
+            let journal = store.load_journal().await?;
+            let mut report = report_zero(store.dialect());
+            let decisions = self.plan_decisions(plan, &journal);
+            report.decisions = clone_decisions(&decisions);
+            for decision in decisions.iter() {
+                match decision {
+                    RdAbortDrift(_, reason) => {
+                        report.aborted = true;
+                        if report.abort_reason is Maybe.None {
+                            report.abort_reason = Maybe.Some(reason.clone());
+                        }
+                    }
+                    _ => { report.skipped = report.skipped + 1; }
+                }
+            }
+            return Result.Ok(report);
+        }
         store.init().await?;
-
-        // 2. Acquire concurrency lock (no-op on SQLite).
         store.acquire_lock().await?;
+        let result = self.execute_locked(plan, store, clock_ns).await;
+        let released = store.release_lock().await;
+        match (result, released) {
+            (Result.Ok(report), Result.Ok(_)) => Result.Ok(report),
+            (Result.Err(error), Result.Ok(_)) => Result.Err(error),
+            (Result.Ok(_), Result.Err(error)) => Result.Err(error),
+            (Result.Err(primary), Result.Err(secondary)) => Result.Err(
+                combine_migration_errors(store.adapter_id(), primary, &"release_lock", secondary)
+            ),
+        }
+    }
 
-        // 3. Load existing journal.
+    async fn execute_locked(
+        &self,
+        plan: &MigrationPlan,
+        store: &mut dyn MigrationStore,
+        clock_ns: Int64,
+    ) -> Result<RunReport, DbError> {
+        let mut report = report_zero(store.dialect());
         let mut journal = store.load_journal().await?;
-
-        // 4. Compute decisions and execute.
         let decisions = self.plan_decisions(plan, &journal);
         report.decisions = clone_decisions(&decisions);
+        // Reject known drift across the whole plan before applying an earlier
+        // fresh step. A later incompatible journal row must not leave a partial
+        // deployment that was already known to be invalid at planning time.
+        for decision in decisions.iter() {
+            match decision {
+                RdAbortDrift(_, reason) => {
+                    report.aborted = true;
+                    report.abort_reason = Maybe.Some(reason.clone());
+                    return Result.Ok(report);
+                }
+                _ => {},
+            }
+        }
         let mut applied_steps: List<Migration> = List.new();
         let mut idx: Int = 0;
         while idx < decisions.len() {
@@ -207,46 +243,45 @@ implement MigrationRunner {
                     break;
                 }
                 RdApply(_, sql) => {
-                    journal.record_pending(m);
-                    if let Maybe.Some(entry) = journal.lookup(m.version) {
-                        store.upsert_entry(&entry).await?;
-                    }
-                    let exec_res: Result<(), DbError> = store.execute_sql(sql).await;
-                    match exec_res {
+                    let pending = entry_for(m, MsPending);
+                    let applied = entry_for(m, MsApplied(clock_ns));
+                    let step_result = match store.upsert_entry(&pending).await {
+                        Result.Ok(_) => store.execute_step(sql, &applied).await,
+                        Result.Err(error) => Result.Err(error),
+                    };
+                    match step_result {
                         Result.Ok(_) => {
                             journal.record_applied(m, clock_ns);
-                            if let Maybe.Some(entry) = journal.lookup(m.version) {
-                                store.upsert_entry(&entry).await?;
-                            }
                             report.applied = report.applied + 1;
                             applied_steps.push(clone_migration(m));
                         }
-                        Result.Err(err) => {
-                            let err_msg = f"{err}";
-                            journal.record_failed(m, err_msg.clone());
-                            if let Maybe.Some(entry) = journal.lookup(m.version) {
-                                let _ = store.upsert_entry(&entry).await;
+                        Result.Err(error) => {
+                            let mut failure = error;
+                            let failed = entry_for(m, MsFailed(f"{failure:?}"));
+                            match store.upsert_entry(&failed).await {
+                                Result.Ok(_) => {},
+                                Result.Err(secondary) => {
+                                    failure = combine_migration_errors(store.adapter_id(), failure,
+                                        &"record_failed", secondary);
+                                }
                             }
-                            report.failed = report.failed + 1;
-                            report.aborted = true;
-                            report.abort_reason = Maybe.Some(err_msg);
                             if self.auto_rollback {
-                                let _ = self.rollback_lifo(
-                                    &applied_steps, &mut journal,
-                                    store, clock_ns, &mut report,
-                                ).await;
+                                match self.rollback_lifo(&applied_steps, &mut journal,
+                                    store, clock_ns, &mut report).await {
+                                    Result.Ok(_) => {},
+                                    Result.Err(secondary) => {
+                                        failure = combine_migration_errors(store.adapter_id(), failure,
+                                            &"rollback_applied_steps", secondary);
+                                    }
+                                }
                             }
-                            break;
+                            return Result.Err(failure);
                         }
                     }
                 }
             }
             idx = idx + 1;
         }
-
-        // 5. Release the lock (always, even on abort).
-        store.release_lock().await?;
-
         Result.Ok(report)
     }
 
@@ -258,36 +293,53 @@ implement MigrationRunner {
         clock_ns: Int64,
         report: &mut RunReport,
     ) -> Result<(), DbError> {
-        let mut i: Int = applied.len() - 1;
-        while i >= 0 {
-            match &applied[i].down_sql {
+        let mut failure: Maybe<DbError> = Maybe.None;
+        let mut i: Int = applied.len();
+        while i > 0 {
+            i = i - 1;
+            let migration = &applied[i];
+            match &migration.down_sql {
                 Maybe.Some(sql) => {
-                    let res = store.execute_sql(sql).await;
-                    match res {
+                    let rolled_back = entry_for(migration, MsRolledBack(clock_ns));
+                    match store.execute_step(sql, &rolled_back).await {
                         Result.Ok(_) => {
-                            journal.record_rolled_back(&applied[i], clock_ns);
-                            if let Maybe.Some(entry) = journal.lookup(applied[i].version) {
-                                let _ = store.upsert_entry(&entry).await;
-                            }
+                            journal.record_rolled_back(migration, clock_ns);
                             report.rolled_back = report.rolled_back + 1;
                         }
-                        Result.Err(err) => {
-                            // Continue rolling back even if one step fails.
-                            let err_msg = f"{err}";
-                            journal.record_failed(&applied[i], err_msg);
-                            if let Maybe.Some(entry) = journal.lookup(applied[i].version) {
-                                let _ = store.upsert_entry(&entry).await;
+                        Result.Err(error) => {
+                            let mut current = error;
+                            let failed = entry_for(migration, MsFailed(f"{current:?}"));
+                            match store.upsert_entry(&failed).await {
+                                Result.Ok(_) => {},
+                                Result.Err(secondary) => {
+                                    current = combine_migration_errors(store.adapter_id(), current,
+                                        &"record_rollback_failed", secondary);
+                                }
                             }
+                            failure = Maybe.Some(match failure {
+                                Maybe.None => current,
+                                Maybe.Some(previous) => combine_migration_errors(
+                                    store.adapter_id(), previous, &"rollback_previous_step", current),
+                            });
                         }
                     }
                 }
-                Maybe.None => {
-                    // Irreversible migration; cannot roll back.
-                }
+                Maybe.None => {} // Irreversible steps remain explicitly applied.
             }
-            i = i - 1;
         }
-        Result.Ok(())
+        match failure {
+            Maybe.None => Result.Ok(()),
+            Maybe.Some(error) => Result.Err(error),
+        }
+    }
+}
+
+fn entry_for(migration: &Migration, status: MigrationStatus) -> JournalEntry {
+    JournalEntry {
+        version: migration.version,
+        name: migration.name.clone(),
+        status: status,
+        checksum: checksum_for_sql(&migration.up_sql),
     }
 }
 

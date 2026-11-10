@@ -1,39 +1,4 @@
-// =============================================================================
-// database/postgres/migrations/store.vr — PostgresMigrationStore
-// =============================================================================
-// Layer: 2 (Database — Postgres adapter)
-// Dependencies: core, base, common/migrations/{store, journal, migration},
-//               postgres/{connection, transaction}
-// =============================================================================
-//
-// Postgres-specific implementation of `MigrationStore`. Adds three
-// Postgres-native concerns on top of the universal protocol:
-//
-//   1. **Advisory locks.** `pg_advisory_lock(<key>)` acquires a
-//      session-level lock; `pg_advisory_unlock(<key>)` releases. The
-//      key is FNV-1a of the tracking-table name so concurrent cogs
-//      with different table names don't contend. This guarantees that
-//      multiple Postgres clients running migrations against the same
-//      database serialise — preventing duplicate-apply, lost-update,
-//      and partial-DDL hazards.
-//
-//   2. **Transactional DDL.** Postgres allows DDL inside transactions
-//      (unlike MySQL); `MigrationStoreConfig.transactional = true`
-//      wraps every step in a transaction so the row-update in
-//      `__verum_migrations` and the actual DDL commit atomically.
-//
-//   3. **JSONB-friendly column types.** The tracking table uses
-//      Postgres-canonical types: `BIGINT` for version + checksum,
-//      `TEXT` for name + status + error, `TIMESTAMPTZ` for
-//      `applied_at`. These are emitted by `init()`'s SQL.
-//
-// **Categorical position.** This is the Postgres-side image of the
-// Postgres-flavoured adjunction described in `common/migrations/store.vr`:
-// `init` is the unit; `release_lock` after `execute` is the counit;
-// the universal `MigrationRunner` factors uniquely through `init |>
-// acquire_lock |> load_journal |> ... |> release_lock`.
-// =============================================================================
-
+// PostgreSQL migration storage: session ownership, typed journals and atomic steps.
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
     stratum: MsfsStratum.LFnd,
@@ -53,46 +18,30 @@
 )
 module core.database.postgres.migrations.store;
 
-mount base.{Text, Bool, Maybe, Some, None, Result, Ok, Err};
-mount collections.List;
-mount core.database.common.error.{DbError, AdapterSpecific, AdPostgres};
-mount core.database.common.migrations.store.{
-    MigrationStore, MigrationStoreConfig, advisory_lock_key_for, combine_migration_errors,
-};
-mount core.database.common.migrations.migration.{
-    MigrationStatus, MsPending, MsApplied, MsRolledBack, MsFailed,
-};
-mount core.database.common.migrations.journal.{
-    MigrationJournal, JournalEntry, journal_from_entries, journal_new,
-};
+mount core.base.maybe.Maybe;
+mount core.base.result.Result;
+mount core.text.text.Text;
+mount core.collections.list.List;
+mount core.database.common.error.{DbError, AdapterId, AdapterSpecific, AdPostgres};
+mount core.database.common.migrations.store.{MigrationStore, MigrationStoreConfig, combine_migration_errors};
+mount core.database.common.migrations.journal.{MigrationJournal, JournalEntry, journal_from_entries, journal_new};
 mount core.database.postgres.connection.{PgConnection, PgTypedQueryResult};
-mount core.database.postgres.transaction.{PgTransaction, begin_tx_read_only, commit_tx, rollback_tx};
-mount core.database.postgres.wire.backend.TxIdle;
+mount core.database.postgres.transaction.{PgTransaction, begin_tx, begin_tx_read_only, commit_tx, rollback_tx};
+mount core.database.postgres.wire.backend.{TxIdle, TxInTransaction};
 mount core.database.postgres.wire.typed.TypedValue;
-mount core.database.postgres.migrations.journal_codec.{decode_entry, quote_tracking_table};
+mount core.database.postgres.migrations.journal_codec.{decode_entry, entry_parameters, quote_tracking_table, transactional_sql};
 
-// =============================================================================
-// PostgresMigrationStore
-// =============================================================================
-
+/// Owns one session: advisory locks and each migration transaction stay on it.
 public type PostgresMigrationStore is {
-    conn: PgConnection,
-    config: MigrationStoreConfig,
-    /// FNV-1a of `config.table_name` — the advisory-lock key.
-    lock_key: Int64,
-    /// Whether `acquire_lock` has been called and not yet released.
-    /// Used by `release_lock` to be idempotent.
-    lock_held: Bool,
+    private conn: PgConnection,
+    private config: MigrationStoreConfig,
+    private table: Maybe<(Text, Int)>,
+    // Release uses the key actually acquired even after the relation was replaced.
+    private held_lock: Maybe<Int>,
 };
 
 public fn store_new(conn: PgConnection, config: MigrationStoreConfig) -> PostgresMigrationStore {
-    let key = advisory_lock_key_for(&config.table_name);
-    PostgresMigrationStore {
-        conn: conn,
-        config: config,
-        lock_key: key,
-        lock_held: false,
-    }
+    PostgresMigrationStore { conn: conn, config: config, table: Maybe.None, held_lock: Maybe.None }
 }
 
 fn state_error(message: &Text) -> DbError {
@@ -150,6 +99,13 @@ fn lookup_table(conn: &mut PgConnection, table: &Text) -> Result<Maybe<(Text, In
     }
 }
 
+fn require_table_identity(conn: &mut PgConnection, table: &Text, expected: Int) -> Result<(), DbError> {
+    match lookup_table(conn, table)? {
+        Maybe.Some((_, oid)) if oid == expected => Result.Ok(()),
+        _ => Result.Err(state_error(&"tracking table was replaced; reinitialize the store")),
+    }
+}
+
 /// Hold a relation lock until commit, including while waiting for concurrent
 /// DDL. Check the acquired lock as well as the current name: a schema rename
 /// can redirect a qualified name without acquiring locks on its tables.
@@ -185,6 +141,68 @@ fn finish_transaction<T>(conn: &mut PgConnection, tx: PgTransaction, operation: 
             Result.Err(cleanup) => Result.Err(combine_migration_errors(AdPostgres, error, &"rollback migration", cleanup)),
         },
     }
+}
+
+fn execute_transaction_sql(conn: &mut PgConnection, sql: &Text) -> Result<(), DbError> {
+    let command = transactional_sql(sql)?;
+    conn.execute(&command)?;
+    if !(conn.tx_status() is TxInTransaction) {
+        return Result.Err(state_error(&"migration did not retain its transaction"));
+    }
+    Result.Ok(())
+}
+
+fn execute_sequential_sql(conn: &mut PgConnection, sql: &Text) -> Result<(), DbError> {
+    match conn.execute(sql) {
+        Result.Ok(_) if conn.tx_status() is TxIdle => Result.Ok(()),
+        Result.Ok(_) => Result.Err(rollback_if_active(conn, state_error(&"nontransactional SQL left an open transaction"))),
+        Result.Err(error) => Result.Err(rollback_if_active(conn, error)),
+    }
+}
+
+/// CREATE TABLE IF NOT EXISTS can still lose a concurrent catalog insertion.
+/// Serialize initializers by the creation schema and name before the OID exists.
+/// The two-int advisory key space is disjoint from the session's bigint OID.
+fn initialize_table(conn: &mut PgConnection, table: &Text) -> Result<(Text, Int), DbError> {
+    let params: List<Maybe<TypedValue>> = [Maybe.Some(TypedValue.TvText(table.clone()))];
+    let bootstrap = "SELECT true FROM pg_catalog.parse_ident($1::text) AS name(parts) CROSS JOIN LATERAL pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('core.database.postgres.migrations.init'),pg_catalog.hashtext(pg_catalog.format('%I.%I',CASE WHEN parts[2] IS NULL THEN pg_catalog.current_schema()::text ELSE parts[1] END,COALESCE(parts[2],parts[1]))))";
+    query_typed(conn, &bootstrap, &params)?;
+    let sql = f"CREATE TABLE IF NOT EXISTS {table} (version BIGINT PRIMARY KEY,name TEXT NOT NULL,status TEXT NOT NULL,applied_at BIGINT,error TEXT,checksum BIGINT NOT NULL,CHECK ((status='pending' AND applied_at IS NULL AND error IS NULL) OR (status IN ('applied','rolled_back') AND applied_at IS NOT NULL AND error IS NULL) OR (status='failed' AND applied_at IS NULL AND error IS NOT NULL)))";
+    conn.execute(&sql)?;
+    let relation = lookup_table(conn, table)?;
+    relation.ok_or_else(|| state_error(&"tracking table was not found after initialization"))
+}
+
+fn write_locked(conn: &mut PgConnection, table: &Text, expected: Int, sql: Maybe<&Text>, entry: &JournalEntry)
+    -> Result<(), DbError>
+{
+    lock_table(conn, table, expected, &"ROW EXCLUSIVE")?;
+    if let Maybe.Some(command) = sql {
+        execute_transaction_sql(conn, command)?;
+        // Our own transactional DDL can rename or replace the locked table.
+        require_table_identity(conn, table, expected)?;
+    }
+    // The whole-row type denotes the actual SQL target (also for partitions).
+    // Verify it from RETURNING before committing, even if another transaction
+    // exchanged the schema names after the explicit relation lock.
+    let insert = f"INSERT INTO {table} AS j (version,name,status,applied_at,error,checksum) VALUES ($1::bigint,$2::text,$3::text,$4::bigint,$5::text,$6::bigint) ON CONFLICT (version) DO UPDATE SET name=EXCLUDED.name,status=EXCLUDED.status,applied_at=EXCLUDED.applied_at,error=EXCLUDED.error,checksum=EXCLUDED.checksum RETURNING (SELECT t.typrelid::bigint FROM pg_catalog.pg_type t WHERE t.oid=pg_catalog.pg_typeof(j.*)::oid)";
+    let params = entry_parameters(entry);
+    let result = query_typed(conn, &insert, &params)?;
+    if result.rows.len() != 1 || result.rows[0].len() != 1 {
+        return Result.Err(state_error(&"journal upsert did not write one row"));
+    }
+    match result.rows[0][0] {
+        TypedValue.TvInt8(oid) if oid == expected => Result.Ok(()),
+        _ => Result.Err(state_error(&"journal upsert reached a replacement table")),
+    }
+}
+
+fn persist_entry(conn: &mut PgConnection, table: &Text, expected: Int, sql: Maybe<&Text>, entry: &JournalEntry)
+    -> Result<(), DbError>
+{
+    let tx = begin_tx(conn)?;
+    let result = write_locked(conn, table, expected, sql, entry);
+    finish_transaction(conn, tx, result)
 }
 
 fn read_locked(conn: &mut PgConnection, table: &Text, expected: Int) -> Result<MigrationJournal, DbError> {
@@ -232,123 +250,139 @@ fn read_current_journal(conn: &mut PgConnection, configured: &Text) -> Result<Mi
     read_relation(conn, &table, oid)
 }
 
+fn drop_locked(conn: &mut PgConnection, table: &Text, expected: Int) -> Result<(), DbError> {
+    lock_table(conn, table, expected, &"ACCESS EXCLUSIVE")?;
+    conn.execute(&f"DROP TABLE {table}")?;
+    // A schema can be renamed while we own the table lock. If the name then
+    // dropped another relation, the locked original still exists. Roll back.
+    let params: List<Maybe<TypedValue>> = [Maybe.Some(TypedValue.TvInt8(expected))];
+    let gone = "SELECT NOT EXISTS (SELECT FROM pg_catalog.pg_class WHERE oid::bigint=$1::bigint)";
+    let result = query_typed(conn, &gone, &params)?;
+    if result.rows.len() == 1 && result.rows[0].len() == 1 && result.rows[0][0] is TypedValue.TvBool(true) {
+        return Result.Ok(());
+    }
+    Result.Err(state_error(&"drop reached a replacement tracking table"))
+}
+
+implement PostgresMigrationStore {
+    fn initialized_table(&self) -> Result<(Text, Int), DbError> {
+        match &self.table {
+            Maybe.Some((name, oid)) => Result.Ok((name.clone(), *oid)),
+            Maybe.None => Result.Err(state_error(&"initialize the migration store first")),
+        }
+    }
+
+    fn drop_relation(&mut self, table: &Text, expected: Int) -> Result<(), DbError> {
+        let tx = begin_tx(&mut self.conn)?;
+        let result = drop_locked(&mut self.conn, table, expected);
+        finish_transaction(&mut self.conn, tx, result)
+    }
+}
+
 implement MigrationStore for PostgresMigrationStore {
     fn dialect(&self) -> Text { "postgres".to_text() }
-
+    fn adapter_id(&self) -> AdapterId { AdPostgres }
     fn config(&self) -> &MigrationStoreConfig { &self.config }
 
     async fn init(&mut self) -> Result<(), DbError> {
-        // Postgres-canonical types. CREATE TABLE IF NOT EXISTS is
-        // idempotent on Postgres ≥ 9.1 (which is the minimum we support).
-        let table = &self.config.table_name;
-        let sql = f"CREATE TABLE IF NOT EXISTS {table} (\n                version    BIGINT PRIMARY KEY,\n                name       TEXT NOT NULL,\n                status     TEXT NOT NULL,\n                applied_at BIGINT,\n                error      TEXT,\n                checksum   BIGINT NOT NULL\n            )";
-        execute_raw(&mut self.conn, &sql).await
+        require_idle(&self.conn)?;
+        if self.held_lock is Maybe.Some(_) { return Result.Err(state_error(&"cannot reinitialize a locked store")); }
+        let table = quoted_table(&mut self.conn, &self.config.table_name)?;
+        let tx = begin_tx(&mut self.conn)?;
+        let result = initialize_table(&mut self.conn, &table);
+        let resolved = finish_transaction(&mut self.conn, tx, result)?;
+        self.table = Maybe.Some(resolved);
+        Result.Ok(())
     }
 
     async fn load_journal(&mut self) -> Result<MigrationJournal, DbError> {
         require_idle(&self.conn)?;
-        read_current_journal(&mut self.conn, &self.config.table_name)
+        let (table, oid) = match &self.table {
+            Maybe.Some((name, key)) => (name.clone(), *key),
+            Maybe.None => return read_current_journal(&mut self.conn, &self.config.table_name),
+        };
+        read_relation(&mut self.conn, &table, oid)
     }
 
     async fn upsert_entry(&mut self, entry: &JournalEntry) -> Result<(), DbError> {
-        let (status_str, applied_at_opt, error_opt) = render_status(&entry.status);
-        let table = &self.config.table_name;
-        let version = entry.version;
-        let name_lit = sql_text_literal(&entry.name);
-        let status_lit = sql_text_literal(&status_str);
-        let applied_lit = match applied_at_opt { Maybe.Some(t) => f"{t}", Maybe.None => "NULL".to_text() };
-        let error_lit = match &error_opt { Maybe.Some(e) => sql_text_literal(e), Maybe.None => "NULL".to_text() };
-        let checksum = entry.checksum;
-        let sql = f"INSERT INTO {table} (version, name, status, applied_at, error, checksum)\n               VALUES ({version}, {name_lit}, {status_lit}, {applied_lit}, {error_lit}, {checksum})\n               ON CONFLICT (version) DO UPDATE SET\n                   name = EXCLUDED.name,\n                   status = EXCLUDED.status,\n                   applied_at = EXCLUDED.applied_at,\n                   error = EXCLUDED.error,\n                   checksum = EXCLUDED.checksum";
-        execute_raw(&mut self.conn, &sql).await
+        require_idle(&self.conn)?;
+        let (table, oid) = self.initialized_table()?;
+        persist_entry(&mut self.conn, &table, oid, Maybe.None, entry)
     }
 
     async fn acquire_lock(&mut self) -> Result<(), DbError> {
-        if self.lock_held { return Result.Ok(()); }
-        let sql = f"SELECT pg_advisory_lock({self.lock_key})";
-        execute_raw(&mut self.conn, &sql).await?;
-        self.lock_held = true;
-        Result.Ok(())
+        require_idle(&self.conn)?;
+        let (table, key) = self.initialized_table()?;
+        if self.held_lock is Maybe.Some(_) { return require_table_identity(&mut self.conn, &table, key); }
+        self.conn.execute(&f"SELECT pg_catalog.pg_advisory_lock({key}::bigint)")?;
+        self.held_lock = Maybe.Some(key);
+        // A different runner may have replaced the journal while we waited.
+        match require_table_identity(&mut self.conn, &table, key) {
+            Result.Ok(_) => Result.Ok(()),
+            Result.Err(error) => match self.release_lock().await {
+                Result.Ok(_) => Result.Err(error),
+                Result.Err(cleanup) => Result.Err(combine_migration_errors(
+                    AdPostgres, error, &"release obsolete relation lock", cleanup)),
+            },
+        }
     }
 
     async fn release_lock(&mut self) -> Result<(), DbError> {
-        if !self.lock_held { return Result.Ok(()); }
-        let sql = f"SELECT pg_advisory_unlock({self.lock_key})";
-        execute_raw(&mut self.conn, &sql).await?;
-        self.lock_held = false;
-        Result.Ok(())
+        require_idle(&self.conn)?;
+        let key = match self.held_lock {
+            Maybe.Some(value) => value,
+            Maybe.None => return Result.Ok(()),
+        };
+        let params: List<Maybe<TypedValue>> = [Maybe.Some(TypedValue.TvInt8(key))];
+        let result = query_typed(&mut self.conn, &"SELECT pg_catalog.pg_advisory_unlock($1::bigint)", &params)?;
+        if result.rows.len() != 1 || result.rows[0].len() != 1 {
+            return Result.Err(state_error(&"invalid advisory unlock response"));
+        }
+        match result.rows[0][0] {
+            TypedValue.TvBool(true) => { self.held_lock = Maybe.None; Result.Ok(()) },
+            TypedValue.TvBool(false) => {
+                self.held_lock = Maybe.None;
+                Result.Err(state_error(&"migration advisory lock was not held"))
+            }
+            _ => Result.Err(state_error(&"invalid advisory unlock response")),
+        }
     }
 
     async fn execute_sql(&mut self, sql: &Text) -> Result<(), DbError> {
+        require_idle(&self.conn)?;
+        if !self.config.transactional { return execute_sequential_sql(&mut self.conn, sql); }
+        let tx = begin_tx(&mut self.conn)?;
+        let result = execute_transaction_sql(&mut self.conn, sql);
+        finish_transaction(&mut self.conn, tx, result)
+    }
+
+    async fn execute_step(&mut self, sql: &Text, entry: &JournalEntry) -> Result<(), DbError> {
+        require_idle(&self.conn)?;
+        let (table, oid) = self.initialized_table()?;
         if self.config.transactional {
-            // Wrap in BEGIN ... COMMIT.
-            let tx = self.conn.begin().await?;
-            let exec_res = execute_in_tx(&tx, sql).await;
-            match exec_res {
-                Result.Ok(_)  => tx.commit().await,
-                Result.Err(e) => {
-                    let _ = tx.rollback().await;
-                    Result.Err(e)
-                }
-            }
-        } else {
-            execute_raw(&mut self.conn, sql).await
+            return persist_entry(&mut self.conn, &table, oid, Maybe.Some(sql), entry);
         }
+        require_table_identity(&mut self.conn, &table, oid)?;
+        execute_sequential_sql(&mut self.conn, sql)?;
+        // Nontransactional SQL has committed. Journal only the original table.
+        persist_entry(&mut self.conn, &table, oid, Maybe.None, entry)
     }
 
     async fn drop_tracking_table(&mut self) -> Result<(), DbError> {
-        let sql = f"DROP TABLE IF EXISTS {self.config.table_name}";
-        execute_raw(&mut self.conn, &sql).await
-    }
-}
-
-// =============================================================================
-// Helpers
-// =============================================================================
-
-/// Render a `MigrationStatus` as `(status_text, applied_at?, error?)`.
-fn render_status(s: &MigrationStatus) -> (Text, Maybe<Int64>, Maybe<Text>) {
-    match s {
-        MsPending          => ("pending".to_text(),      Maybe.None,    Maybe.None),
-        MsApplied(t)       => ("applied".to_text(),      Maybe.Some(*t), Maybe.None),
-        MsRolledBack(t)    => ("rolled_back".to_text(),  Maybe.Some(*t), Maybe.None),
-        MsFailed(e)        => ("failed".to_text(),       Maybe.None,    Maybe.Some(e.clone())),
-    }
-}
-
-/// SQL string literal — escape single quotes by doubling.
-fn sql_text_literal(t: &Text) -> Text {
-    let bs = t.as_bytes();
-    let mut out = Text.new();
-    out.push_byte(0x27_u8);  // '
-    let mut i: Int = 0;
-    while i < bs.len() {
-        let b = bs[i];
-        if b == 0x27_u8 {
-            out.push_byte(0x27_u8); out.push_byte(0x27_u8);
-        } else {
-            out.push_byte(b);
+        require_idle(&self.conn)?;
+        if self.held_lock is Maybe.Some(_) { return Result.Err(state_error(&"cannot drop a locked migration store")); }
+        if self.table is Maybe.None { return Result.Ok(()); }
+        let (table, oid) = self.initialized_table()?;
+        self.acquire_lock().await?;
+        let result = self.drop_relation(&table, oid);
+        if result is Result.Ok(_) { self.table = Maybe.None; }
+        let released = self.release_lock().await;
+        match (result, released) {
+            (Result.Ok(_), Result.Ok(_)) => Result.Ok(()),
+            (Result.Err(error), Result.Ok(_)) => Result.Err(error),
+            (Result.Ok(_), Result.Err(error)) => Result.Err(error),
+            (Result.Err(error), Result.Err(cleanup)) => Result.Err(combine_migration_errors(
+                AdPostgres, error, &"release dropped relation lock", cleanup)),
         }
-        i = i + 1;
     }
-    out.push_byte(0x27_u8);
-    out
 }
-
-// Connection helpers — these route through the canonical pg connection
-// API. Because `MigrationStore.execute_sql` operates at the textual-SQL
-// level (not the typed `sql#"..."` meta-fn level), we use the raw
-// statement-execution path that postgres/connection.vr exposes for
-// dynamic SQL.
-async fn execute_raw(conn: &mut PgConnection, sql: &Text) -> Result<(), DbError> {
-    conn.execute_simple(sql).await.map(|_| ())
-}
-
-async fn execute_in_tx(tx: &mut PgTransaction, sql: &Text) -> Result<(), DbError> {
-    tx.execute_simple(sql).await.map(|_| ())
-}
-
-// =============================================================================
-// Tests
-// =============================================================================
-
