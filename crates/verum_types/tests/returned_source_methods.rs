@@ -813,3 +813,28 @@ fn imported_concrete_receivers_do_not_bind_a_same_leaf_type_from_the_consumer() 
     assert!(negative.iter().any(|error| error.contains("Mismatch")
         && error.contains("demo.other.Key") && error.contains("demo.store.Key")), "{negative:?}");
 }
+
+#[test]
+fn chained_protocol_results_keep_the_imported_sum_and_its_payload() {
+    let packet = "public type Packet<T> is Empty | Wrap(T);
+        implement<T> Packet<T> {
+            public fn populated(&self) -> Bool { match self { Wrap(_) => true, Empty => false } }
+            public fn transform<U, F: fn(T) -> U>(self, f: F) -> Packet<U> {
+                match self { Wrap(value) => Packet.Wrap(f(value)), Empty => Packet.Empty }
+            }
+        }";
+    let other = "public type Packet<T> is Empty | Wrap(T); implement<T> Packet<T> { public fn foreign(&self) -> Bool { true } }";
+    let modules = [("demo.payload", packet), ("demo.other", other)];
+    let source = "mount demo.payload.Packet; type Feed is protocol {
+        type Element; fn pull(&mut self) -> Packet<Self.Element>;
+        fn populated(mut self) -> Bool { self.pull().populated() }
+    };
+    type Numbers is {};
+    implement Feed for Numbers { type Element = Int; fn pull(&mut self) -> Packet<Int> { Packet.Wrap(3) } }";
+    let accepted = format!("{source} fn read(n: &mut Numbers) -> Bool {{ n.pull().transform(|v| v + 1).populated() }}");
+    let errors = check_with_checker(&accepted, &modules).1;
+    assert!(errors.is_empty(), "{errors:?}");
+    let rejected = format!("{source} fn read(n: &mut Numbers) -> Bool {{ n.pull().foreign() }}");
+    let errors = check_with_checker(&rejected, &modules).1;
+    assert!(errors.iter().any(|diagnostic| diagnostic.contains("MethodNotFound") && diagnostic.contains("foreign")), "{errors:?}");
+}

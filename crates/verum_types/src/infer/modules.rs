@@ -22027,20 +22027,19 @@ impl TypeChecker {
 
                 // Step 7: Return method's return type with substitution
                 let resolved_return = self.unifier.apply(return_type);
-                // CRITICAL FIX: Normalize the return type to resolve associated type projections.
-                // After unifier.apply(), we may still have projections like ::Item[SliceIter<Int>]
-                // that need to be resolved to &Int by looking up the associated type definition.
+                // Projection substitution preserves the nominal result. Expanding
+                // its constructor here discards the declaring module before a
+                // chained call can look up its public methods.
                 let resolved_return = self.resolve_method_output_projections(
                     &resolved_return, &recv_ty, protocol_path,
                 );
-                let normalized_return = self.normalize_type(&resolved_return);
                 if crate::ctor_trace_enabled() {
                     eprintln!(
                         "[ctor-trace] proto-search RETURN {}",
-                        normalized_return
+                        resolved_return
                     );
                 }
-                Ok(InferResult::method(normalized_return, instance.as_ref().and_then(|i| i.receiver_kind)))
+                Ok(InferResult::method(resolved_return, instance.as_ref().and_then(|i| i.receiver_kind)))
             }
             _ => {
                 // Method type is not a function - this shouldn't happen

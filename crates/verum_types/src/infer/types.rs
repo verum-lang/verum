@@ -114,6 +114,14 @@ impl TypeChecker {
 
                 // Reconstruct the generic type with resolved arguments
 
+                // The structural body of a named sum is not its declaring key.
+                // Public method signatures are instantiated in other modules;
+                // keep the selected owner alongside the unevaluated arguments.
+                if matches!(base_ty, Type::Variant(_)) && let TypeKind::Path(path) = &base.kind
+                    && let Ok((_, Some(owner))) = self.resolve_qualified_type_with_parameter_key(path, base.span)
+                {
+                    return Type::Named { path: Self::text_to_path(&owner), args: type_args };
+                }
                 match base_ty {
                     b @ (Type::Named { .. } | Type::Generic { .. }) => {
                         // One rule for applying arguments — see
