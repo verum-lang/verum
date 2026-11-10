@@ -13,7 +13,7 @@ mount core.intrinsics.arithmetic.{
     checked_neg, checked_abs,
     saturating_add, saturating_sub,
     wrapping_div, wrapping_rem, wrapping_abs,
-    overflowing_add, overflowing_sub, overflowing_mul, overflowing_neg,
+    overflowing_add, overflowing_sub, overflowing_mul, overflowing_neg, overflowing_shr,
     widening_mul, carrying_add, borrowing_sub,
     checked_shl, checked_shr, checked_next_power_of_two,
     ilog10, leading_sign_bits,
@@ -178,6 +178,32 @@ fn regression_checked_shl_in_range() {
 @test
 fn regression_checked_shr_in_range() {
     assert(checked_shr(256 as Int, 4 as UInt32) is Some(16));
+}
+
+@test
+fn regression_right_shifts_preserve_signed_and_unsigned_high_bits() {
+    let negative: Int8 = -128_i8;
+    let top: UInt64 = 0x8000000000000000_u64;
+    assert(checked_shr(negative, 1_u32) is Some(-64_i8));
+    assert(checked_shr(top, 1_u32) is Some(0x4000000000000000_u64));
+    let (right, overflow) = overflowing_shr(255_u8, 9_u32);
+    assert(right == 127_u8 && overflow);
+}
+
+@test
+fn regression_checked_shifts_use_the_declared_integer_width() {
+    assert(checked_shl(255_u8, 1_u32) is Some(254_u8));
+    assert(checked_shl(64_i8, 1_u32) is Some(-128_i8));
+    assert(checked_shl(1_u8, 8_u32) is None);
+    assert(checked_shr(255_u8, 8_u32) is None);
+    let big: UInt128 = 1_u128;
+    match checked_shl(big, 100_u32) {
+        Some(high) => {
+            assert(high == (1_u128 << 100_u128));
+            assert(checked_shr(high, 100_u32) is Some(1_u128));
+        }
+        None => panic("valid 128-bit shift"),
+    }
 }
 
 @test

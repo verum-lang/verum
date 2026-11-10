@@ -33,7 +33,8 @@ module core.intrinsics.arithmetic;
 // ARITH-PURE-BODY-1: the pure bodies below (widening_mul,
 // leading_sign_bits, checked_next_power_of_two) build on the registered
 // bitwise primitives.
-mount core.intrinsics.bitwise.{lshr, clz};
+mount core.base.maybe.Maybe;
+mount core.intrinsics.bitwise.{ashr, lshr, shl, clz};
 
 // =============================================================================
 // SECTION 1: Basic Arithmetic
@@ -168,18 +169,17 @@ public fn checked_abs<T>(x: T) -> Maybe<T> { @intrinsic("checked_abs", x) }
 /// Checked left shift (returns Maybe.None if shift >= bit width).
 ///
 /// ARITH-PURE-BODY-1: pure body (was an unregistered @intrinsic →
-/// LoadNil).  Bit width follows the 64-bit generic value model; the
-/// sized variants own narrower widths.
+/// LoadNil). The declared integer width bounds the shift count.
 public fn checked_shl<T>(x: T, n: UInt32) -> Maybe<T> {
-    if (n as Int) >= 64 { return Maybe.None; }
-    Maybe.Some(x << n)
+    if (n as Int) >= T.size * 8 { return Maybe.None; }
+    Maybe.Some(wrapping_shl(x, n))
 }
 
 /// Checked right shift (returns Maybe.None if shift >= bit width).
 /// ARITH-PURE-BODY-1: pure body; see `checked_shl`.
 public fn checked_shr<T>(x: T, n: UInt32) -> Maybe<T> {
-    if (n as Int) >= 64 { return Maybe.None; }
-    Maybe.Some(x >> n)
+    if (n as Int) >= T.size * 8 { return Maybe.None; }
+    Maybe.Some(wrapping_shr(x, n))
 }
 
 // --- UInt64-specific checked arithmetic (uses unsigned overflow detection) ---
@@ -222,7 +222,7 @@ public fn overflowing_mul<T>(a: T, b: T) -> (T, Bool) { @intrinsic("overflowing_
 /// minimum (its negation is unrepresentable); the result then wraps to
 /// the same bit pattern.
 public fn overflowing_neg<T>(x: T) -> (T, Bool) {
-    let min = (1 as T) << (63 as UInt32);
+    let min = shl(1 as T, 63 as UInt32);
     (wrapping_neg(x), x == min)
 }
 
@@ -230,15 +230,15 @@ public fn overflowing_neg<T>(x: T) -> (T, Bool) {
 /// taken modulo the bit width (like `wrapping_shl`); the flag reports
 /// `n >= bits`.  ARITH-PURE-BODY-1: pure body.
 public fn overflowing_shl<T>(x: T, n: UInt32) -> (T, Bool) {
-    let masked = n & (63 as UInt32);
-    (x << masked, (n as Int) >= 64)
+    let width = T.size * 8;
+    (wrapping_shl(x, n), (n as Int) >= width)
 }
 
 /// Right shift returning (result, overflow_flag).  Same contract shape
 /// as `overflowing_shl`.  ARITH-PURE-BODY-1: pure body.
 public fn overflowing_shr<T>(x: T, n: UInt32) -> (T, Bool) {
-    let masked = n & (63 as UInt32);
-    (x >> masked, (n as Int) >= 64)
+    let width = T.size * 8;
+    (wrapping_shr(x, n), (n as Int) >= width)
 }
 
 // =============================================================================
@@ -279,10 +279,22 @@ public fn wrapping_neg<T>(x: T) -> T { @intrinsic("wrapping_neg", x) }
 public fn wrapping_abs<T>(x: T) -> T { @intrinsic("wrapping_abs", x) }
 
 /// Wrapping left shift
-public fn wrapping_shl<T>(x: T, n: UInt32) -> T { @intrinsic("wrapping_shl", x, n) }
+public fn wrapping_shl<T>(x: T, n: UInt32) -> T {
+    let width = T.size * 8;
+    let shifted = shl(x, n & ((width - 1) as UInt32));
+    if width >= 64 { return shifted; }
+    // Narrow values occupy a machine word. Recover the declared signed or
+    // unsigned value from its low bits after the left shift.
+    let excess = (64 - width) as UInt32;
+    let aligned = shl(shifted, excess);
+    if T.is_signed { ashr(aligned, excess) } else { lshr(aligned, excess) }
+}
 
 /// Wrapping right shift
-public fn wrapping_shr<T>(x: T, n: UInt32) -> T { @intrinsic("wrapping_shr", x, n) }
+public fn wrapping_shr<T>(x: T, n: UInt32) -> T {
+    let shift = n & ((T.size * 8 - 1) as UInt32);
+    if T.is_signed { ashr(x, shift) } else { lshr(x, shift) }
+}
 
 // --- Type-specific wrapping intrinsics (proper bit-width truncation) ---
 
@@ -325,7 +337,7 @@ public fn saturating_mul<T>(a: T, b: T) -> T { @intrinsic("saturating_mul", a, b
 /// ARITH-PURE-BODY-1 (2026-07-15): pure body (was an unregistered
 /// @intrinsic → LoadNil).
 public fn saturating_div<T>(a: T, b: T) -> T {
-    let min = (1 as T) << (63 as UInt32);
+    let min = shl(1 as T, 63 as UInt32);
     let neg_one = (0 as T) - (1 as T);
     if a == min && b == neg_one {
         return wrapping_sub(min, 1 as T);
@@ -431,7 +443,7 @@ public fn widening_mul<T>(a: T, b: T) -> (T, T) {
     // is < 2^32 (a 32×32 product's half), so the sum fits without carry.
     let mid = wrapping_add(wrapping_add(lshr(p_ll, 32 as UInt32), p_lh & mask), p_hl & mask);
 
-    let lo = (p_ll & mask) | (mid << (32 as UInt32));
+    let lo = (p_ll & mask) | shl(mid, 32 as UInt32);
     let hi = wrapping_add(
         wrapping_add(p_hh, lshr(p_lh, 32 as UInt32)),
         wrapping_add(lshr(p_hl, 32 as UInt32), lshr(mid, 32 as UInt32)),
@@ -459,7 +471,7 @@ public fn widening_mul_signed<T>(a: T, b: T) -> (T, T) {
 /// bit patterns unsigned under the signed comparator).  LLVM folds the
 /// chain to `adds`/`adcs` at Tier-1.
 public fn carrying_add<T>(a: T, b: T, carry: Bool) -> (T, Bool) {
-    let bias = (1 as T) << (63 as UInt32);
+    let bias = shl(1 as T, 63 as UInt32);
     let s1 = wrapping_add(a, b);
     let c1 = (s1 ^ bias) < (a ^ bias);
     let s2 = if carry { wrapping_add(s1, 1 as T) } else { s1 };
@@ -471,7 +483,7 @@ public fn carrying_add<T>(a: T, b: T, carry: Bool) -> (T, Bool) {
 /// Borrow-out is the unsigned underflow of the 64-bit patterns.
 /// ARITH-PURE-BODY-1: pure body; see `carrying_add`.
 public fn borrowing_sub<T>(a: T, b: T, borrow: Bool) -> (T, Bool) {
-    let bias = (1 as T) << (63 as UInt32);
+    let bias = shl(1 as T, 63 as UInt32);
     let d1 = wrapping_sub(a, b);
     let b1 = (a ^ bias) < (b ^ bias);
     let d2 = if borrow { wrapping_sub(d1, 1 as T) } else { d1 };
@@ -492,7 +504,7 @@ public fn borrowing_sub<T>(a: T, b: T, borrow: Bool) -> (T, Bool) {
 /// bit (arithmetic shift replicates the sign), so `clz` of that pattern
 /// counts them plus the sign position itself.
 public fn leading_sign_bits<T>(x: T) -> Int {
-    clz(x ^ (x >> (63 as UInt32))) - 1
+    clz(x ^ ashr(x, 63 as UInt32)) - 1
 }
 
 /// Integer log2 (floor)
@@ -526,10 +538,10 @@ public fn is_power_of_two<T>(x: T) -> Bool {
 /// unregistered @intrinsic → LoadNil).
 public fn checked_next_power_of_two<T>(x: T) -> Maybe<T> {
     if x <= (1 as T) { return Maybe.Some(1 as T); }
-    let max_pow = (1 as T) << (62 as UInt32);
+    let max_pow = shl(1 as T, 62 as UInt32);
     if x > max_pow { return Maybe.None; }
     let shift = 64 - clz(wrapping_sub(x, 1 as T));
-    Maybe.Some((1 as T) << (shift as UInt32))
+    Maybe.Some(shl(1 as T, shift as UInt32))
 }
 
 /// Next power of 2 (wraps to 0 on overflow — the two's-complement shift
