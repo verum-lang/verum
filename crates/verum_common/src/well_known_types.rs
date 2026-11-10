@@ -1886,40 +1886,43 @@ pub mod type_names {
     /// the authority for `T.id` (TYPEINFO-ID-CANON-1): `Int` and `Int64`
     /// name the SAME 64-bit signed integer, so they must produce the same
     /// id, while `Int8` stays distinct.  Aliases collapse by
-    /// `(bit-width, signedness, float-ness)`; a non-primitive name is
-    /// returned unchanged (user types keep their nominal identity).
+    /// `(bit-width, signedness, float-ness)`; a non-primitive name returns
+    /// [`NON_PRIMITIVE_IDENTITY`] (user types keep their nominal identity).
     ///
     /// Mapping (all aliases → canonical): signed ints → `Int{N}`,
     /// unsigned ints → `UInt{N}`, floats → `Float{N}`, pointer-width
     /// aliases fold to the 64-bit canonical, `Byte` → `UInt8`.
     pub fn canonical_identity_name(name: &str) -> &'static str {
-        // Pointer-width + convenience aliases first (they don't carry an
-        // explicit width in numeric_bit_width's eyes uniformly).
-        match name {
-            "Int" | "Int64" | "i64" | "I64" | "IntSize" | "ISize" | "Isize" | "isize" => {
-                return INT64;
-            }
-            "UInt" | "UInt64" | "u64" | "U64" | "UIntSize" | "USize" | "Usize" | "usize" => {
-                return UINT64;
-            }
-            "Byte" | "UInt8" | "u8" | "U8" => return UINT8,
-            "Float" | "Float64" | "f64" | "F64" => return FLOAT64,
-            "Float32" | "f32" | "F32" => return FLOAT32,
-            "Int8" | "i8" | "I8" => return INT8,
-            "Int16" | "i16" | "I16" => return INT16,
-            "Int32" | "i32" | "I32" => return INT32,
-            "Int128" | "i128" | "I128" => return INT128,
-            "UInt16" | "u16" | "U16" => return UINT16,
-            "UInt32" | "u32" | "U32" => return UINT32,
-            "UInt128" | "u128" | "U128" => return UINT128,
-            "Bool" | "bool" => return BOOL,
-            "Char" | "char" => return CHAR,
-            _ => {}
+        primitive_identity_spellings(name).first().copied().unwrap_or(NON_PRIMITIVE_IDENTITY)
+    }
+
+    /// All spellings of one language primitive, with its canonical name first.
+    /// Nominal types have no entry. Shared storage alone does not establish identity.
+    pub fn primitive_identity_spellings(name: &str) -> &'static [&'static str] {
+        macro_rules! families {
+            ($($canonical:ident => [$($alias:literal),*]),* $(,)?) => {
+                match name {
+                    $($canonical $(| $alias)* => &[$canonical, $($alias),*],)*
+                    _ => &[],
+                }
+            };
         }
-        // Non-primitive (user/nominal or Text) — identity is the name.
-        // We can't return a borrowed `&str` as `&'static`, so callers hash
-        // the ORIGINAL name when this returns the sentinel.
-        NON_PRIMITIVE_IDENTITY
+        families! {
+            INT64 => ["Int", "i64", "I64", "IntSize", "ISize", "Isize", "isize"],
+            UINT64 => ["UInt", "u64", "U64", "UIntSize", "USize", "Usize", "usize"],
+            UINT8 => ["Byte", "u8", "U8"],
+            FLOAT64 => ["Float", "f64", "F64"],
+            FLOAT32 => ["f32", "F32"],
+            INT8 => ["i8", "I8"],
+            INT16 => ["i16", "I16"],
+            INT32 => ["i32", "I32"],
+            INT128 => ["i128", "I128"],
+            UINT16 => ["u16", "U16"],
+            UINT32 => ["u32", "U32"],
+            UINT128 => ["u128", "U128"],
+            BOOL => ["bool"],
+            CHAR => ["char"],
+        }
     }
 
     /// Sentinel returned by [`canonical_identity_name`] for names that are

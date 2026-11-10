@@ -12512,6 +12512,45 @@ impl VbcCodegen {
         None
     }
 
+    /// A type-prefix call has no value receiver. Find the declaration owned by
+    /// a spelling of the same language scalar before lowering a dynamic call.
+    fn scalar_alias_static_method(
+        &self,
+        owner: &str,
+        method: &str,
+        arity: usize,
+    ) -> CodegenResult<Option<&FunctionInfo>> {
+        use crate::types::TypeId;
+
+        let spellings = type_names::primitive_identity_spellings(owner);
+        if spellings.is_empty() || !self.nominal_type_id(owner).is_some_and(TypeId::is_builtin) {
+            return Ok(None);
+        }
+        let mut selected: Option<&FunctionInfo> = None;
+        for spelling in std::iter::once(owner).chain(spellings.iter().copied().filter(|name| *name != owner)) {
+            let key = format!("{spelling}.{method}");
+            let Some(candidate) = self.ctx.lookup_qualified_function(&key) else { continue };
+            let Some(declaration) = self.declared_callable_descriptors.get(&candidate.id) else { continue };
+            let Some(parent) = declaration.parent_type else { continue };
+            if TypeId::from_well_known_scalar_name(spelling) != Some(parent)
+                || !declaration.has_source_body
+                || declaration.params.len() != arity
+                || declaration.params.first().is_some_and(|parameter|
+                    self.ctx.strings.get(parameter.name.0 as usize).is_some_and(|name| name == "self"))
+            {
+                continue;
+            }
+            if spelling == owner { return Ok(Some(candidate)); }
+            if selected.is_some_and(|previous| previous.id != candidate.id) {
+                return Err(CodegenError::new(CodegenErrorKind::InvalidSourceSignature(
+                    format!("ambiguous static method {owner}.{method} across scalar declarations"),
+                )));
+            }
+            selected = Some(candidate);
+        }
+        Ok(selected)
+    }
+
     /// A numeric carrier does not identify its source method owner. Prefer an
     /// exact registered declaration before the width-only dispatch fallback.
     fn declared_numeric_receiver_method(
@@ -14184,6 +14223,10 @@ impl VbcCodegen {
             };
 
         if let Some(ref type_name) = static_receiver_type {
+            if let Some(info) = self.scalar_alias_static_method(type_name, method.name.as_str(), args.len())?.cloned() {
+                self.ctx.pending_static_call_type_args = static_witness_args.clone();
+                return self.compile_static_method_call(&info, args, type_args);
+            }
             let qualified_rust = format!("{}::{}", type_name, method.name);
             let qualified_verum = format!("{}.{}", type_name, method.name);
             // CONST-GENERIC-VALUE-CARRY-1: alias statics resolve against

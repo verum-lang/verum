@@ -607,3 +607,37 @@ fn borrowed_float_self_refuses_an_unproved_dereference_tape_transfer() {
         "borrowed.sin()",
     )));
 }
+
+#[test]
+fn static_protocol_methods_follow_scalar_identity_in_both_directions() {
+    check(r#"
+        type Stamp is protocol { fn stamp() -> Int; };
+        implement Stamp for Byte { fn stamp() -> Int { 37 } }
+        implement Stamp for ISize { fn stamp() -> Int { 11 } }
+        implement Stamp for UInt64 { fn stamp() -> Int { 5 } }
+        fn probe() -> Int {
+            UInt8.stamp() * 100 + Int64.stamp() * 10 + USize.stamp()
+        }
+    "#, 3815);
+    check(r#"
+        type Stamp is protocol { fn stamp() -> Int; };
+        implement Stamp for UInt8 { fn stamp() -> Int { 43 } }
+        implement Stamp for USize { fn stamp() -> Int { 7 } }
+        implement Stamp for Int { fn stamp() -> Int { 19 } }
+        fn probe() -> Int { Byte.stamp() * 100 + UInt64.stamp() * 10 + ISize.stamp() }
+    "#, 4389);
+}
+
+#[test]
+fn static_scalar_alias_does_not_capture_a_nominal_homonym() {
+    check(r#"
+        type Stamp is protocol { fn stamp() -> Int; };
+        implement Stamp for Byte { fn stamp() -> Int { 17 } }
+        module records {
+            public type UInt8 is { value: Int };
+            implement UInt8 { public fn stamp() -> Int { 91 } }
+            public fn read() -> Int { UInt8.stamp() }
+        }
+        fn probe() -> Int { UInt8.stamp() * 100 + records.read() }
+    "#, 1791);
+}
