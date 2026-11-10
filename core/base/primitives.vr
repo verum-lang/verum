@@ -4492,21 +4492,8 @@ implement Clone for Int32 {
 implement Copy for Int32 {}
 
 // --- Int64 ---
-implement Eq for Int64 {
-    public fn eq(&self, other: &Int64) -> Bool { eq(*self, *other) }
-}
-implement Ord for Int64 {
-    public fn cmp(&self, other: &Int64) -> Ordering {
-        if *self < *other { Less }
-        else if *self > *other { Greater }
-        else { Equal }
-    }
-}
 implement Hash for Int64 {
     public fn hash(&self, hasher: &mut Hasher) { hasher.write_int(*self as Int); }
-}
-implement Clone for Int64 {
-    public fn clone(&self) -> Int64 { *self }
 }
 // --- Int128 ---
 implement Eq for Int128 {
@@ -4528,38 +4515,12 @@ implement Clone for Int128 {
 implement Copy for Int128 {}
 
 // --- ISize ---
-implement Eq for ISize {
-    public fn eq(&self, other: &ISize) -> Bool { eq(*self, *other) }
-}
-implement Ord for ISize {
-    public fn cmp(&self, other: &ISize) -> Ordering {
-        if *self < *other { Less }
-        else if *self > *other { Greater }
-        else { Equal }
-    }
-}
 implement Hash for ISize {
     public fn hash(&self, hasher: &mut Hasher) { hasher.write_int(*self as Int); }
 }
-implement Clone for ISize {
-    public fn clone(&self) -> ISize { *self }
-}
 // --- UInt8 ---
-implement Eq for UInt8 {
-    public fn eq(&self, other: &UInt8) -> Bool { eq(*self, *other) }
-}
-implement Ord for UInt8 {
-    public fn cmp(&self, other: &UInt8) -> Ordering {
-        if *self < *other { Less }
-        else if *self > *other { Greater }
-        else { Equal }
-    }
-}
 implement Hash for UInt8 {
     public fn hash(&self, hasher: &mut Hasher) { hasher.write_int(*self as Int); }
-}
-implement Clone for UInt8 {
-    public fn clone(&self) -> UInt8 { *self }
 }
 implement Copy for UInt8 {}
 
@@ -4671,68 +4632,8 @@ implement Clone for Float32 {
 implement Copy for Float32 {}
 
 // =============================================================================
-// Float64 — Full Protocol Suite
+// Float64
 // =============================================================================
-// Float64 was previously missing nearly all protocols. These implementations
-// bring it to parity with Float.
-// =============================================================================
-
-implement Add for Float64 {
-    type Output = Float64;
-    public fn add(self, rhs: Float64) -> Float64 { add(self, rhs) }
-}
-
-implement Sub for Float64 {
-    type Output = Float64;
-    public fn sub(self, rhs: Float64) -> Float64 { sub(self, rhs) }
-}
-
-implement Mul for Float64 {
-    type Output = Float64;
-    public fn mul(self, rhs: Float64) -> Float64 { mul(self, rhs) }
-}
-
-implement Div for Float64 {
-    type Output = Float64;
-    public fn div(self, rhs: Float64) -> Float64 { div(self, rhs) }
-}
-
-implement Rem for Float64 {
-    type Output = Float64;
-    public fn rem(self, rhs: Float64) -> Float64 { rem(self, rhs) }
-}
-
-// `PartialEq`, not `Eq`: `Eq` promises REFLEXIVITY — that `a == a`
-// always holds — and NaN breaks it, by IEEE 754 and by design. This
-// impl always knew (the comment below said so) while the declaration
-// claimed the opposite; `PartialEq` exists in `core/base/protocols.vr`
-// for exactly this case, and its doc names floating point as the
-// reason (T0833).
-implement PartialEq for Float64 {
-    public fn eq(&self, other: &Float64) -> Bool {
-        // NaN != NaN by IEEE 754 — which is why this is PartialEq.
-        eq(*self, *other)
-    }
-}
-
-implement PartialOrd for Float64 {
-    public fn partial_cmp(&self, other: &Float64) -> Maybe<Ordering> {
-        if self.is_nan() || other.is_nan() {
-            Maybe.None
-        } else if *self < *other {
-            Maybe.Some(Ordering.Less)
-        } else if *self > *other {
-            Maybe.Some(Ordering.Greater)
-        } else {
-            Maybe.Some(Ordering.Equal)
-        }
-    }
-}
-
-implement Clone for Float64 {
-    public fn clone(&self) -> Float64 { *self }
-}
-
 implement Copy for Float64 {}
 
 implement Default for Float64 {
@@ -5018,66 +4919,6 @@ implement One for Int64 {
     public fn is_one(&self) -> Bool { *self == 1_i64 }
 }
 
-implement Add for Int64 {
-    type Output = Int64;
-    public fn add(self, rhs: Int64) -> Int64 { add(self, rhs) }
-}
-
-implement Sub for Int64 {
-    type Output = Int64;
-    public fn sub(self, rhs: Int64) -> Int64 { sub(self, rhs) }
-}
-
-implement Mul for Int64 {
-    type Output = Int64;
-    public fn mul(self, rhs: Int64) -> Int64 { mul(self, rhs) }
-}
-
-implement Div for Int64 {
-    type Output = Int64;
-    public fn div(self, rhs: Int64) -> Int64 { div(self, rhs) }
-}
-
-implement Rem for Int64 {
-    type Output = Int64;
-    public fn rem(self, rhs: Int64) -> Int64 { rem(self, rhs) }
-}
-
-implement Neg for Int64 {
-    type Output = Int64;
-    public fn neg(self) -> Int64 { neg(self) }
-}
-
-implement BitAnd for Int64 {
-    type Output = Int64;
-    public fn bitand(self, rhs: Int64) -> Int64 { bitand(self, rhs) }
-}
-
-implement BitOr for Int64 {
-    type Output = Int64;
-    public fn bitor(self, rhs: Int64) -> Int64 { bitor(self, rhs) }
-}
-
-implement BitXor for Int64 {
-    type Output = Int64;
-    public fn bitxor(self, rhs: Int64) -> Int64 { bitxor(self, rhs) }
-}
-
-implement Not for Int64 {
-    type Output = Int64;
-    public fn not(self) -> Int64 { bitnot(self) }
-}
-
-implement Shl for Int64 {
-    type Output = Int64;
-    public fn shl(self, rhs: Int64) -> Int64 { shl(self, rhs as UInt32) }
-}
-
-implement Shr for Int64 {
-    type Output = Int64;
-    public fn shr(self, rhs: Int64) -> Int64 { shr(self, rhs as UInt32) }
-}
-
 // -----------------------------------------------------------------------------
 // Int128
 // -----------------------------------------------------------------------------
@@ -5164,66 +5005,6 @@ implement Zero for ISize {
 implement One for ISize {
     public fn one() -> ISize { 1 as ISize }
     public fn is_one(&self) -> Bool { *self == (1 as ISize) }
-}
-
-implement Add for ISize {
-    type Output = ISize;
-    public fn add(self, rhs: ISize) -> ISize { add(self, rhs) }
-}
-
-implement Sub for ISize {
-    type Output = ISize;
-    public fn sub(self, rhs: ISize) -> ISize { sub(self, rhs) }
-}
-
-implement Mul for ISize {
-    type Output = ISize;
-    public fn mul(self, rhs: ISize) -> ISize { mul(self, rhs) }
-}
-
-implement Div for ISize {
-    type Output = ISize;
-    public fn div(self, rhs: ISize) -> ISize { div(self, rhs) }
-}
-
-implement Rem for ISize {
-    type Output = ISize;
-    public fn rem(self, rhs: ISize) -> ISize { rem(self, rhs) }
-}
-
-implement Neg for ISize {
-    type Output = ISize;
-    public fn neg(self) -> ISize { neg(self) }
-}
-
-implement BitAnd for ISize {
-    type Output = ISize;
-    public fn bitand(self, rhs: ISize) -> ISize { bitand(self, rhs) }
-}
-
-implement BitOr for ISize {
-    type Output = ISize;
-    public fn bitor(self, rhs: ISize) -> ISize { bitor(self, rhs) }
-}
-
-implement BitXor for ISize {
-    type Output = ISize;
-    public fn bitxor(self, rhs: ISize) -> ISize { bitxor(self, rhs) }
-}
-
-implement Not for ISize {
-    type Output = ISize;
-    public fn not(self) -> ISize { bitnot(self) }
-}
-
-implement Shl for ISize {
-    type Output = ISize;
-    public fn shl(self, rhs: ISize) -> ISize { shl(self, rhs as UInt32) }
-}
-
-implement Shr for ISize {
-    type Output = ISize;
-    public fn shr(self, rhs: ISize) -> ISize { shr(self, rhs as UInt32) }
 }
 
 // -----------------------------------------------------------------------------
@@ -5719,28 +5500,6 @@ implement RemAssign<Int32> for Int32 {
     public fn rem_assign(&mut self, rhs: Int32) { *self = *self % rhs; }
 }
 
-// --- Int64 ---
-
-implement AddAssign<Int64> for Int64 {
-    public fn add_assign(&mut self, rhs: Int64) { *self = *self + rhs; }
-}
-
-implement SubAssign<Int64> for Int64 {
-    public fn sub_assign(&mut self, rhs: Int64) { *self = *self - rhs; }
-}
-
-implement MulAssign<Int64> for Int64 {
-    public fn mul_assign(&mut self, rhs: Int64) { *self = *self * rhs; }
-}
-
-implement DivAssign<Int64> for Int64 {
-    public fn div_assign(&mut self, rhs: Int64) { *self = *self / rhs; }
-}
-
-implement RemAssign<Int64> for Int64 {
-    public fn rem_assign(&mut self, rhs: Int64) { *self = *self % rhs; }
-}
-
 // --- UInt32 ---
 
 implement AddAssign<UInt32> for UInt32 {
@@ -5913,28 +5672,6 @@ implement ShrAssign<Int32> for Int32 {
     public fn shr_assign(&mut self, rhs: Int32) { *self = shr(*self, rhs as UInt32); }
 }
 
-// --- Int64 (bitwise compound assignments) ---
-
-implement BitAndAssign<Int64> for Int64 {
-    public fn bitand_assign(&mut self, rhs: Int64) { *self = *self & rhs; }
-}
-
-implement BitOrAssign<Int64> for Int64 {
-    public fn bitor_assign(&mut self, rhs: Int64) { *self = *self | rhs; }
-}
-
-implement BitXorAssign<Int64> for Int64 {
-    public fn bitxor_assign(&mut self, rhs: Int64) { *self = *self ^ rhs; }
-}
-
-implement ShlAssign<Int64> for Int64 {
-    public fn shl_assign(&mut self, rhs: Int64) { *self = shl(*self, rhs as UInt32); }
-}
-
-implement ShrAssign<Int64> for Int64 {
-    public fn shr_assign(&mut self, rhs: Int64) { *self = shr(*self, rhs as UInt32); }
-}
-
 // --- Int128 ---
 
 implement AddAssign<Int128> for Int128 {
@@ -5975,48 +5712,6 @@ implement ShlAssign<Int128> for Int128 {
 
 implement ShrAssign<Int128> for Int128 {
     public fn shr_assign(&mut self, rhs: Int128) { *self = shr(*self, rhs as UInt32); }
-}
-
-// --- ISize ---
-
-implement AddAssign<ISize> for ISize {
-    public fn add_assign(&mut self, rhs: ISize) { *self = *self + rhs; }
-}
-
-implement SubAssign<ISize> for ISize {
-    public fn sub_assign(&mut self, rhs: ISize) { *self = *self - rhs; }
-}
-
-implement MulAssign<ISize> for ISize {
-    public fn mul_assign(&mut self, rhs: ISize) { *self = *self * rhs; }
-}
-
-implement DivAssign<ISize> for ISize {
-    public fn div_assign(&mut self, rhs: ISize) { *self = *self / rhs; }
-}
-
-implement RemAssign<ISize> for ISize {
-    public fn rem_assign(&mut self, rhs: ISize) { *self = *self % rhs; }
-}
-
-implement BitAndAssign<ISize> for ISize {
-    public fn bitand_assign(&mut self, rhs: ISize) { *self = *self & rhs; }
-}
-
-implement BitOrAssign<ISize> for ISize {
-    public fn bitor_assign(&mut self, rhs: ISize) { *self = *self | rhs; }
-}
-
-implement BitXorAssign<ISize> for ISize {
-    public fn bitxor_assign(&mut self, rhs: ISize) { *self = *self ^ rhs; }
-}
-
-implement ShlAssign<ISize> for ISize {
-    public fn shl_assign(&mut self, rhs: ISize) { *self = shl(*self, rhs as UInt32); }
-}
-
-implement ShrAssign<ISize> for ISize {
-    public fn shr_assign(&mut self, rhs: ISize) { *self = shr(*self, rhs as UInt32); }
 }
 
 // --- UInt8 ---
@@ -6189,72 +5884,10 @@ implement ShrAssign<UInt128> for UInt128 {
     public fn shr_assign(&mut self, rhs: UInt128) { *self = shr(*self, rhs as UInt32); }
 }
 
-// --- USize ---
-
-implement AddAssign<USize> for USize {
-    public fn add_assign(&mut self, rhs: USize) { *self = *self + rhs; }
-}
-
-implement SubAssign<USize> for USize {
-    public fn sub_assign(&mut self, rhs: USize) { *self = *self - rhs; }
-}
-
-implement MulAssign<USize> for USize {
-    public fn mul_assign(&mut self, rhs: USize) { *self = *self * rhs; }
-}
-
-implement DivAssign<USize> for USize {
-    public fn div_assign(&mut self, rhs: USize) { *self = *self / rhs; }
-}
-
-implement RemAssign<USize> for USize {
-    public fn rem_assign(&mut self, rhs: USize) { *self = *self % rhs; }
-}
-
-implement BitAndAssign<USize> for USize {
-    public fn bitand_assign(&mut self, rhs: USize) { *self = *self & rhs; }
-}
-
-implement BitOrAssign<USize> for USize {
-    public fn bitor_assign(&mut self, rhs: USize) { *self = *self | rhs; }
-}
-
-implement BitXorAssign<USize> for USize {
-    public fn bitxor_assign(&mut self, rhs: USize) { *self = *self ^ rhs; }
-}
-
-implement ShlAssign<USize> for USize {
-    public fn shl_assign(&mut self, rhs: USize) { *self = shl(*self, rhs as UInt32); }
-}
-
-implement ShrAssign<USize> for USize {
-    public fn shr_assign(&mut self, rhs: USize) { *self = shr(*self, rhs as UInt32); }
-}
-
 // --- Float64 ---
 
 implement Neg for Float64 {
     public fn neg(self) -> Float64 { 0.0 as Float64 - self }
-}
-
-implement AddAssign<Float64> for Float64 {
-    public fn add_assign(&mut self, rhs: Float64) { *self = *self + rhs; }
-}
-
-implement SubAssign<Float64> for Float64 {
-    public fn sub_assign(&mut self, rhs: Float64) { *self = *self - rhs; }
-}
-
-implement MulAssign<Float64> for Float64 {
-    public fn mul_assign(&mut self, rhs: Float64) { *self = *self * rhs; }
-}
-
-implement DivAssign<Float64> for Float64 {
-    public fn div_assign(&mut self, rhs: Float64) { *self = *self / rhs; }
-}
-
-implement RemAssign<Float64> for Float64 {
-    public fn rem_assign(&mut self, rhs: Float64) { *self = *self % rhs; }
 }
 
 // =============================================================================
@@ -6303,10 +5936,6 @@ implement Default for UInt64 {
 
 implement Default for UInt128 {
     public fn default() -> UInt128 { 0 as UInt128 }
-}
-
-implement Default for USize {
-    public fn default() -> USize { 0 as USize }
 }
 
 implement Default for Float32 {
