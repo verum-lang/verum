@@ -451,6 +451,40 @@ fn test_hash_different_values() {
     assert(k1.hash_value() != k2.hash_value());
 }
 
+type HashBytes is { count: Int, bytes: Int };
+
+implement Hasher for HashBytes {
+    fn write(&mut self, bytes: &[Byte]) {
+        let mut i = 0;
+        while i < bytes.len() {
+            self.write_byte(bytes[i]);
+            i = i + 1;
+        }
+    }
+
+    fn write_byte(&mut self, byte: Byte) {
+        self.bytes = (self.bytes << 8) | (byte as Int);
+        self.count = self.count + 1;
+    }
+
+    fn finish(&self) -> Int { self.bytes }
+}
+
+@test
+fn primitive_hashes_preserve_width_and_little_endian_order() {
+    let mut trace = HashBytes { count: 0, bytes: 0 };
+    let byte: Byte = 0xE5 as Byte;
+    let alias: UInt8 = 0xA2 as UInt8;
+    byte.hash(&mut trace);
+    alias.hash(&mut trace);
+    assert(trace.count == 2 && trace.finish() == 0xE5A2);
+
+    let mut wide = HashBytes { count: 0, bytes: 0 };
+    let word: Int = 0x0102030405060708;
+    word.hash(&mut wide);
+    assert(wide.count == 8 && wide.finish() == 0x0807060504030201);
+}
+
 /// Test DefaultHasher
 @test
 fn test_default_hasher() {
