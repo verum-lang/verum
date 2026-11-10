@@ -607,14 +607,25 @@ pub(crate) fn main() {
     let runtime_vbc_path = Path::new(&out_dir).join("stdlib_runtime.vbca");
     let runtime_metadata_path = Path::new(&out_dir).join("stdlib_runtime.core_metadata");
     let runtime_symbol_graph_path = Path::new(&out_dir).join("stdlib_runtime.symbol_graph");
-    if !auto_precompile_disabled && !stale_stdlib_fallback_allowed() {
+    let artifacts = [
+        (&precompile_archive, &runtime_vbc_path, "STDLIB_RUNTIME_VBC_PATH"),
+        (&precompile_metadata, &runtime_metadata_path, "STDLIB_RUNTIME_CORE_METADATA_PATH"),
+        (&precompile_symbol_graph, &runtime_symbol_graph_path, "STDLIB_SYMBOL_GRAPH_PATH"),
+    ];
+    if auto_precompile_disabled && !cache_matches() {
+        // A bootstrap build must be able to produce the next archive even if
+        // its target directory still contains a previous compiler's files.
+        for (_, destination, variable) in artifacts {
+            fs::write(destination, []).unwrap_or_else(|e| panic!("clear {}: {e}", destination.display()));
+            println!("cargo:rustc-env={variable}={}", destination.display());
+        }
+        println!("cargo:warning=Source-only stdlib bootstrap: automatic refresh disabled and no matching stdlib receipt and checksum");
+        return;
+    }
+    if auto_precompile_disabled || !stale_stdlib_fallback_allowed() {
         // Verify the exact private OUT_DIR copy consumed by include_bytes!.
         // A concurrent cache replacement cannot substitute an index after this check.
-        for (source, destination, variable) in [
-            (&precompile_archive, &runtime_vbc_path, "STDLIB_RUNTIME_VBC_PATH"),
-            (&precompile_metadata, &runtime_metadata_path, "STDLIB_RUNTIME_CORE_METADATA_PATH"),
-            (&precompile_symbol_graph, &runtime_symbol_graph_path, "STDLIB_SYMBOL_GRAPH_PATH"),
-        ] {
+        for (source, destination, variable) in artifacts {
             fs::copy(source, destination).unwrap_or_else(|e| panic!("copy {}: {e}", source.display()));
             println!("cargo:rerun-if-changed={}", source.display());
             println!("cargo:rustc-env={variable}={}", destination.display());

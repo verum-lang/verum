@@ -578,6 +578,13 @@ fn main() {{
                 !target.join("precompile-bootstrap").exists(),
                 "no nested baker target may be created"
             );
+            for (private, cached) in [
+                ("stdlib_runtime.vbca", "runtime.vbca"),
+                ("stdlib_runtime.core_metadata", "runtime.core_metadata"),
+                ("stdlib_runtime.symbol_graph", "runtime.symbol_graph"),
+            ] {
+                assert_eq!(fs::read(output.join(private)).unwrap(), fs::read(cache.join(cached)).unwrap());
+            }
             eprintln!(
                 "policy control {label}: runs={runs}, automatic={}",
                 flag.is_none()
@@ -588,19 +595,27 @@ fn main() {{
     // A present but unrelated index must force a refresh. With the baker
     // unavailable, the ordinary build must fail before any bytes can be embedded.
     fs::write(cache.join("runtime.core_metadata"), b"another producer's metadata").unwrap();
-    let rejected = Command::new(std::env::current_exe().unwrap())
-        .args(["--exact", "cargo_rechecks_auto_precompile_policy_on_environment_changes", "--nocapture"])
-        .env("VERUM_CACHE_POLICY_CHILD", "1")
-        .env_remove("VERUM_NO_AUTO_PRECOMPILE")
-        .env_remove("DOCS_RS")
-        .env_remove("VERUM_ALLOW_STALE_STDLIB")
-        .env("TARGET", env!("VERUM_BAKE_TARGET"))
-        .env("CARGO_MANIFEST_DIR", manifest.parent().unwrap())
-        .env("CARGO_TARGET_DIR", &target)
-        .env("OUT_DIR", last_out.unwrap())
-        .env("PATH", root.path().join("no-executables"))
-        .current_dir(root.path())
-        .output().unwrap();
+    let output = last_out.unwrap();
+    let build = |bootstrap: bool| {
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command.args(["--exact", "cargo_rechecks_auto_precompile_policy_on_environment_changes", "--nocapture"])
+            .env(CHILD, "1").env_remove("VERUM_NO_AUTO_PRECOMPILE")
+            .env_remove("DOCS_RS").env_remove("VERUM_ALLOW_STALE_STDLIB")
+            .env("TARGET", env!("VERUM_BAKE_TARGET"))
+            .env("CARGO_MANIFEST_DIR", manifest.parent().unwrap()).env("CARGO_TARGET_DIR", &target)
+            .env("OUT_DIR", &output).env("PATH", root.path().join("no-executables"))
+            .current_dir(root.path());
+        if bootstrap { command.env("VERUM_NO_AUTO_PRECOMPILE", "1"); }
+        command.output().unwrap()
+    };
+    let bootstrap = build(true);
+    assert!(bootstrap.status.success());
+    assert!(String::from_utf8(bootstrap.stdout).unwrap().contains("Source-only stdlib bootstrap"));
+    for file in ["stdlib_runtime.vbca", "stdlib_runtime.core_metadata", "stdlib_runtime.symbol_graph"] {
+        assert!(fs::read(output.join(file)).unwrap().is_empty(), "stale {file} survived");
+    }
+    assert_eq!(fs::read(cache.join("runtime.core_metadata")).unwrap(), b"another producer's metadata");
+    let rejected = build(false);
     assert!(!rejected.status.success());
     let log = String::from_utf8(rejected.stdout).unwrap();
     assert!(log.contains("Refreshing stdlib precompile artefacts"), "{log}");
