@@ -588,6 +588,35 @@ impl AffineTracker {
         Ok(())
     }
 
+    /// A projection may traverse a record with a moved sibling. Borrowing or
+    /// transferring the resulting field requires its complete subtree to be available.
+    pub fn check_field_available(
+        &self,
+        root: &str,
+        projection: &str,
+        traversing: bool,
+        span: Span,
+    ) -> Result<(), TypeError> {
+        let Some(binding) = self.bindings.get(&Text::from(root)) else { return Ok(()) };
+        let moved_at = binding.first_use.unwrap_or(binding.binding_span);
+        if binding.is_consumed {
+            return Err(TypeError::MovedValueUsed { name: root.into(), moved_at, used_at: span });
+        }
+        if let Some(moved) = binding.moved_fields.iter().find(|moved|
+            Self::contains_projection(moved, projection)
+                || (!traversing && Self::contains_projection(projection, moved))
+        ) {
+            return Err(TypeError::PartiallyMovedValue {
+                name: root.into(), moved_field: moved.clone(), moved_at, used_at: span,
+            });
+        }
+        Ok(())
+    }
+
+    fn contains_projection(parent: &str, child: &str) -> bool {
+        child.strip_prefix(parent).is_some_and(|rest| rest.is_empty() || rest.starts_with('.'))
+    }
+
     /// Record a use of a field from a struct containing affine values
     ///
     /// This is called when accessing `container.field` where `field` is an affine type.
@@ -640,17 +669,7 @@ impl AffineTracker {
     ///
     /// Returns true if the access is to a non-moved, non-affine field.
     pub fn can_access_field(&self, var_name: &str, field_name: &str) -> bool {
-        if let Some(binding) = self.bindings.get(&Text::from(var_name)) {
-            // If whole struct is consumed, cannot access any field
-            if binding.is_consumed {
-                return false;
-            }
-            // Can access if this specific field wasn't moved
-            !binding.moved_fields.contains(&Text::from(field_name))
-        } else {
-            // Not tracked - assume allowed
-            true
-        }
+        self.check_field_available(var_name, field_name, false, Span::default()).is_ok()
     }
 
     /// Reinitialize a field that was previously moved out
@@ -671,7 +690,7 @@ impl AffineTracker {
         let loop_can_iterate = self.loop_can_iterate();
         if let Some(binding) = self.bindings.get_mut(&Text::from(var_name)) {
             // Remove the field from moved_fields set
-            binding.moved_fields.remove(&Text::from(field_name));
+            binding.moved_fields.retain(|moved| !Self::contains_projection(field_name, moved));
 
             // If no more moved fields, clear the first_use span since struct is whole again
             // (but only if the struct wasn't fully consumed)

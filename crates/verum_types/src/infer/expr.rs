@@ -96,7 +96,55 @@ fn peel_refinement(ty: &Type) -> &Type {
 }
 
 
+/// Whether evaluating a named field transfers its value or only addresses its storage.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum FieldUse {
+    Value,
+    Borrow,
+    /// Selecting a deeper field may traverse a partially moved record.
+    Operand,
+}
+
 impl TypeChecker {
+    pub(super) fn synth_field_use(&mut self, expr: &Expr, usage: FieldUse) -> Result<InferResult> {
+        let mut field = expr;
+        while let ExprKind::Paren(inner) = &field.kind {
+            field = inner;
+        }
+        if !matches!(field.kind, ExprKind::Field { .. }) {
+            return self.synth_expr(expr);
+        }
+        let result = self.infer_expr_field(field)?;
+        if let Some((root, projection)) = Self::named_field_place(field)
+            && self.affine_tracker.get_binding_resource_kind(&root).is_some()
+        {
+            self.affine_tracker.check_field_available(
+                &root, &projection, usage == FieldUse::Operand, field.span,
+            )?;
+            if usage == FieldUse::Value {
+                self.track_affine_field_access(&root, &projection, &result.ty, field.span)?;
+            }
+        }
+        self.observe_place_operand(expr, &result.ty);
+        Ok(result)
+    }
+
+    pub(super) fn synth_borrowed_operand(&mut self, expr: &Expr) -> Result<InferResult> {
+        let previous = self.in_call_arg_context;
+        self.in_call_arg_context = true;
+        let result = self.synth_field_use(expr, FieldUse::Borrow);
+        self.in_call_arg_context = previous;
+        result
+    }
+
+    fn check_borrow_operand(&mut self, expr: &Expr, expected: &Type) -> Result<InferResult> {
+        if Self::named_field_place(expr).is_some() {
+            let result = self.synth_borrowed_operand(expr)?;
+            return self.check_synthesized_value(expr, expected, result);
+        }
+        self.check_expr(expr, expected)
+    }
+
     pub fn synth_expr(&mut self, expr: &Expr) -> Result<InferResult> {
         self.metrics.synth_count += 1;
 
@@ -1182,7 +1230,7 @@ impl TypeChecker {
                 } = expected
                 {
                     // Try checking the inner expression against the expected inner type first
-                    match self.check_expr(inner, expected_inner) {
+                    match self.check_borrow_operand(inner, expected_inner) {
                         Ok(_) => {
                             self.track_reference_borrow(inner, false, expr.span)?;
                             Ok(InferResult::new(expected.clone()))
@@ -1206,7 +1254,7 @@ impl TypeChecker {
                     inner: expected_inner,
                 } = expected
                 {
-                    match self.with_checked_write(inner, |tc| tc.check_expr(inner, expected_inner)) {
+                    match self.with_checked_write(inner, |tc| tc.check_borrow_operand(inner, expected_inner)) {
                         Ok(_) => {
                             self.track_reference_borrow(inner, true, expr.span)?;
                             Ok(InferResult::new(expected.clone()))
@@ -2467,6 +2515,10 @@ impl TypeChecker {
         self.check_integer_literal_fits(expr, expected)?;
 
         let result = self.synth_expr(expr)?;
+        self.check_synthesized_value(expr, expected, result)
+    }
+
+    fn check_synthesized_value(&mut self, expr: &Expr, expected: &Type, result: InferResult) -> Result<InferResult> {
         self.check_value_conversion_obligations(&result.ty, expected, expr.span)?;
         if std::env::var("VERUM_TRACE_QUALPATH").is_ok()
             && matches!(&expr.kind, ExprKind::MethodCall { .. })
@@ -4792,7 +4844,7 @@ impl TypeChecker {
 
                 // Field access (including GAT access like Iterator.Item)
                 // Generic Associated Types (GATs): associated types with their own type parameters, enabling lending iterators and monadic abstractions — .1-1.4 - GAT syntax
-                Field { .. } => self.infer_expr_field(current_expr),
+                Field { .. } => self.synth_field_use(current_expr, FieldUse::Value),
 
                 // Index access
                 // Supports Array, Slice, List<T>, Text (returns Char), Map<K,V> (returns V)
@@ -9605,45 +9657,11 @@ impl TypeChecker {
         // Spec: L0-critical/memory-safety/uninitialized
         // When accessing obj.field, check if that specific field is initialized
         // =====================================================================
-        // Track the variable name for affine tracking (if applicable)
-        let var_name_for_affine = if let ExprKind::Path(path) = &obj.kind {
-            if path.segments.len() == 1 {
-                if let verum_ast::ty::PathSegment::Name(id) = &path.segments[0] {
-                    let var_name = verum_common::Text::from(id.name.as_str());
-                    let field_name_text = verum_common::Text::from(field.name.as_str());
-                    // Check if this specific field is initialized
-                    self.check_field_initialized(
-                        &var_name,
-                        &field_name_text,
-                        expr.span,
-                    )?;
-
-                    // PARTIAL MOVE: Check if this field has already been moved
-                    // Spec: L0-critical/reference_system/value_transfer - Partial move tracking
-                    // If a field was moved out of a container, subsequent access should fail
-                    if !self
-                        .affine_tracker
-                        .can_access_field(id.name.as_str(), field.name.as_str())
-                    {
-                        return Err(TypeError::PartiallyMovedValue {
-                            name: var_name.clone(),
-                            moved_field: field_name_text,
-                            moved_at: expr.span,
-                            used_at: expr.span,
-                        });
-                    }
-
-                    Some(id.name.as_str().to_string())
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-        let field_name_str = field.name.as_str().to_string();
+        if let ExprKind::Path(path) = &obj.kind
+            && let [verum_ast::ty::PathSegment::Name(id)] = path.segments.as_slice()
+        {
+            self.check_field_initialized(&id.name, &field.name, expr.span)?;
+        }
 
         // Normal field access: synthesize the object type and access its field
         // Note: synth_expr will check full initialization for non-field access
@@ -9655,9 +9673,6 @@ impl TypeChecker {
         let resolved_ty = self.unifier.apply(&obj_result.ty);
         self.check_record_field_visibility(&resolved_ty, field.name.as_str(), expr.span)?;
         if let Some(ty) = self.dependent_field_type(obj, &resolved_ty, &field.name, false, expr.span)? {
-            if let Some(ref var_name) = var_name_for_affine {
-                self.track_affine_field_access(var_name, &field_name_str, &ty, expr.span)?;
-            }
             return Ok(InferResult::new(ty));
         }
 
@@ -9733,15 +9748,6 @@ impl TypeChecker {
                 if let Some(field_ty) =
                     fields.get(&verum_common::Text::from(field.name.as_str()))
                 {
-                    // Track affine field access (partial move tracking)
-                    if let Some(ref var_name) = var_name_for_affine {
-                        self.track_affine_field_access(
-                            var_name,
-                            &field_name_str,
-                            field_ty,
-                            expr.span,
-                        )?;
-                    }
                     Ok(InferResult::new(field_ty.clone()))
                 } else {
                     // Better error: include field list
@@ -9804,15 +9810,6 @@ impl TypeChecker {
                     let resolved_ty = self.instantiate_nominal_record_fields(
                         type_name.as_str(), &fields, Some(args.as_slice()), expr.span,
                     )?.0.remove(&field_name).expect("selected field");
-                    // Track affine field access (partial move tracking)
-                    if let Some(ref var_name) = var_name_for_affine {
-                        self.track_affine_field_access(
-                            var_name,
-                            &field_name_str,
-                            &resolved_ty,
-                            expr.span,
-                        )?;
-                    }
                     return Ok(InferResult::new(resolved_ty));
                 }
 
@@ -9827,15 +9824,6 @@ impl TypeChecker {
                     let resolved_ty = self.instantiate_nominal_record_fields(
                         type_name.as_str(), &fields, Some(args.as_slice()), expr.span,
                     )?.0.remove(&field_name).expect("selected field");
-                    // Track affine field access (partial move tracking)
-                    if let Some(ref var_name) = var_name_for_affine {
-                        self.track_affine_field_access(
-                            var_name,
-                            &field_name_str,
-                            &resolved_ty,
-                            expr.span,
-                        )?;
-                    }
                     return Ok(InferResult::new(resolved_ty));
                 }
 
@@ -9885,14 +9873,6 @@ impl TypeChecker {
                     {
                         let resolved_ty =
                             self.substitute_type_params(field_ty, &leaf_subst);
-                        if let Some(ref var_name) = var_name_for_affine {
-                            self.track_affine_field_access(
-                                var_name,
-                                &field_name_str,
-                                &resolved_ty,
-                                expr.span,
-                            )?;
-                        }
                         return Ok(InferResult::new(resolved_ty));
                     }
                 }

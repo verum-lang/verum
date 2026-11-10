@@ -18238,15 +18238,11 @@ impl TypeChecker {
                     }
                 })?)
             } else { None };
-            let old_call_context = tc.in_call_arg_context;
-            tc.in_call_arg_context = true;
-            let base_type = if let Some(resolved) = &namespace_first {
-                Ok(resolved.ty.clone())
+            let mut current_ty = if let Some(resolved) = &namespace_first {
+                resolved.ty.clone()
             } else {
-                tc.synth_expr(current_receiver).map(|result| result.ty)
+                tc.synth_borrowed_operand(current_receiver)?.ty
             };
-            tc.in_call_arg_context = old_call_context;
-            let mut current_ty = base_type?;
 
             // Step 2: Process each method call iteratively (in reverse order to apply from base)
             //
@@ -18437,28 +18433,6 @@ impl TypeChecker {
         // Restore context
         self.in_call_arg_context = old_call_context;
 
-        // Consume affine receiver if method takes self by value
-        if let Ok(ref _res) = result {
-            if let Some(ref receiver_name) = receiver_name_for_2pb {
-                if self
-                    .affine_tracker
-                    .is_affine_binding(receiver_name.as_str())
-                {
-                    let recv_ty = self
-                        .ctx
-                        .env
-                        .lookup(receiver_name.as_str())
-                        .map(|s| s.instantiate());
-                    if let Some(recv_ty) = recv_ty {
-                        if self.method_takes_self_by_value(&recv_ty, method) {
-                            self.affine_tracker
-                                .use_value(receiver_name.as_str(), span)?;
-                        }
-                    }
-                }
-            }
-        }
-
         result
     }
 
@@ -18519,21 +18493,6 @@ impl TypeChecker {
 
         // Restore context
         self.in_call_arg_context = old_call_context;
-
-        // Consume affine receiver if method takes self by value
-        if let Ok(ref _res) = result {
-            if let Some(ref receiver_name) = receiver_name_for_2pb {
-                if self
-                    .affine_tracker
-                    .is_affine_binding(receiver_name.as_str())
-                {
-                    if self.method_takes_self_by_value(&recv_ty, method) {
-                        self.affine_tracker
-                            .use_value(receiver_name.as_str(), span)?;
-                    }
-                }
-            }
-        }
 
         result
     }
@@ -18735,6 +18694,22 @@ impl TypeChecker {
                     matches!(Self::auto_deref_for_method_call(ty), Type::Int | Type::Bool | Type::Char | Type::Float | Type::Unit)
                 ) => {}
                 _ => tc.check_write_access(receiver, receiver_type.as_ref(), method.span)?,
+            }
+            if let Some(ty) = receiver_type.as_ref() {
+                if let Some((root, projection)) = Self::named_field_place(receiver) {
+                    // An argument may have moved this field since the receiver was evaluated.
+                    tc.affine_tracker.check_field_available(&root, &projection, false, span)?;
+                    if kind.is_none_or(|kind| kind.meta().is_by_value) {
+                        tc.track_affine_field_access(&root, &projection, ty, span)?;
+                    }
+                } else if let ExprKind::Path(path) = &receiver.kind
+                    && let [verum_ast::ty::PathSegment::Name(name)] = path.segments.as_slice()
+                    && tc.affine_tracker.is_affine_binding(&name.name)
+                    && kind.map_or_else(|| tc.method_takes_self_by_value(ty, method),
+                                        |kind| kind.meta().is_by_value)
+                {
+                    tc.affine_tracker.use_value(&name.name, span)?;
+                }
             }
             Ok(result)
         })

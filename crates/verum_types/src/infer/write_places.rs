@@ -193,6 +193,27 @@ impl TypeChecker {
         Some((root, (!projection.is_empty()).then(|| projection.join("."))))
     }
 
+    /// A statically named field path can be tracked independently from its siblings.
+    pub(super) fn named_field_place(place: &Expr) -> Option<(Text, String)> {
+        let mut step = unparen(place);
+        let mut fields = Vec::new();
+        while let ExprKind::Field { expr, field } = &step.kind {
+            fields.push(field.name.as_str());
+            step = unparen(expr);
+        }
+        if fields.is_empty() {
+            return None;
+        }
+        let ExprKind::Path(path) = &step.kind else { return None };
+        let root = match path.segments.as_slice() {
+            [verum_ast::ty::PathSegment::Name(name)] => name.name.clone(),
+            [verum_ast::ty::PathSegment::SelfValue] => "self".into(),
+            _ => return None,
+        };
+        fields.reverse();
+        Some((root, fields.join(".")))
+    }
+
     /// Expand transparent type names without erasing the permission on a reference.
     pub(super) fn place_reference_head(&self, ty: &Type, span: Span) -> Result<Type> {
         let mut current = self.unifier.apply(ty);

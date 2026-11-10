@@ -394,3 +394,44 @@ fn sibling_method_cannot_supply_a_missing_declared_method() {
         );
     }
 }
+
+#[test]
+fn affine_field_receivers_follow_the_selected_method_receiver() {
+    let declarations = r#"
+        type affine Program is { count: Int };
+        implement Program {
+            fn emit(&mut self) -> Int { self.count = self.count + 1; self.count }
+            fn read(&self) -> Int { self.count }
+            fn finish(self) -> Int { self.count }
+        }
+        type State is { program: Program, other: Program };
+        type Frame is { state: State };
+        fn accept(program: Program) {}
+        fn borrow(program: &Program) {}
+        fn mutate(program: &mut Program) {}
+    "#;
+    for body in [
+        "fn test(st: &mut State) { st.program.emit(); st.program.read(); st.program.emit(); }",
+        "fn test(st: &State) -> Int { st.program.read() + st.program.read() }",
+        "fn test(st: &mut State) { borrow(&st.program); mutate(&mut st.program); st.program.read(); }",
+        "fn test(frame: Frame) -> Int { frame.state.program.finish(); frame.state.other.read() }",
+        "fn test(st: State) { st.program.read(); accept(st.program); st.other.read(); }",
+        "fn test(mut st: State) { st.program.finish(); st.program = Program { count: 2 }; st.program.read(); }",
+    ] {
+        let found = errors("sqlite", &format!("{declarations}{body}"));
+        assert!(found.is_empty(), "{body}: {found:?}");
+    }
+    for body in [
+        "fn test(st: State) { st.program.finish(); st.program.read(); }",
+        "fn test(st: State) { accept(st.program); st.program.read(); }",
+        "fn test(frame: Frame) { frame.state.program.finish(); frame.state.program.emit(); }",
+        "fn test(frame: Frame) { frame.state.program.finish(); let state = frame.state; }",
+        "fn test(st: State) { let p = st.program; st.program.read(); }",
+    ] {
+        let found = errors("sqlite", &format!("{declarations}{body}"));
+        assert!(found.iter().any(|e| e.contains("PartiallyMovedValue") || e.contains("MovedValueUsed")), "{body}: {found:?}");
+    }
+    let body = "fn test(st: &State) { st.program.emit(); }";
+    let found = errors("sqlite", &format!("{declarations}{body}"));
+    assert!(found.iter().any(|e| e.contains("SharedReference") || e.contains("shared reference")), "{found:?}");
+}

@@ -2052,16 +2052,12 @@ impl TypeChecker {
                             let var_name = verum_common::Text::from(id.name.as_str());
                             let field_name = verum_common::Text::from(field.name.as_str());
                             self.init_tracker
-                                .initialize_field(&var_name, field_name.clone());
-
-                            // AFFINE FIELD REINITIALIZATION: If this field was previously moved,
-                            // reassigning it makes it available again, potentially making the
-                            // struct "whole" again.
-                            // Memory model: three-tier references (&T managed, &checked T verified, &unsafe T raw) with CBGR runtime checking — #affine-partial-move
-                            self.affine_tracker
-                                .reinitialize_field(id.name.as_str(), field.name.as_str());
+                                .initialize_field(&var_name, field_name);
                         }
                     }
+                }
+                if let Some((root, projection)) = Self::named_field_place(left) {
+                    self.affine_tracker.reinitialize_field(&root, &projection);
                 }
             }
 
@@ -2385,8 +2381,7 @@ impl TypeChecker {
             }
         }
 
-        // For other expressions, use normal synth_expr
-        self.synth_expr(expr)
+        self.synth_field_use(expr, super::expr::FieldUse::Operand)
     }
 
     /// Type-check an expression that is the target of an assignment.
@@ -12636,10 +12631,7 @@ with .to_float() or .to_int() (at {:?})",
             Ref => {
                 // CRITICAL: Set call_arg_context so inner path lookup uses borrow_value
                 // instead of use_value. Taking &x borrows x, it does NOT consume/move x.
-                let old_call_context = self.in_call_arg_context;
-                self.in_call_arg_context = true;
-                let result = self.synth_expr(expr)?;
-                self.in_call_arg_context = old_call_context;
+                let result = self.synth_borrowed_operand(expr)?;
 
                 // Track immutable borrow for aliasing detection
                 // Spec: L0-critical/reference_system/access_rules - Reference aliasing
@@ -12666,10 +12658,7 @@ with .to_float() or .to_int() (at {:?})",
             RefMut => {
                 // CRITICAL: Set call_arg_context so inner path lookup uses borrow_value
                 // instead of use_value. Taking &mut x borrows x, it does NOT consume/move x.
-                let old_call_context = self.in_call_arg_context;
-                self.in_call_arg_context = true;
-                let result = self.synth_expr(expr)?;
-                self.in_call_arg_context = old_call_context;
+                let result = self.synth_borrowed_operand(expr)?;
 
                 // Auto-deref smart pointers: &mut Heap<T> -> &mut T, &mut Shared<T> -> &mut T
                 // STDLIB-AGNOSTIC: These are Verum memory types, not Rust types
@@ -12697,10 +12686,7 @@ with .to_float() or .to_int() (at {:?})",
             // Three-tier reference system: &checked T (Tier 1 - compiler-verified, 0ns overhead)
             // Spec: L0-critical/reference_system/reference_tiers/checked_promotion_fail
             RefChecked => {
-                let old_call_context = self.in_call_arg_context;
-                self.in_call_arg_context = true;
-                let result = self.synth_expr(expr)?;
-                self.in_call_arg_context = old_call_context;
+                let result = self.synth_borrowed_operand(expr)?;
 
                 // Track immutable borrow for aliasing detection and escape analysis
                 // Same tracking as regular &T, needed for interprocedural escape detection
@@ -12709,10 +12695,7 @@ with .to_float() or .to_int() (at {:?})",
                 Ok(InferResult::new(Type::checked_reference(false, result.ty)))
             }
             RefCheckedMut => {
-                let old_call_context = self.in_call_arg_context;
-                self.in_call_arg_context = true;
-                let result = self.synth_expr(expr)?;
-                self.in_call_arg_context = old_call_context;
+                let result = self.synth_borrowed_operand(expr)?;
 
                 Ok(InferResult::new(Type::checked_reference(true, result.ty)))
             }
@@ -12742,10 +12725,7 @@ with .to_float() or .to_int() (at {:?})",
                         "unsafe reference requires unsafe block: `unsafe { &unsafe expr }`",
                     )));
                 }
-                let old_call_context = self.in_call_arg_context;
-                self.in_call_arg_context = true;
-                let result = self.synth_expr(expr)?;
-                self.in_call_arg_context = old_call_context;
+                let result = self.synth_borrowed_operand(expr)?;
                 Ok(InferResult::new(Type::unsafe_reference(false, result.ty)))
             }
             RefUnsafeMut => {
@@ -12755,10 +12735,7 @@ with .to_float() or .to_int() (at {:?})",
                         "unsafe mutable reference requires unsafe block: `unsafe { &unsafe mut expr }`",
                     )));
                 }
-                let old_call_context = self.in_call_arg_context;
-                self.in_call_arg_context = true;
-                let result = self.synth_expr(expr)?;
-                self.in_call_arg_context = old_call_context;
+                let result = self.synth_borrowed_operand(expr)?;
                 Ok(InferResult::new(Type::unsafe_reference(true, result.ty)))
             }
             // Ownership operators: %x and %mut x
