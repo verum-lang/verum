@@ -16,6 +16,7 @@ mount super.super.raw.{RawTerminal, PosixTerminal, TerminalSize, TermCapabilitie
 mount super.super.style.profile.ColorProfile;
 mount super.super.style.Style;
 mount super.super.layout.Rect;
+mount super.super.widget.protocol.Widget;
 
 /// Frame — draw context provided to widgets.
 /// Contains a mutable reference to the buffer and the drawing area.
