@@ -2952,7 +2952,9 @@ pub fn precompile_cog(cfg: &PrecompileCogConfig) -> Result<StdlibCompilationResu
         core_config
     };
 
-    let mut session = Session::new(CompilerOptions::default());
+    let mut options = CompilerOptions::default();
+    options.target_triple = cfg.target_triple.as_deref().map(Into::into);
+    let mut session = Session::new(options);
     let mut pipeline = CompilationPipeline::new_core(&mut session, core_config);
     let result = pipeline.compile_core().with_context(|| {
         format!(
