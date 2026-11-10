@@ -258,6 +258,25 @@ fn integer_rules_cannot_discharge_float_or_overloaded_comparisons() {
 }
 
 #[test]
+fn named_integer_carriers_only_admit_representable_comparisons() {
+    let named = |name| Type::Named {
+        path: Path::single(Ident::new(name, Span::dummy())),
+        args: List::new(),
+    };
+    let positive = predicate("k", comparison("k", BinOp::Gt, 0));
+    let at_least_one = predicate("n", comparison("n", BinOp::Ge, 1));
+    for ty in [named("USize"), named("Int8"), named("UInt128")] {
+        assert!(entails(&ty, &positive, &ty, &at_least_one));
+        assert!(!entails(&ty, &positive, &Type::Int, &at_least_one));
+    }
+    for (name, bound) in [("UInt8", -1), ("Int8", 128), ("UInt8", 256)] {
+        let ty = named(name);
+        let outside = predicate("x", comparison("x", BinOp::Gt, bound));
+        assert!(!entails(&ty, &outside, &ty, &outside));
+    }
+}
+
+#[test]
 fn boolean_distribution_uses_checked_numeric_consequences() {
     let source = binary(
         BinOp::Or,

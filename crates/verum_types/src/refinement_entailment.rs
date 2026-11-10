@@ -1,8 +1,8 @@
-//! Conservative entailment for total predicates, with canonical `Int` comparisons.
+//! Conservative entailment for total predicates over intrinsic integer sorts.
 //!
 //! Supported syntax is Boolean literals, `&&`, `||`, and comparisons between
 //! the recorded refinement binder and an unsuffixed integer literal exactly
-//! representable by canonical signed-64-bit `Int`. Names are
+//! representable by both canonical `Int` and the subject's integer sort. Names are
 //! resolved only against that binder; calls, fields, arithmetic on the binder,
 //! other comparison domains and unknown atoms are refused even when their ASTs
 //! are identical. Boolean constants and their combinations are domain-independent.
@@ -108,7 +108,7 @@ pub fn entails_with_limits(
         atoms: List::new(),
         remaining_syntax: limits.max_expression_nodes,
         max_depth: limits.max_depth,
-        integer_comparisons: matches!(source_base, Type::Int),
+        integer_range: comparison_range(source_base),
     };
     let Some(source_id) = projection.predicate(source) else {
         return false;
@@ -140,7 +140,25 @@ struct Projection {
     atoms: List<IntegerComparison>,
     remaining_syntax: usize,
     max_depth: usize,
-    integer_comparisons: bool,
+    integer_range: Option<std::ops::RangeInclusive<i128>>,
+}
+
+/// The integer-order certificate applies to every subset of the integers.
+/// Only interpret a literal when its value is preserved in the selected sort.
+fn comparison_range(base: &Type) -> Option<std::ops::RangeInclusive<i128>> {
+    use verum_common::well_known_types::type_names;
+    let name = match base {
+        Type::Int => type_names::INT,
+        Type::Named { path, args } if args.is_empty() => path.as_ident()?.as_str(),
+        _ => return None,
+    };
+    let min = type_names::integer_limit(name, "MIN")?;
+    // Every source literal admitted by integer_literal fits in i64, including
+    // when the carrier's unsigned 128-bit upper bound cannot be stored in i128.
+    let max = type_names::integer_limit(name, "MAX")
+        .or_else(|| (type_names::is_unsigned_integer_type(name)
+            && type_names::numeric_bit_width(name) == Some(128)).then_some(i128::MAX))?;
+    Some(min..=max)
 }
 
 impl Projection {
@@ -188,10 +206,8 @@ impl Projection {
                             continue;
                         }
                         ExprKind::Binary { op, left, right } => {
-                            if !self.integer_comparisons {
-                                return None;
-                            }
                             let atom = comparison(*op, left, right, predicate)?;
+                            if !self.integer_range.as_ref()?.contains(&atom.bound) { return None; }
                             let index = match self.atoms.iter().position(|known| *known == atom) {
                                 Some(index) => index,
                                 None => {
