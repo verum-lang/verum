@@ -40,6 +40,9 @@ implement OSError {
         OSError { code: code, message: message }
     }
 
+    /// Take the original OS message while consuming this error.
+    public fn into_message(self) -> Text { self.message }
+
     /// Create an OS error from just an error code.
     public fn from_code(code: Int) -> OSError {
         OSError {

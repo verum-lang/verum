@@ -239,7 +239,7 @@ fn init_tls() -> Result<(), InitError> {
             Result.Ok(())
         }
         Result.Err(e) => {
-            Result.Err(InitError.TlsFailed { reason: e.message })
+            Result.Err(InitError.TlsFailed { reason: e.into_message() })
         }
     }
 }

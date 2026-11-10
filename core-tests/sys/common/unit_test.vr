@@ -250,6 +250,12 @@ fn test_oserror_new_carries_code_and_message() {
 }
 
 @test
+fn test_oserror_into_message_returns_the_supplied_text() {
+    assert_eq(OSError.new(9, "first").into_message(), "first");
+    assert_eq(OSError.new(9, "второе").into_message(), "второе");
+}
+
+@test
 fn test_oserror_is_success_zero_code() {
     // POSIX: errno == 0 == "no error". The is_success() predicate is
     // the boolean-classification API for return-without-error.
