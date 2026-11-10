@@ -601,6 +601,9 @@ enum Commands {
     /// Static analysis suite
     #[command(display_order = 201)]
     Lint {
+        /// Inspect saved workspace sources and emit a revision-bound JSON report with reviewed edits.
+        #[clap(long, conflicts_with_all = ["fix", "deny_warnings", "list_rules", "list_groups", "explain", "validate_config", "format", "since", "new_only_since", "severity", "no_cache", "clean_cache", "baseline", "no_baseline", "write_baseline", "max_warnings", "watch", "watch_clear"])]
+        inspect: bool,
  /// Apply auto-fixes where available; honours [lint.policy].auto_fix.
         #[clap(long)]
         fix: bool,
@@ -3420,15 +3423,12 @@ fn run_command(cli: Cli) -> Result<()> {
                 }
                 return commands::fmt::execute_stdin(stdin_filename.map(|t| t.to_string()));
             }
-            if let Some(n) = threads {
-                let pool_threads = if n == 0 { 1 } else { n };
-                let _ = rayon::ThreadPoolBuilder::new()
-                    .num_threads(pool_threads)
-                    .build_global();
-            }
-            commands::fmt::execute_with_policy(check, verbose, parse_policy)
+            commands::source_worker_pool(threads)?.install(|| {
+                commands::fmt::execute_with_policy(check, verbose, parse_policy)
+            })
         }
         Commands::Lint {
+            inspect,
             fix,
             deny_warnings,
             list_rules,
@@ -3453,6 +3453,10 @@ fn run_command(cli: Cli) -> Result<()> {
             feature_overrides,
         } => {
             feature_overrides::install(feature_overrides);
+            if inspect {
+                let profile = profile.map(|s| s.to_string()).or_else(|| std::env::var("VERUM_LINT_PROFILE").ok());
+                return commands::source_worker_pool(threads)?.install(|| commands::lint::inspect_workspace(profile.as_deref()));
+            }
             if clean_cache {
                 return commands::lint::clean_cache();
             }
@@ -3499,57 +3503,45 @@ fn run_command(cli: Cli) -> Result<()> {
             };
             let since_ref: Option<String> = since.map(|t| t.as_str().to_string());
 
- // Thread-pool sizing: `--threads 0` forces a sequential
- // run (single-thread rayon pool); any other value passes
- // straight through. We build a *global* pool because
- // rayon's API only allows it once per process.
-            if let Some(n) = threads {
-                let pool_threads = if n == 0 { 1 } else { n };
- // Best-effort: if a pool is already initialised
- // (e.g. by an earlier subcommand), the second call
- // is a no-op — the existing pool is left in place.
-                let _ = rayon::ThreadPoolBuilder::new()
-                    .num_threads(pool_threads)
-                    .build_global();
-            }
-
-            if let Some(ref_name) = new_only_since {
-                return commands::lint::run_new_only_since(
-                    fix,
-                    deny_warnings,
-                    fmt,
-                    profile_name.clone(),
-                    severity_filter,
-                    ref_name.to_string(),
-                );
-            }
-            if watch {
-                commands::lint::run_watch(
-                    fix,
-                    deny_warnings,
-                    fmt,
-                    profile_name,
-                    since_ref,
-                    severity_filter,
-                    watch_clear,
-                )
-            } else {
-                let baseline_opt = commands::lint::BaselineMode::from_flags(
-                    baseline.map(|t| t.to_string()),
-                    no_baseline,
-                    write_baseline,
-                );
-                commands::lint::run_extended_full_with_baseline(
-                    fix,
-                    deny_warnings,
-                    fmt,
-                    profile_name,
-                    since_ref,
-                    severity_filter,
-                    max_warnings,
-                    baseline_opt,
-                )
-            }
+            commands::source_worker_pool(threads)?.install(|| {
+                if let Some(ref_name) = new_only_since {
+                    return commands::lint::run_new_only_since(
+                        fix,
+                        deny_warnings,
+                        fmt,
+                        profile_name.clone(),
+                        severity_filter,
+                        ref_name.to_string(),
+                    );
+                }
+                if watch {
+                    commands::lint::run_watch(
+                        fix,
+                        deny_warnings,
+                        fmt,
+                        profile_name,
+                        since_ref,
+                        severity_filter,
+                        watch_clear,
+                    )
+                } else {
+                    let baseline_opt = commands::lint::BaselineMode::from_flags(
+                        baseline.map(|t| t.to_string()),
+                        no_baseline,
+                        write_baseline,
+                    );
+                    commands::lint::run_extended_full_with_baseline(
+                        fix,
+                        deny_warnings,
+                        fmt,
+                        profile_name,
+                        since_ref,
+                        severity_filter,
+                        max_warnings,
+                        baseline_opt,
+                    )
+                }
+            })
         }
         Commands::Doc {
             open,

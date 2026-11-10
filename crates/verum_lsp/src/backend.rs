@@ -240,7 +240,13 @@ impl Backend {
         }
         let lint_settings = self.lint_settings();
         if lint_settings.enabled && Self::snapshot_matches_disk(&uri, &snapshot).await {
-            let lint = crate::lint_diagnostics::lint_diagnostics(&uri, &lint_settings).await;
+            let lint = match crate::lint_diagnostics::for_source(&uri, &snapshot.text, &lint_settings).await {
+                Ok(lint) => lint,
+                Err(error) => {
+                    self.client.log_message(MessageType::WARNING, format!("Workspace lint unavailable: {error}")).await;
+                    return;
+                }
+            };
             // Disk lint has no overlay protocol. Never attach its result to an
             // unsaved buffer or a revision that changed while lint was running.
             if Self::snapshot_matches_disk(&uri, &snapshot).await && !lint.is_empty() {

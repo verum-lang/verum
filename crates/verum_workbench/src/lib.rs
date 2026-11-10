@@ -249,6 +249,14 @@ impl Studio {
                 )
             }
             "workspace.list" => self.workspace.lock().await.list(),
+            "workspace.lint" => {
+                let report = verum_lsp::lint_report::inspect(&self.config.verum, &self.config.workspace, None).await?;
+                for document in &report.files {
+                    ensure!(document.path.to_str().is_some_and(project_files::exposed)
+                        && document.path.extension().is_some_and(|ext| ext == "vr"), "Lint reported a non-workspace source");
+                }
+                Ok(serde_json::to_value(report.as_ref())?)
+            }
             "language.request" => self.language_request(&params).await,
             "project.inspect" => self.project().await,
             "evidence.packet" => self.evidence_packet(params).await,

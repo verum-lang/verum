@@ -11,6 +11,42 @@ pub(super) struct ImplMethodRegistration {
 }
 
 impl VbcCodegen {
+    /// Sibling methods may share both name and operand types while implementing
+    /// different protocols. Their source declaration chooses the operator body.
+    pub(super) fn declared_operator_linkage(
+        &self, family: &str, receiver: &TypeRef, operand: Option<&TypeRef>, protocol: &str, member: &str,
+    ) -> CodegenResult<Option<String>> {
+        let Some(methods) = self.impl_method_registrations.get(family).filter(|rows| rows.len() > 1) else { return Ok(None) };
+        let Some(owner) = receiver.base_type_id().and_then(|id| self.type_by_id(id)) else { return Ok(None) };
+        let Some(protocol_id) = self.nominal_type_id(protocol) else { return Ok(None) };
+        let mut selected = None;
+        for row in owner.protocols.iter().filter(|row| row.protocol.0 == protocol_id.0) {
+            let Some(source) = &row.source_implementation else { continue };
+            let source = source.declaration().map_err(|error| CodegenError::internal(error.to_string()))?;
+            for item in &source.items {
+                let verum_ast::decl::ImplItemKind::Function(function) = &item.kind else { continue };
+                if function.name.as_str() != member { continue; }
+                for method in methods.iter().filter(|method| method.declaration == function.span) {
+                    let Some(pattern) = &method.receiver else { continue };
+                    let mut bindings = TypeSubstitution::empty();
+                    if !match_declared_types(pattern, receiver, &mut bindings) { continue; }
+                    if let Some(actual) = operand
+                        && let Some(input) = self.ctx.semantic_fn_params.get(&method.id)
+                            .and_then(|params| params.get(1)).and_then(Option::as_ref)
+                        && !match_declared_types(input, actual, &mut bindings)
+                    { continue; }
+                    if selected.is_some_and(|previous: &ImplMethodRegistration| previous.id != method.id) {
+                        return Err(CodegenError::with_span(CodegenErrorKind::InvalidSourceSignature(
+                            format!("overloaded operator `{member}` has competing applicable implementations")
+                        ), function.span));
+                    }
+                    selected = Some(method);
+                }
+            }
+        }
+        Ok(selected.map(|method| method.linkage.clone()))
+    }
+
     /// Slot order supplies the linkage spelling. Source location and the
     /// declared receiver identify the body, including a deferred default.
     pub(super) fn registered_impl_body(

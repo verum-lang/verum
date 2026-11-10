@@ -20,9 +20,15 @@ pub(in super::super) fn handle_addg(
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
+    let protocol = read_varint(state)? as u32;
     let val_a = arith_operand(state, a)?;
     let val_b = arith_operand(state, b)?;
 
+    if super::object_dispatch::try_push_declared_binary(
+        state, dst, val_a, val_b, protocol, verum_ast::BinOp::Add,
+    )? {
+        return Ok(DispatchResult::Continue);
+    }
     let result = if val_a.is_float() {
         Value::from_f64(val_a.as_f64() + val_b.as_f64())
     } else if val_a.is_small_string()
@@ -71,9 +77,15 @@ pub(in super::super) fn handle_subg(
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
+    let protocol = read_varint(state)? as u32;
     let val_a = arith_operand(state, a)?;
     let val_b = arith_operand(state, b)?;
 
+    if super::object_dispatch::try_push_declared_binary(
+        state, dst, val_a, val_b, protocol, verum_ast::BinOp::Sub,
+    )? {
+        return Ok(DispatchResult::Continue);
+    }
     let result = if val_a.is_float() {
         Value::from_f64(val_a.as_f64() - val_b.as_f64())
     } else if is_i128_op(val_a, val_b) {
@@ -98,9 +110,15 @@ pub(in super::super) fn handle_mulg(
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
+    let protocol = read_varint(state)? as u32;
     let val_a = arith_operand(state, a)?;
     let val_b = arith_operand(state, b)?;
 
+    if super::object_dispatch::try_push_declared_binary(
+        state, dst, val_a, val_b, protocol, verum_ast::BinOp::Mul,
+    )? {
+        return Ok(DispatchResult::Continue);
+    }
     let result = if val_a.is_float() {
         Value::from_f64(val_a.as_f64() * val_b.as_f64())
     } else if is_i128_op(val_a, val_b) {
@@ -125,9 +143,15 @@ pub(in super::super) fn handle_divg(
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
+    let protocol = read_varint(state)? as u32;
     let val_a = arith_operand(state, a)?;
     let val_b = arith_operand(state, b)?;
 
+    if super::object_dispatch::try_push_declared_binary(
+        state, dst, val_a, val_b, protocol, verum_ast::BinOp::Div,
+    )? {
+        return Ok(DispatchResult::Continue);
+    }
     let result = if val_a.is_float() {
         Value::from_f64(val_a.as_f64() / val_b.as_f64())
     } else if is_i128_op(val_a, val_b) {

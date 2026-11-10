@@ -10,13 +10,54 @@ use tower_lsp::lsp_types::Url;
 use verum_lsp::lint_diagnostics::{LintSettings, lint_diagnostics};
 
 fn binary_path() -> PathBuf {
-    let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    p.pop();
-    p.pop();
-    p.push("target");
-    p.push("release");
-    p.push("verum");
-    p
+    PathBuf::from(env!("CARGO_BIN_EXE_verum"))
+}
+
+#[tokio::test]
+async fn studio_and_cli_inspect_the_same_saved_sources_and_machine_edits() {
+    use verum_workbench::{Config, Studio};
+    let fixture = make_fixture();
+    let root = fixture.path();
+    std::fs::create_dir_all(root.join("packages/nested")).unwrap();
+    std::fs::write(
+        root.join("packages/nested/verum.toml"),
+        "[package]\nname='nested'\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("packages/nested/lib.vr"), "fn inspect() {}\n").unwrap();
+    let binary = binary_path();
+    let cli = std::process::Command::new(&binary)
+        .args(["lint", "--inspect", "--threads", "0"])
+        .current_dir(root)
+        .output()
+        .unwrap();
+    assert!(
+        cli.status.success(),
+        "{}",
+        String::from_utf8_lossy(&cli.stderr)
+    );
+    let expected: serde_json::Value = serde_json::from_slice(&cli.stdout).unwrap();
+    let studio = Studio::open(Config {
+        workspace: root.into(),
+        verum: binary,
+        proof: "unused".into(),
+        codex: "unused".into(),
+        port: 0,
+    })
+    .unwrap();
+    let report = studio
+        .call("workspace.lint", serde_json::json!({}))
+        .await
+        .unwrap();
+    assert_eq!(expected, report);
+    assert_eq!(report["files"].as_array().unwrap().len(), 2);
+    assert!(
+        report["files"][1]["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|finding| finding["rule"] == "deprecated-syntax")
+    );
 }
 
 fn make_fixture() -> tempfile::TempDir {

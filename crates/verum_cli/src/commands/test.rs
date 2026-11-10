@@ -475,14 +475,7 @@ pub fn execute(opts: TestOptions) -> Result<()> {
         if n <= 1 {
             None
         } else {
-            const WORKER_STACK_SIZE: usize = 16 * 1024 * 1024;
-            Some(
-                rayon::ThreadPoolBuilder::new()
-                    .num_threads(n)
-                    .stack_size(WORKER_STACK_SIZE)
-                    .build()
-                    .map_err(|e| CliError::Custom(format!("rayon: {}", e)))?,
-            )
+            Some(super::source_worker_pool(Some(n))?)
         }
     } else {
         None

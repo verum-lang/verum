@@ -15,6 +15,7 @@ enum Route {
     Files,
     Changes,
     Analyze,
+    Lint,
     Format,
     Start(&'static str),
 }
@@ -47,6 +48,7 @@ impl Tool {
             | Route::Files
             | Route::Changes
             | Route::Analyze
+            | Route::Lint
             | Route::Format => "read",
         }
     }
@@ -112,6 +114,7 @@ pub(super) fn operation(params: &Value) -> Result<(&'static str, Value)> {
     }
     let method = match tool.route {
         Route::Project => "project.inspect",
+        Route::Lint => "workspace.lint",
         Route::ReadSource => "workspace.read",
         Route::Propose => "workspace.write",
         Route::Receipt => "operation.read",
@@ -194,6 +197,11 @@ fn define_tools() -> Vec<Tool> {
             "Inspect workspace source inventory and revision-bound analyzed documents shared with Studio. Coverage is analyzed documents only, not a whole-project build or proof.",
             json!({}),
             json!([]),
+        ),
+        (
+            "verum_lint", Route::Lint,
+            "Inspect saved Verum sources across workspace packages. Each file carries its SHA-256, parser coverage, findings and suggested UTF-16 edits. Review edits against that revision before proposing changes.",
+            json!({}), json!([]),
         ),
         (
             "verum_analyze", Route::Analyze,

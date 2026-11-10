@@ -1010,7 +1010,7 @@ fn resolve_vtable_method(
 }
 
 /// Returns the builtin TypeId for a primitive Value.
-fn get_builtin_type_id(val: Value) -> TypeId {
+pub(super) fn get_builtin_type_id(val: Value) -> TypeId {
     if val.is_int() {
         TypeId::INT
     } else if val.is_float() {

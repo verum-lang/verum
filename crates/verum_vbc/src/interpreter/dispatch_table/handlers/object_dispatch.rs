@@ -26,7 +26,7 @@
 //! delegates here rather than keeping its own copy of the header-probe
 //! guards.
 
-use super::super::super::error::InterpreterResult;
+use super::super::super::error::{InterpreterError, InterpreterResult};
 use super::super::super::state::InterpreterState;
 use super::string_helpers::is_byte_slice_value;
 use crate::instruction::Reg;
@@ -49,10 +49,14 @@ use crate::value::Value;
 ///   INVALID → 0) for pointers failing the alignment/sentinel check, so
 ///   mis-tagged integers fall through to the caller's fallback arm
 ///   instead of faulting.
-pub(super) fn runtime_type_for_dispatch(
-    v: &Value,
-    state: &InterpreterState,
-) -> Option<(u32, String)> {
+pub(super) fn runtime_type_for_dispatch(v: &Value, state: &InterpreterState) -> Option<(u32, String)> {
+    let (id, owner) = heap_operator_owner(v, state)?;
+    Some((id.0, state.module.get_string(owner.name)?.into()))
+}
+
+fn heap_operator_owner<'a>(
+    v: &Value, state: &'a InterpreterState,
+) -> Option<(crate::types::TypeId, &'a crate::types::TypeDescriptor)> {
     use crate::interpreter::heap;
     if v.is_fat_ref() && v.as_fat_ref().reserved != 0 {
         return None;
@@ -76,14 +80,8 @@ pub(super) fn runtime_type_for_dispatch(
     if raw_id == 0 {
         return None;
     }
-    let name = state
-        .module
-        .types
-        .iter()
-        .find(|td| td.id.0 == raw_id)
-        .and_then(|td| state.module.strings.get(td.name))
-        .map(|s| s.to_string())?;
-    Some((raw_id, name))
+    let id = crate::types::TypeId(raw_id);
+    Some((id, state.module.get_type(id)?))
 }
 
 /// Resolve the operator method `<ReceiverType>.<method>` for a heap
@@ -92,35 +90,41 @@ pub(super) fn runtime_type_for_dispatch(
 /// is not a dispatchable object or its type has no such method — the
 /// caller then falls through to its legacy arm.
 fn resolve_operator_method(
-    state: &mut InterpreterState,
-    receiver: &Value,
-    method: &'static str,
-) -> Option<FunctionId> {
-    let (type_id, type_name) = runtime_type_for_dispatch(receiver, state)?;
-    if let Some(cached) = state.operator_method_cache.get(&(type_id, method)) {
-        return *cached;
+    state: &mut InterpreterState, receiver: &Value, rhs: Option<&Value>, method: &'static str,
+) -> InterpreterResult<Option<FunctionId>> {
+    let Some((receiver_id, descriptor)) = heap_operator_owner(receiver, state) else { return Ok(None) };
+    let type_id = receiver_id.0;
+    let rhs_type = rhs.map(|value| heap_operator_owner(value, state).map(|(id, _)| id)
+        .unwrap_or_else(|| super::calls::get_builtin_type_id(*value)));
+    let key = (type_id, rhs_type, method);
+    if let Some(cached) = state.operator_method_cache.get(&key) { return Ok(*cached); }
+    let module = &state.module;
+    let standard_protocol = verum_ast::BinOp::ALL.iter().filter_map(|op| op.standard_protocol_member())
+        .find_map(|(protocol, member)| (member == method).then_some(protocol));
+    let mut declared = None;
+    if let Some(protocol) = standard_protocol {
+        for row in &descriptor.protocols {
+            if module.get_type(crate::types::TypeId(row.protocol.0)).and_then(|ty| module.get_string(ty.name)) != Some(protocol) { continue; }
+            if declared.is_some_and(|prior| prior != row.protocol) {
+                return Err(InterpreterError::InvalidBytecode { pc: state.pc() as usize,
+                    message: format!("ambiguous declaring protocol for operator `{method}`") });
+            }
+            declared = Some(row.protocol);
+        }
     }
-    // Descriptor names can be generic-stamped ("Complex<Float>");
-    // function keys are generic-stripped ("Complex.add").
-    let base = crate::module::strip_generic_args(&type_name);
-    let qualified = format!("{}.{}", base, method);
-    let resolved = state.module.find_function_by_name(&qualified).filter(|fid| {
-        // A forward declaration with an empty body is not a dispatch
-        // target — landing in one would silently return nil. Require a
-        // real body, mirroring `find_function_by_name`'s own ranking.
-        state
-            .module
-            .get_function(*fid)
-            .map(|f| {
-                f.bytecode_length > 0
-                    || f.instructions.as_ref().map(|i| !i.is_empty()).unwrap_or(false)
-            })
-            .unwrap_or(false)
-    });
-    state
-        .operator_method_cache
-        .insert((type_id, method), resolved);
-    resolved
+    let resolved = if let Some(protocol) = declared {
+        Some(module.implementation_method(crate::types::TypeId(type_id), protocol, method, rhs_type)
+            .map_err(|message| InterpreterError::InvalidBytecode { pc: state.pc() as usize, message })?
+            .ok_or_else(|| InterpreterError::InvalidBytecode { pc: state.pc() as usize,
+                message: format!("operator `{method}` has no implementation for these operands") })?)
+    } else {
+        let Some(type_name) = module.get_string(descriptor.name) else { return Ok(None) };
+        let base = crate::module::strip_generic_args(type_name);
+        module.find_function_by_name(&format!("{base}.{method}"))
+            .filter(|id| module.get_function(*id).is_some_and(|f| f.has_definition()))
+    };
+    state.operator_method_cache.insert(key, resolved);
+    Ok(resolved)
 }
 
 /// Object arm entry point: when `receiver` is a heap record whose type
@@ -136,9 +140,44 @@ pub(super) fn try_push_operator_method_frame(
     rhs: Option<Value>,
     method: &'static str,
 ) -> InterpreterResult<bool> {
-    let Some(func_id) = resolve_operator_method(state, &receiver, method) else {
+    let Some(func_id) = resolve_operator_method(state, &receiver, rhs.as_ref(), method)? else {
         return Ok(false);
     };
+    push_operator_frame(state, dst, receiver, rhs, func_id)
+}
+
+/// Generic arithmetic carries a protocol ID on the wire. A heap operator may
+/// only enter the vtable identified by that operand.
+pub(super) fn try_push_declared_binary(
+    state: &mut InterpreterState, dst: Reg, left: Value, right: Value,
+    instruction_protocol: u32, operation: verum_ast::BinOp,
+) -> InterpreterResult<bool> {
+    let Some((protocol_name, method)) = operation.standard_protocol_member() else { return Ok(false) };
+    let invalid = |message| InterpreterError::InvalidBytecode { pc: state.pc() as usize, message };
+    if instruction_protocol != 0 {
+        let declared = state.module.get_type(crate::types::TypeId(instruction_protocol))
+            .filter(|protocol| protocol.kind == crate::types::TypeKind::Protocol)
+            .and_then(|protocol| state.module.get_string(protocol.name));
+        if declared != Some(protocol_name) {
+            return Err(invalid(format!("generic operator `{method}` carries a different protocol")));
+        }
+    }
+    let Some((receiver, _)) = heap_operator_owner(&left, state) else { return Ok(false) };
+    if receiver.is_builtin() { return Ok(false); }
+    if instruction_protocol == 0 {
+        return try_push_operator_method_frame(state, dst, left, Some(right), method);
+    }
+    let operand = heap_operator_owner(&right, state).map(|(id, _)| id)
+        .unwrap_or_else(|| super::calls::get_builtin_type_id(right));
+    let target = state.module.implementation_method(receiver,
+        crate::types::ProtocolId(instruction_protocol), method, Some(operand)).map_err(invalid)?
+        .ok_or_else(|| invalid(format!("missing implementation of generic operator `{method}`")))?;
+    push_operator_frame(state, dst, left, Some(right), target)
+}
+
+fn push_operator_frame(
+    state: &mut InterpreterState, dst: Reg, receiver: Value, rhs: Option<Value>, func_id: FunctionId,
+) -> InterpreterResult<bool> {
     let Some(func) = state.module.get_function(func_id) else {
         return Ok(false);
     };

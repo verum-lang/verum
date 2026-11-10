@@ -1367,10 +1367,39 @@ impl VbcModule {
         Some((id, args))
     }
 
-    /// **T0106** — consult the carried-fact protocol dispatch. Returns
-    /// the concrete FunctionId implementing `bare_method` for the
-    /// runtime receiver's concrete `type_id`, when
-    /// [`Self::resolve_protocol_dispatch`] resolved it.
+    /// Select a protocol member by its declaring vtable and actual receiver.
+    /// The optional operand type separates repeated protocol implementations.
+    pub fn implementation_method(
+        &self, receiver: crate::types::TypeId, protocol: crate::types::ProtocolId,
+        method: &str, operand: Option<crate::types::TypeId>,
+    ) -> Result<Option<FunctionId>, String> {
+        let Some(owner) = self.get_type(receiver) else { return Ok(None) };
+        let Some(declaration) = self.get_type(crate::types::TypeId(protocol.0)) else { return Ok(None) };
+        let mut slots = declaration.variants.iter().filter(|member| self.get_string(member.name) == Some(method));
+        let Some(member) = slots.next() else { return Ok(None) };
+        if slots.next().is_some() { return Err(format!("protocol declares competing members named `{method}`")); }
+        let mut selected = None;
+        for implementation in owner.protocols.iter().filter(|row| row.protocol == protocol) {
+            let Some(&raw) = implementation.methods.get(member.tag as usize) else { continue };
+            if raw == u32::MAX { continue; }
+            let id = FunctionId(raw);
+            let target = self.get_function(id).filter(|f| f.id == id && f.has_definition())
+                .ok_or_else(|| format!("protocol member `{method}` has no local definition in slot {raw}"))?;
+            if let Some(actual) = operand
+                && let Some(formal) = target.semantic_parameter_types()
+                    .and_then(|parameters| parameters.get(1)).and_then(Option::as_ref)
+                && formal.base_type_id().is_some_and(|expected| expected != actual)
+            { continue; }
+            if selected.is_some_and(|other| other != id) {
+                return Err(format!("multiple implementations of `{method}` apply to {receiver:?}"));
+            }
+            selected = Some(id);
+        }
+        Ok(selected)
+    }
+
+    /// Returns the compiled method for the receiver and interned member after
+    /// [`Self::resolve_protocol_dispatch`] has populated the dispatch table.
     #[inline]
     pub fn resolve_protocol_method(&self, type_id: u32, method: StringId) -> Option<FunctionId> {
         self.resolved_protocol_dispatch

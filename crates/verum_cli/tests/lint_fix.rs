@@ -100,7 +100,7 @@ fn fix_todo_in_code_inserts_placeholder_issue_tag() {
 // ============================================================
 
 #[test]
-fn fix_empty_match_arm_drops_the_arm() {
+fn fix_keeps_an_empty_arm_that_makes_the_match_exhaustive() {
     let (dir, file) = make_fixture(
         "empty_arm_fix",
         "main.vr",
@@ -113,8 +113,8 @@ fn fix_empty_match_arm_drops_the_arm() {
 
     let content = std::fs::read_to_string(&file).expect("read fixture");
     assert!(
-        !content.contains("=> ()"),
-        "empty arm should be dropped, got:\n{content}"
+        content.contains("_ => (),"),
+        "the unit-valued fallback is part of the program: {content}"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }

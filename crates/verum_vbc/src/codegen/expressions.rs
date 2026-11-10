@@ -3047,20 +3047,9 @@ impl VbcCodegen {
         // Operator overloading: check if the left operand's type has a matching method
         // (e.g., Vec2.add for `+`, Vec2.sub for `-`, etc.)
         if !is_float && !is_text && !is_primitive {
-            let op_method_name = match op {
-                BinOp::Add => Some("add"),
-                BinOp::Sub => Some("sub"),
-                BinOp::Mul => Some("mul"),
-                BinOp::Div => Some("div"),
-                BinOp::Rem => Some("rem"),
-                BinOp::Eq => Some("eq"),
-                BinOp::Ne => Some("ne"),
-                BinOp::Lt => Some("lt"),
-                BinOp::Gt => Some("gt"),
-                BinOp::Le => Some("le"),
-                BinOp::Ge => Some("ge"),
-                _ => None,
-            };
+            let op_method_name = matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Rem
+                | BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge)
+                .then(|| op.standard_protocol_member().map(|(_, method)| method)).flatten();
             if let Some(method) = op_method_name
                 && let Some(type_name) = self.extract_expr_type_name(left)
             {
@@ -3095,8 +3084,14 @@ impl VbcCodegen {
                 let rhs_ty = self
                     .extract_expr_type_name(right)
                     .map(|t| VbcCodegen::strip_generic_args(&t).to_string());
-                let mut chosen_key = qualified.clone();
-                if let Some(ref rhs) = rhs_ty
+                let declared_key = if let Some((protocol, member)) = op.standard_protocol_member()
+                    && let Some(receiver) = self.declared_expression_result(left, None, 0, 0)
+                {
+                    self.declared_operator_linkage(&qualified, &receiver,
+                        self.declared_expression_result(right, None, 0, 0).as_ref(), protocol, member)?
+                } else { None };
+                let mut chosen_key = declared_key.clone().unwrap_or_else(|| qualified.clone());
+                if declared_key.is_none() && let Some(ref rhs) = rhs_ty
                     && self
                         .ctx
                         .lookup_function(&format!("{}#impl2", qualified))

@@ -9,6 +9,7 @@ fn only_host_registered_routes_receive_review_categories() {
     }
     for tool in [
         "verum_format",
+        "verum_lint",
         "verum_analyze",
         "verum_plan",
         "verum_receipt",

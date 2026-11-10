@@ -73,6 +73,7 @@ pub mod hover;
 pub mod incremental;
 pub mod inline_values;
 pub mod lint_diagnostics;
+pub mod lint_report;
 pub mod lsp_config;
 pub mod position_utils;
 pub mod project;

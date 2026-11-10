@@ -11,6 +11,10 @@ use std::path::{Path, PathBuf};
 use verum_common::{List, Text};
 use walkdir::WalkDir;
 
+mod mounts;
+mod snapshot;
+pub use snapshot::inspect_workspace;
+
 /// Lint severity level
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum LintLevel {
@@ -997,14 +1001,17 @@ fn load_lint_config() -> HashSet<String> {
 }
 
 fn load_full_lint_config() -> LintConfig {
+    load_lint_config_at(Path::new("."))
+}
+
+fn load_lint_config_at(root: &Path) -> LintConfig {
     let mut config = LintConfig::default();
 
     // Layer 1: dedicated .verum/lint.toml takes priority over the
     // manifest, matching the design doc — projects that prefer to
     // keep verum.toml clean can drop a separate lint config without
     // touching the manifest.
-    let dedicated = PathBuf::from(".verum/lint.toml");
-    let manifest_candidates: &[&str] = &[".verum.toml", "verum.toml", "Verum.toml"];
+    let dedicated = root.join(".verum/lint.toml");
 
     if dedicated.exists() {
         if let Ok(content) = fs::read_to_string(&dedicated) {
@@ -1013,8 +1020,8 @@ fn load_full_lint_config() -> LintConfig {
             parse_lint_config_from_toml_v2(&content, &mut config, /* lint_root = */ true);
         }
     } else {
-        for name in manifest_candidates {
-            let path = PathBuf::from(name);
+        for name in LINT_MANIFESTS {
+            let path = root.join(name);
             if path.exists() {
                 if let Ok(content) = fs::read_to_string(&path) {
                     parse_lint_config_from_toml_v2(&content, &mut config, false);
@@ -1035,6 +1042,8 @@ fn load_full_lint_config() -> LintConfig {
 
     config
 }
+
+const LINT_MANIFESTS: &[&str] = &[".verum.toml", "verum.toml", "Verum.toml"];
 
 /// Activate a named profile from `[lint.profiles.<name>]` on top of
 /// the loaded config. Profile blocks accept the same keys as the
@@ -1486,49 +1495,10 @@ fn apply_fixes(content: &str, issues: &List<&LintIssue>) -> String {
     // and produces the same byte-level result as the JSON
     // `fix.edits` consumer.
     let mut edits: Vec<FixEdit> = Vec::with_capacity(issues.len());
-    let mut fallbacks: Vec<&LintIssue> = Vec::new();
     for issue in issues.iter() {
-        match synthesize_fix_edits_for(issue, content) {
-            Some(es) => edits.extend(es),
-            None => fallbacks.push(issue),
-        }
+        if let Some(fixes) = synthesize_fix_edits_for(issue, content) { edits.extend(fixes); }
     }
-    let staged = match apply_fix_edits(content, &edits) {
-        Ok(s) => s,
-        Err(_) => content.to_string(),
-    };
-    if fallbacks.is_empty() {
-        return staged;
-    }
-
-    // Fallback path: rules that don't yet have a structured
-    // synthesis (none today, but the path stays in place so adding
-    // a new rule that only has a line-rewrite helper still works).
-    let lines: Vec<&str> = staged.lines().collect();
-    let result_lines: Vec<Option<String>> = lines.iter().map(|l| Some(l.to_string())).collect();
-    for issue in fallbacks {
-        let idx = issue.line.wrapping_sub(1);
-        if idx >= result_lines.len() {
-            continue;
-        }
-        match issue.rule {
-            // The legacy line-rewrite helpers stay reachable for
-            // callers that emit fixable issues without a matching
-            // synthesized edit. They are silent no-ops for rules
-            // that already went through the structured path.
-            _ => {
-                let _ = &result_lines[idx];
-            }
-        }
-    }
-    let mut result = String::new();
-    for line in result_lines {
-        if let Some(l) = line {
-            result.push_str(&l);
-            result.push('\n');
-        }
-    }
-    result
+    apply_fix_edits(content, &edits).unwrap_or_else(|_| content.to_owned())
 }
 
 /// Rewrite a single-line `match e { Pat(args) => body }` (one arm,
@@ -2154,65 +2124,50 @@ fn check_missing_context_decl(path: &Path, info: &FileInfo, issues: &mut List<Li
 /// Search runs over the per-line code mask, so a `mount foo.{bar}`
 /// followed only by `// bar is great` no longer counts as a use —
 /// the comment is masked out in `code_lines`.
-fn check_unused_imports(path: &Path, info: &FileInfo, issues: &mut List<LintIssue>) {
-    for (module_path, names, mount_line) in &info.mount_imports {
-        if names.iter().any(|n| n == "*") {
-            continue;
+fn check_unused_imports(path: &Path, info: &FileInfo, module: &verum_ast::Module, issues: &mut List<LintIssue>) {
+    use verum_ast::Visitor;
+    // Interpolation expressions contain real paths even where the lexical
+    // code mask hides the surrounding literal.
+    #[derive(Default)]
+    struct Uses(HashSet<String>);
+    impl Visitor for Uses {
+        fn visit_path(&mut self, path: &verum_ast::Path) {
+            for segment in &path.segments {
+                if let verum_ast::ty::PathSegment::Name(name) = segment { self.0.insert(name.name.to_string()); }
+            }
         }
-
-        for name in names {
-            if name.is_empty() {
-                continue;
-            }
-            let used = (0..info.lines.len()).any(|idx| {
-                if idx == *mount_line {
-                    return false;
-                }
-                contains_word(info.code_line(idx), name)
-            });
-
-            if !used {
-                let display_import = if names.len() == 1 {
-                    format!("{}.{}", module_path, name)
-                } else {
-                    name.clone()
-                };
-                issues.push(LintIssue {
-                    rule: "unused-import",
-                    level: LintLevel::Warning,
-                    file: path.to_path_buf(),
-                    line: mount_line + 1,
-                    column: 1,
-                    message: format!("Unused import: {}", display_import),
-                    suggestion: Some("Remove unused import".into()),
-                    fixable: true,
-                });
-            }
+    }
+    let mut uses = Uses::default();
+    for item in &module.items {
+        if !matches!(item.kind, verum_ast::ItemKind::Mount(_)) { uses.visit_item(item); }
+    }
+    for (_, _, index) in &info.mount_imports {
+        let line = &info.lines[*index];
+        let Some(mount) = mounts::LineMount::parse(line) else { continue };
+        let unused: Vec<_> = mount.bindings.iter().filter(|binding|
+            !uses.0.contains(&binding.name) && !(0..info.lines.len()).any(|row| row != *index && contains_word(info.code_line(row), &binding.name))
+        ).collect();
+        if unused.is_empty() { continue; }
+        let mut emit = |column, name: &str| issues.push(LintIssue {
+            rule: "unused-import", level: LintLevel::Warning, file: path.to_owned(),
+            line: index + 1, column, message: format!("Unused import: {name}"),
+            suggestion: Some("Remove unused import".into()), fixable: true,
+        });
+        if unused.len() == mount.bindings.len() {
+            emit(mount.start + 1, line[mount.start..mount.end].trim());
+        } else {
+            for binding in unused { emit(binding.start + 1, &binding.name); }
         }
     }
 }
 
 /// Check if a line contains a word (not just a substring)
 fn contains_word(line: &str, word: &str) -> bool {
-    let mut start = 0;
-    while let Some(pos) = line[start..].find(word) {
-        let abs_pos = start + pos;
-        let before_ok = abs_pos == 0
-            || !line.as_bytes()[abs_pos - 1].is_ascii_alphanumeric()
-                && line.as_bytes()[abs_pos - 1] != b'_';
-        let after_pos = abs_pos + word.len();
-        let after_ok = after_pos >= line.len()
-            || !line.as_bytes()[after_pos].is_ascii_alphanumeric()
-                && line.as_bytes()[after_pos] != b'_';
-        if before_ok && after_ok {
-            return true;
-        }
-        start = abs_pos + 1;
-        if start >= line.len() {
-            break;
-        }
-    }
-    false
+    let identifier = |ch: char| ch == '_' || ch.is_alphanumeric();
+    !word.is_empty() && line.match_indices(word).any(|(start, _)| {
+        !line[..start].chars().next_back().is_some_and(identifier)
+            && !line[start + word.len()..].chars().next().is_some_and(identifier)
+    })
 }
 
 /// Rule 4: UnnecessaryHeap
@@ -2949,7 +2904,6 @@ fn lint_file_with(path: &Path, cfg: &LintConfig) -> Result<List<LintIssue>> {
 
     check_unchecked_refinement(path, &info, &mut issues);
     check_missing_context_decl(path, &info, &mut issues);
-    check_unused_imports(path, &info, &mut issues);
     check_unnecessary_heap(path, &info, &mut issues);
     check_missing_error_context(path, &info, &mut issues);
     check_large_copy(path, &info, &mut issues);
@@ -2972,6 +2926,7 @@ fn lint_file_with(path: &Path, cfg: &LintConfig) -> Result<List<LintIssue>> {
     let lexer = Lexer::new(&content, fid);
     let parser = VerumParser::new();
     if let Ok(module) = parser.parse_module(lexer, fid) {
+        check_unused_imports(path, &info, &module, &mut issues);
         let ctx = super::lint_engine::LintCtx {
             file: path,
             source: &content,
@@ -3173,7 +3128,6 @@ fn lint_content_with_module(
 
     check_unchecked_refinement(path, &info, &mut issues);
     check_missing_context_decl(path, &info, &mut issues);
-    check_unused_imports(path, &info, &mut issues);
     check_unnecessary_heap(path, &info, &mut issues);
     check_missing_error_context(path, &info, &mut issues);
     check_large_copy(path, &info, &mut issues);
@@ -3219,6 +3173,7 @@ fn lint_content_with_module(
         }
     };
     if let Some(module) = parsed_module.as_ref() {
+        check_unused_imports(path, &info, &module, &mut issues);
         let ctx = super::lint_engine::LintCtx {
             file: path,
             source: content,
@@ -3423,9 +3378,9 @@ fn check_extended_rules(path: &Path, info: &FileInfo, issues: &mut List<LintIssu
                 column: 1,
                 message: "Match arm has empty body".to_string(),
                 suggestion: Some(
-                    "drop the arm and let exhaustiveness handle it, or add a body".into(),
+                    "Review whether returning unit is intentional".into(),
                 ),
-                fixable: true,
+                fixable: false,
             });
         }
 
@@ -3480,7 +3435,8 @@ fn check_extended_rules(path: &Path, info: &FileInfo, issues: &mut List<LintIssu
                                         format!("rename the inner binding (e.g. `{var_name}2`)")
                                             .into(),
                                     ),
-                                    fixable: true,
+                                    fixable: !info.lines.iter().skip(line_num + 1).any(|text| contains_word(text, var_name))
+                                        && !info.lines.iter().any(|text| contains_word(text, &format!("{var_name}2"))),
                                 });
                                 break;
                             }
@@ -3554,7 +3510,6 @@ pub fn lint_source(path: &Path, content: &str, config: Option<&LintConfig>) -> L
 
     check_unchecked_refinement(path, &info, &mut issues);
     check_missing_context_decl(path, &info, &mut issues);
-    check_unused_imports(path, &info, &mut issues);
     check_unnecessary_heap(path, &info, &mut issues);
     check_missing_error_context(path, &info, &mut issues);
     check_large_copy(path, &info, &mut issues);
@@ -3578,7 +3533,8 @@ pub fn lint_source(path: &Path, content: &str, config: Option<&LintConfig>) -> L
     let parser = VerumParser::new();
     match parser.parse_module(lexer, fid) {
         Ok(module) => {
-            let ctx = super::lint_engine::LintCtx {
+            check_unused_imports(path, &info, &module, &mut issues);
+        let ctx = super::lint_engine::LintCtx {
                 file: path,
                 source: content,
                 module: &module,
@@ -4327,19 +4283,14 @@ pub fn synthesize_fix_edits_for(issue: &LintIssue, content: &str) -> Option<Vec<
     let line = content.lines().nth(line_idx)?;
 
     match issue.rule {
-        "unused-import" => Some(vec![FixEdit {
-            start_line: issue.line,
-            start_column: 1,
-            end_line: issue.line + 1,
-            end_column: 1,
-            new_text: String::new(),
-        }]),
+        "unused-import" => mounts::LineMount::parse(line)?.edits(line, issue),
         "todo-in-code" => {
             let suggestion = issue.suggestion.as_ref()?.as_str().to_string();
+            let pos = issue.column.checked_sub(1)?;
+            let reported = line.get(pos..)?;
             let marker = ["TODO", "FIXME", "HACK", "XXX"]
                 .iter()
-                .find(|m| line.contains(*m))?;
-            let pos = line.find(*marker)?;
+                .find(|m| reported.starts_with(*m))?;
             Some(vec![FixEdit {
                 start_line: issue.line,
                 start_column: pos + 1,
@@ -4372,13 +4323,6 @@ pub fn synthesize_fix_edits_for(issue: &LintIssue, content: &str) -> Option<Vec<
                 new_text: String::new(),
             }])
         }
-        "empty-match-arm" => Some(vec![FixEdit {
-            start_line: issue.line,
-            start_column: 1,
-            end_line: issue.line + 1,
-            end_column: 1,
-            new_text: String::new(),
-        }]),
         // ── Newly structured edits (Phase E) — these were
         // previously handled by per-rule string-replace helpers in
         // apply_fixes; consolidating onto the FixEdit path means
@@ -4391,7 +4335,7 @@ pub fn synthesize_fix_edits_for(issue: &LintIssue, content: &str) -> Option<Vec<
                 start_line: issue.line,
                 start_column: 1,
                 end_line: issue.line,
-                end_column: line.chars().count() + 1,
+                end_column: line.len() + 1,
                 new_text: new_line,
             }]
         }),
@@ -4400,7 +4344,7 @@ pub fn synthesize_fix_edits_for(issue: &LintIssue, content: &str) -> Option<Vec<
                 start_line: issue.line,
                 start_column: 1,
                 end_line: issue.line,
-                end_column: line.chars().count() + 1,
+                end_column: line.len() + 1,
                 new_text: new_line,
             }]
         }),
