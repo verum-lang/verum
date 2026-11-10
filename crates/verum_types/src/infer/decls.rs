@@ -6347,11 +6347,13 @@ impl TypeChecker {
             let verum_ast::ty::TypeKind::Path(path) = &ty.kind else {
                 continue;
             };
-            let Some(ident) = path.as_ident() else { continue };
-            let Maybe::Some(Type::Var(tvar)) = self.ctx.lookup_type(ident.name.as_str()).cloned()
-            else {
-                continue;
+            let binder = match path.segments.as_slice() {
+                [verum_ast::ty::PathSegment::SelfValue] => self.current_self_type.as_ref(),
+                [verum_ast::ty::PathSegment::Name(ident)] => self.lookup_decl_param(ident.name.as_str())
+                    .or_else(|| self.ctx.lookup_type(ident.name.as_str())),
+                _ => continue,
             };
+            let Some(Type::Var(tvar)) = binder.cloned() else { continue };
             let protocol_bounds = self.convert_type_bounds_for_receiver(bounds, Some(&Type::Var(tvar)))?;
             if !protocol_bounds.is_empty()
             {

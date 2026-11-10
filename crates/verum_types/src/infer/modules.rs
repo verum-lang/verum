@@ -21035,14 +21035,24 @@ impl TypeChecker {
         let resolved_ty = if let Some(var) = dispatch_var {
             let var = &var;
             {
-                let bounds = self.get_type_var_bounds(var);
-
+                // Where clauses are lexical premises, including a conditional
+                // default's rigid Self. They are visible only in this body.
+                let mut bounds = self.get_type_var_bounds(var);
+                for premise in &self.source_type_registration.projection_assumptions {
+                    if premise.ty == Type::Var(*var) {
+                        for bound in &premise.bounds {
+                            if !bound.is_negative && !bounds.contains(bound) {
+                                bounds.push(bound.clone());
+                            }
+                        }
+                    }
+                }
                 if !bounds.is_empty() {
                     // Type variable has bounds - we can use them for method resolution
                     // The protocol checker will find methods from the bounded protocols
 
                     // Try to find the method in any of the bounding protocols
-                    for bound in &bounds {
+                    for bound in bounds.iter().filter(|bound| !bound.is_negative) {
                         {
                             // Check if this protocol has the method we're looking for
                             let protocol_key = self.path_to_string(&bound.protocol);

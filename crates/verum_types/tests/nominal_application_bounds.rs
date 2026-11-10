@@ -391,3 +391,20 @@ fn protocol_method_self_proves_only_its_instantiated_declared_superprotocols() {
     refused(&format!("{declarations} type Wrong is protocol extends Middle<Bool> {{ fn make(&self) -> Need<Int,Self>; }};"));
     refused(&format!("{declarations} type Unrelated is protocol {{ fn make(&self) -> Need<Bool,Self>; }};"));
 }
+
+#[test]
+fn a_conditional_default_uses_its_own_rigid_receiver_as_a_premise() {
+    let declarations = r#"
+        type Copyable is protocol { fn id(&self) -> Int; };
+        type Cell<X> is { value:X };
+        implement<X> Copyable for Cell<X> { fn id(&self) -> Int { 1 } }
+        type Saved<S:Copyable> is { value:S };
+    "#;
+    accepted(&format!("{declarations} type Cursor is protocol {{ fn save(self) -> Saved<Self> where Self:Copyable {{ let tag = self.id(); Saved {{ value:self }} }} }};"));
+    let sibling = format!("{declarations} type Cursor is protocol {{ fn constrained(self) -> Int where Self:Copyable {{ self.id() }} fn unconstrained(self) -> Int {{ self.id() }} }};");
+    for owner in [None, Some("demo")] {
+        let diagnostics = errors(&sibling, owner);
+        assert!(diagnostics.iter().any(|error| error.contains("method `id` not found")), "{diagnostics:?}");
+    }
+    refused(&format!("{declarations} type Cursor is protocol {{ fn save(self) -> Saved<Self> {{ Saved {{ value:self }} }} }};"));
+}
