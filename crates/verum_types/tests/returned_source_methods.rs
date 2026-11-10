@@ -551,3 +551,27 @@ fn inherent_calls_must_prove_the_declaring_implementations_conditions() {
     let invalid = check_with_checker(&format!("{declarations} fn use_bool(xs: &[Bool]) -> Int {{ xs.stamp() }}"), &[]).1;
     assert!(invalid.iter().any(|error| error.contains("E405")), "{invalid:?}");
 }
+
+#[test]
+fn a_type_mounted_through_a_module_alias_keeps_its_static_method_owner() {
+    let modules = [
+        ("demo.tickets", r#"
+            public type Ticket<T> is { public value: T };
+            implement<T> Ticket<T> { public fn wrap(item:T)->Ticket<T> { Ticket { value:item } } }
+        "#),
+        ("demo.other", r#"
+            public type Ticket<T> is { item:T };
+            implement<T> Ticket<T> { public fn foreign(item:T)->Bool { true } }
+        "#),
+    ];
+    let aliases = [("old.tickets", "demo.tickets")];
+    let header = "mount demo.other.{Ticket as Other}; mount old.tickets.Ticket;";
+    for (body, accepted) in [
+        ("fn use_it() -> Bool { Ticket.wrap(true).value }", true),
+        ("fn wrong() -> Int { Ticket.wrap(true).value }", false),
+        ("fn wrong() -> Bool { Ticket.foreign(true) }", false),
+    ] {
+        let errors = check_with_module_aliases(&format!("{header} {body}"), &modules, &aliases).1;
+        assert_eq!(errors.is_empty(), accepted, "{body}: {errors:?}");
+    }
+}

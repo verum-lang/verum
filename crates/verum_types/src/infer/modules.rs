@@ -896,10 +896,16 @@ impl TypeChecker {
                         if self.ctx.env.lookup(alias_text.as_str()).is_none()
                             || occupant_is_ambient_builtin
                         {
-                            // Store the full dotted path; downstream
-                            // `module_aliases` consumers split on '.'.
-                            let full_path: Text = segments.join(".").into();
-                            self.module_aliases.insert(alias_text, full_path);
+                            let written = segments.join(".");
+                            let binding = self.get_module_with_path_aliases(&written, &registry)
+                                .map(|module| Text::from(module.path.to_string()))
+                                .or_else(|| {
+                                    let (parent, name) = written.rsplit_once('.')?;
+                                    let (declaration, owner) = self.resolve_public_source_type(parent, name, &registry)?;
+                                    Some(Self::source_type_declaration_key(&owner, &declaration.name.name))
+                                })
+                                .unwrap_or_else(|| written.into());
+                            self.module_aliases.insert(alias_text, binding);
                         }
                     }
                 }
@@ -4193,8 +4199,8 @@ impl TypeChecker {
         let prefixed = format!("core.{}", candidate);
         let spellings: [&str; 2] = [candidate, prefixed.as_str()];
         for sp in spellings {
-            if registry.get_by_path(sp).is_some() {
-                return Some(Text::from(sp));
+            if let Some(module) = registry.get_by_path_aliased(sp) {
+                return Some(module.path.to_string().into());
             }
         }
         let Maybe::Some(md) = &self.core_metadata else {
