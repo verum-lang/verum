@@ -351,6 +351,23 @@ impl<'ctx> PlatformIR<'ctx> {
         )
     }
 
+    fn emit_named_linux_syscall(
+        &self,
+        builder: &verum_llvm::builder::Builder<'ctx>,
+        module: &Module<'ctx>,
+        name: &str,
+        args: &[verum_llvm::values::IntValue<'ctx>],
+    ) -> super::error::Result<verum_llvm::values::IntValue<'ctx>> {
+        let triple = module.get_triple();
+        let target = triple.as_str().to_string_lossy();
+        let arch = target.split('-').next().unwrap_or_default();
+        let nr = verum_common::linux_syscalls::syscall_for_arch(name, arch)
+            .filter(|_| !target.contains("x32") && !target.contains("ilp32"))
+            .ok_or_else(|| super::error::LlvmLoweringError::UnsupportedInstruction(
+                format!("no Linux {name} ABI for {target}").into()))?;
+        self.emit_linux_syscall(builder, module, nr, args)
+    }
+
     /// Create a new platform-IR emitter with the documented-default
     /// panic strategy (Unwind). Most call sites should use
     /// [`PlatformIR::with_panic_strategy`] to thread the user's
@@ -1560,54 +1577,27 @@ impl<'ctx> PlatformIR<'ctx> {
             };
             builder.build_return(Some(&result_ptr)).or_llvm_err()?;
         } else {
-            // `mmap` is a dual-declared symbol (libsystem.vr FFI extern
-            // spells C widths; the registry canon is all-i64). The
-            // registry-first getter pins the declaration and
-            // `call_native_i64` adapts every argument to whichever
-            // spelling actually won — the mid-position `i32`
-            // prot/flags/fd params were exactly what the old
-            // param0-only adaptation missed (T0278: `i64 3` against an
-            // `i32` slot, verifier-invalid on every allocator inline).
-            let mmap_fn = super::error::get_or_declare_function(
-                module,
-                "mmap",
-                i64_type.fn_type(
-                    &[
-                        i64_type.into(),
-                        i64_type.into(),
-                        i64_type.into(),
-                        i64_type.into(),
-                        i64_type.into(),
-                        i64_type.into(),
-                    ],
-                    false,
-                ),
-            );
-
-            // MAP_PRIVATE | MAP_ANON{YMOUS}: Darwin=0x1002, Linux=0x0022.
-            let map_flags_val: u64 = if target_is_linux(module) {
-                0x0022
+            use verum_common::os_memory::{MAP_PRIVATE, PROT_READ, PROT_WRITE, darwin, linux};
+            let linux_target = target_is_linux(module);
+            let flags = MAP_PRIVATE | if linux_target { linux::MAP_ANONYMOUS } else { darwin::MAP_ANONYMOUS };
+            let args = [i64_type.const_zero(), size, i64_type.const_int((PROT_READ | PROT_WRITE) as u64, false),
+                i64_type.const_int(flags as u64, false), i64_type.const_all_ones(), i64_type.const_zero()];
+            let (raw, failed) = if linux_target {
+                let raw = self.emit_named_linux_syscall(&builder, module, "SYS_MMAP", &args)?;
+                // Linux encodes errors in the final 4095 machine words.
+                let failed = builder.build_int_compare(IntPredicate::UGE, raw, i64_type.const_int((-4095i64) as u64, false), "mmap_errno").or_llvm_err()?;
+                (raw, failed)
             } else {
-                0x1002
+                let mmap = super::error::get_or_declare_function(module, "mmap",
+                    i64_type.fn_type(&[i64_type.into(); 6], false));
+                let raw = self.call_native_i64(&builder, mmap, &args.map(Into::into), "mmap_result")?;
+                let failed = builder.build_int_compare(IntPredicate::EQ, raw, i64_type.const_all_ones(), "map_failed").or_llvm_err()?;
+                (raw, failed)
             };
-            let map_flags = i64_type.const_int(map_flags_val, false);
-
-            let raw = self.call_native_i64(
-                &builder,
-                mmap_fn,
-                &[
-                    i64_type.const_zero().into(), // addr = NULL
-                    size.into(),
-                    i64_type.const_int(3, false).into(), // PROT_READ|PROT_WRITE
-                    map_flags.into(),
-                    i64_type.const_all_ones().into(), // fd = -1
-                    i64_type.const_int(0, false).into(), // offset = 0
-                ],
-                "mmap_result",
-            )?;
-            let result = builder
-                .build_int_to_ptr(raw, ptr_type, "mmap_ptr")
-                .or_llvm_err()?;
+            // All callers of the allocator, including checked_malloc, use null
+            // as the failure sentinel. Never expose MAP_FAILED as a live pointer.
+            let address = builder.build_select(failed, i64_type.const_zero(), raw, "allocation").or_llvm_err()?.into_int_value();
+            let result = builder.build_int_to_ptr(address, ptr_type, "mmap_ptr").or_llvm_err()?;
             builder.build_return(Some(&result)).or_llvm_err()?;
         }
 
@@ -1683,6 +1673,9 @@ impl<'ctx> PlatformIR<'ctx> {
                 )
                 .or_llvm_err()?;
             let _ = size_param; // Windows path doesn't need it.
+        } else if target_is_linux(module) {
+            let addr = builder.build_ptr_to_int(ptr_param, i64_type, "address").or_llvm_err()?;
+            self.emit_named_linux_syscall(&builder, module, "SYS_MUNMAP", &[addr, size_param])?;
         } else {
             // Registry-canonical declaration + the ONE adaptive call
             // authority — same treatment as the mmap site above.
@@ -1786,25 +1779,16 @@ impl<'ctx> PlatformIR<'ctx> {
             builder
                 .build_call(exit_process, &[code_u32.into()], "")
                 .or_llvm_err()?;
-        } else {
-            let exit_fn = module
-                .get_function("verum_internal_exit_i64")
-                .unwrap_or_else(|| {
-                    let exit_type = void_type.fn_type(&[i64_type.into()], false);
-                    let f = module.add_function("verum_internal_exit_i64", exit_type, None);
-                    f.add_attribute(
-                        AttributeLoc::Function,
-                        ctx.create_string_attribute("noreturn", ""),
-                    );
-                    f
-                });
-
+        } else if target_is_linux(module) {
             let code64 = builder
-                .build_int_s_extend(code, i64_type, "c64")
+                .build_int_s_extend(code, i64_type, "status")
                 .or_llvm_err()?;
-            builder
-                .build_call(exit_fn, &[code64.into()], "")
-                .or_llvm_err()?;
+            self.emit_named_linux_syscall(&builder, module, "SYS_EXIT_GROUP", &[code64])?;
+        } else {
+            // The internal i64 exit adapter calls this function. Terminate at
+            // the POSIX platform boundary instead of recursing into the adapter.
+            let exit = super::error::get_or_declare_noreturn_function(module, ctx, "_exit", fn_type);
+            builder.build_call(exit, &[code.into()], "").or_llvm_err()?;
         }
 
         builder.build_unreachable().or_llvm_err()?;
