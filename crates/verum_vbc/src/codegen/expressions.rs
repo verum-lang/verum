@@ -16262,6 +16262,26 @@ impl VbcCodegen {
         let generic_operand_declarations = resolvable_fid.and_then(|id| self.ctx.lookup_function_by_id(crate::module::FunctionId(id)))
             .filter(|function| !function.type_param_ids.is_empty()).map(|_| std::iter::once(receiver_result_declaration.clone())
                 .chain(args.iter().map(|argument| self.declared_expression_result(argument, None, 0, 0))).collect::<Vec<_>>());
+        // A temporary's exact type can first become known while emitting its
+        // receiver. Bind the selected declaration before lowering its callbacks.
+        if let (Some(info), Some(receiver_type)) = (resolved_method.as_ref(), receiver_result_declaration.as_ref())
+            && let Some(formal) = self.ctx.semantic_fn_params.get(&info.id)
+                .and_then(|params| params.first()).and_then(Option::as_ref)
+        {
+            use crate::types::TypeRef;
+            let formal = match formal { TypeRef::Reference { inner, .. } => inner.as_ref(), ty => ty };
+            let actual = match receiver_type { TypeRef::Reference { inner, .. } => inner.as_ref(), ty => ty };
+            let mut bindings = crate::mono::TypeSubstitution::empty();
+            if self.bind_source_declaration(formal, actual, &mut bindings) {
+                for (index, arg) in args.iter().enumerate() {
+                    if matches!(arg.kind, ExprKind::Closure { .. }) && (arg.span.start != 0 || arg.span.end != 0)
+                        && let Some(hints) = self.selected_closure_param_hints(info, index, bindings.clone(), type_args, args)
+                    {
+                        self.ctx.closure_param_type_hints.insert(arg.span, hints);
+                    }
+                }
+            }
+        }
         // Compile arguments into consecutive registers (after receiver).
         // Phase 1: compile all arg expressions (may allocate non-consecutive regs)
         // Phase 2: allocate consecutive fresh regs and move values into them
@@ -31727,7 +31747,6 @@ impl VbcCodegen {
         explicit: &verum_common::List<verum_ast::ty::GenericArg>,
         operands: &[Expr],
     ) -> Option<verum_common::List<Option<crate::types::TypeRef>>> {
-        use crate::types::TypeRef;
         let receiver_name = self.declared_callable_receiver_name(receiver)?;
         let mut owner = Self::method_receiver_type_name(&receiver_name).to_string();
         for _ in 0..self.method_receiver_deref_count(&owner, method) {
@@ -31735,9 +31754,16 @@ impl VbcCodegen {
         }
         let key = self.registered_receiver_method(&owner, method)?;
         let info = self.ctx.lookup_qualified_function(&key)?;
-        let slot = argument + usize::from(info.param_names.first().is_some_and(|name| name == "self"));
-        let TypeRef::Function { params, .. } = self.callable_parameter_bound(info, slot)? else { return None };
-        let mut substitution = self.callable_owner_substitution(&owner)?;
+        self.selected_closure_param_hints(info, argument, self.callable_owner_substitution(&owner)?, explicit, operands)
+    }
+
+    fn selected_closure_param_hints(
+        &self, info: &super::context::FunctionInfo, argument: usize, mut substitution: crate::mono::TypeSubstitution,
+        explicit: &verum_common::List<verum_ast::ty::GenericArg>, operands: &[Expr],
+    ) -> Option<verum_common::List<Option<crate::types::TypeRef>>> {
+        use crate::types::TypeRef;
+        let receiver_slots = usize::from(info.param_names.first().is_some_and(|name| name == "self"));
+        let TypeRef::Function { params, .. } = self.callable_parameter_bound(info, argument + receiver_slots)? else { return None };
         for (arg, id) in explicit.iter().zip(&info.explicit_type_param_ids) {
             if let (Some(ty), Some(id)) = (arg.type_for_declared_slot(), id)
                 && let Some(ty) = self.explicit_type_witness(&ty, None)
@@ -31748,7 +31774,6 @@ impl VbcCodegen {
         // Sibling operands contribute evidence before lowering a closure. An
         // accumulator determined by a declared constructor can constrain both
         // callback inputs and its result independently of source argument order.
-        let receiver_slots = usize::from(info.param_names.first().is_some_and(|name| name == "self"));
         if let Some(formals) = self.ctx.semantic_fn_params.get(&info.id) {
             for (index, operand) in operands.iter().enumerate() {
                 if index == argument { continue; }
