@@ -42,7 +42,7 @@
 module core.base.serde;
 
 mount core.base.protocols.{
-    Debug, Display, Clone, Eq, Describable, ErrorSource,
+    Debug, Display, Clone, Eq, Hash, Describable, ErrorSource,
     Formatter, FormatError,
 };
 mount core.base.maybe.{Maybe, Some, None};
@@ -280,7 +280,7 @@ public type Deserializer is protocol {
     fn deserialize_list<T: Deserialize>(&mut self) -> Result<List<T>, Self.Error>;
 
     /// Deserialize a map of key-value pairs.
-    fn deserialize_map<K: Deserialize, V: Deserialize>(&mut self) -> Result<Map<K, V>, Self.Error>;
+    fn deserialize_map<K: Deserialize + Hash + Eq, V: Deserialize>(&mut self) -> Result<Map<K, V>, Self.Error>;
 };
 
 // =============================================================================
