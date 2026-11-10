@@ -476,3 +476,24 @@ fn raw_pointer_write_permission_survives_an_explicit_dereference() {
         assert!(found.iter().any(|error| error.contains("SharedReferenceWrite")), "{body}: {found:?}");
     }
 }
+
+#[test]
+fn slice_and_array_pointer_producers_keep_their_receiver_permissions() {
+    for (body, permitted) in [
+        ("fn probe(xs: &[UInt32]) -> Int { xs.len() }", true),
+        ("fn probe(xs: &[UInt32]) -> *const UInt32 { xs.as_ptr() }", true),
+        ("fn probe(xs: &[UInt32; 3]) -> *const UInt32 { xs.as_ptr() }", true),
+        ("fn probe(xs: &mut [UInt32]) -> *mut UInt32 { xs.as_mut_ptr() }", true),
+        ("fn probe(xs: &[UInt32]) -> *mut UInt32 { xs.as_mut_ptr() }", false),
+        ("fn probe(xs: &[UInt32]) -> *const Bool { xs.as_ptr() }", false),
+        ("fn probe(xs: &[UInt32]) { unsafe { *xs.as_ptr() = 7_u32; } }", false),
+        ("type Ledger is { n:Int }; implement Ledger { fn len(&mut self)->Int { self.n } } fn probe(x:&Ledger)->Int { x.len() }", false),
+    ] {
+        let module = Parser::new(&format!("module demo; {body}")).parse_module().unwrap();
+        let mut checker = TypeChecker::with_minimal_context();
+        checker.register_builtins();
+        register(&mut checker, "demo", &module);
+        let actual = check(&mut checker, &module);
+        assert_eq!(actual.is_empty(), permitted, "{body}: {actual:?}");
+    }
+}

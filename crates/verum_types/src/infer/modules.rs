@@ -24197,20 +24197,18 @@ impl TypeChecker {
                 let method_name_str = method.name.as_str();
                 match method_name_str {
                     "as_mut_ptr" | "as_ptr" if args.is_empty() => {
-                        return Ok(Some(InferResult::new(Type::Pointer {
-                            inner: Box::new(elem),
-                            mutable: method_name_str == "as_mut_ptr",
-                        })));
+                        use crate::core_metadata::ReceiverKind::{SelfMut, SelfRef};
+                        let mutable = method_name_str == "as_mut_ptr";
+                        let pointer = Type::Pointer { inner: Box::new(elem), mutable };
+                        return Ok(Some(InferResult::method(pointer, Some(if mutable { SelfMut } else { SelfRef }))));
                     }
                     "len" if args.is_empty() => {
-                        return Ok(Some(InferResult::new(Type::int())));
+                        return Ok(Some(InferResult::method(Type::int(), Some(crate::core_metadata::ReceiverKind::SelfRef))));
                     }
                     "offset" if args.len() == 1 => {
                         let _ = self.synth_expr(&args[0])?;
-                        return Ok(Some(InferResult::new(Type::Pointer {
-                            inner: Box::new(elem),
-                            mutable: false,
-                        })));
+                        let pointer = Type::Pointer { inner: Box::new(elem), mutable: false };
+                        return Ok(Some(InferResult::method(pointer, Some(crate::core_metadata::ReceiverKind::SelfRef))));
                     }
                     "from_bytes" if args.len() <= 1 => {
                         for arg in args.iter() {
