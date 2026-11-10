@@ -1361,12 +1361,13 @@ impl<'s> CompilationPipeline<'s> {
                     // method signatures reference the *declaring* module's
                     // same-named types).
                     for (module_path, stdlib_mod) in &stdlib_entries {
-                        checker.set_current_module_path(module_path.clone());
-                        for item in &stdlib_mod.items {
-                            if let verum_ast::ItemKind::Impl(impl_decl) = &item.kind {
-                                let _ = checker.register_impl_block(impl_decl);
+                        checker.with_source_signature_scope(module_path.as_str(), |checker| {
+                            for item in &stdlib_mod.items {
+                                if let verum_ast::ItemKind::Impl(impl_decl) = &item.kind {
+                                    let _ = checker.register_impl_block(impl_decl);
+                                }
                             }
-                        }
+                        });
                     }
                 }
 
@@ -1507,6 +1508,7 @@ impl<'s> CompilationPipeline<'s> {
                     }
                 }
                 checker.clear_diagnostics();
+                self.emit_deferred_type_errors(&mut checker);
 
                 // Accumulate metrics
                 let metrics = checker.metrics();

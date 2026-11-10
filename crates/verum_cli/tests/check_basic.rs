@@ -245,12 +245,17 @@ fn write_source_core(root: &Path, modules: &[(&str, &str)]) -> PathBuf {
     core
 }
 
-fn check_with_source_core(core: &Path, file: &Path, source: &str) -> Output {
-    std::fs::write(file, source).unwrap();
-    Command::new(binary())
-        .arg("check")
-        .arg(file)
-        .current_dir(file.parent().unwrap())
+fn check_with_source_core(core: &Path, entry: &Path, source: &str) -> Output {
+    let mut command = Command::new(binary());
+    command.arg("check");
+    if entry.is_dir() {
+        std::fs::write(entry.join("src/main.vr"), source).unwrap();
+        command.current_dir(entry);
+    } else {
+        std::fs::write(entry, source).unwrap();
+        command.arg(entry).current_dir(entry.parent().unwrap());
+    }
+    command
         .env("VERUM_STDLIB_PATH", core)
         .env("VERUM_ALLOW_STDLIB_SOURCE_FALLBACK", "1")
         .output()
@@ -344,21 +349,34 @@ fn inherent_signatures_resolve_types_in_their_defining_source_module() {
         }
     "#;
     let core = write_source_core(root, &[("events", events), ("worker", worker)]);
-    let entry = root.join("entry.vr");
-    let checked = check_with_source_core(&core, &entry, user);
-    assert!(
-        checked.status.success(),
-        "{}",
-        String::from_utf8_lossy(&checked.stderr)
-    );
+    let project = root.join("app");
+    std::fs::create_dir_all(project.join("src")).unwrap();
+    std::fs::write(
+        project.join("verum.toml"),
+        "[cog]\nname = \"signature_scope\"\nversion = \"0.1.0\"\nedition = \"2026\"\n",
+    )
+    .unwrap();
+    let entry = project.join("src/main.vr");
+    for path in [&project, &entry] {
+        let checked = check_with_source_core(&core, path, user);
+        assert!(
+            checked.status.success(),
+            "{}",
+            String::from_utf8_lossy(&checked.stderr)
+        );
+    }
 
     let invalid_worker = worker.replace("-> ImportedEvent<T>", "-> ConsumerOnly<T>");
-    std::fs::write(core.join("worker.vr"), invalid_worker).unwrap();
-    let missing = check_with_source_core(&core, &entry, user);
-    let error = String::from_utf8_lossy(&missing.stderr);
-    assert!(!missing.status.success());
-    assert!(
-        error.contains("type not found: ConsumerOnly") && error.contains("core/worker.vr"),
-        "{error}"
-    );
+    let worker_path = core.join("worker.vr");
+    std::fs::write(&worker_path, invalid_worker).unwrap();
+    for path in [&project, &entry] {
+        let missing = check_with_source_core(&core, path, user);
+        let error = String::from_utf8_lossy(&missing.stderr);
+        assert!(!missing.status.success());
+        assert!(
+            error.contains("type not found: ConsumerOnly")
+                && error.contains(worker_path.to_str().unwrap()),
+            "{error}"
+        );
+    }
 }

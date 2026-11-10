@@ -1225,6 +1225,8 @@ impl<'s> CompilationPipeline<'s> {
             }
         }
 
+        self.emit_deferred_type_errors(&mut checker);
+
         // Abort if errors occurred
         self.session.abort_if_errors()?;
 
