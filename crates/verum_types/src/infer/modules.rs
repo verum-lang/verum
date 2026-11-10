@@ -9436,107 +9436,71 @@ impl TypeChecker {
         }
     }
 
-    /// Register a blanket impl from its AST node.
+    /// Register implementation evidence without importing the receiver's entire
+    /// method surface. The receiver and protocol arguments share the same
+    /// declaration-owned conditions as ordinary implementation checking.
     pub(super) fn register_blanket_impl_from_ast(
         &mut self,
-        impl_decl: &verum_ast::decl::ImplDecl,
+        source: &verum_ast::decl::ImplDecl,
     ) -> Result<()> {
-        use crate::protocol::{ProtocolImpl, WhereClause as ProtocolWhereClause};
-        use verum_ast::decl::ImplKind;
+        use verum_ast::{decl::ImplKind, ty::GenericParamKind};
 
-        let selected = self.cfg_filtered_impl(impl_decl);
-        let impl_decl = selected.as_ref().unwrap_or(impl_decl);
-        if self.protocol_checker.read().has_source_impl(&self.current_module_path, impl_decl)? {
+        let selected = self.cfg_filtered_impl(source);
+        let source = selected.as_ref().unwrap_or(source);
+        let ImplKind::Protocol { protocol, protocol_args, for_type } = &source.kind else {
+            return Ok(());
+        };
+        if self.protocol_checker.read().has_source_impl(&self.current_module_path, source)? {
             return Ok(());
         }
-        let specialization = Self::source_impl_specialization(impl_decl)?;
-
-        if let ImplKind::Protocol {
-            protocol,
-            protocol_args,
-            for_type,
-        } = &impl_decl.kind
-        {
-            let protocol = self.resolve_protocol_reference(protocol)?;
-            // Enter a scope to handle type parameters
-            self.ctx.enter_scope();
-            let preparation = (|| -> Result<ProtocolImpl> {
-
-
-            // Collect type variables for the impl's generic parameters
-            let mut type_param_to_var: indexmap::IndexMap<Text, Type> =
-                indexmap::IndexMap::new();
-
-            for generic_param in &impl_decl.generics {
-                if let verum_ast::ty::GenericParamKind::Type { name, .. } = &generic_param.kind {
-                    let type_var = TypeVar::fresh();
-                    let name_text: Text = name.name.clone();
-                    let type_var_ty = Type::Var(type_var);
-                    self.ctx.define_type(name_text.clone(), type_var_ty.clone());
-                    type_param_to_var.insert(name_text, type_var_ty);
-                } else if let verum_ast::ty::GenericParamKind::Meta { name, .. } | verum_ast::ty::GenericParamKind::Const { name, .. } = &generic_param.kind {
-                    let value = self.source_value_parameter(generic_param)?;
-                    type_param_to_var.insert(name.name.clone(), value.clone());
-                    self.ctx.define_type(name.name.clone(), value);
-                }
+        let protocol = self.resolve_protocol_reference(protocol)?;
+        let specialization = Self::source_impl_specialization(source)?;
+        let previous_self = self.current_self_type.clone();
+        let mut shadowed = Vec::new();
+        self.ctx.enter_scope();
+        let result = self.in_impl_proof_scope(|checker| {
+            let mut owner = indexmap::IndexMap::new();
+            for parameter in &source.generics {
+                let (name, value) = match &parameter.kind {
+                    GenericParamKind::Type { name, .. } => (name, Type::Var(TypeVar::fresh())),
+                    GenericParamKind::Meta { name, .. } | GenericParamKind::Const { name, .. } =>
+                        (name, checker.source_value_parameter(parameter)?),
+                    _ => continue,
+                };
+                shadowed.push((name.name.clone(), checker.ctx.type_defs.get(&name.name).cloned()));
+                checker.ctx.define_type(name.name.clone(), value.clone());
+                owner.insert(name.name.clone(), value);
             }
-
-            // Resolve the for_type
-            let resolved_for_type = self
-                .ast_to_type(for_type)
-                .unwrap_or_else(|_| self.ast_to_type_lenient(for_type));
-
-            let (where_clauses, type_param_fn_bounds) =
-                self.elaborate_source_impl_conditions(impl_decl, &type_param_to_var)?;
-
-            // Resolve protocol type arguments (e.g., U in Into<U>)
-            let resolved_protocol_args = self.protocol_application_arguments(
-                &protocol, protocol_args, Some(&resolved_for_type),
-            )?;
-
-            let owner_frame = type_param_to_var.iter().map(|(name, ty)| (name.clone(), ty.clone())).collect();
-            let associated_types = self.elaborate_impl_associated_assignments(
-                &self.path_to_string(&protocol), impl_decl, &owner_frame,
-            )?;
-
-            // Build the ProtocolImpl
-            let protocol_impl = ProtocolImpl {
-                parameters: owner_frame.values().map(crate::context::GenericBinder::declared)
+            checker.push_decl_param_frame(owner.clone());
+            let prepared = (|| {
+                let (where_clauses, type_param_fn_bounds) = checker.enter_source_impl_conditions(source, &owner)?;
+                let receiver = checker.checked_impl_receiver(for_type)?;
+                checker.set_current_self_type(Some(receiver.clone()));
+                let arguments = checker.protocol_application_arguments(&protocol, protocol_args, Some(&receiver))?;
+                let associated_types = checker.elaborate_impl_associated_assignments(
+                    &checker.path_to_string(&protocol), source, &owner,
+                )?;
+                let parameters = owner.values().map(crate::context::GenericBinder::declared)
                     .collect::<std::result::Result<List<_>, _>>()
-                    .map_err(|message| TypeError::UniverseBinding { message, span: impl_decl.span })?,
-                protocol: protocol.clone(),
-                protocol_args: resolved_protocol_args,
-                for_type: resolved_for_type,
-                where_clauses,
-                methods: Map::new(), // Methods come from protocol definition
-                associated_types,
-                associated_consts: Map::new(),
-                specialization,
-                impl_crate: Maybe::Some(self.current_module_path.clone()),
-                span: impl_decl.span,
-                type_param_fn_bounds,
-            };
-
-            Ok(protocol_impl)
+                    .map_err(|message| TypeError::UniverseBinding { message, span: source.span })?;
+                Ok(crate::protocol::ProtocolImpl {
+                    parameters, protocol, protocol_args: arguments, for_type: receiver,
+                    where_clauses, type_param_fn_bounds, associated_types,
+                    methods: Map::new(), associated_consts: Map::new(), specialization,
+                    impl_crate: Some(checker.current_module_path.clone()), span: source.span,
+                })
             })();
-            self.ctx.exit_scope();
-            let protocol_impl = preparation?;
-
-            self.protocol_checker.write().register_source_impl(
-                &self.current_module_path, impl_decl, protocol_impl.clone(),
-            )?;
-
-            #[cfg(debug_assertions)]
-            {
-                let proto_name = protocol.as_ident().map(|i| i.name.as_str()).unwrap_or("?");
-                // eprintln!(
-                // "[DEBUG] Registered blanket impl: {} for {:?}, where_clauses: {:?}",
-                // proto_name, protocol_impl.for_type, protocol_impl.where_clauses
-                // );
-            }
+            checker.pop_decl_param_frame();
+            prepared
+        });
+        self.set_current_self_type(previous_self);
+        for (name, prior) in shadowed.into_iter().rev() {
+            if let Some(prior) = prior { self.ctx.define_type(name, prior); }
+            else { self.ctx.remove_type(&name); }
         }
-
-        Ok(())
+        self.ctx.exit_scope();
+        let implementation = result?;
+        self.protocol_checker.write().register_source_impl(&self.current_module_path, source, implementation)
     }
 
     /// Import all public items from a module (glob import).

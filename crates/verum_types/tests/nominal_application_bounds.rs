@@ -313,6 +313,22 @@ fn imported_receiver_keeps_its_bounds_and_rejects_foreign_evidence() {
         "{invalid:#?}"
     );
 }
+
+#[test]
+fn imported_implementation_arguments_share_the_receivers_declared_constraints() {
+    let provider = r#"
+        public type Key is protocol {};
+        public type Table<T:Key> is { value:T };
+        public type Combine<R> is protocol { type Out; };
+        implement<T:Key> Combine<&Table<T>> for &Table<T> { type Out = Table<T>; }
+    "#;
+    let import = "mount demo.lib.{Key, Table, Combine};";
+    let valid = mounted(import, provider, None);
+    assert!(valid.is_empty(), "{valid:#?}");
+    let unbounded = provider.replace("implement<T:Key>", "implement<T>");
+    let refused = mounted(import, &unbounded, None);
+    assert!(refused.iter().any(|e| e.contains("declared assumptions") || e.contains("no implementation")), "{refused:#?}");
+}
 #[test]
 fn mounted_generic_uses_only_its_declared_owner_premises() {
     let good = mounted(
