@@ -16573,55 +16573,7 @@ impl VbcCodegen {
                         let method_name = decl.name.name.to_string();
                         let method_name_id = StringId(self.ctx.intern_string_raw(&method_name));
 
-                        // Build the combined scope: protocol-level
-                        // params first (IDs 0..N), then method-local
-                        // params (IDs N..N+M).  Method-locals start
-                        // from the protocol-param count so the
-                        // archive_metadata renderer's
-                        // protocol-only `param_id_to_name` doesn't
-                        // resolve them — they round-trip as
-                        // `__generic_N` → fresh TypeVar.
-                        let mut combined_map = proto_param_map.clone();
-                        let proto_count = combined_map.len() as u16;
-                        for (i, g) in decl.generics.iter().enumerate() {
-                            if let verum_ast::ty::GenericParamKind::Type { name, .. } = &g.kind {
-                                let key = name.name.to_string();
-                                combined_map
-                                    .entry(key)
-                                    .or_insert(proto_count + i as u16);
-                            }
-                        }
-
-                        // Build function TypeRef for the method
-                        let param_refs: Vec<crate::types::TypeRef> = decl
-                            .params
-                            .iter()
-                            .filter_map(|p| {
-                                if let verum_ast::decl::FunctionParamKind::Regular { ty, .. } =
-                                    &p.kind
-                                {
-                                    Some(self.resolve_signature_type_ref(ty, &combined_map))
-                                } else {
-                                    None // Skip self params
-                                }
-                            })
-                            .collect::<CodegenResult<_>>()?;
-
-                        let ret_ref = match &decl.return_type {
-                            verum_common::Maybe::Some(ty) => {
-                                self.resolve_signature_type_ref(ty, &combined_map)?
-                            }
-                            verum_common::Maybe::None => {
-                                TypeRef::Concrete(crate::types::TypeId::UNIT)
-                            }
-                        };
-
-                        let method_type_ref = TypeRef::Function {
-                            is_async: decl.is_async,
-                            params: param_refs,
-                            return_type: Box::new(ret_ref),
-                            contexts: smallvec::SmallVec::new(),
-                        };
+                        let method_type_ref = self.protocol_member_signature(decl, &proto_param_map)?;
 
                         let variant_desc = crate::types::VariantDescriptor {
                             method_dispatch: Some(verum_ast::method_dispatch::MethodDispatch::from_declaration(decl)),

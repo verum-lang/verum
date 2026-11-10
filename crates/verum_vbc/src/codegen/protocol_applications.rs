@@ -258,7 +258,7 @@ impl VbcCodegen {
     /// Walk type positions, preserving the kind of nominal argument slots and
     /// locally quantified shadowing. A value is legal inside Sized<N>, but not
     /// inside (N, Int), &N, or fn() -> N.
-    fn reject_protocol_value_as_type(
+    pub(super) fn reject_protocol_value_as_type(
         &mut self,
         ty: &Type,
         parameters: &[GenericParam],

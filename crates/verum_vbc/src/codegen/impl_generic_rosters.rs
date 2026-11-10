@@ -321,6 +321,16 @@ impl VbcCodegen {
                 receiver.0
             });
             let deferred = declaration.body.is_protocol_like() && receiver_dependent;
+            if let Some(default) = default.filter(|_| declaration.body.is_protocol_like() && !deferred)
+                && declaration.generics.iter().any(|formal| matches!(
+                    formal.kind, GenericParamKind::Const { .. } | GenericParamKind::Meta { .. }
+                ))
+            {
+                self.reject_protocol_value_as_type(default, &declaration.generics, &scope)
+                    .map_err(|error| error.with_context(format!("default of protocol '{}', parameter '{}'",
+                        crate::module::qualify_module_name(self.lexical_type_scope(), declaration.name.name.as_str()),
+                        name.name)))?;
+            }
             let mut descriptor = TypeParamDescriptor {
                 name: StringId(self.ctx.intern_string_raw(name.name.as_str())),
                 id: TypeParamId(index),

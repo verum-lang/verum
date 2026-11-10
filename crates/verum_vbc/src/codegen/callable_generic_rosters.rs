@@ -583,6 +583,48 @@ impl VbcCodegen {
         Ok(substitution)
     }
 
+    /// Method-local binders take precedence over the protocol's binders in
+    /// both the signature and the compile-time value environment.
+    pub(super) fn protocol_member_signature(
+        &mut self,
+        function: &FunctionDecl,
+        owner: &std::collections::HashMap<String, u16>,
+    ) -> CodegenResult<TypeRef> {
+        let (mut scope, local) = Self::extend_function_generic_scope(function, owner.clone());
+        scope.extend(local);
+        let mut substitution = self.current_source_substitution.for_function(function);
+        self.bind_source_value_parameters(&function.generics, &scope, &mut substitution)?;
+        self.with_protocol_source_scope(
+            Some(self.lexical_type_scope().to_owned()),
+            substitution,
+            None,
+            |cg| {
+                let params = function
+                    .params
+                    .iter()
+                    .filter_map(|parameter| match &parameter.kind {
+                        verum_ast::FunctionParamKind::Regular { ty, .. } => {
+                            Some(cg.resolve_signature_type_ref(ty, &scope))
+                        }
+                        _ => None,
+                    })
+                    .collect::<CodegenResult<Vec<_>>>()?;
+                let result = function
+                    .return_type
+                    .as_ref()
+                    .map(|ty| cg.resolve_signature_type_ref(ty, &scope))
+                    .transpose()?
+                    .unwrap_or(TypeRef::Concrete(TypeId::UNIT));
+                Ok(TypeRef::Function {
+                    is_async: function.is_async,
+                    params,
+                    return_type: Box::new(result),
+                    contexts: Default::default(),
+                })
+            },
+        )
+    }
+
     pub(super) fn implementation_value_scope(
         &self,
         target: &verum_ast::Type,
