@@ -260,10 +260,10 @@ implement PanicReport {
     /// directly to limit aggregate allocation size.
     public fn format_panic_context(&self) -> Text {
         let mut out: Text = "PanicReport at panic site:\n".clone();
-        out = out + f"  panic: {self.info.message}";
+        out = out + f"  panic: {self.info.message()}";
         match self.info.location() {
             Maybe.Some(loc) => {
-                out = out + f"\n  at: {loc.file}:{loc.line}:{loc.column}";
+                out = out + f"\n  at: {loc}";
             }
             Maybe.None => {}
         }
@@ -302,19 +302,19 @@ implement Display for PanicReport {
     /// Each subsection compresses to its identity so the line stays
     /// log-friendly even with all three contexts present.
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str(f"panic[msg={self.info.message}")?;
+        f.write_str(f"panic[msg={self.info.message()}")?;
         if self.has_thread_name() {
             f.write_str(f",thread={self.thread_name}")?;
         }
         match &self.task {
             Maybe.Some(t) => {
-                f.write_str(f",task={t.id.id}")?;
+                f.write_str(f",task={t.id().as_int()}")?;
             }
             Maybe.None => {}
         }
         match &self.header {
             Maybe.Some(h) => {
-                f.write_str(f",alloc_gen={h.generation}")?;
+                f.write_str(f",alloc_gen={h.generation()}")?;
             }
             Maybe.None => {}
         }

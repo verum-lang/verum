@@ -142,6 +142,9 @@ public type TaskInfo is {
 };
 
 implement TaskInfo {
+    @inline
+    public fn id(&self) -> &TaskId { &self.id }
+
     /// Construct a snapshot from raw metadata. The async runtime
     /// owns the source of truth (per-task atomic counters); this
     /// constructor is the format-stable boundary callers code
@@ -177,7 +180,7 @@ implement TaskInfo {
     /// per call so OOM-path callers should prefer Display.
     public fn format_panic_context(&self) -> Text {
         let mut out: Text = "  Async task at panic site:\n".clone();
-        out = out + f"    id:         {self.id.id}\n";
+        out = out + f"    id:         {self.id.as_int()}\n";
         out = out + f"    state:      {self.state}\n";
         out = out + f"    name:       {self.name}\n";
         out = out + f"    poll_count: {self.poll_count}";
@@ -191,7 +194,7 @@ implement TaskInfo {
 implement Display for TaskInfo {
     /// Single-line summary suitable for log lines.
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str(f"task[id={self.id.id},state={self.state},polls={self.poll_count},name={self.name}]")
+        f.write_str(f"task[id={self.id.as_int()},state={self.state},polls={self.poll_count},name={self.name}]")
     }
 }
 
@@ -199,7 +202,7 @@ implement Debug for TaskInfo {
     /// Multi-line dump suitable for panic post-mortems.
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         f.write_str("TaskInfo {\n")?;
-        f.write_str(f"  id:         TaskId({self.id.id})\n")?;
+        f.write_str(f"  id:         TaskId({self.id.as_int()})\n")?;
         f.write_str(f"  state:      {self.state}\n")?;
         f.write_str(f"  name:       {self.name}\n")?;
         f.write_str(f"  poll_count: {self.poll_count}\n")?;

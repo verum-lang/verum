@@ -97,6 +97,9 @@ public type MemHeaderView is {
 };
 
 implement MemHeaderView {
+    @inline
+    public fn generation(&self) -> UInt32 { self.generation }
+
     /// Capture a snapshot of a header.
     ///
 

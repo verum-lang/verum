@@ -53,6 +53,10 @@ public type TaskId is {
 };
 
 implement TaskId {
+    /// The stable numeric identity allocated when the task was spawned.
+    @inline
+    public fn as_int(&self) -> Int { self.id }
+
     // Create new task ID.
     fn new() -> TaskId {
         // Use atomic counter for unique IDs
