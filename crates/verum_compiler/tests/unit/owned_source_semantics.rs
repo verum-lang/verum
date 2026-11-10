@@ -610,3 +610,25 @@ fn mounted_free_functions_keep_their_declared_protocol_requirements() {
         assert_eq!(result.is_ok(), allowed, "{body}: {result:?}");
     }
 }
+
+#[test]
+fn forward_type_aliases_reach_their_declaring_constructor() {
+    let concrete = "public type Concrete is { n:Int };";
+    let constructor = "implement Concrete { public fn new()->Concrete { Concrete { n:7 } } }";
+    let alias = "type Backend is Concrete;";
+    let consumer = "type Driver is { inner:Backend }; implement Driver { fn new()->Driver { Driver { inner:Backend.new() } } }";
+    for (declarations, valid) in [
+        (format!("{consumer} {alias} {concrete} {constructor}"), true),
+        (format!("{concrete} {constructor} {alias} {consumer}"), true),
+        (format!("{consumer} type Backend is Missing; {concrete} {constructor}"), false),
+        (format!("{consumer} {alias} {concrete}"), false),
+    ] {
+        let source = format!("module core.driver; {declarations}");
+        let ast = Parser::new(&source).parse_module().unwrap();
+        let registry = source_registry([("core.driver", "driver.vr", &ast)]).unwrap();
+        let mut checker = TypeChecker::with_minimal_context();
+        checker.register_builtins();
+        let result = check_source_module(&mut checker, "core.driver", &ast, &registry);
+        assert_eq!(result.is_ok(), valid, "{source}: {result:?}");
+    }
+}

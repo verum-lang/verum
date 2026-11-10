@@ -199,6 +199,19 @@ impl TypeChecker {
 
     /// Alias application substitutes every retained declaration slot in source
     /// order. Lifetime annotations erase; value parameters retain their identity.
+    /// A forward-declared target has a nominal identity before its fields
+    /// and inherent methods are complete. An alias must retain that
+    /// identity so later users look up the completed declaration.
+    fn declared_alias_target(&mut self, source: &verum_ast::Type) -> Result<Type> {
+        match self.declared_type(source)? {
+            Type::Placeholder { name, .. } => Ok(Type::Named {
+                path: Self::text_to_path(&name),
+                args: List::new(),
+            }),
+            target => Ok(target),
+        }
+    }
+
     fn register_source_alias_parameters(
         &mut self,
         name: &Text,
@@ -582,7 +595,7 @@ impl TypeChecker {
         match effective_body {
             TypeDeclBody::Alias(aliased_type) => {
                 // Register the type alias in the type context
-                let resolved_type = self.declared_type(aliased_type)?;
+                let resolved_type = self.declared_alias_target(aliased_type)?;
 
                 // CRITICAL: Store the RESOLVED type in the alias table, but store a NAMED type
                 // reference in type_defs. This ensures that when `Reducer<Int, Int>` is looked up:
@@ -2582,7 +2595,7 @@ impl TypeChecker {
 
         match effective_body {
             TypeDeclBody::Alias(aliased_type) => {
-                let resolved_type = self.declared_type(aliased_type)?;
+                let resolved_type = self.declared_alias_target(aliased_type)?;
                 // Register as alias for proper resolution (stores resolved type)
                 self.declare_type_alias_target(type_name.clone(), resolved_type.clone());
                 // Also register in the unifier for transparent alias unification
