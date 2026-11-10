@@ -776,6 +776,12 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             encode_varint(*message_id as u64, output);
         }
 
+        Instruction::PanicValue { message } => {
+            output.push(Opcode::Extended.to_byte());
+            output.push(ExtendedSubOpcode::PanicValue.to_byte());
+            encode_reg(*message, output);
+        }
+
         Instruction::Panic { message_id } => {
             output.push(Opcode::Panic.to_byte());
             encode_varint(*message_id as u64, output);
@@ -5261,6 +5267,9 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     let type_ref = decode_type_ref(data, offset)?;
                     Ok(Instruction::DropTyped { src, type_ref })
                 }
+                Some(ExtendedSubOpcode::PanicValue) => Ok(Instruction::PanicValue {
+                    message: decode_reg(data, offset)?,
+                }),
                 Some(ExtendedSubOpcode::TypeLayout) => {
                     let dst = decode_reg(data, offset)?;
                     let raw_property = decode_u8(data, offset)?;
@@ -7528,6 +7537,7 @@ mod tests {
             message_id: 10,
         });
         test_roundtrip(&Instruction::Panic { message_id: 20 });
+        test_roundtrip(&Instruction::PanicValue { message: Reg(314) });
         test_roundtrip(&Instruction::Unreachable);
     }
 

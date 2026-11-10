@@ -9833,6 +9833,9 @@ pub enum ExtendedSubOpcode {    /// Reserved no-op — forward-compat anchor. Al
     /// FFI calls.
     ProcessExit = 0x10,
 
+    /// Raise a panic using the Text stored in the operand register.
+    PanicValue = 0x11,
+
     // ========================================================================
     // Embedded scripting engine (0x20-0x5C) — backing for `core.script`.
     // ========================================================================
@@ -10074,6 +10077,7 @@ impl ExtendedSubOpcode {
             0x09 => Some(Self::DropTyped),
             0x0a => Some(Self::BindMethodReceiver),
             0x10 => Some(Self::ProcessExit),
+            0x11 => Some(Self::PanicValue),
             0x20 => Some(Self::ScriptEngineNew),
             0x21 => Some(Self::ScriptEngineFree),
             0x22 => Some(Self::ScriptEngineEval),
@@ -10165,6 +10169,7 @@ impl ExtendedSubOpcode {
             Self::GetFieldNamed => "EXT_GET_FIELD_NAMED",
             Self::SetFieldNamed => "EXT_SET_FIELD_NAMED",
             Self::ProcessExit => "EXT_PROCESS_EXIT",
+            Self::PanicValue => "EXT_PANIC_VALUE",
             Self::ScriptEngineNew => "EXT_SCRIPT_ENGINE_NEW",
             Self::ScriptEngineFree => "EXT_SCRIPT_ENGINE_FREE",
             Self::ScriptEngineEval => "EXT_SCRIPT_ENGINE_EVAL",
@@ -11605,6 +11610,11 @@ pub enum Instruction {    // ===================================================
     Panic {
         /// Message string pool index.
         message_id: u32,
+    },
+    /// Panic with a Text value supplied at runtime.
+    PanicValue {
+        /// Register holding the message.
+        message: Reg,
     },
     /// Unreachable marker.
     Unreachable,

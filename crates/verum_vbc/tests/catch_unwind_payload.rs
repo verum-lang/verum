@@ -246,3 +246,40 @@ fn panic_unwind_removes_contexts_and_registers_owned_by_departing_frames() {
     assert!(interpreter.state.context_stack.get(98765).is_none());
     assert_eq!(interpreter.state.registers.top(), 0);
 }
+
+#[test]
+fn runtime_panic_text_crosses_calls_and_keeps_its_utf8_bytes() {
+    for (message, body) in [
+        ("short", r#"@intrinsic("panic", message)"#),
+        ("два разных сообщения", "panic(message)"),
+    ] {
+        let mut program = source("core.intrinsics.control", "IntrinsicPanicInfo", "fence(|| victim())");
+        program = program.replace(
+            r#"fn victim() -> Int { panic("payload-seven"); 0 }"#,
+            &format!("fn fail(message:Text) -> Never {{ {body} }}\nfn victim()->Int {{ fail(\"{message}\"); 0 }}"),
+        );
+        let module = compile(&program).expect("compile the runtime operand");
+        let module = verum_vbc::deserialize::deserialize_module(
+            &verum_vbc::serialize::serialize_module(&module).expect("serialize"),
+        ).expect("read the panic operand");
+        verum_vbc::validate::validate_module(&module).expect("valid runtime panic register");
+        let victim = module.find_function_by_name("core.intrinsics.control.victim").unwrap();
+        let (mut vm, result) = run(module);
+        let error = caught_error(result);
+        // SAFETY: catch returns its declared two-field error record whose first member is Text.
+        let received = unsafe {
+            let value = *(error.as_ptr::<u8>().add(heap::OBJECT_HEADER_SIZE) as *const Value);
+            if value.is_small_string() {
+                value.as_small_string().as_bytes().to_vec()
+            } else {
+                let (pointer, length) = heap::text_record_payload(value.as_ptr::<u8>()).expect("panic text");
+                std::slice::from_raw_parts(pointer, length).to_vec()
+            }
+        };
+        assert_eq!(received, message.as_bytes());
+        assert!(matches!(
+            vm.execute_function(victim),
+            Err(heap::InterpreterError::Panic { message: actual }) if actual == message
+        ));
+    }
+}

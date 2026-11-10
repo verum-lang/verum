@@ -194,6 +194,7 @@ impl crate::module::VbcModule {
                 Instruction::Ret { .. }
                 | Instruction::RetV
                 | Instruction::Panic { .. }
+                | Instruction::PanicValue { .. }
                 | Instruction::Unreachable => successors.push(exit),
                 Instruction::Switch { .. }
                 | Instruction::TryBegin { .. }

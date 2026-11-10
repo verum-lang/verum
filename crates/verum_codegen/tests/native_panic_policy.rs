@@ -172,3 +172,70 @@ fn runtime_unwind_throws_an_owned_message_packet_while_abort_terminates() {
         }
     }
 }
+
+#[cfg(target_os = "macos")]
+#[test]
+fn caught_and_uncaught_runtime_messages_reach_the_native_process() {
+    use std::process::Command;
+    use verum_fast_parser::Parser;
+    use verum_llvm::OptimizationLevel;
+    use verum_llvm::targets::{CodeModel, FileType, RelocMode, TargetMachine};
+    use verum_vbc::{codegen::VbcCodegen, deserialize::deserialize_module, serialize::serialize_module};
+
+    Target::initialize_native(&InitializationConfig::default()).unwrap();
+    for caught in [true, false] {
+        let body = if caught {
+            r#"if check("first") == 1 && check("второе сообщение") == 1 { 86 } else { 42 }"#
+        } else {
+            r#"fail("uncaught второй"); 0"#
+        };
+        let source = format!(r#"
+            module core.intrinsics.control;
+            type Location is {{ line: Int }};
+            type IntrinsicPanicInfo is {{ message: Text, location: Maybe<Location> }};
+            @intrinsic("catch_unwind")
+            fn fence<T>(f:fn()->T)->Result<T,IntrinsicPanicInfo> {{ @intrinsic("catch_unwind", f) }}
+            fn fail(message:Text)->Never {{ @intrinsic("panic", message) }}
+            fn check(message:Text)->Int {{
+                let result = fence(|| {{ fail(message); 0 }});
+                match result {{ Result.Err(info) => if info.message == message {{ 1 }} else {{ 2 }}, _ => 3 }}
+            }}
+            fn main()->Int {{ {body} }}
+        "#);
+        let module = VbcCodegen::new().compile_module(&Parser::new(&source).parse_module().unwrap()).unwrap();
+        let mut wire = deserialize_module(&serialize_module(&module).unwrap()).unwrap();
+        for function in &mut wire.functions {
+            let start = function.bytecode_offset as usize;
+            let end = start + function.bytecode_length as usize;
+            let mut instructions = verum_vbc::bytecode::decode_instructions(&wire.bytecode[start..end]).unwrap();
+            verum_vbc::bytecode::jump_offsets_to_instr_indices(&mut instructions);
+            function.instructions = Some(instructions);
+        }
+        let context = Context::create();
+        let mut config = LoweringConfig::debug("panic_value").with_debug_info(false);
+        config.panic_strategy = if caught { PanicStrategy::Unwind } else { PanicStrategy::Abort };
+        let mut lowering = VbcToLlvmLowering::new(&context, config);
+        lowering.lower_module(&wire).expect("native lowering");
+        let module = lowering.module();
+        let triple = TargetMachine::get_default_triple();
+        let machine = Target::from_triple(&triple).unwrap().create_target_machine(
+            &triple, "generic", "", OptimizationLevel::None, RelocMode::PIC, CodeModel::Default,
+        ).unwrap();
+        module.set_data_layout(&machine.get_target_data().get_data_layout());
+        module.verify().expect("verified native IR");
+        let temp = tempfile::tempdir().unwrap();
+        let object = temp.path().join("panic.o");
+        let binary = temp.path().join("panic");
+        machine.write_to_file(module, FileType::Object, &object).unwrap();
+        let linked = Command::new("cc").arg(&object).args(["-Wl,-dead_strip", "-nostdlib", "-lSystem", "-o"])
+            .arg(&binary).output().unwrap();
+        assert!(linked.status.success(), "{}", String::from_utf8_lossy(&linked.stderr));
+        let actual = Command::new(binary).output().unwrap();
+        if caught {
+            assert_eq!(actual.status.code(), Some(86), "{}", String::from_utf8_lossy(&actual.stderr));
+        } else {
+            assert_eq!(actual.status.code(), Some(1));
+            assert!(String::from_utf8_lossy(&actual.stderr).contains("uncaught второй"));
+        }
+    }
+}

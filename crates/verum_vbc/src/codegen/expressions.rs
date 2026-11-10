@@ -9629,75 +9629,33 @@ impl VbcCodegen {
         });
     }
 
-    /// Tries to compile a builtin function.
-    /// The message id for a `panic`-family builtin.
-    ///
-    /// `panic`, `todo`, `unimplemented` and `unreachable` all end in
-    /// `Instruction::Panic`, whose operand is a STRING TABLE index —
-    /// `handle_panic` reads it with `state.module.get_string(StringId(id))`.
-    /// `add_const_string` returns a CONST POOL index, and the two spaces are
-    /// unrelated: `todo()` panicked with `DataBuilder` and `unimplemented()`
-    /// with `pos`, names that happened to sit at those indices in the string
-    /// table. `intern_string` is the string table, and is what every other
-    /// `Panic` emitter in this file already used.
-    ///
-    /// The argument handling is `panic`'s, verbatim, because all four take
-    /// the SAME optional `Text`: `core/base/panic.vr` declares
-    /// `unreachable(msg: Text = "entered unreachable code")`,
-    /// `unimplemented(msg: Text = "not implemented")` and
-    /// `todo(msg: Text = "not yet implemented")`. Sharing one path is what
-    /// keeps the dynamic case — `f"..."` rendered to stderr — from being
-    /// implemented once and forgotten three times.
-    fn panic_family_message_id(
+    /// Static panic messages use the string table. A computed message is
+    /// evaluated once and follows the same unwinder in its Text register.
+    fn emit_panic_family(
         &mut self,
         args: &verum_common::List<Expr>,
         default_message: &str,
-    ) -> CodegenResult<u32> {
-        let static_text: Option<&str> = if args.is_empty() {
-            Some(default_message)
-        } else if let ExprKind::Literal(lit) = &args[0].kind
-            && let LiteralKind::Text(text) = &lit.kind
-        {
-            Some(text.as_str())
-        } else if let ExprKind::Unary {
-            op: UnOp::Ref,
-            expr,
-            ..
-        } = &args[0].kind
-            && let ExprKind::Literal(lit) = &expr.kind
-            && let LiteralKind::Text(text) = &lit.kind
-        {
-            Some(text.as_str())
-        } else {
-            None
+    ) -> CodegenResult<()> {
+        let Some(message) = args.first() else {
+            let message_id = self.intern_string(default_message);
+            self.ctx.emit(Instruction::Panic { message_id });
+            return Ok(());
         };
-
-        match static_text {
-            Some(s) => Ok(self.intern_string(s)),
-            None => {
-                // Dynamic-message path: render the argument to stderr — the
-                // same stream the Tier-0 panic render writes to — and leave a
-                // sentinel in the Panic itself so a reader grepping `Panic:`
-                // is pointed at the line above rather than handed "explicit
-                // panic".
-                let prefix = self.ctx.alloc_temp();
-                let prefix_id = self.ctx.add_const_string("panic: ");
-                self.ctx.emit(Instruction::LoadK {
-                    dst: prefix,
-                    const_id: prefix_id.0,
-                });
-                self.ctx.emit(Instruction::DebugPrint { value: prefix });
-                self.ctx.free_temp(prefix);
-
-                let msg_reg = self
-                    .compile_expr(&args[0])?
-                    .or_internal("panic arg has no value")?;
-                self.ctx.emit(Instruction::DebugPrint { value: msg_reg });
-                self.ctx.free_temp(msg_reg);
-
-                Ok(self.intern_string("<dynamic panic — see message above>"))
-            }
+        let text = match &message.kind {
+            ExprKind::Unary { op: UnOp::Ref, expr, .. } => expr.as_ref(),
+            _ => message,
+        };
+        if let ExprKind::Literal(lit) = &text.kind
+            && let LiteralKind::Text(text) = &lit.kind
+        {
+            let message_id = self.intern_string(text.as_str());
+            self.ctx.emit(Instruction::Panic { message_id });
+        } else {
+            let message = self.compile_expr(message)?.or_internal("panic message has no value")?;
+            self.ctx.emit(Instruction::PanicValue { message });
+            self.ctx.free_temp(message);
         }
+        Ok(())
     }
 
     fn try_compile_builtin(
@@ -9802,33 +9760,7 @@ impl VbcCodegen {
             }
 
             "panic" => {
-                // Static-message fast path: when the argument is a bare
-                // Text literal (or `&"..."` reference to one), intern
-                // the string directly into the constant pool and emit
-                // `Instruction::Panic { message_id }`.  This keeps the
-                // common case (`panic("oops")`) zero-overhead.
-                //
-                // Dynamic-message slow path: when the argument is any
-                // other expression — most importantly `f"..."`
-                // interpolated strings, which Map.resize / vector
-                // intrinsics / collection bound-checks rely on for
-                // diagnostic context — compile the argument to a
-                // register, DebugPrint it so the rendered message
-                // appears on stderr (the same stream the Tier-0
-                // interpreter's panic-render path writes to), and
-                // then emit a single literal Panic carrying the
-                // sentinel "<dynamic panic — see message above>"
-                // so callers grepping for `Panic:` find a clear
-                // pointer to the rendered message.  Pre-fix the
-                // dynamic case silently degraded to the static
-                // "explicit panic" string, swallowing the real
-                // diagnostic — `Map.resize: allocator returned null for
-                // {size} bytes (new_cap={new_cap}, old_cap={self.cap})`
-                // became unreadable "explicit panic", a class of
-                // diagnostic loss that blocked union_find /
-                // toposort suite triage.
-                let message_id = self.panic_family_message_id(args, "panic!")?;
-                self.ctx.emit(Instruction::Panic { message_id });
+                self.emit_panic_family(args, "panic!")?;
                 Ok(Some(None))
             }
 
@@ -9865,9 +9797,7 @@ impl VbcCodegen {
                 if args.is_empty() {
                     self.ctx.emit(Instruction::Unreachable);
                 } else {
-                    let message_id =
-                        self.panic_family_message_id(args, "entered unreachable code")?;
-                    self.ctx.emit(Instruction::Panic { message_id });
+                    self.emit_panic_family(args, "entered unreachable code")?;
                 }
                 Ok(Some(None))
             }
@@ -10316,15 +10246,13 @@ impl VbcCodegen {
                 // Mark as not yet implemented — panics at runtime, with the
                 // caller's message when one is given. The defaults mirror
                 // `core/base/panic.vr`, which is where a reader looks them up.
-                let message_id = self.panic_family_message_id(args, "not yet implemented")?;
-                self.ctx.emit(Instruction::Panic { message_id });
+                self.emit_panic_family(args, "not yet implemented")?;
                 Ok(Some(None))
             }
 
             "unimplemented" => {
                 // Alias for todo, with its own default message.
-                let message_id = self.panic_family_message_id(args, "not implemented")?;
-                self.ctx.emit(Instruction::Panic { message_id });
+                self.emit_panic_family(args, "not implemented")?;
                 Ok(Some(None))
             }
 
@@ -35919,13 +35847,13 @@ impl VbcCodegen {
                 )));
             }
             CodegenStrategy::DirectOpcode(opcode) => {
-                self.emit_intrinsic_direct_opcode(*opcode, args, dest);
+                self.emit_intrinsic_direct_opcode(*opcode, args, dest)?;
             }
             CodegenStrategy::OpcodeWithMode(opcode, mode) => {
-                self.emit_intrinsic_opcode_with_mode(*opcode, *mode, args, dest);
+                self.emit_intrinsic_opcode_with_mode(*opcode, *mode, args, dest)?;
             }
             CodegenStrategy::OpcodeWithSize(opcode, size) => {
-                self.emit_intrinsic_opcode_with_size(*opcode, *size, args, dest);
+                self.emit_intrinsic_opcode_with_size(*opcode, *size, args, dest)?;
             }
             CodegenStrategy::InlineSequence(seq_id) => {
                 // `ptr_elem_stride` is 8 for every non-pointer intrinsic
@@ -36008,7 +35936,7 @@ impl VbcCodegen {
         opcode: crate::instruction::Opcode,
         args: &[Reg],
         dest: Reg,
-    ) {
+    ) -> CodegenResult<()> {
         use crate::instruction::Opcode;
 
         match opcode {
@@ -36308,9 +36236,10 @@ impl VbcCodegen {
 
             // Control flow
             Opcode::Panic => {
-                let message_id = self.intern_string("intrinsic panic");
-                self.ctx.emit(Instruction::Panic { message_id });
-                self.ctx.emit(Instruction::LoadNil { dst: dest });
+                let [message] = args else {
+                    return Err(CodegenError::internal("panic requires one Text argument"));
+                };
+                self.ctx.emit(Instruction::PanicValue { message: *message });
             }
             Opcode::Unreachable => {
                 self.ctx.emit(Instruction::Unreachable);
@@ -36424,6 +36353,7 @@ impl VbcCodegen {
                 self.ctx.emit(Instruction::LoadNil { dst: dest });
             }
         }
+        Ok(())
     }
 
     /// Emits an opcode with mode for intrinsics (e.g., atomic operations with ordering).
@@ -36433,7 +36363,7 @@ impl VbcCodegen {
         mode: u8,
         args: &[Reg],
         dest: Reg,
-    ) {
+    ) -> CodegenResult<()> {
         use crate::instruction::Opcode;
 
         match opcode {
@@ -36465,9 +36395,10 @@ impl VbcCodegen {
                 self.ctx.emit(Instruction::LoadNil { dst: dest });
             }
             _ => {
-                self.emit_intrinsic_direct_opcode(opcode, args, dest);
+                self.emit_intrinsic_direct_opcode(opcode, args, dest)?;
             }
         }
+        Ok(())
     }
 
     /// Emits an opcode with size for intrinsics (e.g., atomic operations with different sizes).
@@ -36477,7 +36408,7 @@ impl VbcCodegen {
         size: u8,
         args: &[Reg],
         dest: Reg,
-    ) {
+    ) -> CodegenResult<()> {
         use crate::instruction::Opcode;
 
         match opcode {
@@ -36520,9 +36451,10 @@ impl VbcCodegen {
             }
             _ => {
                 // Fallback for other opcodes
-                self.emit_intrinsic_direct_opcode(opcode, args, dest);
+                self.emit_intrinsic_direct_opcode(opcode, args, dest)?;
             }
         }
+        Ok(())
     }
 
     /// Resolve the panic error from the callee signature. A raw intrinsic

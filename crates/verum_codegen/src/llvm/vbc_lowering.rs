@@ -2870,6 +2870,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                 | Instruction::TailCall { .. }
                 | Instruction::Unreachable
                 | Instruction::Panic { .. }
+                | Instruction::PanicValue { .. }
                 | Instruction::Throw { .. } => {
                     // Instructions after a return/unreachable/panic/throw need their own block
                     // (may be dead code or merge point)

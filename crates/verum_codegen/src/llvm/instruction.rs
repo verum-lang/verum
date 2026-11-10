@@ -48,6 +48,16 @@ mod drop_typed;
 /// so the fallthrough is dead code, and not emitting `unreachable` keeps the
 /// rest of the enclosing VBC basic block lowerable into well-formed IR.
 fn emit_runtime_abort(ctx: &FunctionContext<'_, '_>, message: &str, name: &str) -> Result<()> {
+    let message_ptr = ctx.builder().build_global_string_ptr(message, name).or_llvm_err()?;
+    let length = ctx.llvm_context().i64_type().const_int(message.len() as u64, false);
+    emit_panic_bytes(ctx, message_ptr.as_pointer_value(), length)
+}
+
+fn emit_panic_bytes<'ctx>(
+    ctx: &FunctionContext<'_, 'ctx>,
+    message: verum_llvm::values::PointerValue<'ctx>,
+    length: verum_llvm::values::IntValue<'ctx>,
+) -> Result<()> {
     let llvm_ctx = ctx.llvm_context();
     let module = ctx.get_module();
     let builder = ctx.builder();
@@ -67,15 +77,12 @@ fn emit_runtime_abort(ctx: &FunctionContext<'_, '_>, message: &str, name: &str) 
     );
     let panic_fn = super::error::get_or_declare_function(module, "verum_panic", fn_type);
 
-    let msg = builder
-        .build_global_string_ptr(message, name)
-        .or_llvm_err()?;
     builder
         .build_call(
             panic_fn,
             &[
-                msg.as_pointer_value().into(),
-                i64_type.const_int(message.len() as u64, false).into(),
+                message.into(),
+                length.into(),
                 ptr_type.const_null().into(),
                 i32_type.const_zero().into(),
             ],
@@ -6672,6 +6679,25 @@ fn lower_instruction_impl<'ctx>(
             ctx.builder()
                 .build_unreachable()
                 .or_llvm_err()?;
+            Ok(())
+        }
+
+        Instruction::PanicValue { message } => {
+            let text = as_i64(ctx, ctx.get_register(message.0)?, "panic_text")?;
+            let i64_type = ctx.types().i64_type();
+            let ptr_type = ctx.types().ptr_type();
+            let data_fn = super::error::get_or_declare_function(
+                ctx.get_module(), "verum_text_get_ptr", ptr_type.fn_type(&[i64_type.into()], false),
+            );
+            let len_fn = super::error::get_or_declare_function(
+                ctx.get_module(), "verum_text_byte_len", i64_type.fn_type(&[i64_type.into()], false),
+            );
+            let data = ctx.builder().build_call(data_fn, &[text.into()], "panic_data")
+                .or_llvm_err()?.basic_value_or("panic Text has no data pointer")?.into_pointer_value();
+            let length = ctx.builder().build_call(len_fn, &[text.into()], "panic_len")
+                .or_llvm_err()?.basic_value_or("panic Text has no byte length")?.into_int_value();
+            emit_panic_bytes(ctx, data, length)?;
+            ctx.builder().build_unreachable().or_llvm_err()?;
             Ok(())
         }
 
@@ -31597,6 +31623,9 @@ fn lower_extended<'ctx>(
         }
         Some(ExtendedSubOpcode::NewClosureTyped | ExtendedSubOpcode::NewClosureWitnessed) => Err(LlvmLoweringError::unsupported(
             "typed NewClosure must be structurally decoded before lowering",
+        )),
+        Some(ExtendedSubOpcode::PanicValue) => Err(LlvmLoweringError::unsupported(
+            "PanicValue requires the canonical decoded instruction",
         )),
         Some(ExtendedSubOpcode::BindMethodReceiver) => Err(LlvmLoweringError::unsupported(
             "BindMethodReceiver requires the canonical decoded instruction",

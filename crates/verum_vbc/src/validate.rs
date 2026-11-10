@@ -874,6 +874,7 @@ impl<'a> Validator<'a> {
             // -----------------------------------------------------------
             // Panic — message_id references the string table.
             // -----------------------------------------------------------
+            Instruction::PanicValue { message } => self.check_reg(*message, max_reg, &func_name),
             Instruction::Panic { message_id } if *message_id >= string_count => {
                 self.errors.push(VbcError::InvalidStringId(*message_id));
             }

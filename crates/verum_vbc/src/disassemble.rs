@@ -803,6 +803,7 @@ fn write_instruction(
             str_name(module, *message_id)
         ),
         Panic { message_id } => write!(out, "PANIC     {}", str_name(module, *message_id)),
+        PanicValue { message } => write!(out, "PANIC_VALUE {}", r(message)),
         Unreachable => write!(out, "UNREACHABLE"),
         DebugPrint { value } => write!(out, "DBG_PRINT {}", r(value)),
         // ── Exception Handling ──

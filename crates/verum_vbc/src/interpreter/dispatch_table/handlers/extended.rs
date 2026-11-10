@@ -146,6 +146,12 @@ pub(in super::super) fn handle_extended(
 ) -> InterpreterResult<DispatchResult> {
     let sub_op_byte = read_u8(state)?;
     match ExtendedSubOpcode::from_byte(sub_op_byte) {
+        Some(ExtendedSubOpcode::PanicValue) => {
+            let source = read_reg(state)?;
+            let value = super::cbgr_helpers::resolve_arg_value(state, state.get_reg(source))?;
+            let message = super::string_helpers::extract_string(&value, state);
+            Err(InterpreterError::Panic { message })
+        }
         Some(ExtendedSubOpcode::NewClosureTyped) => super::calls::handle_new_closure_typed(state),
         Some(ExtendedSubOpcode::NewClosureWitnessed) => super::calls::handle_new_closure_witnessed(state),
         Some(ExtendedSubOpcode::Reserved) => {
