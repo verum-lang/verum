@@ -444,7 +444,8 @@ impl VbcCodegen {
             ) {
                 self.source_expression_declaration(arg, Some(&bindings.apply(formal).ok()?), 0)?
             } else {
-                self.declared_expression_result(arg, None, 0, 0).or_else(|| {
+                self.compiled_callable_signature(arg).cloned().or_else(||
+                    self.declared_expression_result(arg, None, 0, 0)).or_else(|| {
                     // A literal binding a still-free formal has the language's
                     // literal type. No register or rendered variable hint is evidence.
                     matches!(Self::normalized_place(arg).kind, ExprKind::Literal(_))
@@ -464,6 +465,12 @@ impl VbcCodegen {
                 }
             }
             if !self.bind_source_declaration(formal, actual, &mut bindings) { return None; }
+            if matches!(formal, TypeRef::Generic(_)) && matches!(actual, TypeRef::Function { .. })
+                && let Some(bound) = self.callable_parameter_bound(info, index)
+                && !self.bind_source_declaration(bound, actual, &mut bindings)
+            {
+                return None;
+            }
         }
         info.type_param_ids.iter().map(|id| bindings.get(*id).cloned()).collect()
     }

@@ -1285,6 +1285,7 @@ impl VbcCodegen {
         self.ctx.stats.expressions_compiled += 1;
         // Track source span for DWARF debug info (SourceMap population)
         self.ctx.set_current_span(expr.span);
+        let start = self.ctx.instructions.len();
 
         let result = match &expr.kind {
             // === Literals ===
@@ -1634,6 +1635,27 @@ impl VbcCodegen {
             // holds the thunk/closure for the corresponding observation.
             ExprKind::CopatternBody { arms, .. } => self.compile_copattern_body(arms),
         }?;
+        if let Some(reg) = result
+            && matches!(expr.kind, ExprKind::Path(_) | ExprKind::Field { .. })
+            && self.ctx.instructions.len() > start
+            && let Some(Instruction::NewClosure { dst, func_id, lexical_types, .. }) = self.ctx.instructions.last()
+            && *dst == reg
+            && let Some(info) = self.ctx.lookup_function_by_id(crate::FunctionId(*func_id))
+            && info.type_param_ids.len() == lexical_types.len()
+            && let Some(signature) = info.callable_signature.as_ref()
+        {
+            // The emitted function identity and its lexical arguments describe the
+            // actual value, including qualified names and locally shadowed functions.
+            let mut substitution = crate::mono::TypeSubstitution::empty();
+            for (&id, ty) in info.type_param_ids.iter().zip(lexical_types) {
+                substitution.bind(id, ty.clone());
+            }
+            if let Ok(signature) = substitution.apply(signature)
+                && self.declared_type_in_scope(&signature)
+            {
+                self.ctx.declared_result_types.insert(expr.span, Some(signature));
+            }
+        }
         if demand == ResultDemand::CallableReturn {
             result.map(|reg| self.materialize_list_return(reg)).transpose()
         } else {
@@ -8481,13 +8503,16 @@ impl VbcCodegen {
         }
     }
 
-    /// Read the semantic signature produced for this exact closure body.
+    /// Read the semantic signature produced for this exact callable value.
     pub(super) fn compiled_callable_signature(&self, expr: &Expr) -> Option<&crate::types::TypeRef> {
         match &expr.kind {
             ExprKind::Paren(inner) => self.compiled_callable_signature(inner),
             ExprKind::Closure { contexts, .. } if contexts.is_empty() => {
                 let id = self.ctx.compiled_closures.get(&expr.span)?;
                 self.ctx.lookup_function_by_id(*id)?.callable_signature.as_ref()
+            }
+            ExprKind::Path(_) | ExprKind::Field { .. } => {
+                self.ctx.declared_result_types.get(&expr.span)?.as_ref()
             }
             _ => None,
         }
@@ -8499,6 +8524,21 @@ impl VbcCodegen {
                 self.ctx.strings.get(id.0 as usize).map(String::as_str)))
             .or_else(|| self.ctx.archive_fn_parameter_generics.get(&func_id)
                 .and_then(|parameters| parameters.get(index)).copied().flatten())
+    }
+
+    /// The declared function bound is available before lowering a body and
+    /// from the same parameter's structural signature in imported bytecode.
+    pub(super) fn callable_parameter_bound<'a>(&'a self, info: &'a FunctionInfo, slot: usize) -> Option<&'a crate::types::TypeRef> {
+        use crate::types::TypeRef;
+        self.ctx.source_callable_bounds.get(&(info.id, slot))
+            .or_else(|| info.callable_signature.as_ref().and_then(|signature| match signature {
+                TypeRef::Function { params, .. } => params.get(slot).filter(|ty| matches!(ty, TypeRef::Function { .. })),
+                _ => None,
+            }))
+            .or_else(|| self.functions.iter().find(|f| f.descriptor.id == info.id)
+                .and_then(|f| f.descriptor.params.get(slot)).map(|p| &p.type_ref))
+            .or_else(|| self.ctx.archive_fn_param_types.get(&info.id.0)?.get(slot))
+            .filter(|ty| matches!(ty, TypeRef::Function { .. }))
     }
 
     fn bind_compiled_callable_argument(
@@ -31828,15 +31868,7 @@ impl VbcCodegen {
         let key = self.registered_receiver_method(&owner, method)?;
         let info = self.ctx.lookup_qualified_function(&key)?;
         let slot = argument + usize::from(info.param_names.first().is_some_and(|name| name == "self"));
-        let parameter = self.ctx.source_callable_bounds.get(&(info.id, slot))
-            .or_else(|| info.callable_signature.as_ref().and_then(|signature| match signature {
-                TypeRef::Function { params, .. } => params.get(slot).filter(|ty| matches!(ty, TypeRef::Function { .. })),
-                _ => None,
-            }))
-            .or_else(|| self.functions.iter().find(|f| f.descriptor.id == info.id)
-                .and_then(|f| f.descriptor.params.get(slot)).map(|p| &p.type_ref))
-            .or_else(|| self.ctx.archive_fn_param_types.get(&info.id.0)?.get(slot))?;
-        let TypeRef::Function { params, .. } = parameter else { return None };
+        let TypeRef::Function { params, .. } = self.callable_parameter_bound(info, slot)? else { return None };
         let mut substitution = self.callable_owner_substitution(&owner)?;
         for (arg, id) in explicit.iter().zip(&info.explicit_type_param_ids) {
             if let (Some(ty), Some(id)) = (arg.type_for_declared_slot(), id)

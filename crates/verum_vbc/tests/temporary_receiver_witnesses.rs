@@ -461,3 +461,51 @@ fn probe() -> Int {{
         }
     }
 }
+
+#[test]
+fn named_and_shadowed_callable_values_bind_their_own_method_witnesses() {
+    let source = Parser::new(r#"
+module carrier;
+type Cell<T> is { value: T };
+implement<T> Cell<T> {
+    fn adapt<U, F: fn(T) -> U>(self, f: F) -> U { f(self.value) }
+}
+fn select_value(x: Int32) -> Int { (x as Int) + 5 }
+fn from_flag(x: Bool) -> Int { if x { 17 } else { 3 } }
+fn probe() -> Int {
+    let cell: Cell<Int32> = Cell { value: 4 as Int32 };
+    let first = cell.adapt(select_value);
+    let select_value: fn(Bool) -> Int = from_flag;
+    let cell: Cell<Bool> = Cell { value: true };
+    let second = cell.adapt(select_value);
+    first * 100 + second
+}
+"#).parse_module().unwrap();
+    let mut codegen = VbcCodegen::with_config(CodegenConfig::new("carrier"));
+    let module = codegen.compile_module(&source).unwrap();
+    let mut module = deserialize_module(&serialize_module(&module).unwrap()).unwrap();
+    assert!(module.resolve_external_bands().is_empty());
+    verum_vbc::validate::validate_module(&module).unwrap();
+    let entry = module.find_function_by_name("carrier.probe").unwrap();
+    let desc = module.get_function(entry).unwrap();
+    let mut offset = desc.bytecode_offset as usize;
+    let end = offset + desc.bytecode_length as usize;
+    let mut witnesses = Vec::new();
+    while offset < end {
+        let op = verum_vbc::bytecode::decode_instruction(&module.bytecode, &mut offset).unwrap();
+        match op {
+            verum_vbc::Instruction::CallG { type_args, .. }
+            | verum_vbc::Instruction::SetCallWitness { type_args } => witnesses.push(type_args),
+            _ => {}
+        }
+    }
+    let expected: Vec<_> = [TypeId::I32, TypeId::BOOL].into_iter().map(|input| {
+        let input = TypeRef::Concrete(input);
+        let output = TypeRef::Concrete(TypeId::INT);
+        vec![input.clone(), output.clone(), TypeRef::Function {
+            is_async: false, params: vec![input], return_type: Box::new(output), contexts: Default::default(),
+        }]
+    }).collect();
+    assert_eq!(witnesses, expected);
+    assert_eq!(Interpreter::new(Arc::new(module)).execute_function(entry).unwrap().as_i64(), 917);
+}
