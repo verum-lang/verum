@@ -246,3 +246,25 @@ fn ordinary_body_parameters_shadow_module_aliases_lexically() {
     rejected("type T is Bool; fn wrong<T>(value:T)->Bool{value}");
     accepted("type T is Bool; fn identity<T>(value:T)->T{value} fn outer()->T{true}");
 }
+
+#[test]
+fn inferred_locals_can_retain_the_enclosing_receivers_associated_type() {
+    let declarations = "
+        type Slot<T> is Missing | Found(T);
+        type Feed is protocol {
+            type Element;
+            fn pull(&mut self) -> Slot<Self.Element>;
+            fn final_item(mut self) -> Slot<Self.Element> {
+                let mut saved = Slot.Missing;
+                while let Slot.Found(x) = self.pull() { saved = Slot.Found(x); }
+                saved
+            }
+        };
+    ";
+    let errors = check(&mut checker(), declarations);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    let unconstrained = "type Slot<T> is Missing | Found(T); type Probe is protocol { fn f(&self) -> Int { let loose = Slot.Missing; 0 } };";
+    let errors = check(&mut checker(), unconstrained);
+    assert!(errors.iter().any(|error| error.contains("E404")), "{errors:?}");
+}

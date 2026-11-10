@@ -12445,7 +12445,8 @@ impl TypeChecker {
             }
             if free.iter().all(|v| {
                 let v_repr = self.unifier.apply(&Type::Var(*v));
-                func_type_param_vars.iter().any(|p| p == v)
+                self.unifier.is_rigid(*v)
+                    || func_type_param_vars.iter().any(|p| p == v)
                     || param_reprs.iter().any(|r| r == &v_repr)
                     // T0741: a var that a TYPE NAME is bound to is a declared
                     // parameter, not an unsolved inference variable.
