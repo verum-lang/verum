@@ -221,3 +221,77 @@ fn only_the_explicit_parse_option_can_omit_type_checking() {
     );
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn protocol_signatures_resolve_the_entry_files_source_mounts() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    let core = root.join("core");
+    std::fs::create_dir_all(core.join("base")).unwrap();
+    std::fs::write(
+        core.join("mod.vr"),
+        "module core; public module base; public module source_provider; public module prelude {}",
+    )
+    .unwrap();
+    std::fs::write(
+        core.join("base/mod.vr"),
+        "module core.base; public module protocols;",
+    )
+    .unwrap();
+    std::fs::write(
+        core.join("base/protocols.vr"),
+        "module core.base.protocols;",
+    )
+    .unwrap();
+    std::fs::write(core.join("source_provider.vr"), "module core.source_provider; public type EntryTag is Ready | Busy; type PrivateTag is Hidden;").unwrap();
+
+    let project = root.join("app");
+    std::fs::create_dir_all(project.join("src")).unwrap();
+    std::fs::write(
+        project.join("verum.toml"),
+        "[cog]\nname = \"entry_scope\"\nversion = \"0.1.0\"\nedition = \"2026\"\n",
+    )
+    .unwrap();
+
+    let check = |file: &std::path::Path, source: &str| {
+        std::fs::write(file, source).unwrap();
+        Command::new(binary())
+            .arg("check")
+            .arg(file)
+            .current_dir(file.parent().unwrap())
+            .env("VERUM_STDLIB_PATH", &core)
+            .env("VERUM_ALLOW_STDLIB_SOURCE_FALLBACK", "1")
+            .output()
+            .unwrap()
+    };
+    let standalone = root.join("standalone.vr");
+    let entry = project.join("src/main.vr");
+    for name in ["EntryTag", "core.source_provider.EntryTag"] {
+        let source = format!(
+            "mount core.source_provider.{{EntryTag, Ready}};\n\
+             type Provider is protocol {{ fn tag(&self) -> {name}; }};\n\
+             type Peer is {{ count: Int }};\n\
+             implement Provider for Peer {{ fn tag(&self) -> {name} {{ Ready }} }}\n\
+             fn main() {{}}"
+        );
+        for path in [&standalone, &entry] {
+            let output = check(path, &source);
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
+
+    let hidden = check(
+        &standalone,
+        "mount core.source_provider.EntryTag; type Provider is protocol { fn tag(&self) -> core.source_provider.PrivateTag; }; fn main() {}",
+    );
+    let error = String::from_utf8_lossy(&hidden.stderr);
+    assert!(!hidden.status.success());
+    assert!(
+        error.contains("PrivateTag") && error.contains("visibility error"),
+        "{error}"
+    );
+}

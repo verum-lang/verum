@@ -212,8 +212,15 @@ impl TypeChecker {
                     return Ok((ty, Some(key)));
                 }
             }
-        } else if let Some((ty, key)) = self.load_declaring_archive_type(name, span)? {
-            return Ok((ty, Some(key)));
+        } else {
+            if name.contains('.')
+                && let Some((ty, key)) = self.resolve_qualified_source_type_with_parameter_key(&Text::from(name), span)?
+            {
+                return Ok((ty, Some(key)));
+            }
+            if let Some((ty, key)) = self.load_declaring_archive_type(name, span)? {
+                return Ok((ty, Some(key)));
+            }
         }
         Err(TypeError::TypeNotFound {
             name: name.into(),
