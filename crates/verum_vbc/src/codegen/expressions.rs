@@ -11432,9 +11432,13 @@ impl VbcCodegen {
                 // archive/AOT reader face of the Pillar-2 canonical-
                 // identity root; the free-function face is
                 // `module_qualified_lookup` in compile_call.
-                let info_opt = self
+                let receiver_declaration = receiver.filter(|_| !type_prefix_receiver)
+                    .and_then(|expr| self.declared_expression_result(expr, None, 0, 0));
+                let specialized = self.receiver_specialization(qualified_name.as_str(),
+                    receiver_declaration.as_ref(), args.len() + 1)?.cloned();
+                let info_opt = specialized.or_else(|| self
                     .resolve_receiver_qualified_method(qualified_name.as_str(), receiver.is_some())
-                    .or_else(|| self.ctx.lookup_function(qualified_name.as_str()).cloned());
+                    .or_else(|| self.ctx.lookup_function(qualified_name.as_str()).cloned()));
                 let info = match info_opt {
                     Some(info) => {
                         if std::env::var_os("VERUM_TRACE_PROTOSTAMP").is_some() {
@@ -16274,11 +16278,15 @@ impl VbcCodegen {
         // callee id on BOTH emission paths — the devirt Call upgrades to
         // CallG when witnesses derive, the CallM path stages them via
         // SetCallWitness.
-        let resolved_method = self
+        let specialized = self.receiver_specialization(&effective_method_name,
+            receiver_result_declaration.as_ref(), args.len() + 1)?.cloned();
+        let exact_receiver_target = specialized.as_ref().filter(|info| info.has_source_body)
+            .map(|info| info.id.0);
+        let resolved_method = specialized.or_else(|| self
             .ctx
             .lookup_function_with_arity(&effective_method_name, args.len() + 1)
             .filter(|fi| fi.param_count == args.len() + 1)
-            .cloned();
+            .cloned());
         let resolvable_fid = resolved_method.as_ref()
             .filter(|fi| {
                 fi.id.0 != u32::MAX
@@ -16288,7 +16296,9 @@ impl VbcCodegen {
             })
             .map(|info| info.id.0);
 
-        let devirt_func_id: Option<u32> = if effective_method_name.starts_with("dyn:")
+        let devirt_func_id: Option<u32> = if exact_receiver_target.is_some() {
+            exact_receiver_target
+        } else if effective_method_name.starts_with("dyn:")
             || effective_method_name.starts_with("byte$")
             || effective_method_name.starts_with("int32$")
             || effective_method_name.starts_with("uint64$")

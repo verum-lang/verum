@@ -71,6 +71,7 @@ mod source_substitution;
 mod protocol_applications;
 mod impl_generic_rosters;
 mod protocol_attachments;
+mod receiver_specialization;
 mod blanket_impls;
 mod cfg_selection;
 mod protocol_results;
