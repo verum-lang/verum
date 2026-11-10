@@ -9951,6 +9951,20 @@ impl TypeChecker {
         Ok(())
     }
 
+    /// A function declared inside an extern block participates in the same
+    /// source import and alias binding as a function with a Verum body.
+    fn imported_function<'a>(&self, item: &'a verum_ast::Item, name: &str) -> Option<&'a verum_ast::FunctionDecl> {
+        match &item.kind {
+            verum_ast::ItemKind::Function(function) if function.name.as_str() == name => Some(function),
+            verum_ast::ItemKind::ExternBlock(block) if self.cfg_evaluator.should_include(&item.attributes) => {
+                block.functions.iter().find(|function| function.name.as_str() == name
+                    && self.cfg_evaluator.should_include(&function.attributes))
+            }
+            _ => None,
+        }
+    }
+
+
     /// Extract the type of a function from a module's AST.
     ///
     /// This creates a function type from the function declaration's signature.
@@ -9970,14 +9984,12 @@ impl TypeChecker {
         // Signature extraction is isolated from the caller's level binders.
         // Validate before its lenient nominal-type fallback can run.
         let generics = ast.items.iter().find_map(|item| match &item.kind {
-            verum_ast::ItemKind::Function(function) if function.name.name.as_str() == func_name => Some(&function.generics),
             verum_ast::ItemKind::Axiom(axiom) if axiom.name.name.as_str() == func_name => Some(&axiom.generics),
-            _ => None,
+            _ => self.imported_function(item, func_name).map(|function| &function.generics),
         }).cloned().unwrap_or_default();
         let result = self.with_declared_universe_scope("function", &func_name.into(), &generics, |checker| {
             for item in &ast.items {
-                if let verum_ast::ItemKind::Function(function) = &item.kind
-                    && function.name.name.as_str() == func_name
+                if let Some(function) = checker.imported_function(item, func_name)
                 {
                     checker.validate_function_universes(function)?;
                 }
@@ -10034,8 +10046,7 @@ impl TypeChecker {
 
         for item in &ast.items {
             // Check for function declarations
-            if let ItemKind::Function(func) = &item.kind
-                && func.name.name.as_str() == func_name
+            if let Some(func) = self.imported_function(item, func_name)
             {
                 // CRITICAL: Register generic type parameters BEFORE resolving param types
                 // For functions like `add<T: Numeric>(a: T, b: T) -> T`, we need T in scope

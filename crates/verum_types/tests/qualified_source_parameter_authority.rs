@@ -164,3 +164,23 @@ fn qualified_renamed_reexport_retains_the_alias_declarations_default() {
     );
     assert!(errors.is_empty(), "{errors:?}");
 }
+
+#[test]
+fn an_aliased_extern_uses_its_declaring_signature_across_a_reexport() {
+    let modules = [
+        ("demo.provider", "extern { public fn measure(value: Int) -> Int; }"),
+        ("demo.surface", "public mount demo.provider.measure as reading;"),
+    ];
+    let valid = check(
+        "demo.app",
+        "mount demo.surface.reading as selected; fn probe() -> Int { unsafe { selected(31) } }",
+        &modules,
+    );
+    assert!(valid.is_empty(), "{valid:?}");
+    let invalid = check(
+        "demo.app",
+        "mount demo.surface.reading as selected; fn probe() -> Int { unsafe { selected(true) } }",
+        &modules,
+    );
+    assert!(invalid.iter().any(|error| error.contains("Mismatch") && error.contains("Bool")), "{invalid:?}");
+}
