@@ -73,6 +73,33 @@ impl Expr {
         Self::path(Path::single(name))
     }
 
+    /// Recover the type syntax of a dotted projection rooted at a lexical type
+    /// parameter. The caller supplies its actual binder scope, so ordinary
+    /// fields and namespaces keep their value interpretation.
+    pub fn associated_type_designator(&self, is_type_parameter: impl Fn(&str) -> bool) -> Option<Type> {
+        use crate::ty::{PathSegment, TypeKind};
+        fn designator(expr: &Expr, accepts: &impl Fn(&str) -> bool) -> Option<Type> {
+            let kind = match &expr.kind {
+                ExprKind::Field { expr: base, field } => TypeKind::Qualified {
+                    self_ty: Heap::new(designator(base, accepts)?),
+                    trait_ref: Path::new(List::new(), expr.span),
+                    assoc_name: field.clone(),
+                },
+                ExprKind::Path(path) => {
+                    let root = path.as_ident()?;
+                    if !accepts(root.as_str()) { return None; }
+                    let path = if root.as_str() == "Self" {
+                        Path::new(List::from_iter([PathSegment::SelfValue]), expr.span)
+                    } else { path.clone() };
+                    TypeKind::Path(path)
+                }
+                _ => return None,
+            };
+            Some(Type::new(kind, expr.span))
+        }
+        matches!(self.kind, ExprKind::Field { .. }).then(|| designator(self, &is_type_parameter)).flatten()
+    }
+
     /// Get reference kind for optimization
     pub fn reference_kind(&self) -> Option<ReferenceKind> {
         self.ref_kind

@@ -6338,29 +6338,35 @@ impl TypeChecker {
         func: &verum_ast::FunctionDecl,
         protocol_bounds_out: &mut Map<TypeVar, List<crate::protocol::ProtocolBound>>,
         type_bounds_out: &mut Map<TypeVar, List<Type>>,
-    ) -> Result<()> {
+    ) -> Result<List<crate::protocol::WhereClause>> {
+        let mut structural = List::new();
         let Some(ref where_clause) = func.generic_where_clause else {
-            return Ok(());
+            return Ok(structural);
         };
         for predicate in &where_clause.predicates {
             use verum_ast::ty::WherePredicateKind;
             let WherePredicateKind::Type { ty, bounds } = &predicate.kind else {
                 continue;
             };
-            // Only a bound on a bare type-parameter NAME belongs here.
-            // `where List<T>: P` and `where T.Item: P` constrain something
-            // other than the parameter itself, and a call site does not
-            // instantiate those.
-            let verum_ast::ty::TypeKind::Path(path) = &ty.kind else {
+            let binder = match &ty.kind {
+                verum_ast::ty::TypeKind::Path(path) => match path.segments.as_slice() {
+                    [verum_ast::ty::PathSegment::SelfValue] => self.current_self_type.as_ref(),
+                    [verum_ast::ty::PathSegment::Name(ident)] => self.lookup_decl_param(ident.name.as_str())
+                        .or_else(|| self.ctx.lookup_type(ident.name.as_str())),
+                    _ => None,
+                },
+                _ => None,
+            };
+            let Some(Type::Var(tvar)) = binder.cloned() else {
+                // A condition on a projection or composite has a subject of its
+                // own. Retain it in the scheme and prove it after actual arguments bind.
+                let subject = self.ast_to_type(ty)?;
+                let protocols = self.convert_type_bounds_for_receiver(bounds, Some(&subject))?;
+                if !protocols.is_empty() {
+                    structural.push(crate::protocol::WhereClause { ty: subject, bounds: protocols });
+                }
                 continue;
             };
-            let binder = match path.segments.as_slice() {
-                [verum_ast::ty::PathSegment::SelfValue] => self.current_self_type.as_ref(),
-                [verum_ast::ty::PathSegment::Name(ident)] => self.lookup_decl_param(ident.name.as_str())
-                    .or_else(|| self.ctx.lookup_type(ident.name.as_str())),
-                _ => continue,
-            };
-            let Some(Type::Var(tvar)) = binder.cloned() else { continue };
             let protocol_bounds = self.convert_type_bounds_for_receiver(bounds, Some(&Type::Var(tvar)))?;
             if !protocol_bounds.is_empty()
             {
@@ -6377,7 +6383,7 @@ impl TypeChecker {
                 type_bounds_out.entry(tvar).or_default().extend(type_bounds);
             }
         }
-        Ok(())
+        Ok(structural)
     }
 
     pub fn register_function_signature(&mut self, func: &verum_ast::FunctionDecl) -> Result<()> {
@@ -6612,13 +6618,14 @@ impl TypeChecker {
         // same place: the scheme this pass publishes, which is what a call
         // site checks its argument against. One collector, called from both
         // passes that build a scheme — see `collect_where_clause_bounds`.
-        self.collect_where_clause_bounds(
+        let structural_conditions = self.collect_where_clause_bounds(
             func,
             &mut param_protocol_bounds,
             &mut param_type_bounds,
         )?;
 
         self.extend_source_parameter_premises(&param_protocol_bounds, &param_type_bounds);
+        self.source_type_registration.projection_assumptions.extend(structural_conditions.iter().cloned());
 
         // Build parameter types
         let param_types: Result<List<_>> = func
@@ -6719,6 +6726,7 @@ impl TypeChecker {
         };
         let mut scheme = scheme.with_universe_parameters(self.current_universe_parameters())
             .map_err(|message| TypeError::UniverseBinding { message, span: func.span })?;
+        scheme.where_clauses = structural_conditions;
         scheme.returned_parameter = super::reference_origin::forwarded_parameter(func);
         self.record_explicit_method_vars(&mut scheme, func);
         // Protect builtin generic/meta functions from being DOWNGRADED by stdlib.

@@ -10904,12 +10904,13 @@ impl TypeChecker {
                 .with_bounds(protocol_bounds));
         }
 
-        self.collect_where_clause_bounds(
+        let structural_conditions = self.collect_where_clause_bounds(
             func,
             &mut func_param_protocol_bounds,
             &mut func_param_type_bounds,
         )?;
         self.extend_source_parameter_premises(&func_param_protocol_bounds, &func_param_type_bounds);
+        self.source_type_registration.projection_assumptions.extend(structural_conditions.iter().cloned());
 
         // Build function type from signature
         // Generic parameters will be processed in the function scope
@@ -11095,6 +11096,7 @@ impl TypeChecker {
         let scheme = scheme.with_type_bounds(func_param_type_bounds.clone());
         let mut scheme = scheme.with_universe_parameters(self.current_universe_parameters())
             .map_err(|message| TypeError::UniverseBinding { message, span: func.span })?;
+        scheme.where_clauses = structural_conditions.clone();
         self.record_explicit_method_vars(&mut scheme, func);
         scheme.returned_parameter = super::reference_origin::forwarded_parameter(func);
         let source_returned_parameter = scheme.returned_parameter;
@@ -13046,6 +13048,7 @@ impl TypeChecker {
         let final_scheme = final_scheme.with_type_bounds(func_param_type_bounds);
         let mut final_scheme = final_scheme.with_universe_parameters(self.current_universe_parameters())
             .map_err(|message| TypeError::UniverseBinding { message, span: func.span })?;
+        final_scheme.where_clauses = structural_conditions;
         final_scheme.explicit_method_vars = source_explicit_slots;
         final_scheme.value_parameters = source_value_parameters;
         final_scheme.returned_parameter = source_returned_parameter;
@@ -18189,7 +18192,7 @@ impl TypeChecker {
                 _ => None,
             };
             match root_name {
-                Some(root) => self.ctx.env.lookup(root).is_none(),
+                Some(root) => self.ctx.env.lookup(root).is_none() || self.ctx.env.is_type_parameter_mirror(root),
                 None => false,
             }
         };
@@ -24641,6 +24644,11 @@ bake to have this verified.",
         span: Span,
         skip_static_lookup: bool,
     ) -> Result<Option<InferResult>> {
+        if !skip_static_lookup
+            && let Some(result) = self.projected_static_call(receiver, method, type_args, args, span)?
+        {
+            return Ok(Some(result));
+        }
         if let Some(mut r) = self.try_resolve_super_path_call(
             receiver, method, args, span, skip_static_lookup,
         )? {

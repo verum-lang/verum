@@ -29,6 +29,55 @@ fn invalid(span: Span, message: impl Into<Text>) -> TypeError {
 }
 
 impl TypeChecker {
+    /// A static member of a projected type must be declared by a positive
+    /// bound on this exact projection in the current body.
+    pub(super) fn projected_static_call(
+        &mut self, receiver: &verum_ast::Expr, method: &verum_ast::Ident,
+        arguments: &List<verum_ast::GenericArg>, operands: &[verum_ast::Expr], span: Span,
+    ) -> Result<Option<super::InferResult>> {
+        let Some(ast) = receiver.associated_type_designator(|name| {
+            (name == "Self" && self.current_self_type.is_some()) ||
+                self.ctx.env.is_type_parameter_mirror(name) ||
+                (!self.ctx.env.is_locally_bound_value(name) && self.lookup_decl_param(name).is_some())
+        }) else { return Ok(None) };
+        let ty = self.ast_to_type(&ast)?;
+        let mut candidates = List::new();
+        for premise in &self.source_type_registration.projection_assumptions {
+            if self.unifier.apply(&premise.ty) != self.unifier.apply(&ty) { continue; }
+            for bound in premise.bounds.iter().filter(|bound| !bound.is_negative) {
+                let owner = self.path_to_string(&bound.protocol);
+                for candidate in self.applied_protocol_methods_in_hierarchy(
+                    &owner, &bound.args, &ty, &ty, &method.name, span,
+                )? {
+                    if candidate.method.receiver_kind() == Some(crate::core_metadata::ReceiverKind::None)
+                        && !candidates.iter().any(|other: &AppliedProtocolMethod|
+                            other.owner == candidate.owner && other.arguments == candidate.arguments)
+                    {
+                        candidates.push(candidate);
+                    }
+                }
+            }
+        }
+        let selected = match candidates.as_slice() {
+            [candidate] => candidate,
+            [] => return Err(invalid(span, format!("no bound on `{ty}` declares static member `{method}`"))),
+            _ => return Err(invalid(span, format!("multiple bounds on `{ty}` declare static member `{method}`"))),
+        };
+        let signature = self.instantiate_applied_protocol_method(&selected.method, &ty, arguments, span)?;
+        let Type::Function { params, return_type, .. } = &signature else {
+            return Err(TypeError::NotAFunction { ty: signature.to_string().into(), span });
+        };
+        if params.len() != operands.len() {
+            return Err(self.arity_error(method.name.clone(), params.len(), operands.len(), span));
+        }
+        for (operand, parameter) in operands.iter().zip(params) {
+            self.check_expr(operand, &self.unifier.apply(parameter))?;
+        }
+        let result = self.unifier.apply(return_type);
+        self.type_registry.register_call_target(span, signature);
+        Ok(Some(super::InferResult::method(result, Some(crate::core_metadata::ReceiverKind::None))))
+    }
+
     pub(super) fn elaborate_protocol_method(
         &mut self,
         owner: &[GenericParam],

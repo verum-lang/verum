@@ -268,3 +268,43 @@ fn inferred_locals_can_retain_the_enclosing_receivers_associated_type() {
     let errors = check(&mut checker(), unconstrained);
     assert!(errors.iter().any(|error| error.contains("E404")), "{errors:?}");
 }
+
+#[test]
+fn associated_static_members_require_the_bound_on_that_projection() {
+    let declarations = "type Origin is protocol { fn origin() -> Self; };";
+    accepted(&format!("{declarations} type Family is protocol {{
+        type Element;
+        fn seed(self) -> Self.Element where Self.Element: Origin {{ Self.Element.origin() }}
+    }};"));
+    for body in [
+        "fn seed(self) -> Self.Element { Self.Element.origin() }",
+        "fn seed(self) -> Self.Element where Self.Second: Origin { Self.Element.origin() }",
+        "fn seed(self) -> Self.Element where Self.Element: Origin { Self.Element.origin(true) }",
+    ] {
+        rejected(&format!("{declarations} type Family is protocol {{ type Element; type Second; {body} }};"));
+    }
+    rejected("type Source is protocol { fn consume(self) -> Self; };
+        type Family is protocol { type Element;
+            fn consume(self) -> Self.Element where Self.Element: Source { Self.Element.consume() }
+        };");
+    rejected("type Left is protocol { fn seed() -> Self; }; type Right is protocol { fn seed() -> Self; };
+        type Family is protocol { type Element;
+            fn make(self) -> Self.Element where Self.Element: Left + Right { Self.Element.seed() }
+        };");
+}
+
+#[test]
+fn structural_conditions_survive_free_function_registration_and_body_checking() {
+    let api = r#"
+        type Seed is protocol { fn seed() -> Self; };
+        type Producer is protocol { type Item; };
+        type Payload is { value: Int }; type Foreign is { value: Int };
+        type First is {}; type Second is {};
+        implement Seed for Payload { fn seed() -> Self { Payload { value: 17 } } }
+        implement Producer for First { type Item = Payload; }
+        implement Producer for Second { type Item = Foreign; }
+        fn obtain<T: Producer>(_: T) -> T.Item where T.Item: Seed { T.Item.seed() }
+    "#;
+    accepted(&format!("{api} fn valid(v: First) -> Payload {{ obtain(v) }}"));
+    rejected(&format!("{api} fn invalid(v: Second) -> Foreign {{ obtain(v) }}"));
+}
