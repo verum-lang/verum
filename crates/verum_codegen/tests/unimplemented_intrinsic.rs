@@ -375,6 +375,71 @@ fn private_native_symbol_spelling_is_not_an_intrinsic_identity() {
 }
 
 #[test]
+fn linux_signal_intrinsic_has_a_native_body_for_both_supported_targets() {
+    let source = r#"
+        @intrinsic("linux_signal_watch") fn observe(number: Int, operation: Int) -> Int;
+        fn main() -> Int { let watch = observe; watch(10, 1) }
+    "#;
+    for module in routes(source) {
+        for triple in ["aarch64-unknown-linux-gnu", "x86_64-unknown-linux-gnu"] {
+            let context = Context::create();
+            let config = LoweringConfig::debug("signal_watch").with_target(triple);
+            let mut lower = VbcToLlvmLowering::new(&context, config);
+            lower.lower_module(&module).expect("declared first-class signal operation");
+            lower.module().verify().expect("valid target IR");
+            let body = lower.module().get_function("verum_linux_signal_watch").expect("kernel operation");
+            assert_ne!(body.count_basic_blocks(), 0);
+        }
+    }
+}
+
+#[test]
+fn signal_observation_requires_process_permission_in_the_vm() {
+    use std::sync::Arc;
+    use verum_vbc::interpreter::{Interpreter, InterpreterError, permission::{PermissionDecision, PermissionScope}};
+    for module in routes(r#"
+        @intrinsic("linux_signal_watch") fn observe(number: Int, operation: Int) -> Int;
+        fn main() -> Int { observe(10, 1) }
+    "#) {
+        let entry = module.find_function_by_name("main").unwrap();
+        let mut vm = Interpreter::new(Arc::new(module));
+        vm.state.set_permission_policy(|scope, operation| {
+            assert_eq!((scope, operation), (PermissionScope::Process, 1));
+            PermissionDecision::Deny
+        });
+        assert!(matches!(vm.execute_function(entry), Err(InterpreterError::Panic { message })
+            if message == "permission denied: Process(1)"));
+    }
+}
+
+#[cfg(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")))]
+#[test]
+fn vm_observes_two_real_linux_signal_deliveries_on_different_threads() {
+    use std::sync::Arc;
+    use verum_vbc::interpreter::Interpreter;
+    unsafe extern "C" { fn raise(signal: i32) -> i32; }
+    for module in routes(r#"
+        @intrinsic("linux_signal_watch") fn observe(number: Int, operation: Int) -> Int;
+        fn install() -> Int { observe(10, 0) }
+        fn take() -> Int { observe(10, 1) }
+        fn restore() -> Int { observe(10, 2) }
+    "#) {
+        let module = Arc::new(module);
+        let mut vm = Interpreter::new(module.clone());
+        let mut call = |name| vm.execute_function(module.find_function_by_name(name).unwrap())
+            .unwrap().try_as_i64().unwrap();
+        assert_eq!(call("install"), 0);
+        assert_eq!(call("install"), -16);
+        assert_eq!(std::thread::spawn(|| unsafe { raise(10) }).join().unwrap(), 0);
+        assert_eq!(unsafe { raise(10) }, 0);
+        assert_eq!(call("take"), 2);
+        assert_eq!(call("take"), 0);
+        assert_eq!(call("restore"), 0);
+        assert_eq!(call("take"), -9);
+    }
+}
+
+#[test]
 fn unavailable_target_cpu_query_cannot_be_implemented_as_one() {
     for module in routes(
         r#"

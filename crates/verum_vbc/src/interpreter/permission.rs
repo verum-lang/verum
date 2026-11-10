@@ -606,6 +606,7 @@ pub(crate) fn intrinsic_permission_request(
     }
     match intrinsic.category {
         IntrinsicCategory::Syscall => Ok(Some((PermissionScope::Syscall, 0))),
+        IntrinsicCategory::Process => Ok(Some((PermissionScope::Process, 1))),
         category => Err(format!("intrinsic '{}' requires permission but category {category:?} has no permission request", intrinsic.name).into()),
     }
 }
