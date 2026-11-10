@@ -9978,10 +9978,34 @@ impl TypeChecker {
             let Some((ty, vars)) = checker.extract_function_type_in_source_scope(ast, func_name) else {
                 return Ok(None);
             };
-            let scheme = TypeScheme::poly(vars, ty)
-                .with_type_bounds(std::mem::take(&mut checker.pending_extracted_type_bounds))
+            // The declaring file owns both its binders and their proof
+            // obligations. Publish these with exactly the variables used in
+            // the imported callable signature, just as for a local function.
+            let mut protocols = Map::new();
+            let mut type_bounds = std::mem::take(&mut checker.pending_extracted_type_bounds);
+            for parameter in &generics {
+                let (name, bounds) = match &parameter.kind {
+                    verum_ast::ty::GenericParamKind::Type { name, bounds, .. }
+                    | verum_ast::ty::GenericParamKind::HigherKinded { name, bounds, .. } => (name, bounds),
+                    _ => continue,
+                };
+                if let Some(Type::Var(variable)) = checker.lookup_decl_param(&name.name).cloned() {
+                    let constraints = checker.convert_type_bounds_for_receiver(bounds, Some(&Type::Var(variable)))?;
+                    if !constraints.is_empty() {
+                        protocols.insert(variable, constraints);
+                    }
+                }
+            }
+            let conditions = match ast.items.iter().find_map(|item| checker.imported_function(item, func_name)) {
+                Some(function) => checker.collect_where_clause_bounds(function, &mut protocols, &mut type_bounds)?,
+                None => List::new(),
+            };
+            let mut scheme = TypeScheme::poly(vars, ty)
+                .with_type_bounds(type_bounds)
+                .with_protocol_bounds(protocols)
                 .with_universe_parameters(checker.current_universe_parameters())
                 .map_err(|message| TypeError::UniverseBinding { message, span: Span::dummy() })?;
+            scheme.where_clauses = conditions;
             Ok(Some(scheme))
         });
         let result = match result {

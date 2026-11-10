@@ -575,3 +575,38 @@ fn qualified_calls_follow_the_owned_source_exports_and_aliases() {
         assert_eq!(result.is_ok(), valid, "{body}: {result:?}");
     }
 }
+
+#[test]
+fn mounted_free_functions_keep_their_declared_protocol_requirements() {
+    use verum_fast_parser::FastParser;
+    let protocol = "module authority; public type Approved<T> is protocol {};";
+    let provider = r#"module provider; mount authority.Approved;
+        public fn attach<A: Approved<B>,B>(a:A, b:B)->A { a }
+        public fn separated<A,B>(a:A, b:B)->A where A: Approved<B> { a }
+    "#;
+    for (body, allowed) in [
+        ("fn check(n:Card)->Card { call(n, true) }", true),
+        ("fn check(n:Card)->Card { call(n, 7) }", false),
+        ("fn check<T>(v:T)->T { call(v, true) }", false),
+        ("fn check<T:Approved<Bool>>(v:T)->T { call(v, true) }", true),
+        ("fn check(n:Card)->Card { separated(n, true) }", true),
+        ("fn check(n:Card)->Card { separated(n, 7) }", false),
+    ] {
+        let receiver = format!("module consumer; mount authority.Approved; mount entry.call; mount provider.separated;
+            type Card is {{ number:Int }}; implement Approved<Bool> for Card {{}} {body}");
+        let sources = [
+            ("authority", protocol), ("provider", provider),
+            ("entry", "module entry; public mount provider.attach as call;"),
+            ("consumer", receiver.as_str()),
+        ];
+        let modules: Vec<_> = sources.iter().enumerate().map(|(i, (owner, source))| {
+            let ast = FastParser::new().parse_module_str(source, FileId::new(i as u32)).unwrap();
+            (*owner, ast)
+        }).collect();
+        let registry = source_registry(modules.iter().map(|(owner, ast)| (*owner, *owner, ast))).unwrap();
+        let mut checker = TypeChecker::with_minimal_context();
+        checker.register_builtins();
+        let result = check_source_module(&mut checker, "consumer", &modules[3].1, &registry);
+        assert_eq!(result.is_ok(), allowed, "{body}: {result:?}");
+    }
+}
