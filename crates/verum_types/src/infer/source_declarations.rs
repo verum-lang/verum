@@ -690,7 +690,7 @@ impl TypeChecker {
             let owner = module.path.to_string();
             names.iter().try_for_each(|name| {
                 self.import_impl_blocks_for_type_in_module_selected(
-                    &module.ast, name.as_str(), Some(owner.as_str()), Some(&protocol),
+                    &module.ast, name.as_str(), owner.as_str(), Some(&protocol),
                 )
             })
         });
@@ -714,7 +714,7 @@ impl TypeChecker {
         let result = self.import_impl_blocks_for_type_in_module(
             &module.ast,
             name.as_str(),
-            Some(owner.as_str()),
+            owner.as_str(),
         );
         if result.is_err() {
             self.loaded_source_receiver_methods.remove(&key);

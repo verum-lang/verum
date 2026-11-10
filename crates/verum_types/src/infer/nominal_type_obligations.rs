@@ -434,7 +434,7 @@ impl TypeChecker {
                     self.import_impl_blocks_for_type_in_module_selected(
                         &module,
                         local,
-                        Some(&owner),
+                        &owner,
                         Some(&protocol),
                     )?;
                 }

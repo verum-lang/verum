@@ -879,3 +879,32 @@ fn chained_protocol_results_keep_the_imported_sum_and_its_payload() {
     let errors = check_with_checker(&rejected, &modules).1;
     assert!(errors.iter().any(|diagnostic| diagnostic.contains("MethodNotFound") && diagnostic.contains("foreign")), "{errors:?}");
 }
+
+#[test]
+fn imported_primitive_impls_use_the_extensions_private_type_mount() {
+    let sources = [
+        ("fixture.payload", "public type Parcel is { public amount: Int };"),
+        ("fixture.decoy", "public type Parcel is { public wrong: Bool };"),
+        ("fixture.ext", r#"
+            mount fixture.payload.Parcel as LocalReceipt;
+            implement Int {
+                public fn receipt_for_value(self) -> LocalReceipt { LocalReceipt { amount: self } }
+            }
+            public fn activate() -> Int { 1 }
+        "#),
+    ];
+    let prefix = "mount fixture.decoy.Parcel as LocalReceipt; mount fixture.ext.activate;";
+    let accepted = format!("{prefix} fn read(i: Int) -> Int {{ i.receipt_for_value().amount }}");
+    let errors = check(&accepted, &sources);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    let rejected = format!("{prefix} fn read(i: Int) -> Bool {{ i.receipt_for_value().wrong }}");
+    let errors = check(&rejected, &sources);
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    assert!(
+        errors[0].contains("UnknownField")
+            && errors[0].contains("fixture.payload.Parcel")
+            && errors[0].contains("wrong"),
+        "{errors:?}"
+    );
+}

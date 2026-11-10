@@ -1515,9 +1515,9 @@ impl TypeChecker {
                             verum_common::span::FileId::dummy(),
                             module.span,
                         );
-                        if let Err(e) =
-                            self.import_impl_blocks_for_type(&synthetic_module, item_name)
-                        {
+                        if let Err(e) = self.import_impl_blocks_for_type_in_module(
+                            &synthetic_module, item_name, &owner,
+                        ) {
                             tracing::debug!(
                                 "Failed to import implement blocks for inline-mounted type '{}': {}",
                                 item_name,
@@ -3633,7 +3633,7 @@ impl TypeChecker {
                             && let Err(e) = self.import_impl_blocks_for_type_in_module(
                                 &source_module.ast,
                                 item_name,
-                                Some(&src_path),
+                                &src_path,
                             )
                         {
                             tracing::debug!(
@@ -4817,7 +4817,7 @@ impl TypeChecker {
                                     ) && let Err(e) = self.import_impl_blocks_for_type_in_module(
                                         &source_module.ast,
                                         true_name,
-                                        Some(&src_path),
+                                        &src_path,
                                     ) {
                                         tracing::debug!(
                                             "Failed to import implement blocks for '{}' from '{}': {}",
@@ -4833,7 +4833,7 @@ impl TypeChecker {
                                     if let Err(e) = self.import_impl_blocks_for_type_in_module(
                                         &module_info.ast,
                                         true_name,
-                                        Some(&direct_path),
+                                        &direct_path,
                                     ) {
                                         tracing::debug!(
                                             "Failed to import implement blocks for '{}' from '{}': {}",
@@ -5720,38 +5720,13 @@ impl TypeChecker {
         impl_blocks
     }
 
-    /// Import implement block methods for a type from a source module.
-    ///
-    /// This registers both static methods (callable as `Type.method()`) and
-    /// instance methods (callable as `instance.method()`) for imported types.
-    ///
-    /// Static methods are registered in the environment as `"TypeName.method_name"`.
-    /// Instance methods are registered in the `inherent_methods` map.
-    ///
-    /// Only public methods from the implement blocks are imported.
-    fn import_impl_blocks_for_type(
-        &mut self,
-        ast: &verum_ast::Module,
-        type_name: &str,
-    ) -> Result<()> {
-        self.import_impl_blocks_for_type_in_module(ast, type_name, None)
-    }
-
-    /// Same as [`import_impl_blocks_for_type`], but pins the type checker's
-    /// `current_module_path` to `source_module_path` for the duration of the
-    /// import so that type references inside the impl block (e.g. a bare
-    /// `RecvError` return type) resolve against the *source* module's
-    /// qualified-name layer first.
-    ///
-    /// Without this, `ast_to_type` / `ast_to_type_lenient` fall back to the
-    /// flat `ctx.type_defs` map where whichever same-named type was
-    /// registered last wins — so imported broadcast's `poll_next` ends up
-    /// with QUIC's `RecvError` in its stored return type.
+    /// Import public static and instance methods. Their implementation heads
+    /// and signatures resolve private mounts in the defining source module.
     pub(super) fn import_impl_blocks_for_type_in_module(
         &mut self,
         ast: &verum_ast::Module,
         type_name: &str,
-        source_module_path: Option<&str>,
+        source_module_path: &str,
     ) -> Result<()> {
         self.import_impl_blocks_for_type_in_module_selected(
             ast, type_name, source_module_path, None,
@@ -5762,65 +5737,43 @@ impl TypeChecker {
         &mut self,
         ast: &verum_ast::Module,
         type_name: &str,
-        source_module_path: Option<&str>,
+        source_module_path: &str,
+        required_protocol: Option<&Text>,
+    ) -> Result<()> {
+        let blocks = self.find_impl_blocks_for_type(ast, type_name);
+        if blocks.is_empty() {
+            return Ok(());
+        }
+        self.with_source_signature_scope(source_module_path, |checker| {
+            checker.register_imported_impls(type_name, blocks, required_protocol)
+        })
+    }
+
+    fn register_imported_impls(
+        &mut self,
+        type_name: &str,
+        impl_blocks: List<&verum_ast::decl::ImplDecl>,
         required_protocol: Option<&Text>,
     ) -> Result<()> {
         use verum_ast::decl::{FunctionParamKind, ImplItemKind, Visibility as AstVisibility};
 
-        // #[cfg(debug_assertions)]
-        // eprintln!(
-        // "[DEBUG import_impl_blocks_for_type] Called for type '{}'",
-        // type_name
-        // );
-
-        let saved_module_path = self.current_module_path.clone();
-        let saved_source_scope = self.resolving_source_signature;
-        if let Some(path) = source_module_path {
-            self.set_current_module_path(verum_common::Text::from(path));
-            self.resolving_source_signature = true;
-        }
-
-        let impl_blocks = self.find_impl_blocks_for_type(ast, type_name);
         if crate::ctor_trace_enabled() {
             eprintln!(
-                "[ctor-trace] import_impl_blocks: type={:?} src={:?} blocks={}",
-                type_name,
-                source_module_path,
-                impl_blocks.len()
+                "[ctor-trace] import_impl_blocks: type={type_name:?} src={:?} blocks={}",
+                self.current_module_path,
+                impl_blocks.len(),
             );
         }
-
-        // #[cfg(debug_assertions)]
-        // eprintln!(
-        // "[DEBUG import_impl_blocks_for_type] Found {} impl blocks for '{}'",
-        // impl_blocks.len(),
-        // type_name
-        // );
-
         let mut registration_error = None;
         for original in impl_blocks {
             let selected = self.cfg_filtered_impl(original);
             let impl_decl = selected.as_ref().unwrap_or(original);
-            let specialization = match Self::source_impl_specialization(impl_decl) {
-                Ok(value) => value,
-                Err(error) => {
-                    self.set_current_module_path(saved_module_path);
-                    self.resolving_source_signature = saved_source_scope;
-                    return Err(error);
-                }
-            };
+            let specialization = Self::source_impl_specialization(impl_decl)?;
             // Resolve the protocol head while its declaring owner is active,
             // before entering any temporary implementation binder frame.
             let resolved_protocol = match &impl_decl.kind {
                 verum_ast::decl::ImplKind::Protocol { protocol, .. } => {
-                    match self.resolve_protocol_reference(protocol) {
-                        Ok(protocol) => Some(protocol),
-                        Err(error) => {
-                            self.set_current_module_path(saved_module_path);
-                            self.resolving_source_signature = saved_source_scope;
-                            return Err(error);
-                        }
-                    }
+                    Some(self.resolve_protocol_reference(protocol)?)
                 }
                 verum_ast::decl::ImplKind::Inherent(_) => None,
             };
@@ -5832,16 +5785,8 @@ impl TypeChecker {
                 }
                 // A prior successful registration owns this exact declaration.
                 // Do not recursively re-check it through a later obligation.
-                let accepted = self.protocol_checker.read()
-                    .has_source_impl(&self.current_module_path, impl_decl);
-                match accepted {
-                    Ok(true) => continue,
-                    Ok(false) => {},
-                    Err(error) => {
-                        self.set_current_module_path(saved_module_path);
-                        self.resolving_source_signature = saved_source_scope;
-                        return Err(error);
-                    }
+                if self.protocol_checker.read().has_source_impl(&self.current_module_path, impl_decl)? {
+                    continue;
                 }
             }
             if matches!(impl_decl.kind, verum_ast::decl::ImplKind::Inherent(_)) {
@@ -5854,14 +5799,7 @@ impl TypeChecker {
             }
             // Value scopes do not own type definitions. Lazy imports can run
             // inside a generic body, so preserve every name they temporarily bind.
-            let implicit = match self.implicit_impl_receiver_parameters(impl_decl) {
-                Ok(parameters) => parameters,
-                Err(error) => {
-                    self.set_current_module_path(saved_module_path);
-                    self.resolving_source_signature = saved_source_scope;
-                    return Err(error);
-                }
-            };
+            let implicit = self.implicit_impl_receiver_parameters(impl_decl)?;
             let impl_type_bindings: List<_> = impl_decl.generics.iter().filter_map(|param| {
                 use verum_ast::ty::GenericParamKind;
                 match &param.kind {
@@ -5921,8 +5859,6 @@ impl TypeChecker {
                     else { self.ctx.remove_type(&name); }
                 }
                 self.ctx.exit_scope();
-                self.set_current_module_path(saved_module_path);
-                self.resolving_source_signature = saved_source_scope;
                 return Err(error);
             }
 
@@ -6468,10 +6404,6 @@ impl TypeChecker {
             }
         }
 
-        // Restore the checker's module path so imports don't leak
-        // the source module into surrounding scope.
-        self.set_current_module_path(saved_module_path);
-        self.resolving_source_signature = saved_source_scope;
         match registration_error {
             Some(error) => Err(error),
             None => Ok(()),
@@ -8948,7 +8880,7 @@ impl TypeChecker {
         if let Err(error) = imported {
             self.deferred_soundness_errors.push(error);
         } else if let Err(error) = self.import_impl_blocks_for_type_in_module(
-            ast, name.as_str(), Some(module_path),
+            ast, name.as_str(), module_path,
         ) {
             self.deferred_soundness_errors.push(error);
         }
@@ -9977,7 +9909,7 @@ impl TypeChecker {
         for type_name in PRIMITIVE_TYPES {
             // Try to import impl blocks for this primitive type
             // This will find and register methods from `implement Int { ... }` etc.
-            if let Err(e) = self.import_impl_blocks_for_type(ast, type_name) {
+            if let Err(e) = self.import_impl_blocks_for_type_in_module(ast, type_name, module_path) {
                 // Log but don't fail - not all modules have primitive impls
                 tracing::debug!(
                     "Note: Could not import impl blocks for primitive '{}': {}",
