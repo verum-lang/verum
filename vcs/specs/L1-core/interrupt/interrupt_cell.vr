@@ -1,9 +1,9 @@
-// @test: typecheck-pass
+// @test: run-interpreter
 // @level: L1
 // @tier: 0
 // @tags: interrupt, interrupt-cell, shared-data, systems
 // @timeout: 5000
-// @description: Verify InterruptCell for interrupt-safe data sharing compiles correctly.
+// @description: Read and update the stored value through an InterruptCell callback.
 
 mount core.sys.interrupt.{InterruptCell, CriticalSection};
 

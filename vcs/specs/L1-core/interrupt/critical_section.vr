@@ -1,9 +1,9 @@
-// @test: typecheck-pass
+// @test: run-interpreter
 // @level: L1
 // @tier: 0
 // @tags: interrupt, critical-section, systems
 // @timeout: 5000
-// @description: Verify critical section types and RAII pattern compile correctly.
+// @description: Run hosted critical-section guards and return a value from a callback.
 
 mount core.sys.interrupt.{CriticalSection, with_interrupts_disabled, disable_interrupts, restore_interrupts, save_and_disable_interrupts};
 

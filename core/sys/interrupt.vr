@@ -210,7 +210,7 @@ implement Drop for CriticalSection {
 /// Convenience function that creates a critical section, executes
 /// the closure, and restores interrupt state.
 @inline(always)
-public fn with_interrupts_disabled<R, F: Fn() -> R>(f: F) -> R {
+public fn with_interrupts_disabled<R, F: fn() -> R>(f: F) -> R {
     let _guard = CriticalSection.enter();
     f()
 }
@@ -274,7 +274,7 @@ implement<T> InterruptCell<T> {
     /// The closure receives a mutable reference to the inner value.
     /// Interrupts are disabled for the duration of the closure.
     @inline(always)
-    public fn with_disabled<R, F: Fn(&mut T) -> R>(&self, f: F) -> R {
+    public fn with_disabled<R, F: fn(&mut T) -> R>(&self, f: F) -> R {
         let _guard = CriticalSection.enter();
         let ptr = self.get_ptr();
         // SAFETY: Interrupts are disabled, so no concurrent access
