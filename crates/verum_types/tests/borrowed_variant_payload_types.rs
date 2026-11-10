@@ -269,3 +269,14 @@ fn inspect(value: &Choice<Flag>) -> Int {
         "{errors:?}"
     );
 }
+
+#[test]
+fn a_variant_payload_can_only_be_written_through_an_exclusive_scrutinee() {
+    let write = |receiver| format!(
+        "fn assign(value: {receiver} Choice<Cell>) {{ match value {{ Choice.Value(cell) => {{ cell.value = 73; }}, Choice.Absent => {{}}, }} }}"
+    );
+    let valid = check(&write("&mut"));
+    assert!(valid.is_empty(), "{valid:?}");
+    let shared = check(&write("&"));
+    assert!(shared.iter().any(|e| e.contains("SharedReferenceWrite")), "{shared:?}");
+}

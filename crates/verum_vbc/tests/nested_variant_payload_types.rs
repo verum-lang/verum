@@ -223,3 +223,36 @@ fn probe() -> Int {
         7533
     );
 }
+
+#[test]
+fn writing_a_borrowed_scalar_or_record_updates_the_original_variant() {
+    let source = r#"
+        module projection;
+        type Cell is { value: Int };
+        type Choice<T> is Empty | Value(T);
+        fn set_scalar(sum: &mut Choice<Int>) {
+            match sum { Choice.Value(value) => { *value = 73; }, Choice.Empty => {}, }
+        }
+        fn set_record(sum: &mut Choice<Cell>) {
+            match sum { Choice.Value(cell) => { cell.value = 41; }, Choice.Empty => {}, }
+        }
+        public fn observe() -> Int {
+            let mut a = Choice.Value(5);
+            let mut b = Choice.Value(Cell { value: 7 });
+            set_scalar(&mut a);
+            set_record(&mut b);
+            let left = match a { Choice.Value(value) => value, Choice.Empty => 0 };
+            let right = match b { Choice.Value(cell) => cell.value, Choice.Empty => 0 };
+            left + right
+        }
+    "#;
+    let syntax = Parser::new(source).parse_module().unwrap();
+    let module = VbcCodegen::new().compile_module(&syntax).unwrap();
+    let wire = verum_vbc::serialize::serialize_module(&module).unwrap();
+    let module = verum_vbc::deserialize::deserialize_module(&wire).unwrap();
+    verum_vbc::validate::validate_module(&module).unwrap();
+    let observe = module.find_function_by_name("projection.observe").unwrap();
+    let value = Interpreter::new(Arc::new(module))
+        .execute_function(observe).unwrap();
+    assert_eq!(value.try_as_i64(), Some(114));
+}

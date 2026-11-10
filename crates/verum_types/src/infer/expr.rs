@@ -5779,15 +5779,15 @@ impl TypeChecker {
                     // `y.poll(cx)` returning `Poll<Y.Output>`) so pattern binding
                     // and exhaustiveness see the concrete payload.
                     let __applied = self.unifier.apply(&scrut_result.ty);
-                    let scrut_ty = self.resolve_assoc_projections_deep(&__applied);
-                    let sources = self.aggregate_origins(scrutinee, &scrut_ty);
+                    let binding_ty = self.resolve_assoc_projections_deep(&__applied);
+                    let sources = self.aggregate_origins(scrutinee, &binding_ty);
 
                     // Auto-deref scrutinee for match expressions:
                     // When matching &T where T is a variant/generic type, auto-deref to T.
                     // This allows `match self` in impl methods with `&self` to work
                     // without requiring explicit `match *self`.
-                    // The variant payload bindings will NOT be ref-wrapped.
-                    let scrut_ty = match &scrut_ty {
+                    // Exhaustiveness inspects the underlying constructors. Bindings retain the original loan.
+                    let scrut_ty = match &binding_ty {
                         Type::Reference { inner, .. }
                         | Type::CheckedReference { inner, .. }
                         | Type::UnsafeReference { inner, .. } => match &**inner {
@@ -5795,9 +5795,9 @@ impl TypeChecker {
                             | Type::Generic { .. }
                             | Type::Named { .. }
                             | Type::Record(_) => (**inner).clone(),
-                            _ => scrut_ty,
+                            _ => binding_ty.clone(),
                         },
-                        _ => scrut_ty,
+                        _ => binding_ty.clone(),
                     };
 
                     if arms.is_empty() {
@@ -5856,7 +5856,7 @@ impl TypeChecker {
                     // First pass: check all arms and collect their types
                     for arm in arms.iter() {
                         self.affine_tracker.restore_alternatives(&affine_at_match);
-                        let resolved_scrut_ty = self.unifier.apply(&scrut_ty);
+                        let resolved_scrut_ty = self.unifier.apply(&binding_ty);
                         let arm_result = self.infer_scoped_match_arm(
                             arm, &resolved_scrut_ty, scrutinee_var.as_ref(), None, &sources,
                         )?;

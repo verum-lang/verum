@@ -34,6 +34,31 @@ fn freshen_template_vars(ty: &Type) -> Type {
     ty.apply_subst(&subst)
 }
 
+/// Destructuring borrows each field through every reference to the scrutinee.
+/// An intervening shared reference cannot lend exclusive access to a nested value.
+fn pattern_field_type(scrutinee: &Type, field: &Type) -> Type {
+    use verum_ast::expr::ReferenceKind;
+
+    let mut source = scrutinee;
+    let mut mutable = true;
+    let mut borrow = None;
+    while let Some((inner, exclusive, kind)) = source.reference_parts() {
+        mutable &= exclusive;
+        borrow = Some(match (borrow, kind) {
+            (Some(ReferenceKind::Unsafe), _) | (_, ReferenceKind::Unsafe) => ReferenceKind::Unsafe,
+            (Some(ReferenceKind::Managed), _) | (_, ReferenceKind::Managed) => ReferenceKind::Managed,
+            _ => ReferenceKind::Checked,
+        });
+        source = inner;
+    }
+    match borrow {
+        None => field.clone(),
+        Some(ReferenceKind::Managed) => Type::reference(mutable, field.clone()),
+        Some(ReferenceKind::Checked) => Type::checked_reference(mutable, field.clone()),
+        Some(ReferenceKind::Unsafe) => Type::unsafe_reference(mutable, field.clone()),
+    }
+}
+
 /// A single pattern may bind a tuple payload as a whole. Positional patterns
 /// destructure its fields. Both binding passes must use the same shape.
 fn variant_tuple_fields<'a>(
@@ -847,13 +872,6 @@ impl TypeChecker {
                     }
                 }
 
-                // Track if we're matching through a reference
-                let matching_through_ref = matches!(
-                    &expanded_ty,
-                    Type::Reference { .. }
-                        | Type::CheckedReference { .. }
-                        | Type::UnsafeReference { .. }
-                );
 
                 // Unwrap references to get at the variant type
                 if let Type::Reference { inner, .. }
@@ -925,7 +943,7 @@ impl TypeChecker {
                                 *rest,
                                 payload_ty,
                                 pattern.span,
-                                matching_through_ref,
+                                &scheme.ty,
                             )?;
                             return Ok(());
                         }
@@ -1266,12 +1284,6 @@ impl TypeChecker {
 
                 // Track if we're matching through a reference (for binding mode)
                 // When matching &T against a pattern, bindings should be &FieldType
-                let matching_through_ref = matches!(
-                    &expanded_ty,
-                    Type::Reference { .. }
-                        | Type::CheckedReference { .. }
-                        | Type::UnsafeReference { .. }
-                );
 
                 // If we have a reference to a variant, unwrap it for matching
                 // This handles cases like: match &opt { Maybe.Some(x) => ..., Maybe.None => ... }
@@ -1388,7 +1400,7 @@ impl TypeChecker {
                                             patterns,
                                             variant_payload_ty,
                                             pattern.span,
-                                            matching_through_ref,
+                                            &scheme.ty,
                                         )?;
                                     }
                                     // Record-style variant: Error { code, message }
@@ -1399,7 +1411,7 @@ impl TypeChecker {
                                             *rest,
                                             variant_payload_ty,
                                             pattern.span,
-                                            matching_through_ref,
+                                            &scheme.ty,
                                         )?;
                                     }
                                 }
@@ -2864,10 +2876,12 @@ impl TypeChecker {
             }
 
             PatternKind::Tuple(patterns) => {
-                if patterns.is_empty() && matches!(ty, Type::Unit) {
+                let mut referent = ty;
+                while let Some((inner, _, _)) = referent.reference_parts() { referent = inner; }
+                if patterns.is_empty() && matches!(referent, Type::Unit) {
                     return Ok(List::new());
                 }
-                if let Type::Tuple(types) = ty {
+                if let Type::Tuple(types) = referent {
                     if patterns.len() != types.len() {
                         return Err(TypeError::Other(verum_common::Text::from(format!(
                             "tuple pattern has {} elements but type has {}",
@@ -2877,8 +2891,8 @@ impl TypeChecker {
                     }
 
                     let mut all_bindings = List::new();
-                    for (pat, ty) in patterns.iter().zip(types.iter()) {
-                        let mut bindings = self.collect_pattern_bindings(pat, ty)?;
+                    for (pat, field) in patterns.iter().zip(types.iter()) {
+                        let mut bindings = self.collect_pattern_bindings(pat, &pattern_field_type(ty, field))?;
                         all_bindings.append(&mut bindings);
                     }
                     Ok(all_bindings)
@@ -2930,7 +2944,7 @@ impl TypeChecker {
                                     let fields = variant_tuple_fields(&tag, patterns, payload_ty, pattern.span)?;
                                     let mut all_bindings = List::new();
                                     for (pat, field) in patterns.iter().zip(fields) {
-                                        all_bindings.extend(self.collect_pattern_bindings(pat, field)?);
+                                        all_bindings.extend(self.collect_pattern_bindings(pat, &pattern_field_type(ty, field))?);
                                     }
                                     Ok(all_bindings)
                                 }
@@ -2947,13 +2961,13 @@ impl TypeChecker {
                                                 // If pattern is provided, collect from it; otherwise bind field name
                                                 if let Some(ref pat) = field_pat.pattern {
                                                     let mut bindings = self
-                                                        .collect_pattern_bindings(pat, field_ty)?;
+                                                        .collect_pattern_bindings(pat, &pattern_field_type(ty, field_ty))?;
                                                     all_bindings.append(&mut bindings);
                                                 } else {
                                                     // Shorthand: { code, message } means { code: code, message: message }
                                                     all_bindings.push((
                                                         field_name.into(),
-                                                        field_ty.clone(),
+                                                        pattern_field_type(ty, field_ty),
                                                     ));
                                                 }
                                             }
@@ -3247,19 +3261,11 @@ impl TypeChecker {
         patterns: &[Pattern],
         payload_ty: &Type,
         span: Span,
-        binding_through_ref: bool,
+        scrutinee: &Type,
     ) -> Result<()> {
         let fields = variant_tuple_fields(tag, patterns, payload_ty, span)?;
         for (pattern, field) in patterns.iter().zip(fields) {
-            if binding_through_ref {
-                let borrowed = Type::Reference {
-                    mutable: false,
-                    inner: Box::new(field.clone()),
-                };
-                self.bind_pattern(pattern, &borrowed)?;
-            } else {
-                self.bind_pattern(pattern, field)?;
-            }
+            self.bind_pattern(pattern, &pattern_field_type(scrutinee, field))?;
         }
         Ok(())
     }
@@ -3278,7 +3284,7 @@ impl TypeChecker {
         allow_rest: bool,
         payload_ty: &Type,
         span: Span,
-        binding_through_ref: bool,
+        scrutinee: &Type,
     ) -> Result<()> {
         // Payload must be a record type.
         // Handle both direct Type::Record AND Type::Named that resolves to a record.
@@ -3378,14 +3384,7 @@ impl TypeChecker {
                         // When matching through a reference, bind field as reference
                         // e.g., match &tree { Tree.Node { value, ... } => ... }
                         // value should be &Int, not Int
-                        let effective_field_ty = if binding_through_ref {
-                            Type::Reference {
-                                mutable: false,
-                                inner: Box::new(field_ty.clone()),
-                            }
-                        } else {
-                            field_ty.clone()
-                        };
+                        let effective_field_ty = pattern_field_type(scrutinee, field_ty);
 
                         // Bind the pattern (or use shorthand)
                         if let Some(ref pat) = field_pat.pattern {
