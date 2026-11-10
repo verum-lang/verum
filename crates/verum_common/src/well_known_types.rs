@@ -2136,6 +2136,7 @@ pub enum WellKnownProtocol {
     Display,
     Drop,
     Deref,
+    Index,
     From,
     Into,
     Iterator,
@@ -2172,6 +2173,7 @@ impl WellKnownProtocol {
             Self::Display => "Display",
             Self::Drop => "Drop",
             Self::Deref => "Deref",
+            Self::Index => "Index",
             Self::From => "From",
             Self::Into => "Into",
             Self::Iterator => "Iterator",
@@ -2207,6 +2209,7 @@ impl WellKnownProtocol {
             "Display" => Some(Self::Display),
             "Drop" => Some(Self::Drop),
             "Deref" => Some(Self::Deref),
+            "Index" => Some(Self::Index),
             "From" => Some(Self::From),
             "Into" => Some(Self::Into),
             "Iterator" => Some(Self::Iterator),
@@ -2291,6 +2294,7 @@ impl WellKnownProtocol {
             | Self::Display
             | Self::Drop
             | Self::Deref
+            | Self::Index
             | Self::Send
             | Self::Sync
             | Self::From

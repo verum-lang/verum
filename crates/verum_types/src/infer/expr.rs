@@ -10303,6 +10303,7 @@ impl TypeChecker {
 
         let arr_result = self.synth_expr_for_field_access(arr)?;
         let resolved_main = self.unifier.apply(&arr_result.ty);
+        self.load_source_index_methods(&resolved_main)?;
 
         // Synthesize index type to determine if this is indexing or slicing
         let index_result = self.synth_expr(index)?;

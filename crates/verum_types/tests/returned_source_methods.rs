@@ -370,3 +370,31 @@ fn module_path_aliases_preserve_borrowed_receiver_private_methods() {
     let errors = module_alias_method_errors("hidden", "Int");
     assert_missing_method(&errors, "hidden");
 }
+
+#[test]
+fn a_source_index_projects_its_key_and_output_through_a_shared_field() {
+    let modules = [
+        ("core.base.protocols", r#"
+            public type Index<Idx> is protocol { type Output; fn index(&self, key:Idx)->&Self.Output; };
+            public type IndexMut<Idx> is protocol extends Index<Idx> { fn index_mut(&mut self, key:Idx)->&mut Self.Output; };
+        "#),
+        ("demo.provider", r#"
+            mount core.base.protocols.{Index,IndexMut};
+            public type Table<K,V> is { key:K, entry:V };
+            implement<K,V> Index<K> for Table<K,V> { type Output=V; fn index(&self, key:K)->&V { &self.entry } }
+            implement<K,V> IndexMut<K> for Table<K,V> { fn index_mut(&mut self, key:K)->&mut V { &mut self.entry } }
+        "#),
+    ];
+    let header = "mount demo.provider.Table; type Report is { rows: Table<Text,Bool> };";
+    let valid = check(&format!(r#"{header} fn read(report:&Report)->Bool {{ let item = &report.rows["x"]; *item }}"#), &modules);
+    assert!(valid.is_empty(), "{valid:?}");
+    for body in [
+        r#"fn wrong_key(report:&Report)->Bool { report.rows[3] }"#,
+        r#"fn wrong_output(report:&Report)->Int { report.rows["x"] }"#,
+    ] {
+        let errors = check(&format!("{header} {body}"), &modules);
+        assert!(errors.iter().any(|error| error.contains("Mismatch")), "{body}: {errors:?}");
+    }
+    let invalid_write = check(&format!(r#"{header} fn write(report:&Report) {{ report.rows["x"] = true; }}"#), &modules);
+    assert!(invalid_write.iter().any(|error| error.contains("SharedReferenceWrite")), "{invalid_write:?}");
+}

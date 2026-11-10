@@ -644,6 +644,13 @@ impl TypeChecker {
         result
     }
 
+    pub(super) fn load_source_index_methods(&mut self, receiver: &Type) -> Result<()> {
+        if self.protocol_checker.read().resolve_index_protocol(receiver).is_none() {
+            self.load_source_receiver_methods(receiver)?;
+        }
+        Ok(())
+    }
+
     /// Retain private methods for checking their owner's implementation, but
     /// consult declaration visibility before any caller-side dispatch can win.
     pub(super) fn check_source_method_visibility(

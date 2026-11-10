@@ -2950,6 +2950,7 @@ impl TypeChecker {
                 let arr_result = self.synth_expr_for_field_access(arr)?;
                 // Resolve type variables before index protocol resolution
                 let resolved_arr_ty = self.unifier.apply(&arr_result.ty);
+                self.load_source_index_methods(&resolved_arr_ty)?;
 
                 // =========================================================================
                 // Protocol-based Index resolution

@@ -10085,29 +10085,20 @@ impl ProtocolChecker {
         // Stdlib-agnostic type system: type checker operates without hardcoded knowledge of stdlib types, stdlib types registered from parsed .vr files
         // =========================================================================
         // Try to resolve Index via registered protocol implementation.
-        let index_path = Path::single(verum_ast::ty::Ident::new("Index", Span::default()));
-        if let Maybe::Some(impl_) = self.find_impl(ty, &index_path) {
-            // Build type substitution from impl's generic type to concrete type
-            let mut subst = Map::new();
-            self.build_type_substitution_for_impl(&impl_.for_type, ty, &mut subst);
-
-            // Extract associated types Idx and Output
-            let key = impl_
-                .ordinary_associated_type(&"Idx".into())
-                .ok()?
-                .cloned()
-                .map(|t| self.apply_type_substitution_with_map(&t, &subst))
-                .unwrap_or(Type::Int); // Default to Int if not specified
-
-            let output = impl_
-                .ordinary_associated_type(&"Output".into())
-                .ok()?
-                .cloned()
-                .map(|t| self.apply_type_substitution_with_map(&t, &subst));
-
-            if let Some(output) = output {
-                return Some(IndexResolution { key, output });
-            }
+        let index = verum_common::well_known_types::WellKnownProtocol::Index;
+        let owner = index.canonical_archive_modules().first().copied()?;
+        let declared = verum_common::qualified_name::qualify_module_name(owner, index.as_str());
+        let name = if self.has_protocol(&declared) { declared } else { index.as_str().into() };
+        let index_path = Path::single(verum_ast::ty::Ident::new(name, Span::default()));
+        if let Some((implementation, substitution)) = self.find_impl_with_substitution(ty, &index_path) {
+            // The source protocol declares its key as an argument and Output
+            // as an associated type. Both belong to the selected impl scope.
+            let key = implementation.protocol_args.first()
+                .or(implementation.ordinary_associated_type(&"Idx".into()).ok()?)
+                .map(|ty| ty.try_apply_subst(&substitution)).transpose().ok()?.unwrap_or(Type::Int);
+            let output = implementation.ordinary_associated_type(&"Output".into()).ok()??
+                .try_apply_subst(&substitution).ok()?;
+            return Some(IndexResolution { key, output });
         }
 
         // No Index implementation found
