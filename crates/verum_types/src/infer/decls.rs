@@ -5287,7 +5287,7 @@ impl TypeChecker {
                                         func.is_generator,
                                     );
 
-                                    let func_ty = Type::function_with_requirement(param_types, final_return_type, crate::computational_properties::PropertyRequirement::declared_function(func.is_pure, func.is_meta));
+                                    let func_ty = Type::function_with_requirement(param_types, final_return_type, checker.concrete_method_requirement(func));
                                     let qualified_name =
                                         format!("{}.{}", type_name_str, func.name.name);
 
@@ -5421,7 +5421,7 @@ impl TypeChecker {
                                         func.is_generator,
                                     );
 
-                                    let method_ty = Type::function_with_requirement(param_types, final_return_type, crate::computational_properties::PropertyRequirement::declared_function(func.is_pure, func.is_meta));
+                                    let method_ty = Type::function_with_requirement(param_types, final_return_type, checker.concrete_method_requirement(func));
                                     let type_name_text =
                                         verum_common::Text::from(type_name_str.as_str());
                                     let method_name_text =
@@ -5812,7 +5812,7 @@ impl TypeChecker {
                                     func.is_generator,
                                 );
 
-                                let method_ty = Type::function_with_requirement(param_types, final_return_type, crate::computational_properties::PropertyRequirement::declared_function(func.is_pure, func.is_meta));
+                                let method_ty = Type::function_with_requirement(param_types, final_return_type, self.concrete_method_requirement(func));
                                 let type_name_text =
                                     verum_common::Text::from(type_name_str.as_str());
                                 let method_name_text =
@@ -5954,7 +5954,7 @@ impl TypeChecker {
                                     func.is_generator,
                                 );
 
-                                let method_ty = Type::function_with_requirement(param_types, final_return_type, crate::computational_properties::PropertyRequirement::declared_function(func.is_pure, func.is_meta));
+                                let method_ty = Type::function_with_requirement(param_types, final_return_type, self.concrete_method_requirement(func));
                                 let type_name_text =
                                     verum_common::Text::from(type_name_str.as_str());
                                 let method_name_text =
@@ -6135,7 +6135,7 @@ impl TypeChecker {
                                     .unwrap_or(Ok(Type::Unit))
                                     .unwrap_or(Type::Unit);
 
-                                let method_ty = Type::function_with_requirement(params, return_type, crate::computational_properties::PropertyRequirement::declared_function(func.is_pure, func.is_meta));
+                                let method_ty = Type::function_with_requirement(params, return_type, self.concrete_method_requirement(func));
                                 methods.insert(method_name, method_ty);
                             }
                         }

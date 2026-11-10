@@ -444,3 +444,31 @@ fn awaiting_a_returned_source_value_projects_the_declared_future_output() {
         assert!(errors.iter().any(|error| error.contains("Mismatch")), "{expression}: {errors:?}");
     }
 }
+
+#[test]
+fn a_sync_callback_can_call_an_imported_method_with_a_proven_sync_body() {
+    let modules = [("demo.jobs", r#"
+        public type Job is { number: Int };
+        implement Job {
+            public fn read(&self) -> Int { self.number }
+            public async fn later(&self) -> Int { self.number }
+            public fn indirect(&self, callback: async fn() -> Int) -> Int { callback() }
+        }
+    "#)];
+    let header = r#"
+        mount demo.jobs.Job;
+        fn require(item: Job, read: fn(Job) -> Int) -> Int { read(item) }
+    "#;
+    let valid = check(
+        &format!("{header} fn probe(item: Job) -> Int {{ require(item, |job| job.read()) }}"),
+        &modules,
+    );
+    assert!(valid.is_empty(), "{valid:?}");
+    for call in ["job.later()", "job.indirect(callback)"] {
+        let errors = check(
+            &format!("{header} fn probe(item: Job, callback: async fn() -> Int) -> Int {{ require(item, |job| {call}) }}"),
+            &modules,
+        );
+        assert!(errors.iter().any(|error| error.contains("Mismatch") && error.contains("async fn")), "{call}: {errors:?}");
+    }
+}

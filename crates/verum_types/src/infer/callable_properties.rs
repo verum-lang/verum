@@ -64,6 +64,22 @@ impl TypeChecker {
         calls.bound
     }
 
+    /// A concrete source method can establish synchrony before its signature
+    /// is used as a callback. Unknown callees keep the body's bound open.
+    pub(super) fn concrete_method_requirement(
+        &mut self,
+        method: &verum_ast::FunctionDecl,
+    ) -> PropertyRequirement {
+        let declared = PropertyRequirement::declared_function(method.is_pure, method.is_meta);
+        if !method.is_async && declared.may_be_async()
+            && let Some(body) = &method.body
+            && !self.callable_function_body_bound(body).may_be_async()
+        {
+            return PropertyRequirement::source_callable(false);
+        }
+        declared
+    }
+
     pub(super) fn callable_bound_with_marker(
         bound: PropertyRequirement,
         is_async: bool,

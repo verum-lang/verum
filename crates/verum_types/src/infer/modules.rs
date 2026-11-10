@@ -6078,7 +6078,7 @@ impl TypeChecker {
                             func.is_async,
                             func.is_generator,
                         );
-                        let func_ty = Type::function_with_requirement(param_types, final_return_type, crate::computational_properties::PropertyRequirement::declared_function(func.is_pure, func.is_meta));
+                        let func_ty = Type::function_with_requirement(param_types, final_return_type, self.concrete_method_requirement(func));
 
                         // Prepare registration for after scope exit
                         // Quantify both the impl and method variables in declaration order.
@@ -6191,7 +6191,7 @@ impl TypeChecker {
                             func.is_async,
                             func.is_generator,
                         );
-                        let method_ty = Type::function_with_requirement(param_types, final_return_type, crate::computational_properties::PropertyRequirement::declared_function(func.is_pure, func.is_meta));
+                        let method_ty = Type::function_with_requirement(param_types, final_return_type, self.concrete_method_requirement(func));
                         let type_name_text = method_owner.clone();
                         let method_name_text = verum_common::Text::from(func.name.name.as_str());
 
@@ -6323,7 +6323,7 @@ impl TypeChecker {
 
                         // #[cfg(debug_assertions)]
                         // eprintln!("[DEBUG import_impl_blocks] Added method '{}' with return_type={}", method_name, return_type.to_text());
-                        methods.insert(method_name, Type::function_with_requirement(param_types, final_return_type, crate::computational_properties::PropertyRequirement::declared_function(func.is_pure, func.is_meta)));
+                        methods.insert(method_name, Type::function_with_requirement(param_types, final_return_type, self.concrete_method_requirement(func)));
                     }
                 }
 
@@ -9166,7 +9166,7 @@ impl TypeChecker {
                         .map(|t| self.ast_to_type_lenient(t))
                         .unwrap_or(Type::Unit);
 
-                    let method_ty = Type::function_with_requirement(param_types, return_type, crate::computational_properties::PropertyRequirement::declared_function(func.is_pure, func.is_meta));
+                    let method_ty = Type::function_with_requirement(param_types, return_type, self.concrete_method_requirement(func));
 
                     // Generalize with ordered params: [I, method-level params...]
                     let mut ordered_params: List<verum_common::Text> =
