@@ -256,3 +256,17 @@ fn nested_generic_alias_pattern_uses_the_owned_telescope() {
     accept(source);
 }
 
+
+#[test]
+fn nominal_tuple_heads_are_distinct_from_scalar_implementations() {
+    for (declaration, head) in [
+        ("type Token is (UInt64);", "Token"),
+        ("type Token<T> is (T);", "Token<UInt64>"),
+        ("type Token<T> is (T, T);", "Token<UInt64>"),
+    ] {
+        for scalar in ["Int", "Text"] {
+            accept(&heads(declaration, scalar, Some((head, "Bool")), scalar));
+            reject(&heads(declaration, scalar, Some((head, "Bool")), head));
+        }
+    }
+}

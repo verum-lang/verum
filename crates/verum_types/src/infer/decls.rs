@@ -184,6 +184,13 @@ impl TypeChecker {
                     .insert(name.name.clone(), value);
             }
         }
+        // Tuple-like nominal declarations share this frame in both passes.
+        // An explicit empty telescope also distinguishes their heads from scalars.
+        if matches!(&declaration.body, TypeDeclBody::Tuple(_) | TypeDeclBody::Newtype(_)
+            | TypeDeclBody::SigmaTuple(_) | TypeDeclBody::Unit)
+        {
+            self.register_declared_type_arity(&declaration.name.name, &declaration.generics)?;
+        }
         if !matches!(&declaration.body, TypeDeclBody::Protocol(_) | TypeDeclBody::Coinductive(_)) {
             self.record_type_param_defaults(declaration.name.name.as_str(), &declaration.generics)?;
         }
