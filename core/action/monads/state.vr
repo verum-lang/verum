@@ -30,18 +30,18 @@ public type State<S, A> is {
 
 /// `pure : A -> State<S, A>` — return a value without modifying the
 /// state.
-public fn state_unit<S, A>(a: A) -> State<S, A> {
+public fn state_unit<S, A: Clone>(a: A) -> State<S, A> {
     State { run: |s: S| -> (A, S) { (a.clone(), s) } }
 }
 
 /// `get : State<S, S>` — read the current state, leaving it unchanged.
-public fn state_get<S>() -> State<S, S> {
+public fn state_get<S: Clone>() -> State<S, S> {
     State { run: |s: S| -> (S, S) { (s.clone(), s) } }
 }
 
 /// `put : S -> State<S, ()>` — replace the state with a new value;
 /// return unit.
-public fn state_put<S>(new_state: S) -> State<S, ()> {
+public fn state_put<S: Clone>(new_state: S) -> State<S, ()> {
     State { run: |_old: S| -> ((), S) { ((), new_state.clone()) } }
 }
 
@@ -60,7 +60,7 @@ public fn state_bind<S, A, B>(
 ) -> State<S, B> {
     State {
         run: |s: S| -> (B, S) {
-            let (a, s1) = (m.run.clone())(s);
+            let (a, s1) = (m.run)(s);
             let inner: State<S, B> = f(a);
             (inner.run)(s1)
         },
@@ -70,10 +70,10 @@ public fn state_bind<S, A, B>(
 /// `strength : A -> State<S, B> -> State<S, (A, B)>` — tensor a
 /// pure value alongside the State-effectful one. Both threaded
 /// state and output value preserved.
-public fn state_strength<S, A, B>(a: A, mb: State<S, B>) -> State<S, (A, B)> {
+public fn state_strength<S, A: Clone, B>(a: A, mb: State<S, B>) -> State<S, (A, B)> {
     State {
         run: |s: S| -> ((A, B), S) {
-            let (b, s1) = (mb.run.clone())(s);
+            let (b, s1) = (mb.run)(s);
             ((a.clone(), b), s1)
         },
     }
@@ -117,13 +117,13 @@ public fn state_exec<S, A>(m: State<S, A>, initial: S) -> S {
 
 /// **Left identity** at initial state: `bind(unit(a), f).run(s) ≡ f(a).run(s)`.
 @framework(diakrisis, "Theorem 17.T1 (State left-identity monad law)")
-public theorem state_left_identity<S, A, B>(
+public theorem state_left_identity<S: Clone + PartialEq, A: Clone, B: PartialEq>(
     initial: S,
     a: A,
     f: fn(A) -> State<S, B>,
 ) -> Bool
     requires true
-    ensures  state_run(state_bind(state_unit(a.clone()), f.clone()), initial.clone())
+    ensures  state_run(state_bind(state_unit(a.clone()), f), initial.clone())
           == state_run(f(a), initial)
 {
     proof {
@@ -135,7 +135,7 @@ public theorem state_left_identity<S, A, B>(
         //  let inner = f(a') = f(a); (β-let)
         //  (inner.run)(s1) = f(a).run(initial) (β-app)
         let bound_run: (B, S) = state_run(
-            state_bind(unit_a, f.clone()),
+            state_bind(unit_a, f),
             initial.clone(),
         );
         // ── Step 3: direct evaluation — the spec's RHS.
@@ -147,7 +147,7 @@ public theorem state_left_identity<S, A, B>(
 
 /// **Right identity** at initial state: `bind(m, state_unit).run(s) ≡ m.run(s)`.
 @framework(diakrisis, "Theorem 17.T1 (State right-identity monad law)")
-public theorem state_right_identity<S, A>(
+public theorem state_right_identity<S: Clone + PartialEq, A: Clone + PartialEq>(
     initial: S,
     m: State<S, A>,
 ) -> Bool
@@ -176,7 +176,7 @@ public theorem state_right_identity<S, A>(
 
 /// **Associativity** at initial state.
 @framework(diakrisis, "Theorem 17.T1 (State associativity monad law)")
-public theorem state_associativity<S, A, B, C>(
+public theorem state_associativity<S: Clone + PartialEq, A: Clone, B, C: PartialEq>(
     initial: S,
     m: State<S, A>,
     f: fn(A) -> State<S, B>,
@@ -184,10 +184,10 @@ public theorem state_associativity<S, A, B, C>(
 ) -> Bool
     requires true
     ensures  state_run(
-        state_bind(state_bind(m.clone(), f.clone()), g.clone()),
+        state_bind(state_bind(m.clone(), f), g),
         initial.clone()
     ) == state_run(
-        state_bind(m, |x: A| state_bind(f(x), g.clone())),
+        state_bind(m, |x: A| state_bind(f(x), g)),
         initial
     )
 {
@@ -203,7 +203,7 @@ public theorem state_associativity<S, A, B, C>(
         //  let (b', s2') = state_bind(m, f).run(initial) = (b, s2)
         //  g(b').run(s2') = g(b).run(s2)
         let lhs_run: (C, S) = state_run(
-            state_bind(state_bind(m.clone(), f.clone()), g.clone()),
+            state_bind(state_bind(m.clone(), f), g),
             initial.clone(),
         );
         // ── Step 3: RHS — right-associated, same threading.
@@ -212,7 +212,7 @@ public theorem state_associativity<S, A, B, C>(
         //  let inner = (|x| state_bind(f(x), g))(a') = state_bind(f(a), g)
         //  inner.run(s1') = let (b', s2') = f(a).run(s1) = (b, s2); g(b).run(s2)
         let rhs_run: (C, S) = state_run(
-            state_bind(m, |x: A| state_bind(f(x), g.clone())),
+            state_bind(m, |x: A| state_bind(f(x), g)),
             initial,
         );
         // ── Step 4: both reduce to g(b).run(s2) at the witness chain.

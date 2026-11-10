@@ -24,7 +24,7 @@ public type Reader<R, A> is {
 
 /// `pure : A -> Reader<R, A>` — return a constant value regardless
 /// of environment.
-public fn reader_unit<R, A>(a: A) -> Reader<R, A> {
+public fn reader_unit<R, A: Clone>(a: A) -> Reader<R, A> {
     Reader { run: |_r: R| -> A { a.clone() } }
 }
 
@@ -34,13 +34,13 @@ public fn reader_ask<R>() -> Reader<R, R> {
 }
 
 /// `bind : Reader<R, A> -> (A -> Reader<R, B>) -> Reader<R, B>`
-public fn reader_bind<R, A, B>(
+public fn reader_bind<R: Clone, A, B>(
     m: Reader<R, A>,
     f: fn(A) -> Reader<R, B>,
 ) -> Reader<R, B> {
     Reader {
         run: |r: R| -> B {
-            let a: A = (m.run.clone())(r.clone());
+            let a: A = (m.run)(r.clone());
             let inner: Reader<R, B> = f(a);
             (inner.run)(r)
         },
@@ -49,10 +49,10 @@ public fn reader_bind<R, A, B>(
 
 /// `strength : A -> Reader<R, B> -> Reader<R, (A, B)>` — tensor a
 /// pure value alongside the Reader-effectful one.
-public fn reader_strength<R, A, B>(a: A, mb: Reader<R, B>) -> Reader<R, (A, B)> {
+public fn reader_strength<R, A: Clone, B>(a: A, mb: Reader<R, B>) -> Reader<R, (A, B)> {
     Reader {
         run: |r: R| -> (A, B) {
-            let b: B = (mb.run.clone())(r);
+            let b: B = (mb.run)(r);
             (a.clone(), b)
         },
     }
@@ -69,7 +69,7 @@ public fn reader_run<R, A>(m: Reader<R, A>, env: R) -> A {
 /// combinator (Wadler 1990).
 public fn reader_local<R, A>(modify: fn(R) -> R, m: Reader<R, A>) -> Reader<R, A> {
     Reader {
-        run: |r: R| -> A { (m.run.clone())(modify(r)) },
+        run: |r: R| -> A { (m.run)(modify(r)) },
     }
 }
 
@@ -89,13 +89,13 @@ public fn reader_local<R, A>(modify: fn(R) -> R, m: Reader<R, A>) -> Reader<R, A
 
 /// **Left identity** at env: `bind(pure(a), f).run(env) ≡ f(a).run(env)`.
 @framework(diakrisis, "Theorem 17.T1 (Reader left-identity monad law)")
-public theorem reader_left_identity<R, A, B>(
+public theorem reader_left_identity<R: Clone, A: Clone, B: PartialEq>(
     env: R,
     a: A,
     f: fn(A) -> Reader<R, B>,
 ) -> Bool
     requires true
-    ensures  reader_run(reader_bind(reader_unit(a.clone()), f.clone()), env.clone())
+    ensures  reader_run(reader_bind(reader_unit(a.clone()), f), env.clone())
           == reader_run(f(a), env)
 {
     proof {
@@ -108,7 +108,7 @@ public theorem reader_left_identity<R, A, B>(
         //  let inner = f(a') = f(a); (β-let)
         //  (inner.run)(env) (β-app)
         let bound_run_at_env: B = reader_run(
-            reader_bind(unit_a, f.clone()),
+            reader_bind(unit_a, f),
             env.clone(),
         );
         // ── Step 3: direct application — the spec's RHS.
@@ -120,7 +120,7 @@ public theorem reader_left_identity<R, A, B>(
 
 /// **Right identity** at env: `bind(m, reader_unit).run(env) ≡ m.run(env)`.
 @framework(diakrisis, "Theorem 17.T1 (Reader right-identity monad law)")
-public theorem reader_right_identity<R, A>(env: R, m: Reader<R, A>) -> Bool
+public theorem reader_right_identity<R: Clone, A: Clone + PartialEq>(env: R, m: Reader<R, A>) -> Bool
     requires true
     ensures  reader_run(reader_bind(m.clone(), reader_unit), env.clone())
           == reader_run(m, env)
@@ -146,7 +146,7 @@ public theorem reader_right_identity<R, A>(env: R, m: Reader<R, A>) -> Bool
 
 /// **Associativity** at env: `bind(bind(m, f), g) ≡ bind(m, |x| bind(f(x), g))`.
 @framework(diakrisis, "Theorem 17.T1 (Reader associativity monad law)")
-public theorem reader_associativity<R, A, B, C>(
+public theorem reader_associativity<R: Clone, A: Clone, B, C: PartialEq>(
     env: R,
     m: Reader<R, A>,
     f: fn(A) -> Reader<R, B>,
@@ -154,10 +154,10 @@ public theorem reader_associativity<R, A, B, C>(
 ) -> Bool
     requires true
     ensures  reader_run(
-        reader_bind(reader_bind(m.clone(), f.clone()), g.clone()),
+        reader_bind(reader_bind(m.clone(), f), g),
         env.clone()
     ) == reader_run(
-        reader_bind(m, |x: A| reader_bind(f(x), g.clone())),
+        reader_bind(m, |x: A| reader_bind(f(x), g)),
         env
     )
 {
@@ -171,7 +171,7 @@ public theorem reader_associativity<R, A, B, C>(
         //  let b' = (inner_m.run)(env) = let a'' = m.run(env); f(a'').run(env) = f(a).run(env) = b
         //  g(b').run(env)
         let lhs_run: C = reader_run(
-            reader_bind(reader_bind(m.clone(), f.clone()), g.clone()),
+            reader_bind(reader_bind(m.clone(), f), g),
             env.clone(),
         );
         // ── Step 3: RHS — right-associated, same threading.
@@ -180,7 +180,7 @@ public theorem reader_associativity<R, A, B, C>(
         //  let inner = (|x| reader_bind(f(x), g))(a') = reader_bind(f(a), g)
         //  inner.run(env) = let b' = f(a).run(env) = b; g(b').run(env)
         let rhs_run: C = reader_run(
-            reader_bind(m, |x: A| reader_bind(f(x), g.clone())),
+            reader_bind(m, |x: A| reader_bind(f(x), g)),
             env,
         );
         // ── Step 4: both sides reduce to g(b).run(env) at the witness.
@@ -197,7 +197,7 @@ public theorem reader_associativity<R, A, B, C>(
 ///  bind(m1, |a| bind(m2, |b| pure((a,b)))).run(env)
 /// ≡ bind(m2, |b| bind(m1, |a| pure((a,b)))).run(env)
 @framework(diakrisis, "Corollary 17.C2 (Reader tensor-commutativity)")
-public theorem reader_commutativity<R, A, B>(
+public theorem reader_commutativity<R: Clone, A: Clone + PartialEq, B: Clone + PartialEq>(
     env: R,
     m1: Reader<R, A>,
     m2: Reader<R, B>,

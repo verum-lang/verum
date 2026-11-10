@@ -1,0 +1,33 @@
+mount core.base.protocols.Clone;
+mount core.action.monads.reader.{Reader, reader_ask, reader_unit, reader_bind, reader_strength, reader_local, reader_run};
+mount core.action.monads.state.{State, state_get, state_put, state_bind, state_strength, state_modify, state_run};
+
+type Number is { n: Int };
+implement Clone for Number {
+    fn clone(&self) -> Number { Number { n: self.n } }
+}
+
+fn reader_next(value: Number) -> Reader<Number, Number> {
+    reader_unit<Number, Number>(Number { n: value.n + 2 })
+}
+fn add_one(value: Number) -> Number { Number { n: value.n + 1 } }
+fn reset(_value: Number) -> State<Number, ()> { state_put(Number { n: 11 }) }
+
+@test
+fn reading_and_updating_preserves_the_environment_and_results() {
+    let reader: Reader<Number, Number> = reader_bind(reader_ask<Number>(), reader_next);
+    let local: Reader<Number, Number> = reader_local(add_one, reader);
+    let combined: Reader<Number, (Number, Number)> = reader_strength(Number { n: 3 }, local);
+    let pair = reader_run(combined, Number { n: 4 });
+
+    let set: State<Number, ()> = state_bind(state_get<Number>(), reset);
+    let combined_state: State<Number, (Number, ())> = state_strength(Number { n: 9 }, set);
+    let result = state_run(combined_state, Number { n: 5 });
+    let modified = state_run(state_modify(add_one), Number { n: 6 });
+
+    assert_eq(pair.0.n, 3);
+    assert_eq(pair.1.n, 7);
+    assert_eq(result.0.0.n, 9);
+    assert_eq(result.1.n, 11);
+    assert_eq(modified.1.n, 7);
+}
