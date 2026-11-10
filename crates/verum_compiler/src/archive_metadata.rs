@@ -998,11 +998,10 @@ fn register_module_metadata(
                         })
                     })
                     .collect();
-                let default_method_names: List<Text> = ty
-                    .variants
-                    .iter()
-                    .filter_map(|v| module.strings.get(v.name).map(Text::from))
-                    .collect();
+                let default_method_names = match ty.source_declaration.as_ref().map(|declaration| &declaration.body) {
+                    Some(verum_ast::TypeDeclBody::Protocol(body)) => body.declared_default_methods.clone(),
+                    _ => List::new(),
+                };
 
                 // Resolve super-protocol names via type_id_to_name
                 // (VBC encodes super-protocol references in
@@ -1060,7 +1059,7 @@ fn register_module_metadata(
                     super_protocols: super_protocols.clone(),
                     associated_types: List::new(),
                     required_methods: required_methods.clone(),
-                    default_methods: List::new(),
+                    default_methods: required_methods.iter().filter(|method| default_method_names.contains(&method.name)).cloned().collect(),
                     // #101 — span population deferred to a source-walk
                     // pass in `precompile.rs::write_core_metadata_alongside_archive`.
                     decl_span: verum_common::Maybe::None,

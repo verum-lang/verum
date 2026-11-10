@@ -137,7 +137,8 @@ pub const VERSION_MAJOR: u16 = 2;
 /// Protocol descriptors' super-protocol edges remain edges, not implementations.
 // v2.43: callable source name and typed lexical-parent identity.
 // v2.44: distinguish structural slice method owners from nominal records.
-pub const VERSION_MINOR: u16 = 44;
+// v2.45: typed scalar references distinguish managed slots from native storage.
+pub const VERSION_MINOR: u16 = 45;
 
 /// Minor-version floors for sections whose presence readers gate on.  The
 /// register-type-hints section has been written unconditionally since minor 2,

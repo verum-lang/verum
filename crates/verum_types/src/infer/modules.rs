@@ -6238,7 +6238,7 @@ impl TypeChecker {
 
                         // Store the impl self-type arg pattern for specialization filtering.
                         // Only store when the impl has type args (i.e., it's a generic/specialized impl).
-                        if !impl_self_type_args.is_empty() {
+                        if !is_protocol_impl && !impl_self_type_args.is_empty() {
                             let mut patterns_guard = self.method_impl_patterns.write();
                             let type_patterns =
                                 patterns_guard.entry(type_name_text.clone()).or_default();
@@ -6342,6 +6342,7 @@ impl TypeChecker {
                     )?;
 
                     // Defaults inherit the selected application, including owner values.
+                    let mut defaults = Vec::new();
                     if let Some(declaration) = checker.protocol_checker.read().get_protocol(&identity) {
                         let impl_variables: List<TypeVar> = impl_type_bindings.iter().filter_map(|(name, _)| {
                             match checker.ctx.lookup_type(name.as_str()) { Some(Type::Var(var)) => Some(*var), _ => None }
@@ -6359,9 +6360,13 @@ impl TypeChecker {
                             if method.has_default && !methods.contains_key(name) {
                                 let scheme = checker.inherited_protocol_method_scheme(method, &resolved_protocol_args, &for_type_resolved, &impl_variables)?;
                                 methods.insert(name.clone(), scheme.ty.clone());
-                                checker.inherent_methods.write().entry(method_owner.clone()).or_default().entry(name.clone()).or_insert(scheme);
+                                defaults.push((name.clone(), scheme));
                             }
                         }
+                    }
+
+                    for (name, scheme) in defaults {
+                        checker.register_inherited_method(&method_owner, &name, scheme);
                     }
 
                     // Create and register the ProtocolImpl

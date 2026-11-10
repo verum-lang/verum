@@ -1246,6 +1246,9 @@ pub struct ProtocolBody {
     pub generic_where_clause: Maybe<WhereClause>,
     /// Protocol items (methods, associated types, constants)
     pub items: List<ProtocolItem>,
+    /// Declared defaults retained when executable protocol bodies are removed.
+    #[serde(default)]
+    pub declared_default_methods: List<verum_common::Text>,
 }
 
 impl ProtocolBody {
@@ -1256,6 +1259,7 @@ impl ProtocolBody {
             extends: List::new(),
             generic_where_clause: Maybe::None,
             items,
+            declared_default_methods: List::new(),
         }
     }
 
@@ -1266,6 +1270,7 @@ impl ProtocolBody {
             extends: List::new(),
             generic_where_clause: Maybe::None,
             items,
+            declared_default_methods: List::new(),
         }
     }
 
@@ -1276,6 +1281,7 @@ impl ProtocolBody {
             extends,
             generic_where_clause: Maybe::None,
             items,
+            declared_default_methods: List::new(),
         }
     }
 
@@ -1290,6 +1296,7 @@ impl ProtocolBody {
             extends,
             generic_where_clause,
             items,
+            declared_default_methods: List::new(),
         }
     }
 
@@ -1305,6 +1312,7 @@ impl ProtocolBody {
             extends,
             generic_where_clause,
             items,
+            declared_default_methods: List::new(),
         }
     }
 

@@ -121,6 +121,13 @@ impl TypeChecker {
         scheme: crate::context::TypeScheme,
         from_protocol_impl: bool,
     ) {
+        if from_protocol_impl && let Some(Type::Named { args, .. } | Type::Generic { args, .. }) = &scheme.impl_self_type
+            && !args.is_empty()
+        {
+            let mut all = self.method_impl_patterns.write();
+            let patterns = all.entry(type_name.clone()).or_default().entry(method_name.clone()).or_default();
+            if !patterns.contains(args) { patterns.push(args.clone()); }
+        }
         let overload_key = (type_name.clone(), method_name.clone());
         if self.inherent_overloaded_methods.contains(&overload_key) {
             if from_protocol_impl {
@@ -149,6 +156,22 @@ impl TypeChecker {
             }
         } else {
             methods.insert(method_name, scheme);
+        }
+    }
+
+    /// A default applies to the implementation's own receiver. Include that
+    /// receiver in specialization gating even when a sibling overrides it.
+    pub(super) fn register_inherited_method(
+        &mut self,
+        owner: &Text,
+        name: &Text,
+        scheme: crate::context::TypeScheme,
+    ) {
+        let same_receiver = self.inherent_methods.read().get(owner)
+            .and_then(|methods| methods.get(name))
+            .is_some_and(|existing| existing.impl_self_type == scheme.impl_self_type);
+        if !same_receiver {
+            self.register_inherent_method_guarded(owner.clone(), name.clone(), scheme, true);
         }
     }
 

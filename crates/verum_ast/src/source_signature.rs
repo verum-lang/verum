@@ -106,6 +106,17 @@ fn validate_type_declaration(
     {
         return Err("nominal universe parameters require unsupported level instantiation".into());
     }
+    if let TypeDeclBody::Protocol(body) | TypeDeclBody::Coinductive(body) = &declaration.body
+        && !body.declared_default_methods.is_empty()
+    {
+        let mut names: std::collections::HashSet<_> = body.items.iter().filter_map(|item| match &item.kind {
+            ProtocolItemKind::Function { decl, .. } => Some(&decl.name.name),
+            _ => None,
+        }).collect();
+        if !body.declared_default_methods.iter().all(|name| names.remove(name)) {
+            return Err("retained default must identify one declared protocol method".into());
+        }
+    }
     if !allow_source_bodies {
         if let TypeDeclBody::Protocol(body) | TypeDeclBody::Coinductive(body) = &declaration.body {
             for item in &body.items {
@@ -137,6 +148,11 @@ fn copy_type_declaration(declaration: &crate::TypeDecl) -> crate::TypeDecl {
         TypeDeclBody::Protocol(body) | TypeDeclBody::Coinductive(body) => {
             let copied = ProtocolBody {
                 is_context: body.is_context,
+                declared_default_methods: body.items.iter().filter_map(|item| match &item.kind {
+                    ProtocolItemKind::Function { decl, default_impl } if decl.body.is_some()
+                        || default_impl.is_some() || body.declared_default_methods.contains(&decl.name.name) => Some(decl.name.name.clone()),
+                    _ => None,
+                }).collect(),
                 extends: body.extends.clone(),
                 generic_where_clause: body.generic_where_clause.clone(),
                 items: body
@@ -800,7 +816,9 @@ fn check_type_declaration_size(declaration: &crate::TypeDecl) -> Result<()> {
                     extends,
                     generic_where_clause,
                     items,
+                    declared_default_methods,
                 } = body;
+                budget.visit(declared_default_methods, 1)?;
                 budget.visit(is_context, 1)?;
                 budget.visit(extends, 1)?;
                 budget.visit(generic_where_clause, 1)?;

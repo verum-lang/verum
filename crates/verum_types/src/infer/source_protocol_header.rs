@@ -53,6 +53,7 @@ impl TypeChecker {
         constraints: &ProtocolConstraints,
         supers: &[ProtocolBound],
         items: &[ProtocolItem],
+        declared_default_methods: &[Text],
     ) -> Result<(Map<Text, ProtocolMethod>, Map<Text, AssociatedType>, Option<Span>)> {
         // A recursive source load introduces a different Self. Its method
         // obligations must not inherit the caller's equally-spelled receiver.
@@ -64,6 +65,7 @@ impl TypeChecker {
             constraints,
             supers,
             items,
+            declared_default_methods,
         );
         self.source_type_registration.projection_assumptions = previous;
         self.source_type_registration.callable_assumptions = callables;
@@ -77,6 +79,7 @@ impl TypeChecker {
         constraints: &ProtocolConstraints,
         supers: &[ProtocolBound],
         items: &[ProtocolItem],
+        declared_default_methods: &[Text],
     ) -> Result<(Map<Text, ProtocolMethod>, Map<Text, AssociatedType>, Option<Span>)> {
         let mut associated = Map::new();
         for item in items {
@@ -117,7 +120,7 @@ impl TypeChecker {
                         parameters,
                         constraints,
                         decl,
-                        decl.body.is_some() || default_impl.is_some(),
+                        decl.body.is_some() || default_impl.is_some() || declared_default_methods.contains(&decl.name.name),
                     )?;
                     if methods.insert(decl.name.name.clone(), method).is_some() {
                         return Err(invalid(item.span, "duplicate protocol method"));

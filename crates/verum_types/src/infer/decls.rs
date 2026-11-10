@@ -2000,7 +2000,7 @@ impl TypeChecker {
                 };
                 let (protocol_methods, protocol_assoc_types, dyn_required) = self.elaborate_protocol_members(
                     self.declared_type_key(type_name.as_str()), &type_decl.generics,
-                    &constraint_scope, &super_protocols, &protocol_body.items,
+                    &constraint_scope, &super_protocols, &protocol_body.items, &protocol_body.declared_default_methods,
                 )?;
 
                 // Create and register Protocol object
@@ -3452,7 +3452,7 @@ impl TypeChecker {
                 };
                 let (protocol_methods, protocol_assoc_types, dyn_required) = self.elaborate_protocol_members(
                     self.declared_type_key(type_name.as_str()), &type_decl.generics,
-                    &constraint_scope, &super_protocols, &protocol_body.items,
+                    &constraint_scope, &super_protocols, &protocol_body.items, &protocol_body.declared_default_methods,
                 )?;
 
                 // Create and register Protocol object
@@ -4513,7 +4513,7 @@ impl TypeChecker {
         };
         let (protocol_methods, associated_types, dyn_required) = self.elaborate_protocol_members(
             self.declared_type_key(type_name.as_str()), &proto_decl.generics,
-            &constraint_scope, &super_protocols, &proto_decl.items,
+            &constraint_scope, &super_protocols, &proto_decl.items, &[],
         )?;
 
         // Determine protocol kind from is_context flag
@@ -6068,11 +6068,9 @@ impl TypeChecker {
                         .current_self_type
                         .clone()
                         .unwrap_or_else(|| self.ast_to_type(for_type).unwrap_or(Type::Unit));
-                    if let Maybe::Some(proto) =
-                        self.protocol_checker.read().get_protocol(&protocol_text)
+                    let mut defaults = Vec::new();
+                    if let Some(proto) = self.protocol_checker.read().get_protocol(&protocol_text)
                     {
-                        let type_name_text = verum_common::Text::from(type_name_str.as_str());
-
                         for (method_name, proto_method) in &proto.methods {
                             // Only register methods with default implementation that
                             // weren't overridden in the impl
@@ -6097,26 +6095,13 @@ impl TypeChecker {
                                     proto_method, &resolved_protocol_args, &impl_self_type, &impl_type_vars,
                                 )?;
 
-                                // Register in inherent_methods
-                                {
-                                    let mut methods_guard = self.inherent_methods.write();
-                                    let type_methods =
-                                        methods_guard.entry(type_name_text.clone()).or_default();
-
-                                    // Only add if not already registered (don't override explicit definitions)
-                                    if !type_methods.contains_key(method_name) {
-                                        type_methods.insert(method_name.clone(), method_scheme);
-
-                                        tracing::debug!(
-                                            "Registered protocol DEFAULT method: {}.{} (from {})",
-                                            type_name_str,
-                                            method_name,
-                                            protocol_name
-                                        );
-                                    }
-                                }
+                                defaults.push((method_name.clone(), method_scheme));
                             }
                         }
+                    }
+
+                    for (name, scheme) in defaults {
+                        self.register_inherited_method(&type_name_str.as_str().into(), &name, scheme);
                     }
 
                     // ═══════════════════════════════════════════════════════════════

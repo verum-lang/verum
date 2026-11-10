@@ -72,6 +72,7 @@ mod protocol_applications;
 mod impl_generic_rosters;
 mod protocol_attachments;
 mod receiver_specialization;
+mod impl_method_registrations;
 mod blanket_impls;
 mod cfg_selection;
 mod protocol_results;
@@ -1188,21 +1189,7 @@ pub struct VbcCodegen {
     /// three-impl collapse: two of three bodies were never even
     /// compiled — compile_function's name lookup bound every sibling
     /// to the slot-winner's id and the dedupe kept one).
-    sibling_impl_counters: std::collections::HashMap<String, u32>,
-
-    /// SIBLING-PAIRING tie-break (T0585 ERROR-14): when SEVERAL
-    /// sibling impls of one `(type, method)` share an IDENTICAL
-    /// parameter signature (two protocol instantiations differing only
-    /// in return type — `Convertible<Int>` / `Convertible<Text>` for
-    /// Text), content-pairing by `param_type_names` alone is
-    /// ambiguous: every body matched the FIRST ordinal key, so the
-    /// last-compiled body overwrote the first fid and the remaining
-    /// fids stayed empty (measured: `a=textform b=()`).  Each pairing
-    /// site walks decls in the same AST order as registration, so the
-    /// k-th same-signature LOOKUP pairs with the k-th same-signature
-    /// ordinal key.  Keyed by (qualified_name, param_type_names).
-    sibling_pairing_counters:
-        std::collections::HashMap<(String, Vec<String>), u32>,
+    impl_method_registrations: HashMap<String, Vec<impl_method_registrations::ImplMethodRegistration>>,
 
     /// FN-BOUND-CARRY (T0701 next-leg): the CURRENT impl block's AST
     /// generic params, armed around the impl-item compile loop.  The
@@ -1355,7 +1342,9 @@ pub struct VbcCodegen {
     /// that haven't been registered yet during declaration collection.
     ///
     /// Each body carries its concrete receiver and the lexical owner of its source.
-    pending_default_methods: Vec<DeferredDefaultMethod>,
+    pending_default_methods: Vec<(FunctionId, DeferredDefaultMethod)>,
+    /// Entries left open until all explicit overrides and defaults have registered.
+    pending_protocol_method_slots: HashMap<verum_ast::source_implementation::AssociatedImplementationSource, Vec<(usize, String, TypeRef)>>,
     /// Lexical lookup for an inherited signature and body; its function still belongs to the concrete receiver.
     default_body_type_scope: Option<String>,
     /// T0701 (default-steals-slot class): default-method
@@ -2475,8 +2464,7 @@ impl VbcCodegen {
             archive_data_sources: Map::new(),
             type_name_first_qualifier: std::collections::HashMap::new(),
             ambiguous_bare_type_names: std::collections::HashSet::new(),
-            sibling_impl_counters: std::collections::HashMap::new(),
-            sibling_pairing_counters: std::collections::HashMap::new(),
+            impl_method_registrations: HashMap::new(),
             current_impl_ast_generics: None,
             current_impl_where_clause: None,
             current_protocol_bounds: Default::default(),
@@ -2668,6 +2656,7 @@ impl VbcCodegen {
             context_names: Vec::new(),
             // Pending default protocol methods for deferred compilation
             pending_default_methods: Vec::new(),
+            pending_protocol_method_slots: HashMap::new(),
             default_body_type_scope: None,
             pending_default_registrations: Vec::new(),
             concrete_impl_bindings: HashMap::new(),
@@ -3534,7 +3523,7 @@ impl VbcCodegen {
         implementation: &verum_ast::decl::ImplDecl,
         instance: Option<&ConcreteImplType>,
         implemented_methods: &std::collections::HashSet<String>,
-    ) -> CodegenResult<()> {
+    ) -> CodegenResult<ImplReceiverWitness> {
         let (type_generics, const_generics, ordered_generics) = self.resolve_impl_generics(implementation);
         let declaration = std::sync::Arc::new(DeferredImplDeclaration {
             owner: self.ctx.current_source_module.clone(),
@@ -3640,10 +3629,10 @@ impl VbcCodegen {
                     verum_ast::decl::ImplItemKind::Function(function) => Some(function),
                     _ => None,
                 }) {
-                    let full_method_name = format!("{}.{}", type_name, body_func.name.name);
+                    let full_method_name = self.source_impl_method_key(type_name, body_func.name.name.as_str());
                     // An explicit `implement Derived for ThisType` block wins:
                     // same guard the default-method replay uses below.
-                    if self.ctx.lookup_function(&full_method_name).is_some() {
+                    if self.impl_method_for_receiver(&full_method_name, &receiver.ty).is_some() {
                         continue;
                     }
                     // T0701: deferred like the plain default-method
@@ -3694,8 +3683,8 @@ impl VbcCodegen {
                         continue;
                     }
 
-                    let full_method_name = format!("{}.{}", type_name, method_name);
-                    if self.ctx.lookup_function(&full_method_name).is_some() {
+                    let full_method_name = self.source_impl_method_key(type_name, method_name);
+                    if self.impl_method_for_receiver(&full_method_name, &receiver.ty).is_some() {
                         continue;
                     }
 
@@ -3729,7 +3718,7 @@ impl VbcCodegen {
                 }
             }
         }
-        Ok(())
+        Ok(receiver)
     }
 
     fn deferred_default_method(
@@ -3873,27 +3862,7 @@ impl VbcCodegen {
                 method.implementation.declaration.owner.as_deref(),
                 type_name, default_func.name.name.as_str(),
             );
-            // INSTRUMENT (VERUM_TRACE_DEFREG=<substring>): whether a
-            // deferred default-method registration RUNS or is SKIPPED
-            // because the name is already held. R3's wrong return types
-            // are not produced by `register_impl_function` — two fixes to
-            // the mapper it calls measured inert — so the question is
-            // whether it is even reached for `Range.peekable`, and who
-            // registered the name first if it is not.
-            if let Ok(want) = std::env::var("VERUM_TRACE_DEFREG")
-                && full_method_name.contains(want.as_str())
-            {
-                eprintln!(
-                    "[defreg] {} -> {}",
-                    full_method_name,
-                    if self.ctx.lookup_function(&full_method_name).is_some() {
-                        "SKIP (already registered)"
-                    } else {
-                        "register_impl_function"
-                    },
-                );
-            }
-            if self.ctx.lookup_function(&full_method_name).is_some() {
+            if self.impl_method_for_receiver(&full_method_name, &method.implementation.receiver.ty).is_some() {
                 continue;
             }
             if let Some(constraints) = &method.constraints {
@@ -3908,36 +3877,21 @@ impl VbcCodegen {
             // Registration elaborates the same inherited signature as body
             // compilation. Its names belong to the protocol's lexical source,
             // independently of the receiver or the file draining this queue.
-            self.with_deferred_method_scope(&method, |codegen| {
-                codegen.register_impl_function(default_func, type_name, &method.implementation.declaration.ordered_generics).map(|_| ())
+            let id = self.with_deferred_method_scope(&method, |codegen| {
+                codegen.register_impl_function(default_func, type_name, &method.implementation.declaration.ordered_generics)
             }).map_err(|error| error.with_context(format!("in inherited signature {full_method_name}")))?;
-            self.pending_default_methods.push(method);
+            self.pending_default_methods.push((id, method));
         }
+
+        self.bind_deferred_protocol_slots();
 
         // Take ownership of pending methods to avoid borrow conflicts
         let pending = std::mem::take(&mut self.pending_default_methods);
-
-        for method in pending {
+        for (id, method) in pending {
             let default_func = &method.function;
             let type_name = &method.receiver_name;
-            // Check if the function body was already compiled (e.g., by explicit impl in main module)
-            let full_method_name = Self::impl_method_key(
-                method.implementation.declaration.owner.as_deref(),
-                type_name, default_func.name.name.as_str(),
-            );
-
-            // Check if the function was already compiled by checking if it exists in self.functions.
-            // We can't rely on func_info.id being a sentinel because register_impl_function assigns
-            // a valid ID before the body is compiled.
-            if let Some(func_info) = self.ctx.lookup_function(&full_method_name) {
-                // Check if a function with this ID was already compiled (exists in self.functions)
-                let already_compiled = self
-                    .functions
-                    .iter()
-                    .any(|f| f.descriptor.id == func_info.id);
-                if already_compiled {
-                    continue;
-                }
+            if self.functions.iter().any(|function| function.descriptor.id == id) {
+                continue;
             }
 
             let body = self.with_deferred_method_scope(&method, |codegen| {
@@ -10222,7 +10176,7 @@ impl VbcCodegen {
                     if let Some(pn) = protocol_name {
                         // Generate default methods from protocol
                         let instance = self.record_concrete_impl_bindings(impl_decl, &selected_items);
-                        self.generate_default_protocol_methods(
+                        let receiver = self.generate_default_protocol_methods(
                             ty_name, impl_decl, instance.as_ref(), &declared_methods.keys().cloned().collect(),
                         )?;
 
@@ -10278,19 +10232,15 @@ impl VbcCodegen {
                                 }
                                 names
                             };
-                            let method_fn_ids: Vec<u32> = method_names
-                                .iter()
-                                .map(|method_name| {
-                                    if let Some(id) = declared_methods.get(method_name) {
-                                        return *id;
-                                    }
-                                    let qualified = self.source_impl_method_key(ty_name, method_name);
-                                    self.ctx
-                                        .lookup_function(&qualified)
-                                        .map(|fi| fi.id.0)
-                                        .unwrap_or(u32::MAX) // sentinel for missing method
-                                })
-                                .collect();
+                            let mut deferred_slots = Vec::new();
+                            let method_fn_ids: Vec<u32> = method_names.iter().enumerate()
+                                .map(|(slot, method_name)| {
+                                    if let Some(id) = declared_methods.get(method_name) { return *id; }
+                                    let family = self.source_impl_method_key(ty_name, method_name);
+                                    if let Some(id) = self.impl_method_for_receiver(&family, &receiver.ty) { return id.0; }
+                                    deferred_slots.push((slot, family, receiver.ty.clone()));
+                                    u32::MAX
+                                }).collect();
 
                             // Associated bindings are expressed in the nominal owner's
                             // binder scope. Recover that correspondence from the actual
@@ -10464,13 +10414,14 @@ impl VbcCodegen {
                             // registry).
                             // Every source implementation retains its actual owner telescope.
                             // Nominal target arity cannot reconstruct implementation quantifiers.
-                            let source_implementation = Some(
-                                verum_ast::source_implementation::AssociatedImplementationSource::new_with_items(
-                                    self.lexical_type_scope().into(), impl_decl, &selected_items,
-                                ).map_err(|message| CodegenError::new(CodegenErrorKind::InvalidSourceSignature(message.into_string())))?
-                            );
+                            let source = verum_ast::source_implementation::AssociatedImplementationSource::new_with_items(
+                                self.lexical_type_scope().into(), impl_decl, &selected_items,
+                            ).map_err(|message| CodegenError::new(CodegenErrorKind::InvalidSourceSignature(message.into_string())))?;
+                            if !deferred_slots.is_empty() {
+                                self.pending_protocol_method_slots.insert(source.clone(), deferred_slots);
+                            }
                             let impl_record = crate::types::ProtocolImpl {
-                                source_implementation,
+                                source_implementation: Some(source),
                                 protocol: crate::types::ProtocolId(proto_type_id.0),
                                 methods: method_fn_ids,
                                 associated_types: assoc_bindings,
@@ -11922,10 +11873,13 @@ impl VbcCodegen {
         } else {
             None
         };
+        let scope = std::collections::HashMap::new();
+        let source_signature = self.source_callable_signature(func, &scope, &scope, &[]);
+        let result = self.source_semantic_result(func, &scope, &[]);
         let info = FunctionInfo {
             has_source_body: false,
             foreign_declaration: None,
-            callable_signature: None,
+            callable_signature: source_signature,
             type_param_ids: Vec::new(),
             explicit_type_param_ids: Vec::new(),
             id: FunctionId(u32::MAX),
@@ -11935,7 +11889,7 @@ impl VbcCodegen {
             is_async: func.is_async,
             is_generator: func.is_generator,
             contexts: Vec::new(),
-            return_type: None,
+            return_type: result,
             yield_type: None,
             intrinsic_name: None,
             variant_tag: None,
@@ -13976,21 +13930,17 @@ impl VbcCodegen {
         // order within the accumulated collect walk — deterministic
         // (P2-safe).  Consumers self-pair by CONTENT
         // (param_type_names match), never by replaying this counter.
-        let ordinal = {
-            let c = self
-                .sibling_impl_counters
-                .entry(declaration_key.clone())
-                .or_insert(0);
-            *c += 1;
-            *c
-        };
+        let ordinal = self.impl_method_registrations.get(&declaration_key).map_or(1, |methods| methods.len() + 1);
         let registration_key = if ordinal == 1 {
             qualified_name
         } else {
             format!("{}#impl{}", qualified_name, ordinal)
         };
         self.capture_declaration_interface(func, source_signature, &info, &registration_key, Some(type_name), &dense, &shadow)?;
-        let owned_key = if ordinal == 1 { declaration_key } else { format!("{declaration_key}#impl{ordinal}") };
+        let owned_key = if ordinal == 1 { declaration_key.clone() } else { format!("{declaration_key}#impl{ordinal}") };
+        self.impl_method_registrations.entry(declaration_key).or_default().push(impl_method_registrations::ImplMethodRegistration {
+            id, linkage: owned_key.clone(), receiver: self.current_impl_receiver.as_ref().map(|receiver| receiver.ty.clone()), declaration: func.span,
+        });
         if owned_key != registration_key {
             // Only the source declaration producer may assert this ownership.
             // Generic registry aliases/imports do not acquire the caller's owner.
@@ -14068,10 +14018,20 @@ impl VbcCodegen {
             // Extract return type name
             let return_type_name = self.extract_type_name(&ffi_func.signature.return_type);
 
+            let result = self.source_type_in_current_scope(&ffi_func.signature.return_type);
+            let parameters = ffi_func.signature.params.iter()
+                .map(|(_, ty)| self.source_type_in_current_scope(ty))
+                .collect::<Option<Vec<_>>>();
+            let source_signature = result.clone().zip(parameters).map(|(result, parameters)| TypeRef::Function {
+                is_async: false,
+                params: parameters.into_iter().collect(),
+                return_type: Box::new(result),
+                contexts: Default::default(),
+            });
             let info = FunctionInfo {
                 has_source_body: false,
                 foreign_declaration: None,
-                callable_signature: None,
+                callable_signature: source_signature,
                 type_param_ids: Vec::new(),
                 explicit_type_param_ids: Vec::new(),
                 id: FunctionId(u32::MAX),
@@ -14081,7 +14041,7 @@ impl VbcCodegen {
                 is_async: false,     // FFI functions are sync
                 is_generator: false, // FFI functions are not generators
                 contexts: vec![],    // FFI functions don't use contexts
-                return_type: None,   // Type info is in FFISignature
+                return_type: result,
                 yield_type: None,
                 intrinsic_name: None,
                 variant_tag: None,
@@ -19414,92 +19374,14 @@ impl VbcCodegen {
                 })?
                 .clone(),
         };
-        // SIBLING-IMPL-MATERIALIZATION-1: when this decl is an
-        // impl-block method that has SIBLING impls (same type, same
-        // method name — `#impl<N>` ordinal keys exist), the plain-name
-        // lookup above may hand us a DIFFERENT sibling's registration
-        // (its id and facts).  Self-pair by CONTENT: this decl's own
-        // extracted param-type-name vector is exactly what
-        // register_impl_function stored, so an equality scan over the
-        // plain + ordinal candidates recovers OUR registration without
-        // replaying walk order.  No siblings → zero extra work.
-        let mut func_info = if let Some(type_name) = impl_type_name {
-            let qualified = self.source_impl_method_key(type_name, &base_name);
-            if self.ctx.lookup_function(&format!("{}#impl2", qualified)).is_some() {
-                let decl_param_types: Vec<String> = func
-                    .params
-                    .iter()
-                    .filter_map(|p| {
-                        if let verum_ast::decl::FunctionParamKind::Regular { ty, .. } = &p.kind {
-                            let name = Self::extract_type_name_from_ast(ty);
-                            let name = Self::substitute_self_in_type_name(&name, type_name);
-                            if !name.is_empty() && name != "()" {
-                                Some(name)
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
-                let mut chosen = func_info;
-                // Collect EVERY ordinal key whose candidate matches the
-                // declared parameter signature, then tie-break same-
-                // signature siblings POSITIONALLY (k-th compile visit ↔
-                // k-th matching key) via `sibling_pairing_counters` —
-                // param-only pairing collapsed return-only-differing
-                // protocol impls onto one fid (T0585 ERROR-14).
-                let mut matches: Vec<(String, crate::codegen::context::FunctionInfo)> =
-                    Vec::new();
-                let mut key = qualified.clone();
-                let mut n = 1u32;
-                loop {
-                    if let Some(cand) = self.ctx.lookup_function(&key) {
-                        if cand.param_count == param_count
-                            && cand.param_type_names == decl_param_types
-                        {
-                            matches.push((key.clone(), cand.clone()));
-                        }
-                    } else if n > 1 {
-                        break;
-                    }
-                    n += 1;
-                    key = format!("{}#impl{}", qualified, n);
-                }
-                if !matches.is_empty() {
-                    let pick = if matches.len() == 1 {
-                        0
-                    } else {
-                        let c = self
-                            .sibling_pairing_counters
-                            .entry((qualified.clone(), decl_param_types.clone()))
-                            .or_insert(0);
-                        let k = (*c as usize).min(matches.len() - 1);
-                        *c += 1;
-                        k
-                    };
-                    let (picked_key, picked_info) = &matches[pick];
-                    chosen = picked_info.clone();
-                    // The ordinal key becomes THIS body's
-                    // canonical name end-to-end (descriptor,
-                    // current_fn_lookup_name, archive entry) —
-                    // user-side loads then register the three
-                    // sibling bodies under DISTINCT keys and
-                    // the call-site resolver can pick by the
-                    // residual's base type.  Without this the
-                    // uniqueness existed only inside the bake
-                    // codegen's ctx and collapsed again at
-                    // archive load.
-                    lookup_name = picked_key.clone();
-                }
-                chosen
-            } else {
-                func_info
-            }
-        } else {
-            func_info
-        };
+        // Local method registration retains the body owner before defaults are
+        // deferred. Compilation order cannot change an implementation's ID.
+        let mut func_info = if let Some(type_name) = impl_type_name
+            && let Some((key, info)) = self.registered_impl_body(&self.source_impl_method_key(type_name, &base_name), func)?
+        {
+            lookup_name = key;
+            info
+        } else { func_info };
 
         // IMPORTANT: Extract parameter names and mutability from the CURRENT function being compiled,
         // NOT from func_info. When there are multiple impl blocks for the same method

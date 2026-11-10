@@ -539,11 +539,20 @@ fn protocol_carriers_strip_source_bodies_and_reject_bodies_on_decode() {
             panic!("method")
         };
         assert!(decl.body.is_none() && default_impl.is_none());
+        assert_eq!(body.declared_default_methods.as_slice(), &[verum_common::Text::from("sections")]);
         validate_source_type_declaration(&carrier).unwrap();
         let decoded: TypeDecl =
             serde_json::from_slice(&serde_json::to_vec(&carrier).unwrap()).unwrap();
         assert_eq!(decoded, carrier);
         validate_source_type_declaration(&decoded).unwrap();
+        for extra in ["sections", "missing"] {
+            let mut malformed = decoded.clone();
+            let (TypeDeclBody::Protocol(body) | TypeDeclBody::Coinductive(body)) = &mut malformed.body else {
+                panic!("protocol")
+            };
+            body.declared_default_methods.push(extra.into());
+            assert!(validate_source_type_declaration(&malformed).is_err());
+        }
         let (TypeDeclBody::Protocol(original) | TypeDeclBody::Coinductive(original)) =
             &declaration.body
         else {

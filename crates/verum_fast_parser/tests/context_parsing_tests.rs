@@ -446,6 +446,7 @@ fn parse_protocol_decl(source: &str) -> Result<TypeDecl, String> {
                     body: TypeDeclBody::Protocol(ProtocolBody {
                         extends: decl.bounds.iter().cloned().collect(), // bounds -> extends
                         items: decl.items,
+                        declared_default_methods: Default::default(),
                         is_context: decl.is_context,
                         generic_where_clause: decl.generic_where_clause,
                     }),

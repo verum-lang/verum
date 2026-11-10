@@ -473,3 +473,38 @@ fn an_inherited_default_retains_the_declaring_protocol_signature() {
         );
     }
 }
+
+#[test]
+fn an_explicit_override_and_a_default_select_their_own_receivers() {
+    let explicit = "implement Measure for Tray<Bool> { fn measure(&self)->Int { 3 } }";
+    let inherited = "implement Measure for Tray<Int> {}";
+    for (first, second) in [(explicit, inherited), (inherited, explicit)] {
+        let source = format!(r#"
+            module {OWNER};
+            public type Tray<T> is {{ value:T }};
+            public type Measure is protocol {{ fn measure(&self)->Int {{ 7 }} }};
+            {first}
+            {second}
+            public fn probe()->Int {{
+                let flag:Tray<Bool> = Tray {{ value:true }};
+                let number:Tray<Int> = Tray {{ value:92 }};
+                flag.measure() * 10 + number.measure()
+            }}
+        "#);
+        let module = source_module(&source);
+        let metadata = publish(&module).unwrap();
+        let mut module = deserialize_module(&serialize_module(&module).unwrap()).unwrap();
+        assert!(module.resolve_external_bands().is_empty());
+        verum_vbc::validate::validate_module(&module).unwrap();
+        let entry = module.find_function_by_name(&format!("{OWNER}.probe")).unwrap();
+        let result = verum_vbc::interpreter::Interpreter::new(Arc::new(module)).execute_function(entry).unwrap();
+        assert_eq!(result.as_i64(), 37, "{first}");
+        for eager in [false, true] {
+            for receiver in ["Int", "Bool", "Text"] {
+                let consumer = format!("mount {OWNER}.{{Tray,Measure}}; fn member(v:Tray<{receiver}>)->Int {{v.measure()}}");
+                let errors = consumer_errors(&metadata, &consumer, eager);
+                assert_eq!(errors.is_empty(), receiver != "Text", "{first} {receiver} eager={eager}: {errors:?}");
+            }
+        }
+    }
+}

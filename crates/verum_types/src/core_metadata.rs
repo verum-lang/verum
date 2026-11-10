@@ -112,7 +112,7 @@ pub fn validate_source_callable_owners(metadata: &CoreMetadata) -> Result<(), Te
         let (Some(signature), Some(parent)) = (&descriptor.source_signature, &descriptor.parent_type) else { continue };
         let target = metadata.types.get(parent).ok_or_else(|| Text::from("source method has no declared parent type"))?;
         if matches!(target.kind, TypeDescriptorKind::Protocol { .. })
-            && protocol_declares_signature(metadata, &[parent], signature)
+            && protocol_declares_signature(metadata, &[parent], signature, false)
         {
             continue;
         }
@@ -148,7 +148,7 @@ pub fn validate_source_callable_owners(metadata: &CoreMetadata) -> Result<(), Te
         if signatures.is_empty() { continue; }
         let implemented = protocols.get(&(target.clone(), origin));
         for signature in signatures {
-            if !implemented.is_some_and(|protocols| protocol_declares_signature(metadata, protocols, signature)) {
+            if !implemented.is_some_and(|protocols| protocol_declares_signature(metadata, protocols, signature, true)) {
                 return Err(format!("source method {target}.{} lacks its declaration-owned implementation header; rebuild the archive", signature.name.name).into());
             }
         }
@@ -162,6 +162,7 @@ fn protocol_declares_signature(
     metadata: &CoreMetadata,
     protocols: &[&Text],
     signature: &verum_ast::FunctionDecl,
+    require_default: bool,
 ) -> bool {
     use verum_ast::decl::{ProtocolItemKind, TypeDeclBody};
     let mut pending = protocols.to_vec();
@@ -170,8 +171,9 @@ fn protocol_declares_signature(
         if !visited.insert(name) { continue; }
         let Some(ty) = metadata.types.get(name) else { continue };
         let Some(TypeDeclBody::Protocol(body)) = ty.source_declaration.as_ref().map(|decl| &decl.body) else { continue };
-        if body.items.iter().any(|item| matches!(&item.kind,
-            ProtocolItemKind::Function { decl, .. } if decl == signature))
+        if (!require_default || body.declared_default_methods.contains(&signature.name.name))
+            && body.items.iter().any(|item| matches!(&item.kind,
+                ProtocolItemKind::Function { decl, .. } if decl == signature))
         {
             return true;
         }
