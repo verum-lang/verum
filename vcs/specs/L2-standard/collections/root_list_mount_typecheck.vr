@@ -1,0 +1,14 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: collections, imports
+// @description: A renamed mount from core retains the methods declared by List.
+
+@no_implicit_prelude
+module collections.root_list_mount_typecheck;
+
+mount core.List as Items;
+
+fn count(items: Items<Int>) -> Int {
+    items.len()
+}
