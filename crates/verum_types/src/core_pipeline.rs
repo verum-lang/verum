@@ -60,7 +60,7 @@ use crate::infer::TypeChecker;
 /// ```
 ///
 /// The attribute argument must be a string literal containing the intrinsic name.
-fn extract_intrinsic_name(func: &FunctionDecl) -> Maybe<Text> {
+pub(crate) fn extract_intrinsic_name(func: &FunctionDecl) -> Maybe<Text> {
     for attr in &func.attributes {
         if attr.name.as_str() == "intrinsic" {
             // Extract the intrinsic name from the attribute arguments

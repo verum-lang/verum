@@ -7,6 +7,9 @@
 //! This module lives in `verum_common` so all compiler crates can use it without
 //! cross-crate dependency issues.
 
+/// The record produced by a raw catch_unwind intrinsic outside an annotated wrapper.
+pub const CATCH_UNWIND_ERROR_TYPE: &str = "core.intrinsics.control.IntrinsicPanicInfo";
+
 /// Well-known Verum standard library types referenced during compilation.
 ///
 /// These are the types that the compiler needs special handling for — collection

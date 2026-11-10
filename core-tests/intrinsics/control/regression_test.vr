@@ -5,7 +5,8 @@
 // Defect pins for `core/intrinsics/control.vr`.
 // =============================================================================
 
-mount core.intrinsics.control.{ likely, unlikely, expect, nop, assume, debug_assert };
+mount core.intrinsics.control.{ likely, unlikely, expect, nop, assume, debug_assert, catch_unwind, IntrinsicPanicInfo, panic as intrinsic_panic };
+mount core.base.result.Result;
 
 // =============================================================================
 // CONTROL-EXPECT-NIL — likely/unlikely/expect returned `nil`
@@ -70,6 +71,14 @@ fn regression_debug_assert_true_passes() {
     // A satisfied debug assertion is a no-op.
     debug_assert(true, "should hold");
     assert(true);
+}
+
+@test
+fn regression_catch_unwind_preserves_callback_result_and_catches_a_panic() {
+    let ok: Result<Int, IntrinsicPanicInfo> = catch_unwind(|| 73);
+    match ok { Result.Ok(value) => assert_eq(value, 73), _ => panic("callback failed"), }
+    let err: Result<Int, IntrinsicPanicInfo> = catch_unwind(|| intrinsic_panic("caught"));
+    match err { Result.Err(_) => {}, _ => panic("panic passed through"), }
 }
 
 fn main() {}

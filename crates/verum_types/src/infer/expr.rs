@@ -12852,6 +12852,36 @@ impl TypeChecker {
         Ok(InferResult::new(result_type))
     }
 
+    fn catch_unwind_result(&mut self, args: &[Expr], span: Span) -> Result<Type> {
+        let [_, callback] = args else {
+            return Err(TypeError::wrong_arg_count("catch_unwind".into(), 1, args.len().saturating_sub(1), span));
+        };
+        let declared = self.source_type_registration.catch_unwind_body.as_ref()
+            .filter(|(closure, _)| *closure == self.borrow_tracker.current_closure_id())
+            .map(|(_, result)| result.clone());
+        let (result, success) = if let Some(result) = declared {
+            let success = self.conversion_nominal_head(&result)
+                .and_then(|(name, args)| match args {
+                    [ok, _] if name == "core.base.result.Result" || name == WKT_RESULT => Some(ok.clone()),
+                    _ => None,
+                })
+                .ok_or_else(|| TypeError::OtherWithCodeSpanned {
+                    code: "E400".into(), msg: "catch_unwind must declare a Result with a panic record".into(), span,
+                })?;
+            (result, success)
+        } else {
+            let contract = verum_common::well_known_types::CATCH_UNWIND_ERROR_TYPE;
+            self.resolve_declaring_source_type(contract, span)?;
+            let error = Type::Named { path: Self::text_to_path(&Text::from(contract)), args: List::new() };
+            let ok = Type::Var(TypeVar::fresh());
+            self.resolve_declaring_source_type("core.base.result.Result", span)?;
+            let result = Type::Generic { name: "core.base.result.Result".into(), args: vec![ok.clone(), error].into() };
+            (result, ok)
+        };
+        self.check_expr(callback, &Type::function_with_async(List::new(), success, false))?;
+        Ok(self.unifier.apply(&result))
+    }
+
     /// The type a CALL to `@name(...)` produces.
     ///
     /// Split out of `infer_expr_meta_function` so the bare form can reuse it
@@ -12958,30 +12988,7 @@ impl TypeChecker {
                                 "type_name" => Type::text(),
                                 // Control flow
                                 "unreachable" | "panic" | "abort" => Type::never(),
-                                // Catch unwind
-                                "catch_unwind" => {
-                                    // Returns Result<T, PanicInfo>
-                                    Type::Named {
-                                        path: verum_ast::ty::Path::single(
-                                            verum_ast::Ident::new(
-                                                WKT::Result.as_str(),
-                                                expr.span,
-                                            ),
-                                        ),
-                                        args: List::from_iter([
-                                            Type::Var(TypeVar::fresh()),
-                                            Type::Named {
-                                                path: verum_ast::ty::Path::single(
-                                                    verum_ast::Ident::new(
-                                                        "PanicInfo",
-                                                        expr.span,
-                                                    ),
-                                                ),
-                                                args: List::new(),
-                                            },
-                                        ]),
-                                    }
-                                }
+                                "catch_unwind" => return self.catch_unwind_result(args, expr.span),
                                 // Slice intrinsics - return reference to slice
                                 "slice_from_raw_parts" => Type::Reference {
                                     inner: Box::new(Type::Slice {

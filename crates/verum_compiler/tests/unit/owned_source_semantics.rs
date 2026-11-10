@@ -481,3 +481,54 @@ fn check_prelude_scope(provider: &str, consumer: &str) -> Vec<String> {
     let result=super::check_source_module(&mut checker,"core",&source,&graph);
     assert!(result.is_ok(),"{result:?}");
 }
+
+#[test]
+fn catch_unwind_uses_the_declared_callee_and_callback_result() {
+    use verum_fast_parser::FastParser;
+    let maybe = "module core.base.maybe; public type Maybe<T> is None | Some(T);";
+    let result = "module core.base.result; public type Result<T,E> is Ok(T) | Err(E);";
+    let control = r#"module core.intrinsics.control;
+        mount core.base.result.Result;
+        mount core.base.maybe.Maybe;
+        public type Location is { line: Int };
+        public type IntrinsicPanicInfo is { message: Text, location: Maybe<Location> };
+        @intrinsic("catch_unwind")
+        public fn catch_unwind<T>(f:fn()->T)->Result<T,IntrinsicPanicInfo> { @intrinsic("catch_unwind", f) }
+    "#;
+    for (extra, should_pass) in [
+        ("fn check()->Result<Int,IntrinsicPanicInfo> { @intrinsic(\"catch_unwind\", || 7) }", true),
+        ("fn check()->Int { let r:Result<Int,IntrinsicPanicInfo> = @intrinsic(\"catch_unwind\", || 7); match r { Result.Ok(n)=>n, _=>0 } }", true),
+        ("type OtherResult<T,E> is Ok(T) | Err(E); fn check()->Int { let r:OtherResult<Int,IntrinsicPanicInfo> = @intrinsic(\"catch_unwind\", || 7); 0 }", false),
+        ("fn check()->Result<Bool,IntrinsicPanicInfo> { @intrinsic(\"catch_unwind\", || 7) }", false),
+        ("fn check()->Result<Int,Other> { @intrinsic(\"catch_unwind\", || 7) }", false),
+        ("fn check()->Result<Int,IntrinsicPanicInfo> { @intrinsic(\"catch_unwind\", |x:Int| x) }", false),
+        ("fn check()->Result<Int,IntrinsicPanicInfo> { @intrinsic(\"catch_unwind\", async || { 7 }) }", false),
+        ("@intrinsic(\"catch_unwind\") fn wrapper(f:fn()->Int)->Result<Int,Custom> { @intrinsic(\"catch_unwind\", f) }", true),
+        ("@intrinsic(\"catch_unwind\") fn wrapper(f:fn()->Int)->Result<Int,Custom> { let g=|| @intrinsic(\"catch_unwind\", f); g() }", false),
+    ] {
+        let client = format!(r#"module consumer;
+            mount core.base.result.Result;
+            mount core.base.maybe.Maybe;
+            mount core.intrinsics.control.{{IntrinsicPanicInfo, Location}};
+            type Other is {{ value: Int }};
+            type Custom is {{ message: Text, location: Maybe<Location> }};
+            {extra}
+        "#);
+        let files = [
+            ("core.base.maybe", maybe),
+            ("core.base.result", result),
+            ("core.intrinsics.control", control),
+            ("consumer", client.as_str()),
+        ];
+        let modules: Vec<_> = files.iter().enumerate().map(|(i, (owner, source))| {
+            let ast = FastParser::new().parse_module_str(source, FileId::new(i as u32)).unwrap();
+            (*owner, ast)
+        }).collect();
+        let registry = source_registry(modules.iter().map(|(name, ast)| (*name, *name, ast))).unwrap();
+        for (owner, ast) in &modules[2..] {
+            let mut checker = TypeChecker::new();
+            let checked = check_source_module(&mut checker, owner, ast, &registry);
+            assert_eq!(checked.is_ok(), *owner != "consumer" || should_pass, "{extra}: {checked:?}");
+        }
+    }
+}

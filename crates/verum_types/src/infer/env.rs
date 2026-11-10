@@ -10037,7 +10037,7 @@ impl TypeChecker {
                             use std::io::Write;
                             let _ = std::io::stderr().flush();
                         }
-                        let expected = self.ast_to_type(ty_ast)?;
+                        let expected = self.declared_type(ty_ast)?;
                         #[cfg(debug_assertions)]
                         {
                             // #[cfg(debug_assertions)]
@@ -10304,7 +10304,7 @@ impl TypeChecker {
                     // Spec: L0-critical/memory-safety/uninitialized
                     // =====================================================================
                     if let Some(ty_ast) = ty {
-                        let ty = self.ast_to_type(ty_ast)?;
+                        let ty = self.declared_type(ty_ast)?;
                         self.bind_pattern(pattern, &ty)?;
 
                         // Register uninitialized variable with appropriate tracking

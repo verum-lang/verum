@@ -269,7 +269,7 @@ pub enum CodegenStrategy {
 
 /// Public error identity of a raw `@intrinsic("catch_unwind", f)` call.
 /// Declared intrinsic functions carry their own Result error TypeRef instead.
-pub const CATCH_UNWIND_ERROR_TYPE: &str = "core.intrinsics.control.IntrinsicPanicInfo";
+pub use verum_common::well_known_types::CATCH_UNWIND_ERROR_TYPE;
 
 /// Identifier for pre-defined inline instruction sequences.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

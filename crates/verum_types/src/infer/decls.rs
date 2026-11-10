@@ -5382,7 +5382,7 @@ impl TypeChecker {
                                         func.is_generator,
                                     );
 
-                                    let func_ty = Type::function_with_requirement(param_types, final_return_type, checker.concrete_method_requirement(func));
+                                    let func_ty = Type::function_with_requirement(param_types, final_return_type, checker.source_callable_requirement(func));
                                     let qualified_name =
                                         format!("{}.{}", type_name_str, func.name.name);
 
@@ -5467,7 +5467,7 @@ impl TypeChecker {
                                         func.is_generator,
                                     );
 
-                                    let method_ty = Type::function_with_requirement(param_types, final_return_type, checker.concrete_method_requirement(func));
+                                    let method_ty = Type::function_with_requirement(param_types, final_return_type, checker.source_callable_requirement(func));
                                     let type_name_text =
                                         verum_common::Text::from(type_name_str.as_str());
                                     let method_name_text =
@@ -5847,7 +5847,7 @@ impl TypeChecker {
                                     func.is_generator,
                                 );
 
-                                let method_ty = Type::function_with_requirement(param_types, final_return_type, self.concrete_method_requirement(func));
+                                let method_ty = Type::function_with_requirement(param_types, final_return_type, self.source_callable_requirement(func));
                                 let type_name_text =
                                     verum_common::Text::from(type_name_str.as_str());
                                 let method_name_text =
@@ -5989,7 +5989,7 @@ impl TypeChecker {
                                     func.is_generator,
                                 );
 
-                                let method_ty = Type::function_with_requirement(param_types, final_return_type, self.concrete_method_requirement(func));
+                                let method_ty = Type::function_with_requirement(param_types, final_return_type, self.source_callable_requirement(func));
                                 let type_name_text =
                                     verum_common::Text::from(type_name_str.as_str());
                                 let method_name_text =
@@ -6170,7 +6170,7 @@ impl TypeChecker {
                                     .unwrap_or(Ok(Type::Unit))
                                     .unwrap_or(Type::Unit);
 
-                                let method_ty = Type::function_with_requirement(params, return_type, self.concrete_method_requirement(func));
+                                let method_ty = Type::function_with_requirement(params, return_type, self.source_callable_requirement(func));
                                 methods.insert(method_name, method_ty);
                             }
                         }
@@ -6649,7 +6649,7 @@ impl TypeChecker {
         let mut func_type = func_type;
         if let Type::Function { properties, property_requirement, .. } = &mut func_type {
             *properties = None;
-            *property_requirement = crate::computational_properties::PropertyRequirement::declared_function(func.is_pure, func.is_meta);
+            *property_requirement = self.source_callable_requirement(func);
         }
 
         // CRITICAL: Create TypeScheme explicitly with tracked type parameters.
@@ -6872,7 +6872,7 @@ impl TypeChecker {
         );
 
         // Build function type (intrinsics don't use context requirements)
-        let func_type = Type::function_with_requirement(param_types, return_for_sig, crate::computational_properties::PropertyRequirement::declared_function(func.is_pure, func.is_meta));
+        let func_type = Type::function_with_requirement(param_types, return_for_sig, self.source_callable_requirement(func));
 
         // Create TypeScheme with tracked type parameters
         let scheme = if type_param_vars.is_empty() {

@@ -23,15 +23,20 @@ impl Visitor for Calls<'_> {
         match &expression.kind {
             ExprKind::Closure { .. } => return,
             ExprKind::MetaFunction { name, args, .. } if name.name == "intrinsic" => {
-                let access = args.first().and_then(|arg| match &arg.kind {
+                let requirement = args.first().and_then(|arg| match &arg.kind {
                     ExprKind::Literal(verum_ast::Literal {
                         kind: verum_ast::LiteralKind::Text(name),
                         ..
-                    }) => AtomicAccess::from_intrinsic(name.as_str()),
+                    }) => match name.as_str() {
+                        // The panic instruction raises synchronously. Catching it
+                        // does not require a suspension-capable callback.
+                        "panic" => Some(PropertyRequirement::source_callable(false)),
+                        name => AtomicAccess::from_intrinsic(name).map(AtomicAccess::properties),
+                    },
                     _ => None,
                 });
-                if let Some(access) = access {
-                    self.bound = self.bound.join(&access.properties());
+                if let Some(requirement) = requirement {
+                    self.bound = self.bound.join(&requirement);
                 } else if self.source.is_some() {
                     self.bound = PropertyRequirement::Unrestricted;
                 }
@@ -129,13 +134,13 @@ impl TypeChecker {
         calls.bound
     }
 
-    pub(super) fn concrete_method_requirement(
+    pub(super) fn source_callable_requirement(
         &mut self,
-        method: &FunctionDecl,
+        function: &FunctionDecl,
     ) -> PropertyRequirement {
-        let declared = PropertyRequirement::declared_function(method.is_pure, method.is_meta);
+        let declared = PropertyRequirement::declared_function(function.is_pure, function.is_meta);
         if declared.may_be_async()
-            && self.source_body_is_sync(method, &self.current_module_path.clone(), &mut Vec::new())
+            && self.source_body_is_sync(function, &self.current_module_path.clone(), &mut Vec::new())
         {
             return PropertyRequirement::source_callable(false);
         }

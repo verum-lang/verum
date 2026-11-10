@@ -7,6 +7,8 @@ use verum_common::{List, Map, Text};
 pub(crate) struct SourceTypeRegistration {
     /// Lexical source declarations available while preparing one module.
     pub local_declarations: List<(Text, verum_common::Shared<verum_ast::Module>)>,
+    /// Result declared by the current catch_unwind wrapper and the enclosing closure identity.
+    pub(super) catch_unwind_body: Option<(Option<crate::aliasing::RefId>, Type)>,
     pub active_impl_bounds: verum_common::Set<(Text, Text)>,
     pub(super) loading_blankets: verum_common::Set<Text>,
     /// Public sequence methods imported by each source scope. Store the

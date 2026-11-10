@@ -6055,7 +6055,7 @@ impl TypeChecker {
                             func.is_async,
                             func.is_generator,
                         );
-                        let func_ty = Type::function_with_requirement(param_types, final_return_type, self.concrete_method_requirement(func));
+                        let func_ty = Type::function_with_requirement(param_types, final_return_type, self.source_callable_requirement(func));
 
                         // Prepare registration for after scope exit
                         // Quantify both the impl and method variables in declaration order.
@@ -6168,7 +6168,7 @@ impl TypeChecker {
                             func.is_async,
                             func.is_generator,
                         );
-                        let method_ty = Type::function_with_requirement(param_types, final_return_type, self.concrete_method_requirement(func));
+                        let method_ty = Type::function_with_requirement(param_types, final_return_type, self.source_callable_requirement(func));
                         let type_name_text = method_owner.clone();
                         let method_name_text = verum_common::Text::from(func.name.name.as_str());
 
@@ -6300,7 +6300,7 @@ impl TypeChecker {
 
                         // #[cfg(debug_assertions)]
                         // eprintln!("[DEBUG import_impl_blocks] Added method '{}' with return_type={}", method_name, return_type.to_text());
-                        methods.insert(method_name, Type::function_with_requirement(param_types, final_return_type, self.concrete_method_requirement(func)));
+                        methods.insert(method_name, Type::function_with_requirement(param_types, final_return_type, self.source_callable_requirement(func)));
                     }
                 }
 
@@ -9143,7 +9143,7 @@ impl TypeChecker {
                         .map(|t| self.ast_to_type_lenient(t))
                         .unwrap_or(Type::Unit);
 
-                    let method_ty = Type::function_with_requirement(param_types, return_type, self.concrete_method_requirement(func));
+                    let method_ty = Type::function_with_requirement(param_types, return_type, self.source_callable_requirement(func));
 
                     // Generalize with ordered params: [I, method-level params...]
                     let mut ordered_params: List<verum_common::Text> =
@@ -10194,7 +10194,7 @@ impl TypeChecker {
 
                 return Some((
                     Type::Function {
-                        property_requirement: crate::computational_properties::PropertyRequirement::declared_function(func.is_pure, func.is_meta),
+                        property_requirement: self.source_callable_requirement(func),
                         params: param_types,
                         return_type: Box::new(final_return_type),
                         contexts: None,
@@ -10568,6 +10568,7 @@ impl TypeChecker {
         // and a leaked parameter would arrive at the next function as a var
         // that refuses to bind to anything.
         let saved_rigid = self.unifier.rigid_snapshot();
+        let previous_catch = self.source_type_registration.catch_unwind_body.take();
         let assumption_depth = self.source_type_registration.projection_assumptions.len();
         let callable_depth = self.source_type_registration.callable_assumptions.len();
         let result = self.with_function_parameter_scope(func, |checker| {
@@ -10578,6 +10579,7 @@ impl TypeChecker {
                 })
             })
         });
+        self.source_type_registration.catch_unwind_body = previous_catch;
         self.source_type_registration.projection_assumptions.truncate(assumption_depth);
         self.source_type_registration.callable_assumptions.truncate(callable_depth);
         self.unifier.exit_rigid_scope(saved_rigid);
@@ -10901,6 +10903,11 @@ impl TypeChecker {
             .unwrap_or_else(Type::unit);
 
         let return_carrier = self.declared_sum_carrier(func.return_type.as_ref(), &initial_return_type)?;
+        if crate::core_pipeline::extract_intrinsic_name(func).as_deref() == Some("catch_unwind") {
+            self.source_type_registration.catch_unwind_body = Some((
+                self.borrow_tracker.current_closure_id(), return_carrier.clone(),
+            ));
+        }
 
         // Resolve and expand context requirements
         // Context group expansion: resolving context group names to their constituent contexts recursively — Context group expansion
@@ -11006,7 +11013,7 @@ impl TypeChecker {
             params: param_types.clone(), return_type: Box::new(initial_return_for_sig),
             contexts: context_requirement.clone().map(crate::di::requirement::ContextExpr::Concrete),
             type_params: List::new(), properties: None,
-            property_requirement: crate::computational_properties::PropertyRequirement::declared_function(func.is_pure, func.is_meta),
+            property_requirement: self.source_callable_requirement(func),
         };
         // CRITICAL: Create TypeScheme explicitly with tracked type parameters.
         // We cannot use `generalize()` which relies on `free_vars()` because:
