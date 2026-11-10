@@ -223,7 +223,7 @@ impl<'s> CompilationPipeline<'s> {
             .with_target(target.clone());
         let admission_sources: Vec<_> = source_identities.iter()
             .map(|(owner, path, ast)| (*owner, path.as_str(), *ast)).collect();
-        semantic.admit_owned_source_roster(&admission_sources, &self.session.module_registry())?;
+        semantic.admit_owned_source_roster(&admission_sources, self.session)?;
         // Materialization follows successful original-source admission. Registry
         // and interface snapshots below must then use the transformed roster.
         // A single owned roster feeds declarations and bodies. @const results
@@ -779,8 +779,9 @@ one module and therefore never seeded",
         module.source_files.iter().map(|path| {
             let source = SourceFile::load(path)
                 .map_err(|e| anyhow::anyhow!("reading {}: {e}", path.display()))?;
-            let ast = verum_fast_parser::Parser::new(&source.content)
-                .parse_module()
+            let file_id = self.session.load_source_string(&source.content, path.clone())?;
+            let ast = verum_fast_parser::VerumParser::new()
+                .parse_module_str(&source.content, file_id)
                 .map_err(|e| anyhow::anyhow!("parsing {}: {e:?}", path.display()))?;
             Ok((path.clone(), ast))
         }).collect()

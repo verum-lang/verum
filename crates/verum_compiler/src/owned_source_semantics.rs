@@ -5,7 +5,6 @@ use verum_ast::{ItemKind, Module};
 use verum_common::{List, Map, Shared, Text};
 
 pub(crate) type SourceRegistry = Shared<parking_lot::RwLock<ModuleRegistry>>;
-use verum_diagnostics::Diagnostic;
 use verum_modules::{ModuleInfo, ModulePath, ModuleRegistry, extract_exports_from_module};
 use verum_types::TypeChecker;
 
@@ -173,7 +172,18 @@ pub(crate) fn check_source_module(
     owner: &str,
     module: &Module,
     registry: &SourceRegistry,
-) -> Result<(), List<Diagnostic>> {
+) -> Result<(), List<verum_diagnostics::Diagnostic>> {
+    check_source_types(checker, owner, module, registry, verum_types::TypeError::to_diagnostic)
+}
+
+/// Keep original spans until the session responsible for parsing renders them.
+pub(crate) fn check_source_types(
+    checker: &mut TypeChecker,
+    owner: &str,
+    module: &Module,
+    registry: &SourceRegistry,
+    render: impl Fn(&verum_types::TypeError) -> verum_diagnostics::Diagnostic,
+) -> Result<(), List<verum_diagnostics::Diagnostic>> {
     checker.set_current_module_path(owner);
     checker.set_module_registry(registry.clone());
     checker.register_stdlib_types_for_module(module);
@@ -192,33 +202,19 @@ pub(crate) fn check_source_module(
     if let Some(header) = body.file_header_index() {
         body.items.remove(header);
     }
-    let mut errors: List<Diagnostic> = checker
-        .prepare_module_declarations(&body)
-        .into_iter()
-        .map(|error| error.to_diagnostic())
-        .collect();
+    let mut errors: List<_> = checker.prepare_module_declarations(&body).iter().map(&render).collect();
     if errors.is_empty() {
         for item in &body.items {
             if let Err(error) = checker.check_item(item) {
-                errors.push(error.to_diagnostic());
+                errors.push(render(&error));
                 // A nested checker may return before restoring its local scope.
                 // Do not check another item under the failed item's authority.
                 break;
             }
         }
     }
-    errors.extend(
-        checker
-            .take_deferred_errors()
-            .into_iter()
-            .map(|error| error.to_diagnostic()),
-    );
-    errors.extend(
-        checker
-            .diagnostic_sources()
-            .iter()
-            .map(|error| error.to_diagnostic()),
-    );
+    errors.extend(checker.take_deferred_errors().iter().map(&render));
+    errors.extend(checker.diagnostic_sources().iter().map(render));
     if errors.is_empty() {
         Ok(())
     } else {

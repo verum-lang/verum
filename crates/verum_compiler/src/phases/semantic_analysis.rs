@@ -122,19 +122,31 @@ impl SemanticAnalysisPhase {
     pub(crate) fn admit_owned_source_roster(
         &self,
         sources: &[(&str, &str, &verum_ast::Module)],
-        existing: &crate::owned_source_semantics::SourceRegistry,
+        session: &crate::Session,
     ) -> anyhow::Result<()> {
         let selected = crate::owned_source_semantics::select_source_roster(sources, &self.target)?;
-        let graph = verum_common::Shared::new(parking_lot::RwLock::new(existing.read().clone()));
+        let graph = verum_common::Shared::new(parking_lot::RwLock::new(session.module_registry().read().clone()));
         crate::owned_source_semantics::register_sources(&graph,
             selected.iter().map(|(owner, path, module)| (owner.as_str(), path.as_str(), module)))?;
         for (owner, path, module) in &selected {
             let mut checker = self.configured_checker();
-            if let Err(errors) = crate::owned_source_semantics::check_source_module(
+            if let Err(errors) = crate::owned_source_semantics::check_source_types(
                 &mut checker, owner, module, &graph,
+                |error| error.to_diagnostic_with_span(Some(|span| session.convert_span(span))),
             ) {
-                anyhow::bail!("semantic checking failed in {owner} ({path}): {}",
-                    errors.iter().map(|diagnostic| diagnostic.message().to_string()).collect::<Vec<_>>().join("\n"));
+                let details = errors.iter().map(|diagnostic| {
+                    let mut line = String::new();
+                    if let Some(span) = diagnostic.primary_span() {
+                        line.push_str(&format!("{span}: "));
+                    }
+                    if let Some(code) = diagnostic.code() {
+                        line.push_str(code);
+                        line.push(' ');
+                    }
+                    line.push_str(diagnostic.message());
+                    line
+                }).collect::<Vec<_>>().join("\n");
+                anyhow::bail!("semantic checking failed in {owner} ({path}): {details}");
             }
         }
         Ok(())

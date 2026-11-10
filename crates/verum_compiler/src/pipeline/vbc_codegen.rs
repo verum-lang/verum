@@ -64,7 +64,7 @@ impl<'s> CompilationPipeline<'s> {
             if let Some(metadata) = self.stdlib_metadata.get() {
                 semantic = semantic.with_core_metadata(Arc::clone(metadata));
             }
-            semantic.admit_owned_source_roster(&source_refs, &self.session.module_registry())?;
+            semantic.admit_owned_source_roster(&source_refs, self.session)?;
             let mut lowering = ConstLowering::new(self.fresh_meta_ctx_with_version_stamp());
             for (owner, _, module) in &units { lowering.register(owner, module)?; }
             for (owner, _, module) in &mut units {

@@ -96,6 +96,16 @@ fn explicit_header_overrides_filename_in_registry_and_archive() {
     execute(module, "core.client.run", 42);
 }
 #[test]
+fn bootstrap_reports_the_file_and_line_that_owns_a_type_error() {
+    let error = produce(&[
+        ("mod.vr", "module core; public module left; public module right;"),
+        ("left.vr", "public fn works() -> Int { 1 }"),
+        ("right.vr", "\n\npublic fn broken() -> Int { true }"),
+    ]).unwrap_err();
+    assert!(error.contains("right.vr:3:") && error.contains("E400"), "{error}");
+}
+
+#[test]
 fn wrong_sibling_mount_cannot_publish_an_archive() {
     let error = produce(&[
         ("mod.vr", "module core; public module wrong; public module client;"),
