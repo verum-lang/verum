@@ -14,6 +14,7 @@
 use crate::ty::{EqTerm, Quantity, Substitution, SubstitutionExt, Type, TypeVar, UniverseLevel};
 use crate::{Result, TypeError};
 use indexmap::IndexMap;
+use std::sync::Arc;
 use verum_ast::span::Span;
 #[allow(unused_imports)]
 use verum_common::Text;
@@ -72,7 +73,7 @@ pub struct Unifier {
     /// Type alias registry: maps alias names to their target types.
     /// E.g., "Byte" -> Named("UInt8"), enabling transparent unification
     /// through aliases like `type Byte is UInt8;`.
-    type_aliases: Map<Text, Type>,
+    type_aliases: Arc<Map<Text, Type>>,
     /// Type parameter names for generic type aliases, in declaration order.
     /// E.g., "IoResult" -> ["T"] for `type IoResult<T> is Result<T, StreamError>`.
     /// Used by try_expand_alias to substitute type arguments into generic aliases.
@@ -228,6 +229,11 @@ pub const DEFAULT_MAX_UNIFY_DEPTH: u32 = 50;
 
 impl Unifier {
     pub fn new() -> Self {
+        Self::with_type_aliases(Arc::default())
+    }
+
+    /// Start a fresh inference state with an already validated alias table.
+    pub(crate) fn with_type_aliases(type_aliases: Arc<Map<Text, Type>>) -> Self {
         // Array-coercible types — populated dynamically via
         // `register_array_coercible_type()` from stdlib's
         // `implement<T> ArrayCoercible for X<T> {}` blocks.
@@ -291,7 +297,7 @@ impl Unifier {
             protocol_names: std::collections::HashSet::new(),
             type_var_orders: Map::new(),
             variant_registration_journal: None,
-            type_aliases: Map::new(),
+            type_aliases,
             type_alias_params: Map::new(),
             array_coercible_types,
             tensor_family_types,
@@ -823,7 +829,11 @@ impl Unifier {
             // diagnostic via a dedicated pass.
             return;
         }
-        self.type_aliases.insert(alias_name, target);
+        Arc::make_mut(&mut self.type_aliases).insert(alias_name, target);
+    }
+
+    pub(crate) fn into_type_aliases(self) -> Arc<Map<Text, Type>> {
+        self.type_aliases
     }
 
     /// Returns true if registering `alias -> target` would create a cycle
@@ -905,8 +915,8 @@ impl Unifier {
         binding: (Option<Type>, Option<List<Text>>),
     ) {
         match binding.0 {
-            Some(target) => { self.type_aliases.insert(name.clone(), target); }
-            None => { self.type_aliases.remove(&name); }
+            Some(target) => { Arc::make_mut(&mut self.type_aliases).insert(name.clone(), target); }
+            None => { Arc::make_mut(&mut self.type_aliases).remove(&name); }
         }
         match binding.1 {
             Some(parameters) => { self.type_alias_params.insert(name, parameters); }
@@ -917,7 +927,7 @@ impl Unifier {
     /// Remove a type alias (used when user types override stdlib aliases)
     pub fn remove_type_alias(&mut self, alias_name: &str) {
         let key: Text = alias_name.into();
-        self.type_aliases.remove(&key);
+        Arc::make_mut(&mut self.type_aliases).remove(&key);
     }
 
     /// Recursively expand type aliases in a type.

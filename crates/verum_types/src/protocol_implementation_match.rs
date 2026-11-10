@@ -1,9 +1,6 @@
 //! One rigid implementation matcher shared by proof obligations and family applications.
 use super::{ProtocolChecker, ProtocolImpl, WhereClause};
-use crate::{
-    ty::{Substitution, Type},
-    unify::Unifier,
-};
+use crate::ty::{Substitution, Type};
 use verum_ast::Span;
 
 /// Checked lexical premises used by both candidate inference and final proof.
@@ -160,8 +157,7 @@ impl ProtocolChecker {
             }
             environment.extend_variables(&mut variables);
         }
-        let mut matcher = Unifier::new();
-        self.install_builtin_proof_aliases(&mut matcher);
+        let mut matcher = self.fresh_proof_matcher();
         matcher.enter_rigid_scope(variables.into_iter().map(|variable| {
             (
                 variable,

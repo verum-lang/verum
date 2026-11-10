@@ -1,6 +1,7 @@
 //! Declaration facts used by exact protocol proof, independently of dispatch names.
 use super::{AssociatedTypeAssignment, ProtocolChecker};
 use crate::{Type, unify::Unifier};
+use std::sync::{Arc, OnceLock};
 use verum_ast::{Ident, Path, Span, decl::TypeDeclBodyKind};
 use verum_common::{List, Map, Text, well_known_types::type_names};
 
@@ -10,6 +11,7 @@ pub(super) struct TypeAuthority {
     representatives: Map<Text, Type>,
     declarations: Map<Text, (TypeDeclBodyKind, Option<usize>)>,
     aliases: Map<Text, AssociatedTypeAssignment>,
+    proof_aliases: OnceLock<Arc<Map<Text, Type>>>,
 }
 
 enum HeadIdentity {
@@ -74,6 +76,7 @@ impl ProtocolChecker {
             return;
         };
         let identity = scalar_identity(&name);
+        self.type_authority.proof_aliases.take();
         self.type_authority.builtins.insert(name, identity.clone());
         self.type_authority
             .builtins
@@ -104,6 +107,7 @@ impl ProtocolChecker {
         arity: Option<usize>,
         alias: Option<AssociatedTypeAssignment>,
     ) {
+        self.type_authority.proof_aliases.take();
         self.type_authority.aliases.remove(&key);
         if kind == TypeDeclBodyKind::Alias {
             if let Some(alias) = alias {
@@ -222,9 +226,15 @@ impl ProtocolChecker {
         Some(left_tier == right_tier && left_mutable == right_mutable && compare_pointees(left, right))
     }
 
-    /// Reuse the unifier's existing recursive transparent-alias substitution.
-    /// This changes only a private proof matcher, not method dispatch identity.
-    pub(super) fn install_builtin_proof_aliases(&self, matcher: &mut Unifier) {
+    /// Candidate substitutions and rigid variables are private to the proof.
+    /// Only aliases validated for this declaration registry can be shared.
+    pub(super) fn fresh_proof_matcher(&self) -> Unifier {
+        let aliases = self.type_authority.proof_aliases.get_or_init(|| self.build_proof_aliases());
+        Unifier::with_type_aliases(Arc::clone(aliases))
+    }
+
+    fn build_proof_aliases(&self) -> Arc<Map<Text, Type>> {
+        let mut matcher = Unifier::new();
         for (key, alias) in &self.type_authority.aliases {
             if let Some(body) = alias.ordinary_body() {
                 matcher.register_type_alias(key.clone(), body.clone());
@@ -244,5 +254,76 @@ impl ProtocolChecker {
             }
             matcher.register_type_alias(name.clone(), target.clone());
         }
+        matcher.into_type_aliases()
+    }
+}
+
+#[cfg(test)]
+mod proof_alias_tests {
+    use super::*;
+    use crate::TypeVar;
+
+    fn named(name: &str) -> Type {
+        Type::Named {
+            path: Path::single(Ident::new(name, Span::default())),
+            args: List::new(),
+        }
+    }
+
+    #[test]
+    fn candidates_share_aliases_and_keep_separate_inference_and_binding_state() {
+        let mut registry = ProtocolChecker::new();
+        registry.register_type_declaration_kind(
+            "Payload".into(), TypeDeclBodyKind::Alias, Some(0),
+            Some(AssociatedTypeAssignment::ordinary(Type::Int)),
+        );
+        let aliases = registry.fresh_proof_matcher().into_type_aliases();
+        assert!(Arc::ptr_eq(&aliases, &registry.fresh_proof_matcher().into_type_aliases()));
+
+        let mut first = registry.fresh_proof_matcher();
+        let second = registry.fresh_proof_matcher();
+        let variable = TypeVar::fresh();
+        first.unify(&Type::Var(variable), &Type::Bool, Span::default()).unwrap();
+        assert_eq!(second.apply(&Type::Var(variable)), Type::Var(variable));
+        first.enter_rigid_scope([(variable, "Local".into(), false, None)]);
+        assert!(!second.is_rigid(variable));
+        first.restore_alias_binding("Payload".into(), (Some(Type::Text), None));
+        assert_eq!(first.normalize_aliases(&named("Payload")), Type::Text);
+        assert_eq!(second.normalize_aliases(&named("Payload")), Type::Int);
+        assert_eq!(registry.fresh_proof_matcher().normalize_aliases(&named("Payload")), Type::Int);
+    }
+
+    #[test]
+    fn updated_declarations_and_builtins_invalidate_only_the_owning_registry() {
+        let mut registry = ProtocolChecker::new();
+        registry.register_builtin_type_identity(&Type::Int);
+        let initial = registry.fresh_proof_matcher();
+        assert!(initial.alias_binding("ISize").0.is_none());
+        registry.register_builtin_type_identity(&named("ISize"));
+        let previous = registry.fresh_proof_matcher();
+        assert_eq!(previous.alias_binding("ISize").0, Some(Type::Int));
+        let mut sibling = registry.clone();
+        sibling.register_type_declaration_kind("ISize".into(), TypeDeclBodyKind::Unit, Some(0), None);
+        assert!(sibling.fresh_proof_matcher().alias_binding("ISize").0.is_none());
+        assert_eq!(registry.fresh_proof_matcher().alias_binding("ISize").0, Some(Type::Int));
+        registry.register_type_declaration_kind(
+            "ISize".into(), TypeDeclBodyKind::Alias, Some(0),
+            Some(AssociatedTypeAssignment::ordinary(Type::Text)),
+        );
+        assert_eq!(registry.fresh_proof_matcher().alias_binding("ISize").0, Some(Type::Text));
+        assert_eq!(previous.alias_binding("ISize").0, Some(Type::Int));
+    }
+
+    #[test]
+    fn cyclic_source_aliases_still_undergo_the_unifiers_cycle_check() {
+        let mut registry = ProtocolChecker::new();
+        for (left, right) in [("First", "Second"), ("Second", "First")] {
+            registry.register_type_declaration_kind(
+                left.into(), TypeDeclBodyKind::Alias, Some(0),
+                Some(AssociatedTypeAssignment::ordinary(named(right))),
+            );
+        }
+        let matcher = registry.fresh_proof_matcher();
+        assert_ne!(matcher.alias_binding("First").0.is_some(), matcher.alias_binding("Second").0.is_some());
     }
 }
