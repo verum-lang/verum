@@ -15050,30 +15050,21 @@ impl TypeChecker {
             }
         }
 
-        let result = if let Some(expr) = &block.expr {
-            self.check_expr(expr, expected)?
+        let result = if let Some(tail) = &block.expr {
+            self.check_expr(tail, expected).and_then(|result| {
+                self.check_aggregate_escape(tail, &result.ty, false)?;
+                Ok(result)
+            })
+        } else if has_diverging_stmt {
+            Ok(InferResult::new(expected.clone()))
         } else {
-            // If there's no trailing expression, check if we have a diverging statement
-            if has_diverging_stmt {
-                // A diverging statement (like return, break, continue) means the block
-                // can have any type, so we return the expected type
-                InferResult::new(expected.clone())
-            } else if !matches!(expected, Type::Unit) {
-                return Err(TypeError::Mismatch {
-                    expected: expected.to_text(),
-                    actual: "Unit".to_text(),
-                    span: block.span,
-                });
-            } else {
-                InferResult::new(Type::unit())
-            }
+            // Reaching the end contributes Unit, including to an inferred callable result.
+            self.unifier.unify(&Type::Unit, expected, block.span)
+                .map(|_| InferResult::new(Type::Unit))
         };
-
-        let validation = block.expr.as_ref().map(|tail| self.check_aggregate_escape(tail, &result.ty, false));
         self.borrow_tracker.exit_scope();
         self.ctx.exit_scope();
-        validation.transpose()?;
-        Ok(result)
+        result
     }
 }
 

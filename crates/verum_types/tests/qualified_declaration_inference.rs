@@ -435,3 +435,25 @@ fn affine_field_receivers_follow_the_selected_method_receiver() {
     let found = errors("sqlite", &format!("{declarations}{body}"));
     assert!(found.iter().any(|e| e.contains("SharedReference") || e.contains("shared reference")), "{found:?}");
 }
+
+#[test]
+fn statement_only_callback_supplies_unit_to_an_inferred_result() {
+    let declarations = r#"
+        type Cell<T> is { value: T };
+        implement<T> Cell<T> {
+            fn apply<R, F: fn(&mut T) -> R>(&mut self, callback: F) -> R {
+                callback(&mut self.value)
+            }
+        }
+    "#;
+    let positive = "fn run(cell: &mut Cell<Int>) { cell.apply(|value| { *value += 1; }); }";
+    let found = errors("interrupt", &format!("{declarations}{positive}"));
+    assert!(found.is_empty(), "{found:?}");
+    for negative in [
+        "fn run(cell: &mut Cell<Int>) -> Int { cell.apply(|value| { *value += 1; }) }",
+        "fn arbitrary<T>() -> T { let x = 1; }",
+    ] {
+        let found = errors("interrupt", &format!("{declarations}{negative}"));
+        assert!(found.iter().any(|e| e.contains("Mismatch") && e.contains("Unit")), "{negative}: {found:?}");
+    }
+}
