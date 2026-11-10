@@ -53,6 +53,28 @@ fn kernel_error_is_null_and_writable_pages_can_be_released() {
         probe.set_triple(&module.get_triple());
         probe.set_data_layout(&module.get_data_layout());
         module.link_in_module(probe).unwrap();
-        linux_elf::check(module, arch, "probe_pages", "pages", 73);
+        linux_elf::check(module, arch, "probe_pages", "pages", 73, b"");
+    }
+}
+
+#[test]
+fn unavailable_kernel_abi_cannot_emit_an_empty_asm_result() {
+    use verum_codegen::llvm::syscall_registry::emit_linux_syscall_inline;
+    use verum_llvm::targets::TargetTriple;
+    for target in [
+        "riscv64-unknown-linux-gnu",
+        "x86_64-unknown-linux-gnux32",
+        "aarch64-apple-darwin",
+    ] {
+        let ctx = Context::create();
+        let module = ctx.create_module("unsupported_kernel");
+        module.set_triple(&TargetTriple::create(target));
+        let err =
+            emit_linux_syscall_inline(&ctx.create_builder(), &ctx, &module, 0, &[]).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains(&format!("no direct Linux syscall ABI for {target}")),
+            "{err}"
+        );
     }
 }

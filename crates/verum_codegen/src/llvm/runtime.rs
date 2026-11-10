@@ -9789,7 +9789,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
     /// Get or declare a libc-free `write(fd, buf, count) -> i64` wrapper.
     ///
-    /// **Libc-free**: Linux uses `SYS_write` (1) direct syscall,
+    /// **Libc-free**: Linux uses the target kernel’s `SYS_WRITE` syscall,
     /// macOS routes through libSystem; Windows standard streams use WriteFile.
     /// Note: signature here uses
     /// `i64` for fd (matching the historical caller convention in
@@ -9840,9 +9840,9 @@ impl<'ctx> RuntimeLowering<'ctx> {
             let buf_addr = builder
                 .build_ptr_to_int(buf, i64_type, "buf_addr")
                 .expect("write buf p2i");
-            let ret = self
-                .emit_linux_syscall(&builder, module, 1, &[fd, buf_addr, count])
-                .expect("write syscall");
+            let ret = super::syscall_registry::emit_named_linux_syscall(
+                &builder, self.context, module, "SYS_WRITE", &[fd, buf_addr, count],
+            )?;
             builder.build_return(Some(&ret)).expect("write return");
         } else {
             // macOS / other-Unix path: route through libSystem.B.dylib's

@@ -348,6 +348,13 @@ pub struct NoLibcConfig {
 
 impl NoLibcConfig {
 
+    /// Flags understood by a linker acting directly on object files. Compiler
+    /// drivers alone inject startup objects and implicit libraries.
+    pub fn linker_flags(&self) -> impl Iterator<Item = &str> {
+        self.flags.iter().map(String::as_str)
+            .filter(|flag| !matches!(*flag, "-nostartfiles" | "-nostdlib" | "-nodefaultlibs"))
+    }
+
     /// Create Linux no-libc linking configuration.
     ///
     /// Linux uses direct syscalls via the stable kernel ABI.
@@ -366,6 +373,10 @@ impl NoLibcConfig {
                 "-nostdlib".to_string(),
                 "-nostartfiles".to_string(),
                 "--gc-sections".to_string(),
+                // Keep differently protected PT_LOADs on disjoint file pages.
+                // In particular a BSS-only segment must be writable after RELRO.
+                "-z".to_string(),
+                "separate-loadable-segments".to_string(),
             ],
         }
     }
@@ -1327,10 +1338,7 @@ impl LinkSession {
             self.config.inputs.push(InputFile::Library(lib));
         }
 
-        // Add linker flags
-        for flag in config.flags {
-            self.config.extra_args.push(flag);
-        }
+        self.config.extra_args.extend(config.flags);
 
         // Store target info if not already set
         if self.config.target_triple.is_none() {

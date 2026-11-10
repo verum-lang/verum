@@ -351,23 +351,6 @@ impl<'ctx> PlatformIR<'ctx> {
         )
     }
 
-    fn emit_named_linux_syscall(
-        &self,
-        builder: &verum_llvm::builder::Builder<'ctx>,
-        module: &Module<'ctx>,
-        name: &str,
-        args: &[verum_llvm::values::IntValue<'ctx>],
-    ) -> super::error::Result<verum_llvm::values::IntValue<'ctx>> {
-        let triple = module.get_triple();
-        let target = triple.as_str().to_string_lossy();
-        let arch = target.split('-').next().unwrap_or_default();
-        let nr = verum_common::linux_syscalls::syscall_for_arch(name, arch)
-            .filter(|_| !target.contains("x32") && !target.contains("ilp32"))
-            .ok_or_else(|| super::error::LlvmLoweringError::UnsupportedInstruction(
-                format!("no Linux {name} ABI for {target}").into()))?;
-        self.emit_linux_syscall(builder, module, nr, args)
-    }
-
     /// Create a new platform-IR emitter with the documented-default
     /// panic strategy (Unwind). Most call sites should use
     /// [`PlatformIR::with_panic_strategy`] to thread the user's
@@ -1583,7 +1566,7 @@ impl<'ctx> PlatformIR<'ctx> {
             let args = [i64_type.const_zero(), size, i64_type.const_int((PROT_READ | PROT_WRITE) as u64, false),
                 i64_type.const_int(flags as u64, false), i64_type.const_all_ones(), i64_type.const_zero()];
             let (raw, failed) = if linux_target {
-                let raw = self.emit_named_linux_syscall(&builder, module, "SYS_MMAP", &args)?;
+                let raw = super::syscall_registry::emit_named_linux_syscall(&builder, self.context, module, "SYS_MMAP", &args)?;
                 // Linux encodes errors in the final 4095 machine words.
                 let failed = builder.build_int_compare(IntPredicate::UGE, raw, i64_type.const_int((-4095i64) as u64, false), "mmap_errno").or_llvm_err()?;
                 (raw, failed)
@@ -1675,7 +1658,7 @@ impl<'ctx> PlatformIR<'ctx> {
             let _ = size_param; // Windows path doesn't need it.
         } else if target_is_linux(module) {
             let addr = builder.build_ptr_to_int(ptr_param, i64_type, "address").or_llvm_err()?;
-            self.emit_named_linux_syscall(&builder, module, "SYS_MUNMAP", &[addr, size_param])?;
+            super::syscall_registry::emit_named_linux_syscall(&builder, self.context, module, "SYS_MUNMAP", &[addr, size_param])?;
         } else {
             // Registry-canonical declaration + the ONE adaptive call
             // authority — same treatment as the mmap site above.
@@ -1783,7 +1766,7 @@ impl<'ctx> PlatformIR<'ctx> {
             let code64 = builder
                 .build_int_s_extend(code, i64_type, "status")
                 .or_llvm_err()?;
-            self.emit_named_linux_syscall(&builder, module, "SYS_EXIT_GROUP", &[code64])?;
+            super::syscall_registry::emit_named_linux_syscall(&builder, self.context, module, "SYS_EXIT_GROUP", &[code64])?;
         } else {
             // The internal i64 exit adapter calls this function. Terminate at
             // the POSIX platform boundary instead of recursing into the adapter.

@@ -741,6 +741,20 @@ pub fn predeclare_all<'ctx>(module: &Module<'ctx>, ctx: &'ctx Context) {
 // canonical version.
 // =============================================================================
 
+/// Resolve a kernel operation against the output architecture's syscall table.
+pub(super) fn emit_named_linux_syscall<'ctx>(
+    builder: &Builder<'ctx>, ctx: &'ctx Context, module: &Module<'ctx>,
+    name: &str, args: &[IntValue<'ctx>],
+) -> LlvmResult<IntValue<'ctx>> {
+    let triple = module.get_triple();
+    let target = triple.as_str().to_string_lossy();
+    let arch = target.split('-').next().unwrap_or_default();
+    let nr = verum_common::linux_syscalls::syscall_for_arch(name, arch)
+        .ok_or_else(|| super::error::LlvmLoweringError::UnsupportedInstruction(
+            format!("no Linux {name} ABI for {target}").into()))?;
+    emit_linux_syscall_inline(builder, ctx, module, nr, args)
+}
+
 /// Emit a direct Linux syscall via inline-asm (`syscall` on x86_64,
 /// `svc #0` on aarch64).  Cross-compilation correct: reads
 /// `module.get_triple()`, never host `#[cfg(target_os)]`.
@@ -761,25 +775,17 @@ pub fn emit_linux_syscall_inline<'ctx>(
 
     let triple = module.get_triple();
     let triple_str = triple.as_str().to_string_lossy();
-    let (asm_str, constraints) =
-        if triple_str.contains("aarch64") || triple_str.contains("arm64") {
-            (
-                "svc #0",
-                "={x0},{x8},{x0},{x1},{x2},{x3},{x4},{x5},~{memory}",
-            )
-        } else if triple_str.contains("x86_64") {
-            (
-                "syscall",
-                "={rax},{rax},{rdi},{rsi},{rdx},{r10},{r8},{r9},~{rcx},~{r11},~{memory}",
-            )
-        } else {
-            // Other archs (32-bit ARM, RISC-V, …): callers should
-            // route through the per-platform fallback rather than
-            // relying on this helper.  Emitted as `=r,r,...,r` so the
-            // module still validates; the result is meaningless but
-            // surfacing the architectural gap loudly is the point.
-            ("", "=r,r,r,r,r,r,r,r")
-        };
+    let arch = triple_str.split('-').next().unwrap_or_default();
+    let lp64_linux = triple_str.contains("linux")
+        && !triple_str.contains("x32") && !triple_str.contains("ilp32");
+    let (asm_str, constraints) = match (lp64_linux, arch) {
+        (true, "aarch64" | "arm64") =>
+            ("svc #0", "={x0},{x8},{x0},{x1},{x2},{x3},{x4},{x5},~{memory}"),
+        (true, "x86_64") =>
+            ("syscall", "={rax},{rax},{rdi},{rsi},{rdx},{r10},{r8},{r9},~{rcx},~{r11},~{memory}"),
+        _ => return Err(super::error::LlvmLoweringError::UnsupportedInstruction(
+            format!("no direct Linux syscall ABI for {triple_str}").into())),
+    };
 
     let fn_type = i64_type.fn_type(
         &[

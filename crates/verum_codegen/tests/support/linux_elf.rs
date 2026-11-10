@@ -9,7 +9,14 @@ use verum_llvm::{
     targets::{CodeModel, FileType, InitializationConfig, RelocMode, Target},
 };
 
-pub fn check(module: &Module<'_>, arch: &str, entry: &str, case: &str, expected: i32) {
+pub fn check(
+    module: &Module<'_>,
+    arch: &str,
+    entry: &str,
+    case: &str,
+    expected: i32,
+    stdout: &[u8],
+) {
     let start = match arch {
         "aarch64" => format!("bl {entry}\nb verum_os_exit"),
         "x86_64" => format!("callq {entry}\nmovl %eax, %edi\ncallq verum_os_exit"),
@@ -54,9 +61,14 @@ pub fn check(module: &Module<'_>, arch: &str, entry: &str, case: &str, expected:
     machine
         .write_to_file(module, FileType::Object, &object)
         .unwrap();
+    let config = verum_codegen::link::NoLibcConfig::linux();
     let lld = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../llvm/install/bin/ld.lld");
     let linked = Command::new(if lld.is_file() { lld } else { "ld.lld".into() })
-        .args(["-static", "--gc-sections", "-e", "_start", "-o"])
+        .arg("-static")
+        .args(config.linker_flags())
+        .arg("-e")
+        .arg(&config.entry_point)
+        .arg("-o")
         .arg(&exe)
         .arg(object)
         .output()
@@ -70,6 +82,8 @@ pub fn check(module: &Module<'_>, arch: &str, entry: &str, case: &str, expected:
         std::fs::copy(&exe, PathBuf::from(out).join(format!("{case}-{arch}"))).unwrap();
     }
     if cfg!(target_os = "linux") && std::env::consts::ARCH == arch {
-        assert_eq!(Command::new(&exe).status().unwrap().code(), Some(expected));
+        let run = Command::new(&exe).output().unwrap();
+        assert_eq!(run.status.code(), Some(expected));
+        assert_eq!(run.stdout, stdout);
     }
 }
