@@ -229,3 +229,27 @@ fn test_named_type_normalization() {
         "Should find implementation via Record type"
     );
 }
+
+#[test]
+fn scalar_methods_use_the_contract_of_the_lexically_visible_protocol() {
+    let declarations = r#"
+        type Hash is protocol { fn hash(&self, salt: Text) -> Text; };
+        implement Hash for Int { fn hash(&self, salt: Text) -> Text { salt } }
+    "#;
+    for (argument, accepted) in [(r#""salt""#, true), ("42", false)] {
+        let source = format!("{declarations} fn digest(value: Int) -> Text {{ value.hash({argument}) }}");
+        let module = verum_fast_parser::Parser::new(&source).parse_module().unwrap();
+        let mut checker = TypeChecker::with_minimal_context();
+        checker.set_current_module_path("sample");
+        checker.register_builtins();
+        let mut errors = checker.prepare_module_declarations(&module);
+        for item in &module.items {
+            if let Err(error) = checker.check_item(item) {
+                errors.push(error);
+            }
+        }
+        errors.extend(checker.take_deferred_errors());
+        let diagnostics: Vec<_> = checker.diagnostics().iter().filter(|d| d.is_error()).collect();
+        assert_eq!(errors.is_empty() && diagnostics.is_empty(), accepted, "{argument}: {errors:?}, {diagnostics:?}");
+    }
+}

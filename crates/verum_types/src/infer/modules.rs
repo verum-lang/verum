@@ -21141,7 +21141,7 @@ impl TypeChecker {
         // snapshots (ordinal, substituted fn type) for the
         // defer-by-return step at the ambiguity gate below.
         let mut own_method_ordinal: usize = 0;
-        let mut overload_candidates: Vec<(usize, Type, Option<crate::context::InstantiatedScheme>)> = Vec::new();
+        let mut overload_candidates: Vec<(Path, usize, Type, Option<crate::context::InstantiatedScheme>)> = Vec::new();
 
         // Scope the read guard tightly to avoid borrow conflicts later
         {
@@ -21565,7 +21565,7 @@ impl TypeChecker {
                         )?;
                         let signature = instance.as_ref().map_or(substituted_method_ty, |i| i.ty.clone());
                         if own_method_ordinal_here > 0 {
-                            overload_candidates.push((own_method_ordinal_here, signature.clone(), instance.clone()));
+                            overload_candidates.push((source_protocol.clone(), own_method_ordinal_here, signature.clone(), instance.clone()));
                         }
                         candidates.push((source_protocol, signature, instance));
                     }
@@ -21580,6 +21580,28 @@ impl TypeChecker {
                 candidates.len()
             );
         }
+        // An unqualified compatibility declaration can coexist with the
+        // actual protocol visible in this source. When both supply the same
+        // member, only the declaration selected by that lexical name applies.
+        if candidates.len() > 1 {
+            let owners: verum_common::Set<_> = candidates.iter()
+                .map(|(owner, _, _)| self.path_to_string(owner)).collect();
+            let mut shadowed = verum_common::Set::new();
+            for (protocol, _, _) in &candidates {
+                let Some(simple) = protocol.as_ident() else { continue };
+                let lexical = Path::single(verum_ast::Ident::new(simple.name.clone(), span));
+                if let Ok(visible) = self.resolve_protocol_reference(&lexical) {
+                    let selected = self.path_to_string(&visible);
+                    if selected != simple.name && owners.contains(&selected) {
+                        shadowed.insert(simple.name.clone());
+                    }
+                }
+            }
+            let visible = |protocol: &Path| !protocol.as_ident().is_some_and(|name| shadowed.contains(&name.name));
+            candidates.retain(|(protocol, _, _)| visible(protocol));
+            overload_candidates.retain(|(protocol, _, _, _)| visible(protocol));
+        }
+
         // Step 4: Handle no candidates or ambiguity
         if candidates.is_empty() {
             return self.handle_empty_candidates(
@@ -21774,7 +21796,7 @@ impl TypeChecker {
                             let resolved_param = self.unifier.apply(param_ty);
                             self.check_expr(arg, &resolved_param)?;
                         }
-                        for instance in overload_candidates.iter().filter_map(|(_, _, i)| i.as_ref()) {
+                        for instance in overload_candidates.iter().filter_map(|(_, _, _, i)| i.as_ref()) {
                             self.bind_explicit_method_arguments(
                                 instance.explicit_method_vars.as_ref(), type_args, method, span,
                             )?;
@@ -21782,7 +21804,7 @@ impl TypeChecker {
                         let alpha = crate::ty::TypeVar::fresh();
                         let rets: Vec<(usize, Type, Option<crate::context::InstantiatedScheme>)> = overload_candidates
                             .iter()
-                            .map(|(ord, t, instance)| {
+                            .map(|(_, ord, t, instance)| {
                                 let ret = if let Type::Function { return_type, .. } = t {
                                     (**return_type).clone()
                                 } else {
