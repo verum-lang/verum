@@ -9,22 +9,25 @@
 // types + the Postgres `MigrationStore` impl so callers can:
 //
 // ```verum
-// use core.database.postgres.migrations.*;
+// mount core.database.common.error.DbError;
+// mount core.database.postgres.config.PgConfig;
+// mount core.database.postgres.connection.connect;
+// mount core.database.common.migrations.plan.MigrationPlan;
+// mount core.database.common.migrations.runner.{RunReport, RmStrict, runner_new};
+// mount core.database.common.migrations.store.store_config_default;
+// mount core.database.postgres.migrations.store.store_new;
 //
-// let conn = postgres.connect(&config).await?;
-// let mut store = store_new(conn, store_config_default());
-// let plan = build(vec![
-//     migration_new(1, "init".to_text(), CREATE_USERS_SQL.to_text()),
-// ])?;
-// let runner = runner_new(RmStrict);
-// let report = runner.execute(&plan, &mut store, now_ns()).await?;
+// async fn apply_plan(config: &PgConfig, plan: &MigrationPlan, now_ns: Int64) -> Result<RunReport, DbError> {
+//     let mut store = store_new(connect(config)?, store_config_default());
+//     runner_new(RmStrict).execute(plan, &mut store, now_ns).await
+// }
 // ```
 //
-// **Postgres-specific concerns operationalised here:**
-//   * `pg_advisory_lock(<key>)` for concurrent-safety
-//   * Transactional DDL when `config.transactional == true`
-//   * Postgres-canonical column types (BIGINT / TEXT / TIMESTAMPTZ)
-//   * `ON CONFLICT (version) DO UPDATE` for idempotent upsert
+// The store serializes migration runs with a PostgreSQL advisory lock.
+// In transactional mode each step commits its SQL and journal entry together.
+// Journal writes lock and verify the original tracking relation.
+// Versions, checksums and nanosecond timestamps use BIGINT.
+// Names, statuses and errors use TEXT.
 // =============================================================================
 
 @arch_module(

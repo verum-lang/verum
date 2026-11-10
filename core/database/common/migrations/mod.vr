@@ -19,21 +19,19 @@
 //   * `MigrationRunner`  — state machine executing the plan
 //   * `MigrationStore`   — vendor adapter protocol
 //
-// **Usage** (Postgres example):
+// Construct a dependency-ordered plan before opening a database connection.
 //
 // ```verum
-// use core.database.common.migrations.*;
-// use core.database.postgres.migrations.PostgresMigrationStore;
+// mount core.database.common.migrations.migration.migration_new;
+// mount core.database.common.migrations.plan.{MigrationPlan, MigrationPlanError, build};
 //
-// let conn = postgres.connect(&config).await?;
-// let mut store = PostgresMigrationStore.new(conn, store_config_default());
-// let plan = build(vec![
-//     migration_new(1, "init".to_text(), CREATE_USERS_SQL.to_text()),
-//     migration_new(2, "add_email_index".to_text(), INDEX_SQL.to_text())
-//         .with_dependency(1),
-// ])?;
-// let runner = runner_new(RmStrict);
-// let report = runner.execute(&plan, &mut store, now_ns()).await?;
+// fn schema_plan() -> Result<MigrationPlan, MigrationPlanError> {
+//     build([
+//         migration_new(1, "users", "CREATE TABLE users (id BIGINT PRIMARY KEY, email TEXT)"),
+//         migration_new(2, "users_email", "CREATE INDEX users_email ON users (email)")
+//             .with_dependency(1),
+//     ])
+// }
 // ```
 //
 // **Vendor-specific entry points:**
