@@ -113,7 +113,9 @@ pub fn compile_module_with_stdlib(
     // ordering: seed first, then collect protocols from the user
     // module itself (so any locally-defined protocols layer on top of
     // the seeded stdlib).
-    crate::pipeline::vbc_codegen::seed_protocol_registry_from_embedded_stdlib(&mut codegen);
+    if let Some(protocols) = crate::pipeline::protocol_seed::embedded_protocols() {
+        codegen.collect_protocol_definitions(protocols);
+    }
 
     // User-side passes. Same order as `compile_ast_to_vbc`:
     //   protocols (so default-method inheritance is in place) →

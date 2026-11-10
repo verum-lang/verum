@@ -43,8 +43,8 @@ use verum_modules::{
 
 
 use super::{
-    BuildMode, CachedStdlibModules, CompilationPipeline, compute_stdlib_content_hash,
-    global_stdlib_cache, global_stdlib_registry_cache, save_registry_to_disk,
+    BuildMode, CompilationPipeline, compute_stdlib_content_hash,
+    global_stdlib_registry_cache, save_registry_to_disk,
     should_parse_as_script, try_load_registry_from_disk,
 };
 
@@ -136,13 +136,10 @@ impl<'s> CompilationPipeline<'s> {
         // first run, and subsequent runs reuse `STDLIB_REGISTRY`
         // via `global_stdlib_registry_cache()`.
 
-        // FAST PATH: Try to use cached fully-populated registry
-        // This is the key optimization: deep_clone a cached registry (~1ms)
-        // instead of re-registering ~166 modules (~500ms).
-        // NOTE: deep_clone shares ModuleInfo via Arc (Shared) and only clones
-        // the HashMap structure. Further optimization would require wrapping the
-        // entire registry in Arc and using copy-on-write for mutations.
-        {
+        // A source AST carries this session's FileIds. Only a projected
+        // archive registry can be installed into a different session.
+        let selected_source = self.stdlib_source_root();
+        if selected_source.is_none() {
             let cache = global_stdlib_registry_cache();
             let guard = cache.read().unwrap_or_else(|poisoned| {
                 tracing::warn!("stdlib registry cache RwLock poisoned, recovering");
@@ -225,42 +222,10 @@ impl<'s> CompilationPipeline<'s> {
         // explicit out-of-tree experimentation; without it, Normal mode
         // exclusively populates the registry from
         // `load_stdlib_from_embedded` (CoreMetadata-driven, ~2 ms).
-        let (stdlib_path, workspace_root_for_cache): (PathBuf, Option<PathBuf>) =
-            match &self.build_mode {
-                BuildMode::StdlibBootstrap { config } => {
-                    debug!(
-                        "StdlibBootstrap mode: using configured path {:?}",
-                        config.stdlib_path
-                    );
-                    (config.stdlib_path.clone(), None)
-                }
-                BuildMode::Normal => {
-                    // Explicit override — opt-in only.  The default
-                    // Normal path skips filesystem entirely and goes
-                    // through the embedded archive.
-                    if let Ok(path) = std::env::var("VERUM_STDLIB_PATH") {
-                        let p = PathBuf::from(&path);
-                        if p.exists() {
-                            debug!("VERUM_STDLIB_PATH override: using {:?}", p);
-                            (p, None)
-                        } else {
-                            debug!(
-                                "VERUM_STDLIB_PATH set to non-existent path {:?} — falling back to embedded archive",
-                                p
-                            );
-                            return self.load_stdlib_from_embedded(scope);
-                        }
-                    } else {
-                        debug!("Normal mode: populating registry from embedded archive");
-                        return self.load_stdlib_from_embedded(scope);
-                    }
-                }
-            };
-
-        // SLOW PATH: source-driven parsing.  Reached only by
-        // StdlibBootstrap mode and the explicit `VERUM_STDLIB_PATH`
-        // override above.
-        debug!("No in-memory registry cache, loading stdlib from source");
+        let Some(stdlib_path) = selected_source else {
+            return self.load_stdlib_from_embedded(scope);
+        };
+        let workspace_root_for_cache: Option<PathBuf> = None;
 
         if !stdlib_path.exists() {
             debug!("Stdlib directory not found at {:?}, skipping", stdlib_path);
@@ -300,20 +265,6 @@ impl<'s> CompilationPipeline<'s> {
                     }
                     drop(reg);
 
-                    // Also populate in-memory caches for subsequent pipeline instances
-                    {
-                        let cache = global_stdlib_registry_cache();
-                        let mut guard = cache.write().unwrap_or_else(|poisoned| {
-                            tracing::warn!(
-                                "stdlib registry cache RwLock poisoned during write, recovering"
-                            );
-                            poisoned.into_inner()
-                        });
-                        if guard.is_none() {
-                            *guard = Some(disk_registry);
-                        }
-                    }
-
                     let elapsed = start.elapsed();
                     info!(
                         "Loaded {} stdlib module(s) from disk cache in {:.2}ms",
@@ -340,22 +291,8 @@ impl<'s> CompilationPipeline<'s> {
             );
         }
 
-        // Try to use the process-level parsed stdlib cache.
-        // This avoids re-parsing 166+ .vr files for every pipeline instance.
-        let cached_entries = {
-            let cache = global_stdlib_cache();
-            let guard = cache.read().unwrap_or_else(|poisoned| {
-                tracing::warn!("stdlib cache RwLock poisoned, recovering");
-                poisoned.into_inner()
-            });
-            guard.as_ref().map(|c| c.entries.clone())
-        };
-
-        let parsed_modules: Vec<(Text, Module, Text)> = if let Some(entries) = cached_entries {
-            debug!("Using cached stdlib modules ({} entries)", entries.len());
-            entries
-        } else {
-            // First time: discover, read, and parse all stdlib files
+        let parsed_modules: Vec<(Text, Module, Text)> = {
+            // Parse against this session so imports and diagnostics share each source identity.
             let stdlib_files = self.discover_stdlib_files(&stdlib_path)?;
             if stdlib_files.is_empty() {
                 debug!("No .vr files found in core/");
@@ -455,18 +392,6 @@ impl<'s> CompilationPipeline<'s> {
                         module_path_str.as_str()
                     );
                 }
-            }
-
-            // Store in global cache for future pipeline instances
-            {
-                let cache = global_stdlib_cache();
-                let mut guard = cache.write().unwrap_or_else(|poisoned| {
-                    tracing::warn!("stdlib cache RwLock poisoned during write, recovering");
-                    poisoned.into_inner()
-                });
-                *guard = Some(CachedStdlibModules {
-                    entries: entries.clone(),
-                });
             }
 
             entries
@@ -593,25 +518,6 @@ impl<'s> CompilationPipeline<'s> {
                 stdlib_count,
                 elapsed.as_secs_f64() * 1000.0
             );
-        }
-
-        // Cache the fully-populated registry for future pipeline instances.
-        // This is the key optimization: subsequent loads will deep_clone this
-        // cached registry instead of re-registering all modules.
-        {
-            let cache = global_stdlib_registry_cache();
-            let mut guard = cache.write().unwrap_or_else(|poisoned| {
-                tracing::warn!("stdlib registry cache RwLock poisoned during write, recovering");
-                poisoned.into_inner()
-            });
-            if guard.is_none() {
-                let registry = self.session.module_registry().read().clone();
-                info!(
-                    "Caching stdlib registry with {} modules for future reuse",
-                    registry.len()
-                );
-                *guard = Some(registry);
-            }
         }
 
         // Persist registry to disk for cross-process reuse (release builds or opt-in).

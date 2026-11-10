@@ -125,6 +125,7 @@ mod mlir;
 mod native_codegen;
 mod phase0;
 mod phases_orchestration;
+pub(crate) mod protocol_seed;
 mod profile_boundaries;
 mod refinement_verify;
 mod stdlib_bootstrap;
@@ -146,21 +147,6 @@ pub(crate) mod vbc_codegen;
 // Cache key: workspace root path (canonicalized)
 // Cache value: Vec<(module_path, Arc<Module>)> + ModuleRegistry entries
 // ═══════════════════════════════════════════════════════════════════════════
-
-/// Cached parsed stdlib modules for process-level reuse.
-/// Stores parsed Module ASTs and source text so subsequent pipeline instances
-/// skip file I/O and parsing (the expensive part of stdlib loading).
-pub(super) struct CachedStdlibModules {
-    /// (module_path_string, parsed_module, source_text) triples
-    pub(super) entries: Vec<(Text, Module, Text)>,
-}
-
-static GLOBAL_STDLIB_MODULES: std::sync::OnceLock<std::sync::RwLock<Option<CachedStdlibModules>>> =
-    std::sync::OnceLock::new();
-
-pub(super) fn global_stdlib_cache() -> &'static std::sync::RwLock<Option<CachedStdlibModules>> {
-    GLOBAL_STDLIB_MODULES.get_or_init(|| std::sync::RwLock::new(None))
-}
 
 /// Cached fully-populated ModuleRegistry for process-level reuse.
 ///
@@ -274,12 +260,6 @@ fn install_canonical_module_aliases(registry: &mut ModuleRegistry) {
 /// Call this between test batches or when memory pressure is high.
 /// The caches will be lazily re-populated on the next compilation.
 pub fn clear_global_caches() {
-    {
-        let cache = global_stdlib_cache();
-        if let Ok(mut guard) = cache.write() {
-            *guard = None;
-        }
-    }
     {
         let cache = global_stdlib_registry_cache();
         if let Ok(mut guard) = cache.write() {
