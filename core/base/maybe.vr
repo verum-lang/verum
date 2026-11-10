@@ -667,13 +667,7 @@ implement<T> FromResidual<Maybe<Never>> for Maybe<T> {
     fn from_residual(residual: Maybe<Never>) -> Maybe<T> {
         match residual {
             None => None,
-            // `Never` is uninhabited, so `Maybe<Never>` can only ever
-            // be `None`. The `Some(_)` arm is provably dead at every
-            // call site — we use the UB-hint variant so LLVM elides
-            // the branch entirely instead of paying the cost of an
-            // always-false test plus a panic prologue we will never
-            // reach.
-            Some(_) => unsafe { unreachable_unchecked() },
+            Some(never) => never,
         }
     }
 }

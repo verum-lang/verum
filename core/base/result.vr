@@ -535,28 +535,13 @@ implement<T, E> Try for Result<T, E> {
     }
 }
 
-// Same error type - trivial conversion
-implement<T, E> FromResidual<Result<Never, E>> for Result<T, E> {
-    fn from_residual(residual: Result<Never, E>) -> Result<T, E> {
-        match residual {
-            Err(e) => Err(e),
-            // `Result<Never, E>` cannot be `Ok(_)` because `Never`
-            // is uninhabited — this branch is provably dead at every
-            // call site. Use the UB-hint variant so LLVM elides the
-            // tag test entirely along the `?`-propagation hot path.
-            Ok(_) => unsafe { unreachable_unchecked() },
-        }
-    }
-}
-
-// Different error types - requires From conversion
+// From is reflexive, so one implementation covers both unchanged and converted errors.
 implement<T, E, F> FromResidual<Result<Never, F>> for Result<T, E>
 where E: From<F> {
     fn from_residual(residual: Result<Never, F>) -> Result<T, E> {
         match residual {
             Err(f) => Err(E.from(f)),
-            // Same uninhabited-Never reasoning as above.
-            Ok(_) => unsafe { unreachable_unchecked() },
+            Ok(never) => never,
         }
     }
 }
