@@ -18,6 +18,27 @@ const PROVIDER: &str = r#"
     public fn checked_issue() -> Result<Receipt, Text> { Result.Ok(issue()) }
 "#;
 
+#[test]
+fn two_mount_paths_preregister_one_implementation_owner() {
+    let library = r#"
+        public type Stamp is protocol { fn stamp(&self) -> Int; };
+        public type Ticket<T> is { value:T };
+        implement<T> Stamp for Ticket<T> { fn stamp(&self) -> Int { 7 } }
+        public fn first() -> Int { 1 }
+        public fn second() -> Int { 2 }
+    "#;
+    for mounts in [
+        "mount demo.tickets.first; mount old.tickets.second;",
+        "mount old.tickets.second; mount demo.tickets.first;",
+    ] {
+        let (_, errors) = check_with_module_aliases(
+            &format!("{mounts} fn probe() -> Int {{ first() + second() }}"),
+            &[("demo.tickets", library)], &[("old.tickets", "demo.tickets")],
+        );
+        assert!(errors.is_empty(), "{mounts} {errors:?}");
+    }
+}
+
 fn check_with_checker(consumer: &str, modules: &[(&str, &str)]) -> (TypeChecker, List<Text>) {
     check_with_module_aliases(consumer, modules, &[])
 }

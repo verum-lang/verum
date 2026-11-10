@@ -3259,11 +3259,7 @@ impl TypeChecker {
             // Pre-register all function signatures from this module to enable forward references
             // within the imported module itself. This is critical for cases where a function
             // calls another function defined later in the same module.
-            self.preregister_module_function_signatures(
-                &module_info.ast,
-                resolved_module_path.as_str(),
-                registry,
-            );
+            self.preregister_module_function_signatures(&module_info, registry);
 
             // Find the exported item
             // Note: ExportTable.get expects &Text (verum_common::Text)
@@ -8703,11 +8699,15 @@ impl TypeChecker {
     /// Import and re-export system: "mount module.{item1, item2}" for imports, pub use for re-exports, glob imports — Cross-module resolution
     fn preregister_module_function_signatures(
         &mut self,
-        ast: &verum_ast::Module,
-        module_path: &str,
+        module: &verum_modules::ModuleInfo,
         registry: &verum_modules::ModuleRegistry,
     ) {
         use verum_ast::ItemKind;
+        // An import alias may resolve to this file. Only the registry entry
+        // that owns its AST can supply the namespace for its declarations.
+        let ast = &module.ast;
+        let owner = module.path.to_string();
+        let module_path = owner.as_str();
 
         // Check if we've already pre-registered this module
         if self.preregistered_modules.contains(module_path) {
@@ -9697,9 +9697,7 @@ impl TypeChecker {
         if let Some(module_info) = registry.get_by_path(module_path.as_str()) {
             // Pre-register all function signatures to enable forward references
             // within the imported module itself
-            self.preregister_module_function_signatures(
-                &module_info.ast, module_path.as_str(), registry,
-            );
+            self.preregister_module_function_signatures(&module_info, registry);
 
             // Import all public exports.
             // Sort names for deterministic import order — ExportTable uses HashMap
