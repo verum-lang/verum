@@ -479,6 +479,10 @@ pub struct VbcModule {
     #[serde(skip)]
     pub resolved_protocol_dispatch: std::collections::HashMap<(u32, u32), FunctionId>,
 
+    /// Declaration-owned instance methods in this assembled function table.
+    #[serde(skip)]
+    pub(crate) receiver_method_families: std::sync::OnceLock<crate::receiver_methods::MethodFamilies>,
+
     /// Mount-rename alias table — Phase 1 of task #11 fundamental fix
     /// (see `task11-mount-alias-aot-fix spec`).
     ///
@@ -673,6 +677,7 @@ impl VbcModule {
             external_function_names: Vec::new(),
             resolved_band_map: std::collections::HashMap::new(),
             resolved_protocol_dispatch: std::collections::HashMap::new(),
+            receiver_method_families: std::sync::OnceLock::new(),
             mount_aliases: Vec::new(),
             fn_idx_by_name: std::sync::OnceLock::new(),
             fn_idx_by_last_segment: std::sync::OnceLock::new(),
@@ -982,6 +987,7 @@ impl VbcModule {
 
     /// Adds a function descriptor.
     pub fn add_function(&mut self, desc: FunctionDescriptor) -> FunctionId {
+        self.receiver_method_families.take();
         let id = FunctionId(self.functions.len() as u32);
         // Keep the by-name index coherent when it is already materialised,
         // mirroring `add_type`. Appending preserves table order, which the
@@ -1093,6 +1099,7 @@ impl VbcModule {
 
     /// Gets a mutable function descriptor by ID.
     pub fn get_function_mut(&mut self, id: FunctionId) -> Option<&mut FunctionDescriptor> {
+        self.receiver_method_families.take();
         // A descriptor's name participates in both indexes. A mutable caller
         // may replace it before the next lookup.
         self.fn_idx_by_name.take();
@@ -1323,8 +1330,29 @@ impl VbcModule {
         method: StringId,
         argc: u8,
     ) -> Option<(FunctionId, Vec<TypeRef>)> {
-        let name = self.get_string(method)?.rsplit('.').next()?;
-        let id = self.resolve_protocol_method_by_name(receiver.base_type_id()?.0, name)?;
+        self.try_bound_instance_method(receiver, method, argc).ok().flatten()
+    }
+
+    /// A competing family requires a unique declared receiver. Native lowering
+    /// must propagate a refusal before considering ordinary protocol dispatch.
+    pub fn try_bound_instance_method(
+        &self, receiver: &TypeRef, method: StringId, argc: u8,
+    ) -> Result<Option<(FunctionId, Vec<TypeRef>)>, String> {
+        let specialized = self.receiver_specialization(receiver, method, argc)?;
+        let target = specialized.or_else(|| {
+            let name = self.get_string(method)?.rsplit('.').next()?;
+            self.resolve_protocol_method_by_name(receiver.base_type_id()?.0, name)
+        });
+        let bound = target.and_then(|id| self.bind_instance_receiver(id, receiver, argc));
+        if specialized.is_some() && bound.is_none() {
+            return Err(format!("receiver {receiver:?} does not establish the selected method's arguments"));
+        }
+        Ok(bound)
+    }
+
+    fn bind_instance_receiver(
+        &self, id: FunctionId, receiver: &TypeRef, argc: u8,
+    ) -> Option<(FunctionId, Vec<TypeRef>)> {
         let function = self.get_function(id)?;
         if function.params.len() != usize::from(argc) + 1
             || self.get_string(function.params.first()?.name) != Some("self")

@@ -535,6 +535,51 @@ pub(super) fn handle_bound_method(
     execute_method_call(state, declared_receiver, instruction_pc, dst, receiver_reg, method_id, args)
 }
 
+/// Enter a resolved body using its declared self convention. Mutable methods
+/// borrow the caller's slot when their receiver is an unwrapped value.
+fn enter_resolved_method(
+    state: &mut InterpreterState,
+    target: FunctionId,
+    receiver: Value,
+    receiver_reg: Reg,
+    args: RegRange,
+    dst: Reg,
+    witnesses: Option<Box<[crate::types::TypeRef]>>,
+) -> InterpreterResult<DispatchResult> {
+    let function = state.module.get_function(target)
+        .ok_or(InterpreterError::FunctionNotFound(target))?;
+    let reg_count = function.register_count;
+    let first = function.params.first();
+    let takes_self = first.and_then(|p| state.module.get_string(p.name))
+        .is_none_or(|name| name == "self");
+    let borrows_mut = first.is_some_and(|p| state.module.get_string(p.name) == Some("self")
+        && matches!(p.type_ref, crate::types::TypeRef::Reference {
+            mutability: crate::types::Mutability::Mutable, ..
+        }));
+    let caller = state.reg_base();
+    let self_value = if borrows_mut && !is_cbgr_ref(&receiver)
+        && !receiver.is_thin_ref() && !receiver.is_fat_ref()
+    {
+        let slot = caller + u32::from(receiver_reg.0);
+        super::cbgr_helpers::encode_cbgr_ref_mut(slot, state.registers.get_generation(slot))
+    } else { receiver };
+    let base = state.call_stack.push_frame(target, reg_count, state.pc(), dst)?;
+    state.registers.push_frame(reg_count);
+    if let Some(witnesses) = witnesses {
+        state.call_stack.set_generic_witnesses(witnesses);
+    }
+    if takes_self {
+        state.registers.set(base, Reg(0), self_value);
+    }
+    for i in 0..u16::from(args.count) {
+        let value = state.registers.get(caller, Reg(args.start.0 + i));
+        state.registers.set(base, Reg(u16::from(takes_self) + i), value);
+    }
+    state.set_pc(0);
+    state.record_call();
+    Ok(DispatchResult::Continue)
+}
+
 fn execute_method_call(
     state: &mut InterpreterState,
     declared_receiver: Option<crate::types::TypeRef>,
@@ -588,6 +633,14 @@ fn execute_method_call(
             })?;
         Ok::<_, InterpreterError>(Some(arguments.into_boxed_slice()))
     };
+
+    if let Some(declaration) = &declared_receiver
+        && let Some(target) = state.module.receiver_specialization(declaration, StringId(method_id), args.count)
+            .map_err(|message| InterpreterError::Panic { message })?
+    {
+        let witnesses = take_witness(&state.module, target)?;
+        return enter_resolved_method(state, target, receiver, receiver_reg, args, dst, witnesses);
+    }
 
     if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceCallmEq) {
         let mname = state.module.strings.get(StringId(method_id)).unwrap_or("?");
@@ -4156,104 +4209,8 @@ fn execute_method_call(
             state.method_cache.insert(key, target_func_id);
         }
 
-        if let Some(func) = state.module.get_function(target_func_id) {
-            let reg_count = func.register_count;
-            let return_pc = state.pc();
-            let caller_base = state.reg_base();
-
-            // Some method-shaped calls dispatch to functions that DON'T take
-            // self — most commonly context methods declared without `&self`
-            // (`context Logger { fn log(tag: Text, message: Text); }`). For
-            // those, prepending the receiver as r0 shifts every real arg one
-            // slot too far and produces "tag={empty record}" / "message=<the
-            // intended tag>" symptoms. Detect by inspecting the callee's
-            // first param name: if it's not `self`, copy args directly into
-            // r0+ without prepending the receiver.
-            let takes_self = func
-                .params
-                .first()
-                .and_then(|p| state.module.strings.get(p.name))
-                .map(|n| n == "self")
-                .unwrap_or(true);
-
-            let witnesses = take_witness(&state.module, target_func_id)?;
-            let new_base =
-                state
-                    .call_stack
-                    .push_frame(target_func_id, reg_count, return_pc, dst)?;
-            state.registers.push_frame(reg_count);
-            if let Some(w) = witnesses {
-                state.call_stack.set_generic_witnesses(w);
-            }
-
-            if takes_self {
-                // SELF-MUT-RECV-COHERENCE-1: the callee's DESCRIPTOR is the
-                // authority on the receiver convention.  When it declares
-                // `&mut self` (param[0] is a Mutable Reference named `self`)
-                // but the call site passed the receiver BY VALUE — which
-                // happens whenever the codegen-time registry had no entry
-                // under the call's key (prelude-only compiles resolve
-                // `Text.make_ascii_uppercase` only at RUNTIME; the compile-
-                // time `lookup_function` miss skipped the RefMut wrap) —
-                // synthesize the CBGR ref to the CALLER's receiver register
-                // here.  Without this, the body's `*self = X` DEREF_MUT
-                // wrote into the callee-frame COPY and every `&mut self`
-                // stdlib method was a silent no-op, with mount-set-dependent
-                // reproduction (the worst failure shape).  Mutability is a
-                // callee-declared fact; honoring it must not depend on
-                // call-site registry timing.
-                let callee_wants_mut_self = func
-                    .params
-                    .first()
-                    .map(|p| {
-                        matches!(
-                            &p.type_ref,
-                            crate::types::TypeRef::Reference {
-                                mutability: crate::types::Mutability::Mutable,
-                                ..
-                            }
-                        ) && state
-                            .module
-                            .strings
-                            .get(p.name)
-                            .is_some_and(|n| n == "self")
-                    })
-                    .unwrap_or(false);
-                let receiver_to_pass = if callee_wants_mut_self
-                    && !is_cbgr_ref(&receiver)
-                    && !receiver.is_thin_ref()
-                    && !receiver.is_fat_ref()
-                {
-                    let abs = caller_base + receiver_reg.0 as u32;
-                    let generation = state.registers.get_generation(abs);
-                    super::cbgr_helpers::encode_cbgr_ref_mut(abs, generation)
-                } else {
-                    receiver
-                };
-                // First arg is receiver (self)
-                state.registers.set(new_base, Reg(0), receiver_to_pass);
-                // Copy remaining arguments
-                for i in 0..args.count {
-                    let arg_value = state
-                        .registers
-                        .get(caller_base, Reg(args.start.0 + i as u16));
-                    state.registers.set(new_base, Reg(i as u16 + 1), arg_value);
-                }
-            } else {
-                // Static method dispatched via CallM (e.g., context method
-                // with no `self`). Skip the receiver and copy args into r0+.
-                for i in 0..args.count {
-                    let arg_value = state
-                        .registers
-                        .get(caller_base, Reg(args.start.0 + i as u16));
-                    state.registers.set(new_base, Reg(i as u16), arg_value);
-                }
-            }
-
-            state.set_pc(0);
-            state.record_call();
-            return Ok(DispatchResult::Continue);
-        }
+        let witnesses = take_witness(&state.module, target_func_id)?;
+        return enter_resolved_method(state, target_func_id, receiver, receiver_reg, args, dst, witnesses);
     }
 
     // Fallback for "eq" method: when no custom Eq implementation is found,

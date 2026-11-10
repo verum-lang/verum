@@ -60,3 +60,48 @@ fn a_nonmatching_instantiation_cannot_reuse_the_first_body() {
         "{err}"
     );
 }
+
+#[test]
+fn a_protocol_bound_uses_the_callers_concrete_receiver_on_each_invocation() {
+    let ast = Parser::new(
+        r#"
+        protocol Measure { fn width(&self) -> Int; }
+        type Cell<T> is { value: T };
+        implement Measure for Cell<Int> { fn width(&self) -> Int { 13 } }
+        implement Measure for Cell<Bool> { fn width(&self) -> Int { 29 } }
+        fn measure<T: Measure>(value: T) -> Int { value.width() }
+        fn probe() -> Int {
+            let a: Cell<Int> = Cell { value: 0 };
+            let b: Cell<Bool> = Cell { value: true };
+            measure<Cell<Int>>(a) * 100 + measure<Cell<Bool>>(b)
+        }
+    "#,
+    )
+    .parse_module()
+    .unwrap();
+    let module = VbcCodegen::new().compile_module(&ast).unwrap();
+    let mut module = deserialize_module(&serialize_module(&module).unwrap()).unwrap();
+    assert!(module.resolve_external_bands().is_empty());
+    module.resolve_protocol_dispatch();
+    validate_module(&module).unwrap();
+    let cell = module
+        .get_function(module.find_function_by_name("Cell.width").unwrap())
+        .unwrap()
+        .parent_type
+        .unwrap();
+    let width = module.strings.lookup("width").unwrap();
+    use verum_vbc::types::{TypeId, TypeRef};
+    let target = |item| {
+        let declared = TypeRef::instantiated(cell, [TypeRef::Concrete(item)]);
+        module.try_bound_instance_method(&declared, width, 0)
+    };
+    let (integer, _) = target(TypeId::INT).unwrap().unwrap();
+    let (boolean, _) = target(TypeId::BOOL).unwrap().unwrap();
+    assert_ne!(integer, boolean);
+    assert!(target(TypeId::TEXT).is_err());
+    let entry = module.find_function_by_name("probe").unwrap();
+    let value = Interpreter::new(Arc::new(module))
+        .execute_function(entry)
+        .unwrap();
+    assert_eq!(value.as_i64(), 1329);
+}

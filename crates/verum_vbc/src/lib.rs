@@ -68,6 +68,7 @@ pub mod error;
 pub mod format;
 pub mod instruction;
 pub mod module;
+mod receiver_methods;
 pub mod type_layout;
 pub mod drop_plan;
 pub mod types;

@@ -15530,7 +15530,8 @@ fn lower_call_method<'ctx>(
             return Ok(());
         }
         if let Some((function, args)) =
-            vbc_mod.bound_instance_method(&declaration, StringId(method_id), args.count)
+            vbc_mod.try_bound_instance_method(&declaration, StringId(method_id), args.count)
+                .map_err(LlvmLoweringError::unsupported)?
         {
             let target = vbc_mod
                 .specialized_function_id(function, &args)
