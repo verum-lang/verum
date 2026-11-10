@@ -63,6 +63,7 @@ impl TypeChecker {
         use verum_ast::ty::{GenericParamKind, WherePredicateKind};
         let previous_self = self.current_self_type.clone();
         let assumption_depth = self.source_type_registration.projection_assumptions.len();
+        let previous_source = std::mem::replace(&mut self.resolving_source_signature, true);
         self.push_decl_param_frame(owner.clone());
         let result = (|| {
             let receiver = match &source.kind {
@@ -96,6 +97,7 @@ impl TypeChecker {
             Ok((clauses, callable_bounds))
         })();
         self.pop_decl_param_frame();
+        self.resolving_source_signature = previous_source;
         self.set_current_self_type(previous_self);
         self.source_type_registration.projection_assumptions.truncate(assumption_depth);
         result

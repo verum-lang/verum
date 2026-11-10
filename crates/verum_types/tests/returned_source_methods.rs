@@ -742,3 +742,74 @@ fn a_selected_protocol_method_projects_its_item_inside_variant_payloads() {
         assert_eq!(errors.is_empty(), accepted, "{body}: {errors:?}");
     }
 }
+
+#[test]
+fn implementation_headers_and_bodies_share_the_receivers_declared_parameters() {
+    let declarations = r#"
+        type Info is { code:Int };
+        type Window<T> is { value:T };
+        type Heading is protocol { fn heading(&self)->Int; };
+        type Extent is protocol { fn length(&self)->Int; };
+        implement Heading for Window<Info> { fn heading(&self)->Int { self.value.code } }
+        implement Extent for Window<Info> { fn length(&self)->Int { self.heading() } }
+        implement Heading for Window<Int8> { fn heading(&self)->Int { self.value as Int } }
+        implement Extent for Window<Int8> { fn length(&self)->Int { self.heading() } }
+    "#;
+    let valid = check(declarations, &[]);
+    assert!(valid.is_empty(), "{valid:?}");
+    let different = check(&format!("{declarations} type Twin is {{ code:Int }}; fn bad(x:Window<Twin>)->Int {{ x.length() }}"), &[]);
+    assert!(different.iter().any(|error| error.contains("MethodNotFound")), "{different:?}");
+    let collision = check(r#"
+        type T is { code:Int };
+        type Storage<T> is { data:T };
+        type Read is protocol { fn read(&self)->Int; };
+        implement Read for Storage<T> { fn read(&self)->Int { self.data.code } }
+        fn good(x:Storage<T>)->Int { x.read() }
+    "#, &[]);
+    assert!(collision.is_empty(), "{collision:?}");
+    let unknown_bound = check(r#"
+        type Job<F> is { action:F }; type Run is protocol {};
+        implement<F> Run for Job<F> where F:fn(Int)->Z {}
+    "#, &[]);
+    assert!(unknown_bound.iter().any(|error| error.contains("Z") && error.contains("TypeNotFound")), "{unknown_bound:?}");
+    let implicit = check("type Boxed<T> is { value:T }; implement Boxed<T> { fn item(&self)->&T { &self.value } }", &[]);
+    assert!(implicit.is_empty(), "{implicit:?}");
+    let repeated = check(r#"
+        type Pair<A,B> is { first:A, second:B };
+        implement Pair<B,B> { fn item(&self)->&B { &self.first } }
+    "#, &[]);
+    assert!(repeated.is_empty(), "{repeated:?}");
+    for missing in ["Missing", "Z"] {
+        for header in [
+            format!("implement Heading for Window<{missing}> {{ fn heading(&self)->Int {{ 0 }} }}"),
+            format!("implement Window<{missing}> {{ fn bad(&self)->Int {{ 0 }} }}"),
+        ] {
+            let errors = check(&format!("{declarations} {header}"), &[]);
+            assert!(errors.iter().any(|error| error.contains(missing) && error.contains("TypeNotFound")), "{header}: {errors:?}");
+        }
+    }
+}
+
+#[test]
+fn imported_concrete_receivers_do_not_bind_a_same_leaf_type_from_the_consumer() {
+    let modules = [
+        ("demo.store", r#"
+            public type Key is { public value:Int };
+            public type Shelf<Element> is { item:Element };
+            implement Shelf<Key> { public fn read(&self)->Int { self.item.value } }
+            implement Shelf<Element> { public fn get(&self)->&Element { &self.item } }
+        "#),
+        ("demo.other", "public type Key is { public value:Int };"),
+    ];
+    let positive = check(
+        "mount demo.store.{Shelf,Key}; fn read(x:Shelf<Key>)->Int { x.read() + x.get().value }",
+        &modules,
+    );
+    assert!(positive.is_empty(), "{positive:?}");
+    let negative = check(
+        "mount demo.store.Shelf; mount demo.other.Key; fn read(x:Shelf<Key>)->Int { x.read() }",
+        &modules,
+    );
+    assert!(negative.iter().any(|error| error.contains("Mismatch")
+        && error.contains("demo.other.Key") && error.contains("demo.store.Key")), "{negative:?}");
+}

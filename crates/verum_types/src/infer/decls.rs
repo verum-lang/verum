@@ -4743,7 +4743,9 @@ impl TypeChecker {
                 code: "E405".into(), msg: "associated-family metadata requires a protocol implementation".into(), span: declaration.span,
             });
         }
-        self.register_impl_block_inner(declaration, expected)?;
+        self.with_impl_parameter_scope(declaration, |checker, implicit|
+            checker.register_impl_block_inner(declaration, expected, implicit)
+        )?;
         if matches!(expected, Some(ExpectedImplementation::Protocol(_, _)))
             && self.protocol_checker.read().source_impl(&self.current_module_path, declaration)?.is_none()
         {
@@ -4821,11 +4823,168 @@ impl TypeChecker {
         })
     }
 
+    /// A receiver can reuse its nominal declaration's positional type
+    /// parameters without repeating an impl telescope. Other names denote
+    /// ordinary lexical types and must resolve as such.
+    pub(super) fn implicit_impl_receiver_parameters(
+        &mut self,
+        implementation: &verum_ast::ImplDecl,
+    ) -> Result<List<Text>> {
+        use verum_ast::ty::{GenericArg, TypeKind};
+        let mut binders = List::new();
+        if !implementation.generics.is_empty() {
+            return Ok(binders);
+        }
+        let receiver = match &implementation.kind {
+            verum_ast::decl::ImplKind::Inherent(ty) => ty,
+            verum_ast::decl::ImplKind::Protocol { for_type, .. } => for_type,
+        };
+        let TypeKind::Generic { base, args } = &receiver.kind else {
+            return Ok(binders);
+        };
+        let TypeKind::Path(path) = &base.kind else {
+            return Ok(binders);
+        };
+        let (_, key) = self.resolve_qualified_type_with_parameter_key(path, base.span)?;
+        let parameters = key
+            .as_ref()
+            .and_then(|key| {
+                self.source_type_registration
+                    .pending
+                    .get(key)
+                    .or_else(|| self.source_type_registration.completed.get(key))
+                    .map(|declaration| declaration.generics.clone())
+            })
+            .or_else(|| {
+                path.as_ident().and_then(|name| {
+                    self.declaring_source_type_declaration(name.as_str())
+                        .map(|(declaration, _)| declaration.generics)
+                })
+            });
+        let type_slots: Vec<Option<Text>> = if let Some(parameters) = parameters {
+            parameters
+                .iter()
+                .filter(|p| {
+                    !p.is_implicit
+                        && !matches!(p.kind, verum_ast::ty::GenericParamKind::Lifetime { .. })
+                })
+                .map(|p| match &p.kind {
+                    verum_ast::ty::GenericParamKind::Type { name, .. } => Some(name.name.clone()),
+                    _ => None,
+                })
+                .collect()
+        } else if let Some(Type::Record(slots)) = key
+            .as_ref()
+            .and_then(|key| self.ctx.lookup_type(&format!("__type_params_{key}")))
+        {
+            slots
+                .iter()
+                .map(|(name, ty)| match ty {
+                    Type::Var(_) => Some(name.clone()),
+                    Type::Named { path, args }
+                        if args.is_empty()
+                            && path.as_ident().is_some_and(|id| &id.name == name) =>
+                    {
+                        Some(name.clone())
+                    }
+                    _ => None,
+                })
+                .collect()
+        } else {
+            return Ok(binders);
+        };
+        let mut unresolved = Vec::new();
+        for (position, argument) in args
+            .iter()
+            .filter(|arg| matches!(arg, GenericArg::Type(_) | GenericArg::Const(_)))
+            .enumerate()
+        {
+            let GenericArg::Type(argument) = argument else {
+                continue;
+            };
+            let TypeKind::Path(path) = &argument.kind else {
+                continue;
+            };
+            let Some(ident) = path.as_ident() else {
+                continue;
+            };
+            let name = &ident.name;
+            let occupied = self.declaring_source_type_declaration(name).is_some()
+                || self.ctx.lookup_type(name).is_some_and(|ty| match ty {
+                    Type::Var(_) => false,
+                    Type::Named { path, args }
+                        if args.is_empty()
+                            && path.as_ident().is_some_and(|id| &id.name == name) =>
+                    {
+                        verum_common::well_known_types::type_names::is_primitive_value_type(name)
+                    }
+                    _ => true,
+                });
+            if occupied {
+                continue;
+            }
+            if type_slots.get(position).and_then(Option::as_ref) == Some(name) {
+                binders.push(name.clone());
+            } else {
+                unresolved.push((name, argument.span));
+            }
+        }
+        // A repeated use may precede the positional declaration of a binder.
+        for (name, span) in unresolved {
+            if !binders.contains(name) {
+                let (resolved, key) =
+                    self.resolve_declaring_source_type_with_parameter_key(name, span)?;
+                if matches!(resolved, Type::Var(_)) && key.is_none() {
+                    return Err(TypeError::TypeNotFound {
+                        name: name.clone(),
+                        span,
+                    });
+                }
+            }
+        }
+        Ok(binders)
+    }
+
+    fn with_impl_parameter_scope<T>(
+        &mut self,
+        declaration: &verum_ast::ImplDecl,
+        operation: impl FnOnce(&mut Self, &[Text]) -> Result<T>,
+    ) -> Result<T> {
+        use verum_ast::ty::GenericParamKind;
+        let implicit = self.implicit_impl_receiver_parameters(declaration)?;
+        let saved: Vec<_> = declaration
+            .generics
+            .iter()
+            .filter_map(|parameter| match &parameter.kind {
+                GenericParamKind::Type { name, .. }
+                | GenericParamKind::Meta { name, .. }
+                | GenericParamKind::Const { name, .. } => Some(&name.name),
+                _ => None,
+            })
+            .chain(implicit.iter())
+            .map(|name| (name.clone(), self.ctx.type_defs.get(name).cloned()))
+            .collect();
+        let previous_self = self.current_self_type.clone();
+        let previous_mode = (self.in_impl_block, self.in_inherent_impl);
+        let result = operation(self, &implicit);
+        for (name, prior) in saved {
+            if let Some(ty) = prior {
+                self.ctx.type_defs.insert(name, ty);
+            } else {
+                self.ctx.type_defs.remove(&name);
+            }
+        }
+        self.set_current_self_type(previous_self);
+        (self.in_impl_block, self.in_inherent_impl) = previous_mode;
+        result
+    }
+
     /// Inner implementation of register_impl_block
     fn register_impl_block_inner(
         &mut self,
         impl_decl: &verum_ast::decl::ImplDecl,
         expected: Option<ExpectedImplementation<'_>>,
+        implicit: &[Text],
     ) -> Result<()> {
         use verum_ast::decl::{FunctionParamKind, ImplItemKind, ImplKind};
 
@@ -4885,106 +5044,11 @@ impl TypeChecker {
             }
         }
 
-        // CRITICAL: If no explicit type parameters on implement, extract them from the target type
-        // This handles: implement Either<L, R> { ... } where L, R are inferred from the type
-        if impl_decl.generics.is_empty() {
-            let target_type = match &impl_decl.kind {
-                ImplKind::Inherent(for_type) => Some(for_type),
-                ImplKind::Protocol { for_type, .. } => Some(for_type),
-            };
-
-            if let Some(for_type) = target_type {
-                // Extract type parameters from generic type like Either<L, R>
-                if let verum_ast::ty::TypeKind::Generic { args, .. } = &for_type.kind {
-                    for arg in args {
-                        // Check if the argument is a simple type parameter (uppercase identifier)
-                        if let verum_ast::ty::GenericArg::Type(ty) = arg {
-                            if let verum_ast::ty::TypeKind::Path(path) = &ty.kind {
-                                if let Some(ident) = path.as_ident() {
-                                    let name = ident.name.as_str();
-                                    // A leftover impl PARAMETER is not a type
-                                    // (T1040).
-                                    //
-                                    // The guard used to be
-                                    // `lookup_type(name).is_none()` — "is
-                                    // this name free?" — and the answer for
-                                    // `T` is no, because every impl block
-                                    // registered before this one defined its
-                                    // own `T` into the same global type
-                                    // namespace, and nothing takes it back
-                                    // out. After the first stdlib
-                                    // `implement<T> …` is registered, `T`
-                                    // looks occupied to every later impl, so
-                                    // this extraction never ran for it.
-                                    //
-                                    // The effect is that the same file
-                                    // compiles or does not depending on the
-                                    // LETTER the author chose:
-                                    //
-                                    //     implement Bag<T>   E404, `List<_>`
-                                    //     implement Bag<Wq>  clean
-                                    //
-                                    // — identical otherwise. A parameter
-                                    // registration is a bare `Type::Var`; a
-                                    // real type declaration never is. Asking
-                                    // that distinguishes "occupied by a type"
-                                    // from "occupied by someone else's
-                                    // parameter", which is the question this
-                                    // guard meant to ask.
-                                    let occupied_by_a_real_type = !matches!(
-                                        self.ctx.lookup_type(name),
-                                        None | Some(Type::Var(_))
-                                    );
-                                    if name
-                                        .chars()
-                                        .next()
-                                        .map(|c| c.is_uppercase())
-                                        .unwrap_or(false)
-                                        && !occupied_by_a_real_type
-                                    {
-                                        let type_var = Type::Var(TypeVar::fresh());
-                                        let name_text: Text = name.into();
-                                        owner_frame.insert(name_text.clone(), type_var.clone());
-                    self.ctx.define_type(name_text.clone(), type_var);
-                                        type_param_names.push(name_text);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Extract implicit type parameters from where clause bounds.
-        // For `implement Iterator for MapIterator<I, F> where F: Fn(I.Item) -> U`,
-        // `U` is not in the generic params but needs a fresh TypeVar.
-        if let Some(ref where_clause) = impl_decl.generic_where_clause {
-            for predicate in &where_clause.predicates {
-                use verum_ast::ty::WherePredicateKind;
-                if let WherePredicateKind::Type { bounds, .. } = &predicate.kind {
-                    for bound in bounds {
-                        // Extract free type names from bounds that aren't already registered
-                        let bound_ty_ast = match &bound.kind {
-                            verum_ast::ty::TypeBoundKind::Equality(ty) => Some(ty),
-                            verum_ast::ty::TypeBoundKind::GenericProtocol(ty) => Some(ty),
-                            _ => None,
-                        };
-                        if let Some(bound_ty) = bound_ty_ast {
-                            let parameter_start = type_param_names.len();
-                            self.extract_implicit_type_params_from_type(
-                                bound_ty,
-                                &mut type_param_names,
-                            );
-                            for name in type_param_names.iter().skip(parameter_start) {
-                                if let Some(ty) = self.ctx.lookup_type(name.as_str()) {
-                                    owner_frame.insert(name.clone(), ty.clone());
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+        for name in implicit.iter().cloned() {
+            let variable = Type::Var(TypeVar::fresh());
+            self.ctx.define_type(name.clone(), variable.clone());
+            owner_frame.insert(name.clone(), variable);
+            type_param_names.push(name);
         }
 
         // Imported source signatures resolve parameters through the lexical
@@ -5016,11 +5080,6 @@ impl TypeChecker {
             }
         });
         self.decl_param_frames.pop();
-
-        // Restore the binder frame on failed publication as well.
-        for param_name in type_param_names {
-            self.ctx.remove_type(&param_name);
-        }
 
         result
     }
@@ -6914,11 +6973,13 @@ impl TypeChecker {
             self.register_impl_block(impl_decl)?;
         }
         self.push_decl_param_frame(indexmap::IndexMap::new());
-        let result =
-            self.in_impl_proof_scope(|checker| match checker.cfg_filtered_impl(impl_decl) {
-                Some(filtered) => checker.check_impl_block_inner(&filtered),
-                None => checker.check_impl_block_inner(impl_decl),
-            });
+        let result = self.in_impl_proof_scope(|checker| {
+            let filtered = checker.cfg_filtered_impl(impl_decl);
+            let declaration = filtered.as_ref().unwrap_or(impl_decl);
+            checker.with_impl_parameter_scope(declaration, |checker, implicit|
+                checker.check_impl_block_inner(declaration, implicit)
+            )
+        });
         self.pop_decl_param_frame();
         result
     }
@@ -6952,7 +7013,7 @@ impl TypeChecker {
         }
     }
 
-    fn check_impl_block_inner(&mut self, impl_decl: &verum_ast::decl::ImplDecl) -> Result<()> {
+    fn check_impl_block_inner(&mut self, impl_decl: &verum_ast::decl::ImplDecl, implicit: &[Text]) -> Result<()> {
         use verum_ast::decl::{ImplItemKind, ImplKind};
 
         // CRITICAL FIX: Register generic type parameters from the impl block FIRST
@@ -7004,54 +7065,12 @@ impl TypeChecker {
             }
         }
 
-        // CRITICAL: If no explicit type parameters on implement, extract them from the target type
-        // This handles: implement Either<L, R> { ... } where L, R are inferred from the type
-        // Also: shadow stdlib type bindings (e.g. `I` -> `Interval`) by saving the prior binding
-        // and restoring it after the impl block. Without this, an impl like
-        // `implement Iterator for MapIterator<I, F>` would resolve `I` to whatever stdlib
-        // type happens to be aliased to that name, defeating the whole impl.
-        let mut shadowed_type_bindings: Vec<(Text, Option<Type>)> = Vec::new();
-        if impl_decl.generics.is_empty() {
-            let target_type = match &impl_decl.kind {
-                ImplKind::Inherent(for_type) => Some(for_type),
-                ImplKind::Protocol { for_type, .. } => Some(for_type),
-            };
-
-            if let Some(for_type) = target_type {
-                // Extract type parameters from generic type like Either<L, R>
-                if let verum_ast::ty::TypeKind::Generic { args, .. } = &for_type.kind {
-                    for arg in args {
-                        // Check if the argument is a simple type parameter (uppercase identifier)
-                        if let verum_ast::ty::GenericArg::Type(ty) = arg {
-                            if let verum_ast::ty::TypeKind::Path(path) = &ty.kind {
-                                if let Some(ident) = path.as_ident() {
-                                    let name = ident.name.as_str();
-                                    // Type parameters are conventionally uppercase single letters or short names
-                                    if name
-                                        .chars()
-                                        .next()
-                                        .map(|c| c.is_uppercase())
-                                        .unwrap_or(false)
-                                    {
-                                        let name_text: Text = name.into();
-                                        let prior = self.ctx.lookup_type(name).cloned();
-                                        // If the prior binding is already a Type::Var
-                                        // (i.e. another impl-level type-param in scope),
-                                        // skip — that one is still valid.
-                                        if matches!(prior, Some(Type::Var(_))) {
-                                            continue;
-                                        }
-                                        let type_var = Type::Var(TypeVar::fresh());
-                                        self.ctx.define_type(name_text.clone(), type_var);
-                                        type_param_names.push(name_text.clone());
-                                        shadowed_type_bindings.push((name_text, prior));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+        for name in implicit.iter().cloned() {
+            let variable = Type::Var(TypeVar::fresh());
+            self.ctx.define_type(name.clone(), variable.clone());
+            self.decl_param_frames.last_mut().expect("implementation body parameter scope")
+                .insert(name.clone(), variable);
+            type_param_names.push(name);
         }
 
         let frame = self
@@ -7231,22 +7250,6 @@ impl TypeChecker {
                 self.set_current_self_type(previous_self_type);
             }
         }
-
-        // Clean up type parameters from the type context
-        for param_name in type_param_names {
-            self.ctx.remove_type(&param_name);
-        }
-
-        // Restore any stdlib type bindings we shadowed when extracting implicit
-        // type-params from the for_type (e.g. `I` was a fresh type-var here but
-        // points at `Interval` in the outer scope). Without this restore the
-        // outer scope would lose its binding once we exited.
-        for (name, prior) in shadowed_type_bindings {
-            if let Some(prior_ty) = prior {
-                self.ctx.define_type(name, prior_ty);
-            }
-        }
-
 
         // CONFORMANCE: an `implement P for T` block must provide every
         // method P requires.

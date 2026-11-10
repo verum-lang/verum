@@ -5846,6 +5846,14 @@ impl TypeChecker {
             }
             // Value scopes do not own type definitions. Lazy imports can run
             // inside a generic body, so preserve every name they temporarily bind.
+            let implicit = match self.implicit_impl_receiver_parameters(impl_decl) {
+                Ok(parameters) => parameters,
+                Err(error) => {
+                    self.set_current_module_path(saved_module_path);
+                    self.resolving_source_signature = saved_source_scope;
+                    return Err(error);
+                }
+            };
             let impl_type_bindings: List<_> = impl_decl.generics.iter().filter_map(|param| {
                 use verum_ast::ty::GenericParamKind;
                 match &param.kind {
@@ -5854,7 +5862,7 @@ impl TypeChecker {
                     | GenericParamKind::Const { name, .. } => Some(name.name.clone()),
                     _ => None,
                 }
-            }).chain(std::iter::once(Text::from("Self")))
+            }).chain(implicit.iter().cloned()).chain(std::iter::once(Text::from("Self")))
                 .map(|name| { let prior = self.ctx.type_defs.get(&name).cloned(); (name, prior) })
                 .collect();
             // CRITICAL FIX: Set up type parameter scope from the implement block.
@@ -5891,6 +5899,12 @@ impl TypeChecker {
                 }
             }
 
+            for name in implicit {
+                let variable = TypeVar::fresh();
+                owner_frame.insert(name.clone(), Type::Var(variable));
+                self.ctx.define_type(name, Type::Var(variable));
+                impl_type_vars.push(variable);
+            }
                 Ok(())
             })();
             if let Err(error) = bindings {
