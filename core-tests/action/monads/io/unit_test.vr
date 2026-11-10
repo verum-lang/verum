@@ -1,0 +1,22 @@
+mount core.action.monads.io.{Io, io_bind, io_from_thunk, io_map, io_run, io_strength, io_then, io_unit};
+mount core.base.protocols.Clone;
+
+type Number is { n: Int };
+implement Clone for Number {
+    fn clone(&self) -> Number { Number { n: self.n } }
+}
+
+type Token is { n: Int };
+
+fn next(n: Number) -> Io<Number> {
+    io_unit(Number { n: n.n * 2 })
+}
+
+@test
+fn composes_clonable_values_and_returns_an_owned_result() {
+    let start = io_unit(Number { n: 20 });
+    let mapped = io_map(start, |v: Number| Number { n: v.n + 1 });
+    let pair = io_run(io_strength(Number { n: 3 }, io_bind(mapped, next)));
+    let item = io_run(io_then(io_unit(Number { n: 90 }), io_from_thunk(|| Token { n: 8 })));
+    assert_eq(pair.0.n + pair.1.n + item.n, 53);
+}

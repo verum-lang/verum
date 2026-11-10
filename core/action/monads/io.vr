@@ -53,7 +53,7 @@ public type Io<A> is {
 /// `pure : A -> Io<A>` — wrap a pure value as a no-effect thunk.
 /// The unit of the monad. Calling `io_run(io_unit(a))` performs
 /// no side effect and returns `a`.
-public fn io_unit<A>(a: A) -> Io<A> {
+public fn io_unit<A: Clone>(a: A) -> Io<A> {
     Io { thunk: || -> A { a.clone() } }
 }
 
@@ -66,7 +66,7 @@ public fn io_unit<A>(a: A) -> Io<A> {
 public fn io_bind<A, B>(m: Io<A>, f: fn(A) -> Io<B>) -> Io<B> {
     Io {
         thunk: || -> B {
-            let a: A = (m.thunk.clone())();
+            let a: A = (m.thunk)();
             let inner: Io<B> = f(a);
             (inner.thunk)()
         },
@@ -76,10 +76,10 @@ public fn io_bind<A, B>(m: Io<A>, f: fn(A) -> Io<B>) -> Io<B> {
 /// `strength : A -> Io<B> -> Io<(A, B)>` — tensor a pure value
 /// alongside an effectful one. The thunk runs `mb`'s side effects
 /// and pairs the result with `a`.
-public fn io_strength<A, B>(a: A, mb: Io<B>) -> Io<(A, B)> {
+public fn io_strength<A: Clone, B>(a: A, mb: Io<B>) -> Io<(A, B)> {
     Io {
         thunk: || -> (A, B) {
-            let b: B = (mb.thunk.clone())();
+            let b: B = (mb.thunk)();
             (a.clone(), b)
         },
     }
@@ -92,7 +92,7 @@ public fn io_strength<A, B>(a: A, mb: Io<B>) -> Io<(A, B)> {
 public fn io_map<A, B>(m: Io<A>, f: fn(A) -> B) -> Io<B> {
     Io {
         thunk: || -> B {
-            let a: A = (m.thunk.clone())();
+            let a: A = (m.thunk)();
             f(a)
         },
     }
@@ -109,8 +109,8 @@ public fn io_map<A, B>(m: Io<A>, f: fn(A) -> B) -> Io<B> {
 public fn io_then<A, B>(m: Io<A>, n: Io<B>) -> Io<B> {
     Io {
         thunk: || -> B {
-            let _ignored: A = (m.thunk.clone())();
-            (n.thunk.clone())()
+            let _ignored: A = (m.thunk)();
+            (n.thunk)()
         },
     }
 }
@@ -184,7 +184,7 @@ public fn io_from_thunk<A>(thunk: fn() -> A) -> Io<A> {
 /// bind composition runs unit first (no effect), then `f(a)`. Both
 /// sides observably equal under `io_run`.
 @framework(diakrisis, "Theorem 17.T1 (Io left-identity monad law)")
-public theorem io_left_identity<A, B>(
+public theorem io_left_identity<A: Clone, B: PartialEq>(
     a: A,
     f: fn(A) -> Io<B>,
 ) -> Bool
@@ -193,7 +193,7 @@ public theorem io_left_identity<A, B>(
 {
     proof {
         let unit_a: Io<A> = io_unit(a.clone());
-        let bound: Io<B> = io_bind(unit_a, f.clone());
+        let bound: Io<B> = io_bind(unit_a, f);
         let direct: Io<B> = f(a);
         io_run(bound) == io_run(direct)
     }
@@ -206,7 +206,7 @@ public theorem io_left_identity<A, B>(
 /// of m), then wraps the result in `io_unit` (no further effect).
 /// Both sides yield the same `A`.
 @framework(diakrisis, "Theorem 17.T1 (Io right-identity monad law)")
-public theorem io_right_identity<A>(m: Io<A>) -> Bool
+public theorem io_right_identity<A: Clone + PartialEq>(m: Io<A>) -> Bool
     requires true
     ensures  true
 {
@@ -224,7 +224,7 @@ public theorem io_right_identity<A>(m: Io<A>) -> Bool
 /// (m, then f(a), then g(b)) — the only difference is syntactic
 /// grouping. Observably equal.
 @framework(diakrisis, "Theorem 17.T1 (Io associativity monad law)")
-public theorem io_associativity<A, B, C>(
+public theorem io_associativity<A, B, C: PartialEq>(
     m: Io<A>,
     f: fn(A) -> Io<B>,
     g: fn(B) -> Io<C>,
@@ -233,8 +233,8 @@ public theorem io_associativity<A, B, C>(
     ensures  true
 {
     proof {
-        let lhs: Io<C> = io_bind(io_bind(m.clone(), f.clone()), g.clone());
-        let rhs: Io<C> = io_bind(m, |x: A| io_bind(f(x), g.clone()));
+        let lhs: Io<C> = io_bind(io_bind(m.clone(), f), g);
+        let rhs: Io<C> = io_bind(m, |x: A| io_bind(f(x), g));
         io_run(lhs) == io_run(rhs)
     }
 }
@@ -271,7 +271,7 @@ public theorem io_is_not_commutative() -> Bool
 /// **`then` is bind-with-discard** (operational lemma):
 /// `io_then(m, n) ≡ bind(m, |_| n)`.
 @framework(diakrisis, "Operational lemma (Io then = bind-discard)")
-public theorem io_then_is_bind_discard<A, B>(m: Io<A>, n: Io<B>) -> Bool
+public theorem io_then_is_bind_discard<A, B: PartialEq>(m: Io<A>, n: Io<B>) -> Bool
     requires true
     ensures  true
 {
