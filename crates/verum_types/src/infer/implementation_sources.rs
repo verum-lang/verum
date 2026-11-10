@@ -68,6 +68,35 @@ impl TypeChecker {
         result
     }
 
+    /// The protocol owner can declare a blanket even when the goal's concrete
+    /// receiver has no source module (for example a scalar). Loading that
+    /// declaration supplies a candidate; its bounds are still proved normally.
+    pub(super) fn load_protocol_owner_blankets(&mut self, protocol: &Text) -> Result<()> {
+        use verum_ast::{ItemKind, decl::ImplKind};
+        let Some((owner, _)) = protocol.rsplit_once('.') else { return Ok(()) };
+        if self.blanket_impls_registered_modules.contains(owner) { return Ok(()); }
+        let Some(module) = self.module_registry.read().get_by_path(owner) else { return Ok(()) };
+        if !self.source_type_registration.loading_blankets.insert(protocol.clone()) { return Ok(()); }
+        let result = self.with_implementation_owner(owner, |checker| {
+            for item in &module.ast.items {
+                let ItemKind::Impl(declaration) = &item.kind else { continue };
+                let ImplKind::Protocol { protocol: path, for_type, .. } = &declaration.kind else { continue };
+                if !checker.cfg_evaluator.should_include(&item.attributes)
+                    || !checker.is_blanket_impl_for_type(for_type, &declaration.generics)
+                {
+                    continue;
+                }
+                let selected = checker.resolve_protocol_reference(path)?;
+                if checker.path_to_string(&selected) == *protocol {
+                    checker.register_blanket_impl_from_ast(declaration)?;
+                }
+            }
+            Ok(())
+        });
+        self.source_type_registration.loading_blankets.remove(protocol);
+        result
+    }
+
     /// Unlike a nominal type, a structural receiver has no declaration to
     /// mount. A glob imports the signatures of its public inherent members.
     pub(super) fn import_structural_methods(
