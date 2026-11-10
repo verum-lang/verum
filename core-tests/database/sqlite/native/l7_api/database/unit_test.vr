@@ -1,0 +1,16 @@
+mount core.database.sqlite.native.l7_api.database.{db_error_from_conn, SqliteApiDbError};
+mount core.database.sqlite.native.l6_session.connection.ConnectionError;
+
+@test
+fn test_connection_io_failure_retains_its_payload_and_category() {
+    match db_error_from_conn(ConnectionError.NotWritable) {
+        SqliteApiDbError.DbReadonly => {},
+        _ => panic("not-writable errors must retain their category"),
+    }
+    match db_error_from_conn(ConnectionError.IoFailure("disk-full")) {
+        SqliteApiDbError.DbIoError(message) => assert_eq(message, "disk-full"),
+        _ => panic("I/O errors must retain their payload"),
+    }
+}
+
+fn main() {}

@@ -175,11 +175,11 @@ implement Eq for SqliteApiDbError {
 /// Map ConnectionError → SqliteApiDbError for the facade layer.
 public fn db_error_from_conn(e: ConnectionError) -> SqliteApiDbError {
     match e {
-        NotWritable          => DbReadonly,
-        NotAdmin             => DbAuthDenied,
-        TxAlreadyActive      => DbMisuse("transaction already active".clone()),
-        TxNotActive          => DbMisuse("no active transaction".clone()),
-        IoFailure(ref msg)   => DbIoError(msg.clone()),
+        ConnectionError.NotWritable => SqliteApiDbError.DbReadonly,
+        ConnectionError.NotAdmin => SqliteApiDbError.DbAuthDenied,
+        ConnectionError.TxAlreadyActive => SqliteApiDbError.DbMisuse("transaction already active"),
+        ConnectionError.TxNotActive => SqliteApiDbError.DbMisuse("no active transaction"),
+        ConnectionError.IoFailure(message) => SqliteApiDbError.DbIoError(message),
     }
 }
 
