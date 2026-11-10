@@ -75,16 +75,9 @@ public fn nondeterm_bind<A, B>(
     f: fn(A) -> Nondeterm<B>,
 ) -> Nondeterm<B> {
     let mut joined: List<B> = List.new();
-    let mut i: Int = 0;
-    while i < m.candidates.len() as Int {
-        let a = m.candidates.get(i as Int).unwrap().clone();
+    for a in m.candidates {
         let inner: Nondeterm<B> = f(a);
-        let mut j: Int = 0;
-        while j < inner.candidates.len() as Int {
-            joined.push(inner.candidates.get(j as Int).unwrap().clone());
-            j = j + 1;
-        }
-        i = i + 1;
+        for b in inner.candidates { joined.push(b); }
     }
     Nondeterm { candidates: joined }
 }
@@ -92,14 +85,9 @@ public fn nondeterm_bind<A, B>(
 /// `strength : A -> Nondeterm<B> -> Nondeterm<(A, B)>` — tensor a
 /// pure value alongside a non-deterministic one. Each outcome `b`
 /// becomes `(a, b)`.
-public fn nondeterm_strength<A, B>(a: A, mb: Nondeterm<B>) -> Nondeterm<(A, B)> {
+public fn nondeterm_strength<A: Clone, B>(a: A, mb: Nondeterm<B>) -> Nondeterm<(A, B)> {
     let mut paired: List<(A, B)> = List.new();
-    let mut i: Int = 0;
-    while i < mb.candidates.len() as Int {
-        let b = mb.candidates.get(i as Int).unwrap().clone();
-        paired.push((a.clone(), b));
-        i = i + 1;
-    }
+    for b in mb.candidates { paired.push((a.clone(), b)); }
     Nondeterm { candidates: paired }
 }
 
@@ -111,17 +99,8 @@ public fn nondeterm_combine<A>(
     m1: Nondeterm<A>,
     m2: Nondeterm<A>,
 ) -> Nondeterm<A> {
-    let mut joined: List<A> = List.new();
-    let mut i: Int = 0;
-    while i < m1.candidates.len() as Int {
-        joined.push(m1.candidates.get(i as Int).unwrap().clone());
-        i = i + 1;
-    }
-    let mut j: Int = 0;
-    while j < m2.candidates.len() as Int {
-        joined.push(m2.candidates.get(j as Int).unwrap().clone());
-        j = j + 1;
-    }
+    let mut joined = m1.candidates;
+    for a in m2.candidates { joined.push(a); }
     Nondeterm { candidates: joined }
 }
 
@@ -182,12 +161,7 @@ public fn nondeterm_guard(condition: Bool) -> Nondeterm<()> {
 /// where the transformation introduces no further non-determinism.
 public fn nondeterm_map<A, B>(m: Nondeterm<A>, f: fn(A) -> B) -> Nondeterm<B> {
     let mut mapped: List<B> = List.new();
-    let mut i: Int = 0;
-    while i < m.candidates.len() as Int {
-        let a = m.candidates.get(i as Int).unwrap().clone();
-        mapped.push(f(a));
-        i = i + 1;
-    }
+    for a in m.candidates { mapped.push(f(a)); }
     Nondeterm { candidates: mapped }
 }
 

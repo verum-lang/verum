@@ -64,17 +64,11 @@ public fn prob_bind<A, B>(
     f: fn(A) -> Probability<B>,
 ) -> Probability<B> {
     let mut joined: List<(B, Float)> = List.new();
-    let mut i: Int = 0;
-    while i < m.support.len() as Int {
-        let pair_a = (m.support.get(i as Int).unwrap()).clone();
-        let inner: Probability<B> = f(pair_a.0);
-        let mut j: Int = 0;
-        while j < inner.support.len() as Int {
-            let pair_b = (inner.support.get(j as Int).unwrap()).clone();
-            joined.push((pair_b.0, pair_a.1 * pair_b.1));
-            j = j + 1;
+    for (a, weight_a) in m.support {
+        let inner: Probability<B> = f(a);
+        for (b, weight_b) in inner.support {
+            joined.push((b, weight_a * weight_b));
         }
-        i = i + 1;
     }
     Probability { support: joined }
 }
@@ -82,13 +76,10 @@ public fn prob_bind<A, B>(
 /// `strength : A -> Probability<B> -> Probability<(A, B)>` — tensor
 /// a pure value alongside a probabilistic one. Each (b, w) pair
 /// becomes ((a, b), w).
-public fn prob_strength<A, B>(a: A, mb: Probability<B>) -> Probability<(A, B)> {
+public fn prob_strength<A: Clone, B>(a: A, mb: Probability<B>) -> Probability<(A, B)> {
     let mut paired: List<((A, B), Float)> = List.new();
-    let mut i: Int = 0;
-    while i < mb.support.len() as Int {
-        let pair_b = (mb.support.get(i as Int).unwrap()).clone();
-        paired.push(((a.clone(), pair_b.0), pair_b.1));
-        i = i + 1;
+    for (b, weight) in mb.support {
+        paired.push(((a.clone(), b), weight));
     }
     Probability { support: paired }
 }
@@ -98,12 +89,7 @@ public fn prob_strength<A, B>(a: A, mb: Probability<B>) -> Probability<(A, B)> {
 /// indicates floating-point drift or malformed construction.
 public fn prob_total_weight<A>(m: Probability<A>) -> Float {
     let mut total: Float = 0.0;
-    let mut i: Int = 0;
-    while i < m.support.len() as Int {
-        let pair = (m.support.get(i as Int).unwrap()).clone();
-        total = total + pair.1;
-        i = i + 1;
-    }
+    for (_, weight) in m.support { total = total + weight; }
     total
 }
 
@@ -137,10 +123,10 @@ public fn prob_float_eq(a: Float, b: Float) -> Bool
 /// equality across the joint support, captured by the framework
 /// citation).
 @framework(diakrisis, "Theorem 17.T1 (Probability left-identity monad law)")
-public theorem prob_left_identity<A, B>(a: A, f: fn(A) -> Probability<B>) -> Bool
+public theorem prob_left_identity<A: Clone, B>(a: A, f: fn(A) -> Probability<B>) -> Bool
     requires prob_float_eq(prob_total_weight(f(a.clone())), 1.0)
     ensures  prob_float_eq(
-        prob_total_weight(prob_bind(prob_unit(a.clone()), f.clone())),
+        prob_total_weight(prob_bind(prob_unit(a.clone()), f)),
         prob_total_weight(f(a)),
     )
 {
@@ -152,7 +138,7 @@ public theorem prob_left_identity<A, B>(a: A, f: fn(A) -> Probability<B>) -> Boo
         //  Outer iterates once over (a, 1.0); inner iterates over
         //  each (b, w) in f(a).support producing (b, 1.0 * w) = (b, w).
         //  Total weight: 1.0 * Σw = Σw = total_weight(f(a)).
-        let bound: Probability<B> = prob_bind(unit_a, f.clone());
+        let bound: Probability<B> = prob_bind(unit_a, f);
         // ── Step 3: total weight of bound vs total weight of f(a).
         let bound_total: Float = prob_total_weight(bound);
         let direct_total: Float = prob_total_weight(f(a));
@@ -198,8 +184,8 @@ public theorem prob_associativity<A, B, C>(
 ) -> Bool
     requires prob_float_eq(prob_total_weight(m.clone()), 1.0)
     ensures  prob_float_eq(
-        prob_total_weight(prob_bind(prob_bind(m.clone(), f.clone()), g.clone())),
-        prob_total_weight(prob_bind(m, |x: A| prob_bind(f(x), g.clone()))),
+        prob_total_weight(prob_bind(prob_bind(m.clone(), f), g)),
+        prob_total_weight(prob_bind(m, |x: A| prob_bind(f(x), g))),
     )
 {
     proof {
@@ -208,7 +194,7 @@ public theorem prob_associativity<A, B, C>(
         //  then f(a)'s support then g(b)'s support, producing
         //  triples (c, m(a) * f(a)(b) * g(b)(c)) in left-to-right fold.
         let lhs_total: Float = prob_total_weight(
-            prob_bind(prob_bind(m.clone(), f.clone()), g.clone()),
+            prob_bind(prob_bind(m.clone(), f), g),
         );
         // ── Step 2: compute RHS — right-associated, same triples.
         //  bind(m, |x| bind(f(x), g)): outer accumulates over m's
@@ -216,7 +202,7 @@ public theorem prob_associativity<A, B, C>(
         //  support cross-multiplied with g(b)'s support — same
         //  triple set, same per-triple weight.
         let rhs_total: Float = prob_total_weight(
-            prob_bind(m, |x: A| prob_bind(f(x), g.clone())),
+            prob_bind(m, |x: A| prob_bind(f(x), g)),
         );
         // ── Step 3: by associativity of Float-multiplication
         //  (a * b) * c = a * (b * c) and finite-support sum is

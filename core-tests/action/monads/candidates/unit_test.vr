@@ -1,0 +1,36 @@
+mount core.action.monads.nondeterm.{Nondeterm, nondeterm_bind, nondeterm_combine, nondeterm_map, nondeterm_to_list, nondeterm_unit};
+mount core.action.monads.probability.{Probability, prob_bernoulli, prob_bind, prob_strength, prob_total_weight, prob_unit};
+mount core.base.maybe.Maybe;
+mount core.base.protocols.Clone;
+
+type Candidate is { n: Int };
+type Label is { n: Int };
+implement Clone for Label {
+    fn clone(&self) -> Label { Label { n: self.n } }
+}
+
+@test
+fn owned_candidates_keep_their_order_when_flattened() {
+    let first = nondeterm_combine(
+        nondeterm_unit(Candidate { n: 1 }), nondeterm_unit(Candidate { n: 2 }),
+    );
+    let second = nondeterm_combine(
+        nondeterm_unit(Candidate { n: 3 }), nondeterm_unit(Candidate { n: 4 }),
+    );
+    let nested = nondeterm_combine(nondeterm_unit(first), nondeterm_unit(second));
+    let joined = nondeterm_bind(nested, |group: Nondeterm<Candidate>| group);
+    let mut values = nondeterm_to_list(nondeterm_map(joined, |value: Candidate| value.n));
+    assert(values.pop() is Maybe.Some(4));
+    assert(values.pop() is Maybe.Some(3));
+    assert(values.pop() is Maybe.Some(2));
+    assert(values.pop() is Maybe.Some(1));
+    assert(values.pop() is Maybe.None);
+}
+
+@test
+fn weighting_and_pairing_preserve_total_probability() {
+    let weighted = prob_unit(prob_bernoulli(0.25));
+    let distribution = prob_bind(weighted, |inner: Probability<Bool>| inner);
+    let paired = prob_strength(Label { n: 3 }, distribution);
+    assert(prob_total_weight(paired) == 1.0);
+}
