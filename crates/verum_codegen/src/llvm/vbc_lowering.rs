@@ -1395,7 +1395,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         // Must be emitted BEFORE setting Internal linkage (Phase 3.7) so that
         // the IR versions become module-internal and don't conflict with C runtime
         // symbols at link time.
-        let mut native_intrinsics;
+        let native_intrinsics;
         {
             // VERUM_AOT_TRACE_RUNTIME=1 prints which top-level
             // runtime-emit phase is running so signature-mismatch
@@ -1430,14 +1430,6 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             )
             .with_runtime_bridge(self.config.runtime_bridge);
             native_intrinsics = platform.emit_platform_functions_with_intrinsics(&self.module)?;
-            if vbc_module.functions.iter().any(|function| function.intrinsic_name
-                .and_then(|id| vbc_module.strings.get(id)) == Some("linux_signal_watch"))
-                && super::target_triple::target_is_linux(&self.module)
-            {
-                super::native_intrinsic::link_linux_signal_watch(
-                    self.context, &self.module, &mut native_intrinsics,
-                )?;
-            }
             if let Some(index) = entry_index {
                 let function_id = vbc_module.functions[index].id.0;
                 let entry_function = self.functions.get(&function_id).copied()

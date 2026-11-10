@@ -55,8 +55,6 @@ pub enum IntrinsicCategory {
     Memory,
     /// System calls: syscall0-6
     Syscall,
-    /// Operations on the hosting process, including signal dispositions.
-    Process,
     /// Thread-local storage: tls_get, tls_set
     Tls,
     /// Bit manipulation: clz, ctz, popcnt, bswap
@@ -5625,16 +5623,6 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         strategy: CodegenStrategy::RuntimeCall,
         mlir_op: None,
         doc: "Get number of CPU cores",
-    },
-    Intrinsic {
-        name: "linux_signal_watch",
-        category: IntrinsicCategory::Process,
-        hints: &[IntrinsicHint::RequiresPermission],
-        param_count: 2,
-        return_count: 1,
-        strategy: CodegenStrategy::RuntimeCall,
-        mlir_op: None,
-        doc: "Install, drain or restore a process signal watch. Returns a count or negative errno.",
     },
     // =========================================================================
     // Execution Tier Intrinsics

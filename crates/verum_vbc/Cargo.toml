@@ -1,6 +1,5 @@
 [package]
 name = "verum_vbc"
-links = "verum_vbc"
 description = "Verum Bytecode (VBC) - unified intermediate representation for the Verum compiler"
 version.workspace = true
 edition.workspace = true
@@ -11,9 +10,6 @@ repository.workspace = true
 
 [lints]
 workspace = true
-
-[build-dependencies]
-cc.workspace = true
 
 [dependencies]
 # Internal crates

@@ -1594,28 +1594,6 @@ fn try_dispatch_intrinsic_named(
         }
     }
     match name {
-        "linux_signal_watch" if matches!(origin, IntrinsicNameOrigin::DeclaredIdentity) => {
-            let argument = |index| get_arg(state, index).try_as_i64().ok_or_else(|| {
-                InterpreterError::InvalidBytecode {
-                    pc: state.pc() as usize,
-                    message: "linux_signal_watch requires integer signal and operation".into(),
-                }
-            });
-            let (number, operation) = (argument(0)?, argument(1)?);
-            #[cfg(all(target_os = "linux", any(target_arch = "aarch64", target_arch = "x86_64")))]
-            {
-                unsafe extern "C" { fn verum_linux_signal_watch(number: i64, operation: i64) -> i64; }
-                // The native entry accepts only scalars, checks both ranges,
-                // and keeps all signal-visible storage alive for the process.
-                let result = unsafe { verum_linux_signal_watch(number, operation) };
-                Ok(Some(Value::from_i64(result)))
-            }
-            #[cfg(not(all(target_os = "linux", any(target_arch = "aarch64", target_arch = "x86_64"))))]
-            {
-                let _ = (number, operation);
-                Ok(Some(Value::from_i64(-38))) // Linux ENOSYS
-            }
-        }
         // ================================================================
         // F64 Square Root
         // ================================================================

@@ -49,7 +49,6 @@ public module syscall;
 
 /// Error number constants
 public module errno;
-public module signal_watch;
 
 /// Thread-Local Storage bootstrap
 public module tls;
