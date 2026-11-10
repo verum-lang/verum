@@ -103,6 +103,14 @@ impl TypeChecker {
     ) -> Result<()> {
         if let Some(ty) = method_receiver {
             self.check_write_through_reference(ty, true, place.span)?;
+            if let Some(&hops) = self.deref_adjustments.get(&place.span) {
+                let mut receiver = self.unwrap_reference_type(ty).clone();
+                for _ in 0..hops {
+                    let Some(target) = self.find_deref_target_type(&receiver, place.span)? else { break };
+                    self.require_mutable_deref(&receiver, place.span)?;
+                    receiver = self.unwrap_reference_type(&target).clone();
+                }
+            }
         }
         let tracks_indices = self
             .ctx
@@ -113,6 +121,9 @@ impl TypeChecker {
         while let Some((operand, auto_deref)) = place_operand(step) {
             let ty = self.place_operand_type(operand)?;
             self.check_write_through_reference(&ty, auto_deref, operand.span)?;
+            if !auto_deref {
+                self.check_explicit_mutable_deref(&ty, operand.span)?;
+            }
             if tracks_indices
                 && target
                 && let ExprKind::Field { field, .. } = &step.kind
@@ -207,6 +218,38 @@ impl TypeChecker {
         }
         Err(TypeError::UniverseBinding {
             message: "reference permission exceeds the alias resolution limit".into(),
+            span,
+        })
+    }
+
+    fn check_explicit_mutable_deref(&mut self, receiver: &Type, span: Span) -> Result<()> {
+        let receiver = self.place_reference_head(receiver, span)?;
+        if matches!(receiver, Type::Named { .. } | Type::Generic { .. })
+            && self.find_deref_target_type(&receiver, span)?.is_some()
+        {
+            self.require_mutable_deref(&receiver, span)?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn require_mutable_deref(&mut self, receiver: &Type, span: Span) -> Result<()> {
+        use verum_common::well_known_types::WellKnownProtocol;
+        if self.protocol_checker.read().implements_mutable_deref(receiver) {
+            return Ok(());
+        }
+        if let Some(name) = self.source_operator_name(WellKnownProtocol::DerefMut) {
+            let path = Self::text_to_path(&name);
+            if self.protocol_checker.read().find_impl_with_substitution(receiver, &path).is_some() {
+                return Ok(());
+            }
+            self.load_source_operator_implementation(receiver, WellKnownProtocol::DerefMut, span)?;
+            if self.protocol_checker.read().find_impl_with_substitution(receiver, &path).is_some() {
+                return Ok(());
+            }
+        }
+        Err(TypeError::OtherWithCodeSpanned {
+            code: "E409".into(),
+            msg: format!("writing through a dereference of {receiver} requires DerefMut").into(),
             span,
         })
     }

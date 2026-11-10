@@ -2561,15 +2561,9 @@ impl TypeChecker {
                     let field_name_t: Text = field.name.as_str().into();
                     let mut hops = 0;
                     while hops < 8 && !self.type_has_field(&normalized_ty, &field_name_t) {
-                        let next = {
-                            let checker = self.protocol_checker.read();
-                            checker.try_find_associated_type(
-                                &normalized_ty,
-                                &verum_common::Text::from("Target"),
-                            )
-                        };
-                        match next {
+                        match self.find_deref_target_type(&normalized_ty, expr.span)? {
                             Some(target) => {
+                                self.require_mutable_deref(&normalized_ty, expr.span)?;
                                 self.check_record_field_visibility(&target, field.name.as_str(), expr.span)?;
                                 let unwrapped = self.unwrap_reference_type(&target);
                                 normalized_ty = self.normalize_type(unwrapped);
@@ -2950,44 +2944,20 @@ impl TypeChecker {
                 let arr_result = self.synth_expr_for_field_access(arr)?;
                 // Resolve type variables before index protocol resolution
                 let resolved_arr_ty = self.unifier.apply(&arr_result.ty);
-                self.load_source_index_methods(&resolved_arr_ty)?;
-
-                // =========================================================================
-                // Protocol-based Index resolution
-                // Index operator resolution: "x[i]" desugars to Index/IndexMut protocol method calls
-                // =========================================================================
-                let resolution_opt = self
-                    .protocol_checker
-                    .read()
-                    .resolve_index_protocol(&resolved_arr_ty);
-                // AUTO-DEREF for indexing.  A receiver that does not
-                // implement `Index` itself may deref to one — that is what
-                // `buf[idx]` means when `buf` is a `MutexGuard<List<T>>`,
-                // and it is the third access path of the same protocol
-                // (method call and field access already ask).  Walk the
-                // chain and retry; a receiver that indexes directly is
-                // never affected because this runs only after the direct
-                // resolution failed.
-                let resolution_opt = match resolution_opt {
-                    Some(r) => Some(r),
-                    None => {
-                        let mut cur = resolved_arr_ty.clone();
-                        let mut found = None;
-                        for _ in 0..16 {
-                            let Some(target) = self.find_deref_target_type(&cur) else {
-                                break;
-                            };
-                            if let Some(r) =
-                                self.protocol_checker.read().resolve_index_protocol(&target)
-                            {
-                                found = Some(r);
-                                break;
-                            }
-                            cur = target;
-                        }
-                        found
+                let mut current = self.unwrap_reference_type(&resolved_arr_ty).clone();
+                let mut resolution_opt = None;
+                for _ in 0..=16 {
+                    self.load_source_index_methods(&current)?;
+                    if let Some(direct) = self.protocol_checker.read().resolve_index_direct(&current) {
+                        resolution_opt = Some(direct);
+                        break;
                     }
-                };
+                    let Some(target) = self.find_deref_target_type(&current, expr.span)? else {
+                        break;
+                    };
+                    self.require_mutable_deref(&current, expr.span)?;
+                    current = self.unwrap_reference_type(&target).clone();
+                }
                 match resolution_opt {
                     Some(resolution) => {
                         // Check the index has the appropriate type
@@ -13101,14 +13071,14 @@ with .to_float() or .to_int() (at {:?})",
     /// guessing a field by name across the whole program — which is a
     /// wrong value, not an error.
     pub(super) fn field_type_through_deref(
-        &self,
+        &mut self,
         recv: &Type,
         field: &str,
         span: Span,
     ) -> Result<Option<(Type, usize)>> {
         const MAX_DEREF_CHAIN: usize = 16;
         let mut hops = if recv.is_transparent_carrier() { 0 } else { 1 };
-        let Some(mut current) = self.find_deref_target_type(recv) else {
+        let Some(mut current) = self.find_deref_target_type(recv, span)? else {
             return Ok(None);
         };
         for _ in 0..MAX_DEREF_CHAIN {
@@ -13144,7 +13114,7 @@ with .to_float() or .to_int() (at {:?})",
             if !current.is_transparent_carrier() {
                 hops += 1;
             }
-            let Some(next) = self.find_deref_target_type(&current) else {
+            let Some(next) = self.find_deref_target_type(&current, span)? else {
                 return Ok(None);
             };
             current = next;
@@ -13158,17 +13128,18 @@ with .to_float() or .to_int() (at {:?})",
         Type::bind_params(for_type, recv)
     }
 
-    pub(super) fn find_deref_target_type(&self, ty: &Type) -> Option<Type> {
-        // Protocol-based deref: query Ref<T> protocol implementations.
-        // No hardcoded type names — all dereferenceable types must implement Ref<T>.
-        self.find_ref_protocol_target(ty)
-    }
-
-    /// Find the target type T if a type implements Ref<T> protocol.
-    ///
-    /// Queries the protocol checker for Ref<T> implementation on the given type.
-    fn find_ref_protocol_target(&self, ty: &Type) -> Option<Type> {
-        let target = self.protocol_checker.read().deref_target(ty);
+    pub(super) fn find_deref_target_type(&mut self, ty: &Type, span: Span) -> Result<Option<Type>> {
+        use verum_common::well_known_types::WellKnownProtocol;
+        let mut target = self.protocol_checker.read().deref_target(ty);
+        if target.is_none() && let Some(name) = self.source_operator_name(WellKnownProtocol::Deref) {
+            let path = Self::text_to_path(&name);
+            let member: Text = "Target".into();
+            target = self.protocol_checker.read().resolve_associated_type(ty, &path, &member).ok();
+            if target.is_none() {
+                self.load_source_operator_implementation(ty, WellKnownProtocol::Deref, span)?;
+                target = self.protocol_checker.read().resolve_associated_type(ty, &path, &member).ok();
+            }
+        }
         if std::env::var_os("VERUM_TRACE_DEREF").is_some() {
             eprintln!(
                 "[deref] ty={} -> {}",
@@ -13179,7 +13150,7 @@ with .to_float() or .to_int() (at {:?})",
                     .unwrap_or_else(|| "<none>".to_string())
             );
         }
-        target
+        Ok(target)
     }
 
     /// Elaborate super-protocols through the same owned reference transport as bounds.

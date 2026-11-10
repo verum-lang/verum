@@ -9783,28 +9783,26 @@ impl ProtocolChecker {
     /// unbound `T` — is written once, here.  Field access, method
     /// dispatch and indexing all ask this; none of them re-derives it.
     pub fn deref_target(&self, ty: &Type) -> Option<Type> {
-        for impl_ in self.get_implementations(ty).iter() {
-            let protocol_name = impl_
-                .protocol
-                .as_ident()
-                .map(|id| id.name.as_str())
-                .unwrap_or("");
-            let target = match protocol_name {
-                "Ref" | "RefMut" => impl_.protocol_args.first(),
-                "Deref" | "DerefMut" => impl_
-                    .ordinary_associated_type(&verum_common::Text::from("Target"))
-                    .ok()?,
-                _ => None,
-            };
-            let Some(target) = target else { continue };
-            let subst = Type::bind_params(&impl_.for_type, ty);
-            return Some(if subst.is_empty() {
-                target.clone()
-            } else {
-                target.substitute_params(&subst)
-            });
+        let target: Text = "Target".into();
+        let protocol = self.operator_protocol_path(WellKnownProtocol::Deref);
+        if let Ok(output) = self.resolve_associated_type(ty, &protocol, &target) {
+            return Some(output);
         }
-        None
+        // The low-level reference protocols carry their target as an argument.
+        for name in ["Ref", "RefMut"] {
+            let path = Path::single(Ident::new(name, Span::default()));
+            if let Some((implementation, substitution)) = self.find_impl_with_substitution(ty, &path) {
+                return implementation.protocol_args.first()?.try_apply_subst(&substitution).ok();
+            }
+        }
+        let mutable = self.operator_protocol_path(WellKnownProtocol::DerefMut);
+        self.resolve_associated_type(ty, &mutable, &target).ok()
+    }
+
+    pub(crate) fn implements_mutable_deref(&self, ty: &Type) -> bool {
+        let protocol = self.operator_protocol_path(WellKnownProtocol::DerefMut);
+        self.find_impl_with_substitution(ty, &protocol).is_some() ||
+            self.find_impl_with_substitution(ty, &Path::single(Ident::new("RefMut", Span::default()))).is_some()
     }
 
     /// How many deref steps to follow before declaring a cycle.
@@ -9855,7 +9853,7 @@ impl ProtocolChecker {
         None
     }
 
-    fn resolve_index_direct(&self, ty: &Type) -> Option<IndexResolution> {
+    pub(crate) fn resolve_index_direct(&self, ty: &Type) -> Option<IndexResolution> {
         // Handle type variables
         if let Type::Var(_) = ty {
             return Some(IndexResolution {

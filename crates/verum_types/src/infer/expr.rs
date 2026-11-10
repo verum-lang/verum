@@ -4097,7 +4097,7 @@ impl TypeChecker {
                 if let Some((owner, _)) = self.conversion_nominal_head(&ty) {
                     self.ensure_stdlib_type_loaded_transitive(&owner);
                 }
-                if let Some(target) = self.find_deref_target_type(&ty) {
+                if let Some(target) = self.find_deref_target_type(&ty, span)? {
                     return Ok(self.unifier.apply(&target));
                 }
                 match &ty {

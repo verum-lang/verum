@@ -651,21 +651,53 @@ impl TypeChecker {
         Ok(())
     }
 
+    /// A source roster without core may declare the operator in its own
+    /// lexical scope. An unrelated registered protocol with the same leaf
+    /// supplies no such binding.
+    pub(super) fn source_operator_name(
+        &self,
+        role: verum_common::well_known_types::WellKnownProtocol,
+    ) -> Option<Text> {
+        let canonical = crate::protocol::ProtocolChecker::operator_protocol_source_name(role)?;
+        let (owner, name) = canonical.rsplit_once('.')?;
+        if self.protocol_checker.read().has_protocol(&canonical)
+            || self.module_registry.read().get_by_path(owner)
+                .is_some_and(|module| Self::local_source_type_declaration(&module.ast, name).is_some())
+        {
+            return Some(canonical);
+        }
+        if let Some((declaration, owner)) = self.declaring_source_type_declaration(role.as_str())
+            && matches!(declaration.body, verum_ast::TypeDeclBody::Protocol(_))
+        {
+            return Some(Self::source_type_declaration_key(owner.as_str(), declaration.name.name.as_str()));
+        }
+        Some(canonical)
+    }
+
+    pub(super) fn load_source_operator_implementation(
+        &mut self,
+        receiver: &Type,
+        role: verum_common::well_known_types::WellKnownProtocol,
+        span: Span,
+    ) -> Result<()> {
+        use crate::protocol::ProtocolBound;
+        if let Some(name) = self.source_operator_name(role) {
+            let bound = ProtocolBound::simple(Self::text_to_path(&name));
+            self.load_source_bound_implementations(receiver, &bound, &[], &Default::default(), span)?;
+        }
+        Ok(())
+    }
+
     pub(super) fn resolve_source_future(
         &mut self,
         receiver: &Type,
         span: Span,
     ) -> Result<Option<crate::protocol::FutureResolution>> {
-        use crate::protocol::{ProtocolBound, ProtocolChecker};
         use verum_common::well_known_types::WellKnownProtocol;
-
         if let Some(resolution) = self.protocol_checker.read().resolve_future_protocol(receiver) {
             return Ok(Some(resolution));
         }
-        if let Some(name) = ProtocolChecker::operator_protocol_source_name(WellKnownProtocol::Future) {
-            let bound = ProtocolBound::simple(Self::text_to_path(&name));
-            self.load_source_bound_implementations(receiver, &bound, &[], &Default::default(), span)?;
-        }
+        self.load_source_operator_implementation(receiver, WellKnownProtocol::Future, span)?;
         Ok(self.protocol_checker.read().resolve_future_protocol(receiver))
     }
 

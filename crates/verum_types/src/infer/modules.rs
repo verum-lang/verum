@@ -19196,11 +19196,7 @@ impl TypeChecker {
                 if !carrier_exempt {
                     materialised += 1;
                 }
-                let next = {
-                    let checker = self.protocol_checker.read();
-                    checker.try_find_associated_type(&current, &verum_common::Text::from("Target"))
-                };
-                match next {
+                match self.find_deref_target_type(&current, receiver.span)? {
                     Some(target) => {
                         let unwrapped = self.unwrap_reference_type(&target).clone();
                         let normalised = self.normalize_type(&unwrapped);

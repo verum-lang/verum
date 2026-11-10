@@ -493,3 +493,48 @@ fn a_sync_callback_can_call_an_imported_method_with_a_proven_sync_body() {
         assert!(errors.iter().any(|error| error.contains("Mismatch") && error.contains("async fn")), "{call}: {errors:?}");
     }
 }
+
+#[test]
+fn source_deref_uses_the_declared_target_and_requires_mutable_evidence_for_write() {
+    let modules = [
+        ("core.base.protocols", r#"
+            public type Deref is protocol { type Target; fn deref(&self) -> &Self.Target; };
+            public type DerefMut is protocol extends Deref { fn deref_mut(&mut self) -> &mut Self.Target; };
+        "#),
+        ("demo.foreign", "public type Deref is protocol { type Target; };"),
+        ("demo.locks", r#"
+            mount core.base.protocols.{Deref,DerefMut};
+            mount demo.foreign.{Deref as ForeignDeref};
+            public type Guard<Tag,Item> is { tag: Tag, value: Item };
+            implement<Tag,Item> Deref for Guard<Tag,Item> {
+                type Target = Item; fn deref(&self) -> &Item { &self.value }
+            }
+            implement<Item> DerefMut for Guard<Int,Item> {
+                fn deref_mut(&mut self) -> &mut Item { &mut self.value }
+            }
+            public fn readonly() -> Guard<Text,Bool> { Guard { tag: "read", value: true } }
+            public fn writable() -> Guard<Int,Bool> { Guard { tag: 1, value: false } }
+            public type Payload is { public bit: Bool };
+            public fn shared_field() -> Guard<Text,Payload> { Guard { tag: "r", value: Payload { bit: true } } }
+            public fn mutable_field() -> Guard<Int,Payload> { Guard { tag: 0, value: Payload { bit: true } } }
+            public type Other<T> is { value: T };
+            implement<T> ForeignDeref for Other<T> { type Target = T; }
+            public fn other() -> Other<Bool> { Other { value: false } }
+        "#),
+    ];
+    let header = "mount demo.locks.{readonly,writable,shared_field,mutable_field,other};";
+    let accepted = check(
+        &format!("{header} fn read()->Bool {{ *readonly() }} fn write()->Bool {{ let mut g=writable(); *g=true; *g }} fn field() {{ let mut p=mutable_field(); p.bit=false; }}"),
+        &modules,
+    );
+    assert!(accepted.is_empty(), "{accepted:?}");
+    for (body, reason) in [
+        ("fn wrong()->Text { *readonly() }", "Mismatch"),
+        ("fn sibling()->Bool { *other() }", "Cannot dereference"),
+        ("fn wrong() { let mut g=readonly(); *g=true; }", "DerefMut"),
+        ("fn field() { let mut p=shared_field(); p.bit=false; }", "DerefMut"),
+    ] {
+        let errors = check(&format!("{header} {body}"), &modules);
+        assert!(errors.iter().any(|error| error.contains(reason)), "{body}: {errors:?}");
+    }
+}
