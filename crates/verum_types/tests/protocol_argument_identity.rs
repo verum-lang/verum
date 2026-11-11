@@ -359,9 +359,22 @@ fn nominal_alias_cannot_hide_a_value_in_an_ordinary_type_slot() {
     );
     assert!(
         found.iter().any(|error| {
-            error.contains("E405") && error.contains("value") && error.contains("type parameter")
+            error.contains("E407")
+                && error.contains("demo.main.Packet.T")
+                && error.contains("wrong kind")
+                && error.contains("found N: meta Int")
         }),
         "{found:?}"
+    );
+    acceptance(
+        r#"
+        type Packet<T> is {value:T};
+        type Good<T> is Packet<T>;
+        type P<T> is protocol {};
+        type Item is {id:Int};
+        implement P<Good<Int>> for Item {}
+    "#,
+        true,
     );
 }
 
