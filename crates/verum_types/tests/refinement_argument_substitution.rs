@@ -34,7 +34,7 @@ fn diagnostics(source: &str) -> List<Text> {
 
 #[test]
 fn caller_renaming_cannot_discharge_a_dependent_obligation() {
-    for name in ["outside", "b", "a"] {
+    for name in ["outside", "b", "a", "it"] {
         let source = format!(
             r#"
 fn need(a: Int, b: Int, c: Int {{self == a}}) {{}}

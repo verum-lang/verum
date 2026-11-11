@@ -277,9 +277,29 @@ impl RefinementPredicate {
             RefinementBinding::Lambda(name) | RefinementBinding::Sigma(name) => {
                 [Some(name.as_str()), None, None]
             }
-            RefinementBinding::Named(_) => [None, None, None],
+            // `named` constructs a call whose argument is the bound `it`.
+            RefinementBinding::Named(_) => [Some("it"), None, None],
         };
         names.into_iter().flatten()
+    }
+
+    /// Substitute free call parameters without letting their caller names
+    /// become this predicate's subject on a later verification pass.
+    pub(crate) fn substitute_parameters(
+        &self,
+        replacements: &[(Text, &Expr)],
+    ) -> Result<Self, RefinementError> {
+        let aliases: List<_> = self.subject_names().map(Text::from).collect();
+        let (predicate, renamed) = crate::refinement_substitution::substitute_beneath_binder(
+            &self.predicate, &aliases, replacements,
+        )?;
+        Ok(Self {
+            predicate,
+            // Alpha-conversion makes the formerly aliased subject explicit.
+            binding: renamed.map(RefinementBinding::Lambda).unwrap_or_else(|| self.binding.clone()),
+            span: self.span,
+            provenance: self.provenance,
+        })
     }
 
     /// Create a trivially true predicate (unrefined)

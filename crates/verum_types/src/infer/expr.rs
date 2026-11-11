@@ -8134,7 +8134,6 @@ impl TypeChecker {
                     let check_ty =
                         if let Type::Refined { base, predicate } = &resolved_param {
                             if !dep_param_names.is_empty() && i > 0 {
-                                let mut subst_pred = predicate.clone();
                                 let mut replacements = List::new();
                                 for j in 0..i {
                                     let earlier_name = match dep_param_names.get(j) {
@@ -8148,9 +8147,8 @@ impl TypeChecker {
                                     };
                                     replacements.push((earlier_name, arg_expr));
                                 }
-                                subst_pred.predicate = self.refinement.substitute_all_in_expr(
-                                    &subst_pred.predicate, &replacements,
-                                ).map_err(|error| TypeError::OtherWithCodeSpanned {
+                                let mut subst_pred = predicate.substitute_parameters(&replacements)
+                                .map_err(|error| TypeError::OtherWithCodeSpanned {
                                     code: "E500".into(), msg: error.message, span: error.span,
                                 })?;
                                 // Constant-fold arithmetic that became pure after

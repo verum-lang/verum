@@ -273,3 +273,22 @@ fn an_unsupported_scope_returns_an_error_instead_of_an_unchanged_expression() {
         .unwrap_err();
     assert!(error.message.contains("local declaration"), "{error:?}");
 }
+
+#[test]
+fn named_predicates_apply_to_the_actual_value() {
+    use super::RefinementPredicate;
+    use verum_ast::{Ident, Path, Span};
+    let span = Span::dummy();
+    let predicate = RefinementPredicate::named(Path::single(Ident::new("positive", span)), span);
+    let value = Parser::new("7").parse_expr().unwrap();
+    let checker = RefinementChecker::new(RefinementConfig::default());
+    let condition = checker.generate_vc(&value, &predicate).unwrap().condition;
+    let ExprKind::Call { func, args, .. } = condition.kind else {
+        panic!()
+    };
+    assert_eq!(name(&func), "positive");
+    assert_eq!(
+        ConstEvaluator::new().eval(&args[0]).unwrap(),
+        ConstValue::Int(7)
+    );
+}

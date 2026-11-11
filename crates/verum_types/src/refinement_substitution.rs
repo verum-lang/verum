@@ -61,8 +61,18 @@ struct Substitution {
 }
 
 pub(crate) fn substitute(expr: &Expr, replacements: &[(Text, &Expr)]) -> Result<Expr> {
+    substitute_beneath_binder(expr, &[], replacements).map(|(expr, _)| expr)
+}
+
+/// Transport free arguments while retaining an enclosing value binder. All
+/// aliases denote the same bound value; a collision renames them together.
+pub(crate) fn substitute_beneath_binder(
+    expr: &Expr,
+    aliases: &[Text],
+    replacements: &[(Text, &Expr)],
+) -> Result<(Expr, Option<Text>)> {
     if replacements.is_empty() {
-        return Ok(expr.clone());
+        return Ok((expr.clone(), None));
     }
     let mut names = Names::default();
     names.visit_expr(expr);
@@ -88,9 +98,11 @@ pub(crate) fn substitute(expr: &Expr, replacements: &[(Text, &Expr)]) -> Result<
         next_name: 0,
         depth: 0,
     };
+    substitution.used.extend(aliases.iter().cloned());
+    let renamed = substitution.bind_aliases(aliases, &mut scope);
     let mut result = expr.clone();
     substitution.expr(&mut result, &scope)?;
-    Ok(result)
+    Ok((result, renamed))
 }
 
 impl Substitution {
@@ -104,22 +116,36 @@ impl Substitution {
         )
     }
 
+    fn bind_aliases(&mut self, aliases: &[Text], scope: &mut Scope<'_>) -> Option<Text> {
+        for alias in aliases {
+            scope.remove(alias);
+        }
+        if !aliases
+            .iter()
+            .any(|name| self.argument_names.contains(name))
+        {
+            return None;
+        }
+        let fresh = loop {
+            let candidate: Text = format!("__refinement_local_{}", self.next_name).into();
+            self.next_name += 1;
+            if self.used.insert(candidate.clone()) {
+                break candidate;
+            }
+        };
+        for alias in aliases {
+            scope.insert(alias.clone(), Replacement::Local(fresh.clone()));
+        }
+        Some(fresh)
+    }
+
     fn bind_name(&mut self, name: &mut Text, scope: &mut Scope<'_>, group: &mut Map<Text, Text>) {
         let original = name.clone();
         if let Some(renamed) = group.get(&original) {
             *name = renamed.clone();
             return;
         }
-        scope.remove(&original);
-        if self.argument_names.contains(&original) {
-            let fresh = loop {
-                let candidate: Text = format!("__refinement_local_{}", self.next_name).into();
-                self.next_name += 1;
-                if self.used.insert(candidate.clone()) {
-                    break candidate;
-                }
-            };
-            scope.insert(original.clone(), Replacement::Local(fresh.clone()));
+        if let Some(fresh) = self.bind_aliases(std::slice::from_ref(&original), scope) {
             *name = fresh;
         }
         group.insert(original, name.clone());
