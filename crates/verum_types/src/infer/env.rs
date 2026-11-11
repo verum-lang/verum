@@ -10819,6 +10819,44 @@ impl TypeChecker {
         }
     }
 
+    /// Instantiate a declaration's complete telescope, preserving rigid value
+    /// identities and phantom slots. No payload scan can reconstruct ownership.
+    pub(super) fn instantiate_declared_type(&self, owner: &str, body: &Type, args: &[Type]) -> Result<Type> {
+        // An unapplied constructor exposes its template, not an instance.
+        // Source applications have already checked the required arity.
+        if args.is_empty() { return Ok(body.clone()); }
+        let failure = |message: Text| TypeError::OtherWithCodeSpanned {
+            code: "E407".into(),
+            msg: format!("cannot instantiate `{owner}`: {message}").into(),
+            span: Span::default(),
+        };
+        let Some(Type::Record(parameters)) = self.ctx.lookup_type(&format!("__type_params_{owner}")) else {
+            return Err(failure("missing declaration-owned parameter roster".into()));
+        };
+        if parameters.len() != args.len() {
+            return Err(failure("argument count differs from the declared telescope".into()));
+        }
+        let mut substitution = crate::ty::Substitution::new();
+        let mut named = indexmap::IndexMap::new();
+        for ((name, parameter), argument) in parameters.iter().zip(args) {
+            if parameter == argument { continue; }
+            match parameter {
+                Type::Var(variable) => { substitution.insert(*variable, argument.clone()); }
+                Type::Meta { value: crate::ty::ValueTerm::Parameter(id), .. } => {
+                    substitution.value_bindings.insert(*id, argument.clone());
+                }
+                Type::Named { path, args } if args.is_empty()
+                    && path.as_ident().is_some_and(|ident| ident.name == *name) => {
+                    named.insert(name.clone(), argument.clone());
+                }
+                _ => return Err(failure(format!("parameter `{name}` has no retained declaration identity").into())),
+            }
+        }
+        let body = if named.is_empty() { body.clone() }
+            else { self.substitute_declared_named_slots(body, &named).map_err(failure)? };
+        body.try_apply_subst(&substitution).map_err(failure)
+    }
+
     /// Instantiate only the slots owned by this exact declaration. Metadata
     /// templates record their minted variables when registered; source aliases
     /// also retain parameter names, including unused or reordered parameters.

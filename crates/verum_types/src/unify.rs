@@ -25,7 +25,7 @@ use verum_common::{List, Map, Maybe};
 struct VariantRegistrationJournal {
     names: Map<Text, Option<Text>>,
     originals: Map<Text, Option<Type>>,
-    orders: Map<Text, Option<List<TypeVar>>>,
+    orders: Map<Text, Option<List<Type>>>,
 }
 
 /// Unifier performs type unification.
@@ -65,10 +65,8 @@ pub struct Unifier {
     /// Protocol declaration keys retain nominal identity during unification.
     /// Only the type checker has the evidence needed to erase a carrier.
     protocol_names: std::collections::HashSet<Text>,
-    /// Type variable orders for each variant type.
-    /// Key is the type name, value is the list of TypeVars in declaration order.
-    /// For `type Validated<E, A>`, this stores [E_typevar, A_typevar].
-    type_var_orders: Map<Text, List<TypeVar>>,
+    /// Complete declaration-owned parameter telescopes for sum types.
+    variant_parameters: Map<Text, List<Type>>,
     variant_registration_journal: Option<VariantRegistrationJournal>,
     /// Type alias registry: maps alias names to their target types.
     /// E.g., "Byte" -> Named("UInt8"), enabling transparent unification
@@ -295,7 +293,7 @@ impl Unifier {
             variant_type_names: Map::new(),
             original_variant_types: Map::new(),
             protocol_names: std::collections::HashSet::new(),
-            type_var_orders: Map::new(),
+            variant_parameters: Map::new(),
             variant_registration_journal: None,
             type_aliases,
             type_alias_params: Map::new(),
@@ -778,14 +776,53 @@ impl Unifier {
         self.original_variant_types.insert(type_name, original_type);
     }
 
-    /// Register the type variable order for a variant type.
-    /// This maps type name to the list of TypeVars in declaration order.
+    /// Legacy type-only metadata delegates to the same positional telescope.
     pub fn register_type_var_order(&mut self, type_name: Text, order: List<TypeVar>) {
+        self.register_variant_parameters(type_name, order.into_iter().map(Type::Var).collect());
+    }
+
+    pub(crate) fn register_variant_parameters(&mut self, type_name: Text, parameters: List<Type>) {
         if let Some(journal) = &mut self.variant_registration_journal {
             journal.orders.entry(type_name.clone())
-                .or_insert_with(|| self.type_var_orders.get(&type_name).cloned());
+                .or_insert_with(|| self.variant_parameters.get(&type_name).cloned());
         }
-        self.type_var_orders.insert(type_name, order);
+        self.variant_parameters.insert(type_name, parameters);
+    }
+
+    /// Match an instance against its declared body. Instantiating the telescope
+    /// handles unused, reordered and value slots without guessing from payloads.
+    fn unify_declared_variant(
+        &mut self, name: &Text, args: &[Type], variants: &indexmap::IndexMap<Text, Type>, span: Span,
+    ) -> Option<Result<Substitution>> {
+        let parameters = self.variant_parameters.get(name)?.clone();
+        let body = self.original_variant_types.get(name)?.clone();
+        Some((|| {
+            let invalid = |message| TypeError::UniverseBinding { message, span };
+            if parameters.len() != args.len() {
+                return Err(invalid("sum application differs from its declared arity".into()));
+            }
+            let binders = parameters.iter().map(crate::context::GenericBinder::declared)
+                .collect::<std::result::Result<List<_>, _>>().map_err(invalid)?;
+            let fresh = crate::context::instantiate_binders(&binders, &[]).map_err(invalid)?;
+            let mut scope = Substitution::new();
+            for (parameter, argument) in parameters.iter().zip(args) {
+                if parameter == argument { continue; }
+                match (parameter, argument) {
+                    (Type::Var(variable), argument) if !matches!(argument, Type::Meta { .. }) => {
+                        scope.insert(*variable, argument.clone());
+                    }
+                    (Type::Meta { value: crate::ty::ValueTerm::Parameter(id), .. }, Type::Meta { .. }) => {
+                        scope.value_bindings.insert(*id, argument.clone());
+                    }
+                    _ => return Err(invalid("sum argument has the wrong parameter kind".into())),
+                }
+            }
+            let expected = body.try_apply_subst(&scope).map_err(invalid)?;
+            // A constructor's template must not bind the shared declaration when
+            // matched against an instance. Only this declaration's slots freshen.
+            let actual = Type::Variant(variants.clone()).try_apply_subst(&fresh).map_err(invalid)?;
+            self.unify_inner(&expected, &actual, span)
+        })())
     }
 
     pub(crate) fn begin_variant_registration_journal(&mut self) {
@@ -810,8 +847,8 @@ impl Unifier {
         }
         for (name, previous) in journal.orders {
             match previous {
-                Some(value) => { self.type_var_orders.insert(name, value); }
-                None => { self.type_var_orders.remove(&name); }
+                Some(value) => { self.variant_parameters.insert(name, value); }
+                None => { self.variant_parameters.remove(&name); }
             }
         }
     }
@@ -1216,146 +1253,12 @@ impl Unifier {
         format!("VariantRelaxed({})", names.join("|")).into()
     }
 
-    /// Recursively extract TypeVar -> Type mappings by matching original and substituted types.
-    /// Static version for use in unification (doesn't need self).
-    fn extract_type_var_mapping_static(
-        original: &Type,
-        substituted: &Type,
-        mapping: &mut indexmap::IndexMap<TypeVar, Type>,
-    ) {
-        match (original, substituted) {
-            (Type::Var(tv), concrete) => {
-                mapping.entry(*tv).or_insert_with(|| concrete.clone());
-            }
-            (
-                Type::Generic {
-                    args: orig_args, ..
-                },
-                Type::Generic {
-                    args: subst_args, ..
-                },
-            )
-            | (
-                Type::Named {
-                    args: orig_args, ..
-                },
-                Type::Named {
-                    args: subst_args, ..
-                },
-            ) => {
-                for (orig_arg, subst_arg) in orig_args.iter().zip(subst_args.iter()) {
-                    Self::extract_type_var_mapping_static(orig_arg, subst_arg, mapping);
-                }
-            }
-            (Type::Tuple(orig_elems), Type::Tuple(subst_elems)) => {
-                for (orig_elem, subst_elem) in orig_elems.iter().zip(subst_elems.iter()) {
-                    Self::extract_type_var_mapping_static(orig_elem, subst_elem, mapping);
-                }
-            }
-            (Type::Record(orig_fields), Type::Record(subst_fields)) => {
-                for (field_name, orig_ty) in orig_fields.iter() {
-                    if let Some(subst_ty) = subst_fields.get(field_name) {
-                        Self::extract_type_var_mapping_static(orig_ty, subst_ty, mapping);
-                    }
-                }
-            }
-            (
-                Type::Function {
-                    params: orig_params,
-                    return_type: orig_ret,
-                    ..
-                },
-                Type::Function {
-                    params: subst_params,
-                    return_type: subst_ret,
-                    ..
-                },
-            ) => {
-                for (orig_param, subst_param) in orig_params.iter().zip(subst_params.iter()) {
-                    Self::extract_type_var_mapping_static(orig_param, subst_param, mapping);
-                }
-                Self::extract_type_var_mapping_static(orig_ret, subst_ret, mapping);
-            }
-            (
-                Type::Reference {
-                    inner: orig_inner, ..
-                },
-                Type::Reference {
-                    inner: subst_inner, ..
-                },
-            )
-            | (
-                Type::CheckedReference {
-                    inner: orig_inner, ..
-                },
-                Type::CheckedReference {
-                    inner: subst_inner, ..
-                },
-            )
-            | (
-                Type::UnsafeReference {
-                    inner: orig_inner, ..
-                },
-                Type::UnsafeReference {
-                    inner: subst_inner, ..
-                },
-            ) => {
-                Self::extract_type_var_mapping_static(orig_inner, subst_inner, mapping);
-            }
-            (Type::Variant(orig_variants), Type::Variant(subst_variants)) => {
-                for (variant_name, orig_payload) in orig_variants.iter() {
-                    if let Some(subst_payload) = subst_variants.get(variant_name) {
-                        Self::extract_type_var_mapping_static(orig_payload, subst_payload, mapping);
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-
-    /// Fallback for Generic<->Variant unification when type_var_order is not available.
-    /// Uses the old payload-based approach (which may have incorrect ordering for some types).
-    fn unify_generic_variant_fallback(
-        &mut self,
-        args: &List<Type>,
-        variants: &IndexMap<Text, Type>,
-        t1: &Type,
-        t2: &Type,
-        span: Span,
-    ) -> Result<Substitution> {
-        let non_unit_payloads: Vec<&Type> = variants
-            .values()
-            .filter(|payload| **payload != Type::Unit)
-            .collect();
-
-        // #[cfg(debug_assertions)]
-        // eprintln!("[DEBUG unify_generic_variant_fallback] non_unit_payloads={:?}", non_unit_payloads);
-
-        // Number of non-Unit payloads should match number of type args
-        if non_unit_payloads.len() != args.len() {
-            return Err(TypeError::Mismatch {
-                expected: t2.to_text(),
-                actual: t1.to_text(),
-                span,
-            });
-        }
-
-        // Unify each type argument with corresponding payload
-        let mut subst = Substitution::new();
-        for (arg, payload) in args.iter().zip(non_unit_payloads.iter()) {
-            let s =
-                self.unify_inner(&arg.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?, &payload.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?, span)?;
-            subst = subst.compose(&s).map_err(|message| TypeError::UniverseBinding { message, span })?;
-        }
-        Ok(subst)
-    }
-
-    /// Get the current accumulated substitution
+    /// Get the accumulated substitution established by successful unifications.
     pub fn get_substitution(&self) -> &Substitution {
         &self.substitution
     }
 
-    /// Get context variable bindings accumulated during unification
+    /// Get context variable bindings accumulated during unification.
     pub fn get_context_bindings(&self) -> &IndexMap<TypeVar, crate::di::requirement::ContextExpr> {
         &self.context_bindings
     }
@@ -2580,152 +2483,29 @@ impl Unifier {
 
             // Variant types
             (Variant(v1), Variant(v2)) => {
-                // Try exact match first (same length, same keys)
-                if v1.len() == v2.len() {
-                    let mut subst = Substitution::new();
-                    let mut all_matched = true;
-                    // SORTED, and the reason is soundness, not tidiness.
-                    //
-                    // `Variant` holds a `Map`, which is a `HashMap`, so a
-                    // bare `for .. in v1` visits the tags in an order that
-                    // is randomised per PROCESS. This loop ACCUMULATES a
-                    // substitution as it goes and BREAKS on the first
-                    // failure, so both what each comparison sees and
-                    // whether the loop finishes depend on that order —
-                    // and the caller turns the result into a verdict.
-                    //
-                    // Measured (T0927): `verum check core/logic/kripke.vr`
-                    // returned 0 errors on 32 of 40 runs and 20 on the
-                    // other 8, from one binary on one file. The divergence
-                    // is exactly here — `check_residual_type_compatibility`
-                    // is `unify(..).is_ok()`, and it answered `true` on the
-                    // clean runs and `false` on the others, consistently
-                    // across all 19 sites within each run, which is the
-                    // signature of per-process state.
-                    //
-                    // `ProtocolRegistry::get_implementations` sorts its
-                    // matches for the same reason (T0368). Same hazard,
-                    // same remedy.
-                    let mut tags1: Vec<_> = v1.keys().collect();
-                    tags1.sort();
-                    for tag in tags1 {
-                        let ty1 = &v1[tag];
-                        match v2.get(tag) {
-                            Some(ty2) => {
-                                match self.unify_inner(
-                                    &ty1.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?,
-                                    &ty2.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?,
-                                    span,
-                                ) {
-                                    Ok(s) => {
-                                        subst = subst.compose(&s).map_err(|message| TypeError::UniverseBinding { message, span })?;
-                                    }
-                                    Err(_) => {
-                                        all_matched = false;
-                                        break;
-                                    }
-                                }
-                            }
-                            None => {
-                                all_matched = false;
-                                break;
-                            }
-                        }
-                    }
-                    if all_matched {
-                        return Ok(subst);
-                    }
+                let v1_is_subset = v1.keys().all(|key| v2.contains_key(key));
+                let v2_is_subset = v2.keys().all(|key| v1.contains_key(key));
+                if !v1_is_subset && !v2_is_subset {
+                    return Err(TypeError::Mismatch {
+                        expected: t2.to_text(), actual: t1.to_text(), span,
+                    });
                 }
-
-                // Subset matching: allow variant widening/narrowing
-                // One set of variants is a subset of the other
-                let v1_is_subset = v1.keys().all(|k| v2.contains_key(k));
-                let v2_is_subset = v2.keys().all(|k| v1.contains_key(k));
-                if v1_is_subset || v2_is_subset {
-                    let mut subst = Substitution::new();
-                    // Use the smaller set for iteration
-                    let (smaller, larger) = if v1.len() <= v2.len() {
-                        (v1, v2)
-                    } else {
-                        (v2, v1)
-                    };
-                    // Sorted for the same reason as the exact-match loop
-                    // above: this one accumulates a substitution too.
-                    let mut names: Vec<_> = smaller.keys().collect();
-                    names.sort();
-                    for name in names {
-                        let ty_s = &smaller[name];
-                        if let Some(ty_l) = larger.get(name) {
-                            let (a, b) =
-                                (ty_s.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?, ty_l.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?);
-                            match self.unify_inner(&a, &b, span) {
-                                Ok(s) => {
-                                    subst = subst.compose(&s).map_err(|message| TypeError::UniverseBinding { message, span })?;
-                                }
-                                Err(e) => {
-                                    if !Self::has_type_vars(&a) && !Self::has_type_vars(&b) {
-                                        if std::env::var("VERUM_TRACE_VARUNI").is_ok() {
-                                            eprintln!(
-                                                "[varuni] SUBSET reject: {:?} vs {:?}",
-                                                a, b
-                                            );
-                                        }
-                                        return Err(e);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    if std::env::var("VERUM_TRACE_VARUNI").is_ok() {
-                        eprintln!("[varuni] SUBSET ok (payload errors discarded)");
-                    }
-                    return Ok(subst);
+                let (smaller, larger) = if v1.len() <= v2.len() { (v1, v2) } else { (v2, v1) };
+                let mut names: List<_> = smaller.keys().collect();
+                names.sort();
+                let mut substitution = Substitution::new();
+                for name in names {
+                    let apply = |ty: &Type| ty.try_apply_subst(&substitution)
+                        .map_err(|message| TypeError::UniverseBinding { message, span });
+                    let left = apply(&smaller[name])?;
+                    let right = apply(&larger[name])?;
+                    // A variable elsewhere in a payload cannot discharge a failed
+                    // obligation on its concrete type or value-index components.
+                    let next = self.unify_inner(&left, &right, span)?;
+                    substitution = substitution.compose(&next)
+                        .map_err(|message| TypeError::UniverseBinding { message, span })?;
                 }
-
-                // Overlapping variant unification: when two variant types share some
-                // constructors (e.g., both have Ok) but differ on others (Err vs Overflow),
-                // unify the shared variants and succeed if at least one non-shared variant
-                // payload contains unresolved type variables (meaning the type is not yet
-                // fully determined). This handles the common case where
-                // Ok(T)|Err(Var) and Ok(T)|Overflow(Unit) arise from different Result-like
-                // type definitions resolving the same constructor name.
-                let shared: Vec<&verum_common::Text> =
-                    v1.keys().filter(|k| v2.contains_key(k.as_str())).collect();
-                if !shared.is_empty() {
-                    // Check if non-shared variants have type variables (not yet resolved)
-                    let v1_non_shared_has_vars = v1
-                        .iter()
-                        .filter(|(k, _)| !v2.contains_key(k.as_str()))
-                        .any(|(_, ty)| Self::has_type_vars(ty));
-                    let v2_non_shared_has_vars = v2
-                        .iter()
-                        .filter(|(k, _)| !v1.contains_key(k.as_str()))
-                        .any(|(_, ty)| Self::has_type_vars(ty));
-                    if v1_non_shared_has_vars || v2_non_shared_has_vars {
-                        let mut subst = Substitution::new();
-                        for name in &shared {
-                            if let (Some(ty1), Some(ty2)) = (v1.get(*name), v2.get(*name)) {
-                                if let Ok(s) = self.unify_inner(
-                                    &ty1.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?,
-                                    &ty2.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?,
-                                    span,
-                                ) {
-                                    subst = subst.compose(&s).map_err(|message| TypeError::UniverseBinding { message, span })?;
-                                }
-                            }
-                        }
-                        if std::env::var("VERUM_TRACE_VARUNI").is_ok() {
-                            eprintln!("[varuni] OVERLAP ok (payload errors discarded)");
-                        }
-                        return Ok(subst);
-                    }
-                }
-
-                Err(TypeError::Mismatch {
-                    expected: t2.to_text(),
-                    actual: t1.to_text(),
-                    span,
-                })
+                Ok(substitution)
             }
 
             // Dynamic protocol objects (dyn Display, dyn Error, dyn Display + Debug, etc.)
@@ -3451,301 +3231,22 @@ impl Unifier {
                 Ok(subst)
             }
 
-            // Unify Generic types with their expanded Variant forms
-            // This is stdlib-agnostic: uses the variant_type_names registry to map
-            // variant signatures to their nominal type names.
-            // Example: Maybe<T> should unify with Some(T) | None
-            // Example: Result<T, E> should unify with Ok(T) | Err(E)
+            // Structural sum payloads can be checked only against the exact
+            // declaration's template. Missing ownership is not equality evidence.
             (Generic { name, args }, Variant(variants))
             | (Variant(variants), Generic { name, args }) => {
-                // Generate signature from variant structure
-                let signature = Self::variant_type_signature(variants);
-
-                // #[cfg(debug_assertions)]
-                // eprintln!("[DEBUG unify Generic<->Variant] name={}, args={:?}, signature={}, registry={:?}",
-                // name, args, signature, self.variant_type_names.keys().collect::<Vec<_>>());
-
-                // Look up the type name from registry (try full signature, then relaxed)
-                let registered_name_opt =
-                    self.variant_type_names
-                        .get(&signature)
-                        .cloned()
-                        .or_else(|| {
-                            let relaxed = Self::variant_type_signature_relaxed(variants);
-                            self.variant_type_names.get(&relaxed).cloned()
-                        });
-                if let Some(registered_name) = registered_name_opt.as_ref() {
-                    if registered_name.as_str() == name.as_str() {
-                        // Type names match! Now we need to extract type args from the Variant
-                        // in the correct declaration order using the type_var_order registry.
-
-                        // CRITICAL FIX: The old approach was to just zip payloads with args,
-                        // but payload order doesn't match type parameter declaration order.
-                        // For `Validated<E, A> = Valid(A) | Invalid(List<E>)`:
-                        // - Type args are [E, A] in declaration order
-                        // - But payloads might be [Int, List<Text>] in map iteration order
-                        //
-
-                        // New approach: Extract type args from Variant using unification with
-                        // the original type definition, then unify those with the Generic's args.
-
-                        let type_name_text = name.clone();
-
-                        // Try to use proper type_var_order-based extraction
-                        if let (Some(type_var_order), Some(original_type)) = (
-                            self.type_var_orders.get(&type_name_text),
-                            self.original_variant_types.get(&type_name_text),
-                        ) {
-                            // Extract TypeVar -> concrete type mapping by unifying original with actual
-                            let mut type_var_mapping: indexmap::IndexMap<TypeVar, Type> =
-                                indexmap::IndexMap::new();
-                            if let Type::Variant(original_variants) = original_type {
-                                for (variant_name, original_payload) in original_variants.iter() {
-                                    if let Some(actual_payload) = variants.get(variant_name) {
-                                        Self::extract_type_var_mapping_static(
-                                            original_payload,
-                                            actual_payload,
-                                            &mut type_var_mapping,
-                                        );
-                                    }
-                                }
-                            }
-
-                            // #[cfg(debug_assertions)]
-                            // eprintln!("[DEBUG unify Generic<->Variant] type_var_order={:?}, mapping={:?}",
-                            // type_var_order, type_var_mapping);
-
-                            // Build extracted args in declaration order
-                            let mut extracted_args: List<Type> = List::new();
-                            for tv in type_var_order.iter() {
-                                if let Some(concrete_ty) = type_var_mapping.get(tv) {
-                                    extracted_args.push(concrete_ty.clone());
-                                } else {
-                                    // TypeVar not found in mapping - this shouldn't happen for well-formed types
-                                    // Fall back to old behavior
-                                    // #[cfg(debug_assertions)]
-                                    // eprintln!("[DEBUG unify Generic<->Variant] TypeVar {:?} not in mapping, falling back", tv);
-                                    return self.unify_generic_variant_fallback(
-                                        args, variants, t1, t2, span,
-                                    );
-                                }
-                            }
-
-                            // #[cfg(debug_assertions)]
-                            // eprintln!("[DEBUG unify Generic<->Variant] extracted_args={:?}", extracted_args);
-
-                            // Verify argument count matches
-                            if extracted_args.len() != args.len() {
-                                return Err(TypeError::Mismatch {
-                                    expected: t2.to_text(),
-                                    actual: t1.to_text(),
-                                    span,
-                                });
-                            }
-
-                            // Unify each Generic arg with the corresponding extracted arg
-                            // TEMPLATE-VAR-CAPTURE (#41): when the actual
-                            // Variant is the UNSUBSTITUTED template (its
-                            // payloads still carry the declaration's own
-                            // Type::Vars), the extracted args ARE those
-                            // template vars. Unifying `Int` against them
-                            // binds the TEMPLATE globally — the first
-                            // `match r { SR.Right(x) => ... }` over
-                            // `SelectResult<Int, Int>` pinned `B := Int`
-                            // forever, so a later `SelectResult<Int, Text>`
-                            // failed "expected 'Text', found 'Int'".
-                            // Freshen template vars (one consistent
-                            // substitution across all extracted args) so
-                            // the binding is per-use.
-                            let mut freshen = Substitution::new();
-                            for ex in extracted_args.iter() {
-                                for v in ex.free_vars() {
-                                    if type_var_order.contains(&v)
-                                        && !freshen.contains_key(&v)
-                                    {
-                                        freshen.insert(v, Type::Var(TypeVar::fresh()));
-                                    }
-                                }
-                            }
-                            let mut subst = Substitution::new();
-                            for (generic_arg, extracted_arg) in
-                                args.iter().zip(extracted_args.iter())
-                            {
-                                let s = self.unify_inner(
-                                    &generic_arg.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?,
-                                    &extracted_arg.try_apply_subst(&freshen).map_err(|message| TypeError::UniverseBinding { message, span })?.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?,
-                                    span,
-                                )?;
-                                subst = subst.compose(&s).map_err(|message| TypeError::UniverseBinding { message, span })?;
-                            }
-                            return Ok(subst);
-                        }
-
-                        // Fallback: no type_var_order registered, use old payload-based approach
-                        // #[cfg(debug_assertions)]
-                        // eprintln!("[DEBUG unify Generic<->Variant] No type_var_order for '{}', using fallback", name);
-                        return self.unify_generic_variant_fallback(args, variants, t1, t2, span);
-                    }
-                }
-
-                // #[cfg(debug_assertions)]
-                // eprintln!("[DEBUG unify Generic<->Variant] NO MATCH - signature not in registry or name mismatch");
-
-                // No registry entry or name doesn't match - type mismatch
-                Err(TypeError::Mismatch {
-                    expected: t2.to_text(),
-                    actual: t1.to_text(),
-                    span,
-                })
+                self.unify_declared_variant(name, args, variants, span)
+                    .unwrap_or_else(|| Err(TypeError::Mismatch {
+                        expected: t2.to_text(), actual: t1.to_text(), span,
+                    }))
             }
-
-            // Unify Named types with their expanded Variant forms
-            // This is stdlib-agnostic: uses the variant_type_names registry to map
-            // variant signatures to their nominal type names.
-            // Example: Maybe<T> should unify with Some(T) | None
-            // Example: Result<T, E> should unify with Ok(T) | Err(E)
             (Named { path, args }, Variant(variants))
             | (Variant(variants), Named { path, args }) => {
-                // Extract the type name from the path
-                let type_name = path
-                    .segments
-                    .last()
-                    .map(|seg| match seg {
-                        verum_ast::ty::PathSegment::Name(ident) => ident.name.as_str(),
-                        _ => "",
-                    })
-                    .unwrap_or("");
-
-                // Generate signature from variant structure
-                let signature = Self::variant_type_signature(variants);
-
-                // Look up the type name from registry (try full signature, then relaxed)
-                let registered_name_opt =
-                    self.variant_type_names
-                        .get(&signature)
-                        .cloned()
-                        .or_else(|| {
-                            let relaxed = Self::variant_type_signature_relaxed(variants);
-                            self.variant_type_names.get(&relaxed).cloned()
-                        });
-                if let Some(registered_name) = registered_name_opt.as_ref() {
-                    if registered_name.as_str() == type_name {
-                        // Non-generic type: Named{Expr, []} == Variant{Num(Int) | Neg(Heap<Expr>)}
-                        // If the Named type has 0 type args, it's a concrete type matching its expansion.
-                        if args.is_empty() {
-                            return Ok(Substitution::new());
-                        }
-
-                        // Type names match! Use proper type_var_order-based extraction.
-                        let type_name_text: verum_common::Text = type_name.into();
-
-                        // Try to use proper type_var_order-based extraction
-                        if let (Some(type_var_order), Some(original_type)) = (
-                            self.type_var_orders.get(&type_name_text),
-                            self.original_variant_types.get(&type_name_text),
-                        ) {
-                            // Extract TypeVar -> concrete type mapping by unifying original with actual
-                            let mut type_var_mapping: indexmap::IndexMap<TypeVar, Type> =
-                                indexmap::IndexMap::new();
-                            if let Type::Variant(original_variants) = original_type {
-                                for (variant_name, original_payload) in original_variants.iter() {
-                                    if let Some(actual_payload) = variants.get(variant_name) {
-                                        Self::extract_type_var_mapping_static(
-                                            original_payload,
-                                            actual_payload,
-                                            &mut type_var_mapping,
-                                        );
-                                    }
-                                }
-                            }
-
-                            // #[cfg(debug_assertions)]
-                            // eprintln!("[DEBUG unify Named<->Variant] type_var_order={:?}, mapping={:?}",
-                            // type_var_order, type_var_mapping);
-
-                            // Build extracted args in declaration order
-                            let mut extracted_args: List<Type> = List::new();
-                            for tv in type_var_order.iter() {
-                                if let Some(concrete_ty) = type_var_mapping.get(tv) {
-                                    extracted_args.push(concrete_ty.clone());
-                                } else {
-                                    // TypeVar not found in mapping - fall back to old behavior
-                                    // #[cfg(debug_assertions)]
-                                    // eprintln!("[DEBUG unify Named<->Variant] TypeVar {:?} not in mapping, falling back", tv);
-                                    return self.unify_generic_variant_fallback(
-                                        args, variants, t1, t2, span,
-                                    );
-                                }
-                            }
-
-                            // #[cfg(debug_assertions)]
-                            // eprintln!("[DEBUG unify Named<->Variant] extracted_args={:?}", extracted_args);
-
-                            // Verify argument count matches
-                            if extracted_args.len() != args.len() {
-                                return Err(TypeError::Mismatch {
-                                    expected: t2.to_text(),
-                                    actual: t1.to_text(),
-                                    span,
-                                });
-                            }
-
-                            // TEMPLATE-VAR-CAPTURE (#41): same discipline as
-                            // the Generic↔Variant arm — extracted args may BE
-                            // template/registry vars when the actual variant
-                            // is unsubstituted; freshen them (one consistent
-                            // substitution) so a concrete match cannot bind
-                            // the registry copy globally.
-                            let mut freshen = Substitution::new();
-                            for ex in extracted_args.iter() {
-                                for v in ex.free_vars() {
-                                    if !freshen.contains_key(&v) {
-                                        freshen.insert(v, Type::Var(TypeVar::fresh()));
-                                    }
-                                }
-                            }
-                            // Unify each Named arg with the corresponding extracted arg
-                            let mut subst = Substitution::new();
-                            for (named_arg, extracted_arg) in args.iter().zip(extracted_args.iter())
-                            {
-                                let s = self.unify_inner(
-                                    &named_arg.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?,
-                                    &extracted_arg.try_apply_subst(&freshen).map_err(|message| TypeError::UniverseBinding { message, span })?.try_apply_subst(&subst).map_err(|message| TypeError::UniverseBinding { message, span })?,
-                                    span,
-                                )?;
-                                subst = subst.compose(&s).map_err(|message| TypeError::UniverseBinding { message, span })?;
-                            }
-                            return Ok(subst);
-                        }
-
-                        // Fallback: no type_var_order registered, use old payload-based approach
-                        // #[cfg(debug_assertions)]
-                        // eprintln!("[DEBUG unify Named<->Variant] No type_var_order for '{}', using fallback", type_name);
-                        return self.unify_generic_variant_fallback(args, variants, t1, t2, span);
-                    }
-                }
-
-                // Fallback: Try to unify Named type with Variant using type variable collection.
-                // This handles user-defined recursive types like List<T> -> Cons(T, List<T>) | Nil
-                // where the variant signature is not in the registry.
-                let mut type_vars: Vec<TypeVar> = Vec::new();
-                for (_, payload_ty) in variants.iter() {
-                    Self::collect_type_vars_from_type(payload_ty, &mut type_vars);
-                }
-                type_vars.sort();
-                type_vars.dedup();
-
-                // Build substitution from type arguments by binding type vars to the args
-                let mut subst = Substitution::new();
-                for (idx, tv) in type_vars.iter().enumerate() {
-                    if let Some(arg_ty) = args.get(idx) {
-                        // Unify the type variable with the argument type
-                        let s = self.unify_inner(&Type::Var(*tv), arg_ty, span)?;
-                        subst = subst.compose(&s).map_err(|message| TypeError::UniverseBinding { message, span })?;
-                    }
-                }
-
-                Ok(subst)
+                crate::ty::nominal_path_name(path)
+                    .and_then(|name| self.unify_declared_variant(&name.as_ref().into(), args, variants, span))
+                    .unwrap_or_else(|| Err(TypeError::Mismatch {
+                        expected: t2.to_text(), actual: t1.to_text(), span,
+                    }))
             }
 
             // TypeApp (with Var constructor) vs Variant - HKT inference
@@ -5305,19 +4806,19 @@ impl Unifier {
         }
 
         // TEMPLATE-PIN TRAP (#41): binding a var that BELONGS to a registered
-        // type's declaration (type_var_orders) pins the TEMPLATE globally —
+        // type's declaration (variant_parameters) pins the TEMPLATE globally —
         // always a bug upstream (a registry template leaked into unification
         // unfreshened). Gated diagnostic to locate the leaking door.
         if crate::ctor_trace_enabled()
             && self
-                .type_var_orders
+                .variant_parameters
                 .iter()
-                .any(|(_, order)| order.contains(&var))
+                .any(|(_, order)| order.contains(&Type::Var(var)))
         {
             let owner: Vec<_> = self
-                .type_var_orders
+                .variant_parameters
                 .iter()
-                .filter(|(_, o)| o.contains(&var))
+                .filter(|(_, o)| o.contains(&Type::Var(var)))
                 .map(|(n, _)| n.as_str().to_string())
                 .collect();
             eprintln!(
@@ -6363,10 +5864,10 @@ mod variant_registration_rollback {
         unifier.finish_variant_registration_journal(false);
         assert_eq!(unifier.variant_type_names.get(&Text::from("signature")), Some(&Text::from("Stable")));
         assert_eq!(unifier.original_variant_types.get(&Text::from("Stable")), Some(&Type::Var(original)));
-        assert_eq!(unifier.type_var_orders.get(&Text::from("Stable")), Some(&List::from_single(original)));
+        assert_eq!(unifier.variant_parameters.get(&Text::from("Stable")), Some(&List::from_single(Type::Var(original))));
         assert!(!unifier.variant_type_names.contains_key(&Text::from("Child")));
         assert!(!unifier.original_variant_types.contains_key(&Text::from("Child")));
-        assert!(!unifier.type_var_orders.contains_key(&Text::from("Child")));
+        assert!(!unifier.variant_parameters.contains_key(&Text::from("Child")));
         unifier.begin_variant_registration_journal();
         unifier.register_original_variant_type("Child".into(), Type::Var(provisional));
         unifier.finish_variant_registration_journal(true);

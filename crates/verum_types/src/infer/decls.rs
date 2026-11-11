@@ -163,12 +163,47 @@ impl TypeChecker {
     /// Nominal arguments use the same exact declaration roster as applications.
     /// Erased annotations and invented Unit slots never enter nominal identity.
     fn declared_nominal_arguments(&self, name: &Text, span: Span) -> Result<List<Type>> {
+        Ok(self.declared_parameter_roster(name, span)?.values().cloned().collect())
+    }
+
+    fn declared_parameter_roster(&self, name: &Text, span: Span)
+        -> Result<&indexmap::IndexMap<Text, Type>>
+    {
         let owner = self.declared_type_key(name.as_str());
         match self.ctx.lookup_type(&format!("__type_params_{owner}")) {
-            Some(Type::Record(parameters)) => Ok(parameters.values().cloned().collect()),
+            Some(Type::Record(parameters)) => Ok(parameters),
             _ => Err(TypeError::OtherWithCodeSpanned { code: "E407".into(),
                 msg: "nominal declaration has no owned parameter roster".into(), span }),
         }
+    }
+
+    /// Both sum registration passes publish the prepared lexical telescope.
+    /// Value parameters retain their sort, predicate and rigid identity; they
+    /// must never be replaced by the temporary variables used to enter scope.
+    fn register_sum_parameters(&mut self, declaration: &TypeDecl) -> Result<()> {
+        let name = &declaration.name.name;
+        self.register_declared_type_arity(name, &declaration.generics)?;
+        let parameters = self.declared_nominal_arguments(name, declaration.span)?;
+        self.define_declared_type_metadata("__type_var_order_", name, Type::Tuple(parameters));
+        Ok(())
+    }
+
+    fn register_sum_constructor(
+        &mut self, declaration: &TypeDecl, name: &Text, ty: Type, publish_short: bool,
+    ) -> Result<()> {
+        let mut scheme = crate::context::TypeScheme::mono(ty);
+        for parameter in self.declared_nominal_arguments(&declaration.name.name, declaration.span)? {
+            match parameter {
+                Type::Var(variable) => scheme.vars.push(variable),
+                value @ Type::Meta { .. } => scheme.value_parameters.push(value),
+                _ => return Err(TypeError::OtherWithCodeSpanned { code: "E407".into(),
+                    msg: "sum constructor parameter lacks a declaration-owned identity".into(),
+                    span: declaration.span }),
+            }
+        }
+        if publish_short { self.ctx.env.insert(name.clone(), scheme.clone()); }
+        self.ctx.env.insert(format!("{}.{}", declaration.name.name, name), scheme);
+        Ok(())
     }
 
     /// Preserve the value sort of meta/const parameters in the declaration
@@ -183,6 +218,9 @@ impl TypeChecker {
                 self.decl_param_frames.last_mut().expect("declaration parameter frame")
                     .insert(name.name.clone(), value);
             }
+        }
+        if matches!(&declaration.body, TypeDeclBody::Variant(_)) {
+            self.register_sum_parameters(declaration)?;
         }
         // Tuple-like nominal declarations share this frame in both passes.
         // An explicit empty telescope also distinguishes their heads from scalars.
@@ -476,11 +514,11 @@ impl TypeChecker {
 
         // Save type parameter names so we can clean them up later
         // This prevents type parameter pollution across different type declarations
-        let mut type_param_names = List::new();
+
 
         // Track type parameter names to TypeVars for proper polymorphic quantification
         // This mapping is used when registering variant constructors
-        let mut type_param_vars: indexmap::IndexMap<Text, TypeVar> = indexmap::IndexMap::new();
+
 
         // This declaration's parameter scope, pushed as ONE frame
         // below (see the comment at the push site).
@@ -537,7 +575,7 @@ impl TypeChecker {
                 let type_var = TypeVar::fresh();
                 let param_type = Type::Var(type_var);
                 param_frame.insert(param_name.clone(), param_type);
-                type_param_vars.insert(param_name.clone(), type_var);
+
             } else {
                 // For record types: use Named type for bidirectional type inference
                 // This allows substitute_type_params to find and replace T with concrete types
@@ -550,7 +588,7 @@ impl TypeChecker {
                 };
                 param_frame.insert(param_name.clone(), param_type);
             }
-            type_param_names.push(param_name);
+
         }
         // The frame — not the global flat table — carries this
         // declaration's parameters for the duration of its body.
@@ -656,7 +694,7 @@ impl TypeChecker {
                     }
                 }
             }
-            TypeDeclBody::Variant(_) => self.register_variant_type_body(type_decl, &type_name, &type_param_vars, &type_param_names)?,
+            TypeDeclBody::Variant(_) => self.register_variant_type_body(type_decl, &type_name)?,
             TypeDeclBody::Record(_) => self.register_record_type_body(type_decl, &type_name)?,
             // ── DECLARED-NAME REGISTRATION GOES THROUGH THE MODULE PATH ──
             // Every arm that registers the declared type under its own
@@ -944,7 +982,7 @@ impl TypeChecker {
         // unconditionally, on BOTH success and failure of the body above
         // (GENERIC-PARAM-LEAK, T0148; frame mechanism, T0683).
         self.pop_decl_param_frame();
-        let _ = type_param_names;
+
         body_result?;
 
         // NOTE: Cleanup of types_being_registered is now done in register_type_declaration_inner
@@ -1088,8 +1126,6 @@ impl TypeChecker {
         &mut self,
         type_decl: &verum_ast::TypeDecl,
         type_name: &verum_common::Text,
-        type_param_vars: &indexmap::IndexMap<verum_common::Text, TypeVar>,
-        type_param_names: &List<verum_common::Text>,
     ) -> Result<()> {
         use crate::context::TypeScheme;
         use indexmap::IndexMap;
@@ -1099,8 +1135,6 @@ impl TypeChecker {
         let TypeDeclBody::Variant(variants) = &type_decl.body
             else { unreachable!() };
         let type_name = type_name.clone();
-        let type_param_names = type_param_names.clone();
-        let type_param_vars = type_param_vars.clone();
                 // IMPORT PROVENANCE: If this type name was explicitly imported and the existing
                 // type in ctx has DIFFERENT variant names, skip the entire registration.
                 // This prevents e.g., atomic Ordering (Relaxed|Acquire|...) from overwriting
@@ -1290,48 +1324,7 @@ impl TypeChecker {
                     }
                 }
 
-                self.record_declared_meta_refinements(&type_name, &type_decl.generics);
-
-                // CRITICAL: Store type parameter information for generic variant type substitution.
-                // This enables proper substitution when using generic variant types like Validated<E, A>.
-                // We store:
-                // 1. __type_params_{name}: Parameter names in declaration order (for name-based substitution)
-                // 2. __type_var_order_{name}: TypeVars in declaration order (for TypeVar-based substitution)
-                if !type_param_vars.is_empty() {
-                    // Store parameter names in order (like we do for record types)
-                    let mut param_record: indexmap::IndexMap<verum_common::Text, Type> =
-                        indexmap::IndexMap::new();
-                    for (name, var) in &type_param_vars {
-                        // T0258: store the param's REAL template var instead of
-                        // the former hardcoded `Type::Int` sentinel, so a reader
-                        // of `__type_params_<Name>`'s VALUE gets correct data
-                        // rather than garbage. This is the variant write-site
-                        // where the sentinel bit (T0246's `Maybe.Some(T)` payload
-                        // var); the type-alias write-site is arity/name-only with
-                        // no template var to store.
-                        param_record.insert(name.clone(), Type::Var(*var));
-                    }
-                    self.define_declared_type_metadata(
-                        "__type_params_", type_name.as_str(), Type::Record(param_record),
-                    );
-
-                    // CRITICAL: Store TypeVars in declaration order for proper substitution.
-                    // When a Variant base type is instantiated with type args (e.g., Validated<E, A>),
-                    // we need to map the TypeVars to their corresponding type args in the correct order.
-                    // The type_param_vars map preserves declaration order (IndexMap), so we extract
-                    // TypeVars in that order and store them as a Tuple type.
-                    let type_vars_in_order: List<Type> =
-                        type_param_vars.values().map(|tv| Type::Var(*tv)).collect();
-                    self.define_declared_type_metadata(
-                        "__type_var_order_", type_name.as_str(), Type::Tuple(type_vars_in_order),
-                    );
-                } else {
-                    // No parameters. Say so in the shared key rather than
-                    // staying silent, which would leave a same-named type's
-                    // arity to answer for this one — see
-                    // `register_declared_type_arity`.
-                    self.register_declared_type_arity(&type_name, &type_decl.generics)?;
-                }
+                let parameters = self.declared_nominal_arguments(&type_name, type_decl.span)?;
 
                 // CRITICAL: Register variant type to name mapping for instance method lookup
                 // This allows err.error_code() to find methods defined on RegistryError
@@ -1349,12 +1342,10 @@ impl TypeChecker {
                     // CRITICAL FIX: Register original variant type and type var order with unifier
                     // This enables proper Generic<->Variant unification by allowing extraction
                     // of type args in the correct declaration order.
-                    let type_vars_in_order: List<TypeVar> =
-                        type_param_vars.values().copied().collect();
-                    self.unifier
-                        .register_original_variant_type(type_name.clone(), variant_type.clone());
-                    self.unifier
-                        .register_type_var_order(type_name.clone(), type_vars_in_order);
+                    for key in [type_name.clone(), self.declared_type_key(&type_name)] {
+                        self.unifier.register_original_variant_type(key.clone(), variant_type.clone());
+                        self.unifier.register_variant_parameters(key, parameters.clone());
+                    }
                 }
 
                 // CRITICAL: Register inductive constructors for pattern matching.
@@ -1382,7 +1373,7 @@ impl TypeChecker {
                     };
 
                     // Build return type: TypeName or TypeName<TypeVars...>
-                    let return_type = if type_param_vars.is_empty() {
+                    let return_type = if parameters.is_empty() {
                         Type::Named {
                             path: Path::single(verum_ast::ty::Ident::new(
                                 type_name.as_str(),
@@ -1393,15 +1384,15 @@ impl TypeChecker {
                     } else {
                         Type::Generic {
                             name: type_name.clone(),
-                            args: type_param_vars.values().map(|tv| Type::Var(*tv)).collect(),
+                            args: parameters.clone(),
                         }
                     };
 
                     let constructor = InductiveConstructor {
                         name: ctor_name,
-                        type_params: type_param_vars
+                        type_params: self.declared_parameter_roster(&type_name, type_decl.span)?
                             .iter()
-                            .map(|(n, tv)| (n.clone(), Box::new(Type::Var(*tv))))
+                            .map(|(name, parameter)| (name.clone(), Box::new(parameter.clone())))
                             .collect(),
                         args: ctor_args,
                         return_type: Box::new(return_type),
@@ -1497,40 +1488,7 @@ impl TypeChecker {
                         // e.g., Red : Color
                         // For generic types, we need to quantify over type variables
                         // e.g., None : ∀T. Maybe<T>
-                        let free_vars = variant_type.free_vars();
-                        if free_vars.is_empty() {
-                            // Only register short name if it doesn't already exist
-                            if !short_name_exists {
-                                self.ctx
-                                    .env
-                                    .insert_mono(variant_name.clone(), variant_type.clone());
-                            }
-
-                            // Always register qualified name for Type.Variant syntax
-                            let qualified_name: Text =
-                                format!("{}.{}", type_name, variant_name).into();
-                            self.ctx
-                                .env
-                                .insert_mono(qualified_name, variant_type.clone());
-                        } else {
-                            let vars_list: List<TypeVar> = free_vars.into_iter().collect();
-
-                            // Only register short name if it doesn't already exist
-                            if !short_name_exists {
-                                self.ctx.env.insert(
-                                    variant_name.clone(),
-                                    TypeScheme::poly(vars_list.clone(), variant_type.clone()),
-                                );
-                            }
-                            // Always register qualified name for Type.Variant syntax
-                            let qualified_name: Text =
-                                format!("{}.{}", type_name, variant_name).into();
-                            self.ctx.env.insert(
-                                qualified_name,
-                                TypeScheme::poly(vars_list, variant_type.clone()),
-                            );
-                        }
-
+                        self.register_sum_constructor(type_decl, &variant_name, variant_type.clone(), !short_name_exists)?;
                         // CRITICAL: Also register unit variants as TYPES (not just values).
                         // This enables variant names to be used as type arguments for meta
                         // type parameters. For example, in:
@@ -1588,36 +1546,7 @@ impl TypeChecker {
                         // When called as Some(Some(42)):
                         //  - Inner Some(42): instantiates fresh T1, giving Maybe<Int>
                         //  - Outer Some(...): instantiates fresh T2, giving Maybe<Maybe<Int>>
-                        let free_vars = constructor_ty.free_vars();
-                        if free_vars.is_empty() {
-                            // Only register short name if it doesn't already exist
-                            if !short_name_exists {
-                                self.ctx
-                                    .env
-                                    .insert_mono(variant_name.clone(), constructor_ty.clone());
-                            }
-                            // Always register qualified name for Type.Variant syntax
-                            let qualified_name: Text =
-                                format!("{}.{}", type_name, variant_name).into();
-                            self.ctx.env.insert_mono(qualified_name, constructor_ty);
-                        } else {
-                            let vars_list: List<TypeVar> = free_vars.into_iter().collect();
-
-                            // Only register short name if it doesn't already exist
-                            if !short_name_exists {
-                                self.ctx.env.insert(
-                                    variant_name.clone(),
-                                    TypeScheme::poly(vars_list.clone(), constructor_ty.clone()),
-                                );
-                            }
-                            // Always register qualified name for Type.Variant syntax
-                            let qualified_name: Text =
-                                format!("{}.{}", type_name, variant_name).into();
-                            self.ctx.env.insert(
-                                qualified_name,
-                                TypeScheme::poly(vars_list, constructor_ty),
-                            );
-                        }
+                        self.register_sum_constructor(type_decl, &variant_name, constructor_ty, !short_name_exists)?;
 
                         // CRITICAL: Also register non-unit record variants as TYPES.
                         // This enables:
@@ -2482,9 +2411,6 @@ impl TypeChecker {
         // Push this type onto the resolution stack
         resolution_stack.push(type_name.clone());
 
-        // Save type parameter names so we can clean them up later
-        let mut type_param_names = List::new();
-
         // This declaration's parameter scope frame (T0683).
         let mut param_frame: indexmap::IndexMap<Text, Type> = indexmap::IndexMap::new();
 
@@ -2526,29 +2452,6 @@ impl TypeChecker {
                 };
                 param_frame.insert(param_name.clone(), param_type);
             }
-            type_param_names.push(param_name);
-        }
-
-        // Pass 2 creates fresh sum parameter variables. Publish those same
-        // slots with the replacement body, including an empty declaration:
-        // otherwise a nongeneric namesake can retain the prior body's arity.
-        if is_variant_type {
-            self.record_declared_meta_refinements(&type_name, &type_decl.generics);
-            let new_type_vars: List<Type> = type_param_names.iter().filter_map(|name| {
-                match param_frame.get(name.as_str()) {
-                    Some(Type::Var(variable)) => Some(Type::Var(*variable)),
-                    _ => None,
-                }
-            }).collect();
-            self.define_declared_type_metadata(
-                "__type_var_order_", type_name.as_str(), Type::Tuple(new_type_vars),
-            );
-            let parameters = type_param_names.iter().filter_map(|name| {
-                param_frame.get(name.as_str()).cloned().map(|ty| (name.clone(), ty))
-            }).collect();
-            self.define_declared_type_metadata(
-                "__type_params_", type_name.as_str(), Type::Record(parameters),
-            );
         }
 
         // Same frame discipline as `register_type_declaration_body`
@@ -2564,7 +2467,6 @@ impl TypeChecker {
         self.finish_nominal_declaration_premises(previous_premises);
 
         self.pop_decl_param_frame();
-        let _ = type_param_names;
 
         // Pop from resolution stack
         resolution_stack.pop();
@@ -3012,41 +2914,10 @@ impl TypeChecker {
                         }
                     }
 
-                    // CRITICAL FIX: Register original variant type and type var order with unifier
-                    // For imports, try to look up existing type var order, or extract from variant type
-                    let type_var_order_key: Text = format!("__type_var_order_{}", type_name).into();
-                    if let verum_common::Maybe::Some(Type::Tuple(type_vars)) =
-                        self.ctx.lookup_type(&type_var_order_key)
-                    {
-                        // Use existing type var order
-                        let type_vars_in_order: List<TypeVar> = type_vars
-                            .iter()
-                            .filter_map(|t| {
-                                if let Type::Var(tv) = t {
-                                    Some(*tv)
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect();
-                        self.unifier.register_original_variant_type(
-                            type_name.clone(),
-                            variant_type.clone(),
-                        );
-                        self.unifier
-                            .register_type_var_order(type_name.clone(), type_vars_in_order);
-                    } else {
-                        // Fallback: Extract free vars from variant type (order may not be correct)
-                        let free_vars = variant_type.free_vars();
-                        if !free_vars.is_empty() {
-                            let type_vars_in_order: List<TypeVar> = free_vars.into_iter().collect();
-                            self.unifier.register_original_variant_type(
-                                type_name.clone(),
-                                variant_type.clone(),
-                            );
-                            self.unifier
-                                .register_type_var_order(type_name.clone(), type_vars_in_order);
-                        }
+                    let parameters = self.declared_nominal_arguments(&type_name, type_decl.span)?;
+                    for key in [type_name.clone(), self.declared_type_key(&type_name)] {
+                        self.unifier.register_original_variant_type(key.clone(), variant_type.clone());
+                        self.unifier.register_variant_parameters(key, parameters.clone());
                     }
                 }
 
@@ -3099,33 +2970,7 @@ impl TypeChecker {
                     };
 
                     if *payload_type == Type::Unit {
-                        let free_vars = variant_type.free_vars();
-                        if free_vars.is_empty() {
-                            if !short_name_exists {
-                                self.ctx
-                                    .env
-                                    .insert_mono(variant_name.clone(), variant_type.clone());
-                            }
-                            let qualified_name: Text =
-                                format!("{}.{}", type_name, variant_name).into();
-                            self.ctx
-                                .env
-                                .insert_mono(qualified_name, variant_type.clone());
-                        } else {
-                            let vars_list: List<TypeVar> = free_vars.into_iter().collect();
-                            if !short_name_exists {
-                                self.ctx.env.insert(
-                                    variant_name.clone(),
-                                    TypeScheme::poly(vars_list.clone(), variant_type.clone()),
-                                );
-                            }
-                            let qualified_name: Text =
-                                format!("{}.{}", type_name, variant_name).into();
-                            self.ctx.env.insert(
-                                qualified_name,
-                                TypeScheme::poly(vars_list, variant_type.clone()),
-                            );
-                        }
+                        self.register_sum_constructor(type_decl, &variant_name, variant_type.clone(), !short_name_exists)?;
                     } else {
                         let params = match payload_type {
                             Type::Tuple(tuple_types) => tuple_types.clone(),
@@ -3137,31 +2982,7 @@ impl TypeChecker {
                         };
                         let constructor_ty = Type::function(params, variant_type.clone());
 
-                        let free_vars = constructor_ty.free_vars();
-                        if free_vars.is_empty() {
-                            if !short_name_exists {
-                                self.ctx
-                                    .env
-                                    .insert_mono(variant_name.clone(), constructor_ty.clone());
-                            }
-                            let qualified_name: Text =
-                                format!("{}.{}", type_name, variant_name).into();
-                            self.ctx.env.insert_mono(qualified_name, constructor_ty);
-                        } else {
-                            let vars_list: List<TypeVar> = free_vars.into_iter().collect();
-                            if !short_name_exists {
-                                self.ctx.env.insert(
-                                    variant_name.clone(),
-                                    TypeScheme::poly(vars_list.clone(), constructor_ty.clone()),
-                                );
-                            }
-                            let qualified_name: Text =
-                                format!("{}.{}", type_name, variant_name).into();
-                            self.ctx.env.insert(
-                                qualified_name,
-                                TypeScheme::poly(vars_list, constructor_ty),
-                            );
-                        }
+                        self.register_sum_constructor(type_decl, &variant_name, constructor_ty, !short_name_exists)?;
 
                         // Also register non-unit record variants as TYPES (same as first pass).
                         if let Type::Record(_) = payload_type {

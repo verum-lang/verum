@@ -240,13 +240,13 @@ impl TypeChecker {
         &self,
         resolved_expected: &Type,
         name: &str,
-    ) -> Option<Text> {
+    ) -> Result<Option<Text>> {
         let return_type = match resolved_expected {
             Type::Function { return_type, .. } => return_type,
-            _ => return None,
+            _ => return Ok(None),
         };
         let ret = self.unifier.apply(&**return_type);
-        let expanded = self.expand_generic_to_variant(&ret);
+        let expanded = self.expand_generic_to_variant(&ret)?;
         if crate::ctor_trace_enabled() {
             eprintln!(
                 "[ctor-trace] ctor_parent_from_expected_fn_return: name={:?} ret={:?} expanded_is_variant={}",
@@ -256,14 +256,14 @@ impl TypeChecker {
             );
         }
         let Type::Variant(variants) = &expanded else {
-            return None;
+            return Ok(None);
         };
-        variants.get(name)?;
-        match &ret {
+        if !variants.contains_key(name) { return Ok(None); }
+        Ok(match &ret {
             Type::Named { path, .. } => path.as_ident().map(|i| Text::from(i.name.as_str())),
             Type::Generic { name: n, .. } => Some(n.clone()),
             _ => None,
-        }
+        })
     }
 
     /// CTOR-AS-FN-SYNTH (#31): a bare PAYLOAD constructor used as a VALUE is a
@@ -374,19 +374,19 @@ impl TypeChecker {
     /// `Generic{Result}` and 13 async tests hard-failed with
     /// "`Ready(_)` not covered". Recursively expand payloads (bounded depth
     /// guards against recursive types like Tree/List).
-    fn expand_scrut_deep(&self, ty: &Type, depth: u8) -> Type {
-        let expanded = self.expand_generic_to_variant(ty);
+    fn expand_scrut_deep(&self, ty: &Type, depth: u8) -> Result<Type> {
+        let expanded = self.expand_generic_to_variant(ty)?;
         if depth == 0 {
-            return expanded;
+            return Ok(expanded);
         }
         if let Type::Variant(vs) = &expanded {
             let deep: indexmap::IndexMap<verum_common::Text, Type> = vs
                 .iter()
-                .map(|(n, p)| (n.clone(), self.expand_scrut_deep(p, depth - 1)))
-                .collect();
-            return Type::Variant(deep);
+                .map(|(n, p)| Ok((n.clone(), self.expand_scrut_deep(p, depth - 1)?)))
+                .collect::<Result<_>>()?;
+            return Ok(Type::Variant(deep));
         }
-        expanded
+        Ok(expanded)
     }
 
     /// EXHAUSTIVENESS-UNRESOLVED-PAYLOAD (#41): true when the scrutinee's
@@ -621,7 +621,7 @@ impl TypeChecker {
                 };
                 // First resolve the expected type through any type variables
                 let resolved_expected = self.unifier.apply(expected);
-                let expanded_expected = self.expand_generic_to_variant(&resolved_expected);
+                let expanded_expected = self.expand_generic_to_variant(&resolved_expected)?;
                 if let Type::Variant(ref variants) = expanded_expected {
                     if let Some(payload_ty) = variants.get(name) {
                         if matches!(payload_ty, Type::Unit) {
@@ -681,7 +681,7 @@ impl TypeChecker {
                     && !locally_shadowed
                     && ctor_registered
                 {
-                    let ret = self.expand_generic_to_variant(return_type);
+                    let ret = self.expand_generic_to_variant(return_type)?;
                     if let Type::Variant(vs) = &ret
                         && let Some(payload) = vs.get(name)
                         && !matches!(payload, Type::Unit)
@@ -838,7 +838,7 @@ impl TypeChecker {
                 // covered.  `expand_generic_to_variant` substitutes the args
                 // (`Ready(Unit)`), so the `()` pattern is recognised as
                 // exhaustive; non-variant types pass through unchanged.
-                let resolved_scrut = self.expand_scrut_deep(&applied_scrut_chk, 3);
+                let resolved_scrut = self.expand_scrut_deep(&applied_scrut_chk, 3)?;
                 let should_check = matches!(&resolved_scrut, Type::Variant(_) | Type::Bool);
                 let has_guards = arms.iter().any(|arm| arm.guard.is_some());
                 // Check if patterns contain complex forms the exhaustiveness checker can't handle
@@ -934,7 +934,7 @@ impl TypeChecker {
                             .ctor_parent_from_expected_fn_return(
                                 &self.unifier.apply(expected),
                                 ident.name.as_str(),
-                            )
+                            )?
                             .is_some()) =>
             {
                 let constructor_name = ident.name.as_str();
@@ -962,7 +962,7 @@ impl TypeChecker {
                     .get(&Text::from(constructor_name))
                     .is_none()
                     && let Some(parent) =
-                        self.ctor_parent_from_expected_fn_return(&resolved_expected, constructor_name)
+                        self.ctor_parent_from_expected_fn_return(&resolved_expected, constructor_name)?
                 {
                     self.variant_constructor_parents
                         .entry(Text::from(constructor_name))
@@ -1010,7 +1010,7 @@ impl TypeChecker {
                     self.unifier.unify(&ctor_ty, &resolved_expected, expr.span)?;
                     return Ok(InferResult::new(ctor_ty));
                 }
-                let expanded_expected = self.expand_generic_to_variant(&resolved_expected);
+                let expanded_expected = self.expand_generic_to_variant(&resolved_expected)?;
                 if let Type::Variant(ref variants) = expanded_expected
                     && let Some(payload_ty) = variants.get(constructor_name)
                     && matches!(payload_ty, Type::Unit)
@@ -1053,7 +1053,7 @@ impl TypeChecker {
                     .unifier
                     .try_expand_alias(&resolved_expected_call)
                     .unwrap_or(resolved_expected_call);
-                let expanded_expected = self.expand_generic_to_variant(&resolved_expected_call);
+                let expanded_expected = self.expand_generic_to_variant(&resolved_expected_call)?;
                 // **Architectural fallback** (closes iterator §D / task #14
                 // §3.2): when `expand_generic_to_variant` doesn't produce a
                 // `Type::Variant` (because the type's registration shape is
@@ -1321,7 +1321,7 @@ impl TypeChecker {
                     if is_variant_of_recv {
                         let resolved_expected = self.unifier.apply(expected);
                         let expanded =
-                            self.expand_generic_to_variant(&resolved_expected);
+                            self.expand_generic_to_variant(&resolved_expected)?;
                         if let Type::Variant(variants) = &expanded
                             && let Some(payload_ty) =
                                 variants.get(method.name.as_str())
@@ -2127,7 +2127,7 @@ impl TypeChecker {
                 let is_aliased_variant_constructor = if let Some((parent, variant)) = self.record_variant_parent(lookup_path)
                     && let Ok(parent_ty) = self.resolve_type_name(parent.as_str(), expr.span)
                     && self.resolve_to_record_type(&parent_ty).is_none()
-                    && let Type::Variant(variants) = self.expand_generic_to_variant(&parent_ty)
+                    && let Type::Variant(variants) = self.expand_generic_to_variant(&parent_ty)?
                 {
                     variants.contains_key(variant.as_str())
                 } else {
@@ -2388,14 +2388,10 @@ impl TypeChecker {
                                 .lookup_type(h.as_str())
                                 .cloned()
                                 .or_else(|| self.resolve_type_name(h.as_str(), expr.span).ok());
-                            let is_parent = head_ty
-                                .map(|t| {
-                                    matches!(
-                                        self.expand_generic_to_variant(&t),
-                                        Type::Variant(ref vs) if vs.contains_key(&verum_common::Text::from(c.as_str()))
-                                    )
-                                })
-                                .unwrap_or(false);
+                            let is_parent = if let Some(t) = head_ty {
+                                matches!(self.expand_generic_to_variant(&t)?,
+                                    Type::Variant(ref vs) if vs.contains_key(&verum_common::Text::from(c.as_str())))
+                            } else { false };
                             if is_parent {
                                 verum_ast::ty::Path {
                                     segments: vec![resolved_path.segments[0].clone()].into(),
@@ -5901,7 +5897,7 @@ impl TypeChecker {
                     // (see the check_expr path above): a bare `lookup_type` would
                     // leave `Poll`'s `Ready(T)` payload unsubstituted, breaking
                     // `Poll.Ready(())` exhaustiveness over `Poll<Unit>`.
-                    let resolved_scrut = self.expand_scrut_deep(&applied_scrut, 3);
+                    let resolved_scrut = self.expand_scrut_deep(&applied_scrut, 3)?;
                     let should_check_exhaustiveness =
                         matches!(&resolved_scrut, Type::Variant(_) | Type::Bool);
                     // Don't check if any arm has a guard (guards make analysis imprecise)
@@ -9153,7 +9149,7 @@ impl TypeChecker {
                 // mounted stdlib sum type misses this arm and the
                 // binding degrades to a fresh var (`let trace =
                 // LogLevel.Trace` → E404, T0701 ctor leg).
-                let resolved = self.expand_generic_to_variant(&resolved);
+                let resolved = self.expand_generic_to_variant(&resolved)?;
                 if let Type::Variant(variants) = &resolved {
                     if let Some(payload_ty) = variants.get(field_name) {
                         if matches!(payload_ty, Type::Unit) {
@@ -9203,7 +9199,7 @@ impl TypeChecker {
                 .ctx
                 .lookup_type(type_name)
                 .cloned()
-                .map(|t| self.expand_generic_to_variant(&t));
+                .map(|t| self.expand_generic_to_variant(&t)).transpose()?;
             if let Some(ty) = flat_expanded
                 && let Type::Variant(variants) = &ty
             {
@@ -10691,11 +10687,11 @@ impl TypeChecker {
             let nominal_result: Option<Type> = resolved_variant_ty.clone();
             let resolved_variant_ty: Option<Type> = resolved_variant_ty.map(|t| {
                 if matches!(t, Type::Variant(_)) {
-                    t
+                    Ok(t)
                 } else {
                     self.expand_generic_to_variant(&t)
                 }
-            });
+            }).transpose()?;
             if let Option::Some(ty) = resolved_variant_ty
                 && let Type::Variant(variants) = &ty
             {
@@ -12250,9 +12246,11 @@ impl TypeChecker {
 
         let inner_ty = {
             let checker = self.protocol_checker.read();
-            checker.resolve_maybe_protocol(&obj_result.ty)
-                .or_else(|| checker.resolve_maybe_protocol(&self.expand_generic_to_variant(&obj_result.ty)))
-                .map_or_else(|| obj_result.ty.clone(), |resolution| resolution.inner)
+            let resolution = match checker.resolve_maybe_protocol(&obj_result.ty) {
+                Some(resolution) => Some(resolution),
+                None => checker.resolve_maybe_protocol(&self.expand_generic_to_variant(&obj_result.ty)?),
+            };
+            resolution.map_or_else(|| obj_result.ty.clone(), |resolution| resolution.inner)
         };
 
         // Unwrap reference types before field access (Maybe<&Point>?.field)

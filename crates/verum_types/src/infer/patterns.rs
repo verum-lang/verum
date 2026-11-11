@@ -825,7 +825,7 @@ impl TypeChecker {
                 };
 
                 // Expand the scrutinee type and check if it's a variant
-                let mut expanded_ty = self.expand_generic_to_variant(&scheme.ty);
+                let mut expanded_ty = self.expand_generic_to_variant(&scheme.ty)?;
 
                 // If the pattern is explicitly qualified and the qualifier
                 // resolves to a known variant type in scope, prefer the
@@ -1053,7 +1053,7 @@ impl TypeChecker {
                 };
 
                 // Expand Generic types like Maybe<T> and Result<T,E> to their variant form
-                let mut expanded_ty = self.expand_generic_to_variant(&scheme.ty);
+                let mut expanded_ty = self.expand_generic_to_variant(&scheme.ty)?;
                 if crate::ctor_trace_enabled() {
                     let st = format!("{:?}", scheme.ty);
                     let et = format!("{:?}", expanded_ty);
@@ -2718,7 +2718,7 @@ impl TypeChecker {
 
                 // Try variant resolution first if scrutinee is a variant type
                 let variant_resolved = if let Some(ref name) = variant_name_str {
-                    let expanded = self.expand_generic_to_variant(&scheme.ty);
+                    let expanded = self.expand_generic_to_variant(&scheme.ty)?;
                     if let Type::Variant(variants) = expanded {
                         variants
                             .get(name.as_str())
@@ -2932,7 +2932,7 @@ impl TypeChecker {
                 let dereferenced_ty = self.unwrap_reference_type(ty);
 
                 // Expand the type to variant form (handles custom sum types)
-                let expanded_ty = self.expand_generic_to_variant(dereferenced_ty);
+                let expanded_ty = self.expand_generic_to_variant(dereferenced_ty)?;
 
                 if let Type::Variant(variants) = &expanded_ty {
                     if let Some(payload_ty) = variants.get(&tag) {
@@ -3150,7 +3150,7 @@ impl TypeChecker {
                     _ => None,
                 };
                 let narrowed_type = if let Some(ref name) = variant_name_str {
-                    let expanded = self.expand_generic_to_variant(ty);
+                    let expanded = self.expand_generic_to_variant(ty)?;
                     if let Type::Variant(variants) = expanded {
                         if let Some(payload_ty) = variants.get(name.as_str()) {
                             match payload_ty {

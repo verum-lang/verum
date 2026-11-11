@@ -1208,6 +1208,7 @@ fn substitute_refinement_binder(
                 // Lifetime annotations have no semantic type argument slot.
                 let mut type_args: List<Type> = List::new();
 
+                let source_arguments = elaborated.is_none();
                 if let Some(arguments) = elaborated {
                     type_args = arguments;
                 } else {
@@ -1349,8 +1350,8 @@ fn substitute_refinement_binder(
                         if let Some(Type::Record(parameters)) = self.ctx.lookup_type(&params_key) {
                             let mixed = parameters.values().any(|role| matches!(role, Type::Meta { .. }));
                             let mut named_types = indexmap::IndexMap::new();
-                            for ((name, declared), argument) in parameters.iter().zip(
-                                type_args.iter().filter(|ty| !matches!(ty, Type::Lifetime { .. })))
+                            for (index, ((name, declared), argument)) in parameters.iter().zip(
+                                type_args.iter_mut().filter(|ty| !matches!(ty, Type::Lifetime { .. }))).enumerate()
                             {
                                 // Records and aliases retain declaration-local named
                                 // type slots. Only this exact roster authorizes their
@@ -1361,7 +1362,20 @@ fn substitute_refinement_binder(
                                         .and_then(|role| role.try_apply_subst(&argument_scope))
                                 } else { Ok(declared.clone()) }.map_err(|msg|
                                     TypeError::OtherWithCodeSpanned { code: "E407".into(), msg, span: ast_ty.span })?;
-                                let valid = match (&role, argument) {
+                                if source_arguments
+                                    && let Type::Meta { ty: carrier, .. } = &role
+                                    && let Some(verum_ast::ty::GenericArg::Const(expression)) = args.iter()
+                                        .filter(|argument| !matches!(argument, verum_ast::ty::GenericArg::Lifetime(_)))
+                                        .nth(index)
+                                    && let ExprKind::Literal(literal) = &expression.kind
+                                    && let verum_ast::literal::LiteralKind::Int(integer) = &literal.kind
+                                    && integer.suffix.is_none()
+                                    && let Some(value) = crate::value_parameter_domain::integer_literal_in_carrier(
+                                        integer.value, &self.normalize_type(carrier))
+                                {
+                                    *argument = value;
+                                }
+                                let valid = match (&role, &*argument) {
                                     (Type::Meta { ty: expected, .. }, Type::Meta { ty: actual, .. }) =>
                                         self.normalize_type(actual).base() == self.normalize_type(expected).base(),
                                     (Type::Meta { .. }, _) | (_, Type::Meta { .. }) => false,
@@ -1538,9 +1552,9 @@ fn substitute_refinement_binder(
                     // aliases and records. Declaration order includes unused
                     // parameters; scanning payload variables cannot recover it.
                     Type::Variant(_) => match parameter_key.as_ref() {
-                        Some(key) => self.substitute_with_params(
+                        Some(key) => self.instantiate_declared_type(
                             key.as_str(), &base_ty, &type_args,
-                        ),
+                        )?,
                         None if type_args.is_empty() => base_ty.clone(),
                         None => return Err(TypeError::OtherWithCodeSpanned {
                             code: "E407".into(),

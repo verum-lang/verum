@@ -15994,103 +15994,15 @@ impl TypeChecker {
         Ok(InferResult::new(Type::Record(field_types)))
     }
 
-    /// Expand Generic types like Maybe<T> and Result<T,E> to their variant form.
-    ///
-    /// Expand generic variant types to their variant form for pattern matching.
-    /// STDLIB-AGNOSTIC: Looks up type definitions from context, no hardcoded type names.
-    ///
-    /// Also handles references to generic types:
-    /// - &Maybe<T> expands to &(Some(T) | None)
-    ///
-    /// If the type is not a registered generic variant type, returns it unchanged.
-    /// ONE carrier for positional generic-argument substitution over a
-    /// variant's payloads (T0862). Four sources of parameter identity,
-    /// tried in order, all feeding one substitution map:
-    ///   1. the `__type_params_<Name>` registration (source-driven types);
-    ///   2. the unifier's alias param-name list (metadata aliases like
-    ///      `IoResult<T>` — registered by the alias loader, NEVER as
-    ///      `__type_params_`);
-    ///   3. free `Type::Var`s of the payloads, in id order;
-    ///   4. bare-`Named` placeholder names (`T`, `R`) in first-occurrence
-    ///      order (metadata-eager rigid placeholders).
-    ///
-    /// Before this carrier existed the machinery lived as THREE copies —
-    /// and the alias-chain copy was truncated (stages 3-4 missing, stage
-    /// 2 nowhere), so `match read_to_string(p) { Ok(t) => ... }` bound
-    /// `t` to the FORMAL `T` of `Result<T, StreamError>`: "no method
-    /// `lines` found for type `T`" on the first IO script a newcomer
-    /// writes (dog-food find #2).
+    /// Expand sum payloads using their declaring telescope, including value
+    /// and phantom parameters. Substitution failures propagate to the caller.
     fn substitute_variant_args_positionally(
         &self,
         variants: &indexmap::IndexMap<verum_common::Text, Type>,
         args: &verum_common::List<Type>,
         type_name: &str,
-    ) -> Type {
-        if args.is_empty() {
-            return Type::Variant(variants.clone());
-        }
-        let mut subst: indexmap::IndexMap<verum_common::Text, Type> =
-            indexmap::IndexMap::new();
-        // Stage 1: __type_params_<Name> (name + template-var pairs).
-        let type_params_key = format!("__type_params_{}", type_name);
-        if let Option::Some(Type::Record(params_map)) =
-            self.ctx.lookup_type(type_params_key.as_str())
-        {
-            for (i, (param_name, param_type)) in params_map.iter().enumerate() {
-                if let Some(arg) = args.get(i) {
-                    subst.insert(param_name.clone(), arg.clone());
-                    if let Type::Var(tv) = param_type {
-                        let var_key: verum_common::Text = format!("T{}", tv.id()).into();
-                        subst.insert(var_key, arg.clone());
-                    }
-                }
-            }
-        }
-        // Stage 2: alias param names from the unifier registry.
-        if let Some(param_names) = self.unifier.alias_param_names(type_name) {
-            for (i, name) in param_names.iter().enumerate() {
-                if let Some(arg) = args.get(i) {
-                    if !subst.contains_key(name) {
-                        subst.insert(name.clone(), arg.clone());
-                    }
-                }
-            }
-        }
-        // Stage 3: free TypeVars of the payloads, id order.
-        let variant_type_ref = Type::Variant(variants.clone());
-        let free_vars = variant_type_ref.free_vars();
-        let mut free_vars_sorted: Vec<TypeVar> = free_vars.into_iter().collect();
-        free_vars_sorted.sort_by_key(|tv| tv.id());
-        for (i, tv) in free_vars_sorted.iter().enumerate() {
-            if let Some(arg) = args.get(i) {
-                let var_key: verum_common::Text = format!("T{}", tv.id()).into();
-                if !subst.contains_key(&var_key) {
-                    subst.insert(var_key, arg.clone());
-                }
-            }
-        }
-        // Stage 4: bare-Named placeholder names, first-occurrence order.
-        let mut named_params_ordered: Vec<verum_common::Text> = Vec::new();
-        for payload_ty in variants.values() {
-            Self::collect_bare_named_param_names(payload_ty, &mut named_params_ordered);
-        }
-        for (i, name) in named_params_ordered.iter().enumerate() {
-            if let Some(arg) = args.get(i) {
-                if !subst.contains_key(name) {
-                    subst.insert(name.clone(), arg.clone());
-                }
-            }
-        }
-        if subst.is_empty() {
-            Type::Variant(variants.clone())
-        } else {
-            let mut substituted_variants = indexmap::IndexMap::new();
-            for (tag, payload_ty) in variants.iter() {
-                substituted_variants
-                    .insert(tag.clone(), self.substitute_type_params(payload_ty, &subst));
-            }
-            Type::Variant(substituted_variants)
-        }
+    ) -> Result<Type> {
+        self.instantiate_declared_type(type_name, &Type::Variant(variants.clone()), args)
     }
 
     /// Both applied nominal spellings share exact owner and parameter lookup.
@@ -16126,8 +16038,8 @@ impl TypeChecker {
         type_name: &str,
         args: &[Type],
         depth: usize,
-    ) -> Option<Type> {
-        let alias_ty = self.ctx.resolve_alias(type_name)?.clone();
+    ) -> Result<Option<Type>> {
+        let Some(alias_ty) = self.ctx.resolve_alias(type_name).cloned() else { return Ok(None); };
         let alias_head_same = match &alias_ty {
             Type::Named { path: ap, .. } => ap
                 .segments
@@ -16141,44 +16053,22 @@ impl TypeChecker {
             _ => false,
         };
         if alias_head_same {
-            return None;
+            return Ok(None);
         }
         // Substitute the INSTANCE's type args into the alias target before
         // recursing, so `MetaResult<Int>` reaches `Result<Int, MetaError>`
         // rather than leaving the formal `T` behind.
-        let substituted_alias = if !args.is_empty() {
-            let type_params_key = format!("__type_params_{}", type_name);
-            if let Option::Some(Type::Record(params_map)) =
-                self.ctx.lookup_type(type_params_key.as_str())
-            {
-                let mut subst: indexmap::IndexMap<verum_common::Text, Type> =
-                    indexmap::IndexMap::new();
-                for (i, (param_name, param_type)) in params_map.iter().enumerate() {
-                    if let Some(arg) = args.get(i) {
-                        subst.insert(param_name.clone(), arg.clone());
-                        if let Type::Var(tv) = param_type {
-                            let var_key: verum_common::Text = format!("T{}", tv.id()).into();
-                            subst.insert(var_key, arg.clone());
-                        }
-                    }
-                }
-                self.substitute_type_params(&alias_ty, &subst)
-            } else {
-                alias_ty
-            }
-        } else {
-            alias_ty
-        };
-        Some(self.expand_generic_to_variant_impl(&substituted_alias, depth + 1))
+        let substituted_alias = self.instantiate_declared_type(type_name, &alias_ty, args)?;
+        Ok(Some(self.expand_generic_to_variant_impl(&substituted_alias, depth + 1)?))
     }
 
-    pub(crate) fn expand_generic_to_variant(&self, ty: &Type) -> Type {
+    pub(crate) fn expand_generic_to_variant(&self, ty: &Type) -> Result<Type> {
         self.expand_generic_to_variant_impl(ty, 0)
     }
 
-    fn expand_generic_to_variant_impl(&self, ty: &Type, depth: usize) -> Type {
+    fn expand_generic_to_variant_impl(&self, ty: &Type, depth: usize) -> Result<Type> {
         if depth > 10 {
-            return ty.clone();
+            return Ok(ty.clone());
         }
         // Imported signatures can retain the declaring name even when the
         // archive registered only the leaf template. Patterns must select the
@@ -16194,7 +16084,7 @@ impl TypeChecker {
         {
             use crate::core_metadata::TypeDescriptorKind;
             if let Some(def @ Type::Variant(_)) = self.ctx.lookup_type(&key) {
-                return self.substitute_with_params(&key, def, args);
+                return self.instantiate_declared_type(&key, def, args);
             }
             if desc.source_declaration.is_none()
                 && !self.source_type_registration.completed.contains_key(&key)
@@ -16204,17 +16094,17 @@ impl TypeChecker {
                         let parameters = desc.generic_params.iter().zip(args.iter())
                             .map(|(param, arg)| (param.name.clone(), arg.clone()))
                             .collect();
-                        return Self::substitute_named_params_in_type(
+                        return Ok(Self::substitute_named_params_in_type(
                             &self.type_descriptor_to_type(desc), &parameters,
-                        );
+                        ));
                     }
                     TypeDescriptorKind::Alias { .. } => {}
                     // A record or opaque type cannot acquire another owner's cases.
-                    _ => return ty.clone(),
+                    _ => return Ok(ty.clone()),
                 }
             }
         }
-        match ty {
+        Ok(match ty {
             Type::Generic { name, args } => {
                 // INSTRUMENT (VERUM_TRACE_ALIASEXP): which arm this type
                 // takes, and whether either registry knows the name. A
@@ -16236,7 +16126,7 @@ impl TypeChecker {
                     if let Type::Variant(variants) = def_ty {
                         self.substitute_variant_args_positionally(
                             &variants, args, name.as_str(),
-                        )
+                        )?
                     } else {
                         // AN ALIAS LANDS HERE TOO (A157). This arm had no
                         // alias handling at all — neither on a non-variant
@@ -16248,7 +16138,7 @@ impl TypeChecker {
                         // `try_build_variant_from_constructors`, which has
                         // no constructors for an alias and hands the type
                         // back unchanged.
-                        match self.try_expand_through_alias(name.as_str(), args, depth) {
+                        match self.try_expand_through_alias(name.as_str(), args, depth)? {
                             Option::Some(expanded) => expanded,
                             Option::None => {
                                 // STDLIB-AGNOSTIC: Check inductive_constructors for variant types
@@ -16259,7 +16149,7 @@ impl TypeChecker {
                     }
                 } else {
                     // Same on the miss path, and for the same reason.
-                    match self.try_expand_through_alias(name.as_str(), args, depth) {
+                    match self.try_expand_through_alias(name.as_str(), args, depth)? {
                         Option::Some(expanded) => expanded,
                         Option::None => {
                             // Type not found in lookup, try inductive_constructors
@@ -16296,7 +16186,7 @@ impl TypeChecker {
                         if let Type::Variant(variants) = def_ty {
                             self.substitute_variant_args_positionally(
                                 &variants, args, type_name,
-                            )
+                            )?
                         } else {
                             // The lookup resolved to a non-Variant type. Check if it's a
                             // self-referential placeholder (type alias stores Named{self} in type_defs).
@@ -16316,7 +16206,7 @@ impl TypeChecker {
                                 false
                             };
                             if is_self_ref {
-                                match self.try_expand_through_alias(type_name, args, depth) {
+                                match self.try_expand_through_alias(type_name, args, depth)? {
                                     Option::Some(expanded) => expanded,
                                     Option::None => {
                                         // No usable alias - try inductive_constructors for
@@ -16334,7 +16224,7 @@ impl TypeChecker {
                                 // unchanged to preserve its actual type arguments.
                                 let resolved = def_ty.clone();
                                 let recursed =
-                                    self.expand_generic_to_variant_impl(&resolved, depth + 1);
+                                    self.expand_generic_to_variant_impl(&resolved, depth + 1)?;
                                 if let Type::Variant(variants) = &recursed {
                                     // Found a variant through the alias chain —
                                     // substitute the INSTANCE args through the one
@@ -16343,7 +16233,7 @@ impl TypeChecker {
                                     // IoResult<Text> kept the formal `T` — T0862).
                                     self.substitute_variant_args_positionally(
                                         variants, args, type_name,
-                                    )
+                                    )?
                                 } else {
                                     // Not a variant - return original type with actual args preserved
                                     ty.clone()
@@ -16373,7 +16263,7 @@ impl TypeChecker {
                         // Same helper the `is_self_ref` branch above uses, so the
                         // arg substitution through `__type_params_<name>` is the
                         // one carrier rather than a second copy.
-                        match self.try_expand_through_alias(type_name, args, depth) {
+                        match self.try_expand_through_alias(type_name, args, depth)? {
                             Option::Some(expanded) => expanded,
                             Option::None => {
                                 self.try_build_variant_from_constructors(type_name, args, ty)
@@ -16384,7 +16274,7 @@ impl TypeChecker {
             }
             // Handle references to generic types: &Maybe<T> -> &(Some(T) | None)
             Type::Reference { mutable, inner } => {
-                let expanded_inner = self.expand_generic_to_variant_impl(inner, depth + 1);
+                let expanded_inner = self.expand_generic_to_variant_impl(inner, depth + 1)?;
                 if matches!(&expanded_inner, Type::Variant(_)) {
                     Type::Reference {
                         mutable: *mutable,
@@ -16395,7 +16285,7 @@ impl TypeChecker {
                 }
             }
             Type::CheckedReference { mutable, inner } => {
-                let expanded_inner = self.expand_generic_to_variant_impl(inner, depth + 1);
+                let expanded_inner = self.expand_generic_to_variant_impl(inner, depth + 1)?;
                 if matches!(&expanded_inner, Type::Variant(_)) {
                     Type::CheckedReference {
                         mutable: *mutable,
@@ -16406,7 +16296,7 @@ impl TypeChecker {
                 }
             }
             Type::UnsafeReference { mutable, inner } => {
-                let expanded_inner = self.expand_generic_to_variant_impl(inner, depth + 1);
+                let expanded_inner = self.expand_generic_to_variant_impl(inner, depth + 1)?;
                 if matches!(&expanded_inner, Type::Variant(_)) {
                     Type::UnsafeReference {
                         mutable: *mutable,
@@ -16431,12 +16321,12 @@ impl TypeChecker {
                     resolved
                 } else {
                     // Recurse with the resolved type
-                    self.expand_generic_to_variant_impl(&resolved, depth + 1)
+                    self.expand_generic_to_variant_impl(&resolved, depth + 1)?
                 }
             }
             // Other types pass through unchanged
             _ => ty.clone(),
-        }
+        })
     }
 
     /// T0525 — the ONE module an explicit `mount` binds `name` from
@@ -19266,7 +19156,7 @@ impl TypeChecker {
         // first inside the protocol search (T0701: `LogLevel.severity`
         // is inherent; the protocol search found n=0 candidates while
         // the bucket lookup had already missed on the structural key).
-        let recv_ty = self.recover_union_receiver_nominal(recv_ty);
+        let recv_ty = self.recover_union_receiver_nominal(recv_ty)?;
 
         // Post-cascade DynProtocol resolution.
         //
@@ -20685,8 +20575,8 @@ impl TypeChecker {
     /// protocol search, which was the pre-lift consumer) and kept in
     /// `resolve_method_via_protocol_search` for its other callers.
     /// Idempotent: non-union receivers pass through untouched.
-    fn recover_union_receiver_nominal(&mut self, recv_ty: Type) -> Type {
-        match &recv_ty {
+    fn recover_union_receiver_nominal(&mut self, recv_ty: Type) -> Result<Type> {
+        Ok(match &recv_ty {
             Type::Variant(cases) if !cases.is_empty() => {
                 let mut common: Option<indexmap::IndexSet<Text>> = None;
                 for (case_name, _) in cases.iter() {
@@ -20870,7 +20760,7 @@ impl TypeChecker {
                             path: Self::text_to_path(&owner),
                             args: List::new(),
                         };
-                        let body = self.expand_generic_to_variant(&owner_nominal);
+                        let body = self.expand_generic_to_variant(&owner_nominal)?;
                         let mut var_order: Vec<crate::ty::TypeVar> = Vec::new();
                         let mut bound: std::collections::HashMap<
                             crate::ty::TypeVar,
@@ -20961,7 +20851,7 @@ impl TypeChecker {
                 }
             }
             _ => recv_ty,
-        }
+        })
     }
 
     fn resolve_method_via_protocol_search(
@@ -20986,7 +20876,7 @@ impl TypeChecker {
         // that nominal — restore it before the search. Unions whose
         // cases span several types (or unregistered cases) pass
         // through untouched.
-        let recv_ty = self.recover_union_receiver_nominal(recv_ty);
+        let recv_ty = self.recover_union_receiver_nominal(recv_ty)?;
         let method_name_str = method.name.as_str();
         let mut via_hkt_side_table = false;
         let dispatch_var: Option<TypeVar> = match &recv_ty {

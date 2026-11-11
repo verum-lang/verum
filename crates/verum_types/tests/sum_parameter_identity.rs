@@ -355,3 +355,98 @@ fn refused(value: demo.widths.Sized<8>) {}
         "the qualified declaration must refuse 8 using its own predicate: {errors:?}"
     );
 }
+
+const MIXED_SUM: &str = r#"
+public type Cell<N: meta USize> is { public value: Int };
+public type Envelope<N: meta USize, T> is | Data(Cell<N>, T);
+"#;
+
+#[test]
+fn mixed_sum_substitution_keeps_value_and_type_slots() {
+    let source = r#"
+mount demo.mixed.{Cell, Envelope};
+fn take_cell(value: Cell<4>) {}
+fn take_text(value: Text) {}
+fn inspect(value: Envelope<4, Text>) {
+    match value { Envelope.Data(cell, payload) => { take_cell(cell); take_text(payload); } };
+}
+"#;
+    let errors = check(source, &[("demo.mixed", MIXED_SUM)]);
+    assert!(errors.is_empty(), "{errors:?}");
+    let wrong = source.replace("take_cell(value: Cell<4>)", "take_cell(value: Cell<8>)");
+    let errors = check(&wrong, &[("demo.mixed", MIXED_SUM)]);
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("exact value index")),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn mixed_sum_constructor_checks_every_slot() {
+    let source = r#"
+mount demo.mixed.{Cell, Envelope};
+fn pack(cell: Cell<4>) -> Envelope<4, Text> { Envelope.Data(cell, "value") }
+"#;
+    let errors = check(source, &[("demo.mixed", MIXED_SUM)]);
+    assert!(errors.is_empty(), "{errors:?}");
+    let wrong = source.replace("pack(cell: Cell<4>)", "pack(cell: Cell<8>)");
+    let errors = check(&wrong, &[("demo.mixed", MIXED_SUM)]);
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("exact value index")),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn contextual_meta_literals_must_fit_the_declared_integer_sort() {
+    for (carrier, value, valid) in [
+        ("UInt8", "255", true),
+        ("UInt8", "256", false),
+        ("UInt64", "18446744073709551615", true),
+        ("UInt64", "18446744073709551616", false),
+        ("Int8", "127", true),
+        ("Int8", "128", false),
+        ("UInt8", "true", false),
+        ("UInt8", "-1", false),
+    ] {
+        let source = format!(
+            "type Indexed<N: meta {carrier}> is | Item(Int); fn accept(value: Indexed<{value}>) {{}}"
+        );
+        let errors = check(&source, &[]);
+        assert_eq!(errors.is_empty(), valid, "{source}: {errors:?}");
+    }
+}
+
+#[test]
+fn a_symbolic_meta_argument_cannot_change_scalar_sort() {
+    let source = r#"
+type Indexed<N: meta USize> is | Item(Int);
+fn refused<N: meta Int>(value: Indexed<N>) {}
+"#;
+    let errors = check(source, &[]);
+    assert!(
+        errors.iter().any(|error| error.contains("wrong kind")),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn an_unresolved_payload_type_cannot_hide_a_wrong_value_index() {
+    let source = r#"
+mount demo.mixed.{Cell, Envelope};
+fn pack<T>(cell: Cell<4>, value: T) -> Envelope<4, T> { Envelope.Data(cell, value) }
+"#;
+    assert!(check(source, &[("demo.mixed", MIXED_SUM)]).is_empty());
+    let wrong = source.replace("pack<T>(cell: Cell<4>", "pack<T>(cell: Cell<8>");
+    let errors = check(&wrong, &[("demo.mixed", MIXED_SUM)]);
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("exact value index")),
+        "{errors:?}"
+    );
+}

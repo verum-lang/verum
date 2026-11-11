@@ -4,6 +4,23 @@
 //! the exact normalized carrier sort; unknown inference values are not evidence.
 use crate::{refinement::RefinementPredicate, ty::{Type, ValueTerm}};
 
+/// An unsuffixed integer literal receives its scalar sort from the declared
+/// slot. This is elaboration of source syntax, never a cast of a typed value.
+/// Refinements are proved separately and are not copied onto the argument.
+pub(crate) fn integer_literal_in_carrier(value: i128, carrier: &Type) -> Option<Type> {
+    use verum_common::ConstValue;
+    let base = carrier.base();
+    let signed = ConstValue::Int(value);
+    let value = if constant_in_carrier(&signed, base) {
+        signed
+    } else {
+        let unsigned = ConstValue::UInt(u128::try_from(value).ok()?);
+        if !constant_in_carrier(&unsigned, base) { return None; }
+        unsigned
+    };
+    Some(Type::meta_value(value, base.clone()))
+}
+
 pub(crate) fn argument_satisfies_domain(
     parameter: &Type,
     argument: &Type,
