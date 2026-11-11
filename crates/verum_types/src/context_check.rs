@@ -521,6 +521,32 @@ pub struct ContextChecker {
 }
 
 impl ContextChecker {
+    /// Preserve lexical requirements while declarations and call-graph entries
+    /// discovered in the body remain in their registries.
+    pub(crate) fn enter_function_scope(&mut self) -> (usize, ContextSet) {
+        let mut depth = 0;
+        let mut scope = &self.env;
+        while let Some(parent) = scope.parent.as_deref() {
+            depth += 1;
+            scope = parent;
+        }
+        let required = std::mem::take(&mut self.required);
+        self.enter_scope();
+        (depth, required)
+    }
+
+    pub(crate) fn exit_function_scope(&mut self, saved: (usize, ContextSet)) {
+        let mut depth = 0;
+        let mut scope = &self.env;
+        while let Some(parent) = scope.parent.as_deref() {
+            depth += 1;
+            scope = parent;
+        }
+        assert!(depth > saved.0, "function escaped its context scope");
+        for _ in saved.0..depth { self.exit_scope(); }
+        self.required = saved.1;
+    }
+
     /// Lexical body state; dependency declarations remain registered.
     pub(crate) fn body_scope_snapshot(&self, name: &Text) -> (ContextEnv, ContextSet, Option<FunctionContextInfo>) {
         (self.env.clone(), self.required.clone(), self.function_registry.get(name).cloned())

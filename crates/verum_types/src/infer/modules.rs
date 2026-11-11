@@ -10607,7 +10607,7 @@ impl TypeChecker {
             checker.with_value_obligation_scope(true, |checker| {
                 checker.with_declared_universe_scope("function", &func.name.name, &func.generics, |checker| {
                     checker.validate_function_universes(func)?;
-                    checker.check_function_inner(func)
+                    checker.with_function_body_context(|checker| checker.check_function_inner(func))
                 })
             })
         });
@@ -10679,21 +10679,16 @@ impl TypeChecker {
     fn check_function_inner(&mut self, func: &verum_ast::FunctionDecl) -> Result<()> {
         let _global_guard = GlobalDepthGuard::enter()?;
 
-        // CRITICAL: Reset borrow tracker at the start of each function
-        // Borrows are function-scoped, so we must not carry state from previous functions
-        self.borrow_tracker = crate::aliasing::BorrowTracker::new();
 
         // ============================================================
         // Stage Checker Integration for N-level Staged Metaprogramming
         // Stage coherence: runtime code cannot depend on meta-only values, meta code cannot observe runtime state — Stage Coherence Rule
         // ============================================================
         // Save previous stage for restoration after function check
-        let prev_function_stage = self.current_function_stage;
         self.current_function_stage = func.stage_level;
 
         // Track @transparent attribute for quote hygiene checking
         // Quote hygiene: macro-generated code uses hygienic naming to prevent variable capture and scope pollution — Quote Hygiene
-        let prev_function_is_transparent = self.current_function_is_transparent;
         self.current_function_is_transparent = func.is_transparent;
 
         // Register function with StageChecker for cross-stage validation
@@ -11161,21 +11156,19 @@ impl TypeChecker {
         // Enter a new context scope for this function
         // This allows provide statements within the function to shadow outer provides
         // Context requirements: functions declare needed contexts with "using [Ctx1, Ctx2]" after return type, callers must provide all — Context scoping follows lexical scope
-        self.context_checker.enter_scope();
 
         // Enter a new affine tracker scope for this function
         // Each function has its own set of affine bindings - variables from outer scopes
         // are NOT accessible in inner functions (unless captured explicitly).
         // The new_scope() preserves which types are affine but clears variable bindings.
         // Spec: L0-critical/reference_system/value_transfer - Affine type safety
-        let mut new_affine_tracker = self.affine_tracker.new_scope();
         // The obligation is on values the function HOLDS, and it can
         // expire at any `return`, not only at the end of the body — so
         // the exemption has to be reachable from the expression walker.
         // It rides ON the tracker, which is swapped and restored as one
         // object, rather than in a second field a `?` exit could leave
         // out of step.
-        new_affine_tracker.set_linear_exempt(
+        self.affine_tracker.set_linear_exempt(
             func.params
                 .iter()
                 .filter_map(|p| match &p.kind {
@@ -11196,7 +11189,6 @@ impl TypeChecker {
                 })
                 .collect(),
         );
-        let prev_affine_tracker = std::mem::replace(&mut self.affine_tracker, new_affine_tracker);
 
         // AMBIGUITY-E404-1 (T0585): open this function's ambiguity
         // window — MARKER discipline, not take/replace: an early `?`
@@ -11850,31 +11842,26 @@ impl TypeChecker {
         // Build a ContextSet from the function's context requirements and
         // set it as the current function's available contexts. This enables
         // context satisfaction validation in function calls.
-        let prev_source_contexts = std::mem::replace(&mut self.current_source_contexts, func.contexts.iter().cloned().collect());
-        let prev_function_contexts = if let Some(ref req) = context_requirement {
+        self.current_source_contexts = func.contexts.iter().cloned().collect();
+        if let Some(ref req) = context_requirement {
             let mut context_set = ContextSet::new();
             for context_ref in req.iter() {
                 context_set.add(ContextRequirement::new(context_ref.name.clone(), func.span));
             }
             // Also set up the context checker's required contexts
             self.context_checker.set_required(context_set.clone());
-            self.current_function_contexts.replace(context_set)
+            self.current_function_contexts = Maybe::Some(context_set);
         } else {
             // No context requirements - clear the context checker's required contexts
             self.context_checker.set_required(ContextSet::new());
-            self.current_function_contexts.take()
+            self.current_function_contexts = Maybe::None;
         };
 
         // Set function context for ? operator checking
         // Save previous context (for nested functions)
-        let prev_return_type = self
-            .current_function_return_type
-            .replace(return_carrier);
-        let prev_name = self.current_function_name.replace(func.name.name.clone());
-        let prev_span = std::mem::replace(
-            &mut self.current_function_return_span,
-            func.return_type.as_ref().map(|rt| rt.span),
-        );
+        self.current_function_return_type = Maybe::Some(return_carrier);
+        self.current_function_name = Maybe::Some(func.name.name.clone());
+        self.current_function_return_span = func.return_type.as_ref().map(|rt| rt.span);
 
         // Set throws clause for throw expression validation
         let new_throws = if let Maybe::Some(ref throws_clause) = func.throws_clause {
@@ -11893,33 +11880,31 @@ impl TypeChecker {
         } else {
             Maybe::None
         };
-        let prev_throws = std::mem::replace(&mut self.current_function_throws, new_throws);
+        self.current_function_throws = new_throws;
 
         // Set up call tracking for negative context verification
         // Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.4 - Negative Contexts
-        let prev_call_sites = std::mem::replace(&mut self.current_function_call_sites, Map::new());
-        let prev_function_being_checked = self
-            .current_function_being_checked
-            .replace(func.name.name.clone());
+        self.current_function_call_sites.clear();
+        self.current_function_being_checked = Maybe::Some(func.name.name.clone());
 
         // Set up generator context for yield type checking
         // Concurrency model: structured concurrency with nurseries, async/await, channels, Send/Sync protocol bounds — Section 12 - Generator type inference
         // Grammar: grammar/verum.ebnf v2.10 - yield_expr = 'yield' , expression
-        let prev_generator_context = if func.is_generator {
+        self.generator_context = if func.is_generator {
             // For generators, the declared return type is the yield type
             // e.g., `fn* count() -> Int` yields Int values
-            self.generator_context.replace(GeneratorContext {
+            Maybe::Some(GeneratorContext {
                 yield_ty: initial_return_type.clone(),
                 return_ty: Type::unit(), // Generators finish with unit
             })
         } else {
-            self.generator_context.take()
+            Maybe::None
         };
 
         // Set async context for async functions
         // This enables validation that select expressions are only used in async contexts
         // Select expressions require async context: "select { ... }" only valid in async functions — Select expressions require async context
-        let prev_async_context = std::mem::replace(&mut self.in_async_context, func.is_async);
+        self.in_async_context = func.is_async;
 
         // ============================================================
         // E321: Check for unbounded recursion BEFORE body inference
@@ -12291,30 +12276,6 @@ impl TypeChecker {
             self.context_checker.register_function(func_info);
         }
 
-        // Restore previous function context
-        self.current_function_return_type = prev_return_type;
-        self.current_function_name = prev_name;
-        self.current_function_return_span = prev_span;
-        self.current_function_throws = prev_throws;
-        self.generator_context = prev_generator_context;
-        self.in_async_context = prev_async_context;
-        self.current_function_contexts = prev_function_contexts;
-        self.current_source_contexts = prev_source_contexts;
-        self.current_function_call_sites = prev_call_sites;
-        self.current_function_being_checked = prev_function_being_checked;
-
-        // Exit the context scope for this function
-        // This restores the outer context state
-        self.context_checker.exit_scope();
-
-        // Exit the stage checker function context if we were in a meta function
-        // and restore the previous function stage
-        if self.current_function_stage > 0 {
-            self.stage_checker.exit_function();
-        }
-        self.current_function_stage = prev_function_stage;
-        self.current_function_is_transparent = prev_function_is_transparent;
-
         // A `linear` binding is EXACTLY once, and the function body is the
         // scope its obligation is owed to: reaching the end with one
         // unconsumed is the error the modifier exists to raise. This is the
@@ -12336,9 +12297,6 @@ impl TypeChecker {
         // could not have.
         self.report_unmet_linear_obligations(func.span);
 
-        // Restore the outer affine tracker scope
-        // This ensures affine tracking is isolated per function
-        self.affine_tracker = prev_affine_tracker;
 
         // AMBIGUITY-E404-1 (T0585): judge this function's ambiguity
         // candidates now that the WHOLE body has constrained what it

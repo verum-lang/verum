@@ -1220,6 +1220,16 @@ impl BorrowTracker {
         self.closure_captures.remove(&closure_id)
     }
 
+    /// A rejected closure has no value that can retain captures. Keep capture
+    /// reservations belonging to other closures, including enclosing ones.
+    pub fn cancel_closure(&mut self, closure_id: RefId) {
+        self.exit_closure(closure_id);
+        self.captured_by.retain(|_, captures| {
+            captures.retain(|(owner, _)| *owner != closure_id);
+            !captures.is_empty()
+        });
+    }
+
     /// Release all captures made by closures at the current scope level.
     /// Called when exiting a scope to clean up closure captures.
     pub fn release_closure_captures_at_scope(&mut self, _scope_depth: usize) {
@@ -1525,6 +1535,22 @@ mod tests {
 
     fn dummy_span() -> Span {
         Span::new(0, 1, FileId::dummy())
+    }
+
+    #[test]
+    fn cancelling_a_nested_closure_keeps_other_capture_reservations() {
+        let mut tracker = BorrowTracker::new();
+        let outer = tracker.enter_closure(false);
+        tracker.register_capture(outer, "shared", None, CaptureMode::Borrow, dummy_span()).unwrap();
+        let inner = tracker.enter_closure(false);
+        tracker.register_capture(inner, "shared", None, CaptureMode::Borrow, dummy_span()).unwrap();
+        tracker.register_capture(inner, "only_inner", None, CaptureMode::Borrow, dummy_span()).unwrap();
+        tracker.cancel_closure(inner);
+        assert_eq!(tracker.current_closure_id(), Some(outer));
+        assert!(!tracker.is_captured("only_inner"));
+        tracker.exit_closure(outer);
+        assert!(tracker.is_captured("shared"));
+        assert!(!tracker.in_closure());
     }
 
     #[test]

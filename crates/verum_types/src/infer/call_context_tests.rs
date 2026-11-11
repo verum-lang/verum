@@ -205,3 +205,106 @@ fn valid_nested_blocks_preserve_permission_and_lexical_boundaries() {
         assert!(checker.ctx.env.lookup("hidden").is_none(), "{source}");
     }
 }
+
+#[test]
+fn failed_closures_restore_lexical_async_and_capture_state() {
+    for source in ["|hidden: Int| missing", "async |hidden: Int| missing"] {
+        for checking in [false, true] {
+            let (mut checker, _) = prepare("");
+            let depth = checker.ctx.env.scope_depth();
+            let expression = Parser::new(source).parse_expr().expect(source);
+            let result = if checking {
+                checker.check_expr(
+                    &expression,
+                    &crate::Type::function_with_async(
+                        vec![crate::Type::Int].into(),
+                        crate::Type::Int,
+                        true,
+                    ),
+                )
+            } else {
+                checker.synth_expr(&expression)
+            };
+            result.expect_err(source);
+            assert_eq!(
+                checker.ctx.env.scope_depth(),
+                depth,
+                "{source}, checking={checking}"
+            );
+            assert!(!checker.in_async_context, "{source}");
+            assert!(!checker.borrow_tracker.in_closure(), "{source}");
+            assert!(!checker.borrow_tracker.is_captured("missing"), "{source}");
+            assert!(checker.ctx.env.lookup("hidden").is_none(), "{source}");
+        }
+    }
+}
+
+#[test]
+fn closure_arguments_still_enforce_affine_moves_inside_their_bodies() {
+    let (mut checker, module) = prepare(
+        "type affine Parcel is {value: Int};
+         fn accept(f: fn(Parcel) -> (Parcel, Parcel)) {}
+         fn bad() {accept(|item| (item, item));}",
+    );
+    let errors = check_errors(&mut checker, module.items.last().unwrap());
+    assert!(
+        errors.iter().any(|error| error.contains("MovedValueUsed")),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn failed_function_bodies_restore_the_enclosing_context() {
+    let (mut checker, module) = prepare("async fn broken(hidden: Int) -> Int {missing}");
+    let depth = checker.ctx.env.scope_depth();
+    assert!(!check_errors(&mut checker, module.items.last().unwrap()).is_empty());
+    assert_eq!(checker.ctx.env.scope_depth(), depth);
+    assert!(!checker.in_async_context);
+    assert!(checker.current_function_name.is_none());
+    assert!(checker.current_function_return_type.is_none());
+    assert!(checker.ctx.env.lookup("hidden").is_none());
+}
+
+#[test]
+fn a_failed_local_function_does_not_discard_enclosing_affine_bindings() {
+    let (mut checker, module) = prepare(
+        "type affine Parcel is {value: Int};
+         fn bad(original: Parcel) {fn broken() -> Int {missing} (original, original);}",
+    );
+    let errors = check_errors(&mut checker, module.items.last().unwrap());
+    assert!(
+        errors.iter().any(|error| error.contains("MovedValueUsed")),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn valid_callable_scopes_preserve_their_own_and_enclosing_contracts() {
+    for source in [
+        "fn outer(value: Bool) -> Bool {fn nested() -> Int {1} value}",
+        "async fn outer() -> Int {fn nested() -> Int {1} (1).await}",
+        "fn main() {let f = async |value: Int| value.await;}",
+        "type affine Parcel is {value: Int}; fn accept(f: fn(Parcel) -> Parcel) {}
+         fn caller() {accept(|item| item);}",
+    ] {
+        let (mut checker, module) = prepare(source);
+        for item in &module.items {
+            let errors = check_errors(&mut checker, item);
+            assert!(errors.is_empty(), "{source}: {errors:?}");
+        }
+    }
+    for source in [
+        "async fn outer() {let f = |value: Int| value.await;}",
+        "fn main() {let f = |value: Int| value.await;}",
+        "fn outer() {async fn nested() -> Int {1} (1).await;}",
+    ] {
+        let (mut checker, module) = prepare(source);
+        let errors = check_errors(&mut checker, module.items.last().unwrap());
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("AsyncPropertyViolation")),
+            "{source}: {errors:?}"
+        );
+    }
+}

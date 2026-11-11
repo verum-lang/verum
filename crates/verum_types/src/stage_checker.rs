@@ -407,7 +407,31 @@ pub struct StageChecker {
     call_path: Vec<Text>,
 }
 
+pub(crate) struct StageBodyContext {
+    function: Option<Text>,
+    stage: u32,
+    stack: Vec<(Text, u32)>,
+    call_path: Vec<Text>,
+}
+
 impl StageChecker {
+    /// Move transient body state; the declaration registry is shared.
+    pub(crate) fn take_body_context(&mut self) -> StageBodyContext {
+        StageBodyContext {
+            function: self.current_function.take(),
+            stage: std::mem::take(&mut self.current_stage),
+            stack: std::mem::take(&mut self.function_stack),
+            call_path: std::mem::take(&mut self.call_path),
+        }
+    }
+
+    pub(crate) fn restore_body_context(&mut self, saved: StageBodyContext) {
+        self.current_function = saved.function;
+        self.current_stage = saved.stage;
+        self.function_stack = saved.stack;
+        self.call_path = saved.call_path;
+    }
+
     pub(crate) fn body_scope_snapshot(&self, name: &Text) -> (Option<Text>, u32, verum_common::List<(Text, u32)>, verum_common::List<Text>, Option<FunctionStageInfo>) {
         (self.current_function.clone(), self.current_stage, self.function_stack.clone().into(), self.call_path.clone().into(), self.functions.get(name).cloned())
     }
