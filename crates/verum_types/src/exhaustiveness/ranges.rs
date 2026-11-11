@@ -108,12 +108,12 @@ impl Interval {
         }
     }
 
-    /// Size of the interval (number of values)
-    pub fn size(&self) -> u128 {
+    /// Exact cardinality, or None for the full i128 domain (2^128 values).
+    pub fn size(&self) -> Option<u128> {
         if self.is_empty() {
-            0
+            Some(0)
         } else {
-            (self.end - self.start + 1) as u128
+            self.end.abs_diff(self.start).checked_add(1)
         }
     }
 }

@@ -1,7 +1,7 @@
 //! Exact scalar coverage, shared by checking and witness construction.
 use super::{Interval, IntervalSet, LiteralPattern, PatternColumn};
 
-const INT_BOUNDS: Interval = Interval {
+pub(super) const INT_BOUNDS: Interval = Interval {
     start: i64::MIN as i128,
     end: i64::MAX as i128,
 };
@@ -37,14 +37,20 @@ fn integer_coverage(pattern: &PatternColumn) -> IntervalSet {
     }
 }
 
-pub(super) fn uncovered_integer<'a>(
+pub(super) fn covered_integers<'a>(
     patterns: impl IntoIterator<Item = &'a PatternColumn>,
-) -> Option<i64> {
+) -> IntervalSet {
     let mut covered = IntervalSet::empty();
     for pattern in patterns {
         covered.union_with(&integer_coverage(pattern));
     }
     covered
+}
+
+pub(super) fn uncovered_integer<'a>(
+    patterns: impl IntoIterator<Item = &'a PatternColumn>,
+) -> Option<i64> {
+    covered_integers(patterns)
         .first_uncovered(INT_BOUNDS)
         .map(|value| i64::try_from(value).expect("an integer witness lies within the Int domain"))
 }

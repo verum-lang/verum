@@ -123,3 +123,38 @@ fn unconditional_coverage_remains_valid_with_conditional_arms() {
         }
     }
 }
+
+#[test]
+fn refined_matches_keep_their_declared_domain_in_both_directions() {
+    for checking in [false, true] {
+        let parameter = "value: Int{it >= 0 && it <= 100}";
+        let missing = errors(
+            "",
+            parameter,
+            "match value {_ if false => 99, 0 => 0, 50 => 1, 100 => 2}",
+            checking,
+        );
+        assert!(
+            missing.iter().any(|error| error.contains("E0601")),
+            "{missing:?}"
+        );
+        let complete = errors("", parameter, "match value {0..=100 => 1}", checking);
+        assert!(complete.is_empty(), "{complete:?}");
+        let unknown = errors(
+            "",
+            "value: Int{it % 2 == 0}",
+            "match value {0 => 1}",
+            checking,
+        );
+        assert!(
+            unknown
+                .iter()
+                .any(|error| error.contains("coverage is not established")),
+            "{unknown:?}"
+        );
+        assert!(
+            unknown.iter().all(|error| !error.contains("not covered")),
+            "{unknown:?}"
+        );
+    }
+}

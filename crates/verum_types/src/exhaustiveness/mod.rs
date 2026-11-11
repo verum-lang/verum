@@ -240,7 +240,9 @@ pub fn check_exhaustiveness_with_options<'a>(
     config: &ExhaustivenessConfig<'a>,
 ) -> Result<ExhaustivenessResult, TypeError> {
     // Handle empty patterns - always non-exhaustive (unless scrutinee is empty type)
-    if patterns.is_empty() {
+    if patterns.is_empty()
+        && !(config.use_refinement && matches!(scrutinee_ty, Type::Refined { .. }))
+    {
         let constructors = constructors::get_type_constructors(scrutinee_ty, env);
         if constructors.is_empty_type() {
             // Empty type (like `Never`) - no patterns needed
@@ -266,13 +268,6 @@ pub fn check_exhaustiveness_with_options<'a>(
 
     // Check if all patterns are guarded
     let all_guarded = matrix.rows.iter().all(|row| row.has_guard);
-
-    // Extract pattern columns for refinement checking
-    let pattern_columns: Vec<PatternColumn> = matrix
-        .rows
-        .iter()
-        .filter_map(|row| row.columns.first().cloned())
-        .collect();
 
     // Try SMT guard verification for all-guarded matches
     // This can prove exhaustiveness for cases like: n < 0, n == 0, n > 0
@@ -336,18 +331,13 @@ pub fn check_exhaustiveness_with_options<'a>(
 
     // Try refinement-aware exhaustiveness for refined types
     // This enables more precise analysis for types like `Int{x: x > 0}`
-    let uncovered = if config.use_refinement && matches!(scrutinee_ty, Type::Refined { .. }) {
-        let (is_exhaustive, witnesses) =
-            refinement::check_exhaustiveness_with_refinement(&pattern_columns, scrutinee_ty, env);
-        if is_exhaustive {
-            List::new()
+    let (is_exhaustive, uncovered) =
+        if config.use_refinement && matches!(scrutinee_ty, Type::Refined { .. }) {
+            refinement::check_exhaustiveness_with_refinement(&matrix, scrutinee_ty, env)?
         } else {
-            witnesses
-        }
-    } else {
-        // Standard exhaustiveness check
-        find_uncovered_cases(&matrix, scrutinee_ty, env)?
-    };
+            let uncovered = find_uncovered_cases(&matrix, scrutinee_ty, env)?;
+            (uncovered.is_empty(), uncovered)
+        };
 
     // Analyze range patterns for overlaps
     let range_analysis = analyze_range_patterns_in_matrix(&matrix);
@@ -394,8 +384,8 @@ pub fn check_exhaustiveness_with_options<'a>(
     };
 
     Ok(ExhaustivenessResult {
-        is_exhaustive: uncovered.is_empty(),
-        has_unverified_guards: !uncovered.is_empty() && matrix.rows.iter().any(|row| row.has_guard),
+        is_exhaustive,
+        has_unverified_guards: !is_exhaustive && matrix.rows.iter().any(|row| row.has_guard),
         uncovered_witnesses: uncovered,
         redundant_patterns: redundant,
         all_guarded,

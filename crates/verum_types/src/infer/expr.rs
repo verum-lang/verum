@@ -493,8 +493,12 @@ impl TypeChecker {
             carrier = inner;
         }
         let resolved = self.expand_scrut_deep(carrier, 3)?;
+        let mut coverage_carrier = &resolved;
+        while let Type::Refined { base, .. } = coverage_carrier {
+            coverage_carrier = base;
+        }
         if !matches!(
-            &resolved,
+            coverage_carrier,
             Type::Variant(_) | Type::Bool | Type::Int | Type::Float
         ) {
             return Ok(());
@@ -517,7 +521,7 @@ impl TypeChecker {
             .any(|arm| Self::pattern_has_complex_forms(&arm.pattern));
         let message = match crate::exhaustiveness::check_exhaustiveness(&patterns, &resolved, &self.ctx.env) {
             Ok(result) if result.is_exhaustive => return Ok(()),
-            Ok(result) if result.has_unverified_guards || complex => {
+            Ok(result) if result.has_unverified_guards || result.uncovered_witnesses.is_empty() || complex => {
                 "match coverage is not established; add an unconditional covering arm or simplify the patterns".to_string()
             }
             Ok(result) => format!("non-exhaustive patterns: `{}` not covered",

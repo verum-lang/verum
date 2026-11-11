@@ -27,11 +27,13 @@
 //! - `crate::ty::Type::Refined` for refinement type information
 //! - The main exhaustiveness checker for eliminating impossible constructors
 
-use super::constructors::{Constructor, get_type_constructors};
-use super::matrix::PatternColumn;
+use super::constructors::Constructor;
+use super::matrix::CoverageMatrix;
 use super::ranges::{Interval, IntervalSet};
 use super::witness::Witness;
+use crate::TypeError;
 use crate::context::TypeEnv;
+use crate::refinement::RefinementPredicate;
 use crate::ty::Type;
 use verum_ast::expr::{BinOp, Expr, ExprKind, UnOp};
 use verum_common::{List, Maybe, Text};
@@ -71,15 +73,17 @@ impl RefinementConstraint {
     /// Convert constraint to an interval set for numeric types
     pub fn to_interval_set(&self) -> IntervalSet {
         match self {
-            RefinementConstraint::GreaterThan(v) => {
-                IntervalSet::singleton(Interval::new(*v + 1, i128::MAX))
-            }
+            RefinementConstraint::GreaterThan(v) => v
+                .checked_add(1)
+                .map(|start| IntervalSet::singleton(Interval::new(start, i128::MAX)))
+                .unwrap_or_else(IntervalSet::empty),
             RefinementConstraint::GreaterOrEqual(v) => {
                 IntervalSet::singleton(Interval::new(*v, i128::MAX))
             }
-            RefinementConstraint::LessThan(v) => {
-                IntervalSet::singleton(Interval::new(i128::MIN, *v - 1))
-            }
+            RefinementConstraint::LessThan(v) => v
+                .checked_sub(1)
+                .map(|end| IntervalSet::singleton(Interval::new(i128::MIN, end)))
+                .unwrap_or_else(IntervalSet::empty),
             RefinementConstraint::LessOrEqual(v) => {
                 IntervalSet::singleton(Interval::new(i128::MIN, *v))
             }
@@ -91,14 +95,12 @@ impl RefinementConstraint {
                 // Intersection
                 let set_a = a.to_interval_set();
                 let set_b = b.to_interval_set();
-                intersect_interval_sets(&set_a, &set_b)
+                set_a.intersect(&set_b)
             }
             RefinementConstraint::Or(a, b) => {
                 // Union
                 let mut result = a.to_interval_set();
-                for interval in b.to_interval_set().iter() {
-                    result.add(*interval);
-                }
+                result.union_with(&b.to_interval_set());
                 result
             }
             RefinementConstraint::NotEqual(v) => {
@@ -165,56 +167,93 @@ impl RefinementConstraint {
 /// Extract refinement constraint from a refined type
 pub fn extract_refinement(ty: &Type) -> Option<RefinementConstraint> {
     match ty {
-        Type::Refined { base: _, predicate } => {
-            // The predicate field contains the expression we need
-            extract_constraint_from_expr(&predicate.predicate)
+        Type::Refined { base, predicate } => {
+            let outer = extract_constraint_from_expr(&predicate.predicate, predicate)?;
+            let inner = match base.as_ref() {
+                Type::Int => RefinementConstraint::True,
+                Type::Refined { .. } => extract_refinement(base)?,
+                _ => return None,
+            };
+            Some(inner.and(outer))
         }
         _ => None,
     }
 }
 
-/// Extract constraint from a predicate expression
-fn extract_constraint_from_expr(expr: &Expr) -> Option<RefinementConstraint> {
-    use verum_ast::literal::LiteralKind;
-
+fn is_subject(expr: &Expr, predicate: &RefinementPredicate) -> bool {
     match &expr.kind {
-        ExprKind::Binary { op, left, right } => {
-            // Handle comparison operators
-            let rhs_value = extract_int_literal(right);
+        ExprKind::Path(path) => path
+            .as_ident()
+            .is_some_and(|name| predicate.binds_subject(name.as_str())),
+        ExprKind::Paren(inner) => is_subject(inner, predicate),
+        _ => false,
+    }
+}
 
+/// Lower only comparisons whose operand is this predicate's actual subject.
+/// Reject an unsupported expression as a whole: under negation, replacing an
+/// unknown subexpression by True or False would unsoundly narrow the domain.
+fn extract_constraint_from_expr(
+    expr: &Expr,
+    predicate: &RefinementPredicate,
+) -> Option<RefinementConstraint> {
+    use verum_ast::literal::LiteralKind;
+    match &expr.kind {
+        ExprKind::Binary {
+            op: BinOp::And,
+            left,
+            right,
+        } => Some(
+            extract_constraint_from_expr(left, predicate)?
+                .and(extract_constraint_from_expr(right, predicate)?),
+        ),
+        ExprKind::Binary {
+            op: BinOp::Or,
+            left,
+            right,
+        } => Some(
+            extract_constraint_from_expr(left, predicate)?
+                .or(extract_constraint_from_expr(right, predicate)?),
+        ),
+        ExprKind::Binary { op, left, right } => {
+            let (op, value) = if is_subject(left, predicate) {
+                (*op, extract_int_literal(right)?)
+            } else if is_subject(right, predicate) {
+                let reversed = match op {
+                    BinOp::Lt => BinOp::Gt,
+                    BinOp::Le => BinOp::Ge,
+                    BinOp::Gt => BinOp::Lt,
+                    BinOp::Ge => BinOp::Le,
+                    BinOp::Eq => BinOp::Eq,
+                    BinOp::Ne => BinOp::Ne,
+                    _ => return None,
+                };
+                (reversed, extract_int_literal(left)?)
+            } else {
+                return None;
+            };
             match op {
-                BinOp::Lt => rhs_value.map(RefinementConstraint::LessThan),
-                BinOp::Le => rhs_value.map(RefinementConstraint::LessOrEqual),
-                BinOp::Gt => rhs_value.map(RefinementConstraint::GreaterThan),
-                BinOp::Ge => rhs_value.map(RefinementConstraint::GreaterOrEqual),
-                BinOp::Eq => rhs_value.map(RefinementConstraint::Equal),
-                BinOp::Ne => rhs_value.map(RefinementConstraint::NotEqual),
-                BinOp::And => {
-                    let l = extract_constraint_from_expr(left)?;
-                    let r = extract_constraint_from_expr(right)?;
-                    Some(l.and(r))
-                }
-                BinOp::Or => {
-                    let l = extract_constraint_from_expr(left)?;
-                    let r = extract_constraint_from_expr(right)?;
-                    Some(l.or(r))
-                }
+                BinOp::Lt => Some(RefinementConstraint::LessThan(value)),
+                BinOp::Le => Some(RefinementConstraint::LessOrEqual(value)),
+                BinOp::Gt => Some(RefinementConstraint::GreaterThan(value)),
+                BinOp::Ge => Some(RefinementConstraint::GreaterOrEqual(value)),
+                BinOp::Eq => Some(RefinementConstraint::Equal(value)),
+                BinOp::Ne => Some(RefinementConstraint::NotEqual(value)),
                 _ => None,
             }
         }
-        ExprKind::Unary { op, expr: inner } => match op {
-            UnOp::Not => {
-                let c = extract_constraint_from_expr(inner)?;
-                Some(RefinementConstraint::Not(Box::new(c)))
-            }
-            _ => None,
-        },
+        ExprKind::Unary {
+            op: UnOp::Not,
+            expr: inner,
+        } => Some(RefinementConstraint::Not(Box::new(
+            extract_constraint_from_expr(inner, predicate)?,
+        ))),
         ExprKind::Literal(lit) => match &lit.kind {
             LiteralKind::Bool(true) => Some(RefinementConstraint::True),
             LiteralKind::Bool(false) => Some(RefinementConstraint::False),
             _ => None,
         },
-        ExprKind::Paren(inner) => extract_constraint_from_expr(inner),
+        ExprKind::Paren(inner) => extract_constraint_from_expr(inner, predicate),
         _ => None,
     }
 }
@@ -230,7 +269,7 @@ fn extract_int_literal(expr: &Expr) -> Option<i128> {
         },
         ExprKind::Paren(inner) => extract_int_literal(inner),
         ExprKind::Unary { op, expr: inner } => match op {
-            UnOp::Neg => extract_int_literal(inner).map(|n| -n),
+            UnOp::Neg => extract_int_literal(inner).and_then(i128::checked_neg),
             _ => None,
         },
         _ => None,
@@ -249,7 +288,9 @@ impl RefinementContext {
     /// Create a new refinement context from a type
     pub fn from_type(ty: &Type) -> Option<Self> {
         let constraint = extract_refinement(ty)?;
-        let valid_intervals = constraint.to_interval_set();
+        let valid_intervals = constraint
+            .to_interval_set()
+            .intersect(&IntervalSet::singleton(super::scalar::INT_BOUNDS));
         Some(Self {
             constraint,
             valid_intervals,
@@ -289,221 +330,44 @@ impl RefinementContext {
 
     /// Generate a witness that satisfies the refinement
     pub fn generate_valid_witness(&self) -> Option<Witness> {
-        // For numeric refinements, find a value in the valid interval
-        if let Some(interval) = self.valid_intervals.iter().next() {
-            // Prefer small positive values
-            if interval.contains(0) {
-                return Some(Witness::Literal(super::witness::WitnessLiteral::Int(0)));
-            }
-            if interval.contains(1) {
-                return Some(Witness::Literal(super::witness::WitnessLiteral::Int(1)));
-            }
-            // Use the start of the first interval
-            return Some(Witness::Literal(super::witness::WitnessLiteral::Int(
-                interval.start as i64,
-            )));
-        }
-        None
+        self.valid_intervals.iter().next().map(|interval| {
+            Witness::int(
+                i64::try_from(interval.start).expect("refinement is clipped to its Int carrier"),
+            )
+        })
     }
 }
 
-/// Check if patterns are exhaustive with refinement awareness
+/// Exact coverage for the supported integer predicate fragment. For an
+/// unsupported predicate, only coverage of the entire base type establishes
+/// success; a base-type gap is not necessarily inhabited by the refinement.
 pub fn check_exhaustiveness_with_refinement(
-    patterns: &[PatternColumn],
+    matrix: &CoverageMatrix,
     scrutinee_ty: &Type,
     env: &TypeEnv,
-) -> (bool, List<Witness>) {
-    // Get refinement context if available
-    let refinement_ctx = RefinementContext::from_type(scrutinee_ty);
-
-    // Get constructors for the base type
-    let base_ty = match scrutinee_ty {
-        Type::Refined { base, .. } => base.as_ref(),
-        _ => scrutinee_ty,
+) -> Result<(bool, List<Witness>), TypeError> {
+    let Some(context) = RefinementContext::from_type(scrutinee_ty) else {
+        let mut base = scrutinee_ty;
+        while let Type::Refined { base: inner, .. } = base {
+            base = inner;
+        }
+        let uncovered = super::find_uncovered_cases(matrix, base, env)?;
+        return Ok((uncovered.is_empty(), List::new()));
     };
-
-    let all_ctors = get_type_constructors(base_ty, env);
-
-    // Filter constructors based on refinement
-    let possible_ctors: List<Constructor> = match &refinement_ctx {
-        Some(ctx) => ctx.filter_constructors(&all_ctors),
-        None => all_ctors.iter().cloned().collect(),
-    };
-
-    // Check if all possible constructors are covered
-    let mut uncovered = List::new();
-
-    for ctor in possible_ctors.iter() {
-        let covered = patterns
+    let covered = super::scalar::covered_integers(
+        matrix
+            .rows
             .iter()
-            .any(|p| pattern_covers_constructor(p, &ctor.name));
-        if !covered {
-            // Generate witness
-            let witness = Witness::Constructor {
-                name: ctor.name.clone(),
-                args: List::new(),
-            };
-            uncovered.push(witness);
-        }
-    }
-
-    // For numeric types with refinements, check literal coverage
-    if let Some(ctx) = &refinement_ctx {
-        if is_numeric_type(base_ty) {
-            // Check if patterns cover all values in the refined range
-            let covered_values = extract_covered_values(patterns);
-            for interval in ctx.valid_intervals().iter() {
-                // Check a few sample values
-                for v in sample_interval(interval) {
-                    if !value_is_covered(&covered_values, v) {
-                        uncovered.push(Witness::Literal(super::witness::WitnessLiteral::Int(
-                            v as i64,
-                        )));
-                        break;
-                    }
-                }
-            }
-        }
-    }
-
-    (uncovered.is_empty(), uncovered)
-}
-
-/// Check if a pattern covers a constructor
-fn pattern_covers_constructor(pattern: &PatternColumn, name: &Text) -> bool {
-    match pattern {
-        PatternColumn::Wildcard => true,
-        PatternColumn::Constructor { name: pname, .. } => pname == name,
-        PatternColumn::Or(alts) => alts.iter().any(|a| pattern_covers_constructor(a, name)),
-        PatternColumn::Guarded(inner) => pattern_covers_constructor(inner, name),
-        _ => false,
-    }
-}
-
-/// Check if a type is numeric
-fn is_numeric_type(ty: &Type) -> bool {
-    matches!(ty, Type::Int | Type::Float)
-}
-
-/// Extract covered integer values from patterns
-fn extract_covered_values(patterns: &[PatternColumn]) -> CoveredValues {
-    let mut result = CoveredValues::new();
-
-    for pattern in patterns {
-        match pattern {
-            PatternColumn::Wildcard => {
-                result.covers_all = true;
-            }
-            PatternColumn::Literal(super::matrix::LiteralPattern::Int(n)) => {
-                result.literals.push(*n as i128);
-            }
-            PatternColumn::Range {
-                start,
-                end,
-                inclusive,
-            } => {
-                let s = start.unwrap_or(i128::MIN);
-                let e = if *inclusive {
-                    end.unwrap_or(i128::MAX)
-                } else {
-                    end.map(|v| v - 1).unwrap_or(i128::MAX)
-                };
-                result.ranges.push((s, e));
-            }
-            PatternColumn::Or(alts) => {
-                let inner = extract_covered_values(alts);
-                result.merge(&inner);
-            }
-            _ => {}
-        }
-    }
-
-    result
-}
-
-/// Representation of covered values
-struct CoveredValues {
-    covers_all: bool,
-    literals: Vec<i128>,
-    ranges: Vec<(i128, i128)>,
-}
-
-impl CoveredValues {
-    fn new() -> Self {
-        Self {
-            covers_all: false,
-            literals: Vec::new(),
-            ranges: Vec::new(),
-        }
-    }
-
-    fn merge(&mut self, other: &CoveredValues) {
-        if other.covers_all {
-            self.covers_all = true;
-        }
-        self.literals.extend(other.literals.iter());
-        self.ranges.extend(other.ranges.iter());
-    }
-}
-
-/// Check if a value is covered
-fn value_is_covered(covered: &CoveredValues, value: i128) -> bool {
-    if covered.covers_all {
-        return true;
-    }
-    if covered.literals.contains(&value) {
-        return true;
-    }
-    for (start, end) in &covered.ranges {
-        if value >= *start && value <= *end {
-            return true;
-        }
-    }
-    false
-}
-
-/// Sample values from an interval for checking
-fn sample_interval(interval: &Interval) -> Vec<i128> {
-    let mut samples = Vec::new();
-
-    // Always include boundaries
-    samples.push(interval.start);
-    samples.push(interval.end);
-
-    // Include 0 if in range
-    if interval.contains(0) {
-        samples.push(0);
-    }
-
-    // Include midpoint for large intervals
-    if interval.size() > 10 {
-        let mid = (interval.start + interval.end) / 2;
-        samples.push(mid);
-    }
-
-    // Limit to first few values for small intervals
-    if interval.size() <= 10 {
-        for i in interval.start..=interval.end {
-            samples.push(i);
-        }
-    }
-
-    samples
-}
-
-/// Intersect two interval sets
-fn intersect_interval_sets(a: &IntervalSet, b: &IntervalSet) -> IntervalSet {
-    let mut result = IntervalSet::empty();
-
-    for interval_a in a.iter() {
-        for interval_b in b.iter() {
-            if let Some(intersection) = interval_a.intersect(interval_b) {
-                result.add(intersection);
-            }
-        }
-    }
-
-    result
+            .filter(|row| !row.has_guard)
+            .filter_map(|row| row.columns.first()),
+    );
+    let uncovered: List<_> = context
+        .valid_intervals()
+        .iter()
+        .filter_map(|bounds| covered.first_uncovered(*bounds))
+        .map(|value| Witness::int(i64::try_from(value).expect("refinement witness lies in Int")))
+        .collect();
+    Ok((uncovered.is_empty(), uncovered))
 }
 
 #[cfg(test)]
