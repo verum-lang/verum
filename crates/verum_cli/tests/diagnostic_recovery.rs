@@ -72,3 +72,44 @@ fn invalid_blocks_do_not_authorize_later_source() {
     );
     check("fn valid() {async {async {1}; (1).await};}", true, &[]);
 }
+
+#[test]
+fn callable_bodies_preserve_ownership_and_async_boundaries() {
+    check(
+        "fn accept(f: fn(Parcel) -> (Parcel, Parcel)) {}
+         fn bad() {accept(|item| (item, item));}",
+        false,
+        &["E310", "used after move"],
+    );
+    check(
+        "fn bad(original: Parcel) {fn broken() -> Int {missing} (original, original);}",
+        false,
+        &["E100", "E310"],
+    );
+    check(
+        "fn bad() {async |value: Int| missing; (1).await;}",
+        false,
+        &["E100", "async context"],
+    );
+    check(
+        "fn accept(f: fn(Parcel) -> Parcel) {}
+         fn valid() {accept(|item| item);}",
+        true,
+        &[],
+    );
+}
+
+#[test]
+fn annotated_closure_bindings_use_subtyping_without_discarding_results() {
+    check(
+        "fn valid() -> Int {let base = 10; let f: fn(Int) -> Int = |x| x + base; f(5)}",
+        true,
+        &[],
+    );
+    check("fn bad() {let f: fn() = || -> Int {1};}", false, &["E400"]);
+    check(
+        "fn bad() {let f: fn(Int) -> Bool = |x| -> Int {x};}",
+        false,
+        &["E400"],
+    );
+}
