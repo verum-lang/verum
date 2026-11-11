@@ -105,6 +105,19 @@ pub(super) enum FieldUse {
     Operand,
 }
 
+/// A resolved callable and the premises attached to its fresh parameters.
+struct PreparedCall {
+    callable: Type,
+    callee_name: Maybe<Text>,
+    protocol_bounds: Map<TypeVar, List<crate::protocol::ProtocolBound>>,
+    type_bounds: Map<TypeVar, List<Type>>,
+}
+
+enum CallPreparation {
+    Inferred(InferResult),
+    Apply(PreparedCall),
+}
+
 impl TypeChecker {
     pub(super) fn synth_field_use(&mut self, expr: &Expr, usage: FieldUse) -> Result<InferResult> {
         let mut field = expr;
@@ -570,78 +583,7 @@ impl TypeChecker {
 
             // Design: Uses STRUCTURAL matching based on variant keys (Ok/Err, Some/None)
             // rather than hardcoded type names. This is stdlib-agnostic.
-            TryBlock(inner_block) => {
-                // #[cfg(debug_assertions)]
-                // eprintln!("[DEBUG check_expr_inner TryBlock] expected={}, span={:?}", expected, expr.span);
-
-                // Extract the success type from expected type using STRUCTURAL matching
-                // Checks for Ok/Err or Some/None variant structure, not type names
-                let (success_expected, error_expected) = self.extract_try_output_types(expected);
-
-                // #[cfg(debug_assertions)]
-                // eprintln!("[DEBUG check_expr_inner TryBlock] success_expected={}, error_expected={}", success_expected, error_expected);
-
-                // Find error type from ? operators inside the block
-                let error_from_operators = self
-                    .find_try_operator_error_type(inner_block)
-                    .unwrap_or_else(|| Type::Never);
-
-                // Unify error types if both are known
-                if error_expected != Type::Never && error_from_operators != Type::Never {
-                    let _ = self
-                        .unifier
-                        .unify(&error_from_operators, &error_expected, expr.span);
-                }
-                let error_type = if error_expected != Type::Never {
-                    error_expected
-                } else {
-                    error_from_operators
-                };
-
-                // Temporarily set function return type to Result<T, E> so that
-                // the ? operator inside the try block passes type checking.
-                // Without this, ? checks the enclosing function's return type (e.g. Int)
-                // and emits E0205.
-                let saved_return_type = self.current_function_return_type.clone();
-                self.current_function_return_type = Maybe::Some(expected.clone());
-
-                // Check if inner block already produces a Try-compatible type
-                // First synthesize to see what type the block naturally produces
-                let block_result = self.synth_expr(inner_block)?;
-
-                // Restore original function return type
-                self.current_function_return_type = saved_return_type;
-                let block_ty = &block_result.ty;
-
-                // Resolve type variables to get the actual structure
-                let resolved_block_ty = self.unifier.apply(block_ty);
-
-                // Detect if block already returns a Try-compatible type using STRUCTURAL matching
-                // A type is Try-compatible if it has Ok/Err or Some/None variant structure
-                let already_try_type = self.is_try_compatible_type(&resolved_block_ty);
-
-                // #[cfg(debug_assertions)]
-                // eprintln!("[DEBUG check_expr_inner TryBlock] block_ty={}, resolved={}, already_try_type={}",
-                // block_ty, resolved_block_ty, already_try_type);
-
-                if already_try_type {
-                    // Block already returns Try-compatible type, unify directly with expected
-                    // #[cfg(debug_assertions)]
-                    // eprintln!("[DEBUG check_expr_inner TryBlock] unifying resolved_block_ty={} with expected={}", resolved_block_ty, expected);
-                    self.unifier
-                        .unify(&resolved_block_ty, expected, expr.span)?;
-                    Ok(InferResult::new(expected.clone()))
-                } else {
-                    // Block returns non-Try type, wrap in success variant
-                    // Use the expected type's structure to construct the wrapper
-                    let wrapped_type =
-                        self.wrap_in_success_type(&resolved_block_ty, expected, error_type);
-                    // #[cfg(debug_assertions)]
-                    // eprintln!("[DEBUG check_expr_inner TryBlock] wrapping: wrapped_type={}, expected={}", wrapped_type, expected);
-                    self.unifier.unify(&wrapped_type, expected, expr.span)?;
-                    Ok(InferResult::new(expected.clone()))
-                }
-            }
+            TryBlock(inner_block) => self.check_try_block_expr(expr, expected, inner_block),
 
             // Record literal with expected type - enables bidirectional inference for generics
             // e.g., `Box { value: 42 }` with expected type `Box<Int>` should infer T = Int
@@ -651,561 +593,34 @@ impl TypeChecker {
             // Unification: Robinson's algorithm extended with row polymorphism, refinement subtyping, and type class constraints — .5.1 - Meta Parameters
             // When expected is [T; N], check each element against T instead of synthesizing
             // This enables: `let bytes: [Byte; 8] = [0x01, 0x02, ...]` with coercion
-            Array(arr_expr) => {
-                // Extract element type from expected type
-                if let Some((expected_elem, expected_size)) = expected.sequence_domain() {
-                    match arr_expr {
-                        verum_ast::expr::ArrayExpr::List(exprs) => {
-                            // Check size matches if both are known
-                            if let Some(expected_n) = expected_size {
-                                if expected_n != exprs.len() {
-                                    return Err(TypeError::Mismatch {
-                                        expected: format!("[_; {}]", expected_n).into(),
-                                        actual: format!("[_; {}]", exprs.len()).into(),
-                                        span: expr.span,
-                                    });
-                                }
-                            }
-
-                            // Check each element against expected element type
-                            // This enables numeric literal coercion (Int -> Byte, etc.)
-                            for elem in exprs {
-                                self.check_expr(elem, expected_elem)?;
-                            }
-
-                            Ok(InferResult::new(expected.clone()))
-                        }
-                        verum_ast::expr::ArrayExpr::Repeat { value, count } => {
-                            // Check value against expected element type
-                            self.check_expr(value, expected_elem)?;
-
-                            // Count must be Int
-                            let count_result = self.synth_expr(count)?;
-                            self.unifier
-                                .unify(&count_result.ty, &Type::int(), count.span)?;
-
-                            if let Some(expected_size) = expected_size
-                                && self.checked_array_length(count)? != Some(expected_size)
-                            {
-                                return Err(TypeError::OtherWithCodeSpanned {
-                                    code: "E405".into(),
-                                    msg: format!("array repeat must produce exactly {expected_size} elements").into(),
-                                    span: count.span,
-                                });
-                            }
-                            Ok(InferResult::new(expected.clone()))
-                        }
-                    }
-                } else {
-                    // Check if expected is a collection type with an element type
-                    // (e.g., List<T>, Set<T>, or any single-arg generic collection)
-                    let list_elem = match expected {
-                        Type::Generic { args, .. } if args.len() == 1 => Some(&args[0]),
-                        Type::Named { args, .. } if args.len() == 1 => Some(&args[0]),
-                        _ => None,
-                    };
-                    if let Some(expected_elem) = list_elem {
-                        // Expected is List<T>, check each element against T
-                        match arr_expr {
-                            verum_ast::expr::ArrayExpr::List(exprs) => {
-                                for elem in exprs {
-                                    self.check_expr(elem, expected_elem)?;
-                                }
-                                Ok(InferResult::new(expected.clone()))
-                            }
-                            verum_ast::expr::ArrayExpr::Repeat { value, count } => {
-                                self.check_expr(value, expected_elem)?;
-                                let count_result = self.synth_expr(count)?;
-                                self.unifier
-                                    .unify(&count_result.ty, &Type::int(), count.span)?;
-                                Ok(InferResult::new(expected.clone()))
-                            }
-                        }
-                    } else {
-                        // Expected is not an array or List type, fall back to synthesis
-                        self.synth_and_check(expr, expected)
-                    }
-                }
-            }
+            Array(arr_expr) => self.check_array_expr(expr, expected, arr_expr),
 
             // Bare variant path with expected variant type (e.g., `None` when return type is `Maybe<Int>`):
             // When the expected type is a variant and the expression is a bare path matching
             // one of its unit variants, resolve to the expected type directly.
             // This prevents collisions with other types that have the same variant name.
-            Path(path) if path.segments.len() == 1 => {
-                let name = match path.segments.first() {
-                    Some(verum_ast::ty::PathSegment::Name(id)) => id.name.as_str(),
-                    _ => "",
-                };
-                // First resolve the expected type through any type variables
-                let resolved_expected = self.unifier.apply(expected);
-                let expanded_expected = self.expand_generic_to_variant(&resolved_expected)?;
-                if let Type::Variant(ref variants) = expanded_expected {
-                    if let Some(payload_ty) = variants.get(name) {
-                        if matches!(payload_ty, Type::Unit) {
-                            // Unit variant (e.g., None) matches expected variant type
-                            return Ok(InferResult::new(expected.clone()));
-                        }
-                    }
-                }
-                // ── T1234 pole B — THE EXPECTED TYPE IS THE ONLY JUDGE ──
-                // `fn take(f: fn(Int) -> Alpha)` called as `take(Wrap)`,
-                // where Alpha AND Beta both declare `Wrap` with a
-                // payload.  Nothing else can separate them: both are
-                // declared in the file being checked, so the horizon
-                // holds both; both take one argument, so arity holds
-                // both; and the synth path is handed no expected type at
-                // all, so it answered with whichever registration
-                // happened last.
-                //
-                // The first attempt here asked for a PARENT NAME and fed
-                // it to the resolver's #47 hint.  It never fired, and the
-                // trace said why: the expected return type arrives
-                // already EXPANDED —
-                //   `Variant({Wrap: Int, Other: Unit})`, not `Named(Alpha)`
-                // — and `expected_parent_head` reads only Named/Generic.
-                // That is the SAME defect as this task's other half, one
-                // level up: a head-extraction defeated by a type in
-                // expanded form.
-                //
-                // So do not ask for the parent at all.  The expected type
-                // already carries the answer: if it is a one-parameter
-                // function whose return is a Variant owning `name` with a
-                // payload, then the bare ctor used here IS a function of
-                // exactly that type.  Nothing is guessed and no registry
-                // order is consulted.
-                //
-                // AMBIENT LOSES TO EXPLICIT (name-resolution.md, and the
-                // rule T1034 states for the resolver): a name the author
-                // bound in a nested scope is theirs.  `lookup_in_root_only`
-                // is the canonical predicate for "module-level item rather
-                // than function-local binding"; when the two lookups
-                // disagree the binding is local and this arm stands down.
-                let locally_shadowed = {
-                    let any = self.ctx.env.lookup(name);
-                    let root = self.ctx.env.lookup_in_root_only(name);
-                    match (any, root) {
-                        (Some(a), Some(r)) => !std::ptr::eq(a, r),
-                        (Some(_), None) => true,
-                        _ => false,
-                    }
-                };
-                let ctor_registered = self
-                    .variant_constructor_parents
-                    .contains_key(&Text::from(name));
-                if let Type::Function { params, return_type, .. } =
-                    &resolved_expected
-                    && params.len() == 1
-                    && !locally_shadowed
-                    && ctor_registered
-                {
-                    let ret = self.expand_generic_to_variant(return_type)?;
-                    if let Type::Variant(vs) = &ret
-                        && let Some(payload) = vs.get(name)
-                        && !matches!(payload, Type::Unit)
-                        && let Some(param0) = params.first()
-                    {
-                        // Still UNIFY the payload against the expected
-                        // parameter: the expectation says the ctor is
-                        // usable at this type, and a genuine mismatch
-                        // must still be reported rather than waved
-                        // through by having named the right variant.
-                        let payload = payload.clone();
-                        let param0 = param0.clone();
-                        let taken = resolved_expected.clone();
-                        self.unifier.unify(&payload, &param0, expr.span)?;
-                        if crate::ctor_trace_enabled() {
-                            eprintln!(
-                                "[ctor-trace]   T1234 poleB: '{}' taken from the \
-                                 EXPECTED type => {:?}",
-                                name, taken
-                            );
-                        }
-                        return Ok(InferResult::new(taken));
-                    }
-                }
-                if crate::ctor_trace_enabled() {
-                    eprintln!(
-                        "[ctor-trace]   T1234 poleB: '{}' NOT taken \
-                         (locally_shadowed={} ctor_registered={} expected={:?})",
-                        name, locally_shadowed, ctor_registered, resolved_expected
-                    );
-                }
-                // Not a matching unit variant — fall through to synth_and_check
-                self.synth_and_check(expr, expected)
-            }
+            Path(path) if path.segments.len() == 1 => self.check_single_path_expr(expr, expected, path),
 
             // Try/recover with expected type: propagate expected type to both try block
             // and recover arm bodies. This enables bidirectional resolution for `None`/`Some`
             // in try { Some(r) } recover { ... => None } with expected Maybe<T>.
             TryRecover { try_block, recover } => {
-                let error_type = self.extract_try_block_error_type(try_block)?;
-                self.with_try_recover_context(&error_type, |checker| {
-                    checker.check_expr(try_block, expected)
-                })?;
-                self.check_recover_body(recover, &error_type, Some(expected))?;
-                Ok(InferResult::new(expected.clone()))
+                self.check_try_recover_expr(expected, try_block, recover)
             }
 
             // Match expression with expected type: propagate expected type to each arm body.
             // This enables bidirectional type checking for bare variant names like `None`
             // in match arms, preventing collisions with other types (e.g., Command.None vs Maybe.None).
-            Match {
-                expr: scrutinee,
-                arms,
-            } => {
-                // T0264: bound the scrutinee borrow's region to the match. A
-                // borrow taken directly in a scrutinee (`match &v { .. }`) must
-                // end at match end; the result is value-typed (auto-deref), so
-                // no reference escapes and releasing it here is sound.
-                self.borrow_tracker.enter_scope();
-                let scrutinee_ty = self.synth_expr(scrutinee)?.ty;
-                // Resolve any associated-type projection in the scrutinee (e.g.
-                // `y.poll(cx)` returning `Poll<Y.Output>`) so pattern binding and
-                // exhaustiveness see the concrete payload (`Poll<Unit>`).
-                let applied = self.unifier.apply(&scrutinee_ty);
-                let scrutinee_ty = self.resolve_assoc_projections_deep(&applied);
-                let sources = self.aggregate_origins(scrutinee, &scrutinee_ty);
-                // The arms are ALTERNATIVES — the same rule, and the same
-                // code, as the arm loop in `infer_match_expr`. A `match` has
-                // TWO walkers, one per direction, exactly as `if` does; a fix
-                // applied to one of them is not applied to the other, and a
-                // `match` in tail position of a typed function comes through
-                // HERE, not through the synth path.
-                let affine_at_match = self.affine_tracker.snapshot_alternatives();
-                // A `match` has TWO walkers, one per direction. This probe
-                // names WHICH one ran: an instrument that can only see one of
-                // them reports a fix as inert when it is merely in the other
-                // half of the pair.
-                if std::env::var_os("VERUM_TRACE_AFFINE").is_some() {
-                    eprintln!("[affine] match walker=CHECK arm-loop, {} arms", arms.len());
-                }
-                let mut affine_per_arm: Vec<crate::affine::AffineAlternatives> = Vec::new();
-                for arm in arms.iter() {
-                    self.affine_tracker.restore_alternatives(&affine_at_match);
-                    let arm_result = self.infer_scoped_match_arm(arm, &scrutinee_ty, None, Some(expected), &sources)?;
-                    // An arm that diverges never reaches the code after the
-                    // match, so what it consumed cannot reach it either.
-                    if !self.is_never_type(&arm_result.ty) {
-                        affine_per_arm.push(self.affine_tracker.snapshot_alternatives());
-                    }
-                }
-                if affine_per_arm.is_empty() {
-                    self.affine_tracker.restore_alternatives(&affine_at_match);
-                } else {
-                    self.affine_tracker.merge_alternatives(&affine_per_arm);
-                }
-
-                self.borrow_tracker.exit_scope(); // T0264: release scrutinee borrow at match end
-
-                self.check_match_coverage(&scrutinee_ty, arms, expr.span)?;
-
-                Ok(InferResult::new(expected.clone()))
-            }
-
-            // Bare-path variant constructor (no Call wrapper) with expected
-            // variant type: `None`, `Less`, `Greater`, or any user-defined
-            // 0-arg variant.  When checking `None` against `Maybe<Int>`, the
-            // expected type expands to a Variant whose `None` entry has the
-            // `Unit` payload — bind the bare path to that variant of the
-            // expected type, not to whichever first-registered parent's
-            // `None` happens to win the arity-blind lookup (the canonical
-            // collision: `Maybe.None` vs `Backend.None` from the GPU enum).
-            //
-            // Mirrors the bidirectional Call arm below for arg-bearing
-            // variant constructors.  Stdlib-agnostic: every check fires off
-            // the user's expected type, not a hardcoded list.
-            Path(path)
-                if path.segments.len() == 1
-                    && let Some(verum_ast::ty::PathSegment::Name(ident)) =
-                        path.segments.first()
-                    && (self
-                        .variant_constructor_parents
-                        .get(&Text::from(ident.name.as_str()))
-                        .is_some()
-                        || self
-                            .ctor_parent_from_expected_fn_return(
-                                &self.unifier.apply(expected),
-                                ident.name.as_str(),
-                            )?
-                            .is_some()) =>
-            {
-                let constructor_name = ident.name.as_str();
-                let resolved_expected = self.unifier.apply(expected);
-                if crate::ctor_trace_enabled() {
-                    eprintln!(
-                        "[ctor-trace] bare-ctor CHECK arm: name={:?} expected={:?} in_parents={}",
-                        constructor_name,
-                        resolved_expected,
-                        self.variant_constructor_parents
-                            .get(&Text::from(constructor_name))
-                            .is_some(),
-                    );
-                }
-                // Glob / `mount core.prelude.*` imports register the variant
-                // TYPE but NOT the ctor->parent map that the first-declaration
-                // path populates — so `variant_constructor_parents` misses the
-                // bare ctor under the prelude and this arm would never fire.
-                // Recover the parent from the EXPECTED fn's return variant (it
-                // is a Variant that declares this ctor) and register it, so the
-                // guard above admits us and try_resolve below (and any later
-                // lookup) succeeds under glob imports too.
-                if self
-                    .variant_constructor_parents
-                    .get(&Text::from(constructor_name))
-                    .is_none()
-                    && let Some(parent) =
-                        self.ctor_parent_from_expected_fn_return(&resolved_expected, constructor_name)?
-                {
-                    self.variant_constructor_parents
-                        .entry(Text::from(constructor_name))
-                        .or_default()
-                        .push(parent);
-                }
-                // CTOR-AS-FN-1: a bare payload constructor used as a first-class
-                // FUNCTION value — `list.and_then(Some)`, `xs.map(Ok)` — where a
-                // `fn(payload...) -> Variant` is expected. Coerce it to its
-                // constructor-as-function type and unify with the expected fn,
-                // instead of falling to synth_and_check which reports E400
-                // "expected fn(_), found Some". Stdlib-agnostic (any variant in
-                // variant_constructor_parents). Runtime leg: CTOR-AS-FN-3 codegen.
-                // The expected arity comes from a concrete fn OR from a
-                // type-var carrying a function-type bound — the generic
-                // method-param case `and_then<F: fn(T) -> Maybe<U>>(f: F)`,
-                // where `F` is still an unresolved var when the `Some` arg is
-                // checked (this is the `mount core.prelude.*` path that reaches
-                // the method-call arg resolver before `F` concretises). Both
-                // drive the constructor-as-function coercion.
-                let (expected_fn_arity, expected_fn_ret_head) = match &resolved_expected {
-                    Type::Function {
-                        params,
-                        return_type,
-                        ..
-                    } => (Some(params.len()), self.expected_parent_hint(return_type)),
-                    Type::Var(tv) => match self.get_function_type_bound(tv) {
-                        verum_common::Maybe::Some(Type::Function {
-                            params,
-                            return_type,
-                            ..
-                        }) => (Some(params.len()), self.expected_parent_hint(&return_type)),
-                        _ => (None, None),
-                    },
-                    _ => (None, None),
-                };
-                if let Some(arity) = expected_fn_arity
-                    && let Some(ctor_ty) = self
-                        .try_resolve_variant_constructor_with_arity_for(
-                            constructor_name,
-                            Some(arity),
-                            expected_fn_ret_head.as_deref(),
-                        )
-                {
-                    self.unifier.unify(&ctor_ty, &resolved_expected, expr.span)?;
-                    return Ok(InferResult::new(ctor_ty));
-                }
-                let expanded_expected = self.expand_generic_to_variant(&resolved_expected)?;
-                if let Type::Variant(ref variants) = expanded_expected
-                    && let Some(payload_ty) = variants.get(constructor_name)
-                    && matches!(payload_ty, Type::Unit)
-                {
-                    return Ok(InferResult::new(expected.clone()));
-                }
-                self.synth_and_check(expr, expected)
-            }
+            Match { expr: scrutinee, arms } => self.check_match_expr(expr, expected, scrutinee, arms),
 
             // Variant constructor call with expected variant type:
             // When checking `Valid(42)` against `Validation<Text, Int>`, resolve the
             // constructor from the expected type's variants rather than the global scope.
             // This enables user-defined types to use variant names that overlap with stdlib.
-            Call {
-                func,
-                args: call_args,
-                ..
-            } if matches!(&func.kind, ExprKind::Path(_)) => {
-                let constructor_name = if let ExprKind::Path(path) = &func.kind {
-                    path.segments
-                        .last()
-                        .map(|s| match s {
-                            verum_ast::ty::PathSegment::Name(id) => id.name.as_str(),
-                            _ => "",
-                        })
-                        .unwrap_or("")
-                } else {
-                    ""
-                };
-
-                // Expand expected type to variant form
-                let resolved_expected_call = self.unifier.apply(expected);
-                // #47 alias-hop: `type Deep is ControlFlow<X, Y>;` must
-                // present the ALIASED target (head name + concrete args)
-                // to the gate, the parent hint and the positional bind
-                // below — the raw alias head has no registered ctor
-                // parent and an empty args list, so the arm either
-                // skipped (args gate) or resolved first-registered-wins.
-                let resolved_expected_call = self
-                    .unifier
-                    .try_expand_alias(&resolved_expected_call)
-                    .unwrap_or(resolved_expected_call);
-                let expanded_expected = self.expand_generic_to_variant(&resolved_expected_call)?;
-                // **Architectural fallback** (closes iterator §D / task #14
-                // §3.2): when `expand_generic_to_variant` doesn't produce a
-                // `Type::Variant` (because the type's registration shape is
-                // self-referential `Named { Same, args: [] }` rather than
-                // `Type::Variant`), fall back to
-                // `try_resolve_variant_constructor_with_arity` which builds
-                // a proper `fn(payload, ...) -> Variant<fresh_vars>` type
-                // with fresh TypeVars for parent's generic params, then
-                // unifies the constructor return type with the user's
-                // expected type so concrete args propagate to payload
-                // checking.
-                //
-                // Stdlib-agnostic: works for any variant whose parent type
-                // is registered in `variant_constructor_parents` — handles
-                // the lazy-loaded path (`ReduceResult<R>`) symmetrically
-                // with the eager-loaded path (`Maybe<T>` / `Result<T, E>`).
-                // Gate: only fire when the ORIGINAL expected type carries
-                // concrete generic args (e.g. `ReduceResult<Int>`) —
-                // signalling the user expressed a fully-instantiated type.
-                // When expanded_expected stays as `Type::Named { args: [] }`
-                // (precompile-eager-loaded variant types whose registration
-                // shape is self-referential), the fallback path resolves
-                // the constructor against fresh TypeVars and unifies
-                // return-type with the user's expected to bind them.
-                //
-                // When expected is a `Type::Var(_)` (unresolved unifier var
-                // — e.g. polymorphic `assert_eq<T>` first-arg binding
-                // pending), we MUST NOT eagerly resolve the constructor —
-                // that would pick first-registered parent and shadow the
-                // unifier's pending binding.
-                let expected_has_concrete_args = match &resolved_expected_call {
-                    Type::Named { args, .. } | Type::Generic { args, .. } => {
-                        !args.is_empty()
-                    }
-                    _ => false,
-                };
-                if !matches!(expanded_expected, Type::Variant(_))
-                    && expected_has_concrete_args
-                    && self
-                        .variant_constructor_parents
-                        .get(&Text::from(constructor_name))
-                        .is_some()
-                    && let Some(ctor_ty) = self
-                        .try_resolve_variant_constructor_with_arity_for(
-                            constructor_name,
-                            Some(call_args.len()),
-                            self.expected_parent_hint(&resolved_expected_call)
-                                .as_deref(),
-                        )
-                {
-                    if let Type::Function {
-                        params,
-                        return_type,
-                        ..
-                    } = ctor_ty
-                    {
-                        if params.len() == call_args.len() {
-                            // Extract concrete args from the user's expected
-                            // type.  These positionally bind the parent
-                            // variant's generic params.
-                            let concrete_args: List<Type> =
-                                match &resolved_expected_call {
-                                    Type::Named { args, .. }
-                                    | Type::Generic { args, .. } => args.clone(),
-                                    _ => List::new(),
-                                };
-                            // Collect bare-Named param names from the
-                            // constructor signature in positional order so
-                            // we can substitute the rigid `Named{R}`-style
-                            // payloads with the user's concrete args.
-                            let mut named_params: Vec<verum_common::Text> =
-                                Vec::new();
-                            for p in params.iter() {
-                                Self::collect_bare_named_param_names(
-                                    p,
-                                    &mut named_params,
-                                );
-                            }
-                            Self::collect_bare_named_param_names(
-                                &return_type,
-                                &mut named_params,
-                            );
-                            let mut subst: indexmap::IndexMap<
-                                verum_common::Text,
-                                Type,
-                            > = indexmap::IndexMap::new();
-                            for (i, name) in named_params.iter().enumerate() {
-                                if let Some(arg) = concrete_args.get(i) {
-                                    subst.insert(name.clone(), arg.clone());
-                                }
-                            }
-                            // Unify constructor's parent-instance return
-                            // type with the user's expected type — binds
-                            // parent generic-param TypeVars when the
-                            // constructor side carries them.
-                            let _ = self
-                                .unifier
-                                .unify(&return_type, expected, expr.span);
-                            // Now type-check each call argument against
-                            // the substituted param type (combines
-                            // user's concrete args + unifier's bindings).
-                            for (arg, param_ty) in
-                                call_args.iter().zip(params.iter())
-                            {
-                                let substituted =
-                                    Self::substitute_named_params_in_type(
-                                        param_ty, &subst,
-                                    );
-                                let resolved_param =
-                                    self.unifier.apply(&substituted);
-                                self.check_expr(arg, &resolved_param)?;
-                            }
-                            return Ok(InferResult::new(expected.clone()));
-                        }
-                    }
-                }
-                if let Type::Variant(ref variants) = expanded_expected {
-                    if let Some(payload_ty) = variants.get(constructor_name) {
-                        // The expected variant type has this constructor — use it
-                        // Check call args against the payload type
-                        if call_args.len() == 1 {
-                            // Single-payload variant.  Covers BOTH the
-                            // non-Unit case (`Valid(42)` where `Valid(A)`)
-                            // AND the explicit-Unit case (`Ok(())` where
-                            // `Result<Unit, E>.Ok(Unit)` payload is Unit).
-                            // Pre-fix this arm gated on `!Type::Unit` and
-                            // fell through to the arity-based synth path
-                            // — which then picked the first-registered
-                            // parent (typically a stdlib variant like
-                            // `ProveResult.Ok(Proof)`) and check-erred the
-                            // `()` arg against `Proof`.
-                            self.check_expr(&call_args[0], payload_ty)?;
-                            Ok(InferResult::new(expected.clone()))
-                        } else if call_args.is_empty() && matches!(payload_ty, Type::Unit) {
-                            // Unit variant: None
-                            Ok(InferResult::new(expected.clone()))
-                        } else if call_args.len() > 1 {
-                            // Multi-arg: treat as tuple payload
-                            if let Type::Tuple(tuple_types) = payload_ty {
-                                if tuple_types.len() == call_args.len() {
-                                    for (arg, ty) in call_args.iter().zip(tuple_types.iter()) {
-                                        self.check_expr(arg, ty)?;
-                                    }
-                                    return Ok(InferResult::new(expected.clone()));
-                                }
-                            }
-                            // Fall through to synth_and_check
-                            self.synth_and_check(expr, expected)
-                        } else {
-                            // Mismatch in arity — fall through
-                            self.synth_and_check(expr, expected)
-                        }
-                    } else {
-                        // Constructor not in expected variant type — fall through
-                        self.synth_and_check(expr, expected)
-                    }
-                } else {
-                    // Expected type is not a variant — fall through
-                    self.synth_and_check(expr, expected)
+            Call { func, args: call_args, .. } if matches!(&func.kind, ExprKind::Path(_)) => {
+                match self.try_check_path_call_expr(expr, expected, func, call_args)? {
+                    Some(result) => Ok(result),
+                    None => self.synth_and_check(expr, expected),
                 }
             }
 
@@ -1218,50 +633,11 @@ impl TypeChecker {
             // Example: `a.cmp(&b)` where cmp expects `&Heap<Int>` and `b: Heap<Int>`.
             // Without this, synth(&b) auto-derefs Heap<Int>→Int, yielding &Int (wrong).
             // With this, we check `b` against `Heap<Int>` directly, yielding &Heap<Int>.
-            Unary {
-                op: UnOp::Ref,
-                expr: inner,
-            } => {
-                if let Type::Reference {
-                    mutable: false,
-                    inner: expected_inner,
-                } = expected
-                {
-                    // Try checking the inner expression against the expected inner type first
-                    match self.check_borrow_operand(inner, expected_inner) {
-                        Ok(_) => {
-                            self.track_reference_borrow(inner, false, expr.span)?;
-                            Ok(InferResult::new(expected.clone()))
-                        }
-                        Err(_) => {
-                            // Fall back to synth_and_check (auto-deref path)
-                            self.synth_and_check(expr, expected)
-                        }
-                    }
-                } else {
-                    self.synth_and_check(expr, expected)
-                }
+            Unary { op: UnOp::Ref, expr: inner } => {
+                self.check_reference_expr(expr, expected, inner, false)
             }
-
-            Unary {
-                op: UnOp::RefMut,
-                expr: inner,
-            } => {
-                if let Type::Reference {
-                    mutable: true,
-                    inner: expected_inner,
-                } = expected
-                {
-                    match self.with_checked_write(inner, |tc| tc.check_borrow_operand(inner, expected_inner)) {
-                        Ok(_) => {
-                            self.track_reference_borrow(inner, true, expr.span)?;
-                            Ok(InferResult::new(expected.clone()))
-                        }
-                        Err(_) => self.synth_and_check(expr, expected),
-                    }
-                } else {
-                    self.synth_and_check(expr, expected)
-                }
+            Unary { op: UnOp::RefMut, expr: inner } => {
+                self.check_reference_expr(expr, expected, inner, true)
             }
 
             // ============================================================
@@ -1280,179 +656,735 @@ impl TypeChecker {
             //
 
             // This is related to task #22 (protocol constant access on types).
-            MethodCall {
-                receiver,
-                method,
-                args: call_args,
-                ..
-            } => {
-                // Bidirectional qualified variant construction: `Result.Ok(v)`,
-                // `Maybe.Some(x)`, any `T.Variant(args)` checked against a known
-                // Result/Maybe-shaped expected type. The synth path
-                // (`infer_method_call_inner_impl`) resolves the constructor but
-                // returns the `Generic{Result,[T,E]}` form, which fails to unify
-                // with the *expanded* `Variant{Ok:T, Err:E}` form the function
-                // return type / let-annotation carries — so two qualified ctors
-                // in one if/else (`Result.Err(..)` + `Result.Ok(())`) mismatch
-                // even though each works in isolation. Mirror the bidirectional
-                // bare-name Call arm: bind the argument(s) against the expected
-                // variant's payload and return the expected type directly.
-                if let ExprKind::Path(path) = &receiver.kind
-                    && path.segments.len() == 1
-                    && let Some(verum_ast::ty::PathSegment::Name(type_ident)) =
-                        path.segments.first()
-                {
-                    let recv_type_name = type_ident.name.as_str();
-                    let variant_text = Text::from(method.name.as_str());
-                    let is_variant_of_recv = self
-                        .variant_constructor_parents
-                        .get(&variant_text)
-                        .map(|parents| {
-                            parents.iter().any(|p| p.as_str() == recv_type_name)
-                        })
-                        .unwrap_or(false);
-                    if is_variant_of_recv {
-                        let resolved_expected = self.unifier.apply(expected);
-                        let expanded =
-                            self.expand_generic_to_variant(&resolved_expected)?;
-                        if let Type::Variant(variants) = &expanded
-                            && let Some(payload_ty) =
-                                variants.get(method.name.as_str())
-                        {
-                            let payload_ty = payload_ty.clone();
-                            // Single positional payload (`Result.Ok(v)`,
-                            // `Result.Err(e)`, `Maybe.Some(x)`, and the explicit
-                            // `Result.Ok(())` unit form): bind the one argument
-                            // against the expected variant payload and return the
-                            // expected type. Record-style payloads arrive as a
-                            // `Record` expr (a different arm), and multi-arg /
-                            // arity-mismatched calls fall through to the synth
-                            // path which type-checks them in full — so only the
-                            // single-arg case short-circuits here.
-                            if call_args.len() == 1
-                                && !matches!(payload_ty, Type::Record(_))
-                            {
-                                self.check_expr(&call_args[0], &payload_ty)?;
-                                return Ok(InferResult::new(expected.clone()));
-                            }
-                        }
-                    }
-                }
-                // Check if receiver is a path expression to a protocol name
-                if let ExprKind::Path(path) = &receiver.kind {
-                    if let Some(verum_ast::ty::PathSegment::Name(ident)) = path.segments.first() {
-                        let name = ident.name.as_str();
-                        // Check if this name is a known protocol
-                        let is_protocol = self.protocol_checker.read().is_protocol_by_name(name);
-                        if is_protocol && path.segments.len() == 1 {
-                            // This is a protocol-qualified method call like `Default.default()`
-                            // Try to look up the method using the expected type as the implementing type
-                            let method_name_text = verum_common::Text::from(method.name.as_str());
-
-                            // Check if the expected type implements this protocol
-                            let expected_normalized = self.normalize_type(expected);
-                            let method_lookup = self
-                                .protocol_checker
-                                .read()
-                                .lookup_protocol_method(&expected_normalized, &method_name_text);
-
-                            if let Ok(Some(method_ty)) = method_lookup {
-                                // Found the method! Check arguments and compute return type
-                                if let Type::Function {
-                                    params,
-                                    return_type,
-                                    ..
-                                } = &method_ty
-                                {
-                                    // For static protocol methods like Default.default(), params should be empty
-                                    if params.len() == call_args.len() {
-                                        // Check each argument
-                                        for (arg, param_ty) in call_args.iter().zip(params.iter()) {
-                                            self.check_expr(arg, param_ty)?;
-                                        }
-
-                                        // The return type might contain Self, which should be the expected type
-                                        // Apply substitution: Self -> expected
-                                        let result_type =
-                                            self.substitute_self_type(return_type, expected);
-                                        // PROTO-STATIC-EXISTENTIAL (T0585): this
-                                        // bidirectional arm resolves the implementor
-                                        // from the EXPECTED type, but resolution that
-                                        // stops at the type tier leaves codegen to
-                                        // replay the by-name cascade — which lands on
-                                        // the protocol's bodyless requirement stub
-                                        // (measured: `let c: Counter =
-                                        // Default.default();` printed const-zero, the
-                                        // user's impl never ran).  Queue the same
-                                        // epilogue discharge the synth arm uses: α is
-                                        // pre-bound to the expected implementor, the
-                                        // discharge verifies the impl and stamps
-                                        // `resolved_call_targets[span]` with the
-                                        // direct `{Impl}.{method}` target.
-                                        let alpha = crate::ty::TypeVar::fresh();
-                                        let _ = self.unifier.unify(
-                                            &Type::Var(alpha),
-                                            &expected_normalized,
-                                            expr.span,
-                                        );
-                                        self.pending_protocol_static_calls.push((
-                                            expr.span,
-                                            verum_common::Text::from(name),
-                                            method_name_text.clone(),
-                                            alpha,
-                                        ));
-                                        return Ok(InferResult::new(result_type));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                // Fall back to normal handling
-                self.synth_and_check(expr, expected)
+            MethodCall { receiver, method, args: call_args, .. } => {
+                self.check_method_call_expr(expr, expected, receiver, method, call_args)
             }
 
             // Map literal: check entries against expected Map<K, V> type
-            MapLiteral { entries } => {
-                // Extract expected key/value types from Map<K, V> or similar generic
-                let (exp_key, exp_val) = match expected {
-                    Type::Generic { name, args } if name.as_str() == "Map" && args.len() == 2 => {
-                        (Some(&args[0]), Some(&args[1]))
-                    }
-                    Type::Named { path, args } if args.len() == 2 => {
-                        let is_map = path
-                            .segments
-                            .last()
-                            .map(|s| match s {
-                                verum_ast::ty::PathSegment::Name(id) => id.name.as_str() == "Map",
-                                _ => false,
-                            })
-                            .unwrap_or(false);
-                        if is_map {
-                            (Some(&args[0]), Some(&args[1]))
-                        } else {
-                            (None, None)
-                        }
-                    }
-                    _ => (None, None),
-                };
-
-                if let (Some(key_ty), Some(val_ty)) = (exp_key, exp_val) {
-                    // Check each entry against expected types
-                    for (key, val) in entries.iter() {
-                        self.check_expr(key, key_ty)?;
-                        self.check_expr(val, val_ty)?;
-                    }
-                    return Ok(InferResult::new(expected.clone()));
-                }
-
-                // No expected Map type - fall back to synthesis
-                self.synth_and_check(expr, expected)
-            }
+            MapLiteral { entries } => self.check_map_literal_expr(expr, expected, entries),
 
             // Fall back to synthesis + subsumption check
             _ => self.synth_and_check(expr, expected),
         }
+    }
+
+    fn check_try_recover_expr(
+        &mut self,
+        expected: &Type,
+        try_block: &Expr,
+        recover: &verum_ast::expr::RecoverBody,
+    ) -> Result<InferResult> {
+        let error_type = self.extract_try_block_error_type(try_block)?;
+        self.with_try_recover_context(&error_type, |checker| {
+            checker.check_expr(try_block, expected)
+        })?;
+        self.check_recover_body(recover, &error_type, Some(expected))?;
+        Ok(InferResult::new(expected.clone()))
+    }
+
+    fn check_reference_expr(
+        &mut self,
+        expr: &Expr,
+        expected: &Type,
+        inner: &Expr,
+        mutable: bool,
+    ) -> Result<InferResult> {
+        if let Type::Reference {
+            mutable: expected_mutable,
+            inner: expected_inner,
+        } = expected
+            && *expected_mutable == mutable
+        {
+            let checked = if mutable {
+                self.with_checked_write(inner, |checker| {
+                    checker.check_borrow_operand(inner, expected_inner)
+                })
+            } else {
+                self.check_borrow_operand(inner, expected_inner)
+            };
+            if checked.is_ok() {
+                self.track_reference_borrow(inner, mutable, expr.span)?;
+                return Ok(InferResult::new(expected.clone()));
+            }
+        }
+        self.synth_and_check(expr, expected)
+    }
+
+    fn check_try_block_expr(
+        &mut self,
+        expr: &Expr,
+        expected: &Type,
+        inner_block: &Expr,
+    ) -> Result<InferResult> {
+        use ExprKind::*;
+        // #[cfg(debug_assertions)]
+        // eprintln!("[DEBUG check_expr_inner TryBlock] expected={}, span={:?}", expected, expr.span);
+
+        // Extract the success type from expected type using STRUCTURAL matching
+        // Checks for Ok/Err or Some/None variant structure, not type names
+        let (success_expected, error_expected) = self.extract_try_output_types(expected);
+
+        // #[cfg(debug_assertions)]
+        // eprintln!("[DEBUG check_expr_inner TryBlock] success_expected={}, error_expected={}", success_expected, error_expected);
+
+        // Find error type from ? operators inside the block
+        let error_from_operators = self
+            .find_try_operator_error_type(inner_block)
+            .unwrap_or_else(|| Type::Never);
+
+        // Unify error types if both are known
+        if error_expected != Type::Never && error_from_operators != Type::Never {
+            let _ = self
+                .unifier
+                .unify(&error_from_operators, &error_expected, expr.span);
+        }
+        let error_type = if error_expected != Type::Never {
+            error_expected
+        } else {
+            error_from_operators
+        };
+
+        // Temporarily set function return type to Result<T, E> so that
+        // the ? operator inside the try block passes type checking.
+        // Without this, ? checks the enclosing function's return type (e.g. Int)
+        // and emits E0205.
+        let saved_return_type = self.current_function_return_type.clone();
+        self.current_function_return_type = Maybe::Some(expected.clone());
+
+        // Check if inner block already produces a Try-compatible type
+        // First synthesize to see what type the block naturally produces
+        let block_result = self.synth_expr(inner_block)?;
+
+        // Restore original function return type
+        self.current_function_return_type = saved_return_type;
+        let block_ty = &block_result.ty;
+
+        // Resolve type variables to get the actual structure
+        let resolved_block_ty = self.unifier.apply(block_ty);
+
+        // Detect if block already returns a Try-compatible type using STRUCTURAL matching
+        // A type is Try-compatible if it has Ok/Err or Some/None variant structure
+        let already_try_type = self.is_try_compatible_type(&resolved_block_ty);
+
+        // #[cfg(debug_assertions)]
+        // eprintln!("[DEBUG check_expr_inner TryBlock] block_ty={}, resolved={}, already_try_type={}",
+        // block_ty, resolved_block_ty, already_try_type);
+
+        if already_try_type {
+            // Block already returns Try-compatible type, unify directly with expected
+            // #[cfg(debug_assertions)]
+            // eprintln!("[DEBUG check_expr_inner TryBlock] unifying resolved_block_ty={} with expected={}", resolved_block_ty, expected);
+            self.unifier
+                .unify(&resolved_block_ty, expected, expr.span)?;
+            Ok(InferResult::new(expected.clone()))
+        } else {
+            // Block returns non-Try type, wrap in success variant
+            // Use the expected type's structure to construct the wrapper
+            let wrapped_type = self.wrap_in_success_type(&resolved_block_ty, expected, error_type);
+            // #[cfg(debug_assertions)]
+            // eprintln!("[DEBUG check_expr_inner TryBlock] wrapping: wrapped_type={}, expected={}", wrapped_type, expected);
+            self.unifier.unify(&wrapped_type, expected, expr.span)?;
+            Ok(InferResult::new(expected.clone()))
+        }
+    }
+
+    fn check_array_expr(
+        &mut self,
+        expr: &Expr,
+        expected: &Type,
+        arr_expr: &verum_ast::expr::ArrayExpr,
+    ) -> Result<InferResult> {
+        use ExprKind::*;
+        // Extract element type from expected type
+        if let Some((expected_elem, expected_size)) = expected.sequence_domain() {
+            match arr_expr {
+                verum_ast::expr::ArrayExpr::List(exprs) => {
+                    // Check size matches if both are known
+                    if let Some(expected_n) = expected_size {
+                        if expected_n != exprs.len() {
+                            return Err(TypeError::Mismatch {
+                                expected: format!("[_; {}]", expected_n).into(),
+                                actual: format!("[_; {}]", exprs.len()).into(),
+                                span: expr.span,
+                            });
+                        }
+                    }
+
+                    // Check each element against expected element type
+                    // This enables numeric literal coercion (Int -> Byte, etc.)
+                    for elem in exprs {
+                        self.check_expr(elem, expected_elem)?;
+                    }
+
+                    Ok(InferResult::new(expected.clone()))
+                }
+                verum_ast::expr::ArrayExpr::Repeat { value, count } => {
+                    // Check value against expected element type
+                    self.check_expr(value, expected_elem)?;
+
+                    // Count must be Int
+                    let count_result = self.synth_expr(count)?;
+                    self.unifier
+                        .unify(&count_result.ty, &Type::int(), count.span)?;
+
+                    if let Some(expected_size) = expected_size
+                        && self.checked_array_length(count)? != Some(expected_size)
+                    {
+                        return Err(TypeError::OtherWithCodeSpanned {
+                            code: "E405".into(),
+                            msg: format!(
+                                "array repeat must produce exactly {expected_size} elements"
+                            )
+                            .into(),
+                            span: count.span,
+                        });
+                    }
+                    Ok(InferResult::new(expected.clone()))
+                }
+            }
+        } else {
+            // Check if expected is a collection type with an element type
+            // (e.g., List<T>, Set<T>, or any single-arg generic collection)
+            let list_elem = match expected {
+                Type::Generic { args, .. } if args.len() == 1 => Some(&args[0]),
+                Type::Named { args, .. } if args.len() == 1 => Some(&args[0]),
+                _ => None,
+            };
+            if let Some(expected_elem) = list_elem {
+                // Expected is List<T>, check each element against T
+                match arr_expr {
+                    verum_ast::expr::ArrayExpr::List(exprs) => {
+                        for elem in exprs {
+                            self.check_expr(elem, expected_elem)?;
+                        }
+                        Ok(InferResult::new(expected.clone()))
+                    }
+                    verum_ast::expr::ArrayExpr::Repeat { value, count } => {
+                        self.check_expr(value, expected_elem)?;
+                        let count_result = self.synth_expr(count)?;
+                        self.unifier
+                            .unify(&count_result.ty, &Type::int(), count.span)?;
+                        Ok(InferResult::new(expected.clone()))
+                    }
+                }
+            } else {
+                // Expected is not an array or List type, fall back to synthesis
+                self.synth_and_check(expr, expected)
+            }
+        }
+    }
+
+    fn check_single_path_expr(
+        &mut self,
+        expr: &Expr,
+        expected: &Type,
+        path: &Path,
+    ) -> Result<InferResult> {
+        use ExprKind::*;
+        let name = match path.segments.first() {
+            Some(verum_ast::ty::PathSegment::Name(id)) => id.name.as_str(),
+            _ => "",
+        };
+        // First resolve the expected type through any type variables
+        let resolved_expected = self.unifier.apply(expected);
+        let expanded_expected = self.expand_generic_to_variant(&resolved_expected)?;
+        if let Type::Variant(ref variants) = expanded_expected {
+            if let Some(payload_ty) = variants.get(name) {
+                if matches!(payload_ty, Type::Unit) {
+                    // Unit variant (e.g., None) matches expected variant type
+                    return Ok(InferResult::new(expected.clone()));
+                }
+            }
+        }
+        // ── T1234 pole B — THE EXPECTED TYPE IS THE ONLY JUDGE ──
+        // `fn take(f: fn(Int) -> Alpha)` called as `take(Wrap)`,
+        // where Alpha AND Beta both declare `Wrap` with a
+        // payload.  Nothing else can separate them: both are
+        // declared in the file being checked, so the horizon
+        // holds both; both take one argument, so arity holds
+        // both; and the synth path is handed no expected type at
+        // all, so it answered with whichever registration
+        // happened last.
+        //
+        // The first attempt here asked for a PARENT NAME and fed
+        // it to the resolver's #47 hint.  It never fired, and the
+        // trace said why: the expected return type arrives
+        // already EXPANDED —
+        //   `Variant({Wrap: Int, Other: Unit})`, not `Named(Alpha)`
+        // — and `expected_parent_head` reads only Named/Generic.
+        // That is the SAME defect as this task's other half, one
+        // level up: a head-extraction defeated by a type in
+        // expanded form.
+        //
+        // So do not ask for the parent at all.  The expected type
+        // already carries the answer: if it is a one-parameter
+        // function whose return is a Variant owning `name` with a
+        // payload, then the bare ctor used here IS a function of
+        // exactly that type.  Nothing is guessed and no registry
+        // order is consulted.
+        //
+        // AMBIENT LOSES TO EXPLICIT (name-resolution.md, and the
+        // rule T1034 states for the resolver): a name the author
+        // bound in a nested scope is theirs.  `lookup_in_root_only`
+        // is the canonical predicate for "module-level item rather
+        // than function-local binding"; when the two lookups
+        // disagree the binding is local and this arm stands down.
+        let locally_shadowed = {
+            let any = self.ctx.env.lookup(name);
+            let root = self.ctx.env.lookup_in_root_only(name);
+            match (any, root) {
+                (Some(a), Some(r)) => !std::ptr::eq(a, r),
+                (Some(_), None) => true,
+                _ => false,
+            }
+        };
+        let ctor_registered = self
+            .variant_constructor_parents
+            .contains_key(&Text::from(name));
+        if let Type::Function {
+            params,
+            return_type,
+            ..
+        } = &resolved_expected
+            && params.len() == 1
+            && !locally_shadowed
+            && ctor_registered
+        {
+            let ret = self.expand_generic_to_variant(return_type)?;
+            if let Type::Variant(vs) = &ret
+                && let Some(payload) = vs.get(name)
+                && !matches!(payload, Type::Unit)
+                && let Some(param0) = params.first()
+            {
+                // Still UNIFY the payload against the expected
+                // parameter: the expectation says the ctor is
+                // usable at this type, and a genuine mismatch
+                // must still be reported rather than waved
+                // through by having named the right variant.
+                let payload = payload.clone();
+                let param0 = param0.clone();
+                let taken = resolved_expected.clone();
+                self.unifier.unify(&payload, &param0, expr.span)?;
+                if crate::ctor_trace_enabled() {
+                    eprintln!(
+                        "[ctor-trace]   T1234 poleB: '{}' taken from the \
+                         EXPECTED type => {:?}",
+                        name, taken
+                    );
+                }
+                return Ok(InferResult::new(taken));
+            }
+        }
+        if crate::ctor_trace_enabled() {
+            eprintln!(
+                "[ctor-trace]   T1234 poleB: '{}' NOT taken \
+                 (locally_shadowed={} ctor_registered={} expected={:?})",
+                name, locally_shadowed, ctor_registered, resolved_expected
+            );
+        }
+        // Not a matching unit variant — fall through to synth_and_check
+        self.synth_and_check(expr, expected)
+    }
+
+    fn check_match_expr(
+        &mut self,
+        expr: &Expr,
+        expected: &Type,
+        scrutinee: &Expr,
+        arms: &List<verum_ast::pattern::MatchArm>,
+    ) -> Result<InferResult> {
+        use ExprKind::*;
+        // T0264: bound the scrutinee borrow's region to the match. A
+        // borrow taken directly in a scrutinee (`match &v { .. }`) must
+        // end at match end; the result is value-typed (auto-deref), so
+        // no reference escapes and releasing it here is sound.
+        self.borrow_tracker.enter_scope();
+        let scrutinee_ty = self.synth_expr(scrutinee)?.ty;
+        // Resolve any associated-type projection in the scrutinee (e.g.
+        // `y.poll(cx)` returning `Poll<Y.Output>`) so pattern binding and
+        // exhaustiveness see the concrete payload (`Poll<Unit>`).
+        let applied = self.unifier.apply(&scrutinee_ty);
+        let scrutinee_ty = self.resolve_assoc_projections_deep(&applied);
+        let sources = self.aggregate_origins(scrutinee, &scrutinee_ty);
+        // The arms are ALTERNATIVES — the same rule, and the same
+        // code, as the arm loop in `infer_match_expr`. A `match` has
+        // TWO walkers, one per direction, exactly as `if` does; a fix
+        // applied to one of them is not applied to the other, and a
+        // `match` in tail position of a typed function comes through
+        // HERE, not through the synth path.
+        let affine_at_match = self.affine_tracker.snapshot_alternatives();
+        // A `match` has TWO walkers, one per direction. This probe
+        // names WHICH one ran: an instrument that can only see one of
+        // them reports a fix as inert when it is merely in the other
+        // half of the pair.
+        if std::env::var_os("VERUM_TRACE_AFFINE").is_some() {
+            eprintln!("[affine] match walker=CHECK arm-loop, {} arms", arms.len());
+        }
+        let mut affine_per_arm: Vec<crate::affine::AffineAlternatives> = Vec::new();
+        for arm in arms.iter() {
+            self.affine_tracker.restore_alternatives(&affine_at_match);
+            let arm_result =
+                self.infer_scoped_match_arm(arm, &scrutinee_ty, None, Some(expected), &sources)?;
+            // An arm that diverges never reaches the code after the
+            // match, so what it consumed cannot reach it either.
+            if !self.is_never_type(&arm_result.ty) {
+                affine_per_arm.push(self.affine_tracker.snapshot_alternatives());
+            }
+        }
+        if affine_per_arm.is_empty() {
+            self.affine_tracker.restore_alternatives(&affine_at_match);
+        } else {
+            self.affine_tracker.merge_alternatives(&affine_per_arm);
+        }
+
+        self.borrow_tracker.exit_scope(); // T0264: release scrutinee borrow at match end
+
+        self.check_match_coverage(&scrutinee_ty, arms, expr.span)?;
+
+        Ok(InferResult::new(expected.clone()))
+    }
+
+    fn try_check_path_call_expr(
+        &mut self,
+        expr: &Expr,
+        expected: &Type,
+        func: &Expr,
+        call_args: &List<Expr>,
+    ) -> Result<Maybe<InferResult>> {
+        use ExprKind::*;
+        let constructor_name = if let ExprKind::Path(path) = &func.kind {
+            path.segments
+                .last()
+                .map(|s| match s {
+                    verum_ast::ty::PathSegment::Name(id) => id.name.as_str(),
+                    _ => "",
+                })
+                .unwrap_or("")
+        } else {
+            ""
+        };
+
+        // Expand expected type to variant form
+        let resolved_expected_call = self.unifier.apply(expected);
+        // #47 alias-hop: `type Deep is ControlFlow<X, Y>;` must
+        // present the ALIASED target (head name + concrete args)
+        // to the gate, the parent hint and the positional bind
+        // below — the raw alias head has no registered ctor
+        // parent and an empty args list, so the arm either
+        // skipped (args gate) or resolved first-registered-wins.
+        let resolved_expected_call = self
+            .unifier
+            .try_expand_alias(&resolved_expected_call)
+            .unwrap_or(resolved_expected_call);
+        let expanded_expected = self.expand_generic_to_variant(&resolved_expected_call)?;
+        // **Architectural fallback** (closes iterator §D / task #14
+        // §3.2): when `expand_generic_to_variant` doesn't produce a
+        // `Type::Variant` (because the type's registration shape is
+        // self-referential `Named { Same, args: [] }` rather than
+        // `Type::Variant`), fall back to
+        // `try_resolve_variant_constructor_with_arity` which builds
+        // a proper `fn(payload, ...) -> Variant<fresh_vars>` type
+        // with fresh TypeVars for parent's generic params, then
+        // unifies the constructor return type with the user's
+        // expected type so concrete args propagate to payload
+        // checking.
+        //
+        // Stdlib-agnostic: works for any variant whose parent type
+        // is registered in `variant_constructor_parents` — handles
+        // the lazy-loaded path (`ReduceResult<R>`) symmetrically
+        // with the eager-loaded path (`Maybe<T>` / `Result<T, E>`).
+        // Gate: only fire when the ORIGINAL expected type carries
+        // concrete generic args (e.g. `ReduceResult<Int>`) —
+        // signalling the user expressed a fully-instantiated type.
+        // When expanded_expected stays as `Type::Named { args: [] }`
+        // (precompile-eager-loaded variant types whose registration
+        // shape is self-referential), the fallback path resolves
+        // the constructor against fresh TypeVars and unifies
+        // return-type with the user's expected to bind them.
+        //
+        // When expected is a `Type::Var(_)` (unresolved unifier var
+        // — e.g. polymorphic `assert_eq<T>` first-arg binding
+        // pending), we MUST NOT eagerly resolve the constructor —
+        // that would pick first-registered parent and shadow the
+        // unifier's pending binding.
+        let expected_has_concrete_args = match &resolved_expected_call {
+            Type::Named { args, .. } | Type::Generic { args, .. } => !args.is_empty(),
+            _ => false,
+        };
+        if !matches!(expanded_expected, Type::Variant(_))
+            && expected_has_concrete_args
+            && self
+                .variant_constructor_parents
+                .get(&Text::from(constructor_name))
+                .is_some()
+            && let Some(ctor_ty) = self.try_resolve_variant_constructor_with_arity_for(
+                constructor_name,
+                Some(call_args.len()),
+                self.expected_parent_hint(&resolved_expected_call)
+                    .as_deref(),
+            )
+        {
+            if let Type::Function {
+                params,
+                return_type,
+                ..
+            } = ctor_ty
+            {
+                if params.len() == call_args.len() {
+                    // Extract concrete args from the user's expected
+                    // type.  These positionally bind the parent
+                    // variant's generic params.
+                    let concrete_args: List<Type> = match &resolved_expected_call {
+                        Type::Named { args, .. } | Type::Generic { args, .. } => args.clone(),
+                        _ => List::new(),
+                    };
+                    // Collect bare-Named param names from the
+                    // constructor signature in positional order so
+                    // we can substitute the rigid `Named{R}`-style
+                    // payloads with the user's concrete args.
+                    let mut named_params: Vec<verum_common::Text> = Vec::new();
+                    for p in params.iter() {
+                        Self::collect_bare_named_param_names(p, &mut named_params);
+                    }
+                    Self::collect_bare_named_param_names(&return_type, &mut named_params);
+                    let mut subst: indexmap::IndexMap<verum_common::Text, Type> =
+                        indexmap::IndexMap::new();
+                    for (i, name) in named_params.iter().enumerate() {
+                        if let Some(arg) = concrete_args.get(i) {
+                            subst.insert(name.clone(), arg.clone());
+                        }
+                    }
+                    // Unify constructor's parent-instance return
+                    // type with the user's expected type — binds
+                    // parent generic-param TypeVars when the
+                    // constructor side carries them.
+                    let _ = self.unifier.unify(&return_type, expected, expr.span);
+                    // Now type-check each call argument against
+                    // the substituted param type (combines
+                    // user's concrete args + unifier's bindings).
+                    for (arg, param_ty) in call_args.iter().zip(params.iter()) {
+                        let substituted = Self::substitute_named_params_in_type(param_ty, &subst);
+                        let resolved_param = self.unifier.apply(&substituted);
+                        self.check_expr(arg, &resolved_param)?;
+                    }
+                    return Ok(Some(InferResult::new(expected.clone())));
+                }
+            }
+        }
+        if let Type::Variant(ref variants) = expanded_expected {
+            if let Some(payload_ty) = variants.get(constructor_name) {
+                // The expected variant type has this constructor — use it
+                // Check call args against the payload type
+                if call_args.len() == 1 {
+                    // Single-payload variant.  Covers BOTH the
+                    // non-Unit case (`Valid(42)` where `Valid(A)`)
+                    // AND the explicit-Unit case (`Ok(())` where
+                    // `Result<Unit, E>.Ok(Unit)` payload is Unit).
+                    // Pre-fix this arm gated on `!Type::Unit` and
+                    // fell through to the arity-based synth path
+                    // — which then picked the first-registered
+                    // parent (typically a stdlib variant like
+                    // `ProveResult.Ok(Proof)`) and check-erred the
+                    // `()` arg against `Proof`.
+                    self.check_expr(&call_args[0], payload_ty)?;
+                    Ok(Some(InferResult::new(expected.clone())))
+                } else if call_args.is_empty() && matches!(payload_ty, Type::Unit) {
+                    // Unit variant: None
+                    Ok(Some(InferResult::new(expected.clone())))
+                } else if call_args.len() > 1 {
+                    // Multi-arg: treat as tuple payload
+                    if let Type::Tuple(tuple_types) = payload_ty {
+                        if tuple_types.len() == call_args.len() {
+                            for (arg, ty) in call_args.iter().zip(tuple_types.iter()) {
+                                self.check_expr(arg, ty)?;
+                            }
+                            return Ok(Some(InferResult::new(expected.clone())));
+                        }
+                    }
+                    // Fall through to synth_and_check
+                    Ok(None)
+                } else {
+                    // Mismatch in arity — fall through
+                    Ok(None)
+                }
+            } else {
+                // Constructor not in expected variant type — fall through
+                Ok(None)
+            }
+        } else {
+            // Expected type is not a variant — fall through
+            Ok(None)
+        }
+    }
+
+    fn check_method_call_expr(
+        &mut self,
+        expr: &Expr,
+        expected: &Type,
+        receiver: &Expr,
+        method: &verum_ast::Ident,
+        call_args: &List<Expr>,
+    ) -> Result<InferResult> {
+        use ExprKind::*;
+        // Bidirectional qualified variant construction: `Result.Ok(v)`,
+        // `Maybe.Some(x)`, any `T.Variant(args)` checked against a known
+        // Result/Maybe-shaped expected type. The synth path
+        // (`infer_method_call_inner_impl`) resolves the constructor but
+        // returns the `Generic{Result,[T,E]}` form, which fails to unify
+        // with the *expanded* `Variant{Ok:T, Err:E}` form the function
+        // return type / let-annotation carries — so two qualified ctors
+        // in one if/else (`Result.Err(..)` + `Result.Ok(())`) mismatch
+        // even though each works in isolation. Mirror the bidirectional
+        // bare-name Call arm: bind the argument(s) against the expected
+        // variant's payload and return the expected type directly.
+        if let ExprKind::Path(path) = &receiver.kind
+            && path.segments.len() == 1
+            && let Some(verum_ast::ty::PathSegment::Name(type_ident)) = path.segments.first()
+        {
+            let recv_type_name = type_ident.name.as_str();
+            let variant_text = Text::from(method.name.as_str());
+            let is_variant_of_recv = self
+                .variant_constructor_parents
+                .get(&variant_text)
+                .map(|parents| parents.iter().any(|p| p.as_str() == recv_type_name))
+                .unwrap_or(false);
+            if is_variant_of_recv {
+                let resolved_expected = self.unifier.apply(expected);
+                let expanded = self.expand_generic_to_variant(&resolved_expected)?;
+                if let Type::Variant(variants) = &expanded
+                    && let Some(payload_ty) = variants.get(method.name.as_str())
+                {
+                    let payload_ty = payload_ty.clone();
+                    // Single positional payload (`Result.Ok(v)`,
+                    // `Result.Err(e)`, `Maybe.Some(x)`, and the explicit
+                    // `Result.Ok(())` unit form): bind the one argument
+                    // against the expected variant payload and return the
+                    // expected type. Record-style payloads arrive as a
+                    // `Record` expr (a different arm), and multi-arg /
+                    // arity-mismatched calls fall through to the synth
+                    // path which type-checks them in full — so only the
+                    // single-arg case short-circuits here.
+                    if call_args.len() == 1 && !matches!(payload_ty, Type::Record(_)) {
+                        self.check_expr(&call_args[0], &payload_ty)?;
+                        return Ok(InferResult::new(expected.clone()));
+                    }
+                }
+            }
+        }
+        // Check if receiver is a path expression to a protocol name
+        if let ExprKind::Path(path) = &receiver.kind {
+            if let Some(verum_ast::ty::PathSegment::Name(ident)) = path.segments.first() {
+                let name = ident.name.as_str();
+                // Check if this name is a known protocol
+                let is_protocol = self.protocol_checker.read().is_protocol_by_name(name);
+                if is_protocol && path.segments.len() == 1 {
+                    // This is a protocol-qualified method call like `Default.default()`
+                    // Try to look up the method using the expected type as the implementing type
+                    let method_name_text = verum_common::Text::from(method.name.as_str());
+
+                    // Check if the expected type implements this protocol
+                    let expected_normalized = self.normalize_type(expected);
+                    let method_lookup = self
+                        .protocol_checker
+                        .read()
+                        .lookup_protocol_method(&expected_normalized, &method_name_text);
+
+                    if let Ok(Some(method_ty)) = method_lookup {
+                        // Found the method! Check arguments and compute return type
+                        if let Type::Function {
+                            params,
+                            return_type,
+                            ..
+                        } = &method_ty
+                        {
+                            // For static protocol methods like Default.default(), params should be empty
+                            if params.len() == call_args.len() {
+                                // Check each argument
+                                for (arg, param_ty) in call_args.iter().zip(params.iter()) {
+                                    self.check_expr(arg, param_ty)?;
+                                }
+
+                                // The return type might contain Self, which should be the expected type
+                                // Apply substitution: Self -> expected
+                                let result_type = self.substitute_self_type(return_type, expected);
+                                // PROTO-STATIC-EXISTENTIAL (T0585): this
+                                // bidirectional arm resolves the implementor
+                                // from the EXPECTED type, but resolution that
+                                // stops at the type tier leaves codegen to
+                                // replay the by-name cascade — which lands on
+                                // the protocol's bodyless requirement stub
+                                // (measured: `let c: Counter =
+                                // Default.default();` printed const-zero, the
+                                // user's impl never ran).  Queue the same
+                                // epilogue discharge the synth arm uses: α is
+                                // pre-bound to the expected implementor, the
+                                // discharge verifies the impl and stamps
+                                // `resolved_call_targets[span]` with the
+                                // direct `{Impl}.{method}` target.
+                                let alpha = crate::ty::TypeVar::fresh();
+                                let _ = self.unifier.unify(
+                                    &Type::Var(alpha),
+                                    &expected_normalized,
+                                    expr.span,
+                                );
+                                self.pending_protocol_static_calls.push((
+                                    expr.span,
+                                    verum_common::Text::from(name),
+                                    method_name_text.clone(),
+                                    alpha,
+                                ));
+                                return Ok(InferResult::new(result_type));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // Fall back to normal handling
+        self.synth_and_check(expr, expected)
+    }
+
+    fn check_map_literal_expr(
+        &mut self,
+        expr: &Expr,
+        expected: &Type,
+        entries: &List<(Expr, Expr)>,
+    ) -> Result<InferResult> {
+        use ExprKind::*;
+        // Extract expected key/value types from Map<K, V> or similar generic
+        let (exp_key, exp_val) = match expected {
+            Type::Generic { name, args } if name.as_str() == "Map" && args.len() == 2 => {
+                (Some(&args[0]), Some(&args[1]))
+            }
+            Type::Named { path, args } if args.len() == 2 => {
+                let is_map = path
+                    .segments
+                    .last()
+                    .map(|s| match s {
+                        verum_ast::ty::PathSegment::Name(id) => id.name.as_str() == "Map",
+                        _ => false,
+                    })
+                    .unwrap_or(false);
+                if is_map {
+                    (Some(&args[0]), Some(&args[1]))
+                } else {
+                    (None, None)
+                }
+            }
+            _ => (None, None),
+        };
+
+        if let (Some(key_ty), Some(val_ty)) = (exp_key, exp_val) {
+            // Check each entry against expected types
+            for (key, val) in entries.iter() {
+                self.check_expr(key, key_ty)?;
+                self.check_expr(val, val_ty)?;
+            }
+            return Ok(InferResult::new(expected.clone()));
+        }
+
+        // No expected Map type - fall back to synthesis
+        self.synth_and_check(expr, expected)
     }
 
     /// Synthesize then check subsumption.
@@ -1464,24 +1396,37 @@ impl TypeChecker {
     /// variables. When a `Function` type is known, uses it to bind params;
     /// otherwise falls back to synthesis + subsumption.
     fn closure_callable_properties(
-        &mut self, body: &Expr, is_async: bool,
+        &mut self,
+        body: &Expr,
+        is_async: bool,
     ) -> Result<crate::computational_properties::PropertyRequirement> {
         let bound = self.callable_body_bound(body);
         Ok(Self::callable_bound_with_marker(bound, is_async))
     }
 
     fn check_closure_properties(
-        &mut self, body: &Expr, is_async: bool, expected: &Type, span: Span,
+        &mut self,
+        body: &Expr,
+        is_async: bool,
+        expected: &Type,
+        span: Span,
     ) -> Result<crate::computational_properties::PropertyRequirement> {
         let bound = self.closure_callable_properties(body, is_async)?;
-        let Type::Function { property_requirement: expected_requirement, .. } = expected else {
-            return Err(TypeError::Other("closure property check needs a callable contract".into()));
+        let Type::Function {
+            property_requirement: expected_requirement,
+            ..
+        } = expected
+        else {
+            return Err(TypeError::Other(
+                "closure property check needs a callable contract".into(),
+            ));
         };
         let mut actual = Type::function_with_requirement(List::new(), Type::Unit, bound.clone());
         if let Type::Function { properties, .. } = &mut actual {
             *properties = bound.finite_footprint().cloned();
         }
-        let contract = Type::function_with_requirement(List::new(), Type::Unit, expected_requirement.clone());
+        let contract =
+            Type::function_with_requirement(List::new(), Type::Unit, expected_requirement.clone());
         self.check_call_type_bound(&actual, &contract, span, 0)?;
         Ok(bound)
     }
@@ -4701,8 +4646,8 @@ impl TypeChecker {
 
     /// Core type inference logic.
     ///
-    /// Relies on RUST_MIN_STACK=16MB for stack safety on deep recursion.
-    /// Tracks recursion depth to detect infinite recursion early.
+    /// The shared depth guard bounds nested work. Expression handlers keep
+    /// resolution temporaries separate from recursive operand checking.
     pub(super) fn infer_expr(&mut self, expr: &Expr, mode: InferMode) -> Result<InferResult> {
         // RAII depth guard prevents stack overflow from mutual recursion
         let _depth_guard = self.inc_inference_depth("infer_expr")?;
@@ -4749,31 +4694,7 @@ impl TypeChecker {
 
                 // Range expressions: start..end or start..=end
                 // Syntax grammar: recursive-descent parseable (LL(k), k<=3), reserved keywords only let/fn/is, unified "type X is" definitions — Range expressions
-                Range {
-                    start,
-                    end,
-                    inclusive,
-                } => {
-                    // Determine the element type from start and end bounds
-                    let elem_ty = match (start.as_ref(), end.as_ref()) {
-                        (Some(start_expr), Some(end_expr)) => {
-                            // Both bounds present: infer from start and unify with end
-                            let start_result = self.synth_expr(start_expr)?;
-                            let end_result = self.synth_expr(end_expr)?;
-                            // Unify start and end types
-                            self.unifier
-                                .unify(&start_result.ty, &end_result.ty, expr.span)?;
-                            start_result.ty
-                        }
-                        (Some(start_expr), None) => self.synth_expr(start_expr)?.ty,
-                        (None, Some(end_expr)) => self.synth_expr(end_expr)?.ty,
-                        (None, None) => Type::Var(TypeVar::fresh()),
-                    };
-                    Ok(InferResult::new(Type::Generic {
-                        name: Self::range_literal_constructor(*inclusive).into(),
-                        args: vec![elem_ty].into(),
-                    }))
-                }
+                Range { .. } => self.infer_expr_range(current_expr, expr.span),
 
                 // Block expressions
                 Block(block) => self.infer_block(block),
@@ -4841,26 +4762,7 @@ impl TypeChecker {
                 TryBlock(inner_block) => self.infer_try_block(inner_block, expr.span),
 
                 // Loop expressions
-                Loop {
-                    label: _,
-                    body,
-                    invariants: _,
-                } => {
-                    // Enter loop context for affine tracking
-                    self.affine_tracker.enter_loop();
-
-                    self.infer_block(body)?;
-
-                    // Exit loop context
-                    self.affine_tracker.exit_loop();
-
-                    // Loop without break has type Never (the bottom type).
-                    // A loop that doesn't break naturally diverges, so its type is Never.
-                    // This allows code like: fn f() -> T { loop { return x; } }
-                    // where the loop body only exits via return/break/panic.
-                    // Never unifies with any type, which is correct.
-                    Ok(InferResult::new(Type::Never))
-                }
+                Loop { .. } => self.infer_expr_loop(current_expr, expr.span),
 
                 // Refinement types enhancement: flow-sensitive refinement propagation, evidence tracking for verified predicates — Refinement Evidence Propagation
                 While { .. } => self.infer_while_loop(current_expr),
@@ -4916,47 +4818,11 @@ impl TypeChecker {
 
                 // Tensor literal: tensor<2, 3>Float { [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]] }
                 // Expression grammar: precedence levels, associativity rules, all constructs are expressions — .12 - Tensor literals
-                TensorLiteral {
-                    shape,
-                    elem_type,
-                    data,
-                } => {
-                    // Convert AST element type to Type
-                    let element_ty = self.ast_to_type(elem_type)?;
-
-                    // Type check the data expression
-                    self.synth_expr(data)?;
-
-                    // Create Tensor type with shape and element type
-                    // Tensor<shape..., T> where T is the element type
-                    let tensor_ty = Type::Generic {
-                        name: verum_common::Text::from("Tensor"),
-                        args: std::iter::once(element_ty)
-                            .chain(shape.iter().map(|&dim| Type::Generic {
-                                name: verum_common::Text::from("Const"),
-                                args: vec![Type::int()].into(), // Const dimension
-                            }))
-                            .collect(),
-                    };
-
-                    Ok(InferResult::new(tensor_ty))
-                }
+                TensorLiteral { .. } => self.infer_expr_tensor_literal(current_expr, expr.span),
 
                 // Interpolated strings: f"Sum: {sum}", sql"SELECT * FROM {table}"
                 // Syntax grammar: recursive-descent parseable (LL(k), k<=3), reserved keywords only let/fn/is, unified "type X is" definitions — #1.4.2 - Text interpolation with injection protection
-                InterpolatedString {
-                    handler: _,
-                    parts: _,
-                    exprs,
-                } => {
-                    // Type check all embedded expressions
-                    // They can be of any type - will be converted to string at runtime
-                    for expr in exprs.iter() {
-                        self.synth_expr(expr)?;
-                    }
-                    // Interpolated strings always produce Text
-                    Ok(InferResult::new(Type::text()))
-                }
+                InterpolatedString { .. } => self.infer_expr_interpolation(current_expr, expr.span),
 
                 // List comprehension: [x * 2 for x in list if x > 0]
                 // Expression grammar: precedence levels, associativity rules, all constructs are expressions — .10 - Comprehension expressions
@@ -4993,29 +4859,7 @@ impl TypeChecker {
 
                 // Try-recover-finally: try { ... } recover { ... } finally { ... }
                 // Combines both recover and finally behaviors
-                TryRecoverFinally {
-                    try_block,
-                    recover,
-                    finally_block,
-                } => {
-                    // Extract error type from ? operators inside try block before type checking
-                    let error_type = self.extract_try_block_error_type(try_block)?;
-
-                    let try_result = self.with_try_recover_context(&error_type, |checker| {
-                        checker.synth_expr(try_block)
-                    })?;
-
-                    // Infer type of recovery body with error type for pattern binding
-                    let recover_ty = self.check_recover_body(recover, &error_type, None)?;
-
-                    // Recovery body must have the same type as try block
-                    self.unifier.unify(&try_result.ty, &recover_ty, expr.span)?;
-
-                    // Type check finally block (result is discarded)
-                    self.synth_expr(finally_block)?;
-
-                    Ok(InferResult::new(try_result.ty))
-                }
+                TryRecoverFinally { .. } => self.infer_expr_try_recover_finally(current_expr, expr.span),
 
                 // Parenthesized expressions are unwrapped at the top of infer_expr
                 // to avoid stack overflow on deeply nested parens
@@ -5043,19 +4887,7 @@ impl TypeChecker {
 
                 // Context usage: using Context with handler { body }
                 // Context system: capability-based dependency injection with "context" declarations, "using" requirements, "provide" injection, ~5-30ns runtime overhead via task-local storage — Context usage expressions
-                UseContext {
-                    context: _,
-                    handler,
-                    body,
-                } => {
-                    // Type check the handler expression
-                    let _handler_result = self.synth_expr(handler)?;
-
-                    // The body is evaluated with the context in scope
-                    // Type of the expression is the type of the body
-                    let body_result = self.synth_expr(body)?;
-                    Ok(body_result)
-                }
+                UseContext { .. } => self.infer_expr_use_context(current_expr, expr.span),
 
                 // Capability attenuation: context.attenuate(capabilities)
                 // Context system core: "context Name { fn method(...) }" declarations, "using [Ctx1, Ctx2]" on functions, "provide Ctx = impl" for injection — 0 - Capability Attenuation
@@ -5069,43 +4901,7 @@ impl TypeChecker {
                 // For-await loop: for await pattern in async_iterable { body }
                 // Spec: grammar/verum.ebnf - for_await_loop production (v2.10)
                 // Iterates over an async iterator, awaiting each value
-                ForAwait {
-                    label: _,
-                    pattern,
-                    async_iterable,
-                    body,
-                    invariants: _,
-                    decreases: _,
-                } => {
-                    let iter_result = self.synth_expr(async_iterable)?;
-
-                    // =========================================================================
-                    // Protocol-based AsyncIterator resolution
-                    // ForAwait desugaring: "for await x in stream" desugars to async iterator protocol polling
-                    // =========================================================================
-                    let elem_ty = match self
-                        .protocol_checker
-                        .read()
-                        .resolve_async_iterator_protocol(&iter_result.ty)
-                    {
-                        Some(resolution) => resolution.item,
-                        None => {
-                            return Err(TypeError::Other(verum_common::Text::from(format!(
-                                "for await requires AsyncIterator or AsyncStream, got: {}",
-                                iter_result.ty
-                            ))));
-                        }
-                    };
-
-                    // Enter scope for loop body
-                    self.ctx.enter_scope();
-                    self.bind_pattern(pattern, &elem_ty)?;
-                    self.infer_block(body)?;
-                    self.ctx.exit_scope();
-
-                    // For-await loops return Unit (unless break with value, handled elsewhere)
-                    Ok(InferResult::new(Type::unit()))
-                }
+                ForAwait { .. } => self.infer_expr_for_await(current_expr, expr.span),
 
                 // Throw expression: throw error_value
                 // Spec: grammar/verum.ebnf - throw_expr production
@@ -5127,25 +4923,7 @@ impl TypeChecker {
                 // Is expression: expr is Pattern or expr is not Pattern
                 // "x is Pattern" operator: replaces Rust matches!() macro for pattern testing, returns Bool
                 // Tests if an expression matches a pattern, returns Bool
-                Is {
-                    expr: test_expr,
-                    pattern,
-                    negated: _,
-                } => {
-                    // Type check the expression being tested
-                    let test_result = self.synth_expr(test_expr)?;
-
-                    // Validate that the pattern is compatible with the expression type
-                    // This uses the same logic as match arm pattern checking
-                    self.ctx.enter_scope();
-                    // bind_pattern will validate pattern compatibility and report errors
-                    // for incompatible patterns (e.g., matching Int against Some(x))
-                    self.bind_pattern(pattern, &test_result.ty)?;
-                    self.ctx.exit_scope();
-
-                    // Is expressions always return Bool (regardless of negation)
-                    Ok(InferResult::new(Type::bool()))
-                }
+                Is { .. } => self.infer_expr_is(current_expr, expr.span),
 
                 // Meta block: meta { ... }
                 // Meta system: unified compile-time computation via "meta fn", "meta" parameters, @derive macros, tagged literals, all under single "meta" concept — Compile-time evaluation
@@ -5176,28 +4954,7 @@ impl TypeChecker {
                 // Quote expression: quote { ... } or quote(N) { ... }
                 // Spec: grammar/verum.ebnf - quote_expr production
                 // Quote expressions produce a TokenStream that can be spliced into generated code
-                Quote {
-                    target_stage,
-                    tokens,
-                } => {
-                    // Perform hygiene checking on the quote tokens
-                    // Quote hygiene: macro-generated code uses hygienic naming to prevent variable capture and scope pollution — Quote Hygiene
-                    self.check_quote_hygiene(tokens, *target_stage, expr.span)?;
-
-                    // Quote expressions always produce TokenStream
-                    let token_stream_ty = self
-                        .ctx
-                        .lookup_type(&verum_common::Text::from("TokenStream"))
-                        .cloned()
-                        .unwrap_or_else(|| Type::Named {
-                            path: verum_ast::ty::Path::single(verum_ast::Ident::new(
-                                "TokenStream",
-                                expr.span,
-                            )),
-                            args: List::new(),
-                        });
-                    Ok(InferResult::new(token_stream_ty))
-                }
+                Quote { .. } => self.infer_expr_quote(current_expr, expr.span),
 
                 // StageEscape expression: $(stage N){ expr }
                 // Spec: grammar/verum.ebnf - stage_escape production
@@ -5254,6 +5011,244 @@ impl TypeChecker {
             },
         }
     }
+
+    fn infer_expr_range(&mut self, expr: &Expr, span: Span) -> Result<InferResult> {
+        let ExprKind::Range {
+            start,
+            end,
+            inclusive,
+        } = &expr.kind
+        else {
+            unreachable!()
+        };
+        // Determine the element type from start and end bounds
+        let elem_ty = match (start.as_ref(), end.as_ref()) {
+            (Some(start_expr), Some(end_expr)) => {
+                // Both bounds present: infer from start and unify with end
+                let start_result = self.synth_expr(start_expr)?;
+                let end_result = self.synth_expr(end_expr)?;
+                // Unify start and end types
+                self.unifier.unify(&start_result.ty, &end_result.ty, span)?;
+                start_result.ty
+            }
+            (Some(start_expr), None) => self.synth_expr(start_expr)?.ty,
+            (None, Some(end_expr)) => self.synth_expr(end_expr)?.ty,
+            (None, None) => Type::Var(TypeVar::fresh()),
+        };
+        Ok(InferResult::new(Type::Generic {
+            name: Self::range_literal_constructor(*inclusive).into(),
+            args: vec![elem_ty].into(),
+        }))
+    }
+
+    fn infer_expr_loop(&mut self, expr: &Expr, _span: Span) -> Result<InferResult> {
+        let ExprKind::Loop {
+            label: _,
+            body,
+            invariants: _,
+        } = &expr.kind
+        else {
+            unreachable!()
+        };
+        // Enter loop context for affine tracking
+        self.affine_tracker.enter_loop();
+
+        self.infer_block(body)?;
+
+        // Exit loop context
+        self.affine_tracker.exit_loop();
+
+        // Loop without break has type Never (the bottom type).
+        // A loop that doesn't break naturally diverges, so its type is Never.
+        // This allows code like: fn f() -> T { loop { return x; } }
+        // where the loop body only exits via return/break/panic.
+        // Never unifies with any type, which is correct.
+        Ok(InferResult::new(Type::Never))
+    }
+
+    fn infer_expr_tensor_literal(&mut self, expr: &Expr, _span: Span) -> Result<InferResult> {
+        let ExprKind::TensorLiteral {
+            shape,
+            elem_type,
+            data,
+        } = &expr.kind
+        else {
+            unreachable!()
+        };
+        // Convert AST element type to Type
+        let element_ty = self.ast_to_type(elem_type)?;
+
+        // Type check the data expression
+        self.synth_expr(data)?;
+
+        // Create Tensor type with shape and element type
+        // Tensor<shape..., T> where T is the element type
+        let tensor_ty = Type::Generic {
+            name: verum_common::Text::from("Tensor"),
+            args: std::iter::once(element_ty)
+                .chain(shape.iter().map(|&dim| Type::Generic {
+                    name: verum_common::Text::from("Const"),
+                    args: vec![Type::int()].into(), // Const dimension
+                }))
+                .collect(),
+        };
+
+        Ok(InferResult::new(tensor_ty))
+    }
+
+    fn infer_expr_interpolation(&mut self, expr: &Expr, _span: Span) -> Result<InferResult> {
+        let ExprKind::InterpolatedString {
+            handler: _,
+            parts: _,
+            exprs,
+        } = &expr.kind
+        else {
+            unreachable!()
+        };
+        // Type check all embedded expressions
+        // They can be of any type - will be converted to string at runtime
+        for expr in exprs.iter() {
+            self.synth_expr(expr)?;
+        }
+        // Interpolated strings always produce Text
+        Ok(InferResult::new(Type::text()))
+    }
+
+    fn infer_expr_try_recover_finally(&mut self, expr: &Expr, span: Span) -> Result<InferResult> {
+        let ExprKind::TryRecoverFinally {
+            try_block,
+            recover,
+            finally_block,
+        } = &expr.kind
+        else {
+            unreachable!()
+        };
+        // Extract error type from ? operators inside try block before type checking
+        let error_type = self.extract_try_block_error_type(try_block)?;
+
+        let try_result =
+            self.with_try_recover_context(&error_type, |checker| checker.synth_expr(try_block))?;
+
+        // Infer type of recovery body with error type for pattern binding
+        let recover_ty = self.check_recover_body(recover, &error_type, None)?;
+
+        // Recovery body must have the same type as try block
+        self.unifier.unify(&try_result.ty, &recover_ty, span)?;
+
+        // Type check finally block (result is discarded)
+        self.synth_expr(finally_block)?;
+
+        Ok(InferResult::new(try_result.ty))
+    }
+
+    fn infer_expr_use_context(&mut self, expr: &Expr, _span: Span) -> Result<InferResult> {
+        let ExprKind::UseContext {
+            context: _,
+            handler,
+            body,
+        } = &expr.kind
+        else {
+            unreachable!()
+        };
+        // Type check the handler expression
+        let _handler_result = self.synth_expr(handler)?;
+
+        // The body is evaluated with the context in scope
+        // Type of the expression is the type of the body
+        let body_result = self.synth_expr(body)?;
+        Ok(body_result)
+    }
+
+    fn infer_expr_for_await(&mut self, expr: &Expr, _span: Span) -> Result<InferResult> {
+        let ExprKind::ForAwait {
+            label: _,
+            pattern,
+            async_iterable,
+            body,
+            invariants: _,
+            decreases: _,
+        } = &expr.kind
+        else {
+            unreachable!()
+        };
+        let iter_result = self.synth_expr(async_iterable)?;
+
+        // =========================================================================
+        // Protocol-based AsyncIterator resolution
+        // ForAwait desugaring: "for await x in stream" desugars to async iterator protocol polling
+        // =========================================================================
+        let elem_ty = match self
+            .protocol_checker
+            .read()
+            .resolve_async_iterator_protocol(&iter_result.ty)
+        {
+            Some(resolution) => resolution.item,
+            None => {
+                return Err(TypeError::Other(verum_common::Text::from(format!(
+                    "for await requires AsyncIterator or AsyncStream, got: {}",
+                    iter_result.ty
+                ))));
+            }
+        };
+
+        // Enter scope for loop body
+        self.ctx.enter_scope();
+        self.bind_pattern(pattern, &elem_ty)?;
+        self.infer_block(body)?;
+        self.ctx.exit_scope();
+
+        // For-await loops return Unit (unless break with value, handled elsewhere)
+        Ok(InferResult::new(Type::unit()))
+    }
+
+    fn infer_expr_is(&mut self, expr: &Expr, _span: Span) -> Result<InferResult> {
+        let ExprKind::Is {
+            expr: test_expr,
+            pattern,
+            negated: _,
+        } = &expr.kind
+        else {
+            unreachable!()
+        };
+        // Type check the expression being tested
+        let test_result = self.synth_expr(test_expr)?;
+
+        // Validate that the pattern is compatible with the expression type
+        // This uses the same logic as match arm pattern checking
+        self.ctx.enter_scope();
+        // bind_pattern will validate pattern compatibility and report errors
+        // for incompatible patterns (e.g., matching Int against Some(x))
+        self.bind_pattern(pattern, &test_result.ty)?;
+        self.ctx.exit_scope();
+
+        // Is expressions always return Bool (regardless of negation)
+        Ok(InferResult::new(Type::bool()))
+    }
+
+    fn infer_expr_quote(&mut self, expr: &Expr, span: Span) -> Result<InferResult> {
+        let ExprKind::Quote {
+            target_stage,
+            tokens,
+        } = &expr.kind
+        else {
+            unreachable!()
+        };
+        // Perform hygiene checking on the quote tokens
+        // Quote hygiene: macro-generated code uses hygienic naming to prevent variable capture and scope pollution — Quote Hygiene
+        self.check_quote_hygiene(tokens, *target_stage, span)?;
+
+        // Quote expressions always produce TokenStream
+        let token_stream_ty = self
+            .ctx
+            .lookup_type(&verum_common::Text::from("TokenStream"))
+            .cloned()
+            .unwrap_or_else(|| Type::Named {
+                path: verum_ast::ty::Path::single(verum_ast::Ident::new("TokenStream", span)),
+                args: List::new(),
+            });
+        Ok(InferResult::new(token_stream_ty))
+    }
+
     /// Type-infer a closure (lambda) expression.
     /// Performs capture analysis, borrow tracking, parameter binding,
     /// return-type synthesis, Pi-type formation, and Send/Sync safety checks.
@@ -6892,6 +6887,16 @@ impl TypeChecker {
     }
 
     fn infer_expr_call(&mut self, expr: &Expr) -> Result<InferResult> {
+        // Callee resolution owns temporary instantiations; release its frame
+        // before recursively checking arguments. The selected signature and
+        // its obligations travel together into application checking.
+        match self.prepare_expr_call(expr)? {
+            CallPreparation::Inferred(result) => Ok(result),
+            CallPreparation::Apply(prepared) => self.apply_expr_call(expr, prepared),
+        }
+    }
+
+    fn prepare_expr_call(&mut self, expr: &Expr) -> Result<CallPreparation> {
         use ExprKind::*;
         let ExprKind::Call { func, args, type_args } = &expr.kind else { unreachable!() };
         // ============================================================
@@ -6999,7 +7004,7 @@ impl TypeChecker {
                 method_result.ty
             };
 
-            return Ok(InferResult::new(result_ty));
+            return Ok(CallPreparation::Inferred(InferResult::new(result_ty)));
         }
 
         // ============================================================
@@ -7078,7 +7083,7 @@ impl TypeChecker {
                 for arg in args {
                     self.infer_expr(arg, InferMode::Synth)?;
                 }
-                return Ok(InferResult::new(Type::Unknown));
+                return Ok(CallPreparation::Inferred(InferResult::new(Type::Unknown)));
             }
             // **Audit-driven fundamental fix** — gate WAS
             // `parents.len() > 1` (multi-parent arity disambiguation
@@ -7158,7 +7163,7 @@ impl TypeChecker {
                     } else {
                         resolved_return
                     };
-                    return Ok(InferResult::new(resolved_return));
+                    return Ok(CallPreparation::Inferred(InferResult::new(resolved_return)));
                 }
             }
         }
@@ -7227,7 +7232,7 @@ impl TypeChecker {
                             } else {
                                 resolved_return
                             };
-                        return Ok(InferResult::new(resolved_return));
+                        return Ok(CallPreparation::Inferred(InferResult::new(resolved_return)));
                     }
                 }
             }
@@ -7265,7 +7270,7 @@ impl TypeChecker {
                     }
                 }
                 // offset_of always returns Int
-                return Ok(InferResult::new(Type::Int));
+                return Ok(CallPreparation::Inferred(InferResult::new(Type::Int)));
             }
 
             // ============================================================
@@ -7292,9 +7297,9 @@ impl TypeChecker {
                     awaited_types.push(awaited);
                 }
                 let tuple_ty = Type::Tuple(awaited_types);
-                return Ok(InferResult::new(Type::Future {
+                return Ok(CallPreparation::Inferred(InferResult::new(Type::Future {
                     output: Box::new(tuple_ty),
-                }));
+                })));
             }
         }
 
@@ -7560,766 +7565,815 @@ impl TypeChecker {
 
         self.type_registry.register_call_target(expr.span, func_ty.clone());
 
-        match func_ty {
-            // Unknown propagation: in stdlib single-file mode,
-            // unresolvable callees return Unknown — skip all
-            // argument checking and return Unknown.
-            Type::Unknown if self.stdlib_single_file_mode => {
+        Ok(CallPreparation::Apply(PreparedCall {
+            callable: func_ty,
+            callee_name,
+            protocol_bounds: pending_protocol_bounds,
+            type_bounds: pending_type_bounds,
+        }))
+    }
+
+    fn apply_expr_call(&mut self, expr: &Expr, prepared: PreparedCall) -> Result<InferResult> {
+        let ExprKind::Call { func, .. } = &expr.kind else {
+            unreachable!()
+        };
+        match prepared.callable {
+            Type::Unknown | Type::Var(_) if self.stdlib_single_file_mode => {
                 Ok(InferResult::new(Type::Unknown))
             }
-
-            // Var propagation: unresolved type variables from
-            // lenient-resolved generic functions skip checking.
-            Type::Var(_) if self.stdlib_single_file_mode => {
-                Ok(InferResult::new(Type::Unknown))
-            }
-
-            // Never propagation: calling Never returns Never
             Type::Never => Ok(InferResult::new(Type::Never)),
+            Type::Function { .. } => self.apply_function_call(expr, prepared),
+            callable @ Type::Pi { .. } => self.apply_pi_call(expr, callable),
+            callable @ Type::Var(_) => self.apply_inferred_call(expr, callable),
+            callable @ Type::Forall { .. } => self.apply_polymorphic_call(expr, callable),
+            callable @ Type::Named { .. } => self.apply_nominal_call(expr, callable),
+            callable => Err(TypeError::NotAFunction {
+                ty: callable.to_text(),
+                span: func.span,
+            }),
+        }
+    }
 
-            // Pi type application: beta reduction for dependent functions
-            // Type-level computation: compile-time evaluation of type expressions, reduction rules, normalization — .2 - Type-level computation
-            Type::Pi {
-                param_name,
-                param_type,
-                return_type,
-            } => {
-                if args.len() != 1 {
-                    return Err(TypeError::Other(verum_common::Text::from(format!(
-                        "Pi type expects exactly 1 argument, got {}",
-                        args.len()
-                    ))));
-                }
+    fn apply_pi_call(&mut self, expr: &Expr, func_ty: Type) -> Result<InferResult> {
+        let ExprKind::Call { func, args, .. } = &expr.kind else {
+            unreachable!()
+        };
+        let Type::Pi {
+            param_name,
+            param_type,
+            return_type,
+        } = func_ty
+        else {
+            unreachable!()
+        };
+        if args.len() != 1 {
+            return Err(TypeError::Other(verum_common::Text::from(format!(
+                "Pi type expects exactly 1 argument, got {}",
+                args.len()
+            ))));
+        }
 
-                // Check the argument against parameter type
-                self.check_expr(&args[0], &param_type)?;
+        // Check the argument against parameter type
+        self.check_expr(&args[0], &param_type)?;
 
-                // Beta reduction: substitute argument into return type
-                // Convert argument expression to EqTerm for substitution
-                let arg_term = self.expr_to_eq_term(&args[0])?;
-                let result_ty =
-                    self.substitute_term_in_type(&return_type, &param_name, &arg_term);
+        // Beta reduction: substitute argument into return type
+        // Convert argument expression to EqTerm for substitution
+        let arg_term = self.expr_to_eq_term(&args[0])?;
+        let result_ty = self.substitute_term_in_type(&return_type, &param_name, &arg_term);
 
-                Ok(InferResult::new(result_ty))
+        Ok(InferResult::new(result_ty))
+    }
+
+    fn apply_inferred_call(&mut self, expr: &Expr, func_ty: Type) -> Result<InferResult> {
+        let ExprKind::Call { func, args, .. } = &expr.kind else {
+            unreachable!()
+        };
+        let Type::Var(v) = func_ty else {
+            unreachable!()
+        };
+        // Reached only when the parameter has NO declared function
+        // bound — one with a bound was rewritten to that bound
+        // where `func_ty` is computed, so it arrives at the
+        // ordinary `Type::Function` arm instead.
+        //
+        // Type variable being called as a function - instantiate it as a function type
+        // Create fresh type variables for parameters based on argument count
+        let mut param_types = List::new();
+        for _ in args.iter() {
+            param_types.push(Type::Var(TypeVar::fresh()));
+        }
+
+        let ret_ty = Type::Var(TypeVar::fresh());
+        let func_ty_inst = Type::function_with_async(param_types.clone(), ret_ty.clone(), true);
+
+        // Unify the type variable with the function type
+        self.unifier
+            .unify(&Type::Var(v), &func_ty_inst, func.span)?;
+
+        // Now check arguments against parameter types
+        // NLL: Set call argument context for proper borrow release
+        self.with_call_argument_context(|checker| {
+            for (arg, param_ty) in args.iter().zip(param_types.iter()) {
+                checker.check_expr(arg, param_ty)?;
             }
+            Ok(())
+        })?;
 
+        Ok(InferResult::new(ret_ty))
+    }
+
+    fn apply_polymorphic_call(&mut self, expr: &Expr, func_ty: Type) -> Result<InferResult> {
+        let ExprKind::Call { func, args, .. } = &expr.kind else {
+            unreachable!()
+        };
+        let Type::Forall { ref vars, ref body } = func_ty else {
+            unreachable!()
+        };
+        // Build substitution map: quantified var -> fresh TypeVar
+        let mut subst: Map<TypeVar, Type> = Map::new();
+        for qvar in vars.iter() {
+            let fresh = TypeVar::fresh();
+            subst.insert(*qvar, Type::Var(fresh));
+        }
+
+        // Apply substitution to the body to get the instantiated function type
+        let instantiated_body = self.substitute_type_vars(body, &subst);
+        self.type_registry
+            .register_call_target(expr.span, instantiated_body.clone());
+
+        // Now the body should be a Function type - extract and check
+        match instantiated_body {
             Type::Function {
                 params,
                 return_type,
                 contexts,
                 ..
             } => {
-                // Support default parameter values
-                // Spec: Grammar default_value in function_param
-                //
-
-                // Get minimum required params for this function (if registered)
-                let func_name = if let ExprKind::Path(path) = &func.kind {
-                    path.segments.last().and_then(|seg| match seg {
-                        verum_ast::ty::PathSegment::Name(id) => Some(id.name.clone()),
-                        _ => None,
-                    })
-                } else {
-                    None
-                };
-
-                // Variadic functions can accept any number of args (including zero).
-                // This includes: format, print, println, panic, assert, assert_eq
-                let is_variadic = func_name
-                    .as_ref()
-                    .map(|name| {
-                        matches!(
-                            name.as_str(),
-                            "format" | "print" | "println" | "panic" |
-                            "unreachable" | "todo" |
-                            "assert" | "assert_eq" | "assert_ne" |
-                            // `List.of` and `Set.of` were here and are gone
-                            // (T1093). Neither is implemented anywhere: the
-                            // checker skipped arity for them and codegen then
-                            // died with `undefined function: List.of`. Being
-                            // in this list is what let the call reach codegen
-                            // at all, so the entry did not describe a builtin
-                            // — it manufactured one. 13 call sites in core/
-                            // are rewritten to the list literal `[x]`, which
-                            // is what the language actually provides.
-                            //
-                            // The rule this restores is stated in
-                            // crates/verum_types/src/AGENTS.md: the compiler
-                            // must hold ZERO hardcoded stdlib knowledge. A
-                            // name the checker knows and the library does not
-                            // is exactly the circular dependency it forbids.
-                            "min" | "max" |
-                            "join" | "concat" |
-                            // Meta reflection builtins accept variable args
-                            // (e.g. type_name(Int, Text) for tuple type)
-                            "type_name" | "type_id" | "size_of" | "align_of" |
-                            "text_concat" | "compile_error" | "compile_warning" |
-                            // Meta code generation builtins are variadic
-                            "concat_idents" | "format_ident" | "quote" |
-                            "unquote" | "stringify" | "gensym" |
-                            // Meta context builtins
-                            "emit_diagnostic" | "emit_warning" | "emit_error"
-                        )
-                    })
-                    .unwrap_or(false);
-
-                let required_params = {
-                    let from_registry = func_name
-                        .as_ref()
-                        .and_then(|name| {
-                            self.function_required_params.get(name).copied()
-                                // BAKED-DEFAULT-ARG-1: the registry is
-                                // fed by the AST decl walk and the
-                                // metadata resolvers, but several
-                                // binding paths (eager env loads,
-                                // prelude glob replay) insert schemes
-                                // without passing through either. The
-                                // gate itself is the ONE consumer —
-                                // consult the baked descriptors lazily
-                                // on a registry miss and cache the
-                                // answer.
-                                .or_else(|| self.required_params_from_metadata(name.as_str()))
-                        })
-                        .unwrap_or(params.len());
-                    let capped = from_registry.min(params.len());
-                    // Variadic functions accept 0 or more args
-                    if is_variadic { 0 } else { capped }
-                };
-
-                let total_params = params.len();
-                let provided_args = args.len();
-
-                let has_explicit_type_args = !type_args.is_empty();
-                if provided_args < required_params
-                    && !has_explicit_type_args
-                    && !self.stdlib_single_file_mode
-                {
-                    return Err(TypeError::OtherWithCodeSpanned {
-                        code: verum_common::Text::from("E102"),
-                        msg: verum_common::Text::from(format!(
-                            "Function requires at least {} argument{}, got {}{}",
-                            required_params,
-                            if required_params == 1 { "" } else { "s" },
-                            provided_args,
-                            func_name
-                                .as_ref()
-                                .map(|n| format!(" (calling `{}`)", n))
-                                .unwrap_or_default()
-                        )),
-                        span: expr.span,
-                    });
-                }
-
-                // In unsafe contexts, arity mismatches are often caused by
-                // FFI function name collisions (e.g., extern `read` vs method `read`).
-                // Allow extra args in unsafe contexts to avoid false positives.
-                //
-
-                // Also allow extra args when the function is generic and arguments
-                // look like type names (PascalCase). This handles meta intrinsics
-                // like `stride_of(U8)` where the stdlib declares `stride_of<T>()`
-                // but the call passes the type as a regular arg.
-                let all_args_are_type_like = args.iter().all(|arg| {
-                    if let ExprKind::Path(path) = &arg.kind {
-                        if let Some(ident) = path.as_ident() {
-                            let name = ident.as_str();
-                            name.chars()
-                                .next()
-                                .map(|c| c.is_ascii_uppercase())
-                                .unwrap_or(false)
-                        } else {
-                            false
-                        }
-                    } else {
-                        matches!(&arg.kind, ExprKind::TypeExpr(_))
+                // Check arity
+                // T1270: a ±1 tolerance is not the self-parameter rule.
+                let params = match Self::effective_params(params.as_slice(), args.len(), None) {
+                    Some(effective) => effective,
+                    None => {
+                        return Err(TypeError::Other(verum_common::Text::from(format!(
+                            "Rank-2 function expects {} argument(s), got {}",
+                            params.len(),
+                            args.len()
+                        ))));
                     }
-                });
-                let is_generic_type_call =
-                    has_explicit_type_args || all_args_are_type_like;
-                if provided_args > total_params
-                    && !is_variadic
-                    && !self.in_unsafe_context
-                    && !is_generic_type_call
-                    && !self.stdlib_single_file_mode
-                {
-                    return Err(TypeError::OtherWithCodeSpanned {
-                        code: verum_common::Text::from("E102"),
-                        msg: verum_common::Text::from(format!(
-                            "Function accepts at most {} argument{}, got {}{}",
-                            total_params,
-                            if total_params == 1 { "" } else { "s" },
-                            provided_args,
-                            func_name
-                                .as_ref()
-                                .map(|n| format!(" (calling `{}`)", n))
-                                .unwrap_or_default()
-                        )),
-                        span: expr.span,
-                    });
-                }
+                };
 
-                // ============================================================
-                // Context Satisfaction Check (ContextChecker integration)
-                // Context type system integration: context requirements tracked in function types, checked at call sites — Type System Integration
-                // ============================================================
-                // When calling a function with context requirements, verify that
-                // the current function's contexts satisfy those requirements.
-                // VERUM_TRACE_CTXCALL prints the DECISION this block is
-                // about to make: what the callee requires, what the caller
-                // has, and whether leniency is on. It stays because the
-                // failure mode it caught is invisible without it — the
-                // check below was correct and dead for as long as
-                // `contexts` arrived as `None`, and no diagnostic, test or
-                // suite could tell that apart from "the caller was fine".
-                // One line here answers it in a second (T0935).
-                if std::env::var("VERUM_TRACE_CTXCALL").is_ok() {
-                    let callee_name = if let ExprKind::Path(p) = &func.kind {
-                        p.segments
-                            .last()
-                            .and_then(|s| match s {
-                                verum_ast::ty::PathSegment::Name(i) => {
-                                    Some(i.name.to_string())
-                                }
-                                _ => None,
-                            })
-                            .unwrap_or_else(|| "<path>".into())
-                    } else {
-                        format!("<{:?}>", std::mem::discriminant(&func.kind))
-                    };
-                    eprintln!(
-                        "[ctxcall] callee={callee_name} contexts={:?} caller={:?} lenient={}",
-                        contexts.as_ref().map(|c| c
-                            .iter()
-                            .map(|r| r.name.to_string())
-                            .collect::<Vec<_>>()),
-                        self.current_function_contexts
-                            .as_ref()
-                            .map(|s| s.iter().map(|r| r.name.to_string()).collect::<Vec<_>>()),
-                        self.context_checker.is_lenient(),
-                    );
-                }
+                // Context satisfaction check
                 if let Some(ref callee_contexts) = contexts {
-                    self.check_callable_contexts(callee_contexts, expr.span)?;
-                }
-
-                // Check capability requirements if function has contexts
-                // Context system core: "context Name { fn method(...) }" declarations, "using [Ctx1, Ctx2]" on functions, "provide Ctx = impl" for injection — 0 - Capability Attenuation
-                if let Some(ref req) = contexts {
-                    for context_ref in req.iter() {
-                        let context_name = &context_ref.name;
-                        // Check if the required context is available
-                        match self
-                            .capability_checker
-                            .get_context_capabilities(context_name.as_str())
-                        {
-                            Maybe::Some(caps) => {
-                                // Context is available - verify it has necessary capabilities
-                                // Extract capability requirements from function name and signature
-                                use crate::capability::{
-                                    CapabilityRequirement, TypeCapabilitySet,
-                                };
-
-                                // Extract function name for heuristic analysis
-                                let func_name = if let ExprKind::Path(path) = &func.kind
-                                {
-                                    path.segments
-                                        .last()
-                                        .and_then(|seg| match seg {
-                                            verum_ast::ty::PathSegment::Name(id) => {
-                                                Some(id.name.as_str())
-                                            }
-                                            _ => None,
-                                        })
-                                        .unwrap_or("function")
-                                } else {
-                                    "function"
-                                };
-
-                                // Use the method capability mapper to extract requirements
-                                // For function calls, we use the function name as a hint
-                                let context_decl =
-                                    self.context_declarations.get(context_name);
-                                let required_caps = self
-                                    .method_capability_mapper
-                                    .extract_method_capabilities(
-                                        context_name,
-                                        &verum_common::Text::from(func_name),
-                                        context_decl,
-                                    );
-
-                                let requirement = CapabilityRequirement::new(
-                                    context_name.clone(),
-                                    required_caps.clone(),
-                                    verum_common::Text::from(format!(
-                                        "function call to {}",
-                                        func_name
-                                    )),
-                                );
-
-                                if let Err(cap_err) = self
-                                    .capability_checker
-                                    .check_requirement(&requirement)
-                                {
-                                    // E0306: Capability violation
-                                    use verum_diagnostics::capability_attenuation_errors::CapabilityViolationError;
-
-                                    let func_name = if let ExprKind::Path(path) =
-                                        &func.kind
-                                    {
-                                        path.segments
-                                            .iter()
-                                            .filter_map(|seg| match seg {
-                                                verum_ast::ty::PathSegment::Name(
-                                                    id,
-                                                ) => Some(id.name.as_str()),
-                                                _ => None,
-                                            })
-                                            .collect::<Vec<_>>()
-                                            .join("::")
-                                    } else {
-                                        "function".to_string()
-                                    };
-
-                                    let cap_names: Vec<String> = caps
-                                        .capabilities
-                                        .names()
-                                        .iter()
-                                        .map(|t| t.to_string())
-                                        .collect();
-
-                                    let diagnostic = CapabilityViolationError::new(
-                                        format!("{}::{}", context_name, "ReadOnly"),
-                                        span_to_line_col(func.span),
-                                    )
-                                    .with_declared_capabilities(
-                                        cap_names
-                                            .iter()
-                                            .map(|s| s.as_str().into())
-                                            .collect(),
-                                    )
-                                    .with_function_name(func_name.as_str())
-                                    .build();
-
-                                    self.diagnostics.push(diagnostic);
-
-                                    return Err(TypeError::Other(cap_err.message()));
-                                }
-                            }
-                            Maybe::None => {
-                                // E0308: Required context not provided
-                                use verum_diagnostics::capability_attenuation_errors::CapabilityNotProvidedError;
-
-                                let func_name = if let ExprKind::Path(path) = &func.kind
-                                {
-                                    path.segments
-                                        .iter()
-                                        .filter_map(|seg| match seg {
-                                            verum_ast::ty::PathSegment::Name(id) => {
-                                                Some(id.name.as_str())
-                                            }
-                                            _ => None,
-                                        })
-                                        .collect::<Vec<_>>()
-                                        .join("::")
-                                } else {
-                                    "function".to_string()
-                                };
-
-                                let diagnostic = CapabilityNotProvidedError::new(
-                                    context_name.as_str(),
-                                    span_to_line_col(func.span),
-                                )
-                                .with_function_name(func_name.as_str())
-                                .build();
-
-                                self.diagnostics.push(diagnostic);
-
-                                return Err(TypeError::Other(
-                                    verum_common::Text::from(format!(
-                                        "Function requires context '{}' which is not provided",
-                                        context_name
-                                    )),
-                                ));
-                            }
-                        }
+                    let mut callee_context_set = ContextSet::new();
+                    for ctx_ref in callee_contexts.iter() {
+                        callee_context_set
+                            .add(ContextRequirement::new(ctx_ref.name.clone(), expr.span));
                     }
+
+                    let caller_context_set =
+                        self.current_function_contexts.clone().unwrap_or_default();
+
+                    self.context_checker.check_context_satisfaction(
+                        &callee_context_set,
+                        &caller_context_set,
+                        expr.span,
+                    )?;
                 }
 
-                // Check each argument against parameter type with substitution
-                // NLL: Set call argument context for proper borrow release
+                // Check each argument against parameter type
                 self.with_call_argument_context(|checker| {
-                    // ============================================================
-                    // Dependent refinement substitution (Phase A.5 activation)
-                    // ============================================================
-                    //
-
-                    // Look up the callee's parameter names so that refinement
-                    // predicates on later parameters can be specialised with the
-                    // concrete values of earlier arguments before being checked.
-                    // Without this, a signature like
-                    //
-
-                    //  fn safe_get(len: Int, i: Int{>= 0, < len}) -> Int
-                    //
-
-                    // would leave `len` as a free variable in the predicate on
-                    // `i` at call sites, silently admitting out-of-bounds calls
-                    // like `safe_get(5, 10)`. With this substitution, the
-                    // predicate becomes `10 >= 0 && 10 < 5` at the second
-                    // argument check, which the refinement checker correctly
-                    // rejects.
-                    //
-
-                    // `dep_param_names` is the list of parameter names in
-                    // declaration order; empty strings stand in for positions
-                    // where the parameter uses a non-identifier pattern (those
-                    // positions skip substitution but don't break the loop).
-                    //
-
-                    // Guarded by `callee_name.is_some()` so closures and
-                    // anonymous function values don't pay the lookup cost.
-                    let dep_param_names: List<Text> = callee_name
-                        .as_ref()
-                        .and_then(|name| checker.function_param_names.get(name).cloned())
-                        .unwrap_or_default();
-
-                    for (i, (arg, param_ty)) in args.iter().zip(params.iter()).enumerate() {
+                    for (arg, param_ty) in args.iter().zip(params.iter()) {
                         let resolved_param = checker.unifier.apply(param_ty);
-                        // Normalize TypeApp nodes (GAT/HKT type application)
-                        // so that e.g. F<MaybeInstance><Int> reduces to Maybe<Int>
-                        let resolved_param = if Self::contains_type_app(&resolved_param) {
-                            checker.normalize_type(&resolved_param)
-                        } else {
-                            resolved_param
-                        };
-
-                        // Apply dependent refinement substitution: if this
-                        // parameter is `Type::Refined { base, predicate }`, and
-                        // we know the names of earlier parameters, substitute
-                        // each earlier argument into the predicate so that
-                        // references like `len` become the concrete constant
-                        // passed at the call site. Empty-string parameter
-                        // names (non-identifier patterns) are skipped.
-                        //
-
-                        // The base type and any wrapping refinement structure
-                        // is otherwise preserved, so this only ever tightens
-                        // the predicate with more information.
-                        let check_ty =
-                            if let Type::Refined { base, predicate } = &resolved_param {
-                                if !dep_param_names.is_empty() && i > 0 {
-                                    let mut replacements = List::new();
-                                    for j in 0..i {
-                                        let earlier_name = match dep_param_names.get(j) {
-                                            Some(n) if !n.as_str().is_empty()
-                                                && !predicate.binds_subject(n.as_str()) => n.clone(),
-                                            _ => continue,
-                                        };
-                                        let arg_expr = match args.get(j) {
-                                            Some(a) => a,
-                                            None => continue,
-                                        };
-                                        replacements.push((earlier_name, arg_expr));
-                                    }
-                                    let mut subst_pred = predicate.substitute_parameters(&replacements)
-                                    .map_err(|error| TypeError::OtherWithCodeSpanned {
-                                        code: "E500".into(), msg: error.message, span: error.span,
-                                    })?;
-                                    // Constant-fold arithmetic that became pure after
-                                    // substitution. Without this, a predicate like
-                                    // `count <= src_len - offset` becomes
-                                    // `count <= 10 - 5` after substituting
-                                    // `src_len → 10, offset → 5`, and the syntactic
-                                    // refinement checker cannot decide it because it
-                                    // does not reduce `10 - 5` to `5`. Folding here
-                                    // produces `count <= 5`, which the checker can
-                                    // then decide against any concrete `count`.
-                                    subst_pred.predicate =
-                                        Self::const_fold_expr(&subst_pred.predicate).into();
-                                    Type::Refined {
-                                        base: base.clone(),
-                                        predicate: subst_pred,
-                                    }
-                                } else {
-                                    resolved_param
-                                }
-                            } else {
-                                resolved_param
-                            };
-
-                        checker.check_expr(arg, &check_ty)?;
+                        checker.check_expr(arg, &resolved_param)?;
                     }
                     Ok(())
                 })?;
 
-                self.check_call_loans(args, Some(&params), None)?;
-
-                // Consume affine values passed by value
-                self.consume_affine_call_args(args, &params)?;
-
-                self.enforce_call_type_bounds(&pending_type_bounds, expr.span)?;
-
-                // ============================================================
-                // Protocol Bound Checking at Call Sites
-                // ============================================================
-                // After argument unification, resolve type vars to concrete
-                // types and verify protocol bounds are satisfied.
-                self.enforce_call_protocol_bounds(&pending_protocol_bounds, expr.span)?;
-
-                // ============================================================
-                // Interprocedural Escape Analysis for &checked References
-                // Spec: L0-critical/reference_system/reference_tiers/checked_promotion_fail
-                // ============================================================
-                // When calling a function that returns a reference, check if any
-                // argument is a &checked reference to a local variable.
-                // Such references could escape through the function's return value,
-                // violating the safety guarantee of &checked (0ns overhead, no runtime checks).
-                let resolved_return = self.resolve_call_output(
-                    &return_type, &pending_protocol_bounds, &[], &crate::ty::Substitution::new(),
-                )?;
-                // Normalize TypeApp in return type (GAT/HKT)
-                let resolved_return = if Self::contains_type_app(&resolved_return) {
-                    self.normalize_type(&resolved_return)
-                } else {
-                    resolved_return
-                };
-                // Resolve top-level associated type projections (e.g., ::Item[ListIter<Int>] → &Int)
-                // Resolve associated-type projections at ANY depth — a NESTED
-                // projection such as the `Maybe<::Output[ReadyFuture<Text>]>`
-                // return of `future_poll_sync<F: Future>() -> Maybe<F.Output>`
-                // was left unresolved by the old top-level-only check and
-                // defaulted to Int.
-                let resolved_return = self.resolve_assoc_projections_deep(&resolved_return);
-                if self.is_reference_type(&resolved_return) {
-                    for arg in args.iter() {
-                        // Check if the argument is a &checked reference to a local
-                        if let Some(local_var) = self.get_checked_ref_to_local(arg) {
-                            return Err(TypeError::CheckedRefEscape {
-                                var: local_var,
-                                span: arg.span,
-                            });
-                        }
-                    }
-                }
+                let resolved_return = self.unifier.apply(&return_type);
                 Ok(InferResult::new(resolved_return))
             }
-            Type::Var(v) => {
-                // Reached only when the parameter has NO declared function
-                // bound — one with a bound was rewritten to that bound
-                // where `func_ty` is computed, so it arrives at the
-                // ordinary `Type::Function` arm instead.
-                //
-                // Type variable being called as a function - instantiate it as a function type
-                // Create fresh type variables for parameters based on argument count
-                let mut param_types = List::new();
-                for _ in args.iter() {
-                    param_types.push(Type::Var(TypeVar::fresh()));
-                }
-
-                let ret_ty = Type::Var(TypeVar::fresh());
-                let func_ty_inst = Type::function_with_async(param_types.clone(), ret_ty.clone(), true);
-
-                // Unify the type variable with the function type
-                self.unifier
-                    .unify(&Type::Var(v), &func_ty_inst, func.span)?;
-
-                // Now check arguments against parameter types
-                // NLL: Set call argument context for proper borrow release
-                self.with_call_argument_context(|checker| {
-                    for (arg, param_ty) in args.iter().zip(param_types.iter()) {
-                        checker.check_expr(arg, param_ty)?;
-                    }
-                    Ok(())
-                })?;
-
-                Ok(InferResult::new(ret_ty))
-            }
-
-            // ============================================================
-            // Rank-2 Polymorphic Function Call (Forall instantiation)
-            // Spec: grammar/verum.ebnf - rank2_function_type
-            // ============================================================
-            // When calling a rank-2 polymorphic function (∀R. fn(...) -> ...),
-            // instantiate the quantified type variables with fresh inference
-            // variables and then type-check as a normal function call.
-            Type::Forall { ref vars, ref body } => {
-                // Build substitution map: quantified var -> fresh TypeVar
-                let mut subst: Map<TypeVar, Type> = Map::new();
-                for qvar in vars.iter() {
-                    let fresh = TypeVar::fresh();
-                    subst.insert(*qvar, Type::Var(fresh));
-                }
-
-                // Apply substitution to the body to get the instantiated function type
-                let instantiated_body = self.substitute_type_vars(body, &subst);
-                self.type_registry.register_call_target(expr.span, instantiated_body.clone());
-
-                // Now the body should be a Function type - extract and check
-                match instantiated_body {
-                    Type::Function {
-                        params,
-                        return_type,
-                        contexts,
-                        ..
-                    } => {
-                        // Check arity
-                        // T1270: a ±1 tolerance is not the self-parameter rule.
-                        let params = match Self::effective_params(params.as_slice(), args.len(), None) {
-                            Some(effective) => effective,
-                            None => {
-                                return Err(TypeError::Other(verum_common::Text::from(
-                                    format!(
-                                        "Rank-2 function expects {} argument(s), got {}",
-                                        params.len(),
-                                        args.len()
-                                    ),
-                                )));
-                            }
-                        };
-
-                        // Context satisfaction check
-                        if let Some(ref callee_contexts) = contexts {
-                            let mut callee_context_set = ContextSet::new();
-                            for ctx_ref in callee_contexts.iter() {
-                                callee_context_set.add(ContextRequirement::new(
-                                    ctx_ref.name.clone(),
-                                    expr.span,
-                                ));
-                            }
-
-                            let caller_context_set = self
-                                .current_function_contexts
-                                .clone()
-                                .unwrap_or_default();
-
-                            self.context_checker.check_context_satisfaction(
-                                &callee_context_set,
-                                &caller_context_set,
-                                expr.span,
-                            )?;
-                        }
-
-                        // Check each argument against parameter type
-                        self.with_call_argument_context(|checker| {
-                            for (arg, param_ty) in args.iter().zip(params.iter()) {
-                                let resolved_param = checker.unifier.apply(param_ty);
-                                checker.check_expr(arg, &resolved_param)?;
-                            }
-                            Ok(())
-                        })?;
-
-                        let resolved_return = self.unifier.apply(&return_type);
-                        Ok(InferResult::new(resolved_return))
-                    }
-                    _ => Err(TypeError::NotAFunction {
-                        ty: func_ty.to_text(),
-                        span: func.span,
-                    }),
-                }
-            }
-
-            // D3 (AOT-NEWTYPE-CTOR-1) — a Call whose callee resolved to a
-            // Named TYPE that is actually a transparent-wrapper newtype
-            // (`type X is (T);` / `type X is T;`) is a CONSTRUCTOR call `X(v)`.
-            //
-            // Some stdlib-load paths bind `env[X]` to the TYPE rather than to
-            // the constructor `fn(T) -> X` — notably cfg-gated archive modules
-            // (`@cfg(target_os="macos")` `core.sys.darwin.mach`) whose
-            // synthetic AST never runs the in-source ctor registration, so the
-            // callee lands HERE instead of the `Type::Function` arm and would
-            // otherwise fail `not a function: KernReturn` under `--aot` while
-            // `--interp` (full-stdlib bootstrap binds the ctor) passes.
-            //
-            // Recover the ctor uniformly from the `__newtype_inner_<X>` type
-            // binding (registered alongside every transparent wrapper — it is
-            // also what powers `<X>.0` field access). A non-newtype Named type
-            // has no such key and correctly falls through to NotAFunction.
-            Type::Named { ref path, .. } => {
-                let mut type_name = path.last_segment_name().to_string();
-                // SELF-NEWTYPE-CTOR-1: `Self(v)` inside an
-                // `implement <Newtype>` block is the same constructor
-                // call — resolve `Self` to the enclosing impl type
-                // before probing the newtype-inner binding.  Pre-fix,
-                // `fn root() -> Self { Self(0) }` on
-                // `type SupervisorId is (UInt64);` failed
-                // `not a function: Self` locally, while the lenient
-                // stdlib bake mis-lowered it to a stray MakeVariant
-                // (SupervisorId.root().raw() returned Variant(138, 0)).
-                if type_name == "Self"
-                    && let Maybe::Some(ref self_ty) = self.current_self_type
-                    && let Type::Named { path: self_path, .. } = self_ty
-                {
-                    type_name = self_path.last_segment_name().to_string();
-                }
-                // SYS-IOENGINE-FD-CTOR: the MOUNT-scoped qualified key
-                // (`<module>.__newtype_inner_<X>`) is authoritative —
-                // when two modules declare same-named types (record
-                // `core.shell.resources.Fd` vs newtype
-                // `core.sys.io_engine.Fd`), the bare key describes
-                // whichever won the sorted-walk simple slot; a file
-                // that explicitly mounted the newtype must construct
-                // ITS type.  Falls back to the flat key for the
-                // non-colliding world.
-                let inner_key = format!("__newtype_inner_{}", type_name);
-                // Ctor-position names may never have passed through
-                // TYPE resolution, so the mount-scoped qualified keys
-                // (including `<module>.__newtype_inner_<X>`) may not be
-                // registered yet.  Invoke the QUALIFIED metadata loader
-                // DIRECTLY: `resolve_type_name_mount_scoped` early-returns
-                // on a usable TYPE hit without ever reaching the loader,
-                // so the auxiliary `__newtype_inner_` keys would stay
-                // unregistered exactly when the type resolves fine.
-                // Idempotent; a no-op for unmounted/ambiguous names.
-                let mount_canonical: Option<String> = self
-                    .imported_names
-                    .get(&verum_common::Text::from(type_name.as_str()))
-                    .and_then(|sources| {
-                        if sources.len() != 1 {
-                            return None;
-                        }
-                        sources.iter().next().map(|s| {
-                            s.as_str()
-                                .strip_prefix("cog.")
-                                .unwrap_or(s.as_str())
-                                .to_string()
-                        })
-                    })
-                    .filter(|c| !c.is_empty() && c != "cog");
-                if let Some(canonical) = mount_canonical {
-                    let _ = self.ensure_mounted_type_loaded_qualified(
-                        type_name.as_str(),
-                        canonical.as_str(),
-                    );
-                }
-                let mut inner_ty_hit: Option<Type> =
-                    self.lookup_type_mount_scoped(type_name.as_str(), "__newtype_inner_");
-                if inner_ty_hit.is_none()
-                    && let Some(inner_ty) = self.ctx.lookup_type(inner_key.as_str())
-                {
-                    inner_ty_hit = Some(inner_ty.clone());
-                }
-                if let Some(inner_ty) = inner_ty_hit {
-                    if args.len() == 1
-                        && let Some(arg0) = args.get(0)
-                    {
-                        self.with_call_argument_context(|checker| {
-                            checker.check_expr(arg0, &inner_ty)?;
-                            Ok(())
-                        })?;
-                        return Ok(InferResult::new(func_ty.clone()));
-                    }
-                }
-                Err(TypeError::NotAFunction {
-                    ty: func_ty.to_text(),
-                    span: func.span,
-                })
-            }
-
             _ => Err(TypeError::NotAFunction {
                 ty: func_ty.to_text(),
                 span: func.span,
             }),
         }
+    }
+
+    fn apply_nominal_call(&mut self, expr: &Expr, func_ty: Type) -> Result<InferResult> {
+        let ExprKind::Call { func, args, .. } = &expr.kind else {
+            unreachable!()
+        };
+        let Type::Named { ref path, .. } = func_ty else {
+            unreachable!()
+        };
+        let mut type_name = path.last_segment_name().to_string();
+        // SELF-NEWTYPE-CTOR-1: `Self(v)` inside an
+        // `implement <Newtype>` block is the same constructor
+        // call — resolve `Self` to the enclosing impl type
+        // before probing the newtype-inner binding.  Pre-fix,
+        // `fn root() -> Self { Self(0) }` on
+        // `type SupervisorId is (UInt64);` failed
+        // `not a function: Self` locally, while the lenient
+        // stdlib bake mis-lowered it to a stray MakeVariant
+        // (SupervisorId.root().raw() returned Variant(138, 0)).
+        if type_name == "Self"
+            && let Maybe::Some(ref self_ty) = self.current_self_type
+            && let Type::Named {
+                path: self_path, ..
+            } = self_ty
+        {
+            type_name = self_path.last_segment_name().to_string();
+        }
+        // SYS-IOENGINE-FD-CTOR: the MOUNT-scoped qualified key
+        // (`<module>.__newtype_inner_<X>`) is authoritative —
+        // when two modules declare same-named types (record
+        // `core.shell.resources.Fd` vs newtype
+        // `core.sys.io_engine.Fd`), the bare key describes
+        // whichever won the sorted-walk simple slot; a file
+        // that explicitly mounted the newtype must construct
+        // ITS type.  Falls back to the flat key for the
+        // non-colliding world.
+        let inner_key = format!("__newtype_inner_{}", type_name);
+        // Ctor-position names may never have passed through
+        // TYPE resolution, so the mount-scoped qualified keys
+        // (including `<module>.__newtype_inner_<X>`) may not be
+        // registered yet.  Invoke the QUALIFIED metadata loader
+        // DIRECTLY: `resolve_type_name_mount_scoped` early-returns
+        // on a usable TYPE hit without ever reaching the loader,
+        // so the auxiliary `__newtype_inner_` keys would stay
+        // unregistered exactly when the type resolves fine.
+        // Idempotent; a no-op for unmounted/ambiguous names.
+        let mount_canonical: Option<String> = self
+            .imported_names
+            .get(&verum_common::Text::from(type_name.as_str()))
+            .and_then(|sources| {
+                if sources.len() != 1 {
+                    return None;
+                }
+                sources.iter().next().map(|s| {
+                    s.as_str()
+                        .strip_prefix("cog.")
+                        .unwrap_or(s.as_str())
+                        .to_string()
+                })
+            })
+            .filter(|c| !c.is_empty() && c != "cog");
+        if let Some(canonical) = mount_canonical {
+            let _ =
+                self.ensure_mounted_type_loaded_qualified(type_name.as_str(), canonical.as_str());
+        }
+        let mut inner_ty_hit: Option<Type> =
+            self.lookup_type_mount_scoped(type_name.as_str(), "__newtype_inner_");
+        if inner_ty_hit.is_none()
+            && let Some(inner_ty) = self.ctx.lookup_type(inner_key.as_str())
+        {
+            inner_ty_hit = Some(inner_ty.clone());
+        }
+        if let Some(inner_ty) = inner_ty_hit {
+            if args.len() == 1
+                && let Some(arg0) = args.get(0)
+            {
+                self.with_call_argument_context(|checker| {
+                    checker.check_expr(arg0, &inner_ty)?;
+                    Ok(())
+                })?;
+                return Ok(InferResult::new(func_ty.clone()));
+            }
+        }
+        Err(TypeError::NotAFunction {
+            ty: func_ty.to_text(),
+            span: func.span,
+        })
+    }
+
+    fn apply_function_call(&mut self, expr: &Expr, prepared: PreparedCall) -> Result<InferResult> {
+        let ExprKind::Call { args, .. } = &expr.kind else {
+            unreachable!()
+        };
+        let Type::Function {
+            params, contexts, ..
+        } = &prepared.callable
+        else {
+            unreachable!()
+        };
+        self.validate_function_call(expr, params, contexts)?;
+        self.check_function_call_arguments(args, params, &prepared.callee_name)?;
+        self.finish_function_call(expr, prepared)
+    }
+
+    fn check_function_call_arguments(
+        &mut self,
+        args: &List<Expr>,
+        params: &List<Type>,
+        callee_name: &Maybe<Text>,
+    ) -> Result<()> {
+        self.with_call_argument_context(|checker| {
+            // ============================================================
+            // Dependent refinement substitution (Phase A.5 activation)
+            // ============================================================
+            //
+
+            // Look up the callee's parameter names so that refinement
+            // predicates on later parameters can be specialised with the
+            // concrete values of earlier arguments before being checked.
+            // Without this, a signature like
+            //
+
+            //  fn safe_get(len: Int, i: Int{>= 0, < len}) -> Int
+            //
+
+            // would leave `len` as a free variable in the predicate on
+            // `i` at call sites, silently admitting out-of-bounds calls
+            // like `safe_get(5, 10)`. With this substitution, the
+            // predicate becomes `10 >= 0 && 10 < 5` at the second
+            // argument check, which the refinement checker correctly
+            // rejects.
+            //
+
+            // `dep_param_names` is the list of parameter names in
+            // declaration order; empty strings stand in for positions
+            // where the parameter uses a non-identifier pattern (those
+            // positions skip substitution but don't break the loop).
+            //
+
+            // Guarded by `callee_name.is_some()` so closures and
+            // anonymous function values don't pay the lookup cost.
+            let dep_param_names: List<Text> = callee_name
+                .as_ref()
+                .and_then(|name| checker.function_param_names.get(name).cloned())
+                .unwrap_or_default();
+
+            for (i, (arg, param_ty)) in args.iter().zip(params.iter()).enumerate() {
+                let check_ty =
+                    checker.specialize_call_parameter(param_ty, i, args, &dep_param_names)?;
+                checker.check_expr(arg, &check_ty)?;
+            }
+            Ok(())
+        })
+    }
+
+    fn specialize_call_parameter(
+        &mut self,
+        param_ty: &Type,
+        i: usize,
+        args: &[Expr],
+        dep_param_names: &[Text],
+    ) -> Result<Type> {
+        let resolved_param = self.unifier.apply(param_ty);
+        // Normalize TypeApp nodes (GAT/HKT type application)
+        // so that e.g. F<MaybeInstance><Int> reduces to Maybe<Int>
+        let resolved_param = if Self::contains_type_app(&resolved_param) {
+            self.normalize_type(&resolved_param)
+        } else {
+            resolved_param
+        };
+
+        // Apply dependent refinement substitution: if this
+        // parameter is `Type::Refined { base, predicate }`, and
+        // we know the names of earlier parameters, substitute
+        // each earlier argument into the predicate so that
+        // references like `len` become the concrete constant
+        // passed at the call site. Empty-string parameter
+        // names (non-identifier patterns) are skipped.
+        //
+
+        // The base type and any wrapping refinement structure
+        // is otherwise preserved, so this only ever tightens
+        // the predicate with more information.
+        let check_ty = if let Type::Refined { base, predicate } = &resolved_param {
+            if !dep_param_names.is_empty() && i > 0 {
+                let mut replacements = List::new();
+                for j in 0..i {
+                    let earlier_name = match dep_param_names.get(j) {
+                        Some(n)
+                            if !n.as_str().is_empty() && !predicate.binds_subject(n.as_str()) =>
+                        {
+                            n.clone()
+                        }
+                        _ => continue,
+                    };
+                    let arg_expr = match args.get(j) {
+                        Some(a) => a,
+                        None => continue,
+                    };
+                    replacements.push((earlier_name, arg_expr));
+                }
+                let mut subst_pred =
+                    predicate
+                        .substitute_parameters(&replacements)
+                        .map_err(|error| TypeError::OtherWithCodeSpanned {
+                            code: "E500".into(),
+                            msg: error.message,
+                            span: error.span,
+                        })?;
+                // Constant-fold arithmetic that became pure after
+                // substitution. Without this, a predicate like
+                // `count <= src_len - offset` becomes
+                // `count <= 10 - 5` after substituting
+                // `src_len → 10, offset → 5`, and the syntactic
+                // refinement checker cannot decide it because it
+                // does not reduce `10 - 5` to `5`. Folding here
+                // produces `count <= 5`, which the checker can
+                // then decide against any concrete `count`.
+                subst_pred.predicate = Self::const_fold_expr(&subst_pred.predicate).into();
+                Type::Refined {
+                    base: base.clone(),
+                    predicate: subst_pred,
+                }
+            } else {
+                resolved_param
+            }
+        } else {
+            resolved_param
+        };
+
+        Ok(check_ty)
+    }
+
+    fn finish_function_call(&mut self, expr: &Expr, prepared: PreparedCall) -> Result<InferResult> {
+        let ExprKind::Call { args, .. } = &expr.kind else {
+            unreachable!()
+        };
+        let PreparedCall {
+            callable,
+            callee_name,
+            protocol_bounds: pending_protocol_bounds,
+            type_bounds: pending_type_bounds,
+        } = prepared;
+        let Type::Function {
+            params,
+            return_type,
+            contexts,
+            ..
+        } = callable
+        else {
+            unreachable!()
+        };
+        self.check_call_loans(args, Some(&params), None)?;
+
+        // Consume affine values passed by value
+        self.consume_affine_call_args(args, &params)?;
+
+        self.enforce_call_type_bounds(&pending_type_bounds, expr.span)?;
+
+        // ============================================================
+        // Protocol Bound Checking at Call Sites
+        // ============================================================
+        // After argument unification, resolve type vars to concrete
+        // types and verify protocol bounds are satisfied.
+        self.enforce_call_protocol_bounds(&pending_protocol_bounds, expr.span)?;
+
+        // ============================================================
+        // Interprocedural Escape Analysis for &checked References
+        // Spec: L0-critical/reference_system/reference_tiers/checked_promotion_fail
+        // ============================================================
+        // When calling a function that returns a reference, check if any
+        // argument is a &checked reference to a local variable.
+        // Such references could escape through the function's return value,
+        // violating the safety guarantee of &checked (0ns overhead, no runtime checks).
+        let resolved_return = self.resolve_call_output(
+            &return_type,
+            &pending_protocol_bounds,
+            &[],
+            &crate::ty::Substitution::new(),
+        )?;
+        // Normalize TypeApp in return type (GAT/HKT)
+        let resolved_return = if Self::contains_type_app(&resolved_return) {
+            self.normalize_type(&resolved_return)
+        } else {
+            resolved_return
+        };
+        // Resolve top-level associated type projections (e.g., ::Item[ListIter<Int>] → &Int)
+        // Resolve associated-type projections at ANY depth — a NESTED
+        // projection such as the `Maybe<::Output[ReadyFuture<Text>]>`
+        // return of `future_poll_sync<F: Future>() -> Maybe<F.Output>`
+        // was left unresolved by the old top-level-only check and
+        // defaulted to Int.
+        let resolved_return = self.resolve_assoc_projections_deep(&resolved_return);
+        if self.is_reference_type(&resolved_return) {
+            for arg in args.iter() {
+                // Check if the argument is a &checked reference to a local
+                if let Some(local_var) = self.get_checked_ref_to_local(arg) {
+                    return Err(TypeError::CheckedRefEscape {
+                        var: local_var,
+                        span: arg.span,
+                    });
+                }
+            }
+        }
+        Ok(InferResult::new(resolved_return))
+    }
+
+    fn validate_function_call(
+        &mut self,
+        expr: &Expr,
+        params: &List<Type>,
+        contexts: &Maybe<crate::di::requirement::ContextExpr>,
+    ) -> Result<()> {
+        let ExprKind::Call {
+            func,
+            args,
+            type_args,
+        } = &expr.kind
+        else {
+            unreachable!()
+        };
+        // Support default parameter values
+        // Spec: Grammar default_value in function_param
+        //
+
+        // Get minimum required params for this function (if registered)
+        let func_name = if let ExprKind::Path(path) = &func.kind {
+            path.segments.last().and_then(|seg| match seg {
+                verum_ast::ty::PathSegment::Name(id) => Some(id.name.clone()),
+                _ => None,
+            })
+        } else {
+            None
+        };
+
+        // Variadic functions can accept any number of args (including zero).
+        // This includes: format, print, println, panic, assert, assert_eq
+        let is_variadic = func_name
+            .as_ref()
+            .map(|name| {
+                matches!(
+                    name.as_str(),
+                    "format" | "print" | "println" | "panic" |
+                    "unreachable" | "todo" |
+                    "assert" | "assert_eq" | "assert_ne" |
+                    // `List.of` and `Set.of` were here and are gone
+                    // (T1093). Neither is implemented anywhere: the
+                    // checker skipped arity for them and codegen then
+                    // died with `undefined function: List.of`. Being
+                    // in this list is what let the call reach codegen
+                    // at all, so the entry did not describe a builtin
+                    // — it manufactured one. 13 call sites in core/
+                    // are rewritten to the list literal `[x]`, which
+                    // is what the language actually provides.
+                    //
+                    // The rule this restores is stated in
+                    // crates/verum_types/src/AGENTS.md: the compiler
+                    // must hold ZERO hardcoded stdlib knowledge. A
+                    // name the checker knows and the library does not
+                    // is exactly the circular dependency it forbids.
+                    "min" | "max" |
+                    "join" | "concat" |
+                    // Meta reflection builtins accept variable args
+                    // (e.g. type_name(Int, Text) for tuple type)
+                    "type_name" | "type_id" | "size_of" | "align_of" |
+                    "text_concat" | "compile_error" | "compile_warning" |
+                    // Meta code generation builtins are variadic
+                    "concat_idents" | "format_ident" | "quote" |
+                    "unquote" | "stringify" | "gensym" |
+                    // Meta context builtins
+                    "emit_diagnostic" | "emit_warning" | "emit_error"
+                )
+            })
+            .unwrap_or(false);
+
+        let required_params = {
+            let from_registry = func_name
+                .as_ref()
+                .and_then(|name| {
+                    self.function_required_params
+                        .get(name)
+                        .copied()
+                        // BAKED-DEFAULT-ARG-1: the registry is
+                        // fed by the AST decl walk and the
+                        // metadata resolvers, but several
+                        // binding paths (eager env loads,
+                        // prelude glob replay) insert schemes
+                        // without passing through either. The
+                        // gate itself is the ONE consumer —
+                        // consult the baked descriptors lazily
+                        // on a registry miss and cache the
+                        // answer.
+                        .or_else(|| self.required_params_from_metadata(name.as_str()))
+                })
+                .unwrap_or(params.len());
+            let capped = from_registry.min(params.len());
+            // Variadic functions accept 0 or more args
+            if is_variadic { 0 } else { capped }
+        };
+
+        let total_params = params.len();
+        let provided_args = args.len();
+
+        let has_explicit_type_args = !type_args.is_empty();
+        if provided_args < required_params
+            && !has_explicit_type_args
+            && !self.stdlib_single_file_mode
+        {
+            return Err(TypeError::OtherWithCodeSpanned {
+                code: verum_common::Text::from("E102"),
+                msg: verum_common::Text::from(format!(
+                    "Function requires at least {} argument{}, got {}{}",
+                    required_params,
+                    if required_params == 1 { "" } else { "s" },
+                    provided_args,
+                    func_name
+                        .as_ref()
+                        .map(|n| format!(" (calling `{}`)", n))
+                        .unwrap_or_default()
+                )),
+                span: expr.span,
+            });
+        }
+
+        // In unsafe contexts, arity mismatches are often caused by
+        // FFI function name collisions (e.g., extern `read` vs method `read`).
+        // Allow extra args in unsafe contexts to avoid false positives.
+        //
+
+        // Also allow extra args when the function is generic and arguments
+        // look like type names (PascalCase). This handles meta intrinsics
+        // like `stride_of(U8)` where the stdlib declares `stride_of<T>()`
+        // but the call passes the type as a regular arg.
+        let all_args_are_type_like = args.iter().all(|arg| {
+            if let ExprKind::Path(path) = &arg.kind {
+                if let Some(ident) = path.as_ident() {
+                    let name = ident.as_str();
+                    name.chars()
+                        .next()
+                        .map(|c| c.is_ascii_uppercase())
+                        .unwrap_or(false)
+                } else {
+                    false
+                }
+            } else {
+                matches!(&arg.kind, ExprKind::TypeExpr(_))
+            }
+        });
+        let is_generic_type_call = has_explicit_type_args || all_args_are_type_like;
+        if provided_args > total_params
+            && !is_variadic
+            && !self.in_unsafe_context
+            && !is_generic_type_call
+            && !self.stdlib_single_file_mode
+        {
+            return Err(TypeError::OtherWithCodeSpanned {
+                code: verum_common::Text::from("E102"),
+                msg: verum_common::Text::from(format!(
+                    "Function accepts at most {} argument{}, got {}{}",
+                    total_params,
+                    if total_params == 1 { "" } else { "s" },
+                    provided_args,
+                    func_name
+                        .as_ref()
+                        .map(|n| format!(" (calling `{}`)", n))
+                        .unwrap_or_default()
+                )),
+                span: expr.span,
+            });
+        }
+
+        // ============================================================
+        // Context Satisfaction Check (ContextChecker integration)
+        // Context type system integration: context requirements tracked in function types, checked at call sites — Type System Integration
+        // ============================================================
+        // When calling a function with context requirements, verify that
+        // the current function's contexts satisfy those requirements.
+        // VERUM_TRACE_CTXCALL prints the DECISION this block is
+        // about to make: what the callee requires, what the caller
+        // has, and whether leniency is on. It stays because the
+        // failure mode it caught is invisible without it — the
+        // check below was correct and dead for as long as
+        // `contexts` arrived as `None`, and no diagnostic, test or
+        // suite could tell that apart from "the caller was fine".
+        // One line here answers it in a second (T0935).
+        if std::env::var("VERUM_TRACE_CTXCALL").is_ok() {
+            let callee_name = if let ExprKind::Path(p) = &func.kind {
+                p.segments
+                    .last()
+                    .and_then(|s| match s {
+                        verum_ast::ty::PathSegment::Name(i) => Some(i.name.to_string()),
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| "<path>".into())
+            } else {
+                format!("<{:?}>", std::mem::discriminant(&func.kind))
+            };
+            eprintln!(
+                "[ctxcall] callee={callee_name} contexts={:?} caller={:?} lenient={}",
+                contexts
+                    .as_ref()
+                    .map(|c| c.iter().map(|r| r.name.to_string()).collect::<Vec<_>>()),
+                self.current_function_contexts
+                    .as_ref()
+                    .map(|s| s.iter().map(|r| r.name.to_string()).collect::<Vec<_>>()),
+                self.context_checker.is_lenient(),
+            );
+        }
+        if let Some(callee_contexts) = contexts {
+            self.check_callable_contexts(callee_contexts, expr.span)?;
+        }
+
+        // Check capability requirements if function has contexts
+        // Context system core: "context Name { fn method(...) }" declarations, "using [Ctx1, Ctx2]" on functions, "provide Ctx = impl" for injection — 0 - Capability Attenuation
+        if let Some(req) = contexts {
+            for context_ref in req.iter() {
+                let context_name = &context_ref.name;
+                // Check if the required context is available
+                match self
+                    .capability_checker
+                    .get_context_capabilities(context_name.as_str())
+                {
+                    Maybe::Some(caps) => {
+                        // Context is available - verify it has necessary capabilities
+                        // Extract capability requirements from function name and signature
+                        use crate::capability::{CapabilityRequirement, TypeCapabilitySet};
+
+                        // Extract function name for heuristic analysis
+                        let func_name = if let ExprKind::Path(path) = &func.kind {
+                            path.segments
+                                .last()
+                                .and_then(|seg| match seg {
+                                    verum_ast::ty::PathSegment::Name(id) => Some(id.name.as_str()),
+                                    _ => None,
+                                })
+                                .unwrap_or("function")
+                        } else {
+                            "function"
+                        };
+
+                        // Use the method capability mapper to extract requirements
+                        // For function calls, we use the function name as a hint
+                        let context_decl = self.context_declarations.get(context_name);
+                        let required_caps =
+                            self.method_capability_mapper.extract_method_capabilities(
+                                context_name,
+                                &verum_common::Text::from(func_name),
+                                context_decl,
+                            );
+
+                        let requirement = CapabilityRequirement::new(
+                            context_name.clone(),
+                            required_caps.clone(),
+                            verum_common::Text::from(format!("function call to {}", func_name)),
+                        );
+
+                        if let Err(cap_err) =
+                            self.capability_checker.check_requirement(&requirement)
+                        {
+                            // E0306: Capability violation
+                            use verum_diagnostics::capability_attenuation_errors::CapabilityViolationError;
+
+                            let func_name = if let ExprKind::Path(path) = &func.kind {
+                                path.segments
+                                    .iter()
+                                    .filter_map(|seg| match seg {
+                                        verum_ast::ty::PathSegment::Name(id) => {
+                                            Some(id.name.as_str())
+                                        }
+                                        _ => None,
+                                    })
+                                    .collect::<Vec<_>>()
+                                    .join("::")
+                            } else {
+                                "function".to_string()
+                            };
+
+                            let cap_names: Vec<String> = caps
+                                .capabilities
+                                .names()
+                                .iter()
+                                .map(|t| t.to_string())
+                                .collect();
+
+                            let diagnostic = CapabilityViolationError::new(
+                                format!("{}::{}", context_name, "ReadOnly"),
+                                span_to_line_col(func.span),
+                            )
+                            .with_declared_capabilities(
+                                cap_names.iter().map(|s| s.as_str().into()).collect(),
+                            )
+                            .with_function_name(func_name.as_str())
+                            .build();
+
+                            self.diagnostics.push(diagnostic);
+
+                            return Err(TypeError::Other(cap_err.message()));
+                        }
+                    }
+                    Maybe::None => {
+                        // E0308: Required context not provided
+                        use verum_diagnostics::capability_attenuation_errors::CapabilityNotProvidedError;
+
+                        let func_name = if let ExprKind::Path(path) = &func.kind {
+                            path.segments
+                                .iter()
+                                .filter_map(|seg| match seg {
+                                    verum_ast::ty::PathSegment::Name(id) => Some(id.name.as_str()),
+                                    _ => None,
+                                })
+                                .collect::<Vec<_>>()
+                                .join("::")
+                        } else {
+                            "function".to_string()
+                        };
+
+                        let diagnostic = CapabilityNotProvidedError::new(
+                            context_name.as_str(),
+                            span_to_line_col(func.span),
+                        )
+                        .with_function_name(func_name.as_str())
+                        .build();
+
+                        self.diagnostics.push(diagnostic);
+
+                        return Err(TypeError::Other(verum_common::Text::from(format!(
+                            "Function requires context '{}' which is not provided",
+                            context_name
+                        ))));
+                    }
+                }
+            }
+        }
+
+        // Check each argument against parameter type with substitution
+        // NLL: Set call argument context for proper borrow release
+        Ok(())
     }
 
     fn infer_expr_tuple(&mut self, expr: &Expr) -> Result<InferResult> {

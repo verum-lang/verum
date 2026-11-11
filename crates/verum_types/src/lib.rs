@@ -554,7 +554,7 @@ pub use termination::{TerminationChecker, TerminationError};
 pub use unified_type_error::UnifiedTypeError;
 
 use thiserror::Error;
-use verum_common::{List, Shared, Text};
+use verum_common::{Heap, List, Shared, Text};
 use verum_diagnostics::{Diagnostic, DiagnosticBuilder};
 
 /// Type checking errors.
@@ -953,21 +953,22 @@ pub enum TypeError {
         span: verum_ast::span::Span,
     },
 
-    // Try operator (?) errors
+    // Try operator (?) errors. Keep full type and diagnostic payloads indirect:
+    // the largest error variant also sizes every successful Result<Type>.
     // E0204 Multiple conversion paths: when try (?) operator finds multiple From implementations for error conversion, requiring explicit disambiguation — Specialized Diagnostics
     #[error("cannot use '?' operator outside of function context")]
     TryOperatorOutsideFunction { span: verum_ast::span::Span },
 
     #[error("cannot use '?' on non-Result/Maybe type")]
     TryOnNonResult {
-        ty: Type,
+        ty: Heap<Type>,
         span: verum_ast::span::Span,
     },
 
     #[error("'?' operator error type mismatch")]
     TryOperatorMismatch {
-        expr_type: Type,
-        return_type: Type,
+        expr_type: Heap<Type>,
+        return_type: Heap<Type>,
         span: verum_ast::span::Span,
     },
 
@@ -976,7 +977,7 @@ pub enum TypeError {
         inner_error: Text,
         outer_error: Text,
         span: verum_ast::span::Span,
-        diagnostic: verum_diagnostics::Diagnostic,
+        diagnostic: Heap<verum_diagnostics::Diagnostic>,
     },
 
     #[error("multiple conversion paths from {from_type} to {to_type}")]
@@ -985,7 +986,7 @@ pub enum TypeError {
         to_type: Text,
         paths: List<Text>,
         span: verum_ast::span::Span,
-        diagnostic: verum_diagnostics::Diagnostic,
+        diagnostic: Heap<verum_diagnostics::Diagnostic>,
     },
 
     #[error("cannot use '?' operator in function returning {function_return_type}")]
@@ -993,7 +994,7 @@ pub enum TypeError {
         expr_type: Text,
         function_return_type: Text,
         span: verum_ast::span::Span,
-        diagnostic: verum_diagnostics::Diagnostic,
+        diagnostic: Heap<verum_diagnostics::Diagnostic>,
     },
 
     #[error("type {ty} is not Result or Maybe")]
@@ -3088,7 +3089,7 @@ impl TypeError {
                 outer_error,
                 span: _,
                 diagnostic,
-            } => diagnostic.clone(),
+            } => diagnostic.as_ref().clone(),
 
             MultipleConversionPaths {
                 from_type,
@@ -3096,14 +3097,14 @@ impl TypeError {
                 paths: _,
                 span: _,
                 diagnostic,
-            } => diagnostic.clone(),
+            } => diagnostic.as_ref().clone(),
 
             TryInNonResultContext {
                 expr_type,
                 function_return_type,
                 span: _,
                 diagnostic,
-            } => diagnostic.clone(),
+            } => diagnostic.as_ref().clone(),
 
             NotResultOrMaybe { ty, span } => {
                 let mut builder = DiagnosticBuilder::error()

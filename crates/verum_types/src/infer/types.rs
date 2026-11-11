@@ -2129,7 +2129,7 @@ fn substitute_refinement_binder(
                     expr_type: inner_ty.to_text(),
                     function_return_type: function_return_type.to_text(),
                     span: try_span,
-                    diagnostic: diag,
+                    diagnostic: Heap::new(diag),
                 });
             }
         };
@@ -2246,7 +2246,7 @@ fn substitute_refinement_binder(
                     inner_error: inner_residual_text,
                     outer_error: outer_residual_text,
                     span: try_span,
-                    diagnostic: diag,
+                    diagnostic: Heap::new(diag),
                 });
             }
         }
@@ -6249,7 +6249,7 @@ fn substitute_refinement_binder(
                 to_type: to_type.to_text(),
                 paths: path_descriptions,
                 span,
-                diagnostic: diag,
+                diagnostic: Heap::new(diag),
             });
         }
 

@@ -900,7 +900,7 @@ fn test_for_loop() {
     let expr = Expr::new(
         ExprKind::For {
             label: verum_common::Maybe::None,
-            pattern,
+            pattern: verum_common::Heap::new(pattern),
             iter: arr,
             body: Block::empty(span),
             invariants: vec![].into(),
