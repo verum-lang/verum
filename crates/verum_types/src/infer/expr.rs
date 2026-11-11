@@ -8135,22 +8135,22 @@ impl TypeChecker {
                         if let Type::Refined { base, predicate } = &resolved_param {
                             if !dep_param_names.is_empty() && i > 0 {
                                 let mut subst_pred = predicate.clone();
+                                let mut replacements = List::new();
                                 for j in 0..i {
                                     let earlier_name = match dep_param_names.get(j) {
-                                        Some(n) if !n.as_str().is_empty() => n.clone(),
+                                        Some(n) if !n.as_str().is_empty()
+                                            && !predicate.binds_subject(n.as_str()) => n.clone(),
                                         _ => continue,
                                     };
                                     let arg_expr = match args.get(j) {
-                                        Some(a) => a.clone(),
+                                        Some(a) => a,
                                         None => continue,
                                     };
-                                    subst_pred.predicate =
-                                        self.refinement.substitute_in_expr(
-                                            &subst_pred.predicate,
-                                            &earlier_name,
-                                            &arg_expr,
-                                        );
+                                    replacements.push((earlier_name, arg_expr));
                                 }
+                                subst_pred.predicate = self.refinement.substitute_all_in_expr(
+                                    &subst_pred.predicate, &replacements,
+                                );
                                 // Constant-fold arithmetic that became pure after
                                 // substitution. Without this, a predicate like
                                 // `count <= src_len - offset` becomes

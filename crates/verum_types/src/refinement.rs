@@ -1469,9 +1469,19 @@ impl RefinementChecker {
         value: &Expr,
         predicate: &RefinementPredicate,
     ) -> Result<VerificationCondition, RefinementError> {
-        // Stage aliases before inserting the value: its free occurrences of
-        // `it`, `self`, or the parameter name belong to the caller's scope.
-        // Include bound identifiers when choosing the intermediate name.
+        let replacements: List<_> = predicate.subject_names()
+            .map(|name| (Text::from(name), value)).collect();
+        let condition = self.substitute_all_in_expr(&predicate.predicate, &replacements);
+        Ok(VerificationCondition::new(condition, predicate.span))
+    }
+
+    /// Substitute one caller's arguments simultaneously. Intermediate names
+    /// separate declaration variables from the free variables of each argument.
+    /// Include bound identifiers when choosing fresh names for the AST walk.
+    pub(crate) fn substitute_all_in_expr(&self, expr: &Expr, replacements: &[(Text, &Expr)]) -> Expr {
+        if replacements.is_empty() {
+            return expr.clone();
+        }
         struct Names(Set<Text>);
         impl verum_ast::visitor::Visitor for Names {
             fn visit_ident(&mut self, ident: &verum_ast::Ident) {
@@ -1487,19 +1497,28 @@ impl RefinementChecker {
         }
         use verum_ast::visitor::Visitor;
         let mut names = Names(Set::new());
-        names.visit_expr(&predicate.predicate);
-        names.visit_expr(value);
-        let fresh = (0..)
-            .map(|index| Text::from(format!("__refinement_subject_{index}")))
-            .find(|name| !names.0.contains(name))
-            .expect("finite source names");
-        let subject = Expr::ident(verum_ast::Ident::new(fresh.clone(), predicate.span));
-        let mut condition = predicate.predicate.clone();
-        for name in predicate.subject_names() {
-            condition = self.substitute_in_expr(&condition, &Text::from(name), &subject);
+        names.visit_expr(expr);
+        for (name, value) in replacements {
+            names.0.insert(name.clone());
+            names.visit_expr(value);
         }
-        let condition = self.substitute_in_expr(&condition, &fresh, value);
-        Ok(VerificationCondition::new(condition, predicate.span))
+        let mut result = expr.clone();
+        let mut staged = List::new();
+        let mut index = 0usize;
+        for (name, value) in replacements {
+            let fresh = loop {
+                let fresh = Text::from(format!("__refinement_subject_{index}"));
+                index += 1;
+                if names.0.insert(fresh.clone()) { break fresh; }
+            };
+            let subject = Expr::ident(verum_ast::Ident::new(fresh.clone(), expr.span));
+            result = self.substitute_in_expr(&result, name, &subject);
+            staged.push((fresh, value));
+        }
+        for (name, value) in staged {
+            result = self.substitute_in_expr(&result, &name, value);
+        }
+        result
     }
 
     /// Production-grade capture-avoiding substitution
@@ -3970,6 +3989,10 @@ impl Default for RefinementChecker {
 }
 
 // Tests moved to tests/refinement_tests.rs
+
+#[cfg(test)]
+#[path = "../tests/unit/refinement_substitution_replay.rs"]
+mod substitution_replay;
 
 #[cfg(test)]
 mod format_pattern_tests {
