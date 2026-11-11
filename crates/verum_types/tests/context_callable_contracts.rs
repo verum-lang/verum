@@ -167,6 +167,21 @@ fn method_context_requirements_reach_the_caller() {
 }
 
 #[test]
+fn inherent_callback_bounds_retain_the_receiver_parameter() {
+    for (bound, accepted) in [("fn(&A)->Int", true), ("fn(USize)->Int", false)] {
+        let source = format!(r#"
+            type Mesh<A> is {{ value:A }};
+            implement<A> Mesh<A> {{
+                fn call<R,F:fn(&A)->R>(&self, callback:F)->R {{ callback(&self.value) }}
+            }}
+            fn probe<A,F:{bound}>(mesh:&Mesh<A>,callback:F)->Int {{ mesh.call(callback) }}
+        "#);
+        let errors = check(&source);
+        assert_eq!(errors.is_empty(), accepted, "{source}\n{errors:#?}");
+    }
+}
+
+#[test]
 fn mounted_context_keeps_its_own_signature_types() {
     use verum_ast::FileId;
     use verum_fast_parser::FastParser;
