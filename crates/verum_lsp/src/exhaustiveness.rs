@@ -29,6 +29,8 @@ pub struct ExhaustivenessDiagnostic {
     pub range: Range,
     /// Whether the match is exhaustive
     pub is_exhaustive: bool,
+    /// Guards were not proved; negative coverage is inconclusive.
+    pub has_unverified_guards: bool,
     /// Uncovered cases as string representations
     pub uncovered_cases: List<Text>,
     /// Indices of redundant patterns
@@ -78,7 +80,9 @@ impl ExhaustivenessDiagnostic {
         // Non-exhaustive error.
         if !self.is_exhaustive && config.report_errors {
             let max = config.max_witnesses.max(1);
-            let message = if self.uncovered_cases.len() == 1 {
+            let message = if self.has_unverified_guards {
+                "match coverage is not established; add an unconditional covering arm or simplify the patterns".to_string()
+            } else if self.uncovered_cases.len() == 1 {
                 format!(
                     "non-exhaustive patterns: `{}` not covered",
                     self.uncovered_cases
@@ -325,6 +329,8 @@ pub fn create_remove_redundant_fix(range: Range, uri: &Url) -> CodeAction {
 pub struct MatchCoverageInfo {
     /// Whether the match is exhaustive
     pub is_exhaustive: bool,
+    /// Guards were not proved; negative coverage is inconclusive.
+    pub has_unverified_guards: bool,
     /// Number of patterns
     pub pattern_count: usize,
     /// Number of uncovered cases (if not exhaustive)
@@ -346,6 +352,8 @@ impl MatchCoverageInfo {
 
         if self.is_exhaustive {
             lines.push("✅ **Exhaustive**".to_string());
+        } else if self.has_unverified_guards {
+            lines.push("**Coverage not established**: conditional arms require a proof or an unconditional fallback.".to_string());
         } else {
             lines.push(format!(
                 "❌ **Non-exhaustive**: {} uncovered case(s)",
@@ -422,7 +430,9 @@ impl ExhaustivenessProvider {
         let mut fixes = Vec::new();
 
         if !diagnostic.is_exhaustive {
-            fixes.push(create_add_patterns_fix(diagnostic, match_end_range));
+            if !diagnostic.has_unverified_guards {
+                fixes.push(create_add_patterns_fix(diagnostic, match_end_range));
+            }
             fixes.push(create_add_wildcard_fix(diagnostic, match_end_range));
         }
 
@@ -483,6 +493,8 @@ pub struct MatchExhaustivenessState {
 pub struct MatchExhaustivenessResult {
     /// Is the match exhaustive?
     pub is_exhaustive: bool,
+    /// Guards were not proved; negative coverage is inconclusive.
+    pub has_unverified_guards: bool,
     /// Uncovered witnesses
     pub witnesses: List<Text>,
     /// Redundant pattern indices
@@ -617,7 +629,8 @@ impl DocumentExhaustivenessTracker {
                 match_id,
                 range,
                 result: MatchExhaustivenessResult {
-                    is_exhaustive: true, // Assume exhaustive until checked
+                    is_exhaustive: true,
+                    has_unverified_guards: false,
                     witnesses: List::new(),
                     redundant: List::new(),
                     range_overlaps: List::new(),
@@ -694,6 +707,7 @@ impl DocumentExhaustivenessTracker {
             let diag = ExhaustivenessDiagnostic {
                 range: state.range,
                 is_exhaustive: state.result.is_exhaustive,
+                has_unverified_guards: state.result.has_unverified_guards,
                 uncovered_cases: state.result.witnesses.clone(),
                 redundant_patterns: state.result.redundant.clone(),
                 all_guarded: state.result.all_guarded,
@@ -769,6 +783,7 @@ pub fn convert_exhaustiveness_result(
 
     MatchExhaustivenessResult {
         is_exhaustive: result.is_exhaustive,
+        has_unverified_guards: result.has_unverified_guards,
         witnesses,
         redundant: result.redundant_patterns.clone(),
         range_overlaps,
@@ -799,6 +814,7 @@ mod tests {
                 },
             },
             is_exhaustive: true,
+            has_unverified_guards: false,
             uncovered_cases: List::new(),
             redundant_patterns: List::new(),
             all_guarded: false,
@@ -823,6 +839,7 @@ mod tests {
                 },
             },
             is_exhaustive: false,
+            has_unverified_guards: false,
             uncovered_cases: List::from_iter([Text::from("None")]),
             redundant_patterns: List::new(),
             all_guarded: false,
@@ -852,6 +869,7 @@ mod tests {
                 },
             },
             is_exhaustive: true,
+            has_unverified_guards: false,
             uncovered_cases: List::new(),
             redundant_patterns: List::new(),
             all_guarded: true,
@@ -880,6 +898,7 @@ mod tests {
                 },
             },
             is_exhaustive: false,
+            has_unverified_guards: false,
             uncovered_cases: List::from_iter([Text::from("None")]),
             redundant_patterns: List::new(),
             all_guarded: false,
@@ -910,6 +929,7 @@ mod tests {
                 },
             },
             is_exhaustive: true,
+            has_unverified_guards: false,
             uncovered_cases: List::new(),
             redundant_patterns: List::new(),
             all_guarded: true,
@@ -940,6 +960,7 @@ mod tests {
                 },
             },
             is_exhaustive: true,
+            has_unverified_guards: false,
             uncovered_cases: List::new(),
             redundant_patterns: List::from_iter([1usize, 3]),
             all_guarded: false,
@@ -981,6 +1002,7 @@ mod tests {
                 },
             },
             is_exhaustive: false,
+            has_unverified_guards: false,
             uncovered_cases: List::from_iter([
                 Text::from("A"),
                 Text::from("B"),
@@ -1021,6 +1043,7 @@ mod tests {
     fn test_hover_markdown() {
         let info = MatchCoverageInfo {
             is_exhaustive: true,
+            has_unverified_guards: false,
             pattern_count: 3,
             uncovered_count: 0,
             redundant_count: 0,
@@ -1051,5 +1074,57 @@ mod tests {
 
         assert!(diag.message.contains("unreachable"));
         assert!(diag.tags.unwrap().contains(&DiagnosticTag::UNNECESSARY));
+    }
+
+    #[test]
+    fn unverified_guards_do_not_become_counterexamples_or_missing_case_fixes() {
+        use verum_ast::{Expr, ExprKind, Literal, Pattern, PatternKind, Span};
+        use verum_common::Heap;
+        let span = Span::dummy();
+        let pattern = Pattern::new(
+            PatternKind::Guard {
+                pattern: Heap::new(Pattern::wildcard(span)),
+                guard: Heap::new(Expr::new(
+                    ExprKind::Literal(Literal::bool(true, span)),
+                    span,
+                )),
+            },
+            span,
+        );
+        let checked = verum_types::exhaustiveness::check_exhaustiveness(
+            &[pattern],
+            &verum_types::Type::Int,
+            &verum_types::TypeEnv::default(),
+        )
+        .unwrap();
+        let result = convert_exhaustiveness_result(&checked);
+        assert!(result.has_unverified_guards);
+        let diagnostic = ExhaustivenessDiagnostic {
+            range: Range::default(),
+            is_exhaustive: result.is_exhaustive,
+            has_unverified_guards: result.has_unverified_guards,
+            uncovered_cases: result.witnesses,
+            redundant_patterns: result.redundant,
+            all_guarded: result.all_guarded,
+            uri: test_uri(),
+        };
+        let diagnostics = diagnostic.to_lsp_diagnostics();
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("coverage is not established"))
+        );
+        assert!(
+            diagnostics
+                .iter()
+                .all(|d| !d.message.contains("not covered"))
+        );
+        let provider = ExhaustivenessProvider::new();
+        assert_eq!(
+            provider
+                .get_quick_fixes(&diagnostic, Range::default())
+                .len(),
+            1
+        );
     }
 }

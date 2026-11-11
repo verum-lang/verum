@@ -38,6 +38,28 @@ fn check(body: &str, accepted: bool, expected: &[&str]) {
 }
 
 #[test]
+fn match_coverage_uses_real_guards_and_exact_numeric_domains() {
+    for body in [
+        "fn bad(value: Int) -> Int {match value {0 => 5, _ if false => 99}}",
+        "fn bad(value: Int) {let result = match value {0 => 5, 1 => 99};}",
+        "fn bad(value: Bool) -> Int {match value {true if false => 1, false => 0}}",
+        "fn bad(value: &Bool) -> Int {match value {false => 0}}",
+    ] {
+        check(body, false, &["E0601"]);
+    }
+    check(
+        "fn valid(value: Int) -> Int {match value {..0 => 1, 0.. => 2}}",
+        true,
+        &[],
+    );
+    check(
+        "fn valid(value: Bool) -> Int {match value {true if false => 1, _ => 2}}",
+        true,
+        &[],
+    );
+}
+
+#[test]
 fn invalid_calls_preserve_following_ownership_diagnostics() {
     for body in [
         "fn bad(original: Parcel) {need(true); (original, original);}",
