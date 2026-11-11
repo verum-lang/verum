@@ -83,21 +83,9 @@ fn typecheck(code: &str) -> Vec<String> {
     let mut parser = Parser::new(code);
     let module = parser.parse_module().expect("parse should succeed");
     let mut checker = TypeChecker::new();
-    for item in &module.items {
-        if let verum_ast::ItemKind::Type(td) = &item.kind {
-            let _ = checker.register_type_declaration(td);
-        }
-    }
-    for item in &module.items {
-        if let verum_ast::ItemKind::Impl(impl_block) = &item.kind {
-            let _ = checker.register_impl_block(impl_block);
-        }
-    }
-    for item in &module.items {
-        if let verum_ast::ItemKind::Function(f) = &item.kind {
-            let _ = checker.register_function_signature(f);
-        }
-    }
+    checker.register_primitives();
+    let declarations = checker.prepare_module_declarations(&module);
+    assert!(declarations.is_empty(), "valid declarations: {declarations:?}");
     let mut errs: Vec<String> = module
         .items
         .iter()

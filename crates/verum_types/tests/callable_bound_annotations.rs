@@ -81,6 +81,33 @@ fn matching_annotations_remain_valid_for_both_contract_forms() {
 }
 
 #[test]
+fn annotated_bindings_accept_stronger_callable_guarantees() {
+    for source in [
+        "fn good() -> Int {let base = 10; let f: fn(Int) -> Int = |x| x + base; f(5)}",
+        "fn good() -> Int {let f: fn(Int) -> Int = |x| x else {return 0;}; f(5)}",
+    ] {
+        let (errors, _, _) = check(source);
+        assert!(errors.is_empty(), "{source}: {errors:?}");
+    }
+}
+
+#[test]
+fn annotated_bindings_preserve_parameter_and_result_contracts() {
+    for source in [
+        "fn bad() {let f: fn(Int) -> Bool = |x| -> Int {x};}",
+        "fn bad() {let f: fn(Int) -> Bool = |x| -> Int {x} else {return;};}",
+        "fn bad() {let f: fn() = || -> Int {1};}",
+        "fn text(value: Bool) -> Bool {value} fn bad() {let f: fn(Int) -> Bool = text;}",
+    ] {
+        let (errors, _, _) = check(source);
+        assert!(
+            !errors.is_empty(),
+            "accepted incompatible binding: {source}"
+        );
+    }
+}
+
+#[test]
 fn annotation_still_checks_its_body() {
     let (errors, _, _) = check(
         "fn accept(f: fn() -> Bool) -> Bool { f() } fn bad() -> Bool { accept(|| -> Bool { 1 }) }",

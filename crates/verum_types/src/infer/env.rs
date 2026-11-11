@@ -9951,6 +9951,19 @@ impl TypeChecker {
         outcome
     }
 
+    /// A binding admits subtypes of its annotation. Equality is only needed
+    /// when solving unresolved inference variables; stronger callable guarantees
+    /// need not equal a weaker declared contract.
+    fn check_binding_compatibility(&mut self, actual: &Type, expected: &Type, span: Span) -> Result<()> {
+        let actual = self.normalize_type(&self.unifier.apply(actual));
+        let expected = self.normalize_type(&self.unifier.apply(expected));
+        if self.subtyping.is_subtype(&actual, &expected) {
+            Ok(())
+        } else {
+            self.unifier.unify(&actual, &expected, span).map(|_| ())
+        }
+    }
+
     /// Inner implementation of check_stmt
     fn check_stmt_inner(&mut self, stmt: &Stmt) -> Result<bool> {
         match &stmt.kind {
@@ -10058,11 +10071,7 @@ impl TypeChecker {
                         // Use check_expr to propagate expected type into the expression
                         let value_result = self.check_expr(val, &expected)?;
                         let value_ty = value_result.ty;
-                        // Normalize and unify to ensure types match
-                        let normalized_value = self.normalize_type(&value_ty);
-                        let normalized_expected = self.normalize_type(&expected);
-                        self.unifier
-                            .unify(&normalized_value, &normalized_expected, val.span)?;
+                        self.check_binding_compatibility(&value_ty, &expected, val.span)?;
 
                         // =====================================================================
                         // REFINEMENT CHECK: Verify value satisfies refinement predicate
@@ -10424,11 +10433,7 @@ impl TypeChecker {
                     // Use check_expr to propagate expected type into the expression
                     let value_result = self.check_expr(value, &expected)?;
                     let value_ty = value_result.ty;
-                    // Normalize types to resolve type aliases before unification
-                    let normalized_value = self.normalize_type(&value_ty);
-                    let normalized_expected = self.normalize_type(&expected);
-                    self.unifier
-                        .unify(&normalized_value, &normalized_expected, value.span)?;
+                    self.check_binding_compatibility(&value_ty, &expected, value.span)?;
                     expected
                 } else {
                     // No type annotation - synthesize the type
