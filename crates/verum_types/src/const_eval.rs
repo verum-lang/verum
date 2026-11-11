@@ -1353,21 +1353,42 @@ impl ConstEvaluator {
         }
     }
 
+    /// Compare mathematical integer values without narrowing either operand.
+    /// Unsuffixed predicate literals and unsigned subjects may use different
+    /// constant representations. This does not change typed value identity.
+    fn integer_order(left: &ConstValue, right: &ConstValue) -> Option<std::cmp::Ordering> {
+        use std::cmp::Ordering;
+        let signed_unsigned = |signed: i128, unsigned: u128| match u128::try_from(signed) {
+            Ok(nonnegative) => nonnegative.cmp(&unsigned),
+            Err(_) => Ordering::Less,
+        };
+        match (left, right) {
+            (ConstValue::Int(a), ConstValue::Int(b)) => Some(a.cmp(b)),
+            (ConstValue::UInt(a), ConstValue::UInt(b)) => Some(a.cmp(b)),
+            (ConstValue::Int(a), ConstValue::UInt(b)) => Some(signed_unsigned(*a, *b)),
+            (ConstValue::UInt(a), ConstValue::Int(b)) => Some(signed_unsigned(*b, *a).reverse()),
+            _ => None,
+        }
+    }
+
     /// Evaluate equality
     fn eval_eq(&self, left: ConstValue, right: ConstValue) -> Result<ConstValue> {
-        Ok(ConstValue::Bool(left == right))
+        Ok(ConstValue::Bool(Self::integer_order(&left, &right)
+            .map_or_else(|| left == right, |order| order.is_eq())))
     }
 
     /// Evaluate inequality
     fn eval_ne(&self, left: ConstValue, right: ConstValue) -> Result<ConstValue> {
-        Ok(ConstValue::Bool(left != right))
+        Ok(ConstValue::Bool(Self::integer_order(&left, &right)
+            .map_or_else(|| left != right, |order| !order.is_eq())))
     }
 
     /// Evaluate less than
     fn eval_lt(&self, left: ConstValue, right: ConstValue) -> Result<ConstValue> {
+        if let Some(order) = Self::integer_order(&left, &right) {
+            return Ok(ConstValue::Bool(order.is_lt()));
+        }
         match (left, right) {
-            (ConstValue::Int(a), ConstValue::Int(b)) => Ok(ConstValue::Bool(a < b)),
-            (ConstValue::UInt(a), ConstValue::UInt(b)) => Ok(ConstValue::Bool(a < b)),
             (ConstValue::Float(a), ConstValue::Float(b)) => Ok(ConstValue::Bool(a < b)),
             (ConstValue::Text(a), ConstValue::Text(b)) => Ok(ConstValue::Bool(a < b)),
             (ConstValue::Char(a), ConstValue::Char(b)) => Ok(ConstValue::Bool(a < b)),
@@ -1380,9 +1401,10 @@ impl ConstEvaluator {
 
     /// Evaluate less than or equal
     fn eval_le(&self, left: ConstValue, right: ConstValue) -> Result<ConstValue> {
+        if let Some(order) = Self::integer_order(&left, &right) {
+            return Ok(ConstValue::Bool(order.is_le()));
+        }
         match (left, right) {
-            (ConstValue::Int(a), ConstValue::Int(b)) => Ok(ConstValue::Bool(a <= b)),
-            (ConstValue::UInt(a), ConstValue::UInt(b)) => Ok(ConstValue::Bool(a <= b)),
             (ConstValue::Float(a), ConstValue::Float(b)) => Ok(ConstValue::Bool(a <= b)),
             (ConstValue::Text(a), ConstValue::Text(b)) => Ok(ConstValue::Bool(a <= b)),
             (ConstValue::Char(a), ConstValue::Char(b)) => Ok(ConstValue::Bool(a <= b)),
@@ -1395,9 +1417,10 @@ impl ConstEvaluator {
 
     /// Evaluate greater than
     fn eval_gt(&self, left: ConstValue, right: ConstValue) -> Result<ConstValue> {
+        if let Some(order) = Self::integer_order(&left, &right) {
+            return Ok(ConstValue::Bool(order.is_gt()));
+        }
         match (left, right) {
-            (ConstValue::Int(a), ConstValue::Int(b)) => Ok(ConstValue::Bool(a > b)),
-            (ConstValue::UInt(a), ConstValue::UInt(b)) => Ok(ConstValue::Bool(a > b)),
             (ConstValue::Float(a), ConstValue::Float(b)) => Ok(ConstValue::Bool(a > b)),
             (ConstValue::Text(a), ConstValue::Text(b)) => Ok(ConstValue::Bool(a > b)),
             (ConstValue::Char(a), ConstValue::Char(b)) => Ok(ConstValue::Bool(a > b)),
@@ -1410,9 +1433,10 @@ impl ConstEvaluator {
 
     /// Evaluate greater than or equal
     fn eval_ge(&self, left: ConstValue, right: ConstValue) -> Result<ConstValue> {
+        if let Some(order) = Self::integer_order(&left, &right) {
+            return Ok(ConstValue::Bool(order.is_ge()));
+        }
         match (left, right) {
-            (ConstValue::Int(a), ConstValue::Int(b)) => Ok(ConstValue::Bool(a >= b)),
-            (ConstValue::UInt(a), ConstValue::UInt(b)) => Ok(ConstValue::Bool(a >= b)),
             (ConstValue::Float(a), ConstValue::Float(b)) => Ok(ConstValue::Bool(a >= b)),
             (ConstValue::Text(a), ConstValue::Text(b)) => Ok(ConstValue::Bool(a >= b)),
             (ConstValue::Char(a), ConstValue::Char(b)) => Ok(ConstValue::Bool(a >= b)),
@@ -1847,6 +1871,75 @@ mod tests {
         span::Span,
         ty::{Ident, Path},
     };
+
+    #[test]
+    fn integer_comparisons_are_exact_across_signedness_and_full_width() {
+        use std::cmp::Ordering::{Equal, Greater, Less};
+        let evaluator = ConstEvaluator::new();
+        for (signed, unsigned, expected) in [
+            (i128::MIN, 0, Less), (-1, u128::MAX, Less),
+            (0, 0, Equal), (4, 4, Equal), (7, 4, Greater),
+            (i128::MAX, i128::MAX as u128, Equal),
+            (i128::MAX, (i128::MAX as u128) + 1, Less),
+            (i128::MAX, u128::MAX, Less),
+        ] {
+            let left = ConstValue::Int(signed);
+            let right = ConstValue::UInt(unsigned);
+            for (left, right, order) in [
+                (left.clone(), right.clone(), expected), (right, left, expected.reverse()),
+            ] {
+                assert_eq!(evaluator.eval_eq(left.clone(), right.clone()).unwrap(), ConstValue::Bool(order.is_eq()));
+                assert_eq!(evaluator.eval_ne(left.clone(), right.clone()).unwrap(), ConstValue::Bool(!order.is_eq()));
+                assert_eq!(evaluator.eval_lt(left.clone(), right.clone()).unwrap(), ConstValue::Bool(order.is_lt()));
+                assert_eq!(evaluator.eval_le(left.clone(), right.clone()).unwrap(), ConstValue::Bool(order.is_le()));
+                assert_eq!(evaluator.eval_gt(left.clone(), right.clone()).unwrap(), ConstValue::Bool(order.is_gt()));
+                assert_eq!(evaluator.eval_ge(left, right).unwrap(), ConstValue::Bool(order.is_ge()));
+            }
+        }
+        // Numeric evaluation does not identify distinct typed meta constants.
+        assert_ne!(ConstValue::Int(4), ConstValue::UInt(4));
+        assert!(ConstEvaluator::integer_order(&ConstValue::Int(1), &ConstValue::Float(1.0)).is_none());
+    }
+
+    #[test]
+    #[ignore = "requires the pinned Lean toolchain; run explicitly with --ignored"]
+    fn integer_order_replays_against_lean() {
+        use std::{fmt::Write, path::Path, process::Command};
+        let mut source = Text::from(include_str!(
+            "../../../verification/external/lean/VerumExternalReplay/IntegerOrder.lean"
+        ));
+        for signed in [i128::MIN, -1, 0, 1, i128::MAX] {
+            for unsigned in [0, 1, u64::MAX as u128, i128::MAX as u128,
+                (i128::MAX as u128) + 1, u128::MAX]
+            {
+                for (left, right, a, b) in [
+                    (ConstValue::Int(signed), ConstValue::UInt(unsigned), signed.to_string(), unsigned.to_string()),
+                    (ConstValue::UInt(unsigned), ConstValue::Int(signed), unsigned.to_string(), signed.to_string()),
+                ] {
+                    let result = match ConstEvaluator::integer_order(&left, &right).unwrap() {
+                        std::cmp::Ordering::Less => "lt",
+                        std::cmp::Ordering::Equal => "eq",
+                        std::cmp::Ordering::Greater => "gt",
+                    };
+                    writeln!(source, "example : compare ({a} : Int) ({b} : Int) = .{result} := by decide").unwrap();
+                }
+            }
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("IntegerOrder.lean");
+        std::fs::write(&path, source.as_bytes()).unwrap();
+        let result = Command::new(std::env::var_os("VERUM_LEAN").unwrap_or_else(|| "lean".into()))
+            .arg(&path)
+            .current_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../verification/external/lean"))
+            .output().expect("the pinned Lean toolchain must be installed");
+        let stdout = std::string::String::from_utf8_lossy(&result.stdout);
+        let stderr = std::string::String::from_utf8_lossy(&result.stderr);
+        assert!(result.status.success(), "{stdout}\n{stderr}");
+        assert!(stdout.contains("'Verum.IntegerOrder.sound' depends on axioms: [propext, Quot.sound]"), "{stdout}");
+        for forbidden in ["sorryAx", "Lean.ofReduceBool", "warning:", "error:"] {
+            assert!(!stdout.contains(forbidden) && !stderr.contains(forbidden), "{stdout}\n{stderr}");
+        }
+    }
 
     /// Helper to create a simple integer literal expression
     fn int_lit(value: i128) -> Expr {
