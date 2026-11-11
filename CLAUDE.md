@@ -1,5 +1,10 @@
 # Verum Language Platform
 
+**No stack-growing workarounds.** `stacker`, equivalent stack switching and
+raising thread stack sizes are forbidden as implementation fixes. Replace
+recursive stack amplification with bounded explicit traversal and small
+operations; test both valid nesting and resource-limit rejection. See [AGENTS.md](AGENTS.md).
+
 **No authored C/C++ interlayers for Verum operations, in any tier.** Implement
 primitives in VBC and lower them directly in the interpreter and native backend.
 Compiling an interlayer to bitcode or linking it statically is also forbidden.

@@ -1,5 +1,10 @@
 # Verum implementation rules
 
+Do not use `stacker` or any stack-growing library, dynamic stack switching,
+or increased thread stacks to repair compiler/interpreter recursion. Use
+explicit bounded work queues or small, structurally bounded operations.
+Validate nested inputs and rejection paths on ordinary thread stacks.
+
 Implement language and standard-library primitives as VBC intrinsics. The
 registry owns their identity; the interpreter executes their VBC operation and
 the native backend lowers that operation to target instructions or LLVM IR.

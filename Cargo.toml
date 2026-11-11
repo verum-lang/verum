@@ -115,9 +115,6 @@ thiserror = "2.0.18"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 
-# Stack overflow prevention
-stacker = "0.1"
-
 # Data structures
 bitflags = { version = "2.11", features = ["serde"] }
 dashmap = "6.1.0"

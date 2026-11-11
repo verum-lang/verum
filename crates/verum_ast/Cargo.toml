@@ -17,7 +17,6 @@ smallvec = { workspace = true, features = ["serde"] }
 indexmap = { workspace = true }
 bitflags = { workspace = true }
 verum_common = { workspace = true }
-stacker = "0.1"
 # verum_ast only needs core types (List, Text, Maybe, Heap) from verum_common
 
 [dev-dependencies]
