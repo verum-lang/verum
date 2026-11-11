@@ -19,6 +19,7 @@ fn check(body: &str, accepted: bool, diagnostic: &str) {
         public type Cell<N: meta USize> is { public value: Int };
         public type Envelope<N: meta USize, T> is | Data(Cell<N>, T);
         public type Sized<N: meta USize {it == 4}> is | Item(Int);
+        public type Projector<k: meta USize {k > 0}> is { public value: Int };
     "#,
     )
     .unwrap();
@@ -29,7 +30,7 @@ fn check(body: &str, accepted: bool, diagnostic: &str) {
             r#"
         @no_implicit_prelude
         module app.main;
-        mount core.indexed.{{Cell, Envelope, Sized}};
+        mount core.indexed.{{Cell, Envelope, Sized, Projector}};
         {body}
         fn main() {{}}
     "#
@@ -55,6 +56,31 @@ fn check(body: &str, accepted: bool, diagnostic: &str) {
     if !accepted {
         assert!(messages.contains(diagnostic), "{messages}");
     }
+}
+
+#[test]
+fn imported_named_domains_keep_their_declaring_subject() {
+    check(
+        r#"
+        fn retain<n: meta USize {n > 0}>(value: Projector<n>) -> Projector<n> { value }
+        implement<n: meta USize {n > 0}> Projector<n> {
+            fn copy(&self) -> Projector<n> { Projector {value: self.value} }
+        }
+        fn concrete(value: Projector<4>) {}
+    "#,
+        true,
+        "",
+    );
+    check(
+        "fn refused(value: Projector<0>) {}",
+        false,
+        "declared value domain",
+    );
+    check(
+        "fn refused<n: meta USize>(value: Projector<n>) {}",
+        false,
+        "declared value domain",
+    );
 }
 
 #[test]
