@@ -11,6 +11,115 @@ fn prepare(source: &str) -> (TypeChecker, Module) {
     (checker, module)
 }
 
+#[test]
+fn recover_failures_restore_the_enclosing_return_contract_and_depth() {
+    for source in [
+        "try {missing} recover |error| {1}",
+        "try {missing} recover {_ => 1} finally {}",
+    ] {
+        for checking in [false, true] {
+            for depth in [0, 1] {
+                let (mut checker, _) = prepare("");
+                checker.try_recover_depth = depth;
+                checker.current_function_return_type = verum_common::Maybe::Some(crate::Type::Bool);
+                let expression = Parser::new(source).parse_expr().expect(source);
+                let result = if checking {
+                    checker.check_expr(&expression, &crate::Type::Int)
+                } else {
+                    checker.synth_expr(&expression)
+                };
+                result.expect_err("missing try body value");
+                assert_eq!(
+                    checker.try_recover_depth, depth,
+                    "{source}, checking={checking}"
+                );
+                assert_eq!(
+                    checker.current_function_return_type,
+                    verum_common::Maybe::Some(crate::Type::Bool),
+                    "{source}, checking={checking}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn recover_handler_names_do_not_escape_on_success_or_failure() {
+    for source in [
+        "try {1} recover |hidden| {2}",
+        "try {1} recover {hidden => 2}",
+        "try {1} recover |hidden| {missing}",
+        "try {1} recover {hidden => missing}",
+    ] {
+        for checking in [false, true] {
+            let (mut checker, _) = prepare("");
+            let depth = checker.ctx.env.scope_depth();
+            let expression = Parser::new(source).parse_expr().expect(source);
+            let result = if checking {
+                checker.check_expr(&expression, &crate::Type::Int)
+            } else {
+                checker.synth_expr(&expression)
+            };
+            assert_eq!(
+                result.is_err(),
+                source.contains("missing"),
+                "{source}: {result:?}"
+            );
+            assert_eq!(
+                checker.ctx.env.scope_depth(),
+                depth,
+                "{source}, checking={checking}"
+            );
+            assert!(
+                checker.ctx.env.lookup("hidden").is_none(),
+                "{source}, checking={checking}"
+            );
+        }
+    }
+}
+
+#[test]
+fn recover_guards_are_checked_in_both_inference_directions() {
+    for (guard, valid) in [("true", true), ("7", false)] {
+        let source = format!("try {{1}} recover {{hidden if {guard} => 2, _ => 3}}");
+        for checking in [false, true] {
+            let (mut checker, _) = prepare("");
+            let expression = Parser::new(&source).parse_expr().expect("guard grammar");
+            let result = if checking {
+                checker.check_expr(&expression, &crate::Type::Int)
+            } else {
+                checker.synth_expr(&expression)
+            };
+            assert_eq!(
+                result.is_ok(),
+                valid,
+                "{source}, checking={checking}: {result:?}"
+            );
+            assert!(checker.ctx.env.lookup("hidden").is_none());
+        }
+    }
+}
+
+#[test]
+fn recover_arms_do_not_share_pattern_bindings() {
+    let source = "try {1} recover {hidden if true => 2, _ => hidden}";
+    for checking in [false, true] {
+        let (mut checker, _) = prepare("");
+        let expression = Parser::new(source).parse_expr().unwrap();
+        let result = if checking {
+            checker.check_expr(&expression, &crate::Type::Int)
+        } else {
+            checker.synth_expr(&expression)
+        };
+        assert!(
+            matches!(result, Err(crate::TypeError::UnboundVariable { ref name, .. })
+            if name == "hidden"),
+            "{result:?}"
+        );
+        assert!(checker.ctx.env.lookup("hidden").is_none());
+    }
+}
+
 fn check_errors(checker: &mut TypeChecker, item: &verum_ast::Item) -> Vec<String> {
     let mut errors: Vec<_> = checker
         .check_item(item)

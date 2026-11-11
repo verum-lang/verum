@@ -172,6 +172,20 @@ impl TypeChecker {
         result
     }
 
+    fn with_try_recover_context<T>(
+        &mut self,
+        error_type: &Type,
+        check: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> Result<T> {
+        let return_type = Type::result(Type::Var(TypeVar::fresh()), error_type.clone());
+        let previous_return = self.current_function_return_type.replace(return_type);
+        self.try_recover_depth += 1;
+        let result = check(self);
+        self.try_recover_depth -= 1;
+        self.current_function_return_type = previous_return;
+        result
+    }
+
     fn check_borrow_operand(&mut self, expr: &Expr, expected: &Type) -> Result<InferResult> {
         if Self::named_field_place(expr).is_some() {
             let result = self.synth_borrowed_operand(expr)?;
@@ -757,32 +771,10 @@ impl TypeChecker {
             // in try { Some(r) } recover { ... => None } with expected Maybe<T>.
             TryRecover { try_block, recover } => {
                 let error_type = self.extract_try_block_error_type(try_block)?;
-                self.try_recover_depth += 1;
-                let saved_return_type = self.current_function_return_type.clone();
-                let try_ok_var = Type::Var(crate::ty::TypeVar::fresh());
-                self.current_function_return_type =
-                    verum_common::Maybe::Some(Type::result(try_ok_var.clone(), error_type.clone()));
-                self.check_expr(try_block, expected)?;
-                self.current_function_return_type = saved_return_type;
-                self.try_recover_depth -= 1;
-
-                // Check recover arms against expected type
-                match recover {
-                    verum_ast::expr::RecoverBody::MatchArms { arms, .. } => {
-                        for arm in arms {
-                            self.bind_pattern(&arm.pattern, &error_type)?;
-                            if let Some(ref guard) = arm.guard {
-                                self.check_expr(guard, &Type::bool())?;
-                            }
-                            self.check_expr(&arm.body, expected)?;
-                        }
-                    }
-                    verum_ast::expr::RecoverBody::Closure { param, body, .. } => {
-                        // Bind the error parameter pattern
-                        self.bind_pattern(&param.pattern, &error_type)?;
-                        self.check_expr(body, expected)?;
-                    }
-                }
+                self.with_try_recover_context(&error_type, |checker| {
+                    checker.check_expr(try_block, expected)
+                })?;
+                self.check_recover_body(recover, &error_type, Some(expected))?;
                 Ok(InferResult::new(expected.clone()))
             }
 
@@ -5043,25 +5035,12 @@ impl TypeChecker {
                     // Extract error type from ? operators inside try block before type checking
                     let error_type = self.extract_try_block_error_type(try_block)?;
 
-                    // Track that we're inside a try/recover block so throw is allowed
-                    self.try_recover_depth += 1;
-
-                    // Temporarily set function return type to Result<T, E> so that
-                    // the ? operator inside the try block passes type checking.
-                    let saved_return_type = self.current_function_return_type.clone();
-                    let try_ok_var = Type::Var(crate::ty::TypeVar::fresh());
-                    self.current_function_return_type =
-                        Maybe::Some(Type::result(try_ok_var.clone(), error_type.clone()));
-
-                    // Infer type of try block
-                    let try_result = self.synth_expr(try_block)?;
-
-                    // Restore original function return type
-                    self.current_function_return_type = saved_return_type;
-                    self.try_recover_depth -= 1;
+                    let try_result = self.with_try_recover_context(&error_type, |checker| {
+                        checker.synth_expr(try_block)
+                    })?;
 
                     // Infer type of recovery body with error type for pattern binding
-                    let recover_ty = self.infer_recover_body(recover, &error_type)?;
+                    let recover_ty = self.check_recover_body(recover, &error_type, None)?;
 
                     // Recovery body must have the same type as try block
                     self.unifier.unify(&try_result.ty, &recover_ty, expr.span)?;
@@ -6171,7 +6150,7 @@ impl TypeChecker {
                             args: vec![].into(),
                         };
 
-                        let recover_ty = self.infer_recover_body(recover_body, &error_type)?;
+                        let recover_ty = self.check_recover_body(recover_body, &error_type, None)?;
                         // Recover block must return the same type as the body
                         self.unifier
                             .unify(&recover_ty, &body_result.ty, *nursery_span)?;
@@ -12137,27 +12116,12 @@ impl TypeChecker {
         // This ensures we have a concrete error type for pattern binding
         let error_type = self.extract_try_block_error_type(try_block)?;
 
-        // Track that we're inside a try/recover block so throw is allowed
-        self.try_recover_depth += 1;
-
-        // Temporarily set function return type to Result<T, E> so that
-        // the ? operator inside the try block passes type checking.
-        // Without this, ? checks the enclosing function's return type
-        // (which may be non-Result like Int) and rejects it.
-        let saved_return_type = self.current_function_return_type.clone();
-        let try_ok_var = Type::Var(crate::ty::TypeVar::fresh());
-        self.current_function_return_type =
-            Maybe::Some(Type::result(try_ok_var.clone(), error_type.clone()));
-
-        // Infer type of try block
-        let try_result = self.synth_expr(try_block)?;
-
-        // Restore original function return type
-        self.current_function_return_type = saved_return_type;
-        self.try_recover_depth -= 1;
+        let try_result = self.with_try_recover_context(&error_type, |checker| {
+            checker.synth_expr(try_block)
+        })?;
 
         // Infer type of recovery body with error type for pattern binding
-        let recover_ty = self.infer_recover_body(recover, &error_type)?;
+        let recover_ty = self.check_recover_body(recover, &error_type, None)?;
 
         // Recovery body must have the same type as try block
         self.unifier.unify(&try_result.ty, &recover_ty, expr.span)?;

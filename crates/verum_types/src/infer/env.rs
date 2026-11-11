@@ -10525,57 +10525,62 @@ impl TypeChecker {
         Ok(())
     }
 
-    /// Infer the type of a recovery body (either match arms or closure).
-    /// Used for try-recover and try-recover-finally expressions.
-    ///
-    /// `error_type` is the type of the error being recovered from (the `E` in `Result<T, E>`).
-    pub(super) fn infer_recover_body(
+    /// Check recovery handlers with the same lexical and guard rules in both
+    /// inference directions. Each handler owns its pattern bindings.
+    pub(super) fn check_recover_body(
         &mut self,
         recover: &verum_ast::expr::RecoverBody,
         error_type: &Type,
+        expected: Option<&Type>,
     ) -> Result<Type> {
         use verum_ast::expr::RecoverBody;
 
         match recover {
             RecoverBody::MatchArms { arms, .. } => {
-                // Infer type from the first arm, then check all arms unify
-                if arms.is_empty() {
-                    return Ok(Type::unit());
+                let mut result_ty = expected.cloned();
+                for arm in arms {
+                    let ty = self.check_recover_handler(
+                        &arm.pattern,
+                        arm.guard.as_deref(),
+                        &arm.body,
+                        error_type,
+                        expected,
+                    )?;
+                    if expected.is_none() {
+                        if let Some(previous) = &result_ty {
+                            self.unifier.unify(previous, &ty, arm.span)?;
+                        } else {
+                            result_ty = Some(ty);
+                        }
+                    }
                 }
-
-                // Process first arm with pattern binding
-                self.ctx.enter_scope();
-                self.bind_pattern(&arms[0].pattern, error_type)?;
-                let first_result = self.synth_expr(&arms[0].body)?;
-                let result_ty = first_result.ty.clone();
-                self.ctx.exit_scope();
-
-                // Check all other arms have the same type
-                for arm in arms.iter().skip(1) {
-                    self.ctx.enter_scope();
-                    self.bind_pattern(&arm.pattern, error_type)?;
-                    let arm_result = self.synth_expr(&arm.body)?;
-                    self.ctx.exit_scope();
-                    self.unifier.unify(&result_ty, &arm_result.ty, arm.span)?;
-                }
-
-                Ok(result_ty)
+                Ok(result_ty.unwrap_or_else(Type::unit))
             }
             RecoverBody::Closure { param, body, .. } => {
-                // Enter scope for closure parameter
-                self.ctx.enter_scope();
-
-                // Bind closure parameter to error type
-                // Grammar: recover_closure = closure_params , recover_closure_body
-                // The closure takes the error as its parameter
-                self.bind_pattern(&param.pattern, error_type)?;
-
-                let result = self.synth_expr(body)?;
-                self.ctx.exit_scope();
-
-                Ok(result.ty)
+                self.check_recover_handler(&param.pattern, None, body, error_type, expected)
             }
         }
+    }
+
+    fn check_recover_handler(
+        &mut self,
+        pattern: &verum_ast::Pattern,
+        guard: Option<&Expr>,
+        body: &Expr,
+        error_type: &Type,
+        expected: Option<&Type>,
+    ) -> Result<Type> {
+        self.with_lexical_scope(|checker| {
+            checker.bind_pattern(pattern, error_type)?;
+            if let Some(guard) = guard {
+                checker.check_expr(guard, &Type::Bool)?;
+            }
+            let result = match expected {
+                Some(expected) => checker.check_expr(body, expected),
+                None => checker.synth_expr(body),
+            }?;
+            Ok(result.ty)
+        })
     }
 
     /// Extract the error type from a try block by analyzing ? operators.
