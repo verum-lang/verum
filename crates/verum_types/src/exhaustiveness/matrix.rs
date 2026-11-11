@@ -193,7 +193,7 @@ pub enum PatternColumn {
 /// Literal pattern values
 #[derive(Debug, Clone)]
 pub enum LiteralPattern {
-    Int(i64),
+    Int(i128),
     Float(f64),
     Bool(bool),
     Char(char),
@@ -222,7 +222,7 @@ impl PatternColumn {
             }
             PatternColumn::Literal(lit) => {
                 let ast_lit = match lit {
-                    LiteralPattern::Int(n) => Literal::int(*n as i128, span),
+                    LiteralPattern::Int(n) => Literal::int(*n, span),
                     LiteralPattern::Float(f) => Literal::float(*f, span),
                     LiteralPattern::Bool(b) => Literal::bool(*b, span),
                     LiteralPattern::Char(c) => Literal::char(*c, span),
@@ -557,7 +557,7 @@ fn pattern_to_column(pattern: &Pattern, has_guard: &mut bool) -> Result<PatternC
         PatternKind::Literal(lit) => {
             let lit_pattern = match &lit.kind {
                 verum_ast::literal::LiteralKind::Int(int_lit) => {
-                    LiteralPattern::Int(int_lit.value as i64)
+                    LiteralPattern::Int(int_lit.value)
                 }
                 verum_ast::literal::LiteralKind::Float(float_lit) => {
                     LiteralPattern::Float(float_lit.value)
@@ -717,14 +717,14 @@ fn pattern_to_column(pattern: &Pattern, has_guard: &mut bool) -> Result<PatternC
             end,
             inclusive,
         } => {
-            let start_val = start.as_ref().and_then(|l| match &l.kind {
-                verum_ast::literal::LiteralKind::Int(int_lit) => Some(int_lit.value),
-                _ => None,
-            });
-            let end_val = end.as_ref().and_then(|l| match &l.kind {
-                verum_ast::literal::LiteralKind::Int(int_lit) => Some(int_lit.value),
-                _ => None,
-            });
+            let bound = |literal: &Heap<Literal>| match &literal.kind {
+                verum_ast::literal::LiteralKind::Int(value) => Ok(value.value),
+                _ => Err(TypeError::Other(Text::from(
+                    "range coverage requires integer bounds; unsupported bounds cannot become unbounded",
+                ))),
+            };
+            let start_val = start.as_ref().map(bound).transpose()?;
+            let end_val = end.as_ref().map(bound).transpose()?;
             Ok(PatternColumn::Range {
                 start: start_val,
                 end: end_val,

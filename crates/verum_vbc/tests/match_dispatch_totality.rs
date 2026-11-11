@@ -67,3 +67,22 @@ fn valid_guards_and_patterns_still_select_the_correct_arm() {
         check(body, Some(expected));
     }
 }
+
+#[test]
+fn numeric_patterns_observe_full_width_and_ieee_comparisons() {
+    for (body, expected) in [
+        (
+            "match 9223372036854775807 {0..9223372036854775807 => 99, _ => 8}",
+            8,
+        ),
+        (
+            "match 9223372036854775807 {0..=9223372036854775807 => 8, _ => 99}",
+            8,
+        ),
+        ("match -0.0 {0.0 => 8, _ => 99}", 8),
+        ("match 0.25 {0.0 => 99, 0.25 => 8, _ => 99}", 8),
+        ("let value = 0.0 / 0.0; match value {0.0 => 99, _ => 8}", 8),
+    ] {
+        check(body, Some(expected));
+    }
+}

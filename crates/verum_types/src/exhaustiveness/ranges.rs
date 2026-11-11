@@ -43,7 +43,23 @@ impl Interval {
 
     /// Check if this interval is adjacent to another (can be merged)
     pub fn adjacent(&self, other: &Interval) -> bool {
-        self.end + 1 == other.start || other.end + 1 == self.start
+        self.end.checked_add(1) == Some(other.start) || other.end.checked_add(1) == Some(self.start)
+    }
+
+    /// Interpret source endpoints within a scalar domain, without overflowing
+    /// when an exclusive upper bound is the smallest representable integer.
+    pub fn from_range(
+        start: Option<i128>,
+        end: Option<i128>,
+        inclusive: bool,
+        bounds: Interval,
+    ) -> Option<Self> {
+        let end = match end {
+            Some(end) if !inclusive => end.checked_sub(1)?,
+            Some(end) => end,
+            None => bounds.end,
+        };
+        Self::new(start.unwrap_or(bounds.start), end).intersect(&bounds)
     }
 
     /// Merge two overlapping or adjacent intervals
@@ -118,9 +134,11 @@ impl IntervalSet {
 
     /// Create an interval set with a single interval
     pub fn singleton(interval: Interval) -> Self {
-        Self {
-            intervals: List::from_iter([interval]),
+        let mut result = Self::empty();
+        if !interval.is_empty() {
+            result.intervals.push(interval);
         }
+        result
     }
 
     /// Create a universe set (all values)
@@ -129,54 +147,56 @@ impl IntervalSet {
     }
 
     /// Add an interval to the set (merging overlapping intervals)
-    pub fn add(&mut self, interval: Interval) {
+    pub fn add(&mut self, mut interval: Interval) {
         if interval.is_empty() {
             return;
         }
 
-        // Find intervals that overlap or are adjacent
-        let mut to_merge = List::from_iter([interval]);
-        let mut remaining = List::new();
-
-        for existing in self.intervals.iter() {
-            let mut merged = false;
-            for i in 0..to_merge.len() {
-                if let Some(merged_interval) = to_merge[i].merge(existing) {
-                    to_merge[i] = merged_interval;
-                    merged = true;
-                    break;
-                }
-            }
-            if !merged {
-                remaining.push(*existing);
-            }
-        }
-
-        // Merge the to_merge list
-        let mut result: List<Interval> = List::new();
-        for interval in to_merge.iter() {
-            let mut found_merge = false;
-            for i in 0..result.len() {
-                if let Some(merged) = result[i].merge(interval) {
-                    result[i] = merged;
-                    found_merge = true;
-                    break;
-                }
-            }
-            if !found_merge {
-                result.push(*interval);
+        // The existing intervals are sorted and disjoint. Merge in one pass;
+        // no repeated sorting or pairwise merge search is needed.
+        let mut result = List::new();
+        let mut inserted = false;
+        for existing in &self.intervals {
+            if inserted {
+                result.push(*existing);
+            } else if let Some(merged) = interval.merge(existing) {
+                interval = merged;
+            } else if existing.end < interval.start {
+                result.push(*existing);
+            } else {
+                result.push(interval);
+                result.push(*existing);
+                inserted = true;
             }
         }
-
-        // Add remaining intervals
-        for interval in remaining.iter() {
-            result.push(*interval);
+        if !inserted {
+            result.push(interval);
         }
-
-        // Sort by start
-        result.sort_by_key(|i| i.start);
-
         self.intervals = result;
+    }
+
+    pub fn union_with(&mut self, other: &Self) {
+        for interval in &other.intervals {
+            self.add(*interval);
+        }
+    }
+
+    /// Linear intersection of two sorted, disjoint sets.
+    pub fn intersect(&self, other: &Self) -> Self {
+        let mut result = Self::empty();
+        let mut left = self.iter().peekable();
+        let mut right = other.iter().peekable();
+        while let (Some(a), Some(b)) = (left.peek(), right.peek()) {
+            if let Some(interval) = a.intersect(b) {
+                result.intervals.push(interval);
+            }
+            if a.end <= b.end {
+                left.next();
+            } else {
+                right.next();
+            }
+        }
+        result
     }
 
     /// Subtract an interval from the set
@@ -220,8 +240,24 @@ impl IntervalSet {
 
     /// Get the first uncovered value in a range
     pub fn first_uncovered(&self, bounds: Interval) -> Option<i128> {
-        let complement = self.complement(bounds);
-        complement.intervals.first().map(|i| i.start)
+        if bounds.is_empty() {
+            return None;
+        }
+        let mut candidate = bounds.start;
+        for interval in &self.intervals {
+            if interval.end < candidate {
+                continue;
+            }
+            if interval.start > candidate {
+                return Some(candidate);
+            }
+            if interval.end >= bounds.end {
+                return None;
+            }
+            // interval.end < bounds.end <= i128::MAX.
+            candidate = interval.end + 1;
+        }
+        Some(candidate)
     }
 }
 
@@ -233,14 +269,8 @@ pub fn ranges_cover_type(
     let mut covered = IntervalSet::empty();
 
     for (start, end, inclusive) in ranges {
-        let s = start.unwrap_or(type_bounds.start);
-        let e = if *inclusive {
-            end.unwrap_or(type_bounds.end)
-        } else {
-            end.map(|e| e - 1).unwrap_or(type_bounds.end)
-        };
-        if s <= e {
-            covered.add(Interval::new(s, e));
+        if let Some(interval) = Interval::from_range(*start, *end, *inclusive, type_bounds) {
+            covered.add(interval);
         }
     }
 

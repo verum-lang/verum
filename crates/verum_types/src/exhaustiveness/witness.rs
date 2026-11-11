@@ -8,7 +8,6 @@ use super::matrix::{CoverageMatrix, LiteralPattern, PatternColumn};
 use super::smt::{SmtValue, SmtWitness};
 use crate::context::TypeEnv;
 use crate::ty::Type;
-use std::collections::HashSet;
 use std::fmt;
 use verum_common::{List, Text};
 
@@ -310,8 +309,9 @@ pub fn generate_uncovered_witness(
 
         Type::Int => {
             // Find an uncovered integer value
-            let uncovered = find_uncovered_integer(covered_patterns);
-            Witness::Literal(WitnessLiteral::Int(uncovered))
+            super::scalar::uncovered_integer(covered_patterns)
+                .map(Witness::int)
+                .unwrap_or(Witness::Wildcard)
         }
 
         Type::Unit => Witness::Literal(WitnessLiteral::Text(Text::from("()"))),
@@ -479,13 +479,7 @@ fn covers_cons_stream(pattern: &PatternColumn) -> bool {
 
 /// Check if a pattern covers a specific bool value
 fn covers_bool_value(pattern: &PatternColumn, value: bool) -> bool {
-    match pattern {
-        PatternColumn::Wildcard => true,
-        PatternColumn::Literal(LiteralPattern::Bool(b)) => *b == value,
-        PatternColumn::Or(alts) => alts.iter().any(|a| covers_bool_value(a, value)),
-        PatternColumn::Guarded(inner) => covers_bool_value(inner, value),
-        _ => false,
-    }
+    super::scalar::covers_bool(pattern, value)
 }
 
 /// Check if a pattern covers a specific constructor
@@ -498,81 +492,6 @@ fn covers_constructor(pattern: &PatternColumn, name: &Text) -> bool {
         PatternColumn::Or(alts) => alts.iter().any(|a| covers_constructor(a, name)),
         PatternColumn::Guarded(inner) => covers_constructor(inner, name),
         _ => false,
-    }
-}
-
-/// Find an uncovered integer value
-///
-/// Performance: Uses HashSet for O(1) value lookup instead of O(n) list search
-fn find_uncovered_integer(patterns: &[PatternColumn]) -> i64 {
-    // Collect all covered integers using HashSet for O(1) lookup
-    let mut covered_values: HashSet<i64> = HashSet::new();
-    let mut covered_ranges: Vec<(i128, i128)> = Vec::new();
-
-    for pattern in patterns {
-        collect_integer_coverage_fast(pattern, &mut covered_values, &mut covered_ranges);
-    }
-
-    // Helper to check if value is in any range
-    let in_any_range = |val: i64| -> bool {
-        let val = val as i128;
-        covered_ranges
-            .iter()
-            .any(|(start, end)| val >= *start && val <= *end)
-    };
-
-    // Find a value not covered
-    for candidate in 0i64.. {
-        // O(1) HashSet lookup instead of O(n) list search
-        if !covered_values.contains(&candidate) && !in_any_range(candidate) {
-            return candidate;
-        }
-
-        // Also try negative values
-        let neg_candidate = -(candidate + 1);
-        if !covered_values.contains(&neg_candidate) && !in_any_range(neg_candidate) {
-            return neg_candidate;
-        }
-
-        // Limit search to prevent infinite loop
-        if candidate > 100 {
-            break;
-        }
-    }
-
-    // Default: use a large number
-    999999
-}
-
-/// Collect integer coverage from a pattern (optimized with HashSet)
-fn collect_integer_coverage_fast(
-    pattern: &PatternColumn,
-    values: &mut HashSet<i64>,
-    ranges: &mut Vec<(i128, i128)>,
-) {
-    match pattern {
-        PatternColumn::Literal(LiteralPattern::Int(n)) => {
-            values.insert(*n);
-        }
-        PatternColumn::Range {
-            start,
-            end,
-            inclusive,
-        } => {
-            let s = start.unwrap_or(i128::MIN);
-            let e = if *inclusive {
-                end.unwrap_or(i128::MAX)
-            } else {
-                end.map(|e| e - 1).unwrap_or(i128::MAX)
-            };
-            ranges.push((s, e));
-        }
-        PatternColumn::Or(alts) => {
-            for alt in alts.iter() {
-                collect_integer_coverage_fast(alt, values, ranges);
-            }
-        }
-        _ => {}
     }
 }
 
@@ -628,7 +547,7 @@ mod tests {
             PatternColumn::Literal(LiteralPattern::Int(0)),
             PatternColumn::Literal(LiteralPattern::Int(1)),
         ];
-        let uncovered = find_uncovered_integer(&patterns);
+        let uncovered = super::super::scalar::uncovered_integer(&patterns).unwrap();
         assert!(uncovered != 0 && uncovered != 1);
     }
 

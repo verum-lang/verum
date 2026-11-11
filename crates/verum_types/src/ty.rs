@@ -421,7 +421,7 @@ pub enum Type {
     /// Boolean type
     Bool,
 
-    /// Integer type (arbitrary precision)
+    /// Canonical signed 64-bit integer type.
     Int,
 
     /// Floating-point type (IEEE 754 double)

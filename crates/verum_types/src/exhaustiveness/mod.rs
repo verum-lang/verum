@@ -60,6 +60,7 @@ mod constructors;
 pub mod diagnostics;
 mod matrix;
 mod ranges;
+mod scalar;
 mod usefulness;
 mod witness;
 
@@ -475,10 +476,12 @@ fn analyze_range_patterns_in_matrix(matrix: &CoverageMatrix) -> Option<RangeOver
     // Extract range patterns from the matrix
     for (idx, row) in matrix.rows.iter().enumerate() {
         for col in row.columns.iter() {
-            if let PatternColumn::Range { start, end, .. } = col {
-                let s = start.unwrap_or(default_min);
-                let e = end.unwrap_or(default_max);
-                ranges.push((idx, Interval::new(s, e)));
+            if let PatternColumn::Range { start, end, inclusive } = col {
+                if let Some(interval) = Interval::from_range(
+                    *start, *end, *inclusive, Interval::new(default_min, default_max),
+                ) {
+                    ranges.push((idx, interval));
+                }
             }
         }
     }
@@ -531,7 +534,7 @@ fn find_uncovered_cases(
             return find_uncovered_bool(matrix);
         }
 
-        // Int/Float: infinite domain -- exhaustive only with wildcard
+        // Numeric scalar domains: exact integer intervals and IEEE floating values
         Type::Int | Type::Float => {
             return find_uncovered_numeric(matrix, scrutinee_ty);
         }
@@ -565,175 +568,37 @@ fn find_uncovered_cases(
 /// covers both. Guarded patterns do NOT provide definitive coverage because
 /// the guard can fail at runtime.
 fn find_uncovered_bool(matrix: &CoverageMatrix) -> Result<List<Witness>, TypeError> {
-    let mut covers_true = false;
-    let mut covers_false = false;
-
-    for row in matrix.rows.iter() {
-        // Guarded patterns don't provide definitive coverage
-        if row.has_guard {
-            continue;
-        }
-        if let Some(first) = row.columns.first() {
-            check_bool_coverage(first, &mut covers_true, &mut covers_false);
-        }
-    }
-
     let mut uncovered = List::new();
-    if !covers_true {
-        uncovered.push(Witness::bool(true));
-    }
-    if !covers_false {
-        uncovered.push(Witness::bool(false));
+    for value in [true, false] {
+        if !matrix.rows.iter().filter(|row| !row.has_guard).any(|row| {
+            row.columns
+                .first()
+                .is_some_and(|pattern| scalar::covers_bool(pattern, value))
+        }) {
+            uncovered.push(Witness::bool(value));
+        }
     }
     Ok(uncovered)
 }
 
-/// Recursively check which bool values a pattern column covers
-fn check_bool_coverage(col: &PatternColumn, covers_true: &mut bool, covers_false: &mut bool) {
-    match col {
-        PatternColumn::Wildcard => {
-            *covers_true = true;
-            *covers_false = true;
-        }
-        PatternColumn::Literal(LiteralPattern::Bool(true)) => {
-            *covers_true = true;
-        }
-        PatternColumn::Literal(LiteralPattern::Bool(false)) => {
-            *covers_false = true;
-        }
-        PatternColumn::Constructor { name, .. } if name.as_str() == "true" => {
-            *covers_true = true;
-        }
-        PatternColumn::Constructor { name, .. } if name.as_str() == "false" => {
-            *covers_false = true;
-        }
-        PatternColumn::Or(alts) => {
-            for alt in alts.iter() {
-                check_bool_coverage(alt, covers_true, covers_false);
-            }
-        }
-        PatternColumn::Guarded(_inner) => {
-            // Guarded inner -- conservative: don't count as coverage
-        }
-        PatternColumn::And(conjuncts) => {
-            // And pattern covers what its most specific conjunct covers
-            for conj in conjuncts.iter() {
-                check_bool_coverage(conj, covers_true, covers_false);
-            }
-        }
-        _ => {}
-    }
-}
-
-/// Find uncovered cases for numeric types (Int, Float)
-///
-/// Numeric types have infinite domains. They are exhaustive only if:
-/// - There is a non-guarded wildcard/ident pattern, OR
-/// - There is a non-guarded range pattern that covers the entire domain
-///
-/// Literal-only matches without a wildcard are always non-exhaustive for
-/// infinite types. Guard-only patterns require a wildcard fallback.
+/// Compute exact Int coverage; Float matches require coverage of NaN as well
+/// as ordered values. Never return a sampled or fabricated counterexample.
 fn find_uncovered_numeric(
     matrix: &CoverageMatrix,
     scrutinee_ty: &Type,
 ) -> Result<List<Witness>, TypeError> {
-    // Wildcard already checked by caller (has_wildcard_row)
-
-    // Collect all non-guarded coverage (literals + ranges)
-    let mut covered_values = std::collections::HashSet::new();
-    let mut covered_ranges: Vec<(i128, i128)> = Vec::new();
-    let mut has_unguarded_wildcard = false;
-
-    for row in matrix.rows.iter() {
-        if row.has_guard {
-            continue;
-        }
-        if let Some(first) = row.columns.first() {
-            collect_numeric_coverage(
-                first,
-                &mut covered_values,
-                &mut covered_ranges,
-                &mut has_unguarded_wildcard,
-            );
-        }
-    }
-
-    if has_unguarded_wildcard {
-        return Ok(List::new());
-    }
-
-    // Numeric without wildcard -- non-exhaustive. Generate a witness value.
-    let uncovered_val = find_uncovered_int_value(&covered_values, &covered_ranges);
-    let w = match scrutinee_ty {
-        Type::Float => Witness::float(uncovered_val as f64),
-        _ => Witness::int(uncovered_val),
+    let patterns = || {
+        matrix
+            .rows
+            .iter()
+            .filter(|row| !row.has_guard)
+            .filter_map(|row| row.columns.first())
     };
-    Ok(List::from_iter([w]))
-}
-
-/// Collect numeric coverage from a pattern column
-fn collect_numeric_coverage(
-    col: &PatternColumn,
-    values: &mut std::collections::HashSet<i64>,
-    ranges: &mut Vec<(i128, i128)>,
-    has_wildcard: &mut bool,
-) {
-    match col {
-        PatternColumn::Wildcard => {
-            *has_wildcard = true;
-        }
-        PatternColumn::Literal(LiteralPattern::Int(n)) => {
-            values.insert(*n);
-        }
-        PatternColumn::Range {
-            start,
-            end,
-            inclusive,
-        } => {
-            let s = start.unwrap_or(i128::MIN);
-            let e = if *inclusive {
-                end.unwrap_or(i128::MAX)
-            } else {
-                end.map(|v| v - 1).unwrap_or(i128::MAX)
-            };
-            ranges.push((s, e));
-        }
-        PatternColumn::Or(alts) => {
-            for alt in alts.iter() {
-                collect_numeric_coverage(alt, values, ranges, has_wildcard);
-            }
-        }
-        PatternColumn::And(conjuncts) => {
-            for conj in conjuncts.iter() {
-                collect_numeric_coverage(conj, values, ranges, has_wildcard);
-            }
-        }
-        _ => {}
-    }
-}
-
-/// Find an integer value not covered by the given literals and ranges
-fn find_uncovered_int_value(
-    values: &std::collections::HashSet<i64>,
-    ranges: &[(i128, i128)],
-) -> i64 {
-    let in_range = |v: i64| -> bool {
-        let v = v as i128;
-        ranges.iter().any(|(s, e)| v >= *s && v <= *e)
+    let witness = match scrutinee_ty {
+        Type::Float => (!patterns().any(scalar::covers_nan)).then(|| Witness::float(f64::NAN)),
+        _ => scalar::uncovered_integer(patterns()).map(Witness::int),
     };
-    for candidate in 0i64.. {
-        if !values.contains(&candidate) && !in_range(candidate) {
-            return candidate;
-        }
-        let neg = -(candidate + 1);
-        if !values.contains(&neg) && !in_range(neg) {
-            return neg;
-        }
-        if candidate > 100 {
-            break;
-        }
-    }
-    999999
+    Ok(witness.into_iter().collect())
 }
 
 /// Find uncovered cases for Tuple scrutinee
