@@ -49,9 +49,7 @@ use crate::ty::Type;
 
 /// Binding context for refinement predicates
 ///
-/// Five refinement binding rules: (1) Inline T{pred} with implicit "it", (2) Lambda-style "where |x| pred", (3) Sigma-type "x: T where P(x)", (4) Named predicate "where pred_name", (5) Bare "where pred" (deprecated) — Five Binding Rules
-///
-/// The spec defines 5 different binding rules for refinement types:
+/// Surface forms and their declared subjects:
 /// 1. Inline refinement with implicit 'it': `Int{> 0}`
 /// 2. Lambda-style with explicit binding: `Int where |x| x > 0`
 /// 3. Sigma-type refinement: `x: Int where x > 0`
@@ -62,6 +60,11 @@ pub enum RefinementBinding {
     /// Rule 1: Inline refinement with implicit 'it'
     /// Example: `Int{> 0}`
     Inline,
+
+    /// An inline domain owned by a declared value parameter:
+    /// `n: meta USize {n > 0}`. The parameter name and the inline
+    /// spellings `it`/`self` denote the same subject.
+    ValueParameter(Text),
 
     /// Rule 2: Lambda-style where clause with explicit binding
     /// Example: `Int where |x| x > 0`
@@ -90,7 +93,7 @@ pub enum RefinementBinding {
 pub struct RefinementPredicate {
     /// The predicate expression (must evaluate to Bool)
     pub predicate: Expr,
-    /// Binding context (which of the 5 rules)
+    /// Binding context, including an inline domain's declaring parameter.
     pub binding: RefinementBinding,
     /// Source location for error reporting
     pub span: Span,
@@ -249,6 +252,7 @@ impl RefinementPredicate {
             RefinementBinding::Inline => "it".into(),
             RefinementBinding::Lambda(name) => name.clone(),
             RefinementBinding::Sigma(name) => name.clone(),
+            RefinementBinding::ValueParameter(name) => name.clone(),
             RefinementBinding::Named(_) => "it".into(),
             RefinementBinding::Bare => "it".into(),
         }
@@ -258,13 +262,24 @@ impl RefinementPredicate {
     /// Inline and bare refinements accept both documented implicit spellings;
     /// explicit binders shadow that convention and bind only their own name.
     pub fn binds_subject(&self, name: &str) -> bool {
-        match &self.binding {
-            RefinementBinding::Inline | RefinementBinding::Bare => matches!(name, "self" | "it"),
-            RefinementBinding::Lambda(bound) | RefinementBinding::Sigma(bound) => {
-                bound.as_str() == name
+        self.subject_names().any(|subject| subject == name)
+    }
+
+    /// All unqualified names bound by this predicate, without duplicates.
+    pub fn subject_names(&self) -> impl Iterator<Item = &str> {
+        let names = match &self.binding {
+            RefinementBinding::Inline | RefinementBinding::Bare => [Some("it"), Some("self"), None],
+            RefinementBinding::ValueParameter(name) => [
+                Some(name.as_str()),
+                (name.as_str() != "it").then_some("it"),
+                (name.as_str() != "self").then_some("self"),
+            ],
+            RefinementBinding::Lambda(name) | RefinementBinding::Sigma(name) => {
+                [Some(name.as_str()), None, None]
             }
-            RefinementBinding::Named(_) => false,
-        }
+            RefinementBinding::Named(_) => [None, None, None],
+        };
+        names.into_iter().flatten()
     }
 
     /// Create a trivially true predicate (unrefined)
@@ -331,18 +346,7 @@ fn predicate_text(e: &verum_ast::expr::Expr) -> String {
             }
             _ => "…".to_string(),
         },
-        ExprKind::Path(path) => match path.as_ident() {
-            Some(i) => i.as_str().to_string(),
-            None => path
-                .segments
-                .iter()
-                .map(|seg| match seg {
-                    verum_ast::ty::PathSegment::Name(id) => id.name.as_str(),
-                    _ => "…",
-                })
-                .collect::<Vec<_>>()
-                .join("."),
-        },
+        ExprKind::Path(path) => path.to_string(),
         ExprKind::Field { expr, field } => {
             format!("{}.{}", predicate_text(expr), field.name.as_str())
         }
@@ -357,7 +361,9 @@ fn predicate_text(e: &verum_ast::expr::Expr) -> String {
 impl Display for RefinementPredicate {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match &self.binding {
-            RefinementBinding::Inline => write!(f, "{{{}}}", predicate_text(&self.predicate)),
+            RefinementBinding::Inline | RefinementBinding::ValueParameter(_) => {
+                write!(f, "{{{}}}", predicate_text(&self.predicate))
+            }
             RefinementBinding::Lambda(var) => {
                 write!(f, "where |{}| {}", var, predicate_text(&self.predicate))
             }
@@ -1463,24 +1469,36 @@ impl RefinementChecker {
         value: &Expr,
         predicate: &RefinementPredicate,
     ) -> Result<VerificationCondition, RefinementError> {
-        // Substitute bound variable with actual value.
-        //
-
-        // The canonical bound-variable name is `predicate.bound_variable()`
-        // (default "it"), but users commonly write refinements with `self`
-        // too: `Int{self != 0}`. The AST layer stores the predicate body
-        // verbatim, so without a second pass the substitution never reaches
-        // `self` and the verifier returns Unknown, silently letting
-        // refinement violations through. Substituting both the canonical
-        // bound name AND the `self` alias covers both surface syntaxes
-        // without requiring the parser to rewrite.
-        let bound_var = predicate.bound_variable();
-        let mut condition = self.substitute_in_expr(&predicate.predicate, &bound_var, value);
-        let self_var: Text = "self".into();
-        if bound_var.as_str() != "self" {
-            condition = self.substitute_in_expr(&condition, &self_var, value);
+        // Stage aliases before inserting the value: its free occurrences of
+        // `it`, `self`, or the parameter name belong to the caller's scope.
+        // Include bound identifiers when choosing the intermediate name.
+        struct Names(Set<Text>);
+        impl verum_ast::visitor::Visitor for Names {
+            fn visit_ident(&mut self, ident: &verum_ast::Ident) {
+                self.0.insert(ident.name.clone());
+            }
+            fn visit_path(&mut self, path: &Path) {
+                for segment in &path.segments {
+                    if let verum_ast::PathSegment::Name(ident) = segment {
+                        self.visit_ident(ident);
+                    }
+                }
+            }
         }
-
+        use verum_ast::visitor::Visitor;
+        let mut names = Names(Set::new());
+        names.visit_expr(&predicate.predicate);
+        names.visit_expr(value);
+        let fresh = (0..)
+            .map(|index| Text::from(format!("__refinement_subject_{index}")))
+            .find(|name| !names.0.contains(name))
+            .expect("finite source names");
+        let subject = Expr::ident(verum_ast::Ident::new(fresh.clone(), predicate.span));
+        let mut condition = predicate.predicate.clone();
+        for name in predicate.subject_names() {
+            condition = self.substitute_in_expr(&condition, &Text::from(name), &subject);
+        }
+        let condition = self.substitute_in_expr(&condition, &fresh, value);
         Ok(VerificationCondition::new(condition, predicate.span))
     }
 
@@ -1557,10 +1575,10 @@ impl RefinementChecker {
             ),
 
             // Function calls - substitute in function and arguments
-            ExprKind::Call { func, args, .. } => Expr::new(
+            ExprKind::Call { func, type_args, args } => Expr::new(
                 ExprKind::Call {
                     func: Box::new(self.substitute_in_expr(func, var, value)),
-                    type_args: List::new(),
+                    type_args: type_args.clone(),
                     args: args
                         .iter()
                         .map(|a| self.substitute_in_expr(a, var, value))
@@ -3956,6 +3974,31 @@ impl Default for RefinementChecker {
 #[cfg(test)]
 mod format_pattern_tests {
     use super::*;
+
+    fn variable(name: &str) -> Expr {
+        Expr::ident(verum_ast::Ident::new(name, Span::dummy()))
+    }
+
+    #[test]
+    fn subject_alias_substitution_does_not_rewrite_the_inserted_value() {
+        let checker = RefinementChecker::new(RefinementConfig::default());
+        let value = Expr::new(ExprKind::Tuple([variable("n"), variable("it"), variable("self")].into_iter().collect()), Span::dummy());
+        let mut predicate = RefinementPredicate::inline(value.clone(), Span::dummy());
+        predicate.binding = RefinementBinding::ValueParameter("n".into());
+        let condition = checker.generate_vc(&value, &predicate).unwrap().condition;
+        assert_eq!(condition.kind, ExprKind::Tuple([value.clone(), value.clone(), value].into_iter().collect()));
+    }
+
+    #[test]
+    fn an_explicit_binder_does_not_capture_the_implicit_self_spelling() {
+        let checker = RefinementChecker::new(RefinementConfig::default());
+        let tuple = Expr::new(ExprKind::Tuple([variable("x"), variable("self")].into_iter().collect()), Span::dummy());
+        let mut predicate = RefinementPredicate::inline(tuple, Span::dummy());
+        predicate.binding = RefinementBinding::Sigma("x".into());
+        let value = Expr::literal(Literal::int(7, Span::dummy()));
+        let condition = checker.generate_vc(&value, &predicate).unwrap().condition;
+        assert_eq!(condition.kind, ExprKind::Tuple([value, variable("self")].into_iter().collect()));
+    }
 
     #[test]
     fn format_pattern_renders_source_not_debug_ast_t0479() {

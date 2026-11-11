@@ -670,6 +670,7 @@ impl ConstEvaluator {
                 for segment in &path.segments {
                     match segment {
                         PathSegment::Name(name) => parts.push(name.name.as_str()),
+                        PathSegment::SelfValue if path.segments.len() == 1 => parts.push("self"),
                         PathSegment::Cog if parts.is_empty() => parts.push("cog"),
                         _ => return Err(ConstEvalError::NotConstant),
                     }

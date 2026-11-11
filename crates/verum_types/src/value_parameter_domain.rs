@@ -69,8 +69,9 @@ fn constant_in_carrier(value: &verum_common::ConstValue, carrier: &Type) -> bool
     use verum_common::{ConstValue, well_known_types::type_names};
     if let Type::Refined { base, predicate } = carrier {
         let mut evaluator = crate::const_eval::ConstEvaluator::new();
-        evaluator.bind(predicate.bound_variable(), value.clone());
-        if predicate.binds_subject("self") { evaluator.bind("self", value.clone()); }
+        for subject in predicate.subject_names() {
+            evaluator.bind(subject, value.clone());
+        }
         return matches!(evaluator.eval(&predicate.predicate), Ok(ConstValue::Bool(true)))
             && constant_in_carrier(value, base);
     }

@@ -48,7 +48,7 @@ use verum_kernel::{
     check_eps_mu_coherence, check_eps_mu_coherence_v3_final, check_refine_omega, check_round_trip,
     check_round_trip_v2, check_universe_ascent, check_universe_ascent_v2,
 };
-use verum_types::refinement::{RefinementBinding, RefinementPredicate as TypesRefinementPredicate};
+use verum_types::refinement::RefinementPredicate as TypesRefinementPredicate;
 use verum_types::ty::Type as TypesType;
 
 /// Errors surfaced by the kernel-recheck façade. Each variant
@@ -491,13 +491,13 @@ impl KernelRecheck {
         base: &TypesType,
         predicate: &TypesRefinementPredicate,
     ) -> Result<(), KernelRecheckError> {
-        let binder: Text = match &predicate.binding {
-            RefinementBinding::Inline | RefinementBinding::Bare => Text::from("it"),
-            RefinementBinding::Lambda(name) | RefinementBinding::Sigma(name) => name.clone(),
-            RefinementBinding::Named(_) => Text::from("it"),
-        };
+        let binder = predicate.bound_variable();
         let base_core = lift_types_type_to_core(base);
         let pred_core = lift_expr_to_core(&predicate.predicate);
+        let subjects: List<_> = predicate.subject_names()
+            .map(|name| (Text::from(name), CoreTerm::Var(binder.clone())))
+            .collect();
+        let pred_core = verum_kernel::support::substitute_all(&pred_core, &subjects);
         Self::refine_omega(&binder, &base_core, &pred_core)
     }
 }
@@ -988,7 +988,7 @@ where
 ///
 /// Coverage:
 ///
-///  • `ExprKind::Path` → `CoreTerm::Var("<last-segment>")`.
+///  • `ExprKind::Path` → `CoreTerm::Var` preserving the written path.
 ///  • `ExprKind::Paren(e)` → recurse on `e`.
 ///  • Method-call shape `x.box()` / `x.diamond()` /
 ///  `x.necessarily()` / `x.possibly()` → `ModalBox(x)` /
@@ -1012,14 +1012,8 @@ where
 pub fn lift_expr_to_core(expr: &Expr) -> CoreTerm {
     match &expr.kind {
         ExprKind::Path(path) => {
-            let name = path
-                .segments
-                .last()
-                .and_then(|s| match s {
-                    PathSegment::Name(ident) => Some(ident.name.clone()),
-                    _ => None,
-                })
-                .unwrap_or_else(|| Text::from("<path>"));
+            // Preserve reserved subjects and qualified lexical identities.
+            let name = path.to_string().into();
             CoreTerm::Var(name)
         }
         ExprKind::Paren(inner) => lift_expr_to_core(inner),
@@ -1740,6 +1734,18 @@ mod tests {
     fn refine_omega_from_types_atomic_predicate_accepted() {
         let pred = TypesRefinementPredicate::inline(path_expr("p"), span());
         assert!(KernelRecheck::refine_omega_from_types(&TypesType::Int, &pred).is_ok());
+    }
+
+    #[test]
+    fn declared_value_subjects_preserve_the_modal_depth_check() {
+        for name in ["n", "it", "self"] {
+            let mut predicate = TypesRefinementPredicate::inline(path_expr(name), span());
+            predicate.binding = verum_types::refinement::RefinementBinding::ValueParameter("n".into());
+            assert!(KernelRecheck::refine_omega_from_types(&TypesType::Int, &predicate).is_ok());
+            predicate.predicate = method_call_expr(predicate.predicate, "box");
+            assert!(matches!(KernelRecheck::refine_omega_from_types(&TypesType::Int, &predicate),
+                Err(KernelRecheckError::RefineOmega {binder, ..}) if binder.as_str() == "n"));
+        }
     }
 
     #[test]

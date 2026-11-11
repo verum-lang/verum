@@ -59,11 +59,27 @@ impl TypeChecker {
                 ));
             }
         };
-        let base = self.ast_to_type(ty)?;
+        let mut base = self.ast_to_type(ty)?;
+        // Only refinements written on this parameter acquire its subject.
+        // Walk source and elaborated nodes together, before alias expansion:
+        // a predicate belonging to an alias retains its original scope.
+        let mut source = ty;
+        let mut lowered = &mut base;
+        while let verum_ast::TypeKind::Refined { base, predicate } = &source.kind {
+            let Type::Refined { base: inner, predicate: domain } = lowered else {
+                break;
+            };
+            if predicate.binding.is_none() {
+                domain.binding =
+                    crate::refinement::RefinementBinding::ValueParameter(name.name.clone());
+            }
+            source = base;
+            lowered = inner;
+        }
         let base = self.normalize_type(&base);
         let refinement = refinement.map(|predicate| crate::refinement::RefinementPredicate {
             predicate: (**predicate).clone(),
-            binding: crate::refinement::RefinementBinding::Sigma(name.name.clone()),
+            binding: crate::refinement::RefinementBinding::ValueParameter(name.name.clone()),
             span: ty.span,
             provenance: crate::refinement::PredicateProvenance::Declared,
         });
