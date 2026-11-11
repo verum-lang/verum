@@ -132,6 +132,36 @@ fn stronger_symbolic_domain_survives_archive() {
         None,
     );
 }
+
+#[test]
+fn named_value_domains_survive_archive_and_both_metadata_consumers() {
+    for subject in ["N", "it", "self"] {
+        let source = SOURCE.replace("{>=0}", &format!("{{{subject} >= 0}}"));
+        for interface in [false, true] {
+            let metadata = metadata_from(&source, interface);
+            for eager in [false, true] {
+                let accepted = errors(
+                    &metadata,
+                    "fn retain<M: meta Int {M >= 7}>(value: PointCell<M>) -> PointCell<M> { value }",
+                    eager,
+                );
+                assert!(
+                    accepted.is_empty(),
+                    "{subject}, interface={interface}, eager={eager}: {accepted:?}"
+                );
+                let refused = errors(
+                    &metadata,
+                    "fn refuse<M: meta Int {M >= -1}>(value: PointCell<M>) {}",
+                    eager,
+                );
+                assert!(
+                    refused.iter().any(|e| e.contains("declared value domain")),
+                    "{subject}, interface={interface}, eager={eager}: {refused:?}"
+                );
+            }
+        }
+    }
+}
 #[test]
 fn weaker_symbolic_domain_remains_unproved() {
     cases(
