@@ -605,7 +605,10 @@ impl ContextChecker {
 
     /// Enter a new scope
     pub fn enter_scope(&mut self) {
-        self.env = self.env.child();
+        // The enclosing environment is suspended, not forked. Moving it
+        // keeps entry constant-time even for deeply nested provider scopes.
+        let parent = std::mem::take(&mut self.env);
+        self.env.parent = Some(Box::new(parent));
     }
 
     /// Exit the current scope

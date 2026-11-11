@@ -158,13 +158,15 @@ impl TypeChecker {
         result
     }
 
-    fn with_lexical_scope<T>(
+    pub(super) fn with_lexical_scope<T>(
         &mut self,
         check: impl FnOnce(&mut Self) -> Result<T>,
     ) -> Result<T> {
         self.ctx.enter_scope();
         self.borrow_tracker.enter_scope();
+        self.context_checker.enter_scope();
         let result = check(self);
+        self.context_checker.exit_scope();
         self.borrow_tracker.exit_scope();
         self.ctx.exit_scope();
         result

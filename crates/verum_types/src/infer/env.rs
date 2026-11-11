@@ -10467,27 +10467,8 @@ impl TypeChecker {
             // Provide statement - type checks the context value
             // Also validates for duplicate provide statements in same scope (E808)
             StmtKind::Provide { context, value, .. } => {
-                // Type check the value expression
-                let _value_ty = self.synth_expr(value)?;
-
-                // Register the context as provided and check for duplicates
-                // E808: Duplicate provide for same context in same scope
-                self.context_checker
-                    .provide_context(context.as_str(), stmt.span)?;
-
-                // Make the context name available in the type environment
-                // so that code after the provide statement can access context methods.
-                // This enables the pattern: provide Logger = impl; Logger.log("msg");
-                // Context provision: "provide ContextName = implementation" installs a provider
-                // in lexical scope via task-local storage (theta) — Scope Binding
-                let context_text: Text = context.clone();
-                if let Maybe::Some(ctx_ty) = self.context_resolver.get_context_type(&context_text) {
-                    let ctx_ty = ctx_ty.clone();
-                    self.ctx
-                        .env
-                        .insert(context.as_str(), TypeScheme::mono(ctx_ty));
-                }
-
+                self.synth_expr(value)?;
+                self.bind_provided_context(context, stmt.span)?;
                 Ok(false)
             }
 
@@ -10517,43 +10498,31 @@ impl TypeChecker {
                 block,
                 alias: _,
             } => {
-                // Type check the context value
-                let _value_ty = self.synth_expr(value)?;
-
-                // Enter a new scope for the context and provide it
-                self.context_checker.enter_scope();
-                // This checks for duplicates in the new scope (won't conflict with outer)
-                // so we ignore the result - duplicates in the same ProvideScope aren't possible
-                let _ = self
-                    .context_checker
-                    .provide_context(context.as_str(), stmt.span);
-
-                // Make the context name available within the block scope
-                // so that context method calls resolve correctly.
-                // Context provision: "provide ContextName = implementation" installs a provider
-                // in lexical scope via task-local storage (theta) — Scoped Binding
-                let context_text: Text = context.clone();
-                if let Maybe::Some(ctx_ty) = self.context_resolver.get_context_type(&context_text) {
-                    let ctx_ty = ctx_ty.clone();
-                    self.ctx
-                        .env
-                        .insert(context.as_str(), TypeScheme::mono(ctx_ty));
-                }
-
-                // Type check the block expression
-                let _block_result = self.synth_expr(block)?;
-
-                // Exit the scope - context is no longer available
-                self.context_checker.exit_scope();
-
-                // ProvideScope returns the result of the block, so it may diverge
-                // if the block diverges
-                Ok(false)
+                // The initializer belongs to the enclosing scope. Only the
+                // body sees the provider and its context-name binding.
+                self.synth_expr(value)?;
+                self.with_lexical_scope(|checker| {
+                    checker.bind_provided_context(context, stmt.span)?;
+                    let result = checker.synth_expr(block)?;
+                    Ok(matches!(result.ty, Type::Never))
+                })
             }
 
             // Empty statement
             StmtKind::Empty => Ok(false),
         }
+    }
+
+    /// Bind an already evaluated provider in the current lexical scope.
+    /// Declaration and duplicate checks apply equally to both provide forms.
+    fn bind_provided_context(&mut self, context: &Text, span: Span) -> Result<()> {
+        self.context_checker.provide_context(context.clone(), span)?;
+        if let Maybe::Some(ty) = self.context_resolver.get_context_type(context) {
+            self.ctx
+                .env
+                .insert(context.as_str(), TypeScheme::mono(ty.clone()));
+        }
+        Ok(())
     }
 
     /// Infer the type of a recovery body (either match arms or closure).
