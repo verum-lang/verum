@@ -52,3 +52,23 @@ fn invalid_calls_preserve_following_ownership_diagnostics() {
         &[],
     );
 }
+
+#[test]
+fn invalid_blocks_do_not_authorize_later_source() {
+    check(
+        "fn bad() {unsafe {missing}; true as (Int, Int);}",
+        false,
+        &["E100", "E401", "types are not compatible for casting"],
+    );
+    check(
+        "fn bad() {async {missing}; (1).await;}",
+        false,
+        &["E100", "async context"],
+    );
+    check(
+        "fn bad() {{let hidden = 1; missing}; hidden;}",
+        false,
+        &["unbound variable: missing", "unbound variable: hidden"],
+    );
+    check("fn valid() {async {async {1}; (1).await};}", true, &[]);
+}
