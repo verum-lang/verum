@@ -113,3 +113,36 @@ fn annotated_closure_bindings_use_subtyping_without_discarding_results() {
         &["E400"],
     );
 }
+
+#[test]
+fn provided_contexts_obey_lexical_boundaries_during_recovery() {
+    const DECLARATIONS: &str = "context Gate {fn ping();}
+        type Channel is {value: Int};
+        implement Channel {fn ping(&self) {}}
+        fn needs() using [Gate] {Gate.ping();}";
+    for provision in [
+        "{provide Gate = provider; needs();}",
+        "provide Gate = provider in {needs();}",
+        "{provide Gate = provider; missing}",
+        "provide Gate = provider in {missing}",
+    ] {
+        check(
+            &format!("{DECLARATIONS} fn bad(provider: Channel) {{{provision} needs();}}"),
+            false,
+            &["E613"],
+        );
+    }
+    check(
+        &format!("{DECLARATIONS} fn bad(provider: Channel) {{provide Missing = provider in {{}}}}"),
+        false,
+        &["E605"],
+    );
+    check(
+        &format!(
+            "{DECLARATIONS} fn valid(provider: Channel) {{provide Gate = provider;
+            {{provide Gate = provider; needs();}} needs();}}"
+        ),
+        true,
+        &[],
+    );
+}

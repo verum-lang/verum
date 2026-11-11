@@ -83,6 +83,22 @@ fn standalone_server_analyzes_without_cargos_stack_environment() {
             "fn valid() -> Int {let base = 10; let f: fn(Int) -> Int = |x| x + base; f(5)}",
             vec![],
         ),
+        (
+            "context Gate {}\nfn needs() using [Gate] {}\n\
+             fn bad() {{provide Gate = (); needs();} needs();}",
+            vec!["E613"],
+        ),
+        (
+            "context Gate {}\nfn needs() using [Gate] {}\n\
+             fn bad() {provide Gate = () in {missing} needs();}",
+            vec!["E100", "E613"],
+        ),
+        ("fn bad() {provide Missing = () in {}}", vec!["E605"]),
+        (
+            "context Gate {}\nfn needs() using [Gate] {}\n\
+             fn valid() {provide Gate = (); {provide Gate = (); needs();} needs();}",
+            vec![],
+        ),
     ] {
         let (status, reply) = post(host, Some(token), &request(source));
         assert_eq!(status, 200, "{reply}");
