@@ -383,6 +383,8 @@ pub struct BlanketImpl {
     /// The bound protocol that receivers must implement — for every concrete
     /// type implementing this, we replay the blanket impl.
     pub base_protocol: String,
+    /// The exact prerequisite, interpreted in the declaration's source scope.
+    pub prerequisite: std::sync::Arc<verum_ast::ty::TypeBound>,
     /// The protocol being implemented for all bound-satisfying receivers.
     pub derived_protocol: String,
     /// Method names explicitly implemented in the blanket-impl body.
@@ -393,6 +395,16 @@ pub struct BlanketImpl {
     pub source_module: Option<String>,
     /// Share the source body across implementors rather than cloning its AST.
     pub declaration: std::sync::Arc<verum_ast::decl::ImplDecl>,
+}
+
+impl BlanketImpl {
+    /// Only the same source declaration and prerequisite may be deduplicated.
+    /// Equal leaf names do not identify either a protocol or an implementation.
+    pub fn same_declaration(&self, other: &Self) -> bool {
+        self.source_module == other.source_module
+            && self.prerequisite == other.prerequisite
+            && self.declaration == other.declaration
+    }
 }
 pub use error::{CodegenError, CodegenErrorKind, CodegenOptionExt, CodegenResult, SkipClass};
 pub use registers::{RegisterAllocator, RegisterInfo, RegisterKind, RegisterSnapshot};
@@ -3610,6 +3622,25 @@ impl VbcCodegen {
                 let blanket_substitution = source_substitution::SourceTypeSubstitution::receiver(
                     blanket.receiver_parameter.clone(), receiver.clone(),
                 );
+                let prerequisite = self.with_protocol_source_scope(
+                    blanket.source_module.clone(), blanket_substitution.clone(), Some(receiver.clone()),
+                    |cg| {
+                        use verum_ast::ty::TypeBoundKind;
+                        let (path, args) = match &blanket.prerequisite.kind {
+                            TypeBoundKind::Protocol(path) => (path, &[][..]),
+                            TypeBoundKind::GenericProtocol(ty) => Self::protocol_application_parts(ty)?,
+                            _ => return Err(CodegenError::internal("blanket trigger is not a positive protocol bound")),
+                        };
+                        cg.resolve_protocol_application(path, args, &HashMap::new(), &declared_ids, &blanket.declaration.generics)
+                    },
+                )?;
+                if prerequisite.protocol.is_none()
+                    || prerequisite.protocol != application.protocol
+                    || prerequisite.key != application.key
+                    || prerequisite.substitution != application.substitution
+                {
+                    continue;
+                }
                 let derived = self.with_protocol_source_scope(
                     blanket.source_module.clone(), blanket_substitution.clone(), Some(receiver.clone()),
                     |cg| cg.resolve_protocol_application(protocol, protocol_args, &HashMap::new(), &declared_ids, &blanket.declaration.generics),
@@ -5181,8 +5212,8 @@ impl VbcCodegen {
 
     /// Record every blanket impl (`implement<T: Base> Derived for T`) declared
     /// in `module` into [`Self::blanket_impls`].  Idempotent and additive:
-    /// re-scanning a module, or scanning a module that redeclares a
-    /// `(base, derived)` pair already seen, is a no-op.
+    /// re-scanning the same source declaration is a no-op. Distinct declarations
+    /// remain distinct even when their protocol leaf names are equal.
     ///
     /// This is the ONE authority for turning impl ASTs into [`BlanketImpl`]
     /// records — `collect_all_declarations` runs it as its pre-pass, and the
@@ -5217,10 +5248,8 @@ impl VbcCodegen {
     }
 
     /// Seed blanket impls collected from previously compiled modules.
-    /// Additive / first-wins per `(base_protocol, derived_protocol)`, matching
-    /// [`Self::import_type_aliases`] — this module's own declarations, which
-    /// are collected afterwards, never displace an already-seeded pair (they
-    /// would be the same declaration observed twice).
+    /// Additive by exact declaration identity. Repeated observations are merged;
+    /// different owners, arguments, constraints and bodies are retained.
     ///
     /// A blanket is only useful to a module that implements its BASE protocol,
     /// and a module can only do that once the protocol is defined, so
@@ -5229,8 +5258,7 @@ impl VbcCodegen {
     pub fn import_blanket_impls(&mut self, impls: &[BlanketImpl]) {
         for b in impls {
             let already_present = self.blanket_impls.iter().any(|existing| {
-                existing.base_protocol == b.base_protocol
-                    && existing.derived_protocol == b.derived_protocol
+                existing.same_declaration(b)
             });
             if !already_present {
                 self.blanket_impls.push(b.clone());

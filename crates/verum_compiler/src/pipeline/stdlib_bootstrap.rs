@@ -2337,11 +2337,10 @@ one module and therefore never seeded",
         }
         // Publish this module's blanket impls (T0625) so later, dependent
         // modules apply them to their own implementors of the bound protocol.
-        // First-wins per (base, derived), matching the alias registry above.
+        // Deduplicate only the same source declaration and prerequisite.
         for b in codegen.blanket_impls() {
             let already_present = self.global_blanket_impl_registry.iter().any(|existing| {
-                existing.base_protocol == b.base_protocol
-                    && existing.derived_protocol == b.derived_protocol
+                existing.same_declaration(b)
             });
             if !already_present {
                 self.global_blanket_impl_registry.push(b.clone());

@@ -38,8 +38,9 @@ impl VbcCodegen {
                 };
                 let derived_protocol = derived.name.to_string();
                 if self.blanket_impls.iter().any(|existing| {
-                    existing.base_protocol == base_protocol
-                        && existing.derived_protocol == derived_protocol
+                    existing.source_module == source_module
+                        && *existing.prerequisite == *bound
+                        && *existing.declaration == *declaration
                 }) {
                     continue;
                 }
@@ -52,6 +53,7 @@ impl VbcCodegen {
                     .collect();
                 self.blanket_impls.push(BlanketImpl {
                     base_protocol,
+                    prerequisite: std::sync::Arc::new(bound.clone()),
                     derived_protocol,
                     explicit_methods,
                     receiver_parameter: receiver_parameter.clone(),
