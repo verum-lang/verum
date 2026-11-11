@@ -153,3 +153,49 @@ fn provider_initializers_cannot_use_the_context_they_will_install() {
         "{errors:?}"
     );
 }
+
+#[test]
+fn named_functions_do_not_inherit_the_declaration_sites_providers() {
+    for call in ["needs();", "Gate.ping();"] {
+        let errors = errors(&format!(
+            "fn bad(provider: Channel) {{provide Gate = provider;
+                fn hidden() {{{call}}} hidden();}}"
+        ));
+        assert!(
+            errors.iter().any(|error| error.contains("MissingContext")),
+            "{errors:?}"
+        );
+    }
+}
+
+#[test]
+fn named_functions_own_their_context_requirements() {
+    for body in [
+        "fn valid(provider: Channel) {provide Gate = provider;
+            fn nested() using [Gate] {needs();} nested(); needs();}",
+        "fn valid(provider: Channel) using [Gate] {
+            fn nested() using [Gate] {needs();} nested(); needs();}",
+        "fn valid(provider: Channel) {provide Gate = provider;
+            fn nested(own: Channel) {provide Gate = own; needs();}
+            nested(provider); needs();}",
+    ] {
+        let errors = errors(body);
+        assert!(errors.is_empty(), "{body}: {errors:?}");
+    }
+}
+
+#[test]
+fn a_failed_named_body_does_not_remove_the_callers_provider() {
+    let errors = errors(
+        "fn bad(provider: Channel) {provide Gate = provider;
+            fn nested() {missing;} needs();}",
+    );
+    assert!(
+        errors.iter().any(|error| error.contains("missing")),
+        "{errors:?}"
+    );
+    assert!(
+        errors.iter().all(|error| error.contains("UnboundVariable")),
+        "{errors:?}"
+    );
+}

@@ -237,8 +237,8 @@ impl FromIterator<ContextRequirement> for ContextSet {
 /// # Lexical Scoping
 ///
 /// ```verum
-/// provide Logger = console_logger();
 /// {
+///  provide Logger = console_logger();
 ///  // Logger available here
 ///  Logger.log(...); // ✅
 /// }
@@ -521,30 +521,18 @@ pub struct ContextChecker {
 }
 
 impl ContextChecker {
-    /// Preserve lexical requirements while declarations and call-graph entries
-    /// discovered in the body remain in their registries.
-    pub(crate) fn enter_function_scope(&mut self) -> (usize, ContextSet) {
-        let mut depth = 0;
-        let mut scope = &self.env;
-        while let Some(parent) = scope.parent.as_deref() {
-            depth += 1;
-            scope = parent;
-        }
-        let required = std::mem::take(&mut self.required);
-        self.enter_scope();
-        (depth, required)
+    /// A named function owns its requirements and providers. Its declaration
+    /// site cannot authorize calls in a body that can outlive that scope.
+    /// Declarations and call-graph entries remain shared.
+    pub(crate) fn enter_function_scope(&mut self) -> (ContextEnv, ContextSet) {
+        (
+            std::mem::take(&mut self.env),
+            std::mem::take(&mut self.required),
+        )
     }
 
-    pub(crate) fn exit_function_scope(&mut self, saved: (usize, ContextSet)) {
-        let mut depth = 0;
-        let mut scope = &self.env;
-        while let Some(parent) = scope.parent.as_deref() {
-            depth += 1;
-            scope = parent;
-        }
-        assert!(depth > saved.0, "function escaped its context scope");
-        for _ in saved.0..depth { self.exit_scope(); }
-        self.required = saved.1;
+    pub(crate) fn exit_function_scope(&mut self, saved: (ContextEnv, ContextSet)) {
+        (self.env, self.required) = saved;
     }
 
     /// Lexical body state; dependency declarations remain registered.
