@@ -322,7 +322,7 @@ impl PatternColumn {
                 Pattern::new(
                     PatternKind::TypeTest {
                         binding: verum_ast::ty::Ident::new(Text::from("_tested"), span),
-                        test_type,
+                        test_type: Heap::new(test_type),
                     },
                     span,
                 )

@@ -1126,7 +1126,7 @@ fn test_for_expression() {
     let expr = Expr::new(
         ExprKind::For {
             label: Maybe::None,
-            pattern,
+            pattern: Heap::new(pattern),
             iter,
             body,
             invariants: List::new(),

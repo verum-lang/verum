@@ -126,6 +126,11 @@ const LADDER: &[(&str, &str)] = &[
     ("-a as Int", "(as (Neg a) T)"),
     ("!a as Bool", "(as (Not a) T)"),
     ("a as Int as Float", "(as (as a T) T)"),
+    // Postfix operations complete before pending prefix operators wrap them.
+    ("&item.field", "(Ref (. item field))"),
+    ("*factory()", "(Deref (call factory))"),
+    ("-a[index]", "(Neg ([] a index))"),
+    ("!predicate(a) && b", "(And (Not (call predicate)) b)"),
     // --- shift vs arithmetic ------------------------------------------
     ("a + b << c", "(Shl (Add a b) c)"),
     ("a << b + c", "(Shl a (Add b c))"),

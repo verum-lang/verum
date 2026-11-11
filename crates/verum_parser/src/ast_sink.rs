@@ -4171,7 +4171,7 @@ impl AstSink {
         Some(Expr::new(
             ExprKind::For {
                 label,
-                pattern: pattern?,
+                pattern: Heap::new(pattern?),
                 iter: Heap::new(iter_expr?),
                 body: body?,
                 invariants: invariants.into(),
@@ -4467,7 +4467,7 @@ impl AstSink {
         let body = body?;
 
         Some(RecoverBody::Closure {
-            param,
+            param: Heap::new(param),
             body: Heap::new(body),
             span,
         })

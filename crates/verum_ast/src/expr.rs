@@ -1020,7 +1020,7 @@ pub enum ExprKind {
     For {
         /// Optional label: 'label: for x in iter { ... }
         label: Maybe<Text>,
-        pattern: Pattern,
+        pattern: Heap<Pattern>,
         iter: Heap<Expr>,
         body: Block,
         /// Loop invariants for verification (zero or more)
@@ -1052,7 +1052,7 @@ pub enum ExprKind {
         /// Optional label: 'label: for await item in stream { ... }
         label: Maybe<Text>,
         /// Pattern to bind each yielded value
-        pattern: Pattern,
+        pattern: Heap<Pattern>,
         /// The async iterable expression (must implement AsyncIterator)
         async_iterable: Heap<Expr>,
         /// Loop body
@@ -2766,7 +2766,9 @@ pub enum RecoverBody {
     MatchArms { arms: List<MatchArm>, span: Span },
     /// Closure syntax: `recover |e| handle_error(e)`
     Closure {
-        param: RecoverClosureParam,
+        // A recovery parameter owns both a pattern and an optional type.
+        // Keep that cold payload out of every expression's inline layout.
+        param: Heap<RecoverClosureParam>,
         body: Heap<Expr>,
         span: Span,
     },

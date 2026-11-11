@@ -477,7 +477,7 @@ fn test_complex_expression_serialization() {
     let for_expr = Expr::new(
         ExprKind::For {
             label: Maybe::None,
-            pattern: Pattern::ident(test_ident("i"), false, span),
+            pattern: Heap::new(Pattern::ident(test_ident("i"), false, span)),
             iter: Heap::new(Expr::ident(test_ident("range"))),
             body: Block {
                 stmts: List::new(),

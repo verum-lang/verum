@@ -1219,7 +1219,9 @@ impl std::fmt::Display for KindAnnotation {
 /// A path to a type or value (e.g., std.collections.Vec).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Path {
-    pub segments: SmallVec<[PathSegment; 4]>,
+    // A local name stays allocation-free. Longer qualified paths spill rather
+    // than reserving four identifiers in every type, pattern and expression.
+    pub segments: SmallVec<[PathSegment; 1]>,
     pub span: Span,
 }
 

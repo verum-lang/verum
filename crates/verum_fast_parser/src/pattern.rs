@@ -10,7 +10,7 @@
 
 use verum_ast::ty::PathSegment;
 use verum_ast::{Ident, Literal, Path, Pattern, PatternKind, pattern::*};
-use verum_common::{List, Maybe, Text};
+use verum_common::{Heap, List, Maybe, Text};
 use verum_lexer::{Token, TokenKind};
 
 use crate::error::ParseError;
@@ -1769,7 +1769,7 @@ impl<'a> RecursiveParser<'a> {
             return Ok(Pattern::new(
                 PatternKind::TypeTest {
                     binding: Ident::new(first_name, first_span),
-                    test_type,
+                    test_type: Heap::new(test_type),
                 },
                 span,
             ));

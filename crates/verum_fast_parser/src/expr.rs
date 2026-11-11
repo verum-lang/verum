@@ -1482,8 +1482,8 @@ impl<'a> RecursiveParser<'a> {
     /// - Postfix operators
     /// - Right-associativity through binding power adjustments
     ///
-    /// Uses an iterative approach with an explicit operator stack to handle
-    /// deeply nested expressions without stack overflow.
+    /// Unary operators are collected explicitly and postfix/infix phases
+    /// keep separate frames. Nested operands share the parser's depth budget.
     pub fn parse_expr_bp(&mut self, min_bp: u8) -> ParseResult<Expr> {
         self.parse_expr_with_subject(min_bp, false)
     }
@@ -1499,23 +1499,34 @@ impl<'a> RecursiveParser<'a> {
         result
     }
 
-    fn parse_expr_bp_inner(&mut self, min_bp: u8, implicit_subject: bool) -> ParseResult<Expr> {
-        let start_pos = self.stream.position();
-
+    fn begin_expr(
+        &mut self,
+        implicit_subject: bool,
+    ) -> ParseResult<(Expr, Vec<(UnOp, usize)>, bool)> {
         // A leading comparison in a refinement stands for `it <op> rhs`.
         // Only the missing operand is implicit. The ordinary Pratt table
         // still determines the meaning of the whole predicate.
-        let mut leading_comparison = implicit_subject && matches!(
+        let leading_comparison = implicit_subject && matches!(
             self.stream.peek_kind(),
             Some(TokenKind::Gt | TokenKind::Lt | TokenKind::GtEq | TokenKind::LtEq
                 | TokenKind::EqEq | TokenKind::BangEq)
         );
-        let mut lhs = if leading_comparison {
+        let mut unary_operators = Vec::new();
+        let lhs = if leading_comparison {
             let span = self.stream.current_span();
             Expr::new(ExprKind::Path(Path::from_ident(Ident::new("it", span))), span)
         } else {
-            self.parse_prefix_expr()?
+            unary_operators = self.parse_unary_operators();
+            self.parse_prefix_operand()?
         };
+
+        Ok((lhs, unary_operators, leading_comparison))
+    }
+
+    fn parse_expr_bp_inner(&mut self, min_bp: u8, implicit_subject: bool) -> ParseResult<Expr> {
+        let start_pos = self.stream.position();
+
+        let (mut lhs, mut unary_operators, mut leading_comparison) = self.begin_expr(implicit_subject)?;
 
         // Parse infix and postfix operators
         loop {
@@ -1529,11 +1540,19 @@ impl<'a> RecursiveParser<'a> {
             // The '<' in a leading comparison is always the predicate's
             // operator. The synthetic subject cannot start a generic call.
             if !leading_comparison {
-                let (new_lhs, found_postfix) = self.try_parse_postfix(lhs)?;
+                let (new_lhs, found_postfix) = self.try_parse_postfix_impl(lhs, true)?;
                 lhs = new_lhs;
                 if found_postfix {
                     continue;
                 }
+            }
+
+            // Postfix binds inside every pending unary operator. Apply the
+            // operators only when the postfix chain ends. Keeping this phase
+            // in the Pratt loop avoids retaining a second expression loop on
+            // the native stack while parsing nested call arguments.
+            if !unary_operators.is_empty() {
+                lhs = self.wrap_unary_expr(lhs, std::mem::take(&mut unary_operators));
             }
 
             // Check if the current expression is a block-form expression that doesn't
@@ -1575,185 +1594,197 @@ impl<'a> RecursiveParser<'a> {
             // Consume the operator
             self.stream.advance();
 
-            // Handle special binary operators that aren't in BinOp
-            if op_kind == TokenKind::PipeGt {
-                // Pipeline: lhs |> rhs OR lhs |> .method(args)
-                // When followed by '.', desugar to MethodCall with lhs as receiver
-                if self.stream.check(&TokenKind::Dot) {
-                    lhs = self.parse_pipe_method_call(lhs, start_pos)?;
-                } else {
-                    let rhs = self.parse_expr_bp(right_bp)?;
-                    let span = lhs.span.merge(rhs.span);
-                    lhs = Expr::new(
-                        ExprKind::Pipeline {
-                            left: Box::new(lhs),
-                            right: Box::new(rhs),
-                        },
-                        span,
-                    );
-                }
-                continue;
-            }
+            lhs = self.parse_infix_rhs(lhs, op_kind, right_bp, implicit_subject, start_pos)?;
+        }
 
-            if op_kind == TokenKind::QuestionQuestion {
-                // Null coalescing: lhs ?? rhs
+        Ok(lhs)
+    }
+
+    fn parse_infix_rhs(
+        &mut self,
+        mut lhs: Expr,
+        op_kind: TokenKind,
+        right_bp: u8,
+        implicit_subject: bool,
+        start_pos: usize,
+    ) -> ParseResult<Expr> {
+        // Handle special binary operators that aren't in BinOp
+        if op_kind == TokenKind::PipeGt {
+            // Pipeline: lhs |> rhs OR lhs |> .method(args)
+            // When followed by '.', desugar to MethodCall with lhs as receiver
+            if self.stream.check(&TokenKind::Dot) {
+                lhs = self.parse_pipe_method_call(lhs, start_pos)?;
+            } else {
                 let rhs = self.parse_expr_bp(right_bp)?;
                 let span = lhs.span.merge(rhs.span);
                 lhs = Expr::new(
-                    ExprKind::NullCoalesce {
+                    ExprKind::Pipeline {
                         left: Box::new(lhs),
                         right: Box::new(rhs),
                     },
                     span,
                 );
-                continue;
             }
+            return Ok(lhs);
+        }
 
-            if op_kind == TokenKind::DotDot || op_kind == TokenKind::DotDotEq {
-                // Range: lhs .. rhs or lhs ..= rhs
-                let inclusive = op_kind == TokenKind::DotDotEq;
-                // Range end is optional.
-                // Inside comprehensions, `if`, `for`, `let` are clause keywords,
-                // not the start of a range-end expression.
-                let end = if self.stream.at_end()
-                    || !self.stream.peek().is_some_and(|t| t.starts_expr())
-                    || (self.comprehension_depth > 0
-                        && self.stream.peek().is_some_and(|t| {
-                            matches!(t.kind, TokenKind::If | TokenKind::For | TokenKind::Let)
-                        })) {
-                    Maybe::None
-                } else {
-                    Maybe::Some(Box::new(self.parse_expr_bp(right_bp)?))
-                };
-                let span = if let Maybe::Some(ref end_expr) = end {
-                    lhs.span.merge(end_expr.span)
-                } else {
-                    lhs.span
-                };
-                lhs = Expr::new(
-                    ExprKind::Range {
-                        start: Maybe::Some(Box::new(lhs)),
-                        end,
-                        inclusive,
-                    },
-                    span,
-                );
-                continue;
-            }
-
-            if op_kind == TokenKind::As {
-                // Cast: lhs as Type
-                // Use parse_type_with_lookahead to support refined casts like `x as Int{> 0}`
-                // The lookahead logic distinguishes refinements ({> 0}) from blocks ({ break; })
-                let ty = self.parse_type_with_lookahead()?;
-                let span = lhs.span.merge(ty.span);
-                lhs = Expr::new(
-                    ExprKind::Cast {
-                        expr: Box::new(lhs),
-                        ty,
-                    },
-                    span,
-                );
-                continue;
-            }
-
-            if op_kind == TokenKind::Is {
-                // Pattern test: lhs is Pattern or lhs is not Pattern
-                // Check for optional 'not' keyword (parsed as identifier)
-                let negated = if let Some(TokenKind::Ident(name)) = self.stream.peek_kind() {
-                    if name.as_str() == "not" {
-                        self.stream.advance();
-                        true
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                };
-                // Use parse_pattern_no_struct to prevent `{ }` from being consumed as a record pattern.
-                // This prevents ambiguity in contexts like `if value is None { }`.
-                // For record patterns in is expressions, users can wrap in parentheses: `value is (Point { x, y })`.
-                let pattern = self.parse_pattern_no_struct()?;
-                let span = lhs.span.merge(pattern.span);
-                lhs = Expr::new(
-                    ExprKind::Is {
-                        expr: Box::new(lhs),
-                        pattern,
-                        negated,
-                    },
-                    span,
-                );
-                continue;
-            }
-
-            // Standard binary operator
-            let bin_op = self.token_to_binop(&op_kind)?;
-
-            // E046: Validate assignment LHS
-            if bin_op.is_assignment() {
-                // E047: Check for invalid compound assignment (e.g., x +== 5)
-                if self.stream.check(&TokenKind::Eq) {
-                    return Err(ParseError::compound_assign_invalid(
-                        "invalid compound assignment operator",
-                        self.stream.current_span(),
-                    ));
-                }
-
-                // E041: Check for missing RHS (x =;)
-                if self.stream.check(&TokenKind::Semicolon) || self.stream.check(&TokenKind::RBrace)
-                {
-                    return Err(ParseError::let_missing_value(self.stream.current_span())
-                        .with_help("assignment requires a value on the right-hand side"));
-                }
-
-                // Check if this is a destructuring assignment (tuple, array, record on LHS)
-                if Self::is_destructuring_target(&lhs) {
-                    // Convert expression to assignment pattern
-                    let pattern = Self::expr_to_assignment_pattern(&lhs)?;
-
-                    // Parse RHS value
-                    let rhs = self.parse_expr_bp(right_bp)?;
-
-                    let span = lhs.span.merge(rhs.span);
-                    lhs = Expr::new(
-                        ExprKind::DestructuringAssign {
-                            pattern,
-                            op: bin_op,
-                            value: Heap::new(rhs),
-                        },
-                        span,
-                    );
-                    continue;
-                }
-
-                // Not a destructuring target - check if it's a valid simple assignment target
-                if !Self::is_valid_assignment_target(&lhs) {
-                    return Err(ParseError::assignment_invalid(
-                        "invalid left-hand side of assignment",
-                        lhs.span,
-                    ));
-                }
-            }
-
-            let rhs = self.parse_expr_with_subject(
-                right_bp,
-                implicit_subject && matches!(bin_op, BinOp::And | BinOp::Or),
-            )?;
-
-            // Note: Verum DOES allow chained assignment (a = b = c = 42)
-            // Assignment is right-associative, so a = b = c = 42 parses as a = (b = (c = 42))
-
+        if op_kind == TokenKind::QuestionQuestion {
+            // Null coalescing: lhs ?? rhs
+            let rhs = self.parse_expr_bp(right_bp)?;
             let span = lhs.span.merge(rhs.span);
             lhs = Expr::new(
-                ExprKind::Binary {
-                    op: bin_op,
+                ExprKind::NullCoalesce {
                     left: Box::new(lhs),
                     right: Box::new(rhs),
                 },
                 span,
             );
+            return Ok(lhs);
         }
 
+        if op_kind == TokenKind::DotDot || op_kind == TokenKind::DotDotEq {
+            // Range: lhs .. rhs or lhs ..= rhs
+            let inclusive = op_kind == TokenKind::DotDotEq;
+            // Range end is optional.
+            // Inside comprehensions, `if`, `for`, `let` are clause keywords,
+            // not the start of a range-end expression.
+            let end = if self.stream.at_end()
+                || !self.stream.peek().is_some_and(|t| t.starts_expr())
+                || (self.comprehension_depth > 0
+                    && self.stream.peek().is_some_and(|t| {
+                        matches!(t.kind, TokenKind::If | TokenKind::For | TokenKind::Let)
+                    })) {
+                Maybe::None
+            } else {
+                Maybe::Some(Box::new(self.parse_expr_bp(right_bp)?))
+            };
+            let span = if let Maybe::Some(ref end_expr) = end {
+                lhs.span.merge(end_expr.span)
+            } else {
+                lhs.span
+            };
+            lhs = Expr::new(
+                ExprKind::Range {
+                    start: Maybe::Some(Box::new(lhs)),
+                    end,
+                    inclusive,
+                },
+                span,
+            );
+            return Ok(lhs);
+        }
+
+        if op_kind == TokenKind::As {
+            // Cast: lhs as Type
+            // Use parse_type_with_lookahead to support refined casts like `x as Int{> 0}`
+            // The lookahead logic distinguishes refinements ({> 0}) from blocks ({ break; })
+            let ty = self.parse_type_with_lookahead()?;
+            let span = lhs.span.merge(ty.span);
+            lhs = Expr::new(
+                ExprKind::Cast {
+                    expr: Box::new(lhs),
+                    ty,
+                },
+                span,
+            );
+            return Ok(lhs);
+        }
+
+        if op_kind == TokenKind::Is {
+            // Pattern test: lhs is Pattern or lhs is not Pattern
+            // Check for optional 'not' keyword (parsed as identifier)
+            let negated = if let Some(TokenKind::Ident(name)) = self.stream.peek_kind() {
+                if name.as_str() == "not" {
+                    self.stream.advance();
+                    true
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+            // Use parse_pattern_no_struct to prevent `{ }` from being consumed as a record pattern.
+            // This prevents ambiguity in contexts like `if value is None { }`.
+            // For record patterns in is expressions, users can wrap in parentheses: `value is (Point { x, y })`.
+            let pattern = self.parse_pattern_no_struct()?;
+            let span = lhs.span.merge(pattern.span);
+            lhs = Expr::new(
+                ExprKind::Is {
+                    expr: Box::new(lhs),
+                    pattern,
+                    negated,
+                },
+                span,
+            );
+            return Ok(lhs);
+        }
+
+        // Standard binary operator
+        let bin_op = self.token_to_binop(&op_kind)?;
+
+        // E046: Validate assignment LHS
+        if bin_op.is_assignment() {
+            // E047: Check for invalid compound assignment (e.g., x +== 5)
+            if self.stream.check(&TokenKind::Eq) {
+                return Err(ParseError::compound_assign_invalid(
+                    "invalid compound assignment operator",
+                    self.stream.current_span(),
+                ));
+            }
+
+            // E041: Check for missing RHS (x =;)
+            if self.stream.check(&TokenKind::Semicolon) || self.stream.check(&TokenKind::RBrace)
+            {
+                return Err(ParseError::let_missing_value(self.stream.current_span())
+                    .with_help("assignment requires a value on the right-hand side"));
+            }
+
+            // Check if this is a destructuring assignment (tuple, array, record on LHS)
+            if Self::is_destructuring_target(&lhs) {
+                // Convert expression to assignment pattern
+                let pattern = Self::expr_to_assignment_pattern(&lhs)?;
+
+                // Parse RHS value
+                let rhs = self.parse_expr_bp(right_bp)?;
+
+                let span = lhs.span.merge(rhs.span);
+                lhs = Expr::new(
+                    ExprKind::DestructuringAssign {
+                        pattern,
+                        op: bin_op,
+                        value: Heap::new(rhs),
+                    },
+                    span,
+                );
+                return Ok(lhs);
+            }
+
+            // Not a destructuring target - check if it's a valid simple assignment target
+            if !Self::is_valid_assignment_target(&lhs) {
+                return Err(ParseError::assignment_invalid(
+                    "invalid left-hand side of assignment",
+                    lhs.span,
+                ));
+            }
+        }
+
+        let rhs = self.parse_expr_with_subject(
+            right_bp,
+            implicit_subject && matches!(bin_op, BinOp::And | BinOp::Or),
+        )?;
+
+        // Note: Verum DOES allow chained assignment (a = b = c = 42)
+        // Assignment is right-associative, so a = b = c = 42 parses as a = (b = (c = 42))
+
+        let span = lhs.span.merge(rhs.span);
+        lhs = Expr::new(
+            ExprKind::Binary {
+                op: bin_op,
+                left: Box::new(lhs),
+                right: Box::new(rhs),
+            },
+            span,
+        );
         Ok(lhs)
     }
 
@@ -1928,6 +1959,69 @@ impl<'a> RecursiveParser<'a> {
     /// Uses an iterative approach with an explicit stack to handle chains of
     /// unary operators (e.g., `---x`, `***ptr`) without deep recursion.
     pub(crate) fn parse_prefix_expr(&mut self) -> ParseResult<Expr> {
+        let unary_stack = self.parse_unary_operators();
+        let mut expr = self.parse_prefix_operand()?;
+
+        // CRITICAL FIX: Parse postfix operators (field access, method calls, index)
+        // BEFORE applying prefix operators. This ensures correct precedence:
+        //  &r.x parses as &(r.x), not (&r).x
+        //  *p.field parses as *(p.field), not (*p).field
+        // Postfix operators have higher precedence than prefix operators.
+        loop {
+            let (new_expr, found_postfix) = self.try_parse_postfix_impl(expr, true)?;
+            expr = new_expr;
+            if !found_postfix {
+                break;
+            }
+        }
+
+        Ok(self.wrap_unary_expr(expr, unary_stack))
+    }
+
+    fn parse_prefix_operand(&mut self) -> ParseResult<Expr> {
+        if self.stream.check(&TokenKind::DotDot) || self.stream.check(&TokenKind::DotDotEq) {
+            self.parse_startless_range()
+        } else {
+            self.parse_primary_expr()
+        }
+    }
+
+    fn parse_startless_range(&mut self) -> ParseResult<Expr> {
+        let range_start_pos = self.stream.position();
+        let inclusive = self.stream.consume(&TokenKind::DotDotEq).is_some();
+        if !inclusive {
+            self.stream.consume(&TokenKind::DotDot);
+        }
+
+        // Endpoint of a startless range (`..end`): parse a full
+        // `logical_or_expr` (RANGE_ENDPOINT_BP) so a trailing `as` or
+        // arithmetic binds INTO the endpoint — `..n as Int` is
+        // `..(n as Int)`, matching the infix range, not the former
+        // `(..n) as Int` (T0307).
+        // Inside comprehensions, `if`/`for`/`let` are clause keywords.
+        let end = if self.stream.at_end()
+            || !self.stream.peek().is_some_and(|t| t.starts_expr())
+            || (self.comprehension_depth > 0
+                && self.stream.peek().is_some_and(|t| {
+                    matches!(t.kind, TokenKind::If | TokenKind::For | TokenKind::Let)
+                })) {
+            Maybe::None
+        } else {
+            Maybe::Some(Box::new(self.parse_expr_bp(Self::RANGE_ENDPOINT_BP)?))
+        };
+
+        let span = self.stream.make_span(range_start_pos);
+        Ok(Expr::new(
+            ExprKind::Range {
+                start: Maybe::None,
+                end,
+                inclusive,
+            },
+            span,
+        ))
+    }
+
+    fn parse_unary_operators(&mut self) -> Vec<(UnOp, usize)> {
         // Stack to collect unary operators with their start positions.
         // We parse all prefix operators first, then the primary expression,
         // then build the tree bottom-up from the stack.
@@ -2037,61 +2131,10 @@ impl<'a> RecursiveParser<'a> {
             }
         }
 
-        // Now parse the primary expression or range
-        let range_start_pos = self.stream.position();
+        unary_stack
+    }
 
-        // Check for range with no start: ..end or ..=end
-        let mut expr =
-            if self.stream.check(&TokenKind::DotDot) || self.stream.check(&TokenKind::DotDotEq) {
-                let inclusive = self.stream.consume(&TokenKind::DotDotEq).is_some();
-                if !inclusive {
-                    self.stream.consume(&TokenKind::DotDot);
-                }
-
-                // Endpoint of a startless range (`..end`): parse a full
-                // `logical_or_expr` (RANGE_ENDPOINT_BP) so a trailing `as` or
-                // arithmetic binds INTO the endpoint — `..n as Int` is
-                // `..(n as Int)`, matching the infix range, not the former
-                // `(..n) as Int` (T0307).
-                // Inside comprehensions, `if`/`for`/`let` are clause keywords.
-                let end = if self.stream.at_end()
-                    || !self.stream.peek().is_some_and(|t| t.starts_expr())
-                    || (self.comprehension_depth > 0
-                        && self.stream.peek().is_some_and(|t| {
-                            matches!(t.kind, TokenKind::If | TokenKind::For | TokenKind::Let)
-                        })) {
-                    Maybe::None
-                } else {
-                    Maybe::Some(Box::new(self.parse_expr_bp(Self::RANGE_ENDPOINT_BP)?))
-                };
-
-                let span = self.stream.make_span(range_start_pos);
-                Expr::new(
-                    ExprKind::Range {
-                        start: Maybe::None,
-                        end,
-                        inclusive,
-                    },
-                    span,
-                )
-            } else {
-                // Otherwise, parse a primary expression
-                self.parse_primary_expr()?
-            };
-
-        // CRITICAL FIX: Parse postfix operators (field access, method calls, index)
-        // BEFORE applying prefix operators. This ensures correct precedence:
-        //  &r.x parses as &(r.x), not (&r).x
-        //  *p.field parses as *(p.field), not (*p).field
-        // Postfix operators have higher precedence than prefix operators.
-        loop {
-            let (new_expr, found_postfix) = self.try_parse_postfix_impl(expr, true)?;
-            expr = new_expr;
-            if !found_postfix {
-                break;
-            }
-        }
-
+    fn wrap_unary_expr(&self, mut expr: Expr, mut unary_stack: Vec<(UnOp, usize)>) -> Expr {
         // Build unary expression tree bottom-up from the stack
         while let Some((unary_op, op_start_pos)) = unary_stack.pop() {
             let span = self.stream.make_span(op_start_pos);
@@ -2104,7 +2147,7 @@ impl<'a> RecursiveParser<'a> {
             );
         }
 
-        Ok(expr)
+        expr
     }
 
     /// Parse a primary expression (atoms like literals, identifiers, blocks, etc.).
@@ -2573,448 +2616,12 @@ impl<'a> RecursiveParser<'a> {
         lhs: Expr,
         allow_struct: bool,
     ) -> ParseResult<(Expr, bool)> {
-        let start_pos = self.stream.position();
-        let lhs_span = lhs.span;
-
         match self.stream.peek_kind() {
             // Field access, tuple index, method call, or await: .field, .0, .method(args), .await
-            Some(TokenKind::Dot) => {
-                self.stream.advance();
-
-                // Check for .await postfix
-                if self.stream.check(&TokenKind::Await) {
-                    self.stream.advance();
-                    let span = lhs_span.merge(self.stream.make_span(start_pos));
-                    return Ok((
-                        Expr::new(
-                            ExprKind::Await(Box::new(lhs)), // MOVE instead of clone!
-                            span,
-                        ),
-                        true,
-                    ));
-                }
-
-                // Check for .match { } postfix (method-syntax match expression)
-                // Grammar: match_expr = [ expression , '.' ] , 'match' , [ expression ] , '{' , match_arms , '}' ;
-                if self.stream.check(&TokenKind::Match) {
-                    self.stream.advance();
-                    // Method-syntax match has no additional scrutinee - lhs IS the scrutinee
-                    self.stream.expect(TokenKind::LBrace)?;
-                    let arms = self.parse_match_arms()?;
-                    self.stream.expect(TokenKind::RBrace)?;
-                    let span = lhs_span.merge(self.stream.make_span(start_pos));
-                    return Ok((
-                        Expr::new(
-                            ExprKind::Match {
-                                expr: Box::new(lhs),
-                                arms: arms.into(),
-                            },
-                            span,
-                        ),
-                        true,
-                    ));
-                }
-
-                // Check if it's a tuple index (numeric literal)
-                if let Some(TokenKind::Integer(int_lit)) = self.stream.peek_kind() {
-                    let index_value = int_lit.as_i64().unwrap_or(0);
-                    self.stream.advance();
-
-                    // Convert to u32 for tuple index
-                    let index = u32::try_from(index_value).map_err(|_| {
-                        ParseError::invalid_syntax(
-                            format!("invalid tuple index: {}", index_value),
-                            self.stream.make_span(start_pos),
-                        )
-                    })?;
-
-                    let span = lhs_span.merge(self.stream.make_span(start_pos));
-                    Ok((
-                        Expr::new(
-                            ExprKind::TupleIndex {
-                                expr: Box::new(lhs), // MOVE instead of clone!
-                                index,
-                            },
-                            span,
-                        ),
-                        true,
-                    ))
-                } else if let Some(TokenKind::Float(float_lit)) = self.stream.peek_kind() {
-                    // Handle nested tuple access: `expr.0.0` where the lexer tokenizes
-                    // `0.0` as a single Float literal instead of `Integer(0), Dot, Integer(0)`.
-                    // We decompose the float `N.M` into two TupleIndex operations.
-                    if float_lit.suffix.is_none() {
-                        // Use raw text to preserve the exact source representation
-                        // (e.g., "0.0" stays "0.0", not "0" from f64 Display)
-                        let raw_text = float_lit.raw.as_str();
-                        if let Some((left_str, right_str)) = raw_text.split_once('.') {
-                            if let (Ok(first_idx), Ok(second_idx)) =
-                                (left_str.parse::<u32>(), right_str.parse::<u32>())
-                            {
-                                // Verify both parts are valid non-negative integers
-                                let reconstructed = format!("{}.{}", first_idx, second_idx);
-                                if reconstructed == raw_text {
-                                    self.stream.advance();
-                                    let span = lhs_span.merge(self.stream.make_span(start_pos));
-
-                                    // Build first TupleIndex: expr.N
-                                    let first_access = Expr::new(
-                                        ExprKind::TupleIndex {
-                                            expr: Box::new(lhs),
-                                            index: first_idx,
-                                        },
-                                        span,
-                                    );
-
-                                    // Build second TupleIndex: (expr.N).M
-                                    return Ok((
-                                        Expr::new(
-                                            ExprKind::TupleIndex {
-                                                expr: Box::new(first_access),
-                                                index: second_idx,
-                                            },
-                                            span,
-                                        ),
-                                        true,
-                                    ));
-                                }
-                            }
-                        }
-                    }
-                    // Fall through: if the float doesn't decompose into valid tuple indices,
-                    // treat as an error (e.g., `3.14` after a dot is nonsensical)
-                    let span = lhs_span.merge(self.stream.make_span(start_pos));
-                    Err(ParseError::invalid_syntax(
-                        "unexpected float literal after '.'",
-                        span,
-                    ))
-                } else {
-                    // Check for incomplete float literal: Integer followed by Dot without field name
-                    // This catches patterns like `1.;` which should error as "incomplete float literal"
-                    if let ExprKind::Literal(lit) = &lhs.kind {
-                        if matches!(lit.kind, verum_ast::LiteralKind::Int(_)) {
-                            // Check if next token is not valid for field/method access
-                            match self.stream.peek_kind() {
-                                // These indicate incomplete float literal, not field access
-                                Some(TokenKind::Semicolon)
-                                | Some(TokenKind::Comma)
-                                | Some(TokenKind::RParen)
-                                | Some(TokenKind::RBracket)
-                                | Some(TokenKind::RBrace)
-                                | Some(TokenKind::Eof)
-                                | None => {
-                                    let span = lhs_span.merge(self.stream.make_span(start_pos));
-                                    return Err(ParseError::invalid_number(
-                                        "incomplete float literal: digit required after decimal point",
-                                        span,
-                                    ));
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-
-                    // E048: Check for incomplete field access: expr. followed by terminator
-                    // This catches patterns like `obj.;` which should error as E048
-                    match self.stream.peek_kind() {
-                        Some(TokenKind::Semicolon)
-                        | Some(TokenKind::Comma)
-                        | Some(TokenKind::RParen)
-                        | Some(TokenKind::RBracket)
-                        | Some(TokenKind::RBrace)
-                        | Some(TokenKind::Eof)
-                        | None => {
-                            let span = lhs_span.merge(self.stream.make_span(start_pos));
-                            return Err(ParseError::expr_stmt_invalid(
-                                "incomplete field access: expected field name after '.'",
-                                span,
-                            ));
-                        }
-                        _ => {}
-                    }
-
-                    // Turbofish syntax without method name: expr.<Type, N>(args)
-                    // This is used for explicit generic arguments on function calls.
-                    // Example: fill.<Int, 8>(0) or identity.<3>()
-                    if self.stream.check(&TokenKind::Lt) && self.is_generic_method_call_lookahead()
-                    {
-                        let generic_args = self.parse_generic_args()?;
-                        // Must be followed by `(`
-                        self.stream.expect(TokenKind::LParen)?;
-                        let args = if self.stream.check(&TokenKind::RParen) {
-                            Vec::new()
-                        } else {
-                            self.comma_separated(|p| p.parse_expr())?
-                        };
-                        self.stream.expect(TokenKind::RParen)?;
-                        let span = lhs_span.merge(self.stream.make_span(start_pos));
-                        return Ok((
-                            Expr::new(
-                                ExprKind::Call {
-                                    func: Box::new(lhs),
-                                    args: args.into(),
-                                    type_args: generic_args.into(),
-                                },
-                                span,
-                            ),
-                            true,
-                        ));
-                    }
-
-                    // Regular field access, method call, or variant constructor with record data.
-                    //
-
-                    // Accept *any* keyword as a field / method name — they live
-                    // in the type's namespace (`Type.name`), so reserved-like
-                    // keywords such as `where` (used by `Tensor.where(…)` in
-                    // `vbc/tensor/002_operations.vr`), `from`, `match`, `proof`,
-                    // etc. never collide with the language grammar at this
-                    // position. Using the permissive variant mirrors the fix
-                    // already applied to `parse_variant` (which accepts
-                    // keywords such as `loop`, `merid` as variant names).
-                    let field_name_span = self.stream.current_span();
-                    let field_name = self.consume_ident_or_any_keyword()?;
-
-                    // Check if it's a method call:
-                    // - .method() - regular method call
-                    // - .method<T>() - generic method call (Verum's spaceless form;
-                    //  Verum has no Rust-style turbofish — `::` is not a token)
-                    // For generic method calls, we need lookahead to distinguish from comparison:
-                    // - .field < expr is a comparison, not generic args
-                    // - .method<T>() is a generic method call (< must be followed by valid generic args and then >()
-                    let is_generic_method_call = self.stream.check(&TokenKind::Lt)
-                        && self.is_generic_method_call_lookahead();
-
-                    if self.stream.check(&TokenKind::LParen) || is_generic_method_call {
-                        // Special handling for .attenuate() method with Capability.X syntax
-                        // Only use CapabilitySet syntax if the argument starts with "Capability"
-                        // Otherwise treat as regular method call (allows UInt16 constants like CAP_READ_WRITE)
-                        if field_name.as_str() == "attenuate"
-                            && self.stream.check(&TokenKind::LParen)
-                        {
-                            // Look ahead to check if first argument is "Capability" identifier
-                            let first_arg_name = self.stream.peek_nth_kind(1).and_then(|kind| {
-                                if let TokenKind::Ident(name) = kind {
-                                    Some(name.clone())
-                                } else {
-                                    None
-                                }
-                            });
-
-                            let is_capability_set_syntax = first_arg_name
-                                .as_ref()
-                                .map(|n| n.as_str() == "Capability")
-                                .unwrap_or(false);
-
-                            // Reject plural "Capabilities" - must use singular "Capability"
-                            if let Some(ref name) = first_arg_name {
-                                if name.as_str() == "Capabilities" {
-                                    return Err(crate::ParseError::new(
-                                        crate::error::ParseErrorKind::InvalidSyntax {
-                                            message: "use singular 'Capability' instead of 'Capabilities'".into(),
-                                        },
-                                        self.stream.make_span(start_pos),
-                                    ));
-                                }
-                            }
-
-                            // Reject empty attenuate() - at least one capability required
-                            if self
-                                .stream
-                                .peek_nth_kind(1)
-                                .map(|kind| matches!(kind, TokenKind::RParen))
-                                .unwrap_or(false)
-                            {
-                                return Err(crate::ParseError::new(
-                                    crate::error::ParseErrorKind::InvalidSyntax {
-                                        message:
-                                            "attenuate() requires at least one capability argument"
-                                                .into(),
-                                    },
-                                    self.stream.make_span(start_pos),
-                                ));
-                            }
-
-                            if is_capability_set_syntax {
-                                // Parse attenuate(CapabilitySet)
-                                self.stream.expect(TokenKind::LParen)?;
-                                let capabilities = self.parse_capability_set()?;
-                                self.stream.expect(TokenKind::RParen)?;
-                                let span = lhs_span.merge(self.stream.make_span(start_pos));
-                                return Ok((
-                                    Expr::new(
-                                        ExprKind::Attenuate {
-                                            context: Box::new(lhs),
-                                            capabilities,
-                                        },
-                                        span,
-                                    ),
-                                    true,
-                                ));
-                            }
-                            // Otherwise fall through to regular method call parsing
-                        }
-
-                        // Parse optional generic type arguments: .method<T, U>()
-                        let type_args = if is_generic_method_call {
-                            self.parse_generic_args()?
-                        } else {
-                            Vec::new()
-                        };
-
-                        // Regular method call
-                        let args = self.parse_call_args()?;
-                        let span = lhs_span.merge(self.stream.make_span(start_pos));
-                        Ok((
-                            Expr::new(
-                                ExprKind::MethodCall {
-                                    receiver: Box::new(lhs), // MOVE instead of clone!
-                                    method: verum_ast::ty::Ident::new(field_name, field_name_span),
-                                    type_args: type_args.into_iter().collect(),
-                                    args: args.into(),
-                                },
-                                span,
-                            ),
-                            true,
-                        ))
-                    } else if allow_struct && self.stream.check(&TokenKind::LBrace) {
-                        // Variant constructor with record data: Type.Variant { field: value }
-                        // Only parse if allow_struct is true (disabled in no_struct mode for for-loops, etc.)
-                        // Convert lhs.field into a two-segment path
-                        self.stream.advance();
-
-                        // Build the path from lhs + field_name
-                        // First, try to convert the lhs expression to a path
-                        let path = if let Maybe::Some(mut base_path) = Self::expr_to_path(&lhs) {
-                            // Successfully converted lhs to a path, extend it with the field name
-                            base_path.segments.push(verum_ast::ty::PathSegment::Name(
-                                verum_ast::ty::Ident::new(field_name.clone(), field_name_span),
-                            ));
-                            base_path
-                        } else {
-                            // lhs cannot be converted to a path (e.g., function call, binary op)
-                            return Err(ParseError::invalid_syntax(
-                                "record literal requires a path (e.g., Type { ... } or module.Type { ... })",
-                                lhs_span,
-                            ));
-                        };
-
-                        // Parse fields and base spread
-                        let mut fields = Vec::new();
-                        let mut base = Maybe::None;
-
-                        if !self.stream.check(&TokenKind::RBrace) {
-                            loop {
-                                // Safety: prevent infinite loop
-                                if !self.tick() || self.is_aborted() {
-                                    break;
-                                }
-
-                                // Check for struct update/rest syntax: ..base or just ..
-                                if self.stream.consume(&TokenKind::DotDot).is_some() {
-                                    // Check if this is rest-only (..) or struct update (..base)
-                                    if self.stream.check(&TokenKind::RBrace)
-                                        || self.stream.check(&TokenKind::Comma)
-                                    {
-                                        // Rest-only pattern: { x, y, .. }
-                                        let rest_span = self.stream.current_span();
-                                        base = Maybe::Some(Box::new(Expr::new(
-                                            ExprKind::Tuple(List::new()),
-                                            rest_span,
-                                        )));
-                                    } else {
-                                        // Struct update: { x, y, ..base }
-                                        base = Maybe::Some(Box::new(self.parse_expr()?));
-                                    }
-                                    // After spread, we can optionally have a trailing comma
-                                    self.stream.consume(&TokenKind::Comma);
-                                    break;
-                                }
-
-                                // Parse regular field
-                                fields.push(self.parse_field_init()?);
-
-                                // Check for comma
-                                if self.stream.consume(&TokenKind::Comma).is_none() {
-                                    break;
-                                }
-
-                                // Allow trailing comma
-                                if self.stream.check(&TokenKind::RBrace) {
-                                    break;
-                                }
-                            }
-                        }
-
-                        let end_span = self.stream.expect(TokenKind::RBrace)?.span;
-                        let span = lhs_span.merge(end_span);
-
-                        Ok((
-                            Expr::new(
-                                ExprKind::Record {
-                                    path,
-                                    fields: fields.into(),
-                                    base,
-                                },
-                                span,
-                            ),
-                            true,
-                        ))
-                    } else {
-                        // Only explicit type syntax is unambiguous here. A path
-                        // such as Cell.size must retain its value expression so
-                        // lexical resolution can distinguish a type from a binding.
-                        if let Some(type_prop) = TypeProperty::from_str(field_name.as_str()) {
-                            // Try to convert expression to a type
-                            // This handles: Int, (&Int), (&checked Int), List<Int>, etc.
-                            if let Some(ty) = self.expr_to_type_for_property(&lhs) {
-                                let span = lhs_span.merge(self.stream.make_span(start_pos));
-                                return Ok((
-                                    Expr::new(
-                                        ExprKind::TypeProperty {
-                                            ty,
-                                            property: type_prop,
-                                        },
-                                        span,
-                                    ),
-                                    true,
-                                ));
-                            }
-                        }
-
-                        // Regular field access
-                        let span = lhs_span.merge(self.stream.make_span(start_pos));
-                        Ok((
-                            Expr::new(
-                                ExprKind::Field {
-                                    expr: Box::new(lhs), // MOVE instead of clone!
-                                    field: verum_ast::ty::Ident::new(field_name, field_name_span),
-                                },
-                                span,
-                            ),
-                            true,
-                        ))
-                    }
-                }
-            }
+            Some(TokenKind::Dot) => self.parse_member_postfix(lhs, allow_struct),
 
             // Optional chaining: ?.field
-            Some(TokenKind::QuestionDot) => {
-                self.stream.advance();
-                let field_name_span = self.stream.current_span();
-                let field_name = self.consume_ident_or_keyword()?;
-                let span = lhs_span.merge(self.stream.make_span(start_pos));
-                Ok((
-                    Expr::new(
-                        ExprKind::OptionalChain {
-                            expr: Box::new(lhs), // MOVE instead of clone!
-                            field: verum_ast::ty::Ident::new(field_name, field_name_span),
-                        },
-                        span,
-                    ),
-                    true,
-                ))
-            }
+            Some(TokenKind::QuestionDot) => self.parse_optional_postfix(lhs),
 
             // Generic function call: func<T, U>(args)
             // Detect when < followed by valid type args and then >()
@@ -3022,23 +2629,7 @@ impl<'a> RecursiveParser<'a> {
                 if matches!(&lhs.kind, ExprKind::Path(_))
                     && self.is_generic_func_call_lookahead() =>
             {
-                // Parse generic type arguments: <T, U>
-                let type_args = self.parse_generic_args()?;
-
-                // Parse function call arguments: (args)
-                let args = self.parse_call_args()?;
-                let span = lhs_span.merge(self.stream.make_span(start_pos));
-                Ok((
-                    Expr::new(
-                        ExprKind::Call {
-                            func: Box::new(lhs),
-                            type_args: type_args.into_iter().collect(),
-                            args: args.into(),
-                        },
-                        span,
-                    ),
-                    true,
-                ))
+                self.parse_generic_call_postfix(lhs)
             }
 
             // Rust-style turbofish `::<T1, T2>(args)` — REJECTED in Verum.
@@ -3068,140 +2659,13 @@ impl<'a> RecursiveParser<'a> {
             }
 
             // Function call: (args)
-            Some(TokenKind::LParen) => {
-                // CRITICAL FIX: Block expressions, control flow expressions, and similar
-                // are not callable. If we parsed `{ ... } (a, b)` as a call, we would
-                // incorrectly interpret the block as a function being called with tuple args.
-                // Example: `fn f() -> (Int, Int) { { print(1); } (1, 2) }`
-                // Without this fix, `{ print(1); }` would be parsed as the "function" and
-                // `(1, 2)` as arguments, causing "not a function: Unit" error.
-                // Instead, stop postfix parsing and let the statement parser handle them
-                // as separate expressions.
-                match &lhs.kind {
-                    ExprKind::Block(_)
-                    | ExprKind::If { .. }
-                    | ExprKind::Match { .. }
-                    | ExprKind::While { .. }
-                    | ExprKind::For { .. }
-                    | ExprKind::ForAwait { .. }
-                    | ExprKind::Loop { .. }
-                    | ExprKind::Select { .. }
-                    | ExprKind::TryRecoverFinally { .. } => {
-                        // Not callable - return as-is
-                        return Ok((lhs, false));
-                    }
-                    _ => {}
-                }
-                let args = self.parse_call_args()?;
-                let span = lhs_span.merge(self.stream.make_span(start_pos));
-
-                // E026/E027: Check for empty assert/assume calls
-                if args.is_empty() {
-                    if let ExprKind::Path(path) = &lhs.kind {
-                        if path.segments.len() == 1 {
-                            if let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0] {
-                                let name = ident.name.as_str();
-                                if name == "assert" {
-                                    return Err(ParseError::invalid_assert(
-                                        "assert requires an expression argument",
-                                        span,
-                                    ));
-                                }
-                                if name == "assume" {
-                                    return Err(ParseError::invalid_assume(
-                                        "assume requires an expression argument",
-                                        span,
-                                    ));
-                                }
-                            }
-                        }
-                    }
-                }
-
-                Ok((
-                    Expr::new(
-                        ExprKind::Call {
-                            func: Box::new(lhs), // MOVE instead of clone!
-                            type_args: List::new(),
-                            args: args.into(),
-                        },
-                        span,
-                    ),
-                    true,
-                ))
-            }
+            Some(TokenKind::LParen) => self.parse_call_postfix(lhs),
 
             // Index: [index]
-            Some(TokenKind::LBracket) => {
-                let current_span = self.stream.current_span();
-                let bracket_span = self
-                    .stream
-                    .advance()
-                    .ok_or_else(|| {
-                        ParseError::unexpected_eof(&[TokenKind::LBracket], current_span)
-                    })?
-                    .span;
-
-                // E013: Check for immediately unclosed index (arr[;)
-                if self.stream.check(&TokenKind::Semicolon) || self.stream.check(&TokenKind::RBrace)
-                {
-                    return Err(ParseError::stmt_unclosed_index(bracket_span)
-                        .with_help("missing closing ']' for index access"));
-                }
-
-                let first_index = self.parse_expr()?;
-
-                // Support multi-dimensional indexing: a[i, j, k]
-                // Parsed as Index { expr, index: Tuple([i, j, k]) } when comma present
-                let index = if self.stream.check(&TokenKind::Comma) {
-                    let mut indices = vec![first_index];
-                    while self.stream.check(&TokenKind::Comma) {
-                        self.stream.advance(); // consume comma
-                        indices.push(self.parse_expr()?);
-                    }
-                    let tuple_span = match (indices.first(), indices.last()) {
-                        (Some(first), Some(last)) => first.span.merge(last.span),
-                        _ => bracket_span, // fallback to the opening bracket span
-                    };
-                    Expr::new(ExprKind::Tuple(indices.into()), tuple_span)
-                } else {
-                    first_index
-                };
-
-                // E013: Check for unclosed index after expression
-                if !self.stream.check(&TokenKind::RBracket) {
-                    if self.stream.check(&TokenKind::Semicolon) || self.stream.at_end() {
-                        return Err(ParseError::stmt_unclosed_index(bracket_span)
-                            .with_help("missing closing ']' for index access"));
-                    }
-                }
-
-                self.stream.expect(TokenKind::RBracket)?;
-                let span = lhs_span.merge(self.stream.make_span(start_pos));
-                Ok((
-                    Expr::new(
-                        ExprKind::Index {
-                            expr: Box::new(lhs), // MOVE instead of clone!
-                            index: Box::new(index),
-                        },
-                        span,
-                    ),
-                    true,
-                ))
-            }
+            Some(TokenKind::LBracket) => self.parse_index_postfix(lhs),
 
             // Try operator: ?
-            Some(TokenKind::Question) => {
-                self.stream.advance();
-                let span = lhs_span.merge(self.stream.make_span(start_pos));
-                Ok((
-                    Expr::new(
-                        ExprKind::Try(Box::new(lhs)), // MOVE instead of clone!
-                        span,
-                    ),
-                    true,
-                ))
-            }
+            Some(TokenKind::Question) => self.parse_try_postfix(lhs),
 
             // NOTE: `is` is NOT a postfix operator — it's an infix comparison operator
             // like `==` and must be handled in parse_expr_bp / parse_expr_bp_no_struct.
@@ -3212,6 +2676,618 @@ impl<'a> RecursiveParser<'a> {
             // No postfix found - return lhs unchanged
             _ => Ok((lhs, false)),
         }
+    }
+
+    fn parse_optional_postfix(&mut self, lhs: Expr) -> ParseResult<(Expr, bool)> {
+        let start_pos = self.stream.position();
+        let lhs_span = lhs.span;
+        self.stream.advance();
+        let field_name_span = self.stream.current_span();
+        let field_name = self.consume_ident_or_keyword()?;
+        let span = lhs_span.merge(self.stream.make_span(start_pos));
+        Ok((
+            Expr::new(
+                ExprKind::OptionalChain {
+                    expr: Box::new(lhs), // MOVE instead of clone!
+                    field: verum_ast::ty::Ident::new(field_name, field_name_span),
+                },
+                span,
+            ),
+            true,
+        ))
+    }
+
+    fn parse_try_postfix(&mut self, lhs: Expr) -> ParseResult<(Expr, bool)> {
+        let start_pos = self.stream.position();
+        let lhs_span = lhs.span;
+        self.stream.advance();
+        let span = lhs_span.merge(self.stream.make_span(start_pos));
+        Ok((
+            Expr::new(
+                ExprKind::Try(Box::new(lhs)), // MOVE instead of clone!
+                span,
+            ),
+            true,
+        ))
+    }
+
+    fn parse_generic_call_postfix(&mut self, lhs: Expr) -> ParseResult<(Expr, bool)> {
+        let start_pos = self.stream.position();
+        let lhs_span = lhs.span;
+        // Parse generic type arguments: <T, U>
+        let type_args = self.parse_generic_args()?;
+
+        // Parse function call arguments: (args)
+        let args = self.parse_call_args()?;
+        let span = lhs_span.merge(self.stream.make_span(start_pos));
+        Ok((
+            Expr::new(
+                ExprKind::Call {
+                    func: Box::new(lhs),
+                    type_args: type_args.into_iter().collect(),
+                    args: args.into(),
+                },
+                span,
+            ),
+            true,
+        ))
+    }
+
+    fn parse_member_postfix(&mut self, lhs: Expr, allow_struct: bool) -> ParseResult<(Expr, bool)> {
+        let start_pos = self.stream.position();
+        let lhs_span = lhs.span;
+        self.stream.advance();
+
+        // Check for .await postfix
+        if self.stream.check(&TokenKind::Await) {
+            self.stream.advance();
+            let span = lhs_span.merge(self.stream.make_span(start_pos));
+            return Ok((
+                Expr::new(
+                    ExprKind::Await(Box::new(lhs)), // MOVE instead of clone!
+                    span,
+                ),
+                true,
+            ));
+        }
+
+        // Check for .match { } postfix (method-syntax match expression)
+        // Grammar: match_expr = [ expression , '.' ] , 'match' , [ expression ] , '{' , match_arms , '}' ;
+        if self.stream.check(&TokenKind::Match) {
+            self.stream.advance();
+            // Method-syntax match has no additional scrutinee - lhs IS the scrutinee
+            self.stream.expect(TokenKind::LBrace)?;
+            let arms = self.parse_match_arms()?;
+            self.stream.expect(TokenKind::RBrace)?;
+            let span = lhs_span.merge(self.stream.make_span(start_pos));
+            return Ok((
+                Expr::new(
+                    ExprKind::Match {
+                        expr: Box::new(lhs),
+                        arms: arms.into(),
+                    },
+                    span,
+                ),
+                true,
+            ));
+        }
+
+        // Check if it's a tuple index (numeric literal)
+        if let Some(TokenKind::Integer(int_lit)) = self.stream.peek_kind() {
+            let index_value = int_lit.as_i64().unwrap_or(0);
+            self.stream.advance();
+
+            // Convert to u32 for tuple index
+            let index = u32::try_from(index_value).map_err(|_| {
+                ParseError::invalid_syntax(
+                    format!("invalid tuple index: {}", index_value),
+                    self.stream.make_span(start_pos),
+                )
+            })?;
+
+            let span = lhs_span.merge(self.stream.make_span(start_pos));
+            Ok((
+                Expr::new(
+                    ExprKind::TupleIndex {
+                        expr: Box::new(lhs), // MOVE instead of clone!
+                        index,
+                    },
+                    span,
+                ),
+                true,
+            ))
+        } else if let Some(TokenKind::Float(float_lit)) = self.stream.peek_kind() {
+            // Handle nested tuple access: `expr.0.0` where the lexer tokenizes
+            // `0.0` as a single Float literal instead of `Integer(0), Dot, Integer(0)`.
+            // We decompose the float `N.M` into two TupleIndex operations.
+            if float_lit.suffix.is_none() {
+                // Use raw text to preserve the exact source representation
+                // (e.g., "0.0" stays "0.0", not "0" from f64 Display)
+                let raw_text = float_lit.raw.as_str();
+                if let Some((left_str, right_str)) = raw_text.split_once('.') {
+                    if let (Ok(first_idx), Ok(second_idx)) =
+                        (left_str.parse::<u32>(), right_str.parse::<u32>())
+                    {
+                        // Verify both parts are valid non-negative integers
+                        let reconstructed = format!("{}.{}", first_idx, second_idx);
+                        if reconstructed == raw_text {
+                            self.stream.advance();
+                            let span = lhs_span.merge(self.stream.make_span(start_pos));
+
+                            // Build first TupleIndex: expr.N
+                            let first_access = Expr::new(
+                                ExprKind::TupleIndex {
+                                    expr: Box::new(lhs),
+                                    index: first_idx,
+                                },
+                                span,
+                            );
+
+                            // Build second TupleIndex: (expr.N).M
+                            return Ok((
+                                Expr::new(
+                                    ExprKind::TupleIndex {
+                                        expr: Box::new(first_access),
+                                        index: second_idx,
+                                    },
+                                    span,
+                                ),
+                                true,
+                            ));
+                        }
+                    }
+                }
+            }
+            // Fall through: if the float doesn't decompose into valid tuple indices,
+            // treat as an error (e.g., `3.14` after a dot is nonsensical)
+            let span = lhs_span.merge(self.stream.make_span(start_pos));
+            Err(ParseError::invalid_syntax(
+                "unexpected float literal after '.'",
+                span,
+            ))
+        } else {
+            // Check for incomplete float literal: Integer followed by Dot without field name
+            // This catches patterns like `1.;` which should error as "incomplete float literal"
+            if let ExprKind::Literal(lit) = &lhs.kind {
+                if matches!(lit.kind, verum_ast::LiteralKind::Int(_)) {
+                    // Check if next token is not valid for field/method access
+                    match self.stream.peek_kind() {
+                        // These indicate incomplete float literal, not field access
+                        Some(TokenKind::Semicolon)
+                        | Some(TokenKind::Comma)
+                        | Some(TokenKind::RParen)
+                        | Some(TokenKind::RBracket)
+                        | Some(TokenKind::RBrace)
+                        | Some(TokenKind::Eof)
+                        | None => {
+                            let span = lhs_span.merge(self.stream.make_span(start_pos));
+                            return Err(ParseError::invalid_number(
+                                "incomplete float literal: digit required after decimal point",
+                                span,
+                            ));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+
+            // E048: Check for incomplete field access: expr. followed by terminator
+            // This catches patterns like `obj.;` which should error as E048
+            match self.stream.peek_kind() {
+                Some(TokenKind::Semicolon)
+                | Some(TokenKind::Comma)
+                | Some(TokenKind::RParen)
+                | Some(TokenKind::RBracket)
+                | Some(TokenKind::RBrace)
+                | Some(TokenKind::Eof)
+                | None => {
+                    let span = lhs_span.merge(self.stream.make_span(start_pos));
+                    return Err(ParseError::expr_stmt_invalid(
+                        "incomplete field access: expected field name after '.'",
+                        span,
+                    ));
+                }
+                _ => {}
+            }
+
+            // Turbofish syntax without method name: expr.<Type, N>(args)
+            // This is used for explicit generic arguments on function calls.
+            // Example: fill.<Int, 8>(0) or identity.<3>()
+            if self.stream.check(&TokenKind::Lt) && self.is_generic_method_call_lookahead()
+            {
+                let generic_args = self.parse_generic_args()?;
+                // Must be followed by `(`
+                self.stream.expect(TokenKind::LParen)?;
+                let args = if self.stream.check(&TokenKind::RParen) {
+                    Vec::new()
+                } else {
+                    self.comma_separated(|p| p.parse_expr())?
+                };
+                self.stream.expect(TokenKind::RParen)?;
+                let span = lhs_span.merge(self.stream.make_span(start_pos));
+                return Ok((
+                    Expr::new(
+                        ExprKind::Call {
+                            func: Box::new(lhs),
+                            args: args.into(),
+                            type_args: generic_args.into(),
+                        },
+                        span,
+                    ),
+                    true,
+                ));
+            }
+
+            // Regular field access, method call, or variant constructor with record data.
+            //
+
+            // Accept *any* keyword as a field / method name — they live
+            // in the type's namespace (`Type.name`), so reserved-like
+            // keywords such as `where` (used by `Tensor.where(…)` in
+            // `vbc/tensor/002_operations.vr`), `from`, `match`, `proof`,
+            // etc. never collide with the language grammar at this
+            // position. Using the permissive variant mirrors the fix
+            // already applied to `parse_variant` (which accepts
+            // keywords such as `loop`, `merid` as variant names).
+            let field_name_span = self.stream.current_span();
+            let field_name = self.consume_ident_or_any_keyword()?;
+
+            // Check if it's a method call:
+            // - .method() - regular method call
+            // - .method<T>() - generic method call (Verum's spaceless form;
+            //  Verum has no Rust-style turbofish — `::` is not a token)
+            // For generic method calls, we need lookahead to distinguish from comparison:
+            // - .field < expr is a comparison, not generic args
+            // - .method<T>() is a generic method call (< must be followed by valid generic args and then >()
+            let is_generic_method_call = self.stream.check(&TokenKind::Lt)
+                && self.is_generic_method_call_lookahead();
+
+            if self.stream.check(&TokenKind::LParen) || is_generic_method_call {
+                // Special handling for .attenuate() method with Capability.X syntax
+                // Only use CapabilitySet syntax if the argument starts with "Capability"
+                // Otherwise treat as regular method call (allows UInt16 constants like CAP_READ_WRITE)
+                if field_name.as_str() == "attenuate"
+                    && self.stream.check(&TokenKind::LParen)
+                {
+                    // Look ahead to check if first argument is "Capability" identifier
+                    let first_arg_name = self.stream.peek_nth_kind(1).and_then(|kind| {
+                        if let TokenKind::Ident(name) = kind {
+                            Some(name.clone())
+                        } else {
+                            None
+                        }
+                    });
+
+                    let is_capability_set_syntax = first_arg_name
+                        .as_ref()
+                        .map(|n| n.as_str() == "Capability")
+                        .unwrap_or(false);
+
+                    // Reject plural "Capabilities" - must use singular "Capability"
+                    if let Some(ref name) = first_arg_name {
+                        if name.as_str() == "Capabilities" {
+                            return Err(crate::ParseError::new(
+                                crate::error::ParseErrorKind::InvalidSyntax {
+                                    message: "use singular 'Capability' instead of 'Capabilities'".into(),
+                                },
+                                self.stream.make_span(start_pos),
+                            ));
+                        }
+                    }
+
+                    // Reject empty attenuate() - at least one capability required
+                    if self
+                        .stream
+                        .peek_nth_kind(1)
+                        .map(|kind| matches!(kind, TokenKind::RParen))
+                        .unwrap_or(false)
+                    {
+                        return Err(crate::ParseError::new(
+                            crate::error::ParseErrorKind::InvalidSyntax {
+                                message:
+                                    "attenuate() requires at least one capability argument"
+                                        .into(),
+                            },
+                            self.stream.make_span(start_pos),
+                        ));
+                    }
+
+                    if is_capability_set_syntax {
+                        // Parse attenuate(CapabilitySet)
+                        self.stream.expect(TokenKind::LParen)?;
+                        let capabilities = self.parse_capability_set()?;
+                        self.stream.expect(TokenKind::RParen)?;
+                        let span = lhs_span.merge(self.stream.make_span(start_pos));
+                        return Ok((
+                            Expr::new(
+                                ExprKind::Attenuate {
+                                    context: Box::new(lhs),
+                                    capabilities,
+                                },
+                                span,
+                            ),
+                            true,
+                        ));
+                    }
+                    // Otherwise fall through to regular method call parsing
+                }
+
+                // Parse optional generic type arguments: .method<T, U>()
+                let type_args = if is_generic_method_call {
+                    self.parse_generic_args()?
+                } else {
+                    Vec::new()
+                };
+
+                // Regular method call
+                let args = self.parse_call_args()?;
+                let span = lhs_span.merge(self.stream.make_span(start_pos));
+                Ok((
+                    Expr::new(
+                        ExprKind::MethodCall {
+                            receiver: Box::new(lhs), // MOVE instead of clone!
+                            method: verum_ast::ty::Ident::new(field_name, field_name_span),
+                            type_args: type_args.into_iter().collect(),
+                            args: args.into(),
+                        },
+                        span,
+                    ),
+                    true,
+                ))
+            } else if allow_struct && self.stream.check(&TokenKind::LBrace) {
+                // Variant constructor with record data: Type.Variant { field: value }
+                // Only parse if allow_struct is true (disabled in no_struct mode for for-loops, etc.)
+                // Convert lhs.field into a two-segment path
+                self.stream.advance();
+
+                // Build the path from lhs + field_name
+                // First, try to convert the lhs expression to a path
+                let path = if let Maybe::Some(mut base_path) = Self::expr_to_path(&lhs) {
+                    // Successfully converted lhs to a path, extend it with the field name
+                    base_path.segments.push(verum_ast::ty::PathSegment::Name(
+                        verum_ast::ty::Ident::new(field_name.clone(), field_name_span),
+                    ));
+                    base_path
+                } else {
+                    // lhs cannot be converted to a path (e.g., function call, binary op)
+                    return Err(ParseError::invalid_syntax(
+                        "record literal requires a path (e.g., Type { ... } or module.Type { ... })",
+                        lhs_span,
+                    ));
+                };
+
+                // Parse fields and base spread
+                let mut fields = Vec::new();
+                let mut base = Maybe::None;
+
+                if !self.stream.check(&TokenKind::RBrace) {
+                    loop {
+                        // Safety: prevent infinite loop
+                        if !self.tick() || self.is_aborted() {
+                            break;
+                        }
+
+                        // Check for struct update/rest syntax: ..base or just ..
+                        if self.stream.consume(&TokenKind::DotDot).is_some() {
+                            // Check if this is rest-only (..) or struct update (..base)
+                            if self.stream.check(&TokenKind::RBrace)
+                                || self.stream.check(&TokenKind::Comma)
+                            {
+                                // Rest-only pattern: { x, y, .. }
+                                let rest_span = self.stream.current_span();
+                                base = Maybe::Some(Box::new(Expr::new(
+                                    ExprKind::Tuple(List::new()),
+                                    rest_span,
+                                )));
+                            } else {
+                                // Struct update: { x, y, ..base }
+                                base = Maybe::Some(Box::new(self.parse_expr()?));
+                            }
+                            // After spread, we can optionally have a trailing comma
+                            self.stream.consume(&TokenKind::Comma);
+                            break;
+                        }
+
+                        // Parse regular field
+                        fields.push(self.parse_field_init()?);
+
+                        // Check for comma
+                        if self.stream.consume(&TokenKind::Comma).is_none() {
+                            break;
+                        }
+
+                        // Allow trailing comma
+                        if self.stream.check(&TokenKind::RBrace) {
+                            break;
+                        }
+                    }
+                }
+
+                let end_span = self.stream.expect(TokenKind::RBrace)?.span;
+                let span = lhs_span.merge(end_span);
+
+                Ok((
+                    Expr::new(
+                        ExprKind::Record {
+                            path,
+                            fields: fields.into(),
+                            base,
+                        },
+                        span,
+                    ),
+                    true,
+                ))
+            } else {
+                // Only explicit type syntax is unambiguous here. A path
+                // such as Cell.size must retain its value expression so
+                // lexical resolution can distinguish a type from a binding.
+                if let Some(type_prop) = TypeProperty::from_str(field_name.as_str()) {
+                    // Try to convert expression to a type
+                    // This handles: Int, (&Int), (&checked Int), List<Int>, etc.
+                    if let Some(ty) = self.expr_to_type_for_property(&lhs) {
+                        let span = lhs_span.merge(self.stream.make_span(start_pos));
+                        return Ok((
+                            Expr::new(
+                                ExprKind::TypeProperty {
+                                    ty,
+                                    property: type_prop,
+                                },
+                                span,
+                            ),
+                            true,
+                        ));
+                    }
+                }
+
+                // Regular field access
+                let span = lhs_span.merge(self.stream.make_span(start_pos));
+                Ok((
+                    Expr::new(
+                        ExprKind::Field {
+                            expr: Box::new(lhs), // MOVE instead of clone!
+                            field: verum_ast::ty::Ident::new(field_name, field_name_span),
+                        },
+                        span,
+                    ),
+                    true,
+                ))
+            }
+        }
+    }
+
+    fn parse_call_postfix(&mut self, lhs: Expr) -> ParseResult<(Expr, bool)> {
+        let start_pos = self.stream.position();
+
+        // CRITICAL FIX: Block expressions, control flow expressions, and similar
+        // are not callable. If we parsed `{ ... } (a, b)` as a call, we would
+        // incorrectly interpret the block as a function being called with tuple args.
+        // Example: `fn f() -> (Int, Int) { { print(1); } (1, 2) }`
+        // Without this fix, `{ print(1); }` would be parsed as the "function" and
+        // `(1, 2)` as arguments, causing "not a function: Unit" error.
+        // Instead, stop postfix parsing and let the statement parser handle them
+        // as separate expressions.
+        match &lhs.kind {
+            ExprKind::Block(_)
+            | ExprKind::If { .. }
+            | ExprKind::Match { .. }
+            | ExprKind::While { .. }
+            | ExprKind::For { .. }
+            | ExprKind::ForAwait { .. }
+            | ExprKind::Loop { .. }
+            | ExprKind::Select { .. }
+            | ExprKind::TryRecoverFinally { .. } => {
+                // Not callable - return as-is
+                return Ok((lhs, false));
+            }
+            _ => {}
+        }
+        let args = self.parse_call_args()?;
+        self.finish_call_postfix(lhs, args, start_pos)
+    }
+
+    fn finish_call_postfix(
+        &self,
+        lhs: Expr,
+        args: Vec<Expr>,
+        start_pos: usize,
+    ) -> ParseResult<(Expr, bool)> {
+        let lhs_span = lhs.span;
+        let span = lhs_span.merge(self.stream.make_span(start_pos));
+
+        // E026/E027: Check for empty assert/assume calls
+        if args.is_empty() {
+            if let ExprKind::Path(path) = &lhs.kind {
+                if path.segments.len() == 1 {
+                    if let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0] {
+                        let name = ident.name.as_str();
+                        if name == "assert" {
+                            return Err(ParseError::invalid_assert(
+                                "assert requires an expression argument",
+                                span,
+                            ));
+                        }
+                        if name == "assume" {
+                            return Err(ParseError::invalid_assume(
+                                "assume requires an expression argument",
+                                span,
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok((
+            Expr::new(
+                ExprKind::Call {
+                    func: Box::new(lhs), // MOVE instead of clone!
+                    type_args: List::new(),
+                    args: args.into(),
+                },
+                span,
+            ),
+            true,
+        ))
+    }
+
+    fn parse_index_postfix(&mut self, lhs: Expr) -> ParseResult<(Expr, bool)> {
+        let start_pos = self.stream.position();
+        let lhs_span = lhs.span;
+        let current_span = self.stream.current_span();
+        let bracket_span = self
+            .stream
+            .advance()
+            .ok_or_else(|| {
+                ParseError::unexpected_eof(&[TokenKind::LBracket], current_span)
+            })?
+            .span;
+
+        // E013: Check for immediately unclosed index (arr[;)
+        if self.stream.check(&TokenKind::Semicolon) || self.stream.check(&TokenKind::RBrace)
+        {
+            return Err(ParseError::stmt_unclosed_index(bracket_span)
+                .with_help("missing closing ']' for index access"));
+        }
+
+        let first_index = self.parse_expr()?;
+
+        // Support multi-dimensional indexing: a[i, j, k]
+        // Parsed as Index { expr, index: Tuple([i, j, k]) } when comma present
+        let index = if self.stream.check(&TokenKind::Comma) {
+            let mut indices = vec![first_index];
+            while self.stream.check(&TokenKind::Comma) {
+                self.stream.advance(); // consume comma
+                indices.push(self.parse_expr()?);
+            }
+            let tuple_span = match (indices.first(), indices.last()) {
+                (Some(first), Some(last)) => first.span.merge(last.span),
+                _ => bracket_span, // fallback to the opening bracket span
+            };
+            Expr::new(ExprKind::Tuple(indices.into()), tuple_span)
+        } else {
+            first_index
+        };
+
+        // E013: Check for unclosed index after expression
+        if !self.stream.check(&TokenKind::RBracket) {
+            if self.stream.check(&TokenKind::Semicolon) || self.stream.at_end() {
+                return Err(ParseError::stmt_unclosed_index(bracket_span)
+                    .with_help("missing closing ']' for index access"));
+            }
+        }
+
+        self.stream.expect(TokenKind::RBracket)?;
+        let span = lhs_span.merge(self.stream.make_span(start_pos));
+        Ok((
+            Expr::new(
+                ExprKind::Index {
+                    expr: Box::new(lhs), // MOVE instead of clone!
+                    index: Box::new(index),
+                },
+                span,
+            ),
+            true,
+        ))
     }
 
     /// Convert a token kind to a binary operator.
@@ -4599,13 +4675,7 @@ impl<'a> RecursiveParser<'a> {
     }
 
     fn parse_call_args(&mut self) -> ParseResult<Vec<Expr>> {
-        let open_paren_span = self.stream.expect(TokenKind::LParen)?.span;
-
-        // E012: Check for immediately unclosed call (foo(;)
-        if self.stream.check(&TokenKind::Semicolon) {
-            return Err(ParseError::stmt_unclosed_call(open_paren_span)
-                .with_help("missing closing ')' for function call"));
-        }
+        let open_paren_span = self.expect_call_start()?;
 
         if self.stream.check(&TokenKind::RParen) {
             self.stream.advance();
@@ -4614,6 +4684,24 @@ impl<'a> RecursiveParser<'a> {
 
         let args = self.comma_separated(|p| p.parse_call_arg())?;
 
+        self.expect_call_end(open_paren_span)?;
+
+        Ok(args)
+    }
+
+    fn expect_call_start(&mut self) -> ParseResult<Span> {
+        let open_paren_span = self.stream.expect(TokenKind::LParen)?.span;
+
+        // E012: Check for immediately unclosed call (foo(;)
+        if self.stream.check(&TokenKind::Semicolon) {
+            return Err(ParseError::stmt_unclosed_call(open_paren_span)
+                .with_help("missing closing ')' for function call"));
+        }
+
+        Ok(open_paren_span)
+    }
+
+    fn expect_call_end(&mut self, open_paren_span: Span) -> ParseResult<()> {
         // E012: Check for unclosed call after args
         if !self.stream.check(&TokenKind::RParen) {
             if self.stream.check(&TokenKind::Semicolon) || self.stream.at_end() {
@@ -4624,7 +4712,7 @@ impl<'a> RecursiveParser<'a> {
 
         self.stream.expect(TokenKind::RParen)?;
 
-        Ok(args)
+        Ok(())
     }
 
     /// Parse a single call argument, which may be either:
@@ -4634,32 +4722,30 @@ impl<'a> RecursiveParser<'a> {
     /// Named arguments use the syntax `identifier: expression` where the identifier
     /// is followed by a colon (not a double-colon path separator).
     fn parse_call_arg(&mut self) -> ParseResult<Expr> {
-        // Check for named argument pattern: Ident followed by Colon (not ColonColon)
-        // We use lookahead to avoid consuming tokens prematurely
-        if let Some(Token {
-            kind: TokenKind::Ident(_),
-            ..
-        }) = self.stream.peek()
+        if matches!(self.stream.peek_kind(), Some(TokenKind::Ident(_)))
+            && self.stream.peek_nth_kind(1) == Some(&TokenKind::Colon)
         {
-            if self.stream.peek_nth_kind(1) == Some(&TokenKind::Colon) {
-                // This is a named argument: name: value
-                let start_pos = self.stream.position();
-                let name_str = self.consume_ident()?;
-                let name_span = self.stream.current_span();
-                self.stream.advance(); // consume ':'
-                let value = self.parse_expr()?;
-                let span = self.stream.make_span(start_pos);
-                return Ok(Expr::new(
-                    ExprKind::NamedArg {
-                        name: Ident::new(name_str, name_span),
-                        value: Heap::new(value),
-                    },
-                    span,
-                ));
-            }
+            self.parse_named_call_arg()
+        } else {
+            self.parse_expr()
         }
-        // Otherwise parse as a normal expression
-        self.parse_expr()
+    }
+
+    fn parse_named_call_arg(&mut self) -> ParseResult<Expr> {
+        // This is a named argument: name: value
+        let start_pos = self.stream.position();
+        let name_str = self.consume_ident()?;
+        let name_span = self.stream.current_span();
+        self.stream.advance(); // consume ':'
+        let value = self.parse_expr()?;
+        let span = self.stream.make_span(start_pos);
+        return Ok(Expr::new(
+            ExprKind::NamedArg {
+                name: Ident::new(name_str, name_span),
+                value: Heap::new(value),
+            },
+            span,
+        ));
     }
 
     // ========================================================================
@@ -5195,7 +5281,7 @@ impl<'a> RecursiveParser<'a> {
             Ok(Expr::new(
                 ExprKind::ForAwait {
                     label,
-                    pattern,
+                    pattern: Heap::new(pattern),
                     async_iterable: Box::new(iter),
                     body,
                     invariants,
@@ -5207,7 +5293,7 @@ impl<'a> RecursiveParser<'a> {
             Ok(Expr::new(
                 ExprKind::For {
                     label,
-                    pattern,
+                    pattern: Heap::new(pattern),
                     iter: Box::new(iter),
                     body,
                     invariants,
@@ -5376,7 +5462,7 @@ impl<'a> RecursiveParser<'a> {
 
             let span = self.stream.make_span(start_pos);
             Ok(RecoverBody::Closure {
-                param,
+                param: Heap::new(param),
                 body: Box::new(body),
                 span,
             })
@@ -5424,7 +5510,7 @@ impl<'a> RecursiveParser<'a> {
 
             let span = self.stream.make_span(start_pos);
             Ok(RecoverBody::Closure {
-                param,
+                param: Heap::new(param),
                 body: Box::new(body),
                 span,
             })

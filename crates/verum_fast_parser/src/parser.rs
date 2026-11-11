@@ -630,24 +630,31 @@ impl<'a> RecursiveParser<'a> {
                     self.stream.current_span(),
                 ));
             }
-            if self.stream.consume(&TokenKind::Comma).is_none() {
-                break;
-            }
-            // Allow trailing comma: check for common closing delimiters
-            // Note: Only treat > as delimiter if we're not inside braces (for refinement types)
-            // LBrace is added to support trailing comma in where clauses: where T: Clone, { ... }
-            if self.stream.at_end()
-                || self.stream.check(&TokenKind::RBrace)
-                || self.stream.check(&TokenKind::LBrace)
-                || self.stream.check(&TokenKind::RParen)
-                || self.stream.check(&TokenKind::RBracket)
-                || (self.brace_depth == 0 && (self.stream.check(&TokenKind::Gt) || self.pending_gt))
-            {
+            if !self.continue_comma_separated() {
                 break;
             }
         }
 
         Ok(items)
+    }
+
+    fn continue_comma_separated(&mut self) -> bool {
+        if self.stream.consume(&TokenKind::Comma).is_none() {
+            return false;
+        }
+        // Allow trailing comma: check for common closing delimiters
+        // Note: Only treat > as delimiter if we're not inside braces (for refinement types)
+        // LBrace is added to support trailing comma in where clauses: where T: Clone, { ... }
+        if self.stream.at_end()
+            || self.stream.check(&TokenKind::RBrace)
+            || self.stream.check(&TokenKind::LBrace)
+            || self.stream.check(&TokenKind::RParen)
+            || self.stream.check(&TokenKind::RBracket)
+            || (self.brace_depth == 0 && (self.stream.check(&TokenKind::Gt) || self.pending_gt))
+        {
+            return false;
+        }
+        true
     }
 
     /// Parse content delimited by opening and closing tokens.

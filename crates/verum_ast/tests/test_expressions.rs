@@ -527,7 +527,7 @@ fn test_nested_loops() {
     let inner_loop = Expr::new(
         ExprKind::For {
             label: Maybe::None,
-            pattern: Pattern::ident(test_ident("j"), false, span),
+            pattern: Heap::new(Pattern::ident(test_ident("j"), false, span)),
             iter: Heap::new(Expr::ident(test_ident("inner_range"))),
             body: Block {
                 stmts: List::from(vec![Stmt::new(
@@ -549,7 +549,7 @@ fn test_nested_loops() {
     let outer_loop = Expr::new(
         ExprKind::For {
             label: Maybe::None,
-            pattern: Pattern::ident(test_ident("i"), false, span),
+            pattern: Heap::new(Pattern::ident(test_ident("i"), false, span)),
             iter: Heap::new(Expr::ident(test_ident("outer_range"))),
             body: Block {
                 stmts: List::from(vec![Stmt::new(

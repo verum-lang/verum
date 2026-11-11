@@ -284,7 +284,7 @@ pub enum PatternKind {
         /// Binding name for the narrowed value
         binding: Ident,
         /// Type to test against
-        test_type: crate::ty::Type,
+        test_type: Heap<crate::ty::Type>,
     },
 
     /// Stream pattern for matching and destructuring lazy streams/iterators.

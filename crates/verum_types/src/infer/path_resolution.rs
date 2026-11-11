@@ -861,7 +861,7 @@ impl TypeChecker {
     pub(crate) fn compute_parent_module_path(
         &self,
         current_path: &Text,
-        segments: &SmallVec<[verum_ast::ty::PathSegment; 4]>,
+        segments: &[verum_ast::ty::PathSegment],
     ) -> Option<String> {
         use verum_ast::ty::PathSegment;
 

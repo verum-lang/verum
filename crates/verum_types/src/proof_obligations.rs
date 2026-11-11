@@ -9,7 +9,7 @@
 //! See `docs/architecture/model-theoretic-semantics.md` for the full
 //! specification.
 
-use smallvec::{SmallVec, smallvec};
+use smallvec::smallvec;
 use verum_ast::Ident;
 use verum_ast::decl::{ImplDecl, ImplItem, ImplItemKind, ProtocolItemKind, TypeDecl, TypeDeclBody};
 use verum_ast::expr::{Expr, ExprKind};
@@ -59,7 +59,7 @@ impl ImplBindings {
             match &item.kind {
                 ImplItemKind::Function(func) => {
                     let name = Text::from(func.name.name.as_str());
-                    let segments: SmallVec<[PathSegment; 4]> = smallvec![
+                    let segments = smallvec![
                         PathSegment::Name(Ident::new(for_type_name.clone(), func.name.span)),
                         PathSegment::Name(Ident::new(name.clone(), func.name.span)),
                     ];
@@ -77,7 +77,7 @@ impl ImplBindings {
                 }
                 ImplItemKind::Const { name, .. } => {
                     let key = Text::from(name.name.as_str());
-                    let segments: SmallVec<[PathSegment; 4]> = smallvec![
+                    let segments = smallvec![
                         PathSegment::Name(Ident::new(for_type_name.clone(), name.span)),
                         PathSegment::Name(Ident::new(key.clone(), name.span)),
                     ];
@@ -205,7 +205,7 @@ fn substitute_self_in_path(path: &Path, for_type: &Type, bindings: &ImplBindings
 
         // Value-level lookup (methods / consts).
         if let Some(concrete_path) = bindings.lookup_value(name) {
-            let mut result: SmallVec<[PathSegment; 4]> = concrete_path.segments.clone();
+            let mut result = concrete_path.segments.clone();
             for seg in path.segments.iter().skip(2) {
                 result.push(seg.clone());
             }
@@ -218,7 +218,7 @@ fn substitute_self_in_path(path: &Path, for_type: &Type, bindings: &ImplBindings
         // Type-level lookup — replace with for_type head, keep remaining segments.
         if bindings.lookup_type(name).is_some() {
             let type_name = extract_type_name(for_type);
-            let mut result: SmallVec<[PathSegment; 4]> =
+            let mut result =
                 smallvec![PathSegment::Name(Ident::new(type_name, path.span))];
             for seg in path.segments.iter().skip(1) {
                 result.push(seg.clone());
@@ -232,7 +232,7 @@ fn substitute_self_in_path(path: &Path, for_type: &Type, bindings: &ImplBindings
 
     // Unknown member of Self — replace prefix with for_type, leave the rest.
     let type_name = extract_type_name(for_type);
-    let mut result: SmallVec<[PathSegment; 4]> =
+    let mut result =
         smallvec![PathSegment::Name(Ident::new(type_name, path.span))];
     for seg in path.segments.iter().skip(1) {
         result.push(seg.clone());
