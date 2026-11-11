@@ -569,6 +569,7 @@ mod tests {
         };
         let result = ExhaustivenessResult {
             is_exhaustive: true,
+            has_unverified_guards: false,
             uncovered_witnesses: List::new(),
             redundant_patterns: List::new(),
             all_guarded: false,
@@ -610,6 +611,7 @@ mod tests {
         };
         let result = ExhaustivenessResult {
             is_exhaustive: false,
+            has_unverified_guards: false,
             uncovered_witnesses: List::new(),
             redundant_patterns: List::new(),
             all_guarded: false,
@@ -650,6 +652,7 @@ mod tests {
         };
         let result = ExhaustivenessResult {
             is_exhaustive: true,
+            has_unverified_guards: false,
             uncovered_witnesses: List::new(),
             redundant_patterns: List::new(),
             all_guarded: false,
@@ -681,6 +684,7 @@ mod tests {
         };
         let result = ExhaustivenessResult {
             is_exhaustive: true,
+            has_unverified_guards: false,
             uncovered_witnesses: List::new(),
             redundant_patterns: List::new(),
             all_guarded: false,

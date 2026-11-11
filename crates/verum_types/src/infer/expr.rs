@@ -476,6 +476,71 @@ impl TypeChecker {
         }
     }
 
+    /// Both bidirectional paths submit the same source patterns and guards.
+    /// Conditional coverage is never presented as a concrete counterexample.
+    fn check_match_coverage(
+        &mut self,
+        scrutinee: &Type,
+        arms: &verum_common::List<verum_ast::pattern::MatchArm>,
+        span: verum_ast::span::Span,
+    ) -> Result<()> {
+        let applied = self.unifier.apply(scrutinee);
+        let mut carrier = &applied;
+        while let Type::Reference { inner, .. }
+        | Type::CheckedReference { inner, .. }
+        | Type::UnsafeReference { inner, .. } = carrier
+        {
+            carrier = inner;
+        }
+        let resolved = self.expand_scrut_deep(carrier, 3)?;
+        if !matches!(
+            &resolved,
+            Type::Variant(_) | Type::Bool | Type::Int | Type::Float
+        ) {
+            return Ok(());
+        }
+        let patterns: Vec<_> = arms
+            .iter()
+            .map(|arm| match &arm.guard {
+                Some(guard) => verum_ast::pattern::Pattern::new(
+                    verum_ast::pattern::PatternKind::Guard {
+                        pattern: verum_common::Heap::new(arm.pattern.clone()),
+                        guard: guard.clone(),
+                    },
+                    arm.pattern.span,
+                ),
+                None => arm.pattern.clone(),
+            })
+            .collect();
+        let complex = arms
+            .iter()
+            .any(|arm| Self::pattern_has_complex_forms(&arm.pattern));
+        let message = match crate::exhaustiveness::check_exhaustiveness(&patterns, &resolved, &self.ctx.env) {
+            Ok(result) if result.is_exhaustive => return Ok(()),
+            Ok(result) if result.has_unverified_guards || complex => {
+                "match coverage is not established; add an unconditional covering arm or simplify the patterns".to_string()
+            }
+            Ok(result) => format!("non-exhaustive patterns: `{}` not covered",
+                result.uncovered_witnesses.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ")),
+            Err(error) => format!("match coverage is not established: {error}"),
+        };
+        if crate::ctor_trace_enabled() {
+            eprintln!(
+                "[ctor-trace] match coverage pre={applied:?} resolved={resolved:?} unresolved={}",
+                Self::scrut_has_unresolved_payload(&resolved)
+            );
+        }
+        // Preserve the existing diagnostic boundary for patterns whose nested
+        // representation is not yet fully handled by the matrix checker.
+        let diagnostic = if complex {
+            Diagnostic::new_warning(message, span_to_line_col(span), "W0601")
+        } else {
+            Diagnostic::new_error(message, span_to_line_col(span), "E0601")
+        };
+        self.diagnostics.push(diagnostic);
+        Ok(())
+    }
+
     /// Inner implementation of check_expr.
     fn check_expr_inner(&mut self, expr: &Expr, expected: &Type) -> Result<InferResult> {
         let _global_guard = GlobalDepthGuard::enter()?;
@@ -829,110 +894,7 @@ impl TypeChecker {
 
                 self.borrow_tracker.exit_scope(); // T0264: release scrutinee borrow at match end
 
-                // Exhaustiveness check (check_expr path)
-                // Only for variant/bool types without guards to avoid false positives
-                let applied_scrut_chk = self.unifier.apply(&scrutinee_ty);
-                // T0647: auto-deref the scrutinee for exhaustiveness purposes,
-                // mirroring infer_expr's Match arm (see the identical block a few
-                // hundred lines below, "Auto-deref scrutinee for match expressions").
-                // Without this, matching on a borrowed sum type (`&Token`,
-                // `&checked Token`, `&unsafe Token`) left `applied_scrut_chk` as
-                // Type::Reference{..}, which never matches the `Type::Variant(_) |
-                // Type::Bool` gate below — so exhaustiveness silently never ran for
-                // any match whose scrutinee is a reference, independent of guards.
-                // Scoped to this local binding only: `scrutinee_ty` itself (used for
-                // `bind_pattern` above) is untouched. bind_pattern_scheme already
-                // auto-derefs references on its own (infer/patterns.rs) — pattern
-                // binding was never the broken half, only this exhaustiveness chain.
-                let applied_scrut_chk = match &applied_scrut_chk {
-                    Type::Reference { inner, .. }
-                    | Type::CheckedReference { inner, .. }
-                    | Type::UnsafeReference { inner, .. } => match &**inner {
-                        Type::Variant(_)
-                        | Type::Generic { .. }
-                        | Type::Named { .. }
-                        | Type::Record(_) => (**inner).clone(),
-                        _ => applied_scrut_chk,
-                    },
-                    _ => applied_scrut_chk,
-                };
-                // Expand the scrutinee to its variant form, SUBSTITUTING the
-                // concrete type arguments.  The pre-fix code used a bare
-                // `lookup_type(name)` which returns the type's raw variant with
-                // UNSUBSTITUTED payload vars (`Poll`'s `Ready(T)`), so a match
-                // like `match y.poll(cx) { Poll.Ready(()) => .. }` over
-                // `Poll<Unit>` saw `Ready(Var)` and reported `Ready(_)` not
-                // covered.  `expand_generic_to_variant` substitutes the args
-                // (`Ready(Unit)`), so the `()` pattern is recognised as
-                // exhaustive; non-variant types pass through unchanged.
-                let resolved_scrut = self.expand_scrut_deep(&applied_scrut_chk, 3)?;
-                let should_check = matches!(&resolved_scrut, Type::Variant(_) | Type::Bool);
-                let has_guards = arms.iter().any(|arm| arm.guard.is_some());
-                // Check if patterns contain complex forms the exhaustiveness checker can't handle
-                let has_complex_patterns = arms
-                    .iter()
-                    .any(|arm| Self::pattern_has_complex_forms(&arm.pattern));
-                if should_check && !has_guards {
-                    let match_patterns: Vec<verum_ast::pattern::Pattern> =
-                        arms.iter().map(|arm| arm.pattern.clone()).collect();
-                    if let Ok(result) = crate::exhaustiveness::check_exhaustiveness(
-                        &match_patterns,
-                        &resolved_scrut,
-                        &self.ctx.env,
-                    ) {
-                        if !result.is_exhaustive {
-                            let witness_str = result
-                                .uncovered_witnesses
-                                .iter()
-                                .map(|w| format!("{}", w))
-                                .collect::<Vec<_>>()
-                                .join(", ");
-                            let msg =
-                                format!("non-exhaustive patterns: `{}` not covered", witness_str);
-                            if crate::ctor_trace_enabled() {
-                                // BEFORE expansion as well as after: the
-                                // post-expansion form shows unresolved
-                                // payloads without saying whether the
-                                // arguments were lost at the call or
-                                // dropped by the expansion. The two
-                                // together name which.
-                                eprintln!(
-                                    "[ctor-trace] E0601(check) pre={:?}",
-                                    applied_scrut_chk
-                                );
-                                eprintln!(
-                                    "[ctor-trace] E0601(check) scrut={:?} unresolved={}",
-                                    resolved_scrut,
-                                    Self::scrut_has_unresolved_payload(&resolved_scrut)
-                                );
-                            }
-                            if has_complex_patterns {
-                                // T0595: downgrade to a warning ONLY for complex (nested)
-                                // patterns, where an unresolved payload type can make the
-                                // exhaustiveness result a false positive. A missing TOP-LEVEL
-                                // variant (simple patterns) is definitive regardless of any
-                                // OTHER variant's payload being generic — emit E0601. The old
-                                // `|| scrut_has_unresolved_payload` disjunct wrongly downgraded
-                                // non-exhaustive matches on generic scrutinees to a warning, so
-                                // they compiled and then panicked at runtime.
-                                let diag = Diagnostic::new_warning(
-                                    msg,
-                                    span_to_line_col(expr.span),
-                                    "W0601",
-                                );
-                                self.diagnostics.push(diag);
-                            } else {
-                                // Simple patterns - emit error
-                                let diag = Diagnostic::new_error(
-                                    msg,
-                                    span_to_line_col(expr.span),
-                                    "E0601",
-                                );
-                                self.diagnostics.push(diag);
-                            }
-                        }
-                    }
-                }
+                self.check_match_coverage(&scrutinee_ty, arms, expr.span)?;
 
                 Ok(InferResult::new(expected.clone()))
             }
@@ -5858,74 +5820,7 @@ impl TypeChecker {
                         }
                     }
 
-                    // Exhaustiveness check: verify all possible values are covered
-                    // Only check for types with finite constructors (Variant, Bool)
-                    // to avoid false positives with Int/Float/Text and guarded patterns.
-                    let applied_scrut = self.unifier.apply(&scrut_ty);
-                    // Expand to the variant form WITH type-argument substitution
-                    // (see the check_expr path above): a bare `lookup_type` would
-                    // leave `Poll`'s `Ready(T)` payload unsubstituted, breaking
-                    // `Poll.Ready(())` exhaustiveness over `Poll<Unit>`.
-                    let resolved_scrut = self.expand_scrut_deep(&applied_scrut, 3)?;
-                    let should_check_exhaustiveness =
-                        matches!(&resolved_scrut, Type::Variant(_) | Type::Bool);
-                    // Don't check if any arm has a guard (guards make analysis imprecise)
-                    let has_guards = arms.iter().any(|arm| arm.guard.is_some());
-                    let has_complex_patterns = arms
-                        .iter()
-                        .any(|arm| Self::pattern_has_complex_forms(&arm.pattern));
-                    if should_check_exhaustiveness && !has_guards {
-                        let match_patterns: Vec<verum_ast::pattern::Pattern> =
-                            arms.iter().map(|arm| arm.pattern.clone()).collect();
-                        match crate::exhaustiveness::check_exhaustiveness(
-                            &match_patterns,
-                            &resolved_scrut,
-                            &self.ctx.env,
-                        ) {
-                            Ok(result) => {
-                                if !result.is_exhaustive {
-                                    let witness_str = result
-                                        .uncovered_witnesses
-                                        .iter()
-                                        .map(|w| format!("{}", w))
-                                        .collect::<Vec<_>>()
-                                        .join(", ");
-                                    let msg = format!(
-                                        "non-exhaustive patterns: `{}` not covered",
-                                        witness_str
-                                    );
-                                    if crate::ctor_trace_enabled() {
-                                        eprintln!(
-                                            "[ctor-trace] E0601(infer) scrut={:?} unresolved={}",
-                                            resolved_scrut,
-                                            Self::scrut_has_unresolved_payload(&resolved_scrut)
-                                        );
-                                    }
-                                    if has_complex_patterns {
-                                        // T0595: see the check-path note — warn only for complex
-                                        // nested patterns; a missing top-level variant is
-                                        // definitive even when another variant's payload is generic.
-                                        let diag = Diagnostic::new_warning(
-                                            msg,
-                                            span_to_line_col(expr.span),
-                                            "W0601",
-                                        );
-                                        self.diagnostics.push(diag);
-                                    } else {
-                                        let diag = Diagnostic::new_error(
-                                            msg,
-                                            span_to_line_col(expr.span),
-                                            "E0601",
-                                        );
-                                        self.diagnostics.push(diag);
-                                    }
-                                }
-                            }
-                            Err(_) => {
-                                // Exhaustiveness check failed - skip silently
-                            }
-                        }
-                    }
+                    self.check_match_coverage(&scrut_ty, arms, expr.span)?;
 
                     self.borrow_tracker.exit_scope(); // T0264: release scrutinee borrow at match end
                     Ok(InferResult::new(result_ty))

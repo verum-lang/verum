@@ -120,8 +120,12 @@ pub struct ExhaustivenessResult {
     /// Whether the patterns cover all possible cases
     pub is_exhaustive: bool,
 
-    /// Concrete examples of uncovered cases
-    /// Each witness represents a value that wouldn't match any pattern
+    /// Conditional rows were not proved. In a negative result, witnesses are
+    /// candidates outside unconditional coverage, not established counterexamples.
+    pub has_unverified_guards: bool,
+
+    /// Examples outside the established coverage; consult has_unverified_guards
+    /// before presenting them as values that cannot match any arm.
     pub uncovered_witnesses: List<Witness>,
 
     /// Indices of patterns that are unreachable (redundant)
@@ -143,6 +147,7 @@ impl ExhaustivenessResult {
     pub fn exhaustive() -> Self {
         Self {
             is_exhaustive: true,
+            has_unverified_guards: false,
             uncovered_witnesses: List::new(),
             redundant_patterns: List::new(),
             all_guarded: false,
@@ -155,6 +160,7 @@ impl ExhaustivenessResult {
     pub fn non_exhaustive(witnesses: List<Witness>) -> Self {
         Self {
             is_exhaustive: false,
+            has_unverified_guards: false,
             uncovered_witnesses: witnesses,
             redundant_patterns: List::new(),
             all_guarded: false,
@@ -296,6 +302,7 @@ pub fn check_exhaustiveness_with_options<'a>(
                     // SMT proved exhaustiveness - return success
                     return Ok(ExhaustivenessResult {
                         is_exhaustive: true,
+                        has_unverified_guards: false,
                         uncovered_witnesses: List::new(),
                         redundant_patterns: redundant,
                         all_guarded: true,
@@ -314,6 +321,7 @@ pub fn check_exhaustiveness_with_options<'a>(
 
                     return Ok(ExhaustivenessResult {
                         is_exhaustive: false,
+                        has_unverified_guards: false,
                         uncovered_witnesses: witnesses,
                         redundant_patterns: redundant,
                         all_guarded: true,
@@ -387,6 +395,7 @@ pub fn check_exhaustiveness_with_options<'a>(
 
     Ok(ExhaustivenessResult {
         is_exhaustive: uncovered.is_empty(),
+        has_unverified_guards: !uncovered.is_empty() && matrix.rows.iter().any(|row| row.has_guard),
         uncovered_witnesses: uncovered,
         redundant_patterns: redundant,
         all_guarded,
@@ -476,9 +485,17 @@ fn analyze_range_patterns_in_matrix(matrix: &CoverageMatrix) -> Option<RangeOver
     // Extract range patterns from the matrix
     for (idx, row) in matrix.rows.iter().enumerate() {
         for col in row.columns.iter() {
-            if let PatternColumn::Range { start, end, inclusive } = col {
+            if let PatternColumn::Range {
+                start,
+                end,
+                inclusive,
+            } = col
+            {
                 if let Some(interval) = Interval::from_range(
-                    *start, *end, *inclusive, Interval::new(default_min, default_max),
+                    *start,
+                    *end,
+                    *inclusive,
+                    Interval::new(default_min, default_max),
                 ) {
                     ranges.push((idx, interval));
                 }

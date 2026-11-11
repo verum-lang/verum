@@ -285,9 +285,18 @@ impl<'a> DependentExhaustivenessChecker<'a> {
                     || (n1.as_str() == "Succ" && n2.as_str() == "Zero")
             }
             // Different meta values - incompatible
-            (Type::Meta { value: crate::ty::ValueTerm::Constant(left), ty: left_ty, .. },
-             Type::Meta { value: crate::ty::ValueTerm::Constant(right), ty: right_ty, .. }) =>
-                left_ty == right_ty && !crate::ty::same_constant_identity(left, right),
+            (
+                Type::Meta {
+                    value: crate::ty::ValueTerm::Constant(left),
+                    ty: left_ty,
+                    ..
+                },
+                Type::Meta {
+                    value: crate::ty::ValueTerm::Constant(right),
+                    ty: right_ty,
+                    ..
+                },
+            ) => left_ty == right_ty && !crate::ty::same_constant_identity(left, right),
             _ => false,
         }
     }
@@ -404,6 +413,8 @@ impl<'a> DependentExhaustivenessChecker<'a> {
 
         Ok(ExhaustivenessResult {
             is_exhaustive: uncovered.is_empty(),
+            has_unverified_guards: !uncovered.is_empty()
+                && matrix.rows.iter().any(|row| row.has_guard),
             uncovered_witnesses: uncovered,
             redundant_patterns: redundant,
             all_guarded,
@@ -886,10 +897,7 @@ mod hou_strategy_tests {
         // 1 undecidable (FullHou). The kernel admit policy gates on
         // this — a wrong classification would let an undecidable
         // strategy through without `@verify(thorough)`.
-        let decidable = HouStrategy::ALL
-            .iter()
-            .filter(|v| v.is_decidable())
-            .count();
+        let decidable = HouStrategy::ALL.iter().filter(|v| v.is_decidable()).count();
         let undecidable = HouStrategy::ALL
             .iter()
             .filter(|v| !v.is_decidable())
