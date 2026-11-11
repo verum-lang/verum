@@ -2745,9 +2745,9 @@ impl TypeChecker {
                                 );
                                 self.diagnostics.push(diag);
                             }
-                            // Valid, a value not yet known, a narrowed
-                            // assumption, or an error reaching the solver.
-                            _ => {}
+                            Err(error) => return Err(error),
+                            // Valid, a value not yet known, or a narrowed assumption.
+                            Ok(_) => {}
                         }
                     }
                 }
@@ -8150,7 +8150,9 @@ impl TypeChecker {
                                 }
                                 subst_pred.predicate = self.refinement.substitute_all_in_expr(
                                     &subst_pred.predicate, &replacements,
-                                );
+                                ).map_err(|error| TypeError::OtherWithCodeSpanned {
+                                    code: "E500".into(), msg: error.message, span: error.span,
+                                })?;
                                 // Constant-fold arithmetic that became pure after
                                 // substitution. Without this, a predicate like
                                 // `count <= src_len - offset` becomes

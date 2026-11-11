@@ -57,3 +57,19 @@ fn established_constant_arguments_remain_valid() {
         diagnostics("fn need(a: Int, b: Int, c: Int {self == a}) {} fn caller() {need(7, 0, 7);}");
     assert!(found.is_empty(), "{found:?}");
 }
+
+#[test]
+fn a_transport_failure_is_not_discarded_by_argument_checking() {
+    let found = diagnostics(
+        r#"
+fn need(value: Int { {fn nested() -> Int {1} nested() == it} }) {}
+fn caller() {need(1);}
+"#,
+    );
+    assert!(
+        found
+            .iter()
+            .any(|message| message.contains("local declaration") && message.contains("E500")),
+        "{found:?}"
+    );
+}

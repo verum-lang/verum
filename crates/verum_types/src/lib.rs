@@ -225,6 +225,7 @@ pub mod proof_obligations; // T1-R phase 2: model-theoretic discharge of protoco
 pub mod protocol;
 pub mod references; // Deref protocol implementations for reference types
 pub mod refinement;
+mod refinement_substitution;
 pub mod refinement_diagnostics;
 pub mod refinement_entailment;
 pub(crate) mod value_parameter_domain;
