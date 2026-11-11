@@ -79,6 +79,18 @@ pub fn scratch_features() -> Result<verum_compiler::language_features::LanguageF
     manifest_to_features(&m)
 }
 
+/// Resolve a file's owning project policy before applying explicit CLI
+/// overrides. A file outside a project retains standalone defaults.
+pub fn source_features(input: &std::path::Path) -> Result<verum_compiler::language_features::LanguageFeatures> {
+    let input = std::path::absolute(input)?;
+    let Some(path) = verum_compiler::pipeline::CompilationPipeline::source_project_manifest(&input) else {
+        return scratch_features();
+    };
+    let mut manifest = Manifest::from_file(&path)?;
+    apply_global(&mut manifest)?;
+    manifest_to_features(&manifest)
+}
+
 /// Translate a fully-merged manifest into the compiler-facing
 /// [`verum_compiler::language_features::LanguageFeatures`] value.
 ///

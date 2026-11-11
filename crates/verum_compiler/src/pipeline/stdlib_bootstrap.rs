@@ -1965,9 +1965,10 @@ one module and therefore never seeded",
                     mls_level: verum_common::Text::from("public"),
                     forbid_stdlib_extern: false,
                 };
-                let diagnostics = crate::phases::safety_gate::check_safety(
+                let diagnostics = crate::phases::safety_gate::check_safety_at(
                     std::slice::from_ref(*ast_module),
                     policy,
+                    Some(self.session),
                 );
                 strict_findings += diagnostics.len();
                 for diagnostic in diagnostics {

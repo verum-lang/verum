@@ -88,7 +88,7 @@ pub fn build(
 
     // Inherit CLI feature overrides so single-file AOT build fires
     // the same gates as `verum build` / `verum run`.
-    let language_features = crate::feature_overrides::scratch_features()?;
+    let language_features = crate::feature_overrides::source_features(&input)?;
     let options = CompilerOptions {
         input: input.clone(),
         output: output_path.clone(),
@@ -155,7 +155,7 @@ pub fn check(file: &str, continue_on_error: bool, parse_only: bool, script_mode:
     // Build LanguageFeatures from any installed CLI overrides so
     // `verum check file.vr -Z safety.unsafe_allowed=false` fires the
     // same gates as `verum run` / `verum build`.
-    let language_features = crate::feature_overrides::scratch_features()?;
+    let language_features = crate::feature_overrides::source_features(&input)?;
     let options = CompilerOptions {
         input,
         output_format: OutputFormat::Human,
@@ -252,7 +252,7 @@ pub fn run_stdin_at(
     let options = CompilerOptions {
         input: input.clone(),
         script_mode: source_mode == verum_common::source_mode::SourceMode::Script,
-        language_features: crate::feature_overrides::scratch_features()?,
+        language_features: crate::feature_overrides::source_features(&input)?,
         ..Default::default()
     };
     run_script_interpreted(
@@ -296,12 +296,9 @@ pub fn run_with_observation(
         return Err(CliError::FileNotFound(file.to_string()));
     }
 
-    // Resolve effective language features from CLI overrides (if any).
-    // Even in single-file mode (no verum.toml), the user can supply
-    // `-Z safety.unsafe_allowed=false` etc. on the command line and
-    // the installed global override set applies. This ensures feature
-    // gates fire identically in Tier 0 (interpreter) AND Tier 1 (AOT).
-    let language_features = crate::feature_overrides::scratch_features()?;
+    // The source's owning project supplies policy; CLI overrides are then
+    // applied identically for interpreter and AOT execution.
+    let language_features = crate::feature_overrides::source_features(&input)?;
 
     match tier_num {
         0 => {
@@ -1859,7 +1856,7 @@ pub fn verify(
     }
 
     let (verify_mode, verify_strategy) = parse_verify_mode(mode)?;
-    let language_features = crate::feature_overrides::scratch_features()?;
+    let language_features = crate::feature_overrides::source_features(&input)?;
     // Always validate the --solver input so typos error out regardless of
     // the `verification` feature. The parsed choice is only forwarded to the
     // compiler when the feature is enabled; otherwise the compiler's Z3

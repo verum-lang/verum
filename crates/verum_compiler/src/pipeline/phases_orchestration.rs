@@ -113,27 +113,18 @@ impl<'s> CompilationPipeline<'s> {
 
     pub(super) fn phase_safety_gate(&self, module: &Module) -> Result<()> {
         let features = self.session.language_features();
-        // Fast path: when every relevant [safety] flag is permissive,
-        // skip the walker entirely — zero cost on the default
-        // configuration.
-        if features.unsafe_allowed()
-            && features.safety.ffi
-            && !features.safety.capability_required
-            && !features.safety.forbid_stdlib_extern
-        {
-            return Ok(());
-        }
+        // The policy owns the permissive fast path. Duplicating only some of
+        // its flags here previously bypassed elevated MLS and strict FFI.
         let policy = crate::phases::safety_gate::SafetyPolicy::from_features(&features.safety);
-        let diags = crate::phases::safety_gate::check_safety(std::slice::from_ref(module), policy);
-        if !diags.is_empty() {
-            let n = diags.len();
-            for d in diags.iter() {
-                self.session.emit_diagnostic(d.clone());
-            }
-            return Err(anyhow::anyhow!(
-                "safety gate rejected {} construct(s); see diagnostics",
-                n
-            ));
+        let diags = crate::phases::safety_gate::check_safety_at(
+            std::slice::from_ref(module), policy, Some(self.session),
+        );
+        let errors = diags.iter().filter(|diagnostic| diagnostic.is_error()).count();
+        self.session.emit_diagnostics(diags);
+        if errors > 0 {
+            // Use the common diagnostic gate so early refusals retain their
+            // actual reason and source information in every entry point.
+            return self.diagnostic_gate().map_err(|error| error.context("safety gate rejected source"));
         }
         Ok(())
     }

@@ -1001,6 +1001,18 @@ impl<'s> CompilationPipeline<'s> {
             || directory.starts_with(root.join("src"))
     }
 
+    /// The manifest owning an absolute source path, using the same boundary
+    /// as module loading. A distant repository manifest does not adopt an
+    /// unrelated standalone script outside its source tree.
+    pub fn source_project_manifest(input: &Path) -> Option<PathBuf> {
+        let directory = input.parent()?;
+        let directory = directory.canonicalize().unwrap_or_else(|_| directory.to_path_buf());
+        let root = Self::nearest_manifest_root(&directory)?;
+        Self::owns_source_dir(root, &directory)
+            .then(|| Self::project_manifest_path(root))
+            .flatten()
+    }
+
     pub(super) fn project_manifest_path(dir: &Path) -> Option<PathBuf> {
         ["Verum.toml", "verum.toml"]
             .into_iter()

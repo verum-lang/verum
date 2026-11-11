@@ -9,9 +9,7 @@
 //! Currently gates:
 //!  - `unsafe { … }` expressions when `safety.unsafe_allowed = false`.
 
-use verum_ast::decl::{FunctionBody, ImplItemKind, Item, ItemKind};
-use verum_ast::expr::{Block, ConditionKind};
-use verum_ast::stmt::StmtKind;
+use verum_ast::visitor::{self, Visitor};
 use verum_ast::{Expr, ExprKind, Module};
 use verum_common::List;
 use verum_diagnostics::{Diagnostic, DiagnosticBuilder};
@@ -80,10 +78,19 @@ impl SafetyPolicy {
 /// diagnostic for every rejected construct. Returns an empty list
 /// when the policy permits everything or no violations are present.
 pub fn check_safety(modules: &[Module], policy: SafetyPolicy) -> List<Diagnostic> {
+    check_safety_at(modules, policy, None)
+}
+
+/// Check source modules with the session's file and offset mapping.
+pub(crate) fn check_safety_at(
+    modules: &[Module],
+    policy: SafetyPolicy,
+    session: Option<&crate::session::Session>,
+) -> List<Diagnostic> {
     let mut diagnostics = List::new();
 
     // Surface elevated MLS levels via tracing for observability.
-    // Operation-level enforcement runs in `walk_item` below
+    // Operation-level enforcement runs in the visitor below
     // (Phase 1 of #266 — surface gate). Pre-fix the gate
     // logged the level but did not enforce.
     if policy.mls_level.as_str() != "public" {
@@ -115,9 +122,10 @@ pub fn check_safety(modules: &[Module], policy: SafetyPolicy) -> List<Diagnostic
     {
         return diagnostics;
     }
+    let mut walker = SafetyGate { policy: &policy, diagnostics: &mut diagnostics, session };
     for module in modules {
-        for item in module.items.iter() {
-            walk_item(item, &policy, &mut diagnostics);
+        for item in &module.items {
+            walker.visit_item(item);
         }
     }
     diagnostics
@@ -131,25 +139,31 @@ pub fn check_unsafe_usage(modules: &[Module], unsafe_allowed: bool) -> List<Diag
     check_safety(modules, p)
 }
 
-fn walk_item(item: &Item, policy: &SafetyPolicy, out: &mut List<Diagnostic>) {
-    match &item.kind {
-        ItemKind::Function(func) => {
-            check_function_decl(func, policy, out);
-            if let Some(body) = &func.body {
-                walk_function_body(body, policy, out);
-            }
+struct SafetyGate<'a> {
+    policy: &'a SafetyPolicy,
+    diagnostics: &'a mut List<Diagnostic>,
+    session: Option<&'a crate::session::Session>,
+}
+
+impl Visitor for SafetyGate<'_> {
+    fn visit_function(&mut self, function: &verum_ast::FunctionDecl) {
+        check_function_decl(function, self.policy, self.diagnostics, self.session);
+        visitor::walk_function(self, function);
+    }
+
+    fn visit_expr(&mut self, expression: &Expr) {
+        if matches!(expression.kind, ExprKind::Unsafe(_)) && !self.policy.unsafe_allowed {
+            self.diagnostics.push(
+                DiagnosticBuilder::error()
+                    .message("`unsafe` blocks are not allowed: `[safety] unsafe_allowed` is disabled")
+                    .span(super::ast_span_to_diagnostic_span(expression.span, self.session))
+                    .help("set `unsafe_allowed = true` under `[safety]` in Verum.toml, or remove `-Z safety.unsafe_allowed=false`")
+                    .build(),
+            );
         }
-        ItemKind::Impl(impl_decl) => {
-            for impl_item in &impl_decl.items {
-                if let ImplItemKind::Function(func) = &impl_item.kind {
-                    check_function_decl(func, policy, out);
-                    if let Some(body) = &func.body {
-                        walk_function_body(body, policy, out);
-                    }
-                }
-            }
-        }
-        _ => {}
+        // Share the AST's traversal of closures, deferred work, nested items,
+        // patterns and type-level expressions instead of maintaining a subset.
+        visitor::walk_expr(self, expression);
     }
 }
 
@@ -317,6 +331,7 @@ fn check_mls_sink_leak(
     func: &verum_ast::decl::FunctionDecl,
     policy: &SafetyPolicy,
     out: &mut List<Diagnostic>,
+    session: Option<&crate::session::Session>,
 ) {
     let floor = MlsLevel::from_manifest_str(policy.mls_level.as_str());
     if floor == MlsLevel::Public {
@@ -349,7 +364,7 @@ fn check_mls_sink_leak(
                 param_max.as_manifest_str(),
                 sink.path.last_segment_name(),
             ))
-            .span(super::ast_span_to_diagnostic_span(func.span, None))
+            .span(super::ast_span_to_diagnostic_span(func.span, session))
             .help(
                 "either remove the classified parameter, drop the sink \
                  context from `using [...]`, or mark the function with \
@@ -363,12 +378,13 @@ fn check_mls_classification(
     func: &verum_ast::decl::FunctionDecl,
     policy: &SafetyPolicy,
     out: &mut List<Diagnostic>,
+    session: Option<&crate::session::Session>,
 ) {
     let floor = MlsLevel::from_manifest_str(policy.mls_level.as_str());
     if floor == MlsLevel::Public {
         return; // Hot path: no manifest floor, no gate.
     }
-    let is_ffi = matches!(&func.extern_abi, verum_common::Maybe::Some(_));
+    let is_ffi = declared_abi(func).is_some();
     let is_unsafe_decl = func.is_unsafe;
     let highest_param = highest_classified_param(func);
     let has_classified_param = highest_param.is_some();
@@ -428,7 +444,7 @@ fn check_mls_classification(
     out.push(
         DiagnosticBuilder::error()
             .message(message)
-            .span(super::ast_span_to_diagnostic_span(func.span, None))
+            .span(super::ast_span_to_diagnostic_span(func.span, session))
             .help(format!(
                 "add `@classification({})` to the function declaration, \
                  or relax `[safety].mls_level` to `\"public\"` in Verum.toml",
@@ -488,9 +504,10 @@ fn check_function_decl(
     func: &verum_ast::decl::FunctionDecl,
     policy: &SafetyPolicy,
     out: &mut List<Diagnostic>,
+    session: Option<&crate::session::Session>,
 ) {
-    check_mls_classification(func, policy, out);
-    check_mls_sink_leak(func, policy, out);
+    check_mls_classification(func, policy, out, session);
+    check_mls_sink_leak(func, policy, out, session);
     if !policy.unsafe_allowed && func.is_unsafe {
         out.push(
             DiagnosticBuilder::error()
@@ -498,7 +515,7 @@ fn check_function_decl(
                     "`unsafe fn {}` is not allowed: `[safety] unsafe_allowed` is disabled",
                     func.name.name
                 ))
-                .span(super::ast_span_to_diagnostic_span(func.span, None))
+                .span(super::ast_span_to_diagnostic_span(func.span, session))
                 .help(
                     "set `unsafe_allowed = true` under `[safety]` in \
                      Verum.toml, or remove the `unsafe` modifier",
@@ -516,7 +533,7 @@ fn check_function_decl(
                         func.name.name,
                         abi.as_str()
                     ))
-                    .span(super::ast_span_to_diagnostic_span(func.span, None))
+                    .span(super::ast_span_to_diagnostic_span(func.span, session))
                     .help(
                         "set `ffi = true` under `[safety]` in Verum.toml, \
                          or remove `-Z safety.ffi=false`",
@@ -551,7 +568,7 @@ fn check_function_decl(
                             func.name.name,
                             abi.as_str()
                         ))
-                        .span(super::ast_span_to_diagnostic_span(func.span, None))
+                        .span(super::ast_span_to_diagnostic_span(func.span, session))
                         .help(
                             "add the `unsafe` modifier to the declaration, or \
                              relax `[safety].ffi_boundary` to `\"lenient\"` in \
@@ -564,126 +581,10 @@ fn check_function_decl(
     }
 }
 
-fn walk_function_body(body: &FunctionBody, policy: &SafetyPolicy, out: &mut List<Diagnostic>) {
-    match body {
-        FunctionBody::Block(blk) => walk_block(blk, policy, out),
-        FunctionBody::Expr(expr) => walk_expr(expr, policy, out),
-    }
-}
-
-fn walk_block(block: &Block, policy: &SafetyPolicy, out: &mut List<Diagnostic>) {
-    for stmt in &block.stmts {
-        walk_stmt(stmt, policy, out);
-    }
-    if let verum_common::Maybe::Some(e) = &block.expr {
-        walk_expr(e, policy, out);
-    }
-}
-
-fn walk_stmt(stmt: &verum_ast::stmt::Stmt, policy: &SafetyPolicy, out: &mut List<Diagnostic>) {
-    match &stmt.kind {
-        StmtKind::Expr { expr, .. } => walk_expr(expr, policy, out),
-        StmtKind::Let { value, .. } => {
-            if let verum_common::Maybe::Some(init) = value {
-                walk_expr(init, policy, out);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn walk_expr(expr: &Expr, policy: &SafetyPolicy, out: &mut List<Diagnostic>) {
-    match &expr.kind {
-        ExprKind::Unsafe(block) => {
-            if !policy.unsafe_allowed {
-                out.push(
-                    DiagnosticBuilder::error()
-                        .message(
-                            "`unsafe` blocks are not allowed: \
-                             `[safety] unsafe_allowed` is disabled",
-                        )
-                        .span(super::ast_span_to_diagnostic_span(expr.span, None))
-                        .help(
-                            "set `unsafe_allowed = true` under `[safety]` in \
-                             Verum.toml, or remove `-Z safety.unsafe_allowed=false`",
-                        )
-                        .build(),
-                );
-            }
-            // Recurse — nested unsafe still worth reporting.
-            walk_block(block, policy, out);
-        }
-        ExprKind::Block(block) => walk_block(block, policy, out),
-        ExprKind::Async(block) | ExprKind::Meta(block) => walk_block(block, policy, out),
-        ExprKind::If {
-            condition,
-            then_branch,
-            else_branch,
-        } => {
-            for cond in &condition.conditions {
-                match cond {
-                    ConditionKind::Expr(e) => walk_expr(e, policy, out),
-                    ConditionKind::Let { value, .. } => walk_expr(value, policy, out),
-                }
-            }
-            walk_block(then_branch, policy, out);
-            if let verum_common::Maybe::Some(else_b) = else_branch {
-                walk_expr(else_b, policy, out);
-            }
-        }
-        ExprKind::Match {
-            expr: scrutinee,
-            arms,
-        } => {
-            walk_expr(scrutinee, policy, out);
-            for arm in arms {
-                if let verum_common::Maybe::Some(guard) = &arm.guard {
-                    walk_expr(guard, policy, out);
-                }
-                walk_expr(&arm.body, policy, out);
-            }
-        }
-        ExprKind::Loop { body, .. } => walk_block(body, policy, out),
-        ExprKind::While {
-            condition, body, ..
-        } => {
-            walk_expr(condition, policy, out);
-            walk_block(body, policy, out);
-        }
-        ExprKind::For { iter, body, .. } => {
-            walk_expr(iter, policy, out);
-            walk_block(body, policy, out);
-        }
-        ExprKind::Call { func, args, .. } => {
-            walk_expr(func, policy, out);
-            for a in args {
-                walk_expr(a, policy, out);
-            }
-        }
-        ExprKind::Binary { left, right, .. } => {
-            walk_expr(left, policy, out);
-            walk_expr(right, policy, out);
-        }
-        ExprKind::Unary { expr, .. } => walk_expr(expr, policy, out),
-        ExprKind::Return(maybe) => {
-            if let verum_common::Maybe::Some(e) = maybe {
-                walk_expr(e, policy, out);
-            }
-        }
-        ExprKind::Paren(inner) => walk_expr(inner, policy, out),
-        _ => {
-            // Other expression kinds (Literal, Path, Lambda, …) are
-            // either leaves or have shapes we don't need to descend
-            // into for this check. A miss here is a false negative —
-            // the safe failure mode.
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use verum_ast::decl::{FunctionDecl, ItemKind};
+    use verum_ast::decl::{FunctionBody, FunctionDecl, Item, ItemKind};
     use verum_ast::expr::{Block, Expr, ExprKind};
     use verum_ast::{FileId, Span};
     use verum_common::{List, Maybe};

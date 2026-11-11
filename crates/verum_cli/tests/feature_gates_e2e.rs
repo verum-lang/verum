@@ -10,7 +10,7 @@
 //! audit-specified error format for invalid input?
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use tempfile::TempDir;
 
@@ -49,6 +49,214 @@ fn stdout(out: &Output) -> String {
 }
 fn stderr(out: &Output) -> String {
     String::from_utf8_lossy(&out.stderr).into_owned()
+}
+
+fn check_source(policy: &str, source: &str) -> Output {
+    let (_temp, dir) = project("source-policy");
+    write_manifest(&dir, policy);
+    let core = dir.join("core");
+    fs::create_dir(&core).unwrap();
+    fs::write(core.join("mod.vr"), "module core; public module prelude {}").unwrap();
+    let entry = dir.join("main.vr");
+    fs::write(
+        &entry,
+        format!("@no_implicit_prelude\nmodule app.main;\n{source}"),
+    )
+    .unwrap();
+    check_file(&entry, &dir, &core, &[])
+}
+
+fn check_file(entry: &Path, cwd: &Path, core: &Path, overrides: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_verum"))
+        .arg("check")
+        .arg(entry)
+        .args(overrides)
+        .current_dir(cwd)
+        .env("VERUM_STDLIB_PATH", core)
+        .env("VERUM_ALLOW_STDLIB_SOURCE_FALLBACK", "1")
+        .env("VERUM_NO_OBJECT_CACHE", "1")
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("real source check")
+}
+
+#[test]
+fn elevated_mls_is_checked_when_other_safety_options_are_permissive() {
+    let policy = "[safety]\nmls_level = \"secret\"\nunsafe_allowed = true\nffi = true\ncapability_required = false\nforbid_stdlib_extern = false\n";
+    let refused = check_source(policy, "unsafe fn probe() {} fn main() {}");
+    assert!(
+        !refused.status.success(),
+        "{}{}",
+        stdout(&refused),
+        stderr(&refused)
+    );
+    assert!(
+        stderr(&refused).contains("requires `@classification(secret)`"),
+        "{}{}",
+        stdout(&refused),
+        stderr(&refused)
+    );
+    assert!(
+        stderr(&refused).contains("main.vr:3:"),
+        "{}",
+        stderr(&refused)
+    );
+    assert!(
+        !stderr(&refused).contains("<unknown>"),
+        "{}",
+        stderr(&refused)
+    );
+    let accepted = check_source(
+        policy,
+        "@classification(secret) unsafe fn probe() {} fn main() {}",
+    );
+    assert!(
+        accepted.status.success(),
+        "{}{}",
+        stdout(&accepted),
+        stderr(&accepted)
+    );
+}
+
+#[test]
+fn strict_ffi_emits_its_warning_without_turning_it_into_an_error() {
+    let declaration = "extern \"C\" fn external_probe() -> Int; fn main() {}";
+    let strict = check_source("[safety]\nffi_boundary = \"strict\"\n", declaration);
+    assert!(
+        strict.status.success(),
+        "{}{}",
+        stdout(&strict),
+        stderr(&strict)
+    );
+    assert!(
+        stderr(&strict).contains("should be marked `unsafe`"),
+        "{}{}",
+        stdout(&strict),
+        stderr(&strict)
+    );
+    let lenient = check_source("[safety]\nffi_boundary = \"lenient\"\n", declaration);
+    assert!(
+        lenient.status.success(),
+        "{}{}",
+        stdout(&lenient),
+        stderr(&lenient)
+    );
+    assert!(
+        !stderr(&lenient).contains("should be marked `unsafe`"),
+        "{}{}",
+        stdout(&lenient),
+        stderr(&lenient)
+    );
+}
+
+#[test]
+fn unsafe_policy_covers_closures_deferred_work_and_nested_declarations() {
+    for source in [
+        "fn main() {let callback = || unsafe {};}",
+        "fn main() {defer unsafe {};}",
+        "fn main() {fn nested() {unsafe {}}}",
+        "fn main() {let pair = (unsafe {1}, 2);}",
+    ] {
+        let refused = check_source("[safety]\nunsafe_allowed = false\n", source);
+        assert!(
+            !refused.status.success(),
+            "{source}\n{}{}",
+            stdout(&refused),
+            stderr(&refused)
+        );
+        assert!(
+            stderr(&refused).contains("`unsafe` blocks are not allowed"),
+            "{source}\n{}{}",
+            stdout(&refused),
+            stderr(&refused)
+        );
+        let accepted = check_source("[safety]\nunsafe_allowed = true\n", source);
+        assert!(
+            accepted.status.success(),
+            "{source}\n{}{}",
+            stdout(&accepted),
+            stderr(&accepted)
+        );
+    }
+}
+
+#[test]
+fn mls_classifies_attribute_ffi_declarations_as_well_as_extern_syntax() {
+    let refused = check_source(
+        "[safety]\nmls_level = \"secret\"\n",
+        "@extern(\"libSystem.B.dylib\") fn external_probe() -> Int; fn main() {}",
+    );
+    assert!(
+        !refused.status.success(),
+        "{}{}",
+        stdout(&refused),
+        stderr(&refused)
+    );
+    assert!(
+        stderr(&refused).contains("requires `@classification(secret)`"),
+        "{}{}",
+        stdout(&refused),
+        stderr(&refused)
+    );
+    let accepted = check_source(
+        "[safety]\nmls_level = \"secret\"\n",
+        "@classification(secret) @extern(\"libSystem.B.dylib\") unsafe fn external_probe() -> Int; fn main() {}",
+    );
+    assert!(
+        accepted.status.success(),
+        "{}{}",
+        stdout(&accepted),
+        stderr(&accepted)
+    );
+}
+
+#[test]
+fn file_policy_uses_source_ownership_and_preserves_explicit_overrides() {
+    let (_temp, owner) = project("owner");
+    write_manifest(&owner, "[safety]\nunsafe_allowed = false\n");
+    let cwd = owner.join("unrelated-cwd");
+    fs::create_dir(&cwd).unwrap();
+    write_manifest(&cwd, "[safety]\nunsafe_allowed = true\n");
+    let core = owner.join("core");
+    fs::create_dir(&core).unwrap();
+    fs::write(core.join("mod.vr"), "module core; public module prelude {}").unwrap();
+    let nested = owner.join("src/deep");
+    fs::create_dir_all(&nested).unwrap();
+    let entry = nested.join("main.vr");
+    let source = "@no_implicit_prelude\nmodule gate_test.deep.main; fn main() {unsafe {}}";
+    fs::write(&entry, source).unwrap();
+    let refused = check_file(&entry, &cwd, &core, &[]);
+    assert!(
+        !refused.status.success(),
+        "{}{}",
+        stdout(&refused),
+        stderr(&refused)
+    );
+    assert!(
+        stderr(&refused).contains("`unsafe` blocks are not allowed"),
+        "{}{}",
+        stdout(&refused),
+        stderr(&refused)
+    );
+    let override_on = check_file(&entry, &cwd, &core, &["-Z", "safety.unsafe_allowed=true"]);
+    assert!(
+        override_on.status.success(),
+        "{}{}",
+        stdout(&override_on),
+        stderr(&override_on)
+    );
+
+    let standalone = owner.join("fixtures/standalone");
+    fs::create_dir_all(&standalone).unwrap();
+    let entry = standalone.join("main.vr");
+    fs::write(&entry, source).unwrap();
+    let accepted = check_file(&entry, &owner, &core, &[]);
+    assert!(
+        accepted.status.success(),
+        "{}{}",
+        stdout(&accepted),
+        stderr(&accepted)
+    );
 }
 
 // ---------------------------------------------------------------------------
