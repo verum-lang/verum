@@ -2181,8 +2181,6 @@ dependencies = [
 [[package]]
 name = "logos-codegen"
 version = "0.16.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "58b3ffaa284e1350d017a57d04ada118c4583cf260c8fb01e0fe28a2e9cf8970"
 dependencies = [
  "fnv",
  "proc-macro2",

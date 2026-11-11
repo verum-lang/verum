@@ -65,7 +65,12 @@ members = [
 # migration: random_range, RngExt).  Until that lands, the crate runs
 # standalone via `cd vcs/fuzz && cargo test --lib` after its own
 # `Cargo.toml` is set to a non-inherited version block.
-exclude = ["vcs/fuzz"]
+exclude = ["vcs/fuzz", "vendor/logos-codegen"]
+
+[patch.crates-io]
+# Share immutable DFA tables and terminal storage across generated states.
+# See vendor/logos-codegen/VERUM-PATCH.md; keep lexical transitions unchanged.
+logos-codegen = { path = "vendor/logos-codegen" }
 
 [workspace.package]
 version = "0.1.0"

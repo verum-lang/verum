@@ -1,0 +1,41 @@
+[dependencies]
+fnv = "1.0.6"
+proc-macro2 = "1.0.9"
+quote = "1.0.3"
+regex-automata = "0.4.9"
+regex-syntax = "0.8.5"
+syn = { version = "2.0.13", features = ["full"] }
+
+[dev-dependencies]
+rstest = "0.26.1"
+insta = "1.41.1"
+prettyplease = "0.2.36"
+
+[features]
+# Enables debug messages
+debug = []
+# Don't use or generate unsafe code
+forbid_unsafe = []
+# Use the state machine codegen instead of the tailcall codegen
+state_machine_codegen = []
+
+[lib]
+bench = false
+
+[package]
+name = "logos-codegen"
+authors.workspace = true
+categories.workspace = true
+description.workspace = true
+edition.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+license.workspace = true
+readme.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+include.workspace = true
+
+[package.metadata.release]
+shared-version = true

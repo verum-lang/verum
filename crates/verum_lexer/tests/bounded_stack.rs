@@ -8,7 +8,7 @@ use verum_lexer::{Lexer, TokenKind};
 // explicitly so the repository's larger RUST_MIN_STACK cannot hide a regression.
 fn on_small_stack(check: impl FnOnce() + Send + 'static) {
     std::thread::Builder::new()
-        .stack_size(2 * 1024 * 1024)
+        .stack_size(512 * 1024)
         .spawn(check)
         .expect("spawn lexer worker")
         .join()
