@@ -1,4 +1,4 @@
-//! Mixed sum telescopes through the packaged compiler's module pipeline.
+//! Declared dependent domains through the packaged compiler's module pipeline.
 use std::{fs, process::Command};
 use tempfile::TempDir;
 
@@ -53,9 +53,36 @@ fn check(body: &str, accepted: bool, diagnostic: &str) {
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(output.status.success(), accepted, "{body}\n{messages}");
-    if !accepted {
+    if !diagnostic.is_empty() {
         assert!(messages.contains(diagnostic), "{messages}");
     }
+}
+
+#[test]
+fn dependent_contracts_preserve_caller_names_through_cli_checking() {
+    for name in ["outside", "b", "it"] {
+        check(
+            &format!(
+                "fn need(a: Int, b: Int, c: Int {{self == a}}) {{}} fn caller({name}: Int) {{need({name}, 0, 0);}}"
+            ),
+            true,
+            "W0500",
+        );
+    }
+    check(
+        "fn need(a: Int, b: Int, c: Int {self == a}) {} fn caller() {need(7, 0, 7);}",
+        true,
+        "",
+    );
+}
+
+#[test]
+fn refinement_transport_errors_reach_cli_diagnostics() {
+    check(
+        "fn need(value: Int {{fn nested() -> Int {1} nested() == it}}) {} fn caller() {need(1);}",
+        false,
+        "local declaration",
+    );
 }
 
 #[test]
