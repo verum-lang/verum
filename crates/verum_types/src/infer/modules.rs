@@ -19981,7 +19981,9 @@ impl TypeChecker {
                                 self.enforce_call_where_clauses(&where_clauses, span)?;
 
                                 // Apply substitution and unifier to get concrete return type
-                                let subst_return_type = return_type.apply_subst(&combined_subst);
+                                let subst_return_type = self.resolve_call_output(
+                                    &return_type, &protocol_bounds, &where_clauses, &combined_subst,
+                                )?;
                                 // T0707: reduce projections AT THE PRODUCER —
                                 // `peek() -> Maybe<&Item<Range<Int>>>` must hand
                                 // consumers `Maybe<&Int>`, or every downstream
