@@ -176,6 +176,8 @@ public module text;
 // Data structures: List, Map, Set, Deque, BTree, PriorityQueue.
 public module collections;
 public mount .collections.list.List;
+public mount .collections.map.Map;
+public mount .collections.set.Set;
 
 // =============================================================================
 // Layer 2.5: Context (Depends on: base, collections, runtime)

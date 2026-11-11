@@ -1410,11 +1410,13 @@ implement TypeId {
     }
 }
 
-implement Eq for TypeId {
+implement PartialEq for TypeId {
     fn eq(&self, other: &TypeId) -> Bool {
         self.0 == other.0
     }
 }
+
+implement Eq for TypeId {}
 
 implement Hash for TypeId {
     fn hash(&self, hasher: &mut Hasher) {
