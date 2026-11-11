@@ -167,3 +167,28 @@ fn nested_functions_must_own_their_context_requirements() {
         &[],
     );
 }
+
+#[test]
+fn recovery_handlers_keep_their_bindings_and_guard_contracts_local() {
+    check(
+        "fn bad() -> Int {let value: Int = try {1} recover |hidden| {2}; hidden}",
+        false,
+        &["E100", "unbound variable: hidden"],
+    );
+    check(
+        "fn bad() -> Int {try {1} recover {hidden if true => 2, _ => hidden}}",
+        false,
+        &["E100", "unbound variable: hidden"],
+    );
+    check(
+        "fn bad() {let value = try {1} recover {_ if 7 => 2, _ => 3};}",
+        false,
+        &["E400", "Bool", "Int"],
+    );
+    check(
+        "fn valid() -> Int {let hidden = 7;
+            let value: Int = try {1} recover |hidden| {2}; hidden + value}",
+        true,
+        &[],
+    );
+}

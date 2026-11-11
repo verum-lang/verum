@@ -32999,6 +32999,90 @@ impl VbcCodegen {
         Ok(None)
     }
 
+    /// Shared recovery dispatch for try/recover and nurseries. Guards select
+    /// a handler only after its pattern matched; exhaustion propagates the
+    /// original error instead of manufacturing a result.
+    fn compile_recover_body(
+        &mut self,
+        recover: &verum_ast::RecoverBody,
+        error: Reg,
+        dest: Reg,
+        demand: ResultDemand,
+    ) -> CodegenResult<()> {
+        match recover {
+            verum_ast::RecoverBody::MatchArms { arms, .. } => {
+                let end = self.ctx.new_label("recover_end");
+                for arm in arms {
+                    let next = self.ctx.new_label("recover_next");
+                    let matched = self.ctx.alloc_temp();
+                    self.compile_pattern_test(&arm.pattern, error, matched)?;
+                    self.ctx
+                        .emit_forward_jump(&next, |offset| Instruction::JmpNot {
+                            cond: matched,
+                            offset,
+                        });
+                    self.ctx.free_temp(matched);
+
+                    self.ctx.enter_scope();
+                    let result = (|| {
+                        self.compile_pattern_bind(&arm.pattern, error)?;
+                        if let Some(guard) = &arm.guard {
+                            let condition = self
+                                .compile_expr(guard)?
+                                .or_internal("recover guard has no value")?;
+                            self.ctx
+                                .emit_forward_jump(&next, |offset| Instruction::JmpNot {
+                                    cond: condition,
+                                    offset,
+                                });
+                            self.ctx.free_temp(condition);
+                        }
+                        self.compile_expr_with_demand(&arm.body, demand)
+                    })();
+                    let (_, defers) = self.ctx.exit_scope(false);
+                    if let Some(value) = result? {
+                        self.ctx.emit(Instruction::Mov {
+                            dst: dest,
+                            src: value,
+                        });
+                        self.ctx.free_temp(value);
+                    }
+                    for instructions in defers {
+                        for instruction in instructions {
+                            self.ctx.emit(instruction);
+                        }
+                    }
+                    self.ctx
+                        .emit_forward_jump(&end, |offset| Instruction::Jmp { offset });
+                    self.ctx.define_label(&next);
+                }
+                self.ctx.emit(Instruction::Throw { error });
+                self.ctx.define_label(&end);
+            }
+            verum_ast::RecoverBody::Closure { param, body, .. } => {
+                self.ctx.enter_scope();
+                let result = (|| {
+                    self.compile_pattern_bind(&param.pattern, error)?;
+                    self.compile_expr_with_demand(body, demand)
+                })();
+                let (_, defers) = self.ctx.exit_scope(false);
+                if let Some(value) = result? {
+                    self.ctx.emit(Instruction::Mov {
+                        dst: dest,
+                        src: value,
+                    });
+                    self.ctx.free_temp(value);
+                }
+                for instructions in defers {
+                    for instruction in instructions {
+                        self.ctx.emit(instruction);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Compiles try-recover: try { ... } recover { pattern => expr, ... }
     ///
     /// Exception handling with pattern-based recovery for caught exceptions.
@@ -33008,8 +33092,6 @@ impl VbcCodegen {
         recover: &verum_ast::RecoverBody,
         demand: ResultDemand,
     ) -> CodegenResult<Option<Reg>> {
-        use verum_ast::expr::RecoverBody;
-
         let dest = self.ctx.alloc_temp();
         let handler_label = self.ctx.new_label("recover_handler");
         let end_label = self.ctx.new_label("try_end");
@@ -33050,94 +33132,7 @@ impl VbcCodegen {
         self.ctx
             .emit(Instruction::GetException { dst: exception_reg });
 
-        // Compile recover body based on its form
-        match recover {
-            RecoverBody::MatchArms { arms, .. } => {
-                // Similar to match expression but over exception
-                for (i, arm) in arms.iter().enumerate() {
-                    let arm_label = self.ctx.new_label(&format!("recover_arm_{}", i));
-                    let next_arm_label = self.ctx.new_label(&format!("recover_next_{}", i));
-
-                    self.ctx.define_label(&arm_label);
-
-                    // Test pattern
-                    let match_reg = self.ctx.alloc_temp();
-                    self.compile_pattern_test(&arm.pattern, exception_reg, match_reg)?;
-
-                    // Jump to next arm if no match
-                    self.ctx
-                        .emit_forward_jump(&next_arm_label, |offset| Instruction::JmpNot {
-                            cond: match_reg,
-                            offset,
-                        });
-                    self.ctx.free_temp(match_reg);
-
-                    // Bind pattern variables
-                    self.ctx.enter_scope();
-                    self.compile_pattern_bind(&arm.pattern, exception_reg)?;
-
-                    // Compile arm body
-                    let arm_result = self.compile_expr_with_demand(&arm.body, demand)?;
-                    if let Some(arm_reg) = arm_result {
-                        self.ctx.emit(Instruction::Mov {
-                            dst: dest,
-                            src: arm_reg,
-                        });
-                        self.ctx.free_temp(arm_reg);
-                    }
-
-                    let (_, defers) = self.ctx.exit_scope(false);
-                    for defer_instrs in defers {
-                        for instr in defer_instrs {
-                            self.ctx.emit(instr);
-                        }
-                    }
-
-                    // Jump to end
-                    self.ctx
-                        .emit_forward_jump(&end_label, |offset| Instruction::Jmp { offset });
-
-                    self.ctx.define_label(&next_arm_label);
-                }
-
-                // If no arm matched, re-throw the exception
-                self.ctx.emit(Instruction::Throw {
-                    error: exception_reg,
-                });
-            }
-            RecoverBody::Closure { param, body, .. } => {
-                // Closure syntax: recover |e| expr
-                self.ctx.enter_scope();
-
-                // Bind the parameter - extract name from pattern
-                let param_name = match &param.pattern.kind {
-                    verum_ast::PatternKind::Ident { name, .. } => name.name.to_string(),
-                    _ => "_exception".to_string(), // Fallback for complex patterns
-                };
-                let var_reg = self.ctx.define_var(&param_name, false);
-                self.ctx.emit(Instruction::Mov {
-                    dst: var_reg,
-                    src: exception_reg,
-                });
-
-                // Compile body
-                let body_result = self.compile_expr_with_demand(body, demand)?;
-                if let Some(body_reg) = body_result {
-                    self.ctx.emit(Instruction::Mov {
-                        dst: dest,
-                        src: body_reg,
-                    });
-                    self.ctx.free_temp(body_reg);
-                }
-
-                let (_, defers) = self.ctx.exit_scope(false);
-                for defer_instrs in defers {
-                    for instr in defer_instrs {
-                        self.ctx.emit(instr);
-                    }
-                }
-            }
-        }
+        self.compile_recover_body(recover, exception_reg, dest, demand)?;
 
         self.ctx.free_temp(exception_reg);
         self.ctx.define_label(&end_label);
@@ -33734,90 +33729,7 @@ impl VbcCodegen {
                 dst: error_reg,
             });
 
-            match recover_body {
-                verum_ast::RecoverBody::MatchArms { arms, .. } => {
-                    // Pattern match on error
-                    let recover_end = self.ctx.new_label("recover_end");
-
-                    for (i, arm) in arms.iter().enumerate() {
-                        let next_arm = self.ctx.new_label(&format!("recover_arm_{}", i + 1));
-                        self.ctx.enter_scope();
-
-                        // Try to match pattern
-                        let matched = self.ctx.alloc_temp();
-                        self.compile_pattern_test(&arm.pattern, error_reg, matched)?;
-                        self.ctx
-                            .emit_forward_jump(&next_arm, |offset| Instruction::JmpNot {
-                                cond: matched,
-                                offset,
-                            });
-                        self.ctx.free_temp(matched);
-
-                        // Bind pattern variables
-                        self.compile_pattern_bind(&arm.pattern, error_reg)?;
-
-                        // Check guard if present
-                        if let verum_common::Maybe::Some(ref guard) = arm.guard {
-                            let guard_result = self
-                                .compile_expr(guard)?
-                                .or_internal("guard has no value")?;
-                            self.ctx
-                                .emit_forward_jump(&next_arm, |offset| Instruction::JmpNot {
-                                    cond: guard_result,
-                                    offset,
-                                });
-                            self.ctx.free_temp(guard_result);
-                        }
-
-                        // Execute arm body
-                        let arm_result = self.compile_expr_with_demand(&arm.body, demand)?;
-                        if let Some(arm_reg) = arm_result {
-                            self.ctx.emit(Instruction::Mov {
-                                dst: dest,
-                                src: arm_reg,
-                            });
-                            self.ctx.free_temp(arm_reg);
-                        }
-
-                        let (_, defers) = self.ctx.exit_scope(false);
-                        for defer_instrs in defers {
-                            for instr in defer_instrs {
-                                self.ctx.emit(instr);
-                            }
-                        }
-
-                        self.ctx
-                            .emit_forward_jump(&recover_end, |offset| Instruction::Jmp { offset });
-                        self.ctx.define_label(&next_arm);
-                    }
-
-                    self.ctx.define_label(&recover_end);
-                }
-                verum_ast::RecoverBody::Closure { param, body, .. } => {
-                    // Simple closure: |err| { ... }
-                    self.ctx.enter_scope();
-
-                    // Bind error to parameter
-                    self.compile_pattern_bind(&param.pattern, error_reg)?;
-
-                    // Execute closure body
-                    let closure_result = self.compile_expr_with_demand(body, demand)?;
-                    if let Some(result_reg) = closure_result {
-                        self.ctx.emit(Instruction::Mov {
-                            dst: dest,
-                            src: result_reg,
-                        });
-                        self.ctx.free_temp(result_reg);
-                    }
-
-                    let (_, defers) = self.ctx.exit_scope(false);
-                    for defer_instrs in defers {
-                        for instr in defer_instrs {
-                            self.ctx.emit(instr);
-                        }
-                    }
-                }
-            }
+            self.compile_recover_body(recover_body, error_reg, dest, demand)?;
 
             self.ctx.free_temp(error_reg);
         } else {

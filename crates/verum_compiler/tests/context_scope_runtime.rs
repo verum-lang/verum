@@ -1,4 +1,4 @@
-//! Source provider scopes through the archive producer and actual VBC execution.
+//! Lexical contexts and recovery handlers through archive production and VBC execution.
 //! The fixture is an independent module; it does not stand in for a full stdlib.
 use std::{fs, sync::Arc};
 use verum_compiler::{CompilationPipeline, CompilerOptions, CoreConfig, Session};
@@ -99,5 +99,36 @@ fn nested_functions_use_the_provider_at_the_call_site() {
             result * 100 + nested()
         }",
         102010,
+    );
+}
+
+#[test]
+fn recovery_handlers_preserve_shadowed_values_and_obey_guards() {
+    execute(
+        "public fn probe() -> Int {
+            let hidden = 7;
+            let value: Int = try {throw 3;} recover |hidden| {hidden + 1};
+            hidden * 10 + value
+        }",
+        74,
+    );
+    execute(
+        "public fn probe() -> Int {
+            try {throw 7;} recover {_ if false => 99, caught => caught + 1}
+        }",
+        8,
+    );
+    execute(
+        "public fn probe() -> Int {
+            try {try {throw 7;} recover {_ if false => 99}}
+            recover |original| {original + 1}
+        }",
+        8,
+    );
+    execute(
+        "public fn probe() -> Int {
+            try {throw (3, 4);} recover |(left, right)| {left * 10 + right}
+        }",
+        34,
     );
 }
