@@ -5377,6 +5377,7 @@ impl TypeChecker {
         for item in &ast.items {
             if let ItemKind::Type(type_decl) = &item.kind
                 && type_decl.name.name.as_str() == type_name
+                && self.cfg_evaluator.should_include(&item.attributes)
             {
                 // Private types MUST NOT be visible to importers.
                 // Before this guard, an `import` resolver that fell
@@ -7335,7 +7336,7 @@ impl TypeChecker {
 
         // First, try to find the type declaration directly in this module
         let local_declaration = if allow_local_mounts {
-            Self::local_source_type_declaration(ast, type_name)
+            self.local_source_type_declaration(ast, type_name)
         } else {
             self.find_type_declaration_in_module(ast, type_name)
         };
@@ -7345,6 +7346,9 @@ impl TypeChecker {
 
         // If not found directly, check if it's re-exported via `pub import`
         for item in &ast.items {
+            if !self.cfg_evaluator.should_include(&item.attributes) {
+                continue;
+            }
             if let ItemKind::Mount(import_decl) = &item.kind {
                 if !allow_local_mounts && import_decl.visibility != AstVisibility::Public {
                     continue;

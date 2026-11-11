@@ -193,10 +193,11 @@ fn protocol_implementation_cannot_escalate_receiver_permission() {
     );
     let invalid = "implement Inspect for Pack { fn inspect(&mut self, y: Pack) { *self = y; } }";
     let problems = errors(&format!("{declared}\n{invalid}"));
+    // Signature checking rejects escalation before the method can be called.
     assert!(
         problems
             .iter()
-            .any(|e| e.contains("E427") && e.contains("receiver")),
+            .any(|e| e.contains("method `inspect` changes its declared receiver")),
         "{problems:?}"
     );
 }

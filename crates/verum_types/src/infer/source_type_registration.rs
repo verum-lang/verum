@@ -120,7 +120,21 @@ impl super::TypeChecker {
                     .copied()
             });
         self.source_type_registration.depth += 1;
-        let result = register(self);
+        // Eager preparation and lazy loads share the declaration's lexical
+        // imports. A prior consumer may have populated the nominal cache
+        // before this module reaches its ordinary two-pass registration.
+        let owner = self.current_module_path.clone();
+        let has_source = key == Self::source_type_declaration_key(&owner, &declaration.name.name)
+            && (self.source_type_registration.local_declarations.iter()
+                .any(|(path, _)| path == &owner)
+                || self.inline_modules.contains_key(&owner)
+                || self.get_module_with_path_aliases(&owner, &self.module_registry.read())
+                    .is_some_and(|module| !module.ast.items.is_empty()));
+        let result = if has_source {
+            self.with_source_signature_scope(&owner, register)
+        } else {
+            register(self)
+        };
         self.source_type_registration.depth -= 1;
         if let Err(error) = &result {
             self.source_type_registration.failure = Some(error.to_string().into());
