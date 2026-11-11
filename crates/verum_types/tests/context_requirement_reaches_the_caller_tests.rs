@@ -64,7 +64,7 @@ fn complaints(code: &str) -> Vec<String> {
 const PRELUDE: &str = "\
 context Log { fn note(m: Text); }
 type C is { n: Int };
-implement Log for C { fn note(m: Text) { } }
+implement C { fn note(&self, m: Text) { } }
 fn work() using [Log] { Log.note(\"x\"); }
 ";
 
