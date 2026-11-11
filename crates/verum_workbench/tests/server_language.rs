@@ -64,6 +64,46 @@ fn standalone_server_analyzes_without_cargos_stack_environment() {
         body["result"]["result"]["declarations"][1]["requirements"][0]["source"],
         "Logger"
     );
+
+    let mut previous_revision = body["result"]["result"]["project_revision"].clone();
+    for (source, expected_codes) in [
+        (
+            "type affine Parcel is {value: Int};\n\
+          fn accept(f: fn(Parcel) -> (Parcel, Parcel)) {}\n\
+          fn bad() {accept(|item| (item, item));}",
+            vec!["E310"],
+        ),
+        (
+            "type affine Parcel is {value: Int};\n\
+          fn need(value: Int) {}\n\
+          fn bad(original: Parcel) {need(true); (original, original);}",
+            vec!["E310", "E400"],
+        ),
+        (
+            "fn valid() -> Int {let base = 10; let f: fn(Int) -> Int = |x| x + base; f(5)}",
+            vec![],
+        ),
+    ] {
+        let (status, reply) = post(host, Some(token), &request(source));
+        assert_eq!(status, 200, "{reply}");
+        let snapshot = &reply["result"]["result"];
+        assert_eq!(snapshot["parsed"], true, "{reply}");
+        assert_ne!(snapshot["project_revision"], previous_revision, "{reply}");
+        previous_revision = snapshot["project_revision"].clone();
+        let diagnostics = snapshot["diagnostics"].as_array().unwrap();
+        if expected_codes.is_empty() {
+            assert!(
+                diagnostics.is_empty(),
+                "corrected source retained diagnostics: {reply}"
+            );
+        } else {
+            for code in expected_codes {
+                assert!(diagnostics.iter().any(|diagnostic| diagnostic["code"] == code
+                    && diagnostic["severity"] == 1), "missing {code}: {reply}");
+            }
+        }
+    }
+
     let source = concat!(
         "public type Witness<A> is { public value: A };\n",
         "public type Pack is { public carrier: Type, public witness: Witness<carrier> };\n",
