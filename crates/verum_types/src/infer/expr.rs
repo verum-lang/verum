@@ -7916,45 +7916,7 @@ impl TypeChecker {
                     );
                 }
                 if let Some(ref callee_contexts) = contexts {
-                    // Build a ContextSet from the callee's requirements
-                    let mut callee_context_set = ContextSet::new();
-                    for ctx_ref in callee_contexts.iter() {
-                        // A NEGATIVE context is a promise NOT to use one
-                        // — `using [!IO]`, or every member of a group
-                        // like `using Pure = [!IO, !Random]`. It is not a
-                        // requirement, and turning it into one here told
-                        // the CALLER "context `Random` used but not
-                        // declared" for calling a function that promised
-                        // to touch neither (T0991).
-                        //
-                        // `ContextRequirement::new` sets `is_negative:
-                        // false`; the flag on `ctx_ref` was dropped at
-                        // construction, so no downstream check could see
-                        // it. Two other sites in this repo DO ask
-                        // `is_negative` — the group expansion in
-                        // `context_validation` and the propagation loop
-                        // in `context_check` — and both are dead code on
-                        // this path, which is why fixing them measured
-                        // inert.
-                        if ctx_ref.is_negative {
-                            continue;
-                        }
-                        callee_context_set.add(ContextRequirement::new(
-                            ctx_ref.name.clone(),
-                            expr.span,
-                        ));
-                    }
-
-                    // Get the current function's available contexts
-                    let caller_context_set =
-                        self.current_function_contexts.clone().unwrap_or_default();
-
-                    // Use ContextChecker to validate satisfaction
-                    self.context_checker.check_context_satisfaction(
-                        &callee_context_set,
-                        &caller_context_set,
-                        expr.span,
-                    )?;
+                    self.check_callable_contexts(callee_contexts, expr.span)?;
                 }
 
                 // Check capability requirements if function has contexts
@@ -8857,6 +8819,10 @@ impl TypeChecker {
     fn infer_expr_field(&mut self, expr: &Expr) -> Result<InferResult> {
         use ExprKind::*;
         let ExprKind::Field { expr: obj, field } = &expr.kind else { unreachable!() };
+        if let Some(ty) = self.try_context_method_value(obj, field, &List::new(), expr.span)? {
+            return Ok(InferResult::new(ty));
+        }
+
 
         if let Some(path) = self.rooted_field_path(expr) {
             return self.resolve_multi_segment_path(&path, expr.span);

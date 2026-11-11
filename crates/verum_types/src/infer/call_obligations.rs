@@ -16,6 +16,19 @@ pub(super) struct PendingValueObligation {
 }
 
 impl TypeChecker {
+    pub(super) fn check_callable_contexts(
+        &self, contexts: &crate::di::requirement::ContextExpr, span: Span,
+    ) -> Result<()> {
+        use crate::context_check::{ContextRequirement, ContextSet};
+        let mut required = ContextSet::new();
+        for context in contexts.iter().filter(|context| !context.is_negative) {
+            required.add(ContextRequirement::new(context.name.clone(), span));
+        }
+        self.context_checker.check_context_satisfaction(
+            &required, &self.current_function_contexts.clone().unwrap_or_default(), span,
+        )
+    }
+
     /// Keep value-domain obligations only after selecting a callable candidate.
     pub(super) fn retain_call_value_domains(&mut self, parameters: List<Type>, span: Span) -> Result<()> {
         if parameters.is_empty() { return Ok(()); }

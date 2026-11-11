@@ -5276,7 +5276,10 @@ impl TypeChecker {
                             match ctx_type_result {
                                 Ok(record_type) => {
                                     // Store the context declaration for method-level capability extraction
-                                    let context_name: Text = item_name.into();
+                                    let context_name: Text = register_name.into();
+                                    if let Some(signatures) = self.context_method_signatures.remove(&ctx_decl.name.name) {
+                                        self.context_method_signatures.insert(context_name.clone(), signatures);
+                                    }
                                     self.context_declarations.insert(context_name, ctx_decl);
                                     record_type
                                 }
@@ -7018,6 +7021,7 @@ impl TypeChecker {
         &mut self,
         ctx_decl: &verum_ast::decl::ContextDecl,
     ) -> Result<Type> {
+        self.register_context_method_source(ctx_decl.name.name.clone());
         use verum_ast::ty::GenericParamKind;
         let mut fields = indexmap::IndexMap::new();
 
@@ -11842,6 +11846,7 @@ impl TypeChecker {
         // Build a ContextSet from the function's context requirements and
         // set it as the current function's available contexts. This enables
         // context satisfaction validation in function calls.
+        let prev_source_contexts = std::mem::replace(&mut self.current_source_contexts, func.contexts.iter().cloned().collect());
         let prev_function_contexts = if let Some(ref req) = context_requirement {
             let mut context_set = ContextSet::new();
             for context_ref in req.iter() {
@@ -12290,6 +12295,7 @@ impl TypeChecker {
         self.generator_context = prev_generator_context;
         self.in_async_context = prev_async_context;
         self.current_function_contexts = prev_function_contexts;
+        self.current_source_contexts = prev_source_contexts;
         self.current_function_call_sites = prev_call_sites;
         self.current_function_being_checked = prev_function_being_checked;
 
@@ -18555,7 +18561,7 @@ impl TypeChecker {
     /// Named / Record / Variant. Anything other than absence means the author
     /// has a concrete shape for the name and expects `X.method(...)` to
     /// dispatch on it, not on a context record.
-    fn user_type_shadows_context(&self, context_name: &str) -> bool {
+    pub(super) fn user_type_shadows_context(&self, context_name: &str) -> bool {
         let has_inherent = self
             .inherent_methods
             .read()
@@ -18769,6 +18775,11 @@ impl TypeChecker {
             // method.name.as_str(),
             // std::mem::discriminant(&receiver.kind),
             // receiver.span);
+        }
+
+        if !skip_static_lookup
+            && let Some(result) = self.try_context_method_call(receiver, method, type_args, args, span)? {
+            return Ok(result);
         }
 
         // `iter.collect()` is generic in its return type — `collect<C: FromIterator<Item>>()
@@ -25301,82 +25312,6 @@ bake to have this verified.",
             });
         }
 
-        // Context-method dispatch has priority over stdlib module dispatch.
-        //
-
-        // When a user declares
-        //  context Time { fn now() -> Timestamp; }
-        // and writes
-        //  pure fn f() -> Timestamp using [Time] { Time.now() }
-        // the `Time.now()` call must resolve to the context method (returning
-        // Timestamp), not to the stdlib `core.time.Time.now()` (returning
-        // Duration). Before this check the stdlib path won and produced a
-        // misleading type mismatch on the caller's annotated return type.
-        //
-
-        // Trigger: the first segment of the receiver path is a
-        // user-declared context name AND the current function's `using [...]`
-        // clause lists that context. The explicit `using` marker is what
-        // gives the compiler license to choose the context dispatch —
-        // without it, a bare `Time.now()` in a non-`using` context could
-        // legitimately mean the stdlib namespace.
-        //
-
-        // Only fire on the first call of a method chain
-        // (`!skip_static_lookup`). The iterative chain handler reuses the
-        // outermost receiver expression for every chain step, so inside
-        // `CancelCtx.get_token().check()?` the same `Path(CancelCtx)` is
-        // the receiver for both `.get_token()` and `.check()` — but
-        // `.check()` should resolve against the return type of
-        // `.get_token()`, not re-dispatch the context.
-        if !skip_static_lookup
-            && let ExprKind::Path(path) = &receiver.kind
-            && path.segments.len() == 1
-            && let Some(verum_ast::ty::PathSegment::Name(ident)) = path.segments.first()
-        {
-            let ctx_name: verum_common::Text = ident.name.clone();
-            let in_using_clause = self
-                .current_function_contexts
-                .as_ref()
-                .map(|set| set.iter().any(|req| req.name == ctx_name))
-                .unwrap_or(false);
-            if in_using_clause
-                && let Some(ctx_decl) = self.context_declarations.get(&ctx_name).cloned()
-            {
-                for ctx_method in ctx_decl.methods.iter() {
-                    if ctx_method.name.name != method.name {
-                        continue;
-                    }
-                    // Arity check: caller passes `args`; context method
-                    // carries the signature sans `self` receiver.
-                    if ctx_method.params.len() != args.len() {
-                        continue;
-                    }
-                    // Type-check each argument against the declared
-                    // parameter type. Missing or unresolvable types fall
-                    // through to `Type::Unknown` which still unifies.
-                    for (arg, param) in args.iter().zip(ctx_method.params.iter()) {
-                        let param_ty = if let verum_ast::decl::FunctionParamKind::Regular {
-                            ty: param_ty_ast,
-                            ..
-                        } = &param.kind
-                        {
-                            self.ast_to_type(param_ty_ast).unwrap_or(Type::Unknown)
-                        } else {
-                            Type::Unknown
-                        };
-                        self.check_expr(arg, &param_ty)?;
-                    }
-                    let return_ty = match &ctx_method.return_type {
-                        verum_common::Maybe::Some(rt) => {
-                            self.ast_to_type(rt).unwrap_or(Type::Unknown)
-                        }
-                        verum_common::Maybe::None => Type::unit(),
-                    };
-                    return Ok(Some(InferResult::new(return_ty)));
-                }
-            }
-        }
         Ok(None)
     }
 

@@ -30,6 +30,7 @@ mod source_dyn_protocol;
 mod universe_parameters;
 mod atomic_access;
 mod call_obligations;
+mod context_methods;
 mod callable_properties;
 mod preparation;
 mod dependent_records;
@@ -984,6 +985,8 @@ pub struct TypeChecker {
     /// Context declarations for method-level capability extraction
     /// Maps context name to its AST declaration
     context_declarations: Map<Text, verum_ast::decl::ContextDecl>,
+    context_method_signatures: Map<Text, context_methods::ContextMethodSignatures>,
+    current_source_contexts: List<verum_ast::context::ContextRequirement>,
     /// Method capability mapper for extracting required capabilities from method calls
     method_capability_mapper: crate::capability::MethodCapabilityMapper,
     /// Inherent instance methods from implement blocks

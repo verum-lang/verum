@@ -6362,27 +6362,8 @@ impl TypeChecker {
     }
 
     pub fn register_function_signature(&mut self, func: &verum_ast::FunctionDecl) -> Result<()> {
-        // Carry the declaration-owned identities through source-authority lookup.
-        // Imported signatures start with an empty frame; ordinary methods may
-        // inherit their exact implementation frame. Flat ambient names are not binders.
-        let frame = self.decl_param_frames.last().cloned().unwrap_or_default();
-        self.push_decl_param_frame(frame);
-        let assumption_depth = self.source_type_registration.projection_assumptions.len();
-        let callable_depth = self.source_type_registration.callable_assumptions.len();
-        let result = self.with_declared_universe_scope("function", &func.name.name, &func.generics, |checker| {
-            checker.validate_function_universes(func)?;
-            checker.register_function_signature_in_universe_scope(func)
-        });
-        self.source_type_registration.projection_assumptions.truncate(assumption_depth);
-        self.source_type_registration.callable_assumptions.truncate(callable_depth);
-        self.pop_decl_param_frame();
-        result
-    }
-
-    fn register_function_signature_in_universe_scope(&mut self, func: &verum_ast::FunctionDecl) -> Result<()> {
         use verum_ast::decl::FunctionParamKind;
-        use verum_common::Set;
-
+        let scheme = self.source_function_scheme(func)?;
         // ================================================================
         // Record parameter names for dependent refinement enforcement.
         //
@@ -6471,6 +6452,85 @@ impl TypeChecker {
         self.function_param_classifications
             .insert(func.name.name.clone(), param_classifications);
 
+        // Protect builtin generic/meta functions from being DOWNGRADED by stdlib.
+        // When a generic builtin (e.g., fn<T>(T) -> T for abs) already exists,
+        // don't let a concrete stdlib version (e.g., fn(Float) -> Float) override it.
+        // But DO allow equally-or-more-generic re-registrations (e.g., mount core.intrinsics).
+        //
+        // Both name lists are sourced from canonical constants in `infer::env`
+        // so the registration site (`register_meta_builtins` /
+        // `register_intrinsics`) and the protection site stay in sync —
+        // drift is pinned by the `meta_reflection_builtins_all_registered`
+        // and `io_and_numeric_builtins_pinned` tests.
+        let func_name = func.name.name.as_str();
+        // T0231: the predicate lives in ONE place now —
+        // `TypeChecker::insert_fn_scheme_guarded` (env.rs, next to the
+        // canonical name lists) — because this registration path was
+        // only ONE of the channels that bind fn schemes by name; the
+        // prelude import replay (`import_item_from_module_body`)
+        // bypassed the inline copy of the rule and clobbered the
+        // polymorphic print/println intrinsics.
+        // T1120: DECLARATION channel — the unit's own `fn` outranks an
+        // ambient builtin (see `insert_fn_scheme_declared`).
+        let should_skip_registration = !self.insert_fn_scheme_declared(func_name, scheme);
+
+        // Calculate required params (those without default values)
+        // Default params must come after required params, so find first default
+        let mut required_params = 0;
+        for param in &func.params {
+            match &param.kind {
+                FunctionParamKind::Regular { default_value, .. } => {
+                    if default_value.is_none() {
+                        required_params += 1;
+                    } else {
+                        // Found first default - all remaining are optional
+                        break;
+                    }
+                }
+                // Self parameters are always required
+                _ => required_params += 1,
+            }
+        }
+        if !should_skip_registration {
+            self.function_required_params
+                .insert(func.name.name.clone(), required_params);
+        }
+
+        tracing::debug!(
+            "Registered function signature: {} (required_params: {})",
+            func.name.name,
+            required_params
+        );
+        Ok(())
+    }
+
+    pub(super) fn source_function_scheme(&mut self, func: &verum_ast::FunctionDecl) -> Result<TypeScheme> {
+        self.source_function_scheme_named(func, &func.name.name)
+    }
+
+    pub(super) fn source_function_scheme_named(
+        &mut self, func: &verum_ast::FunctionDecl, owner: &Text,
+    ) -> Result<TypeScheme> {
+        // Carry the declaration-owned identities through source-authority lookup.
+        // Imported signatures start with an empty frame; ordinary methods may
+        // inherit their exact implementation frame. Flat ambient names are not binders.
+        let frame = self.decl_param_frames.last().cloned().unwrap_or_default();
+        self.push_decl_param_frame(frame);
+        let assumption_depth = self.source_type_registration.projection_assumptions.len();
+        let callable_depth = self.source_type_registration.callable_assumptions.len();
+        let result = self.with_declared_universe_scope("function", owner, &func.generics, |checker| {
+            checker.validate_function_universes(func)?;
+            checker.function_scheme_in_universe_scope(func)
+        });
+        self.source_type_registration.projection_assumptions.truncate(assumption_depth);
+        self.source_type_registration.callable_assumptions.truncate(callable_depth);
+        self.pop_decl_param_frame();
+        result
+    }
+
+    fn function_scheme_in_universe_scope(&mut self, func: &verum_ast::FunctionDecl) -> Result<TypeScheme> {
+        use verum_ast::decl::FunctionParamKind;
+        use verum_common::Set;
         // Register generic type parameters FIRST
         // Track both names AND TypeVars for explicit TypeScheme construction
         // This is critical for phantom type parameters (e.g., `fn foo<T>()` where T isn't used)
@@ -6704,56 +6764,7 @@ impl TypeChecker {
         scheme.where_clauses = structural_conditions;
         scheme.returned_parameter = super::reference_origin::forwarded_parameter(func);
         self.record_explicit_method_vars(&mut scheme, func);
-        // Protect builtin generic/meta functions from being DOWNGRADED by stdlib.
-        // When a generic builtin (e.g., fn<T>(T) -> T for abs) already exists,
-        // don't let a concrete stdlib version (e.g., fn(Float) -> Float) override it.
-        // But DO allow equally-or-more-generic re-registrations (e.g., mount core.intrinsics).
-        //
-        // Both name lists are sourced from canonical constants in `infer::env`
-        // so the registration site (`register_meta_builtins` /
-        // `register_intrinsics`) and the protection site stay in sync —
-        // drift is pinned by the `meta_reflection_builtins_all_registered`
-        // and `io_and_numeric_builtins_pinned` tests.
-        let func_name = func.name.name.as_str();
-        // T0231: the predicate lives in ONE place now —
-        // `TypeChecker::insert_fn_scheme_guarded` (env.rs, next to the
-        // canonical name lists) — because this registration path was
-        // only ONE of the channels that bind fn schemes by name; the
-        // prelude import replay (`import_item_from_module_body`)
-        // bypassed the inline copy of the rule and clobbered the
-        // polymorphic print/println intrinsics.
-        // T1120: DECLARATION channel — the unit's own `fn` outranks an
-        // ambient builtin (see `insert_fn_scheme_declared`).
-        let should_skip_registration = !self.insert_fn_scheme_declared(func_name, scheme);
-
-        // Calculate required params (those without default values)
-        // Default params must come after required params, so find first default
-        let mut required_params = 0;
-        for param in &func.params {
-            match &param.kind {
-                FunctionParamKind::Regular { default_value, .. } => {
-                    if default_value.is_none() {
-                        required_params += 1;
-                    } else {
-                        // Found first default - all remaining are optional
-                        break;
-                    }
-                }
-                // Self parameters are always required
-                _ => required_params += 1,
-            }
-        }
-        if !should_skip_registration {
-            self.function_required_params
-                .insert(func.name.name.clone(), required_params);
-        }
-
-        tracing::debug!(
-            "Registered function signature: {} (required_params: {})",
-            func.name.name,
-            required_params
-        );
-        Ok(())
+        Ok(scheme)
         })();
 
         // Restore previous types instead of removing — this prevents generic params
