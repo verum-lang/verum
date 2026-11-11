@@ -27,7 +27,7 @@
 #   - Attribute syntax (# -> @)
 #   - Parser/lexer validation via vtest
 #
-# Reference: CLAUDE.md, grammar/verum.ebnf
+# Reference: AGENTS.md, grammar/verum.ebnf
 # =============================================================================
 
 set -euo pipefail
@@ -436,7 +436,7 @@ EOF
 ## Reference
 
 - Grammar: \`grammar/verum.ebnf\`
-- Style Guide: \`CLAUDE.md\`
+- Style Guide: \`AGENTS.md\`
 EOF
             ;;
         *)
@@ -453,7 +453,7 @@ Summary:
   Warnings:     $WARNINGS
   Auto-Fixed:   $FIXED
 
-Reference: grammar/verum.ebnf, CLAUDE.md
+Reference: grammar/verum.ebnf, AGENTS.md
 EOF
             ;;
     esac

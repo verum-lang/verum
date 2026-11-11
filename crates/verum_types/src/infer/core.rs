@@ -2159,7 +2159,7 @@ impl TypeChecker {
         // `ImplementationDescriptor.protocol` from the VBC type
         // table's `ProtocolId` field (was hardcoded `Text::default()`).
         //
-        // Stdlib-agnostic per `crates/verum_types/src/CLAUDE.md`:
+        // Stdlib-agnostic per `crates/verum_types/src/AGENTS.md`:
         // the impl list comes from `metadata.implementations`, not a
         // hardcoded mapping.  Adding `Foldable` / `Functor` / etc.
         // implementations to a stdlib type works identically.
@@ -2270,7 +2270,7 @@ impl TypeChecker {
     /// simple-name consumer) keep today's behavior. Declaration authority is
     /// rechecked before reusing the flat or qualified registrations.
     ///
-    /// Stdlib-agnostic per `crates/verum_types/src/CLAUDE.md`: the
+    /// Stdlib-agnostic per `crates/verum_types/src/AGENTS.md`: the
     /// mapping comes from `imported_names` (caller) + metadata keys,
     /// never from type-name knowledge.
     pub(crate) fn ensure_mounted_type_loaded_qualified(
@@ -2633,7 +2633,7 @@ impl TypeChecker {
         // This split is the cleanest co-existence with the legacy
         // hardcoded path until `register_standard_protocols` is
         // removed in favour of pure metadata-driven registration
-        // (separate refactor; CLAUDE.md "no stdlib knowledge in
+        // (separate refactor; AGENTS.md "no stdlib knowledge in
         // compiler" rule).
         let (existing_assoc_types, existing_assoc_consts, existing_method_count) = {
             let pc = self.protocol_checker.read();

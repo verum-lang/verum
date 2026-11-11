@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for mirror module
-// Migrated from src/mirror.rs per CLAUDE.md standards
+// Migrated from src/mirror.rs per AGENTS.md standards
 
 use verum_cli::mirror::*;
 

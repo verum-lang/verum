@@ -265,7 +265,7 @@ max_severity = "high"
 6. **Enterprise Features**
    - Access control checking (1000 deny list entries)
 
-**Performance Targets** (from CLAUDE.md):
+**Performance Targets** (from AGENTS.md):
 - ✅ Dependency resolution: < 100ms for 10K LOC
 - ✅ Parallel downloads: Maximize throughput with num_cpus threads
 - ✅ Cache operations: < 10ms for cache hits

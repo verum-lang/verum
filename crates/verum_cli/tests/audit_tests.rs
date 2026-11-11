@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for audit module
-// Migrated from src/audit.rs per CLAUDE.md standards
+// Migrated from src/audit.rs per AGENTS.md standards
 
 use verum_cli::audit::*;
 

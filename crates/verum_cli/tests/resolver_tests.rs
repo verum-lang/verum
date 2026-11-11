@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for resolver module
-// Migrated from src/resolver.rs per CLAUDE.md standards
+// Migrated from src/resolver.rs per AGENTS.md standards
 
 use verum_cli::resolver::*;
 

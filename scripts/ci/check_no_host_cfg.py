@@ -2,7 +2,7 @@
 """
 Architectural CI guard: detect host-`#[cfg(target_os)]` regressions in codegen.
 
-Per `docs/architecture/no-libc-architecture.md` and CLAUDE.md:
+Per `docs/architecture/no-libc-architecture.md` and AGENTS.md:
 
     When emitting LLVM IR, every per-platform decision (syscall numbers,
     sockaddr layout, errno-fn name, socket-option constants, …) reads

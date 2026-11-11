@@ -15,7 +15,7 @@
 // Unit tests for context.rs
 //
 
-// Migrated from src/context.rs to comply with CLAUDE.md test organization.
+// Migrated from src/context.rs to comply with AGENTS.md test organization.
 
 use std::time::Duration;
 use verum_smt::context::*;

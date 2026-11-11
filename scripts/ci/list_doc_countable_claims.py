@@ -14,7 +14,7 @@ page a reader uses to decide whether to try the language:
 
     ~0.93 ns per CBGR check     the cited bench reports 1.69 ns; the
                                 figure predates a re-measurement that is
-                                recorded in CLAUDE.md
+                                recorded in AGENTS.md
     37-file dispatch table      62 files
     1506 / 1507 checks (99.93%) the suite is 7136 spec files and that
                                 denominator matches no level and no total

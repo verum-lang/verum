@@ -12,7 +12,7 @@
     useless_ptr_null_checks,
     unused_assignments
 )]
-// Per CLAUDE.md standards - tests in tests/ directory
+// Per AGENTS.md standards - tests in tests/ directory
 
 use verum_ast::{FileId, Span};
 use verum_common::Text;

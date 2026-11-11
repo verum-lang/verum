@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for verification_cache module
-// Migrated from src/verification_cache.rs per CLAUDE.md standards
+// Migrated from src/verification_cache.rs per AGENTS.md standards
 
 use verum_smt::verification_cache::*;
 

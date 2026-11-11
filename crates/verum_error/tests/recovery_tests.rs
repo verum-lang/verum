@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for recovery module
-// Migrated from src/recovery.rs per CLAUDE.md standards
+// Migrated from src/recovery.rs per AGENTS.md standards
 
 use std::time::Duration;
 use verum_error::recovery::*;

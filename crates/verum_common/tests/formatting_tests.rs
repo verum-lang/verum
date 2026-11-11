@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for formatting module
-// Migrated from src/formatting.rs per CLAUDE.md standards
+// Migrated from src/formatting.rs per AGENTS.md standards
 
 use verum_common::formatting::*;
 

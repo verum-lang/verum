@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for exports module
-// Migrated from src/exports.rs per CLAUDE.md standards
+// Migrated from src/exports.rs per AGENTS.md standards
 //
 
 // Tests refined type tracking across module boundaries: export, re-export,

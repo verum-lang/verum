@@ -3,7 +3,7 @@
 
 WHY THIS EXISTS
 ---------------
-CLAUDE.md asks spec-tied code to cite a LOGICAL spec name, "never a path",
+AGENTS.md asks spec-tied code to cite a LOGICAL spec name, "never a path",
 and `check_no_internal_refs.sh` already ratchets the PATH form
 (`Spec: docs/…`) at zero. The bare-name form was unchecked, and it is
 three times larger:
@@ -105,7 +105,7 @@ AMBIGUOUS = {"database.md"}
 def website_docs() -> set[str]:
     """Document basenames the sibling website checkout provides.
 
-    CLAUDE.md names `website:docs/*` as a legitimate thing to cite, so a
+    AGENTS.md names `website:docs/*` as a legitimate thing to cite, so a
     citation resolving there is not dangling. The checkout is a SIBLING
     and may be absent (CI, a fresh clone); `main` says so out loud rather
     than letting its absence quietly widen the finding."""
@@ -197,7 +197,7 @@ def main() -> int:
             "A reader who follows one of these finds nothing, and cannot tell\n"
             "whether the spec is missing or the name is wrong. Cite a document\n"
             "the reader can open — docs/architecture/*, grammar/verum.ebnf,\n"
-            "website:docs/* — or state the requirement in place (CLAUDE.md).",
+            "website:docs/* — or state the requirement in place (AGENTS.md).",
             file=sys.stderr,
         )
         return 1

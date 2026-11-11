@@ -1,7 +1,7 @@
 # Nightly AOT lane (T0709 stage 2) — the tests/ surfaces the merge-gate
 # CANNOT run: AOT-heavy suites that build native binaries through LLVM
 # and are subject to the single-machine "never two AOT suites
-# concurrently" discipline (CLAUDE.md).  Nightly + manual dispatch,
+# concurrently" discipline (AGENTS.md).  Nightly + manual dispatch,
 # NON-BLOCKING by design: this lane exists to MEASURE and to file
 # honest reds as tasks, not to gate merges — a lane nobody has timed
 # yet must not hold the merge queue hostage.  Promotion path: once a

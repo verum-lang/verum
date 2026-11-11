@@ -719,7 +719,7 @@ impl Default for ContextResolver {
 // (`Duration`, `EncryptionKey`, `CacheConfig`) — plus two validators
 // built on it.
 //
-// It violated the standing rule in crates/verum_types/src/CLAUDE.md: the
+// It violated the standing rule in crates/verum_types/src/AGENTS.md: the
 // compiler must hold ZERO hardcoded knowledge of stdlib types. It also
 // gave three wrong answers, each measured on a release binary before
 // removal:

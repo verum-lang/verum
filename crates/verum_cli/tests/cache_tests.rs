@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for cache module
-// Migrated from src/cache.rs per CLAUDE.md standards
+// Migrated from src/cache.rs per AGENTS.md standards
 
 use verum_cli::cache::*;
 

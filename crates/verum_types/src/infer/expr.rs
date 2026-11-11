@@ -4533,7 +4533,7 @@ impl TypeChecker {
                     // circuits at the `lookup_type(name).is_none()`
                     // gate.
                     //
-                    // Stdlib-agnostic per `crates/verum_types/src/CLAUDE.md`:
+                    // Stdlib-agnostic per `crates/verum_types/src/AGENTS.md`:
                     // the lookup is keyed by the user-written name;
                     // the actual existence test is `core_metadata.types`
                     // membership, not a hardcoded list of stdlib
@@ -7062,7 +7062,7 @@ impl TypeChecker {
         // when the variant name resolves to multiple
         // candidates.  Only fires when the callee is a
         // single-segment Path (bare-name call).  Stdlib-
-        // agnostic per `crates/verum_types/src/CLAUDE.md`:
+        // agnostic per `crates/verum_types/src/AGENTS.md`:
         // the disambiguation key is the constructor's
         // payload count from its own registration, never a
         // hardcoded list of variant names.
@@ -7644,7 +7644,7 @@ impl TypeChecker {
                             // is what the language actually provides.
                             //
                             // The rule this restores is stated in
-                            // crates/verum_types/src/CLAUDE.md: the compiler
+                            // crates/verum_types/src/AGENTS.md: the compiler
                             // must hold ZERO hardcoded stdlib knowledge. A
                             // name the checker knows and the library does not
                             // is exactly the circular dependency it forbids.
@@ -9768,7 +9768,7 @@ impl TypeChecker {
                                 // receiver) — same convention as the
                                 // AST-driven path.
                                 //
-                                // Stdlib-agnostic per CLAUDE.md: lookup
+                                // Stdlib-agnostic per AGENTS.md: lookup
                                 // is keyed by the user-written receiver
                                 // name, no per-stdlib-type special case.
                                 let type_name_str = id.name.as_str();
@@ -10719,7 +10719,7 @@ impl TypeChecker {
             // prefer struct construction over variant construction.
             //
 
-            // Per the architectural rule in crates/verum_types/src/CLAUDE.md —
+            // Per the architectural rule in crates/verum_types/src/AGENTS.md —
             // "user-defined variant names must freely override built-in
             // convenience aliases"; symmetrically, a user module's record
             // type must override a cross-module variant of the same name

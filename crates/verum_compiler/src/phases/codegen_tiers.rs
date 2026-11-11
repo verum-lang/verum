@@ -922,7 +922,7 @@ impl CompilationPhase for CodegenTiersPhase {
         // `parallel_threads` is wired, into LtoConfig.num_jobs).
         // The remaining fields belong to a JIT execution tier
         // that doesn't exist in the current architecture (Tier 0
-        // interpreter + Tier 1 AOT only — see CLAUDE.md).
+        // interpreter + Tier 1 AOT only — see AGENTS.md).
         // Embedders that set these via Verum.toml or builder
         // calls will see their setting echoed in the log so the
         // discrepancy is audible rather than silent. Closes the

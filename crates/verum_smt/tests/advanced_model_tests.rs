@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for advanced_model module
-// Migrated from src/advanced_model.rs per CLAUDE.md standards
+// Migrated from src/advanced_model.rs per AGENTS.md standards
 
 use verum_common::{List, Text};
 use verum_smt::advanced_model::*;

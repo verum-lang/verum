@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for span_utils module
-// Migrated from src/span_utils.rs per CLAUDE.md standards
+// Migrated from src/span_utils.rs per AGENTS.md standards
 
 use verum_common::span::{FileId, Span};
 use verum_common::span_utils::*;

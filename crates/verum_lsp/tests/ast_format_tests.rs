@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for ast_format module
-// Migrated from src/ast_format.rs per CLAUDE.md standards
+// Migrated from src/ast_format.rs per AGENTS.md standards
 
 use verum_lsp::ast_format::*;
 

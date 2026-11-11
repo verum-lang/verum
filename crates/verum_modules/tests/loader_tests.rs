@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for loader module
-// Migrated from src/loader.rs per CLAUDE.md standards
+// Migrated from src/loader.rs per AGENTS.md standards
 
 use tempfile::TempDir;
 use verum_modules::loader::*;

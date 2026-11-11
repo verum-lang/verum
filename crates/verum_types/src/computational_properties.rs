@@ -1739,7 +1739,7 @@ impl Default for PropertyInferrer {
 /// computational shape: which contexts it depends on (DI) PLUS which
 /// computational properties it has.
 ///
-/// Verum's CLAUDE.md establishes a **clear architectural distinction**
+/// Verum's AGENTS.md establishes a **clear architectural distinction**
 /// between these two concepts:
 ///
 ///  - **Contexts** (DI): runtime dependency injection via
@@ -1754,7 +1754,7 @@ impl Default for PropertyInferrer {
 /// boundary analysis — typically need BOTH. `ComputationalSignature`
 /// is the unified handle.
 ///
-/// **Architectural notes** (per CLAUDE.md):
+/// **Architectural notes** (per AGENTS.md):
 ///
 ///  - Properties MUST NOT be called "Effects". Verum doesn't have
 ///  algebraic effects; the property system is a compile-time

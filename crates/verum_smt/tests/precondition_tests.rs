@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for precondition module
-// Migrated from src/precondition.rs per CLAUDE.md standards
+// Migrated from src/precondition.rs per AGENTS.md standards
 // FIXED (Session 24): contains_old function made public
 
 use verum_ast::{BinOp, Expr, ExprKind, Ident, Literal, Path, Span};

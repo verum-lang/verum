@@ -60,7 +60,7 @@
 //
 
 // Spec: type-system spec §6.4 (coercion protocols),
-//  crates/verum_types/src/CLAUDE.md (architectural rule:
+//  crates/verum_types/src/AGENTS.md (architectural rule:
 //  "NEVER hardcode stdlib/core type knowledge in the compiler").
 
 @arch_module(

@@ -13,7 +13,7 @@
     unused_assignments
 )]
 //! YAML literal parser tests
-//! Per CLAUDE.md standards - tests in tests/ directory
+//! Per AGENTS.md standards - tests in tests/ directory
 
 use verum_ast::Span;
 use verum_common::Text;

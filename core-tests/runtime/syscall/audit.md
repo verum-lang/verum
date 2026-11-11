@@ -13,7 +13,7 @@ deliberately no kernel-invoking tests in this folder — those live at
 | consumer | how |
 |---|---|
 | `core.sys.linux.*` | every public sys-call (read/write/open/close/mmap/munmap/futex/clone/...) lowers to `syscall6(nr_linux, args...)`. |
-| `core.sys.darwin.*` | dispatches into libSystem.B.dylib via separate path; this intrinsic is **NOT** used on Darwin (architectural invariant per CLAUDE.md "no libc" rule). |
+| `core.sys.darwin.*` | dispatches into libSystem.B.dylib via separate path; this intrinsic is **NOT** used on Darwin (architectural invariant per AGENTS.md "no libc" rule). |
 | `core.sys.freebsd.*` | direct syscall (mirrors Linux pattern). |
 | `core.runtime.time.monotonic_nanos` | falls through to `clock_gettime` via syscall6 on Linux/FreeBSD. |
 | `core.runtime.tls.tls_get_base` | `arch_prctl` / `mrs tpidr_el0` per arch. |

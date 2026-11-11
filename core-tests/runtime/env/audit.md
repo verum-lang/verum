@@ -28,7 +28,7 @@ runtime/.
 * ExecutionTier `overhead_ns` values (15/8/3/0) MUST agree with
   `verum_vbc::cbgr::overhead_target_ns`; drift breaks the
   production_targets benchmark contract.
-* The CBGR check overhead target ("< 15ns") in CLAUDE.md is a
+* The CBGR check overhead target ("< 15ns") in AGENTS.md is a
   performance contract pinned by Tier0_Full.overhead_ns().
 
 ## 3. Language-implementation gaps

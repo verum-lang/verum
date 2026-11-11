@@ -1,5 +1,5 @@
 # Verum Language Platform - Clippy Configuration
-# Spec: CLAUDE.md v6.0-BALANCED - Semantic Type Enforcement
+# Spec: AGENTS.md v6.0-BALANCED - Semantic Type Enforcement
 
 # NOTE: The disallowed-types rule is commented out because the Verum compiler
 # infrastructure legitimately needs to use Rust std types internally.

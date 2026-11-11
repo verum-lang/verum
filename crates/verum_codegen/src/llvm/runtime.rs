@@ -9423,7 +9423,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // declared-without-body case never reaches the linker.
         let i32_type = self.context.i32_type();
         let i64_type = self.context.i64_type();
-        // **Verum-side i64 ABI** (per CLAUDE.md no-libc invariant).
+        // **Verum-side i64 ABI** (per AGENTS.md no-libc invariant).
         // The wrapper takes i64 fd to match how Verum-side code
         // passes file descriptors (NaN-boxed Value → i64).  Internally
         // narrow to POSIX i32 at the syscall / libSystem boundary,
@@ -11713,7 +11713,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
 /// (`verum_alloc` from `platform_ir::emit_allocator`), checks for null,
 /// aborts via `_exit(1)` on OOM.
 ///
-/// **Architectural invariant** (CLAUDE.md no-libc rule): never call
+/// **Architectural invariant** (AGENTS.md no-libc rule): never call
 /// libc `malloc` from emitted LLVM IR.  The Verum CBGR allocator is
 /// the single source of heap allocations across both Tier-0
 /// (interpreter, via `core/mem/allocator.vr::cbgr_alloc`) and
@@ -16184,7 +16184,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
         // verum_dealloc(header, total_size)
         //
-        // **Architectural rule (CLAUDE.md no-libc invariant)**: emit IR
+        // **Architectural rule (AGENTS.md no-libc invariant)**: emit IR
         // routes ALL heap deallocations through `verum_dealloc` (the
         // CBGR-aware companion to `verum_alloc` emitted in
         // `platform_ir.rs::emit_allocator`).  Signature is

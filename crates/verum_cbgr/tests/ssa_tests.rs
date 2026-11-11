@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for ssa module
-// Migrated from src/ssa.rs per CLAUDE.md standards
+// Migrated from src/ssa.rs per AGENTS.md standards
 
 use verum_cbgr::analysis::{BasicBlock, BlockId, ControlFlowGraph, DefSite, RefId, UseeSite};
 use verum_cbgr::ssa::*;

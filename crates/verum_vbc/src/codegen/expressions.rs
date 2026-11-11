@@ -17520,7 +17520,7 @@ impl VbcCodegen {
         // rather than pattern-matching on a name.
         //
 
-        // Per crates/verum_types/src/CLAUDE.md — "NEVER hardcode
+        // Per crates/verum_types/src/AGENTS.md — "NEVER hardcode
         // stdlib/core type knowledge in the compiler". This list
         // shrinks to the minimum that's legitimately type-specific.
         // NOTE (§G closure, 2026-07-09): `as_nanos` / `as_micros` /
@@ -17669,7 +17669,7 @@ impl VbcCodegen {
         // user-defined Functor / Monad-shape that shares method names
         // with the canonical stdlib carriers.
         //
-        // Per crates/verum_types/src/CLAUDE.md — "NEVER hardcode
+        // Per crates/verum_types/src/AGENTS.md — "NEVER hardcode
         // stdlib/core type knowledge in the compiler" — the lists below
         // remain only as a soft last-resort for receivers whose type
         // we cannot infer (typecheck-skipped paths, leniency).
@@ -17810,7 +17810,7 @@ impl VbcCodegen {
         // mis-dispatches every Functor/Monad-shaped user sum that
         // shares method names with Maybe (Poll, Result, custom carriers).
         // See the "NEVER hardcode stdlib/core type knowledge in the
-        // compiler" rule in `crates/verum_types/src/CLAUDE.md`.
+        // compiler" rule in `crates/verum_types/src/AGENTS.md`.
         if MAYBE_RETURNING_METHODS.contains(&method_name_str)
             && MAYBE_METHODS.contains(&outer_method_str)
         {

@@ -26,7 +26,7 @@
 // proper FunctionInfo-based lookup downstream see the actual
 // declared `-> Int` return and dispatch to plain `int$min` / `int$max`.
 //
-// This also aligns the resolver with the CLAUDE.md invariant
+// This also aligns the resolver with the AGENTS.md invariant
 // "NEVER hardcode stdlib/core type knowledge in the compiler".
 
 mount collections.List;

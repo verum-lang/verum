@@ -12,7 +12,7 @@
     useless_ptr_null_checks,
     unused_assignments
 )]
-// Migrated from src/literal_registry.rs per CLAUDE.md standards
+// Migrated from src/literal_registry.rs per AGENTS.md standards
 
 use verum_common::{Maybe, Text};
 use verum_compiler::literal_registry::*;

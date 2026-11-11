@@ -4,7 +4,7 @@
 //
 // LOCK-IN pins for `core.runtime.env`:
 //   §1  ExecutionTier.overhead_ns CBGR cost contract (15/8/3/0 ns) — must
-//       agree with verum_vbc.cbgr overhead targets + CLAUDE.md "< 15ns".
+//       agree with verum_vbc.cbgr overhead targets + AGENTS.md "< 15ns".
 //   §2  requires_epoch ⟹ requires_generation tier invariant.
 //   §3  audit.md §A — EnvTaskId.main() field-write-OOB (the wide-record
 //       static-method shadow / field-shift codegen class, task #17/#39).

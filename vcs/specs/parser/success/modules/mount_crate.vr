@@ -87,7 +87,7 @@ module visibility_test {
     mount crate.internal_module.InternalItem;
 }
 
-// Cog alias for crate (from CLAUDE.md - cog is the Verum term)
+// Cog alias for crate (from AGENTS.md - cog is the Verum term)
 mount cog.helpers;
 mount cog.utils.format;
 mount cog.{core};

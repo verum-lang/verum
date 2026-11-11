@@ -207,7 +207,7 @@ def self_consistent(sigs: set[tuple[str, str, str]]) -> bool:
     REFERENCE TIERS ARE ONE TYPE. `&T`, `&checked T` and `&unsafe T`
     differ in what the compiler proves, not in what is passed, and
     documenting all three of a method is the language's own idiom — see
-    the three-tier table in CLAUDE.md. A page showing them together is
+    the three-tier table in AGENTS.md. A page showing them together is
     teaching CBGR, not contradicting itself.
 
     The normalisation belongs HERE and not in the comparison against

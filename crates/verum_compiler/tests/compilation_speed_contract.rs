@@ -41,7 +41,7 @@ use verum_lexer::Lexer;
 /// target in the language README / pipeline docs is 50 K LOC/sec.
 ///
 /// This comment used to say `~1.4 M LOC/sec (2026-04, macOS arm64)`, and
-/// CLAUDE.md and the marketing homepage repeated it. Re-measured 2026-09-05
+/// AGENTS.md and the marketing homepage repeated it. Re-measured 2026-09-05
 /// with the repository's own bench on the same generator this test uses
 /// (`cargo bench -p verum_fast_parser --bench production_targets`):
 /// 820 LOC **448 K/s**, 4100 LOC **489 K/s**, 8200 LOC **370 K/s** — about

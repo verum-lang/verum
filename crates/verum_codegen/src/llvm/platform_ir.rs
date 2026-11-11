@@ -2179,7 +2179,7 @@ impl<'ctx> PlatformIR<'ctx> {
     /// T1082 — `verum_getenv_linux(name: ptr) -> ptr`, the no-libc leg
     /// of `SysSubOpcode::EnvGet`.
     ///
-    /// CLAUDE.md's load-bearing invariant is that a Linux binary calls
+    /// AGENTS.md's load-bearing invariant is that a Linux binary calls
     /// no libc; `EnvGet` lowered to libc's `getenv` unconditionally, so
     /// `make check-dup-emitters` had been RED on main since
     /// 2026-08-23 (introduced by 6b456d762, T0852).

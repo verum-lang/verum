@@ -28,7 +28,7 @@
 // typo" from "catches everything except `self`". The first version of
 // this file carried only the typo, and the check it guards shipped
 // rejecting `it` — the IMPLICIT binder, used by 166 files in core/ and
-// documented in the root CLAUDE.md's own example. Six core/ files went
+// documented in the root AGENTS.md's own example. Six core/ files went
 // from clean to red, found within the hour by another session's corpus
 // ratchet rather than by this spec.
 

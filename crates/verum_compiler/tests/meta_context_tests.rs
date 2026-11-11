@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for meta_context module
-// Migrated from src/meta_context.rs per CLAUDE.md standards
+// Migrated from src/meta_context.rs per AGENTS.md standards
 
 use verum_ast::Span;
 use verum_common::Text;

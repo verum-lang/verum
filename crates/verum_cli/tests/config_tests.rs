@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for config module
-// Migrated from src/config.rs per CLAUDE.md standards
+// Migrated from src/config.rs per AGENTS.md standards
 
 use verum_cli::config::*;
 

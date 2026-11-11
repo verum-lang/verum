@@ -14,7 +14,7 @@
     unused_assignments
 )]
 // Tests for parallel module
-// Migrated from src/parallel.rs per CLAUDE.md standards
+// Migrated from src/parallel.rs per AGENTS.md standards
 
 use std::sync::atomic::Ordering;
 use verum_common::{List, Maybe};

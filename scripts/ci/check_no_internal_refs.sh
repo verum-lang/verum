@@ -24,7 +24,7 @@ violations=$(git grep -nE '(^|[^A-Za-z0-9_.-])internal/([A-Za-z0-9_-]+/|[A-Za-z0
 if [ -n "$violations" ]; then
   echo "FORBIDDEN internal/-directory references in tracked files:" >&2
   echo "$violations" >&2
-  echo "Fix: state the requirement in place or cite a public doc (see CLAUDE.md)." >&2
+  echo "Fix: state the requirement in place or cite a public doc (see AGENTS.md)." >&2
   exit 1
 fi
 echo "check-internal-refs: OK"
@@ -32,7 +32,7 @@ echo "check-internal-refs: OK"
 # -----------------------------------------------------------------------------
 # The same rule's other face: a `Spec:` citation that resolves nowhere.
 #
-# CLAUDE.md asks for a LOGICAL spec name, "never a path", and this is why.
+# AGENTS.md asks for a LOGICAL spec name, "never a path", and this is why.
 # Every cited spec still exists — inside the gitignored tree this script
 # forbids naming — and 256 citations were left pointing at the public paths
 # they used to have. So a citation can be neither repointed (that would name
@@ -62,7 +62,7 @@ for p in $spec_dangling; do
 done
 echo "check-spec-citations: $n_dangling of $n_spec \`Spec: docs/…\` citations resolve to no file (baseline $SPEC_BASELINE)"
 if [ "$n_dangling" -gt "$SPEC_BASELINE" ]; then
-  echo "A new unresolvable Spec: citation. Cite a LOGICAL spec name (CLAUDE.md), not a path." >&2
+  echo "A new unresolvable Spec: citation. Cite a LOGICAL spec name (AGENTS.md), not a path." >&2
   exit 1
 fi
 

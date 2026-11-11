@@ -281,7 +281,7 @@ impl WellKnownType {
     /// Single source of truth for the codegen-side
     /// `is_builtin_ctor_collection` predicate — the previous HashSet
     /// duplicate at `verum_vbc/src/codegen/mod.rs::CodegenContext::new`
-    /// was a CLAUDE.md violation (hardcoded stdlib type list inside
+    /// was a AGENTS.md violation (hardcoded stdlib type list inside
     /// the compiler).
     ///
     /// `Channel` is NOT in this set. Tier 0 has no builtin channel: the
@@ -321,7 +321,7 @@ impl WellKnownType {
     /// Single source of truth for the codegen-side
     /// `type_prefix_intercepted_by_runtime` predicate — the previous
     /// inline hardcoded `matches!(...)` block at
-    /// `verum_vbc/src/codegen/expressions.rs` was a CLAUDE.md
+    /// `verum_vbc/src/codegen/expressions.rs` was a AGENTS.md
     /// violation.
     pub fn has_runtime_inline_dispatch(name: &str) -> bool {
         if Self::from_name(name).is_some() {

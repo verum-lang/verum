@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for conversions module
-// Migrated from src/conversions.rs per CLAUDE.md standards
+// Migrated from src/conversions.rs per AGENTS.md standards
 
 use verum_common::Maybe;
 use verum_common::conversions::*;

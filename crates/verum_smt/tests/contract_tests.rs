@@ -15,7 +15,7 @@
 // Unit tests for contract.rs
 //
 
-// Migrated from src/contract.rs to comply with CLAUDE.md test organization.
+// Migrated from src/contract.rs to comply with AGENTS.md test organization.
 
 use verum_smt::contract::*;
 use verum_smt::rsl_parser::RslClauseKind;

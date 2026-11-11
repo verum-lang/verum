@@ -1012,7 +1012,7 @@ impl TypeChecker {
     /// leniency masked it.
     ///
     /// Discovery is purely registration-driven (NO hardcoded stdlib/primitive
-    /// name lists — see crate CLAUDE.md): a name is an existing type iff
+    /// name lists — see crate AGENTS.md): a name is an existing type iff
     /// `lookup_type` returns a rich (`Variant`/`Record`), `Named`, or scalar
     /// entry. Fresh marker names return `None` and keep sum semantics.
     ///

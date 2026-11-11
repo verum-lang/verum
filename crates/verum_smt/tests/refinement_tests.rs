@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for refinement module
-// Migrated from src/refinement.rs per CLAUDE.md standards
+// Migrated from src/refinement.rs per AGENTS.md standards
 
 use verum_smt::refinement::*;
 use verum_smt::verify::VerifyMode;

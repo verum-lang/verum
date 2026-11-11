@@ -37,7 +37,7 @@
 /// `pthread_*`, etc.) without bringing in any glibc/musl-style libc.
 /// Apple requires every macOS binary to link this library.
 ///
-/// Per CLAUDE.md no-libc invariant: this is the **only** dynamic
+/// Per AGENTS.md no-libc invariant: this is the **only** dynamic
 /// library a Verum-AOT-compiled macOS binary is allowed to import.
 pub const MACOS_LIBSYSTEM: &str = "libSystem.B.dylib";
 

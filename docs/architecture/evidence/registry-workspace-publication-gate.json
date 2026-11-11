@@ -295,7 +295,7 @@
     "identical_cli_tree": "e0041251a19b4f03b5e39ba7ef209eac48836eff",
     "cli_source_and_tests_identical": true,
     "base_changed_paths": [
-      "CLAUDE.md",
+      "AGENTS.md",
       "crates/verum_compiler/tests/bootstrap/generic_variant_payloads.rs",
       "crates/verum_types/src/infer/core.rs",
       "crates/verum_types/src/infer/env.rs",

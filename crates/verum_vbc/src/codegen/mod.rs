@@ -15459,7 +15459,7 @@ impl VbcCodegen {
     /// predicates describe the program being compiled, not how this compiler
     /// binary was built. The previous implementation hardcoded
     /// `cfg!(debug_assertions)` / `cfg!(unix)` / `cfg!(target_os = ...)`, which
-    /// (a) violated the CLAUDE.md rule that every per-platform decision reads
+    /// (a) violated the AGENTS.md rule that every per-platform decision reads
     /// the target — host gates miscompile cross builds — and (b) duplicated
     /// semantics the target-aware [`verum_ast::cfg::TargetConfig`] already
     /// implements, so the two could drift. `TargetConfig` is the single
@@ -16048,7 +16048,7 @@ impl VbcCodegen {
                     // the original collision-removal stays: a user-defined
                     // `type Foo is None | ...` wins the simple name over
                     // the stdlib's `Maybe.None` (per the architectural
-                    // rule in `verum_types/src/CLAUDE.md`).
+                    // rule in `verum_types/src/AGENTS.md`).
                     if !self.variant_collisions.contains(&variant_name) {
                         // Check if simple name is already registered
                         if let Some(existing) = self.ctx.lookup_function(&variant_name) {

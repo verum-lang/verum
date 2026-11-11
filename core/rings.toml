@@ -51,7 +51,7 @@ inherited_budget = 40
 # `types` likewise names the checker's own vocabulary.
 modules = [
     "base", "types", "intrinsics",
-    # The LANGUAGE's own vocabulary. CLAUDE.md mandates List/Text/Map/Set
+    # The LANGUAGE's own vocabulary. AGENTS.md mandates List/Text/Map/Set
     # as the semantic types — they are named by the grammar and by every
     # signature in the stdlib, exactly like Maybe and Result, and they
     # belong in the primitive layer for the same reason.

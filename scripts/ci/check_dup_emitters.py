@@ -94,7 +94,7 @@ def collect_definers():
 # body referencing one of these as an extern WITHOUT a co-located
 # target_is_linux syscall path is flagged. The legit
 # `if target_is_linux { syscall } else { libSystem extern }` pattern
-# (macOS boundary is ALLOWED per CLAUDE.md) never fires: the
+# (macOS boundary is ALLOWED per AGENTS.md) never fires: the
 # target_is_linux mention itself clears the emitter.
 FORBIDDEN_LIBC = [
     "clock_gettime",

@@ -260,7 +260,7 @@ impl TypeChecker {
         // miss-trigger, body-position references to unmounted
         // stdlib types throw `type not found: List` / `Map` etc.
         //
-        // Stdlib-agnostic per `crates/verum_types/src/CLAUDE.md`:
+        // Stdlib-agnostic per `crates/verum_types/src/AGENTS.md`:
         // the existence test is `core_metadata.types` membership,
         // not a hardcoded list of stdlib type names.
         // `ensure_stdlib_type_loaded` is idempotent (gates on

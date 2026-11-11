@@ -1089,7 +1089,7 @@ fn test_compilation_performance() {
     // bootstrap included, not throughput: 20 trivial functions do not
     // account for 18 seconds on their own. It is a regression tripwire
     // for the whole pipeline, not a check against the
-    // >50K LOC/sec target in CLAUDE.md — that one needs a benchmark
+    // >50K LOC/sec target in AGENTS.md — that one needs a benchmark
     // that excludes bootstrap.
     let bound_secs = if cfg!(debug_assertions) { 240 } else { 30 };
     assert!(

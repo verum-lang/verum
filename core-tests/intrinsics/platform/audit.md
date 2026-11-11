@@ -23,7 +23,7 @@ complementarity, determinism) plus the interpreter-specific contract
 
 > NOTE: the compile-time evaluator currently selects values via host `#[cfg]`
 > (`target_os`/`target_arch`/`target_pointer_width`/endianness). Per
-> `CLAUDE.md` every per-target decision should read the **target** triple
+> `AGENTS.md` every per-target decision should read the **target** triple
 > (`module.get_triple()`), not host cfg — this is pre-existing debt shared by
 > all platform meta intrinsics (the new entries follow the existing pattern for
 > consistency; the triple migration is a separate, module-wide change).

@@ -212,7 +212,7 @@ CI should:
 ## Related Documentation
 
 - [INTEGRATION_TEST_SUITE_REPORT.md](../INTEGRATION_TEST_SUITE_REPORT.md) - Full test suite report
-- [CLAUDE.md](../../../CLAUDE.md) - Development standards
+- [AGENTS.md](../../../AGENTS.md) - Development standards
 - [docs/detailed/06-compilation-pipeline.md](../../../docs/detailed/06-compilation-pipeline.md) - Pipeline specification
 
 ## Contact

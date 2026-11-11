@@ -10,7 +10,7 @@ WHY THIS EXISTS
 registers it as a compiler-level compatibility alias for `Text`
 ("str is an alias for Text (for compatibility)"), reinforced by a
 `From<&str> for Text` fallback coercion in `infer/types.rs`. But
-CLAUDE.md's semantic-types rule is mandatory: `Text`, never `str` /
+AGENTS.md's semantic-types rule is mandatory: `Text`, never `str` /
 `String`. Every `&str` in `core/` is a Rust-porting artefact exactly
 like the `::` this repo already gates — this script is the same idea,
 aimed at a second construct.

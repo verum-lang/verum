@@ -23,7 +23,7 @@ mount core.meta.attribute.{
 };
 
 // `Heap(x)` is not a constructor — the grammar spells it `Heap.new(x)`
-// (CLAUDE.md, semantic types). The bare form is refused with
+// (AGENTS.md, semantic types). The bare form is refused with
 // `error<E412>: not a function: Heap`, a COMPILE error that took the
 // whole file down.
 

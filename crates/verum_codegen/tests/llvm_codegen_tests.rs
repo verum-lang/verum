@@ -727,7 +727,7 @@ fn test_cbgr_fat_ref_type_layout() {
     let fat_ref = cbgr.fat_ref_type();
     // FatRef is 32 bytes: ThinRef (ptr + generation:4 + epoch_caps:4)
     // plus metadata:8, offset:4 and reserved:4 — the layout the
-    // architecture pins (CLAUDE.md, "Memory Layout") and the one the
+    // architecture pins (AGENTS.md, "Memory Layout") and the one the
     // FFI byte-buffer contract calls the "reserved-stride FatRef".
     //
     // This assertion said 4 and had never run: `verum_codegen` is not

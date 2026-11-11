@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for tactics module
-// Migrated from src/tactics.rs per CLAUDE.md standards
+// Migrated from src/tactics.rs per AGENTS.md standards
 
 use verum_smt::tactics::*;
 

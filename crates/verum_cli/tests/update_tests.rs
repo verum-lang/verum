@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for update module
-// Migrated from src/update.rs per CLAUDE.md standards
+// Migrated from src/update.rs per AGENTS.md standards
 
 use verum_cli::update::*;
 

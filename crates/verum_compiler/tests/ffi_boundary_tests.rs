@@ -14,7 +14,7 @@
 )]
 //! Comprehensive FFI Boundary Validation Tests
 //!
-//! Tests per CLAUDE.md standards:
+//! Tests per AGENTS.md standards:
 //! - All tests in tests/ directory
 //! - No #[cfg(test)] in src/
 //! - 100+ comprehensive test cases

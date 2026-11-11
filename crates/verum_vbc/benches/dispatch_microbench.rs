@@ -8,7 +8,7 @@
 //! cycles, multiply by the host CPU frequency in GHz (e.g. 3.2 GHz
 //! Apple-silicon performance core ⇒ cycles ≈ ns × 3.2).
 //!
-//! ## Targets (`crates/verum_vbc/CLAUDE.md`)
+//! ## Targets (`crates/verum_vbc/AGENTS.md`)
 //!
 //! | Opcode class | Target | Source |
 //! |-----------------------------|-----------------------|---------------------|

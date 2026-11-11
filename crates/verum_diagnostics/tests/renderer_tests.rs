@@ -15,7 +15,7 @@
 // Unit tests for renderer.rs
 //
 
-// Migrated from src/renderer.rs to comply with CLAUDE.md test organization.
+// Migrated from src/renderer.rs to comply with AGENTS.md test organization.
 
 use verum_diagnostics::{
     DiagnosticBuilder, Span,

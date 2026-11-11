@@ -8179,7 +8179,7 @@ impl ProtocolChecker {
     ///
     /// True if `name` is declared as an associated type by ANY registered
     /// protocol (Iterator's `Item`, Future's `Output`, …). Registry-driven —
-    /// no hardcoded stdlib names (CLAUDE.md) — used to recognise the LEGACY
+    /// no hardcoded stdlib names (AGENTS.md) — used to recognise the LEGACY
     /// bare-name projection encoding `Generic{"Item",[Iter]}` alongside the
     /// `::Assoc` form the VBC serializer now emits.
     pub fn is_associated_type_name(&self, name: &str) -> bool {

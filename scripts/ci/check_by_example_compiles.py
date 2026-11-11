@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The `docs/by-example/` programs must compile.
 
-CLAUDE.md points at this directory beside `grammar/verum.ebnf` for
+AGENTS.md points at this directory beside `grammar/verum.ebnf` for
 syntax, and 22 chapters live there as real `.vr` files rather than
 fenced blocks. Nothing checked them: `check_doc_examples` walks `core/`
 and the website tree, and neither reaches here. Measured 2026-09-05 —
@@ -23,7 +23,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 # Two corpora, same rule: a program shipped as an example must
-# compile. `docs/by-example` is the tutorial series CLAUDE.md cites
+# compile. `docs/by-example` is the tutorial series AGENTS.md cites
 # for syntax; `crates/verum_cli/examples` ships with the CLI and was
 # measured at 83 errors across three of its five files on
 # 2026-09-05 — nothing referenced them and nothing checked them,

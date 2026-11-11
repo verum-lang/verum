@@ -15,7 +15,7 @@
 // Unit tests for counterexample.rs
 //
 
-// Migrated from src/counterexample.rs to comply with CLAUDE.md test organization.
+// Migrated from src/counterexample.rs to comply with AGENTS.md test organization.
 
 use verum_common::{List, Map};
 use verum_smt::counterexample::*;

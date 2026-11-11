@@ -4,7 +4,7 @@
 #
 # WHY THIS EXISTS.  Contexts and protocol bounds are different
 # mechanisms: a context is runtime dependency injection (`using [X]`), a
-# bound is a compile-time constraint.  CLAUDE.md keeps them apart on
+# bound is a compile-time constraint.  AGENTS.md keeps them apart on
 # purpose.  The compiler mixed them in silence — measured 2026-09-02
 # (T1076):
 #

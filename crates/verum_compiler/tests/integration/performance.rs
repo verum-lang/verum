@@ -582,7 +582,7 @@ fn test_interactive_repl_performance() {
 
 #[test]
 fn test_compilation_speed_target() {
-    // Target: > 50K LOC/sec (CLAUDE.md Performance Targets)
+    // Target: > 50K LOC/sec (AGENTS.md Performance Targets)
 
     let mut large_program = String::new();
     large_program.push_str("fn main() {\n");
@@ -615,7 +615,7 @@ fn test_compilation_speed_target() {
 
 #[test]
 fn test_type_inference_speed_target() {
-    // Target: < 100ms for 10K LOC (CLAUDE.md Performance Targets)
+    // Target: < 100ms for 10K LOC (AGENTS.md Performance Targets)
 
     // This would require a 10K LOC program and actual type checking
     // For now, we test that type checking is fast for small programs
@@ -645,7 +645,7 @@ fn test_type_inference_speed_target() {
 
 #[test]
 fn test_runtime_performance_target() {
-    // Target: 1x native C — parity bar (CLAUDE.md Performance Targets)
+    // Target: 1x native C — parity bar (AGENTS.md Performance Targets)
 
     // This would require actual benchmarking against C
     // For now, we document the target

@@ -412,7 +412,7 @@ client request without a trace.  These fixes turn weft from
 §7–§8 are the deeper Verum-thesis-aligned fixes — they make
 **incorrect server code uncompilable**, the goal of "не позволять
 создавать некорректные или уязвимые системы" (Verum's core
-architectural idea per the project README and CLAUDE.md).
+architectural idea per the project README and AGENTS.md).
 
 ---
 

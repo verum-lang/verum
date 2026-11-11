@@ -15,7 +15,7 @@
 // Unit tests for suggestion.rs
 //
 
-// Migrated from src/suggestion.rs to comply with CLAUDE.md test organization.
+// Migrated from src/suggestion.rs to comply with AGENTS.md test organization.
 
 use verum_diagnostics::suggestion::*;
 
@@ -125,7 +125,7 @@ fn test_type_use_associated_type() {
     let suggestion = TypeSuggestionTemplates::use_associated_type("Iterator", "Item");
     assert!(suggestion.title().contains("associated type"));
     // Verum reaches a protocol's associated type as `Self.Item`
-    // (CLAUDE.md protocol example; core/mesh/k8s/client.vr:280).
+    // (AGENTS.md protocol example; core/mesh/k8s/client.vr:280).
     // This asserted the Rust qualified form until T1142.
     assert!(suggestion.code().contains("Self.Item"));
     assert!(!suggestion.code().contains("::"));

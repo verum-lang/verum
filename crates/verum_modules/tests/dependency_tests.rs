@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for dependency module
-// Migrated from src/dependency.rs per CLAUDE.md standards
+// Migrated from src/dependency.rs per AGENTS.md standards
 
 use verum_modules::dependency::*;
 use verum_modules::{ModuleId, ModulePath};

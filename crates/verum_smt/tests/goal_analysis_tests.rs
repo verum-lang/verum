@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for goal_analysis module
-// Migrated from src/goal_analysis.rs per CLAUDE.md standards
+// Migrated from src/goal_analysis.rs per AGENTS.md standards
 
 use verum_smt::goal_analysis::*;
 

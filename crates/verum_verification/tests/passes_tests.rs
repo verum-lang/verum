@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for passes module
-// Migrated from src/passes.rs per CLAUDE.md standards
+// Migrated from src/passes.rs per AGENTS.md standards
 
 use std::time::Duration;
 use verum_common::List;

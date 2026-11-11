@@ -222,7 +222,7 @@ the test catches it.
 
 **Status:** DEFENSE CONFIRMED — guardrail test `mount_alias_shadows_builtin.vr`
 covers the path. The compiler does NOT have a hardcoded list of protected
-built-in names; per `crates/verum_types/src/CLAUDE.md`'s architectural rule
+built-in names; per `crates/verum_types/src/AGENTS.md`'s architectural rule
 ("Variant constructors: User-defined variant names must freely override
 built-in convenience aliases"), user code is free to mount-alias under
 names that overlap with `core.base.option.Maybe`, `core.base.result.Ok`,
@@ -345,7 +345,7 @@ contexts list is part of the function's TYPE, and `f<T> using [Logger]`
 can only be instantiated at a call-site that itself supplies Logger
 (via its own `using [Logger]` or via `provide Logger` scope).
 
-**Foundation:** the architectural rule `crates/verum_types/src/CLAUDE.md`
+**Foundation:** the architectural rule `crates/verum_types/src/AGENTS.md`
 requires the compiler to discover all type properties from source
 declarations (zero hardcoded stdlib knowledge). Context tracking lives
 in `Function::contexts: SmallVec<[ContextRef; 2]>` (verum_types::ty)
@@ -387,7 +387,7 @@ a Zero-quantity binding's runtime usage count exceeds 0.
 
 All 11 QTT tests passing.
 
-The architectural rule `crates/verum_types/src/CLAUDE.md` "compiler
+The architectural rule `crates/verum_types/src/AGENTS.md` "compiler
 must have ZERO knowledge of stdlib types" forecloses the alternative
 unsoundness vector (compiler hardcoding which type is erased) — every
 binding's quantity is discovered from its declaration / attribute.

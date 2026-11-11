@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for tree module
-// Migrated from src/tree.rs per CLAUDE.md standards
+// Migrated from src/tree.rs per AGENTS.md standards
 
 use verum_cli::tree::*;
 

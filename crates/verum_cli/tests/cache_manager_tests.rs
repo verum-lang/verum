@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for cache_manager module
-// Migrated from src/cache_manager.rs per CLAUDE.md standards
+// Migrated from src/cache_manager.rs per AGENTS.md standards
 
 use verum_cli::cache_manager::*;
 

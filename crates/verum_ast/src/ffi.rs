@@ -295,5 +295,5 @@ impl Ownership {
     }
 }
 
-// Tests moved to tests/ffi_tests.rs per CLAUDE.md standards
+// Tests moved to tests/ffi_tests.rs per AGENTS.md standards
 // (NO #[cfg(test)] modules in src/ - all tests in tests/ directory)

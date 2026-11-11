@@ -2,7 +2,7 @@
 """Gate: every keyword the lexer accepts must appear in the grammar.
 
 `grammar/verum.ebnf` is declared the ONLY source of truth for Verum
-syntax, and CLAUDE.md tells every contributor to check syntax against it
+syntax, and AGENTS.md tells every contributor to check syntax against it
 before writing a `.vr` file. That instruction is only sound if the file
 actually contains the syntax the parser accepts.
 

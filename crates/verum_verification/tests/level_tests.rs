@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for level module
-// Migrated from src/level.rs per CLAUDE.md standards
+// Migrated from src/level.rs per AGENTS.md standards
 
 use verum_verification::level::*;
 

@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for context module
-// Migrated from src/context.rs per CLAUDE.md standards
+// Migrated from src/context.rs per AGENTS.md standards
 
 use verum_common::{List, Maybe, Text};
 use verum_verification::context::*;

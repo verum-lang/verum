@@ -5,7 +5,7 @@
 // LIVE surface of the async-ops intrinsic layer — the global-handle
 // getters and the sleep pair.  These intrinsics were migrated off the
 // removed LibraryCall strategy onto typed dispatch (see
-// crates/verum_vbc/CLAUDE.md — the historical 14-intrinsic backlog);
+// crates/verum_vbc/AGENTS.md — the historical 14-intrinsic backlog);
 // this file pins that they stay CALLABLE and behave per contract under
 // both tiers.  Task-spawn / poll flows need live futures — covered by
 // core-tests/async/.

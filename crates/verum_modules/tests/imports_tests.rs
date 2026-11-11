@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for imports module
-// Migrated from src/imports.rs per CLAUDE.md standards
+// Migrated from src/imports.rs per AGENTS.md standards
 
 use verum_modules::ModuleId;
 use verum_modules::exports::ExportKind;

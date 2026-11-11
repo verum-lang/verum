@@ -15,7 +15,7 @@
 // Unit tests for repl.rs
 //
 
-// Migrated from src/repl.rs to comply with CLAUDE.md test organization.
+// Migrated from src/repl.rs to comply with AGENTS.md test organization.
 
 use std::path::PathBuf;
 use verum_compiler::{CompilerOptions, Repl, Session};

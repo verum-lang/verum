@@ -778,7 +778,7 @@ Test coverage:
 
 ## Spec Reference
 
-Spec: CLAUDE.md v6.0-BALANCED Section 3 - Semantic Types
+Spec: AGENTS.md v6.0-BALANCED Section 3 - Semantic Types
 
 ## Summary
 

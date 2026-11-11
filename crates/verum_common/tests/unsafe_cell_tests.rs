@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for unsafe_cell module
-// Migrated from src/unsafe_cell.rs per CLAUDE.md standards
+// Migrated from src/unsafe_cell.rs per AGENTS.md standards
 
 use verum_common::unsafe_cell::*;
 

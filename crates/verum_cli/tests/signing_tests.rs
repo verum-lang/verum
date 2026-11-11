@@ -19,7 +19,7 @@
     unused_assignments
 )]
 // Tests for signing module
-// Migrated from src/signing.rs per CLAUDE.md standards
+// Migrated from src/signing.rs per AGENTS.md standards
 
 use verum_cli::signing::*;
 

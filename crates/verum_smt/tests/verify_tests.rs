@@ -15,7 +15,7 @@
 // Unit tests for verify.rs
 //
 
-// Migrated from src/verify.rs to comply with CLAUDE.md test organization.
+// Migrated from src/verify.rs to comply with AGENTS.md test organization.
 
 use verum_common::Heap;
 use verum_smt::verify::*;

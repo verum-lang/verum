@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for search module
-// Migrated from src/search.rs per CLAUDE.md standards
+// Migrated from src/search.rs per AGENTS.md standards
 
 use verum_cli::search::*;
 

@@ -23,7 +23,7 @@
 //     change-data-capture log formats, key-value store payload
 //     types, and any tool that prefers strict typing without the
 //     overhead of CBOR's tag system.
-//   * Pure Verum, no FFI — fits the CLAUDE.md "no libc" rule.
+//   * Pure Verum, no FFI — fits the AGENTS.md "no libc" rule.
 //
 // # Supported types (all canonical types per BSON v1.1)
 //

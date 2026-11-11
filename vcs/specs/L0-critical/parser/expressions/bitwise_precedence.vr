@@ -14,7 +14,7 @@
 //
 // Under that reading `a | b & c` with a=12 b=10 c=6 is (a|b)&c = 6. The
 // compiler answers 14, which is a|(b&c). The grammar and the compiler
-// therefore disagree about the VALUE of an expression, and CLAUDE.md names
+// therefore disagree about the VALUE of an expression, and AGENTS.md names
 // the grammar the ONLY source of truth and requires checking it before
 // writing any .vr file — so the document authors are told to trust is the
 // one that is wrong.

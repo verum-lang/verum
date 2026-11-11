@@ -74,7 +74,7 @@ Tests error detection, propagation, and recovery:
 
 Tests performance under load and extreme conditions:
 
-**Performance Targets** (from CLAUDE.md):
+**Performance Targets** (from AGENTS.md):
 - CBGR overhead: < 15ns per check (measured)
 - Type inference: < 100ms for 10K LOC
 - Compilation speed: > 50K LOC/sec (release)
@@ -176,7 +176,7 @@ cargo test --package verum_integration_tests --test stress_tests --release
 
 ## Test Organization
 
-All tests follow the CLAUDE.md testing requirements:
+All tests follow the AGENTS.md testing requirements:
 
 - **NO** `#[cfg(test)]` modules in `src/`
 - All tests in `tests/` directory

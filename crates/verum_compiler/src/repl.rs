@@ -357,7 +357,7 @@ impl Repl {
             .functions
             .iter()
             .find(|f| {
-            // QUALIFIED-NAME MATCH (vbc/CLAUDE.md convention): function
+            // QUALIFIED-NAME MATCH (vbc/AGENTS.md convention): function
             // names in the module are MODULE-QUALIFIED
             // (`repl_cell.__repl_script_1`), so an exact match on the
             // bare wrapper name silently misses and every expression

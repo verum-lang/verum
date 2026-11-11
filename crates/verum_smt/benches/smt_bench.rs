@@ -1,6 +1,6 @@
 //! Performance benchmarks for SMT solving
 //!
-//! Performance targets from CLAUDE.md:
+//! Performance targets from AGENTS.md:
 //! - SMT queries: < 10ms average
 //! - Refinement checking: < 50ms per function
 //!

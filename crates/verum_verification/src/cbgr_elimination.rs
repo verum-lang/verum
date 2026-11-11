@@ -1185,4 +1185,4 @@ pub enum CBGRAnalysisError {
 // Tests Module Notice
 // =============================================================================
 
-// Tests are in tests/cbgr_elimination_tests.rs per CLAUDE.md standards
+// Tests are in tests/cbgr_elimination_tests.rs per AGENTS.md standards

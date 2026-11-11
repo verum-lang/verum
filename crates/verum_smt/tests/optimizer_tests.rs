@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for optimizer module
-// Migrated from src/optimizer.rs per CLAUDE.md standards
+// Migrated from src/optimizer.rs per AGENTS.md standards
 
 use verum_smt::optimizer::*;
 use z3::ast::Bool;

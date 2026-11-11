@@ -12,7 +12,7 @@
     useless_ptr_null_checks,
     unused_assignments
 )]
-// Migrated from src/lib.rs to comply with CLAUDE.md test organization.
+// Migrated from src/lib.rs to comply with AGENTS.md test organization.
 
 use verum_compiler::{BUILD_INFO, VERSION};
 

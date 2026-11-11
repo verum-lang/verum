@@ -1901,7 +1901,7 @@ impl Unifier {
             // with a two-letter name must be explicitly bound via
             // `<Xy: Trait>` declarations, which create proper TypeVars that
             // never reach this fallback path. This is the stdlib-agnostic
-            // replacement for the previous hardcoded name list per CLAUDE.md.
+            // replacement for the previous hardcoded name list per AGENTS.md.
             (Named { path, args, .. }, other) | (other, Named { path, args, .. })
                 if args.is_empty() && {
                     let name = path
@@ -2936,7 +2936,7 @@ impl Unifier {
             // Previously this unifier silently accepted `Bool` and `Char` as
             // subtypes of `Int`, meaning `let x: Int = true`, `fn f() -> Int {
             // true }`, and `a: Int + b: Bool` all type-checked cleanly — an
-            // enormous blind spot directly contradicting CLAUDE.md's "semantic
+            // enormous blind spot directly contradicting AGENTS.md's "semantic
             // honesty" principle ("types describe meaning, not implementation")
             // and causing `integration_test::test_type_error_detection` to
             // fail because `fn bad_add(a: Int, b: Bool) -> Int { a + b }` was
@@ -2957,7 +2957,7 @@ impl Unifier {
             //  - makes `test_type_error_detection` pass correctly
             //  - restores type safety for Bool and Char at assignment,
             //  return, argument passing, and binary operator sites
-            //  - aligns with CLAUDE.md Rule: "Semantic Honesty"
+            //  - aligns with AGENTS.md Rule: "Semantic Honesty"
             //  - keeps the Verum refinement system sound (Int refinements
             //  like `Int{>= 0}` can no longer be "satisfied" by a Bool)
             //
@@ -2966,7 +2966,7 @@ impl Unifier {
             // an explicit cast `as Int` or use `if cond { 1 } else { 0 }`.
             //
 
-            // Related: CLAUDE.md section "Semantic Types", the test
+            // Related: AGENTS.md section "Semantic Types", the test
             // `crates/verum_compiler/tests/type_error_detection_debug.rs`
             // that documents the full matrix of cases (Int+Bool, Bool+Bool,
             // let x: Int = true, fn f() -> Int { true }, ...), and

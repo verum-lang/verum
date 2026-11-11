@@ -2,7 +2,7 @@
 //!
 //! **CRITICAL REQUIREMENTS**: Verify all error handling performance targets
 //!
-//! # Performance Targets (from CLAUDE.md)
+//! # Performance Targets (from AGENTS.md)
 //! - Circuit breaker check overhead: 10-50ns
 //! - Error creation and propagation: < 100ns
 //! - Context chain building: < 50ns per level

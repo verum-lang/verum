@@ -162,7 +162,7 @@ public fn future_poll_sync<F: Future>(future: &mut F) -> Maybe<F.Output> {
 // Pre-fix this file declared `async_sleep_ms`/`ns` with `Int` ABI
 // while `core/intrinsics/runtime/async_ops.vr` had `UInt64 + async`
 // — same `@intrinsic("async_sleep_ms")` name, different surfaces.
-// Per CLAUDE.md "all intrinsics in core/intrinsics", the canonical
+// Per AGENTS.md "all intrinsics in core/intrinsics", the canonical
 // home is `core/intrinsics/runtime/async_ops.vr`; this file just
 // re-exports them so legacy `mount core.async.intrinsics.{...}`
 // users keep working.

@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for tensor_shapes module
-// Migrated from src/tensor_shapes.rs per CLAUDE.md standards
+// Migrated from src/tensor_shapes.rs per AGENTS.md standards
 
 use verum_common::{List, Maybe, Text};
 use verum_verification::tensor_shapes::*;

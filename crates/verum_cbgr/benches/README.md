@@ -4,7 +4,7 @@ This directory contains comprehensive performance benchmarks for the CBGR (Count
 
 ## Critical Performance Requirements
 
-From `CLAUDE.md`, CBGR must meet these targets:
+From `AGENTS.md`, CBGR must meet these targets:
 
 - **CBGR overhead**: < 15ns per check (measured)
 - **Type inference**: < 100ms for 10K LOC
@@ -263,5 +263,5 @@ When adding new benchmarks:
 ## References
 
 - CBGR performance targets: <15ns cache-hot check, <100ms escape analysis for 10K LOC
-- Performance targets: `CLAUDE.md`
+- Performance targets: `AGENTS.md`
 - Criterion docs: https://bheisler.github.io/criterion.rs/

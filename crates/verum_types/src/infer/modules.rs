@@ -9560,7 +9560,7 @@ impl TypeChecker {
         // Cycle guard: if `module_path` is already being glob-expanded higher
         // up the call stack, re-entering it would recurse unbounded. Emit
         // E0811 with the full visit path and bail out of the inner expansion
-        // (the outer expansion continues). Spec: CLAUDE.md § CRITICAL: Verum
+        // (the outer expansion continues). Spec: AGENTS.md § CRITICAL: Verum
         // Grammar — `mount` semantics must not crash on cyclic topology.
         if self.glob_imports_in_progress.contains(module_path) {
             let mut modules_in_cycle: List<Text> = List::new();
@@ -17132,7 +17132,7 @@ impl TypeChecker {
         //      under the lazy-loader path; it's the parent type's own
         //      `generic_params` list as serialised in the archive.
         //
-        // Stdlib-agnostic per `crates/verum_types/src/CLAUDE.md`: the
+        // Stdlib-agnostic per `crates/verum_types/src/AGENTS.md`: the
         // substitution map's KEYS come from the parent's own metadata,
         // never from a hardcoded list of stdlib param names.
         let mut tv_subst: indexmap::IndexMap<verum_common::Text, Type> =
@@ -21222,7 +21222,7 @@ impl TypeChecker {
                 // implements Iterator but doesn't override `map`; the
                 // method lives in `Iterator::methods` as a default.
                 //
-                // Stdlib-agnostic per `crates/verum_types/src/CLAUDE.md`:
+                // Stdlib-agnostic per `crates/verum_types/src/AGENTS.md`:
                 // the lookup is keyed by `impl_.protocol` (a property
                 // of the registered impl), not a hardcoded list of
                 // protocols/methods. Adding `Functor::map` works the
@@ -23518,7 +23518,7 @@ impl TypeChecker {
     /// concretise its method signature with the SAME substitution that matched
     /// the impl's `for_type` against `recv_ty` (a blanket impl's `for_type` is
     /// a bare type-var/param, so it unifies with any type and binds it in the
-    /// substitution).  Stdlib-agnostic per CLAUDE.md: keyed purely by the
+    /// substitution).  Stdlib-agnostic per AGENTS.md: keyed purely by the
     /// user-written method name and the receiver type, no per-type special
     /// case.  Runs only after every other arm has missed, so it can turn a
     /// MethodNotFound into a resolution but never overrides existing dispatch.
@@ -26165,7 +26165,7 @@ bake to have this verified.",
                         // not describing a builtin, it was manufacturing one —
                         // and the compiler holding stdlib knowledge the
                         // library does not have is the circular dependency
-                        // crates/verum_types/src/CLAUDE.md forbids by name.
+                        // crates/verum_types/src/AGENTS.md forbids by name.
                         //
                         // The 13 call sites in core/ now use the list literal
                         // `[x]`, measured working; the sibling entry in the

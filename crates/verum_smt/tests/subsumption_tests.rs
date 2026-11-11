@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for subsumption module
-// Migrated from src/subsumption.rs per CLAUDE.md standards
+// Migrated from src/subsumption.rs per AGENTS.md standards
 
 use verum_smt::subsumption::{CheckMode, SubsumptionChecker, SubsumptionResult};
 

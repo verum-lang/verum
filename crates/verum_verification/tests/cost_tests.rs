@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for cost module
-// Migrated from src/cost.rs per CLAUDE.md standards
+// Migrated from src/cost.rs per AGENTS.md standards
 
 use std::time::Duration;
 use verum_common::Text;

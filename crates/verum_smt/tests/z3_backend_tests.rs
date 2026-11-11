@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for z3_backend module
-// Migrated from src/z3_backend.rs per CLAUDE.md standards
+// Migrated from src/z3_backend.rs per AGENTS.md standards
 
 use verum_common::Maybe;
 use verum_smt::z3_backend::*;

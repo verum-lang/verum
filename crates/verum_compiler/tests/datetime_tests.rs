@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for datetime literal parser
-// Migrated from src/datetime.rs per CLAUDE.md standards
+// Migrated from src/datetime.rs per AGENTS.md standards
 
 use verum_ast::{FileId, Span};
 use verum_common::Text;

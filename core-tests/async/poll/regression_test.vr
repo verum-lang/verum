@@ -133,7 +133,7 @@ fn regression_poll_from_maybe_none_routes_to_pending() {
 //   hardcoded Maybe table runs only as last-resort fallback for
 //   receivers whose actual type is unknown.  This matches the
 //   "NEVER hardcode stdlib/core type knowledge in the compiler"
-//   rule in `crates/verum_types/src/CLAUDE.md`.
+//   rule in `crates/verum_types/src/AGENTS.md`.
 // =============================================================================
 
 @test

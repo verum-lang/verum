@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for promotion module
-// Migrated from src/promotion.rs per CLAUDE.md standards
+// Migrated from src/promotion.rs per AGENTS.md standards
 
 use verum_common::Maybe;
 use verum_common::promotion::*;

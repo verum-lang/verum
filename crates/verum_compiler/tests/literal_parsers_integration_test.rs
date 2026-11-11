@@ -17,7 +17,7 @@
 //! This test validates that all 6 literal parsers (email, uri, xml, yaml, interval, matrix)
 //! are fully functional and integrated into the compilation pipeline.
 //!
-//! Per CLAUDE.md: Tests in tests/ directory, not in src/ with #[cfg(test)]
+//! Per AGENTS.md: Tests in tests/ directory, not in src/ with #[cfg(test)]
 
 use verum_ast::{FileId, Span};
 use verum_common::{Maybe, Text};

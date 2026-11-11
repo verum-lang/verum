@@ -13,7 +13,7 @@
 //
 //   1. The compiler must NOT have hardcoded knowledge that "Maybe / None /
 //      Some / Result / Ok / Err are sacred names" — per the architectural
-//      rule in `crates/verum_types/src/CLAUDE.md`. User code must be free
+//      rule in `crates/verum_types/src/AGENTS.md`. User code must be free
 //      to introduce a `mount X as Maybe` aliasing.
 //
 //   2. The shadowing must follow lexical scoping: within the module that
@@ -23,7 +23,7 @@
 // **Audit reference:** vcs/red-team/round-1-architecture.md §4.3
 // **Related architectural rule:** "Variant constructors: User-defined
 // variant names (Nil, Cons, etc.) must freely override built-in
-// convenience aliases" (verum_types/CLAUDE.md).
+// convenience aliases" (verum_types/AGENTS.md).
 
 module module_with_local_maybe {
     /// A locally-defined sum type using the name `Maybe` — completely

@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for proof_extraction module
-// Migrated from src/proof_extraction.rs per CLAUDE.md standards
+// Migrated from src/proof_extraction.rs per AGENTS.md standards
 //
 
 // FIXED (Session 23): Added explicit Text::from() calls for type inference.

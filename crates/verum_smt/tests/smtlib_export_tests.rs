@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for smtlib_export module
-// Migrated from src/smtlib_export.rs per CLAUDE.md standards
+// Migrated from src/smtlib_export.rs per AGENTS.md standards
 // FIXED (Session 23): Tests enabled
 // #![cfg(feature = "smtlib_export_tests_disabled")]
 

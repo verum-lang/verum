@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for escape_categories module
-// Migrated from src/escape_categories.rs per CLAUDE.md standards
+// Migrated from src/escape_categories.rs per AGENTS.md standards
 
 use verum_cbgr::analysis::{EscapeResult, RefId};
 use verum_cbgr::escape_categories::*;

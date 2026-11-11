@@ -86,7 +86,7 @@ The ambition is **not** to compete with each on any single axis; it is to unify 
 - **Soundness through LCF**: any tactic / SMT backend / macro produces CoreTerms; the kernel re-checks them. We never extend the kernel to accept non-CoreTerm proofs.
 - **Foundation-neutrality**: the kernel must not assume ZFC, HoTT, CIC, or any specific R-S. Framework axioms are the only way to introduce foundation-specific principles, and they are explicitly tagged.
 - **Backward compatibility**: the three refinement forms in `03-type-system.md` (inline `T{pred}`, declarative `T where name`, sigma `x:T where P(x)`) remain the canonical surface for users. VVA extends them into the dependent / proof world without breaking the simple-case ergonomics.
-- **No hardcoded stdlib knowledge in the compiler** (ref: `crates/verum_types/src/CLAUDE.md`). Framework axioms, tactics, and proof strategies are discovered from declarations, not embedded in Rust.
+- **No hardcoded stdlib knowledge in the compiler** (ref: `crates/verum_types/src/AGENTS.md`). Framework axioms, tactics, and proof strategies are discovered from declarations, not embedded in Rust.
 
 ---
 

@@ -168,7 +168,7 @@ Stated explicitly, because an unmeasured area reads as a healthy one.
 * **No AOT number that gates.** The AOT-heavy crates run in a
   non-blocking nightly lane; a red there blocks nothing.
 * **No measured startup/throughput baseline** against the targets in
-  `CLAUDE.md` (>50K LOC/s compile, 1× native C runtime) on current
+  `AGENTS.md` (>50K LOC/s compile, 1× native C runtime) on current
   main. The parse-speed contract exists; the end-to-end one does not.
 * **No soak test** for any long-running tool, which is why T0752 was
   found by a user's editor session rather than by CI.
@@ -444,7 +444,7 @@ Measured against that, the first session of use produced:
 | three example files | `verum run a.vr` executes another file's `main` (T0979) |
 | a three-tier reference | `&unsafe T` loses the receiver's type and guesses the field (T0978) |
 | an `async fn` | produces a value, not a Future — `block_on` panics on an `Int` (T0734, pre-existing, sharpened) |
-| a recursive tree | `Heap(x)`, the form CLAUDE.md documents, is refused (T0944) |
+| a recursive tree | `Heap(x)`, the form AGENTS.md documents, is refused (T0944) |
 
 Eight, of which two are closed. None of them was worked around in the
 registry's own source; each is filed with a repro small enough to run

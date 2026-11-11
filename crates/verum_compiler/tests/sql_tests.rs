@@ -13,7 +13,7 @@
     unused_assignments
 )]
 //! SQL interpolation handler tests
-//! Per CLAUDE.md standards - tests in tests/ directory
+//! Per AGENTS.md standards - tests in tests/ directory
 
 use verum_ast::Span;
 use verum_ast::expr::{Expr, ExprKind};

@@ -536,7 +536,7 @@ impl TypeSuggestionTemplates {
                 trait_name
             ))
             // Verum reaches a protocol's associated type as `Self.Item`
-            // — see the protocol example in CLAUDE.md and
+            // — see the protocol example in AGENTS.md and
             // core/mesh/k8s/client.vr:280 (`Maybe<Self.Item>`). There is
             // no `<Self as Trait>::Assoc` qualified form; the protocol
             // is named in the description instead, where it belongs.

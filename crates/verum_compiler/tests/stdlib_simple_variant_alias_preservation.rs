@@ -30,7 +30,7 @@
 //! collisions on built-in aliases) will fail this test instead of silently
 //! dropping stdlib methods.
 //!
-//! Spec: `crates/verum_types/src/CLAUDE.md` — "Variant constructors:
+//! Spec: `crates/verum_types/src/AGENTS.md` — "Variant constructors:
 //! User-defined variant names must freely override built-in convenience
 //! aliases. Only protect variants from ALREADY-REGISTERED types in the
 //! environment, never via hardcoded name lists."

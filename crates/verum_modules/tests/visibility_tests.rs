@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for visibility module
-// Migrated from src/visibility.rs per CLAUDE.md standards
+// Migrated from src/visibility.rs per AGENTS.md standards
 
 use verum_modules::ModulePath;
 use verum_modules::visibility::*;

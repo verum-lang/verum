@@ -15,7 +15,7 @@
 // Unit tests for diagnostic.rs
 //
 
-// Migrated from src/diagnostic.rs to comply with CLAUDE.md test organization.
+// Migrated from src/diagnostic.rs to comply with AGENTS.md test organization.
 
 use verum_diagnostics::diagnostic::*;
 

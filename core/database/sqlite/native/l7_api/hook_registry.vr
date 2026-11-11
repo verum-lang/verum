@@ -14,7 +14,7 @@ module core.database.sqlite.native.l7_api.hook_registry;
 //                     sqlite3_rollback_hook / sqlite3_wal_hook
 //
 // Pre-fix: `l7_api/hooks.vr` accepted `Heap<dyn HookProtocol>` for
-// every hook surface — violates the CLAUDE.md "no dyn requirement"
+// every hook surface — violates the AGENTS.md "no dyn requirement"
 // architectural principle (Verum's idiomatic dispatch is sum-type
 // `match`).  Worse: there was no path for FFI callers (C / Rust /
 // any language using libSqlite via the C ABI) to register a

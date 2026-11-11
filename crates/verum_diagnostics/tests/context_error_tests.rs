@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for context_error module
-// Migrated from src/context_error.rs per CLAUDE.md standards
+// Migrated from src/context_error.rs per AGENTS.md standards
 
 use verum_common::{List, Text};
 use verum_diagnostics::Span;

@@ -14,7 +14,7 @@
 )]
 //! Tests for verify_cmd module
 //!
-//! Migrated from src/verify_cmd.rs to comply with CLAUDE.md test organization.
+//! Migrated from src/verify_cmd.rs to comply with AGENTS.md test organization.
 
 use std::time::Duration;
 use verum_compiler::verify_cmd::{VerificationReport, VerificationResult};

@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for sat_resolver module
-// Migrated from src/sat_resolver.rs per CLAUDE.md standards
+// Migrated from src/sat_resolver.rs per AGENTS.md standards
 
 use verum_cli::registry::sat_resolver::*;
 use verum_cli::{CogMetadata, DependencySpec, List, Map, Text, TierArtifacts};

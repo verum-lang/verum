@@ -14,7 +14,7 @@
 )]
 //! Comprehensive FFI Marshalling Tests
 //!
-//! Tests per CLAUDE.md standards:
+//! Tests per AGENTS.md standards:
 //! - All tests in tests/ directory
 //! - No #[cfg(test)] in src/
 //! - 20+ comprehensive test cases

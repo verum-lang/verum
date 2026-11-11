@@ -540,7 +540,7 @@ impl TypeChecker {
                         let n = &ident.name;
                         // THREE names bind the value under refinement,
                         // not one. `it` is the IMPLICIT binder — the
-                        // form the root CLAUDE.md uses in its own
+                        // form the root AGENTS.md uses in its own
                         // example (`Int{ it > 0 }`), and the one
                         // `emit_refinement_assert_on_reg` aliases to
                         // the value register alongside the explicit

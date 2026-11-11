@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for enterprise module
-// Migrated from src/enterprise.rs per CLAUDE.md standards
+// Migrated from src/enterprise.rs per AGENTS.md standards
 
 use verum_cli::Text;
 use verum_cli::registry::enterprise::*;

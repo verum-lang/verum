@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for security module
-// Migrated from src/security.rs per CLAUDE.md standards
+// Migrated from src/security.rs per AGENTS.md standards
 
 use verum_cli::security::*;
 

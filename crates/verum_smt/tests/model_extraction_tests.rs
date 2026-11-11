@@ -14,7 +14,7 @@
 )]
 //! Model Extraction and Verification Tests
 //!
-//! Per CLAUDE.md standards: Tests in tests/ directory
+//! Per AGENTS.md standards: Tests in tests/ directory
 //!
 //! Migrated to the z3 0.20 API under T0632: that release made the solver
 //! context implicit, so `Context` no longer threads through construction —

@@ -308,7 +308,7 @@ impl<'s> CompilationPipeline<'s> {
         //
         // Validated 2026-05-18: `verum build --release` on a
         // minimal program produces a 17.1 KB binary linking only
-        // libSystem.B.dylib (no-libc invariant per CLAUDE.md);
+        // libSystem.B.dylib (no-libc invariant per AGENTS.md);
         // running the binary exits 0.
         // **The optimizing pipeline is ON by default** (perf campaign,
         // 2026-08-01). The historical "default<O[1-3]> SIGBUSes on any
@@ -1841,7 +1841,7 @@ fn apply_strip_options_to_linker_config(
 /// Some(NoLibcConfig::for_host())` (so the no-libc entry point,
 /// `-nostdlib` flags and allowed libraries were the HOST's, not the
 /// requested target's). That is exactly the host-gate miscompile
-/// CLAUDE.md's no-libc invariant forbids, at the linking boundary
+/// AGENTS.md's no-libc invariant forbids, at the linking boundary
 /// rather than codegen.
 ///
 /// Mirrors `LinkerTomlConfig::to_linking_config` (linker_config.rs)

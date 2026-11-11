@@ -8130,7 +8130,7 @@ impl TypeChecker {
         // (from the era when they returned OS-name strings) made the strict
         // type-checker reject `target_os() as Int` with E401 under AOT
         // (PLATFORM-AOT-META-TYPE) — and hardcoding stdlib return types in the
-        // compiler violates the no-stdlib-knowledge rule (see crate CLAUDE.md).
+        // compiler violates the no-stdlib-knowledge rule (see crate AGENTS.md).
         reg!("is_debug", List::new(), Type::Bool);
         reg!("is_release", List::new(), Type::Bool);
         reg!("has_feature", List::from_iter([Type::Text]), Type::Bool);
@@ -13117,7 +13117,7 @@ with .to_float() or .to_int() (at {:?})",
                     // A `context` declared WITHOUT `protocol` is injectable
                     // only: it names a runtime dependency, not a
                     // compile-time constraint.  Those are different
-                    // mechanisms — see CLAUDE.md, "Context System vs
+                    // mechanisms — see AGENTS.md, "Context System vs
                     // Computational Properties" — and using one where the
                     // other belongs was accepted in silence.
                     //

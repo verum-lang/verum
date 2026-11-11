@@ -35,7 +35,7 @@ fi
 
 cd "$PROJECT_ROOT"
 
-# Look for any of the markers documented in vcs/CLAUDE.md as
+# Look for any of the markers documented in vcs/AGENTS.md as
 # "skip / ignore / known-failure" forms, plus the explicit
 # `@requires` form which is conditionally-skipped on CI matrix.
 markers=$(

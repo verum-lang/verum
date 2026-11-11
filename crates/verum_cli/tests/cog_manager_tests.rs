@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for cog_manager module
-// Migrated from src/cog_manager.rs per CLAUDE.md standards
+// Migrated from src/cog_manager.rs per AGENTS.md standards
 
 use verum_cli::cog_manager::*;
 

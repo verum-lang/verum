@@ -12,7 +12,7 @@
     useless_ptr_null_checks,
     unused_assignments
 )]
-// Migrated from src/json.rs per CLAUDE.md standards
+// Migrated from src/json.rs per AGENTS.md standards
 
 use verum_compiler::literal_parsers::json::parse_json;
 

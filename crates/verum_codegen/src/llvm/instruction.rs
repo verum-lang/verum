@@ -34138,7 +34138,7 @@ fn lower_sys_extended<'ctx>(
             let module = ctx.get_module();
             let i8p = ctx.types().ptr_type();
             // T1082 — no libc on the Linux leg.  `getenv` is libc's, and
-            // CLAUDE.md's invariant is that a Linux binary calls none;
+            // AGENTS.md's invariant is that a Linux binary calls none;
             // this reached every target unconditionally and had
             // `make check-dup-emitters` red on main since 2026-08-23.
             // The Linux leg walks `__verum_envp` in emitted IR

@@ -3,7 +3,7 @@
 //! Tests compilation performance, memory usage under load,
 //! and concurrent operations.
 //!
-//! Performance Targets (from CLAUDE.md):
+//! Performance Targets (from AGENTS.md):
 //! - CBGR overhead: < 15ns per check
 //! - Type inference: < 100ms for 10K LOC
 //! - Compilation speed: > 50K LOC/sec (release)

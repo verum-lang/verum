@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for strategy_selection module
-// Migrated from src/strategy_selection.rs per CLAUDE.md standards
+// Migrated from src/strategy_selection.rs per AGENTS.md standards
 
 use verum_smt::strategy_selection::*;
 

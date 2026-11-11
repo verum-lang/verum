@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for path module
-// Migrated from src/path.rs per CLAUDE.md standards
+// Migrated from src/path.rs per AGENTS.md standards
 
 use verum_modules::path::*;
 

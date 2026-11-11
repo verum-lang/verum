@@ -52,7 +52,7 @@ BASELINE = "scripts/ci/ignored_tests_without_a_task.txt"
 # unrelated neighbouring test.
 LOOKBACK = 10
 IGNORE = re.compile(r'^\s*@ignore\b')
-# AN OWNER IS A TASK **OR** A REGISTER ROW.  `CLAUDE.md` names two
+# AN OWNER IS A TASK **OR** A REGISTER ROW.  `AGENTS.md` names two
 # tracking systems as living truth — the task pool (`T####`) and
 # `docs/architecture/tech-debt-register.md` (`A##`) — and a disabled
 # test owned by a register row is as tracked as one owned by a task.

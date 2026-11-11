@@ -649,7 +649,7 @@ public module prelude {
     //
     // MEASURED, not assumed: with `@no_implicit_prelude` — the prelude
     // switched off entirely — `print("...")` still compiles and runs.  The
-    // compiler provides it as a built-in form, exactly as CLAUDE.md's
+    // compiler provides it as a built-in form, exactly as AGENTS.md's
     // "no `!` anywhere" table says.  These four lines published names the
     // language already had, and charged 33 upward ring edges plus two of
     // the three prelude cycles for it.

@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for remove module
-// Migrated from src/remove.rs per CLAUDE.md standards
+// Migrated from src/remove.rs per AGENTS.md standards
 
 use verum_cli::Text;
 use verum_cli::remove::*;

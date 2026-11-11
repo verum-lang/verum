@@ -50,7 +50,7 @@ public type Maybe<T> is None | Some(T);
 //   2. Codegen `UnOp.Deref` dispatches `*receiver` through the
 //      generic user-Deref-protocol path in
 //      `crates/verum_vbc/src/codegen/expressions.rs.compile_unary`
-//      (no Maybe special-case — CLAUDE.md "no hardcoded stdlib
+//      (no Maybe special-case — AGENTS.md "no hardcoded stdlib
 //      knowledge in compiler" rule).
 //   3. Runtime `handle_deref` (`cbgr.rs:~244`) intentionally
 //      identity-derefs sum-type heap values so `match *self` on

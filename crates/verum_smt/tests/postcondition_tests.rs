@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for postcondition module
-// Migrated from src/postcondition.rs per CLAUDE.md standards
+// Migrated from src/postcondition.rs per AGENTS.md standards
 
 use verum_smt::postcondition::*;
 

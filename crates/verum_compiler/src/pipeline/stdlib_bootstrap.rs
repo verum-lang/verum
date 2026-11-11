@@ -1598,7 +1598,7 @@ one module and therefore never seeded",
         // `Session::build_target_config` resolves the same platform facts
         // plus the manifest's `debug_assertions` override and
         // `optimization_level`, so it is right on both halves. It is also
-        // what every user compile already uses — CLAUDE.md's rule that a
+        // what every user compile already uses — AGENTS.md's rule that a
         // per-target decision must read the TARGET, never the host, applies
         // here with an extra edge: this host gate leaks the compiler's own
         // build profile into the shipped standard library.
@@ -1830,7 +1830,7 @@ one module and therefore never seeded",
         // the previous hardcoded-fallback `register_stdlib_coercions`
         // was deleted at #101 step 4 close-out once every retrofit
         // landed; the architectural rule in
-        // `verum_types/src/CLAUDE.md` ("NEVER hardcode stdlib/core
+        // `verum_types/src/AGENTS.md` ("NEVER hardcode stdlib/core
         // type knowledge in the compiler") is now structurally
         // enforced — there is no hardcoded list left to drift.
         let registered_via_protocol =

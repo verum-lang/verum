@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for add module
-// Migrated from src/add.rs per CLAUDE.md standards
+// Migrated from src/add.rs per AGENTS.md standards
 
 use verum_cli::add::*;
 

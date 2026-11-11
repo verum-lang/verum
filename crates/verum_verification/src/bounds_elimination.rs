@@ -2398,7 +2398,7 @@ pub fn compute_elimination_stats(decisions: &List<CheckDecision>) -> Elimination
     stats
 }
 
-// Tests moved to tests/bounds_elimination_tests.rs per CLAUDE.md standards
+// Tests moved to tests/bounds_elimination_tests.rs per AGENTS.md standards
 
 #[cfg(test)]
 mod meta_consolidation_pins {

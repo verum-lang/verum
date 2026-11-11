@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for lexical_parsing module
-// Migrated from src/lexical_parsing.rs per CLAUDE.md standards
+// Migrated from src/lexical_parsing.rs per AGENTS.md standards
 
 use std::path::PathBuf;
 use verum_compiler::phases::lexical_parsing::LexicalParsingPhase;

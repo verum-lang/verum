@@ -36,7 +36,7 @@
 #
 # So the failure needs no bad input and no unusual program — only a
 # name that one layer accepts and the other does not implement.  That
-# is the class `crates/verum_types/src/CLAUDE.md` names: *the compiler
+# is the class `crates/verum_types/src/AGENTS.md` names: *the compiler
 # knows a name at a spelling the library never provided.*
 #
 # WHAT THIS GATE ASKS, and why it is not a list comparison.  Comparing

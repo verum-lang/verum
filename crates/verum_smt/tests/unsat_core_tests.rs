@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for unsat_core module
-// Migrated from src/unsat_core.rs per CLAUDE.md standards
+// Migrated from src/unsat_core.rs per AGENTS.md standards
 // FIXED (Session 23): Tests enabled
 // #![cfg(feature = "unsat_core_tests_disabled")]
 

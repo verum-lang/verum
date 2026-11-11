@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for lockfile module
-// Migrated from src/lockfile.rs per CLAUDE.md standards
+// Migrated from src/lockfile.rs per AGENTS.md standards
 
 use verum_cli::registry::lockfile::*;
 use verum_cli::{CogSource, List, Map, Text};

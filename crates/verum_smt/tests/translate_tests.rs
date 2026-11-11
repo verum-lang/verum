@@ -15,7 +15,7 @@
 // Unit tests for translate.rs
 //
 
-// Migrated from src/translate.rs to comply with CLAUDE.md test organization.
+// Migrated from src/translate.rs to comply with AGENTS.md test organization.
 
 use verum_ast::{BinOp, Expr, ExprKind, Literal, Span, Type, UnOp};
 use verum_common::Heap;

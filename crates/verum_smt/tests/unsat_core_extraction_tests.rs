@@ -14,7 +14,7 @@
 )]
 //! Unsat Core Extraction and Verification Tests
 //!
-//! Per CLAUDE.md standards: Tests in tests/ directory
+//! Per AGENTS.md standards: Tests in tests/ directory
 
 use verum_common::Maybe;
 use verum_common::{List, Text};

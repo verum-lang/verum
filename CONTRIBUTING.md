@@ -92,7 +92,7 @@ fn main() {
 }
 ```
 
-Details: `vcs/CLAUDE.md` has the full reference.
+Details: `vcs/AGENTS.md` has the full reference.
 
 ## Architectural Boundaries
 
@@ -105,7 +105,7 @@ runtime bugs later.
   availability are discovered from `.vr` source, not listed in
   `verum_types` / `verum_vbc`. History: hardcoded `Heap`/`File`/etc.
   affine lists and `None`/`Some`/`Ok`/`Err` variant protection have
-  been repeatedly deleted. See `crates/verum_types/src/CLAUDE.md`.
+  been repeatedly deleted. See `crates/verum_types/src/AGENTS.md`.
 - **Do not use Rust `std::vec::Vec` / `String` / `HashMap`** in new
   Verum-facing code. Use `verum_common::{List, Text, Map, Maybe}`
   (semantic types from the stdlib mirror). Compiler-internal types
@@ -115,7 +115,7 @@ runtime bugs later.
   Name { ... }`. `type Name is A | B;`, not `enum Name { A, B }`.
   `implement Name { ... }`, not `impl`. No `!` macro syntax
   anywhere — use `@macro(...)` and `f"..."` format literals. See
-  `CLAUDE.md` and `grammar/verum.ebnf`.
+  `AGENTS.md` and `grammar/verum.ebnf`.
 
 ## Commit Style
 
@@ -151,10 +151,10 @@ cargo fmt --all
 ## Where to Ask
 
 - `grammar/verum.ebnf` — authoritative language syntax.
-- `CLAUDE.md` — project-wide design notes + architectural invariants.
+- `AGENTS.md` — project-wide design notes + architectural invariants.
 - `docs/detailed/` — type system, context system, CBGR, cog
   distribution.
-- `vcs/CLAUDE.md` — test runner reference.
+- `vcs/AGENTS.md` — test runner reference.
 - Interpreter feature compatibility (GPU / dynamic FFI / `vmap`/`pmap`
   fall back to AOT) is documented in
   [Runtime tiers](https://verum-lang.dev/docs/architecture/runtime-tiers).

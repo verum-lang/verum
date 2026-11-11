@@ -14,7 +14,7 @@
 )]
 //! Tests for documentation extraction from attributes
 //!
-//! Per CLAUDE.md standards: Tests in tests/ directory, not inline
+//! Per AGENTS.md standards: Tests in tests/ directory, not inline
 
 use verum_ast::FileId;
 use verum_lsp::document::{DocumentState, SymbolKind};

@@ -275,7 +275,7 @@ each owning one stdlib module. Coordination protocol:
   task — flag the cross-module finding in your `audit.md` instead.
 * **Drift-pinning tests in `crates/verum_common`** are shared
   infrastructure; coordinate via the well-known-types module's
-  internal CLAUDE.md if you need to add a new pinning macro.
+  internal AGENTS.md if you need to add a new pinning macro.
 * **Don't push to `main` mid-cycle** — squash-merge via PR or land in
   topic branches per module.
 

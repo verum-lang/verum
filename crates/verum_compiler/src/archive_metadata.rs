@@ -922,7 +922,7 @@ fn register_module_metadata(
                 // `methods.get(name).map(|m| m.ty.clone())` lookup
                 // ignores it — see infer.rs:#129 fallback branch at
                 // ~line 47680.  Stdlib-agnostic per
-                // `crates/verum_types/src/CLAUDE.md`: every method
+                // `crates/verum_types/src/AGENTS.md`: every method
                 // signature comes from the protocol's own variants,
                 // not a hardcoded list.
                 let proto_param_id_to_name: HashMap<u16, String> =

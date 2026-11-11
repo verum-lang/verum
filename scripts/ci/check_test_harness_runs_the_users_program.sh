@@ -172,7 +172,7 @@ fi
 # one's. Measured 2026-09-03: this gate went red against a binary whose
 # fix was present and working, because argument 2 was omitted and the
 # fallback found `target/release/vtest` from three days earlier — the
-# shared target dir this repo's CLAUDE.md says never to trust. Passing
+# shared target dir this repo's AGENTS.md says never to trust. Passing
 # a matching vtest turned the same run green. A stale harness is not a
 # neutral default: it produces a CONFIDENT WRONG VERDICT, so say which
 # binary answered and how much older it is.

@@ -29,7 +29,7 @@ runs was validated against `main` as of the date above.
 | `differential-tiers` — interp vs AOT                              | not run in CI — `vcs/scripts/differential-tiers.sh` is wired into `vcs/Makefile` only, against `differential-tiers-baseline.txt` |
 
 > **The repo numbers the AOT tier two different ways, so do not read a
-> tier number as identifying a comparison.** `CLAUDE.md` states "VBC
+> tier number as identifying a comparison.** `AGENTS.md` states "VBC
 > interpreter (Tier 0) and AOT-compiled binaries (**Tier 1**)";
 > `vcs/differential/README.md` states "the interpreter (Tier 0) and AOT
 > compiler (**Tier 3**)"; and `vcs/Makefile` invokes `--tier 0,3`. The

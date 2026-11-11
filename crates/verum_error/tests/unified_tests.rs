@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for unified module
-// Migrated from src/unified.rs per CLAUDE.md standards
+// Migrated from src/unified.rs per AGENTS.md standards
 
 use verum_common::List;
 use verum_error::unified::*;

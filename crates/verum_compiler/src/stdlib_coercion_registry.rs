@@ -2,7 +2,7 @@
 //!
 //! # Architectural rule
 //!
-//! `verum_types/src/CLAUDE.md` lays down the canonical rule:
+//! `verum_types/src/AGENTS.md` lays down the canonical rule:
 //!
 //! > **NEVER hardcode stdlib/core type knowledge in the compiler.**
 //! > The compiler implementation (verum_types, verum_vbc, etc.)

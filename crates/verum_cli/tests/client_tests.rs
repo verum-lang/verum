@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for client module
-// Migrated from src/client.rs per CLAUDE.md standards
+// Migrated from src/client.rs per AGENTS.md standards
 
 use verum_cli::client::*;
 

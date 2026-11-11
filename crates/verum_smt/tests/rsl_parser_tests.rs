@@ -15,7 +15,7 @@
 // Unit tests for rsl_parser.rs
 //
 
-// Migrated from src/rsl_parser.rs to comply with CLAUDE.md test organization.
+// Migrated from src/rsl_parser.rs to comply with AGENTS.md test organization.
 
 use verum_smt::rsl_parser::*;
 

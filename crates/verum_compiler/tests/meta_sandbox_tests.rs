@@ -12,7 +12,7 @@
     useless_ptr_null_checks,
     unused_assignments
 )]
-// Migrated from src/meta_sandbox.rs per CLAUDE.md standards
+// Migrated from src/meta_sandbox.rs per AGENTS.md standards
 
 use verum_ast::Span;
 use verum_ast::attr::Attribute;

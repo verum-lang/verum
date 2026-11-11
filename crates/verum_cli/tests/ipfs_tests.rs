@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for ipfs module
-// Migrated from src/ipfs.rs per CLAUDE.md standards
+// Migrated from src/ipfs.rs per AGENTS.md standards
 
 use verum_cli::ipfs::*;
 

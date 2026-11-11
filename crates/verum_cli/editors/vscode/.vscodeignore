@@ -4,4 +4,4 @@ src/**
 node_modules/**
 *.map
 tsconfig.json
-CLAUDE.md
+AGENTS.md

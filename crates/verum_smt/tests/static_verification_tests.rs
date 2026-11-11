@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for static_verification module
-// Migrated from src/static_verification.rs per CLAUDE.md standards
+// Migrated from src/static_verification.rs per AGENTS.md standards
 // FIXED (Session 23): Tests enabled
 
 // #![cfg(feature = "static_verification_tests_disabled")]

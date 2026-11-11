@@ -578,7 +578,7 @@ fn validate_mount_tree(
 /// exports, and record a violation if the symbol isn't there.
 /// Verum's compiler-injected built-in names that can be mounted
 /// directly from `core` without any `.vr` declaration.  Sourced from
-/// CLAUDE.md's "Semantic Types" mandate (List / Text / Map / Set /
+/// AGENTS.md's "Semantic Types" mandate (List / Text / Map / Set /
 /// Maybe / Heap / Shared) plus the primitive scalar types and a few
 /// always-in-scope wrappers (Result, Either) the language privileges.
 fn is_language_builtin(name: &str) -> bool {
@@ -603,7 +603,7 @@ fn is_language_builtin(name: &str) -> bool {
             | "I8" | "I16" | "I32" | "I64" | "I128"
             | "U8" | "U16" | "U32" | "U64" | "U128"
             | "F16" | "F32" | "F64"
-            // Built-in semantic types (CLAUDE.md mandate)
+            // Built-in semantic types (AGENTS.md mandate)
             | "Maybe"
             | "Result"
             | "Either"

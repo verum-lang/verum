@@ -4,7 +4,7 @@
 //!
 //! Pre-fix the engine matched literal `"Some" | "None"` to detect Maybe
 //! constructors and emitted a fixed pair of placeholder subgoals. That
-//! violated the no-stdlib-knowledge-in-compiler rule (CLAUDE.md) and silently
+//! violated the no-stdlib-knowledge-in-compiler rule (AGENTS.md) and silently
 //! gave any non-Maybe variant type ("Result", "Color", user types) an
 //! unhelpful catch-all error from `cases_on`.
 //!

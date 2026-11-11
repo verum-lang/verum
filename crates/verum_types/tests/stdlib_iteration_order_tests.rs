@@ -5,7 +5,7 @@
 //! Pre-fix the loader sorted types alphabetically with a hardcoded priority
 //! list (`["Result", "Maybe", "Ordering", "Bool"]`) to force well-known stdlib
 //! types to register first. That violates the no-stdlib-knowledge-in-compiler
-//! rule (see `crates/verum_types/src/CLAUDE.md`).
+//! rule (see `crates/verum_types/src/AGENTS.md`).
 //!
 //! These tests construct two competing variant types with the same `Ok|Err`
 //! signature and verify that whichever appears first in

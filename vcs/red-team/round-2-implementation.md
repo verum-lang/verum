@@ -333,7 +333,7 @@ constant + source-map), `33a409a6` (pin-test).
 ### 4.1 LibraryCall name collisions — DEFENSE CONFIRMED 2026-04-28
 
 **Status:** DEFENSE CONFIRMED — `LibraryCall` strategy was REMOVED entirely
-under #168. Per `crates/verum_vbc/CLAUDE.md`: *"The previous `LibraryCall`
+under #168. Per `crates/verum_vbc/AGENTS.md`: *"The previous `LibraryCall`
 strategy (string-keyed external function call that the interpreter could
 not resolve) has been removed — every intrinsic now uses one of the typed
 strategies above."*
@@ -433,7 +433,7 @@ constructs 4 nested module declarations and exercises
 **Status:** DEFENSE CONFIRMED — closed by round-1 vector §4.3 closure on
 2026-04-28. See `vcs/specs/L0-critical/modules/mount_alias_shadows_builtin.vr`
 and round-1 doc §4.3 for the audit trail. Architectural rule:
-`crates/verum_types/src/CLAUDE.md` "User-defined variant names must freely
+`crates/verum_types/src/AGENTS.md` "User-defined variant names must freely
 override built-in convenience aliases".
 
 ---

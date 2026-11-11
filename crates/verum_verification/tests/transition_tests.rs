@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for transition module
-// Migrated from src/transition.rs per CLAUDE.md standards
+// Migrated from src/transition.rs per AGENTS.md standards
 
 use verum_common::{List, Text};
 use verum_verification::VerificationLevel;

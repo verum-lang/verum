@@ -13,7 +13,7 @@
     unused_assignments
 )]
 // Tests for boundary module
-// Migrated from src/boundary.rs per CLAUDE.md standards
+// Migrated from src/boundary.rs per AGENTS.md standards
 
 use verum_common::{List, Text};
 use verum_verification::VerificationLevel;

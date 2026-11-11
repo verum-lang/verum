@@ -4,7 +4,7 @@
 # for the VCS benchmark suite.
 #
 # Reference: VCS Spec Section 23 - CI/CD Integration
-# Reference: CLAUDE.md - Performance Targets
+# Reference: AGENTS.md - Performance Targets
 #
 # Thresholds are validated during CI/CD and on-demand via:
 #   make bench-validate

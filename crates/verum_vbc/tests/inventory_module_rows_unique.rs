@@ -1,6 +1,6 @@
 //! Ratchet: `core-tests/INVENTORY.md` must name each module ONCE.
 //!
-//! CLAUDE.md calls that file the per-module conformance truth, and a truth
+//! AGENTS.md calls that file the per-module conformance truth, and a truth
 //! table cannot hold two truths for one module.  It currently does, for
 //! seventeen of them, and the pairs disagree: `text/text` appears at two
 //! places with different LOC counts and different open-issue descriptions,

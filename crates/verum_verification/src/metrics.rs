@@ -1589,7 +1589,7 @@ pub fn nesting_from_cfg(cfg: &EscapeCFG) -> u32 {
 // Tests Module Notice
 // =============================================================================
 
-// Tests are in tests/metrics_tests.rs per CLAUDE.md standards
+// Tests are in tests/metrics_tests.rs per AGENTS.md standards
 
 #[cfg(test)]
 mod kind_meta_drift_pins {
