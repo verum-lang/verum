@@ -126,19 +126,22 @@ impl GlobalDepthGuard {
     pub(crate) fn enter() -> Result<Self> {
         GLOBAL_CALL_DEPTH.with(|d| {
             let depth = d.get() + 1;
-            d.set(depth);
             if depth > 100 {
-                d.set(0); // Reset to prevent cascading errors
                 Err(TypeError::Other(Text::from(format!(
                     "global type inference depth exceeded ({})",
                     depth
                 ))))
             } else {
+                d.set(depth);
                 Ok(GlobalDepthGuard)
             }
         })
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/unit/inference_depth_guard.rs"]
+mod inference_depth_guard_tests;
 
 impl Drop for GlobalDepthGuard {
     fn drop(&mut self) {
