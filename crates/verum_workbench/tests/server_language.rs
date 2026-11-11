@@ -166,6 +166,31 @@ fn standalone_server_analyzes_without_cargos_stack_environment() {
         }
     }
 
+    let nested = |leaf: &str| format!("{}{leaf}{}", "Envelope<".repeat(20), ">".repeat(20));
+    for (result_leaf, valid) in [("Int", true), ("Bool", false)] {
+        let source = format!(
+            "type Envelope<T> is {{value: T}};\n\
+             fn keep(value: {}) -> {} {{value}}",
+            nested("Int"),
+            nested(result_leaf),
+        );
+        let (status, reply) = post(host, Some(token), &request(&source));
+        assert_eq!(status, 200, "{reply}");
+        let snapshot = &reply["result"]["result"];
+        assert_eq!(snapshot["parsed"], true, "{reply}");
+        let diagnostics = snapshot["diagnostics"].as_array().unwrap();
+        if valid {
+            assert!(diagnostics.is_empty(), "nested generic identity: {reply}");
+        } else {
+            assert!(
+                diagnostics
+                    .iter()
+                    .any(|d| d["code"] == "E400" && d["severity"] == 1),
+                "incompatible nested carriers must be refused: {reply}"
+            );
+        }
+    }
+
     let source = concat!(
         "public type Witness<A> is { public value: A };\n",
         "public type Pack is { public carrier: Type, public witness: Witness<carrier> };\n",
@@ -243,7 +268,9 @@ fn post(host: &str, token: Option<&str>, body: &Value) -> (u16, Value) {
     .unwrap();
     let mut response = String::new();
     stream.read_to_string(&mut response).unwrap();
-    let (header, body) = response.split_once("\r\n\r\n").unwrap();
+    let (header, body) = response.split_once("\r\n\r\n").unwrap_or_else(|| {
+        panic!("Studio closed the connection during request: {body}; response: {response}")
+    });
     let status = header.split_whitespace().nth(1).unwrap().parse().unwrap();
     (status, serde_json::from_str(body).unwrap())
 }

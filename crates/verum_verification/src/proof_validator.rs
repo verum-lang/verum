@@ -7312,7 +7312,7 @@ impl ProofValidator {
                     .map(|a| {
                         match a {
                             verum_ast::ty::GenericArg::Type(t) => self.type_to_expr(t),
-                            verum_ast::ty::GenericArg::Const(e) => e.clone(),
+                            verum_ast::ty::GenericArg::Const(e) => e.as_ref().clone(),
                             verum_ast::ty::GenericArg::Lifetime(_) => {
                                 // Lifetimes don't have expression representation
                                 Expr::new(

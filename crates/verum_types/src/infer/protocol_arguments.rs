@@ -652,7 +652,7 @@ impl TypeChecker {
     ) -> Result<Type> {
         self.check_protocol_value_carrier(carrier, span)?;
         let expression = match argument {
-            GenericArg::Const(expression) => expression.clone(),
+            GenericArg::Const(expression) => expression.as_ref().clone(),
             GenericArg::Type(annotation) => {
                 let verum_ast::TypeKind::Path(path) = &annotation.kind else {
                     return Err(invalid(

@@ -3340,7 +3340,7 @@ impl AstSink {
 
         // Try to parse as a const expression (e.g., integer literal)
         if let Some(expr) = self.convert_expr(node) {
-            return Some(GenericArg::Const(expr));
+            return Some(GenericArg::Const(expr.into()));
         }
 
         None

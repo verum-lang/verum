@@ -56,9 +56,6 @@ impl Language {
         let (requests, mut receiver) = mpsc::channel::<Command>(8);
         std::thread::Builder::new()
             .name("studio-language".into())
-            // Parser/type-checker recursion needs the compiler's 16 MiB
-            // analysis stack, including when launched outside Cargo's env.
-            .stack_size(16 * 1024 * 1024)
             .spawn(move || {
                 let runtime = tokio::runtime::Builder::new_current_thread()
                     .enable_all()

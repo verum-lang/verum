@@ -294,7 +294,7 @@ impl TypeLevelEvaluator {
         // Create generic args: <T, n>
         let type_args = List::from(vec![
             GenericArg::Type(element_type),
-            GenericArg::Const(length_expr),
+            GenericArg::Const(length_expr.into()),
         ]);
 
         // Return List<T, n> with full dimension tracking
@@ -332,7 +332,7 @@ impl TypeLevelEvaluator {
         // Create generic args: <T, n>
         let type_args = List::from(vec![
             GenericArg::Type(element_type),
-            GenericArg::Const(size_expr),
+            GenericArg::Const(size_expr.into()),
         ]);
 
         // Return Array<T, n> with full dimension tracking
@@ -370,7 +370,7 @@ impl TypeLevelEvaluator {
         // Create generic args: <T, n>
         let type_args = List::from(vec![
             GenericArg::Type(element_type),
-            GenericArg::Const(capacity_expr),
+            GenericArg::Const(capacity_expr.into()),
         ]);
 
         // Return Vec<T, n> with full dimension tracking
@@ -409,8 +409,8 @@ impl TypeLevelEvaluator {
         // Create generic args: <T, rows, cols>
         let type_args = List::from(vec![
             GenericArg::Type(element_type),
-            GenericArg::Const(rows_expr),
-            GenericArg::Const(cols_expr),
+            GenericArg::Const(rows_expr.into()),
+            GenericArg::Const(cols_expr.into()),
         ]);
 
         // Return Matrix<T, rows, cols> with full dimension tracking
@@ -2104,7 +2104,7 @@ pub mod indexed_types {
         // Create generic args: <T, n>
         let type_args = List::from(vec![
             GenericArg::Type(element_type),
-            GenericArg::Const(length_expr),
+            GenericArg::Const(length_expr.into()),
         ]);
 
         // Return List<T, n> with full dimension tracking
@@ -2153,8 +2153,8 @@ pub mod indexed_types {
         // Create generic args: <T, rows, cols>
         let type_args = List::from(vec![
             GenericArg::Type(element_type),
-            GenericArg::Const(rows_expr),
-            GenericArg::Const(cols_expr),
+            GenericArg::Const(rows_expr.into()),
+            GenericArg::Const(cols_expr.into()),
         ]);
 
         // Return Matrix<T, rows, cols> with full dimension tracking

@@ -21,13 +21,13 @@ fn binary(op: BinOp, left: Expr, right: Expr) -> Expr {
 fn concrete_levels_preserve_the_full_checked_u32_domain() {
     for value in [0, 1, u32::MAX] {
         assert_eq!(
-            GenericArg::Const(integer(i128::from(value))).universe_for_declared_slot(),
+            GenericArg::Const(integer(i128::from(value)).into()).universe_for_declared_slot(),
             Ok(Some(UniverseLevelExpr::Concrete(value)))
         );
     }
     for value in [-1, i128::from(u32::MAX) + 1] {
         assert!(
-            GenericArg::Const(integer(value))
+            GenericArg::Const(integer(value).into())
                 .universe_for_declared_slot()
                 .is_err()
         );
@@ -41,8 +41,8 @@ fn only_an_actual_inference_hole_projects_to_no_level() {
     );
     for argument in [
         GenericArg::Type(Type::new(TypeKind::Int, Span::default())),
-        GenericArg::Const(Expr::literal(Literal::bool(true, Span::default()))),
-        GenericArg::Const(Expr::literal(Literal::float(1.0, Span::default()))),
+        GenericArg::Const(Expr::literal(Literal::bool(true, Span::default())).into()),
+        GenericArg::Const(Expr::literal(Literal::float(1.0, Span::default())).into()),
     ] {
         assert!(argument.universe_for_declared_slot().is_err());
     }
@@ -51,7 +51,7 @@ fn only_an_actual_inference_hole_projects_to_no_level() {
 fn an_unqualified_name_remains_a_symbolic_level_request() {
     let name = Ident::new("u", Span::default());
     for argument in [
-        GenericArg::Const(Expr::ident(name.clone())),
+        GenericArg::Const(Expr::ident(name.clone()).into()),
         GenericArg::Type(Type::new(
             TypeKind::Path(Path::single(name.clone())),
             Span::default(),
@@ -59,7 +59,7 @@ fn an_unqualified_name_remains_a_symbolic_level_request() {
         GenericArg::Const(Expr::new(
             ExprKind::Paren(Heap::new(Expr::ident(name.clone()))),
             Span::default(),
-        )),
+        ).into()),
     ] {
         assert_eq!(
             argument.universe_for_declared_slot(),
@@ -78,7 +78,7 @@ fn qualified_paths_are_not_resolved_by_their_leaf_spelling() {
         span,
     );
     assert!(
-        GenericArg::Const(Expr::path(path.clone()))
+        GenericArg::Const(Expr::path(path.clone()).into())
             .universe_for_declared_slot()
             .is_err()
     );
@@ -92,7 +92,7 @@ fn qualified_paths_are_not_resolved_by_their_leaf_spelling() {
 #[test]
 fn closed_arithmetic_refuses_invalid_result_and_invalid_operations() {
     assert_eq!(
-        GenericArg::Const(binary(BinOp::Add, integer(1), integer(1))).universe_for_declared_slot(),
+        GenericArg::Const(binary(BinOp::Add, integer(1), integer(1)).into()).universe_for_declared_slot(),
         Ok(Some(UniverseLevelExpr::Concrete(2)))
     );
     for expression in [
@@ -101,7 +101,7 @@ fn closed_arithmetic_refuses_invalid_result_and_invalid_operations() {
         binary(BinOp::Sub, integer(0), integer(1)),
     ] {
         assert!(
-            GenericArg::Const(expression)
+            GenericArg::Const(expression.into())
                 .universe_for_declared_slot()
                 .is_err()
         );
@@ -126,7 +126,7 @@ fn a_dead_branch_cannot_hide_a_free_name_in_closed_arithmetic() {
         span,
     );
     assert!(
-        GenericArg::Const(conditional)
+        GenericArg::Const(conditional.into())
             .universe_for_declared_slot()
             .is_err()
     );
@@ -144,7 +144,7 @@ fn foreign_integer_sorts_and_unbounded_expression_trees_are_refused() {
     };
     integer.suffix = Some(verum_ast::literal::IntSuffix::U64);
     assert!(
-        GenericArg::Const(expression)
+        GenericArg::Const(expression.into())
             .universe_for_declared_slot()
             .is_err()
     );
@@ -153,7 +153,7 @@ fn foreign_integer_sorts_and_unbounded_expression_trees_are_refused() {
         nested = Expr::new(ExprKind::Paren(Heap::new(nested)), Span::default());
     }
     assert!(
-        GenericArg::Const(nested)
+        GenericArg::Const(nested.into())
             .universe_for_declared_slot()
             .is_err()
     );

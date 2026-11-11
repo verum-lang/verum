@@ -181,7 +181,7 @@ fn explicit_value_arguments_are_substituted_and_type_arguments_are_retained() {
             func: Box::new(Expr::ident(Ident::new("callee", span))),
             type_args: [
                 GenericArg::Type(Type::int(span)),
-                GenericArg::Const(Parser::new("it + 1").parse_expr().unwrap()),
+                GenericArg::Const(Parser::new("it + 1").parse_expr().unwrap().into()),
             ]
             .into_iter()
             .collect(),

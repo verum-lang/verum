@@ -627,7 +627,7 @@ fn test_generic_types() {
             args: {
                 let mut args = List::new();
                 args.push(GenericArg::Type(Type::int(span)));
-                args.push(GenericArg::Const(Expr::literal(Literal::int(10, span))));
+                args.push(GenericArg::Const(Expr::literal(Literal::int(10, span)).into()));
                 args
             },
         },
@@ -786,7 +786,7 @@ proptest! {
                 if i % 2 == 0 {
                     GenericArg::Type(Type::int(span))
                 } else {
-                    GenericArg::Const(Expr::literal(Literal::int(i as i128, span)))
+                    GenericArg::Const(Expr::literal(Literal::int(i as i128, span)).into())
                 }
             })
             .collect();

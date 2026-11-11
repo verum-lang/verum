@@ -664,7 +664,7 @@ fn test_generic_type_with_const_args() {
 
     let mut args = List::new();
     args.push(GenericArg::Type(Type::int(span)));
-    args.push(GenericArg::Const(Expr::literal(Literal::int(10, span))));
+    args.push(GenericArg::Const(Expr::literal(Literal::int(10, span)).into()));
 
     let ty = Type::new(TypeKind::Generic { base, args }, span);
 

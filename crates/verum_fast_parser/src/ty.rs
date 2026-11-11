@@ -30,6 +30,14 @@ enum TypeBoundary {
     Quantifier,
 }
 
+/// Minimum binding power for expressions inside generic args.
+/// Must be > 10 to exclude shift operators `<<` (10) and
+/// `>>` (10) which would consume the closing `>>`/`>` as
+/// a right-shift operator. Comparison operators `<`/`>`
+/// have BP 6, arithmetic has BP ≤ 13, so BP 11 is the
+/// sweet spot: allows +, -, *, /, % but blocks << and >>.
+const GENERIC_ARG_MIN_BP: u8 = 11;
+
 impl<'a> RecursiveParser<'a> {
     /// Parse a type expression.
     ///
@@ -242,18 +250,35 @@ impl<'a> RecursiveParser<'a> {
         // Try to parse sigma-type first: name: Type where expr
         // This must be parsed before general types because it's more specific
         // Use lookahead to avoid infinite recursion: check for "Ident : " pattern
-        // We use optional() to allow backtracking if it's not actually a sigma type
         // Skip sigma parsing in where clause contexts where `T: Bound` is a type bound
-        if allow_sigma
-            && self.looks_like_sigma_type()
-            && let Some(sigma) = self.optional(|p| p.parse_sigma_type())
-        {
-            return Ok(sigma);
+        if allow_sigma && self.looks_like_sigma_type() {
+            return self.parse_sigma_type();
         }
 
         // Parse base type
-        let mut base = self.parse_base_type(boundary)?;
+        let base = self.parse_base_type(boundary)?;
 
+        self.parse_type_tail(
+            base,
+            start_pos,
+            allow_refinement,
+            use_lookahead,
+            signature_ctx,
+            boundary,
+        )
+    }
+
+    /// Parse suffixes after the base has completed, so their temporaries do
+    /// not remain on the stack while parsing a nested base type.
+    fn parse_type_tail(
+        &mut self,
+        mut base: Type,
+        start_pos: usize,
+        allow_refinement: bool,
+        use_lookahead: bool,
+        signature_ctx: bool,
+        boundary: TypeBoundary,
+    ) -> ParseResult<Type> {
         // Check for capability-restricted type: Type with [Capabilities]
         // Capability-restricted types: `Type with [Cap1, Cap2]` restricts a context
         // to a subset of its capabilities (e.g., `Database with [Read]` allows only reads)
@@ -572,11 +597,9 @@ impl<'a> RecursiveParser<'a> {
         // A keyword-like token is admitted as a CANDIDATE here, not as a
         // decision. `parse_sigma_type` consumes the name with
         // `consume_ident_or_keyword`, whose accept set is the narrow
-        // contextual one, and the caller wraps the whole attempt in
-        // `optional()` — so a word this guard lets through but the
-        // consumer refuses simply backtracks and reports the ordinary
-        // error. Deciding here instead would duplicate the consumer's
-        // list in a second place, and the two would drift.
+        // contextual one. A refused name reports that grammar error.
+        // Duplicating the consumer's accept set here would create two
+        // keyword lists that can drift apart.
         //
         // T1091: before this, the guard accepted only `Ident` and
         // `result`, which made the tuple-slot label the strictest name
@@ -680,60 +703,19 @@ impl<'a> RecursiveParser<'a> {
         let start_pos = self.stream.position();
 
         if self.descriptor_projections && self.stream.consume(&TokenKind::ColonColon).is_some() {
-            let assoc_span = self.stream.current_span();
-            let assoc = Ident::new(self.consume_ident()?, assoc_span);
-            self.stream.expect(TokenKind::Lt)?;
-            let base = Heap::new(self.parse_type()?);
-            self.expect_gt()?;
-            return Ok(Type::new(
-                TypeKind::AssociatedType { base, assoc },
-                self.stream.make_span(start_pos),
-            ));
+            return self.parse_descriptor_projection(start_pos);
         }
 
         // Type lambda: |x| TypeExpr or |x, y| TypeExpr
         // Used in dependent type positions: Sigma<A, |a| B(a)>
         // Try to parse as type lambda first; if it fails, report the original error.
         if self.stream.check(&TokenKind::Pipe) {
-            if let Some(type_lambda) = self.optional(|p| p.parse_type_lambda(boundary)) {
-                return Ok(type_lambda);
-            }
-            // If type lambda parsing failed, report the original error
-            return Err(ParseError::leading_pipe_no_context(
-                self.stream.current_span(),
-            ));
+            return self.parse_type_lambda(boundary);
         }
 
-        // Unit type: ()
-        if self.stream.check(&TokenKind::LParen)
-            && let Some(unit) = self.optional(|p| {
-                p.stream.expect(TokenKind::LParen)?;
-                p.stream.expect(TokenKind::RParen)?;
-                let span = p.stream.make_span(start_pos);
-                Ok(Type::unit(span))
-            })
-        {
-            return Ok(unit);
-        }
-
-        // Never type: ! (for diverging functions)
-        if self.stream.check(&TokenKind::Bang) {
-            self.stream.advance();
-            let span = self.stream.make_span(start_pos);
-            return Ok(Type::never(span));
-        }
-
-        // Unknown type: unknown (top type for safe dynamic typing)
-        // Unknown type: top type for safe dynamic typing — all types are subtypes of unknown
-        if self.stream.check(&TokenKind::Unknown) {
-            self.stream.advance();
-            let span = self.stream.make_span(start_pos);
-            return Ok(Type::unknown(span));
-        }
-
-        // Try primitives
-        if let Some(prim) = self.optional(|p| p.parse_primitive_type()) {
-            return Ok(prim);
+        // Atomic type construction completes before any recursive production.
+        if let Some(atomic) = self.parse_atomic_type() {
+            return Ok(atomic);
         }
 
         // Protocol types: impl Display + Debug, dyn Display + Debug
@@ -843,10 +825,8 @@ impl<'a> RecursiveParser<'a> {
         }
 
         // Tuple type: (A, B, C) - at least 2 elements
-        if self.stream.check(&TokenKind::LParen)
-            && let Some(tuple) = self.optional(|p| p.parse_tuple_type())
-        {
-            return Ok(tuple);
+        if self.stream.check(&TokenKind::LParen) {
+            return self.parse_tuple_type();
         }
 
         // Array or slice type: [T; N] or [T]
@@ -867,31 +847,11 @@ impl<'a> RecursiveParser<'a> {
             return self.parse_reference_type(boundary);
         }
 
-        // Type placeholder: _ (must be checked BEFORE path-based types)
-        if let Some(Token {
-            kind: TokenKind::Ident(name),
-            ..
-        }) = self.stream.peek()
-            && name.as_str() == "_"
-        {
-            let span = self.stream.current_span();
-            self.stream.advance();
-            return Ok(Type::inferred(span));
-        }
-
         // Dependent type meta prefix: meta T, meta Nat, meta K
         // Used in dependent type contexts for compile-time type-level values.
         // Example: fn take<T>(k: meta K) -> SizedList<T, K>
         if self.stream.check(&TokenKind::Meta) {
-            self.stream.advance(); // consume 'meta'
-            let inner = self.parse_type_impl_ctx(false, false, true, false, boundary)?;
-            let span = self.stream.make_span(start_pos);
-            return Ok(Type::new(
-                TypeKind::Meta {
-                    inner: Heap::new(inner),
-                },
-                span,
-            ));
+            return self.parse_meta_carrier_type(start_pos, boundary);
         }
 
         // Meta type: @Expr, @TokenStream, @Type, etc.
@@ -923,6 +883,34 @@ impl<'a> RecursiveParser<'a> {
 
         let span = self.stream.current_span();
         Err(ParseError::invalid_syntax("expected type", span))
+    }
+
+    fn parse_descriptor_projection(&mut self, start_pos: usize) -> ParseResult<Type> {
+        let assoc_span = self.stream.current_span();
+        let assoc = Ident::new(self.consume_ident()?, assoc_span);
+        self.stream.expect(TokenKind::Lt)?;
+        let base = Heap::new(self.parse_type()?);
+        self.expect_gt()?;
+        Ok(Type::new(
+            TypeKind::AssociatedType { base, assoc },
+            self.stream.make_span(start_pos),
+        ))
+    }
+
+    fn parse_meta_carrier_type(
+        &mut self,
+        start_pos: usize,
+        boundary: TypeBoundary,
+    ) -> ParseResult<Type> {
+        self.stream.advance(); // consume 'meta'
+        let inner = self.parse_type_impl_ctx(false, false, true, false, boundary)?;
+        let span = self.stream.make_span(start_pos);
+        Ok(Type::new(
+            TypeKind::Meta {
+                inner: Heap::new(inner),
+            },
+            span,
+        ))
     }
 
     /// Parse type lambda: |x| TypeExpr or |x, y| TypeExpr
@@ -1220,54 +1208,32 @@ impl<'a> RecursiveParser<'a> {
         ))
     }
 
-    /// Parse primitive types: Bool, Int, Float, Char, Text
-    fn parse_primitive_type(&mut self) -> ParseResult<Type> {
-        match self.stream.peek() {
-            Some(Token {
-                kind: TokenKind::Ident(name),
-                span,
-            }) if name.as_str() == "Bool" => {
-                let span = *span;
+    /// Atomic syntax cannot recurse. Construct it outside the compound-type
+    /// dispatcher so leaf temporaries do not accumulate with type nesting.
+    fn parse_atomic_type(&mut self) -> Option<Type> {
+        let start_pos = self.stream.position();
+        let kind = match self.stream.peek_kind()? {
+            TokenKind::LParen
+                if matches!(self.stream.peek_nth_kind(1), Some(TokenKind::RParen)) =>
+            {
                 self.stream.advance();
-                Ok(Type::bool(span))
+                TypeKind::Unit
             }
-            Some(Token {
-                kind: TokenKind::Ident(name),
-                span,
-            }) if name.as_str() == "Int" => {
-                let span = *span;
-                self.stream.advance();
-                Ok(Type::int(span))
-            }
-            Some(Token {
-                kind: TokenKind::Ident(name),
-                span,
-            }) if name.as_str() == "Float" => {
-                let span = *span;
-                self.stream.advance();
-                Ok(Type::float(span))
-            }
-            Some(Token {
-                kind: TokenKind::Ident(name),
-                span,
-            }) if name.as_str() == "Char" => {
-                let span = *span;
-                self.stream.advance();
-                Ok(Type::new(TypeKind::Char, span))
-            }
-            Some(Token {
-                kind: TokenKind::Ident(name),
-                span,
-            }) if name.as_str() == "Text" => {
-                let span = *span;
-                self.stream.advance();
-                Ok(Type::text(span))
-            }
-            _ => {
-                let span = self.stream.current_span();
-                Err(ParseError::invalid_syntax("expected primitive type", span))
-            }
-        }
+            TokenKind::Bang => TypeKind::Never,
+            TokenKind::Unknown => TypeKind::Unknown,
+            TokenKind::Ident(name) => match name.as_str() {
+                "Bool" => TypeKind::Bool,
+                "Int" => TypeKind::Int,
+                "Float" => TypeKind::Float,
+                "Char" => TypeKind::Char,
+                "Text" => TypeKind::Text,
+                "_" => TypeKind::Inferred,
+                _ => return None,
+            },
+            _ => return None,
+        };
+        self.stream.advance();
+        Some(Type::new(kind, self.stream.make_span(start_pos)))
     }
 
     /// Parse GenRef type: GenRef<T>
@@ -1898,7 +1864,82 @@ impl<'a> RecursiveParser<'a> {
     /// Also handles associated type instantiation: Protocol::Assoc<T> or Self.Item<T>
     fn parse_path_type(&mut self, boundary: TypeBoundary) -> ParseResult<Type> {
         let start_pos = self.stream.position();
+        let base_type = self.parse_path_type_head(start_pos, boundary)?;
+        // E055: Detect double opening angle bracket like List<<Int>
+        // The lexer tokenizes << as LtLt (left shift), so we need to check for it
+        if self.stream.check(&TokenKind::LtLt) {
+            return Err(ParseError::double_angle_bracket(self.stream.current_span()));
+        }
 
+        if self.stream.check(&TokenKind::Lt) {
+            let args = self.parse_generic_args()?;
+            self.finish_generic_path_type(base_type, args, start_pos)
+        } else {
+            self.parse_parenthesized_type_arguments(base_type, start_pos, boundary)
+        }
+    }
+
+    fn parse_parenthesized_type_arguments(
+        &mut self,
+        base_type: Type,
+        start_pos: usize,
+        boundary: TypeBoundary,
+    ) -> ParseResult<Type> {
+        if self.stream.check(&TokenKind::LParen)
+            && (matches!(
+                    self.stream.peek_nth_kind(1),
+                    Some(TokenKind::Integer(_)) | Some(TokenKind::Float(_))
+                    | Some(TokenKind::Text(_)) | Some(TokenKind::True)
+                    | Some(TokenKind::False) | Some(TokenKind::Minus)
+                    | Some(TokenKind::SelfValue)
+                )
+                // Value-dependent type application: `B(x)`, `B(a1)`,
+                // where the first argument is a lowercase identifier
+                // referring to a value in scope (dependent type binder).
+                // Types follow the Verum uppercase-convention, so a
+                // lowercase Ident in argument position is unambiguously
+                // a value, not a type — this pattern is pervasive in
+                // HoTT signatures like `fn(x: A) -> B(x)`.
+                || matches!(
+                    self.stream.peek_nth_kind(1),
+                    Some(TokenKind::Ident(name))
+                        if name.as_str().chars().next().is_some_and(|c| c.is_lowercase())
+                ))
+        {
+            self.parse_dependent_type_arguments(base_type, start_pos)
+        } else if self.stream.check(&TokenKind::LParen) {
+            self.parse_constructor_type_arguments(base_type, start_pos, boundary)
+        } else {
+            Ok(base_type)
+        }
+    }
+
+    fn finish_generic_path_type(
+        &mut self,
+        base_type: Type,
+        args: Vec<GenericArg>,
+        start_pos: usize,
+    ) -> ParseResult<Type> {
+        let generic_ty = Type::new(
+            TypeKind::Generic {
+                base: Box::new(base_type),
+                args: args.into_iter().collect(),
+            },
+            self.stream.make_span(start_pos),
+        );
+        if self.stream.check(&TokenKind::LParen) {
+            self.parse_dependent_type_arguments(generic_ty, start_pos)
+        } else {
+            Ok(generic_ty)
+        }
+    }
+
+    /// Resolve the syntactic path/projection head before recursing into arguments.
+    fn parse_path_type_head(
+        &mut self,
+        start_pos: usize,
+        boundary: TypeBoundary,
+    ) -> ParseResult<Type> {
         let path = match boundary {
             TypeBoundary::Ordinary => self.parse_path()?,
             TypeBoundary::Quantifier => {
@@ -2040,181 +2081,107 @@ impl<'a> RecursiveParser<'a> {
             );
         }
 
-        // E055: Detect double opening angle bracket like List<<Int>
-        // The lexer tokenizes << as LtLt (left shift), so we need to check for it
-        if self.stream.check(&TokenKind::LtLt) {
-            return Err(ParseError::double_angle_bracket(self.stream.current_span()));
-        }
+        Ok(base_type)
+    }
 
-        // Handle angle-bracketed generic arguments: <T, U>
-        if self.stream.check(&TokenKind::Lt) {
-            let args = self.parse_generic_args()?;
-            let generic_span = self.stream.make_span(start_pos);
-
-            let generic_ty = Type::new(
-                TypeKind::Generic {
-                    base: Box::new(base_type),
-                    args: args.into_iter().collect::<List<_>>(),
-                },
-                generic_span,
-            );
-
-            // After `<…>`, check for value-argument parentheses:
-            //  Fiber<A, B>(f, b)
-            //  IsContrMap<A, B>(f)
-            //  Glue<A>(phi, T, e)
-            //
-
-            // This is the general dependent-type application shape that
-            // `core/math/hott.vr`, `cubical.vr`, `infinity_topos.vr`, and
-            // `kan_extension.vr` pervasively rely on. The two-argument
-            // `Path<A>(a, b)` form has its own special-cased entry earlier
-            // (`parse_path_type_expr`) for historical compatibility; every
-            // other type with value indices flows through here.
-            if self.stream.check(&TokenKind::LParen) {
-                self.stream.advance();
-                let mut value_args: Vec<Expr> = Vec::new();
-                if !self.stream.check(&TokenKind::RParen) {
-                    loop {
-                        if !self.tick() || self.is_aborted() {
-                            break;
-                        }
-                        let expr = self.parse_expr_no_struct()?;
-                        value_args.push(expr);
-                        if self.stream.consume(&TokenKind::Comma).is_none() {
-                            break;
-                        }
-                        // Allow trailing comma: `Foo<T>(a, b, )`.
-                        if self.stream.check(&TokenKind::RParen) {
-                            break;
-                        }
-                    }
+    /// The value-argument grammar is shared by bare and generic carriers.
+    fn parse_dependent_type_arguments(
+        &mut self,
+        base_type: Type,
+        start_pos: usize,
+    ) -> ParseResult<Type> {
+        self.stream.advance(); // consume `(`
+        let mut value_args: Vec<Expr> = Vec::new();
+        if !self.stream.check(&TokenKind::RParen) {
+            loop {
+                if !self.tick() || self.is_aborted() {
+                    break;
                 }
-                self.stream.expect(TokenKind::RParen)?;
-                let span = self.stream.make_span(start_pos);
-                return Ok(Type::new(
-                    TypeKind::DependentApp {
-                        carrier: Box::new(generic_ty),
-                        value_args: value_args.into_iter().collect::<List<_>>(),
-                    },
-                    span,
-                ));
-            }
-
-            Ok(generic_ty)
-        }
-        // DependentApp without generic prefix — `C.cells(0)`, `Obj(n)`.
-        //
-
-        // When the base (possibly a Qualified type like `C.cells`) is
-        // followed directly by `(<literal>…)`, it is a value-indexed
-        // dependent type, not the "constructor-style" `A(B(C(Int)))`
-        // form (that branch is below and expects types inside the
-        // parens). We pick the DependentApp path when the first token
-        // after `(` is a literal or simple expression that can't be a
-        // type: integer, float, string/char, bool, unary minus, bang
-        // (negation), or a `self.field`-style expression starting with
-        // `self` / `&`. `core/math/infinity_topos.vr:54` uses this for
-        // `C.cells(0)` / `C.cells(1)` throughout.
-        else if self.stream.check(&TokenKind::LParen)
-            && (matches!(
-                    self.stream.peek_nth_kind(1),
-                    Some(TokenKind::Integer(_)) | Some(TokenKind::Float(_))
-                    | Some(TokenKind::Text(_)) | Some(TokenKind::True)
-                    | Some(TokenKind::False) | Some(TokenKind::Minus)
-                    | Some(TokenKind::SelfValue)
-                )
-                // Value-dependent type application: `B(x)`, `B(a1)`,
-                // where the first argument is a lowercase identifier
-                // referring to a value in scope (dependent type binder).
-                // Types follow the Verum uppercase-convention, so a
-                // lowercase Ident in argument position is unambiguously
-                // a value, not a type — this pattern is pervasive in
-                // HoTT signatures like `fn(x: A) -> B(x)`.
-                || matches!(
-                    self.stream.peek_nth_kind(1),
-                    Some(TokenKind::Ident(name))
-                        if name.as_str().chars().next().is_some_and(|c| c.is_lowercase())
-                ))
-        {
-            self.stream.advance(); // consume `(`
-            let mut value_args: Vec<Expr> = Vec::new();
-            if !self.stream.check(&TokenKind::RParen) {
-                loop {
-                    if !self.tick() || self.is_aborted() {
-                        break;
-                    }
-                    let expr = self.parse_expr_no_struct()?;
-                    value_args.push(expr);
-                    if self.stream.consume(&TokenKind::Comma).is_none() {
-                        break;
-                    }
-                    if self.stream.check(&TokenKind::RParen) {
-                        break;
-                    }
+                let expr = self.parse_expr_no_struct()?;
+                value_args.push(expr);
+                if self.stream.consume(&TokenKind::Comma).is_none() {
+                    break;
+                }
+                if self.stream.check(&TokenKind::RParen) {
+                    break;
                 }
             }
-            self.stream.expect(TokenKind::RParen)?;
-            let span = self.stream.make_span(start_pos);
-            Ok(Type::new(
-                TypeKind::DependentApp {
-                    carrier: Box::new(base_type),
-                    value_args: value_args.into_iter().collect::<List<_>>(),
-                },
-                span,
-            ))
         }
-        // Handle parenthesized type arguments: (T, U)
-        // This is used for constructor-style type applications like: A(B(C(Int)))
-        // Also handles function trait syntax: Fn(T, U) -> R
-        else if self.stream.check(&TokenKind::LParen) {
-            self.stream.advance(); // consume (
+        self.stream.expect(TokenKind::RParen)?;
+        let span = self.stream.make_span(start_pos);
+        Ok(Type::new(
+            TypeKind::DependentApp {
+                carrier: Box::new(base_type),
+                value_args: value_args.into_iter().collect::<List<_>>(),
+            },
+            span,
+        ))
+    }
 
-            let args = if self.stream.check(&TokenKind::RParen) {
-                Vec::new()
-            } else {
-                self.comma_separated(|p| {
-                    // Use parse_type_no_refinement to avoid consuming { } as refinement
-                    // This is crucial for function type bounds in where clauses:
-                    // where F: fn(Int) -> Int { body }
-                    // We don't want to consume the function body { } as a type refinement
-                    let ty = p.parse_type_no_refinement()?;
-                    Ok(GenericArg::Type(ty))
-                })?
-            };
+    fn parse_constructor_type_arguments(
+        &mut self,
+        base_type: Type,
+        start_pos: usize,
+        boundary: TypeBoundary,
+    ) -> ParseResult<Type> {
+        self.stream.advance(); // consume (
 
-            self.stream.expect(TokenKind::RParen)?;
-
-            // Check for function trait return type syntax: -> R
-            // This converts Fn(T, U) -> R into Fn<(T, U), Output = R>
-            let mut final_args = args;
-            if self.stream.consume(&TokenKind::RArrow).is_some() {
-                // Use parse_type_no_refinement to avoid consuming { } as refinement
-                // This is especially important in where clauses
-                let return_type = self.parse_type_impl_ctx(false, false, true, false, boundary)?;
-                // Add Output = R as an associated type binding
-                // For now, we'll represent this as a Const generic arg wrapping the type
-                // The type checker will interpret this correctly
-                final_args.push(GenericArg::Type(return_type));
-            }
-
-            let span = self.stream.make_span(start_pos);
-
-            Ok(Type::new(
-                TypeKind::Generic {
-                    base: Box::new(base_type),
-                    args: final_args.into_iter().collect::<List<_>>(),
-                },
-                span,
-            ))
+        let args = if self.stream.check(&TokenKind::RParen) {
+            Vec::new()
         } else {
-            Ok(base_type)
+            self.comma_separated(|p| {
+                // Use parse_type_no_refinement to avoid consuming { } as refinement
+                // This is crucial for function type bounds in where clauses:
+                // where F: fn(Int) -> Int { body }
+                // We don't want to consume the function body { } as a type refinement
+                let ty = p.parse_type_no_refinement()?;
+                Ok(GenericArg::Type(ty))
+            })?
+        };
+
+        self.stream.expect(TokenKind::RParen)?;
+
+        // Check for function trait return type syntax: -> R
+        // This converts Fn(T, U) -> R into Fn<(T, U), Output = R>
+        let mut final_args = args;
+        if self.stream.consume(&TokenKind::RArrow).is_some() {
+            // Use parse_type_no_refinement to avoid consuming { } as refinement
+            // This is especially important in where clauses
+            let return_type = self.parse_type_impl_ctx(false, false, true, false, boundary)?;
+            // Add Output = R as an associated type binding
+            // For now, we'll represent this as a Const generic arg wrapping the type
+            // The type checker will interpret this correctly
+            final_args.push(GenericArg::Type(return_type));
         }
+
+        let span = self.stream.make_span(start_pos);
+
+        Ok(Type::new(
+            TypeKind::Generic {
+                base: Box::new(base_type),
+                args: final_args.into_iter().collect::<List<_>>(),
+            },
+            span,
+        ))
     }
 
     /// Parse generic arguments: <T, U, const N: usize, _>
     /// Supports Higher-Kinded Types (HKT) with _ placeholder
     pub(crate) fn parse_generic_args(&mut self) -> ParseResult<Vec<GenericArg>> {
+        let start_pos = self.begin_generic_args()?;
+        let args = self.comma_separated(Self::parse_generic_argument)?;
+
+        // E051: Unclosed constraint generic (missing >)
+        if self.expect_gt().is_err() {
+            return Err(ParseError::unclosed_constraint_generic(
+                self.stream.make_span(start_pos),
+            ));
+        }
+
+        Ok(args)
+    }
+
+    fn begin_generic_args(&mut self) -> ParseResult<usize> {
         let start_pos = self.stream.position();
 
         // E055: Detect double opening angle bracket like List<<Int>
@@ -2234,348 +2201,287 @@ impl<'a> RecursiveParser<'a> {
         // type_args = '<' , type_arg , { ',' , type_arg } , '>' ;
         // Empty generics like Vec<> are NOT valid according to the grammar.
         // E052: Empty generic type arguments
-        let args = if self.stream.check(&TokenKind::Gt) || self.pending_gt {
-            // Emit error for empty generic arguments
+        if self.stream.check(&TokenKind::Gt) || self.pending_gt {
             return Err(ParseError::empty_generic_args(
                 self.stream.make_span(start_pos),
             ));
-        } else {
-            self.comma_separated(|p| {
-                // Minimum binding power for expressions inside generic args.
-                // Must be > 10 to exclude shift operators `<<` (10) and
-                // `>>` (10) which would consume the closing `>>`/`>` as
-                // a right-shift operator. Comparison operators `<`/`>`
-                // have BP 6, arithmetic has BP ≤ 13, so BP 11 is the
-                // sweet spot: allows +, -, *, /, % but blocks << and >>.
-                const GENERIC_ARG_MIN_BP: u8 = 11;
+        }
+        Ok(start_pos)
+    }
 
-                // Check for HKT placeholder: _
-                // This represents a type constructor hole in higher-kinded types
-                // Example: Functor<F<_>> where F is a type constructor
-                if let Some(Token {
-                    kind: TokenKind::Ident(name),
-                    ..
-                }) = p.stream.peek()
-                    && name.as_str() == "_"
-                {
-                    let span = p.stream.current_span();
-                    p.stream.advance();
-                    // Create an inferred type to represent the HKT placeholder
-                    return Ok(GenericArg::Type(Type::inferred(span)));
-                }
-
-                // Check for lifetime argument: 'a, 'b, 'static
-                // Lifetimes in type arguments: Type<'a, T>
-                if matches!(p.stream.peek_kind(), Some(TokenKind::Lifetime(_))) {
-                    let lifetime = p.parse_lifetime()?;
-                    return Ok(GenericArg::Lifetime(lifetime));
-                }
-
-                // Check if this is definitely a const expression (integer/float literal,
-                // or array literal for const generic shapes like [3, 4])
-                // Integer, float literals, and array literals should NEVER be parsed as types
-                let is_definitely_const = matches!(
-                    p.stream.peek_kind(),
-                    Some(TokenKind::Integer(_))
-                        | Some(TokenKind::Float(_))
-                        | Some(TokenKind::LBracket)
-                );
-
-                if is_definitely_const {
-                    // Parse as full const expression (handles 0 + n, 2 * k, etc.)
-                    // Use bp=7 to stop before `>` and `>=` operators
-                    let const_start = p.stream.position();
-                    let mut expr = p.parse_expr_bp(GENERIC_ARG_MIN_BP)?;
-                    // Comparison heuristic: if `>` follows and has an RHS before another `>`,
-                    // treat as comparison (e.g., Proof<3 > 0>)
-                    if matches!(
-                        p.stream.peek_kind(),
-                        Some(TokenKind::Gt) | Some(TokenKind::GtEq) | Some(TokenKind::LtEq)
-                    ) {
-                        let cmp_cp = p.stream.position();
-                        let cmp_tok = p.stream.peek_kind().cloned();
-                        p.stream.advance();
-                        let has_rhs = matches!(
-                            p.stream.peek_kind(),
-                            Some(TokenKind::Integer(_))
-                                | Some(TokenKind::Float(_))
-                                | Some(TokenKind::Ident(_))
-                                | Some(TokenKind::LParen)
-                                | Some(TokenKind::True)
-                                | Some(TokenKind::False)
-                                | Some(TokenKind::Minus)
-                                | Some(TokenKind::Bang)
-                        );
-                        if has_rhs {
-                            let rhs = p.parse_expr_bp(GENERIC_ARG_MIN_BP)?;
-                            if matches!(
-                                p.stream.peek_kind(),
-                                Some(TokenKind::Gt) | Some(TokenKind::GtGt)
-                            ) || p.pending_gt
-                            {
-                                let op = match cmp_tok {
-                                    Some(TokenKind::Gt) => verum_ast::BinOp::Gt,
-                                    Some(TokenKind::GtEq) => verum_ast::BinOp::Ge,
-                                    Some(TokenKind::LtEq) => verum_ast::BinOp::Le,
-                                    _ => verum_ast::BinOp::Gt,
-                                };
-                                let span = p.stream.make_span(const_start);
-                                expr = verum_ast::Expr::new(
-                                    verum_ast::ExprKind::Binary {
-                                        op,
-                                        left: Heap::new(expr),
-                                        right: Heap::new(rhs),
-                                    },
-                                    span,
-                                );
-                            } else {
-                                p.stream.reset_to(cmp_cp);
-                            }
-                        } else {
-                            p.stream.reset_to(cmp_cp);
-                        }
-                    }
-                    Ok(GenericArg::Const(expr))
-                } else {
-                    // Check for associated type binding: Target=Type
-                    // Peek ahead to see if we have Ident = Type pattern
-                    let checkpoint = p.stream.position();
-                    if let Some(Token {
-                        kind: TokenKind::Ident(name),
-                        span,
-                    }) = p.stream.peek()
-                    {
-                        let ident_span = *span;
-                        let ident_name = name.clone();
-                        p.stream.advance(); // consume identifier
-
-                        if p.stream.check(&TokenKind::Eq) {
-                            // This is an associated type binding: Name=Type
-                            let start_pos = checkpoint;
-                            p.stream.advance(); // consume '='
-
-                            let ty = p.parse_type_no_refinement()?;
-                            let span = p.stream.make_span(start_pos);
-                            let binding =
-                                TypeBinding::new(Ident::new(ident_name, ident_span), ty, span);
-                            return Ok(GenericArg::Binding(binding));
-                        }
-
-                        // Not a binding, restore position and continue
-                        p.stream.reset_to(checkpoint);
-                    }
-
-                    // Try to parse as type first (with proper backtracking)
-                    // But if the parsed type is followed by an arithmetic operator,
-                    // treat it as a const expression instead (for dependent types like Eq<n + 0, n>)
-                    let checkpoint_before_type = p.stream.position();
-                    if let Some(ty) = p.optional(|p2| p2.parse_type()) {
-                        // Check if the next token is an arithmetic operator
-                        // If so, this should be a const expression, not a type
-                        let is_arithmetic_continuation = matches!(
-                            p.stream.peek_kind(),
-                            Some(TokenKind::Plus)
-                                | Some(TokenKind::Minus)
-                                | Some(TokenKind::Star)
-                                | Some(TokenKind::Slash)
-                                | Some(TokenKind::Percent)
-                                | Some(TokenKind::EqEq)
-                                | Some(TokenKind::BangEq)
-                        );
-                        if is_arithmetic_continuation {
-                            // Reset and parse as const expression
-                            p.stream.reset_to(checkpoint_before_type);
-                            let arith_start = p.stream.position();
-                            let mut expr = p.parse_expr_bp(GENERIC_ARG_MIN_BP)?;
-                            // Comparison heuristic for expressions inside generic args
-                            if matches!(
-                                p.stream.peek_kind(),
-                                Some(TokenKind::Gt) | Some(TokenKind::GtEq) | Some(TokenKind::LtEq)
-                            ) {
-                                let cmp_cp = p.stream.position();
-                                let cmp_tok = p.stream.peek_kind().cloned();
-                                p.stream.advance();
-                                let has_rhs = matches!(
-                                    p.stream.peek_kind(),
-                                    Some(TokenKind::Integer(_))
-                                        | Some(TokenKind::Float(_))
-                                        | Some(TokenKind::Ident(_))
-                                        | Some(TokenKind::LParen)
-                                        | Some(TokenKind::True)
-                                        | Some(TokenKind::False)
-                                        | Some(TokenKind::Minus)
-                                        | Some(TokenKind::Bang)
-                                );
-                                if has_rhs {
-                                    let rhs = p.parse_expr_bp(GENERIC_ARG_MIN_BP)?;
-                                    if matches!(
-                                        p.stream.peek_kind(),
-                                        Some(TokenKind::Gt) | Some(TokenKind::GtGt)
-                                    ) || p.pending_gt
-                                    {
-                                        let op = match cmp_tok {
-                                            Some(TokenKind::Gt) => verum_ast::BinOp::Gt,
-                                            Some(TokenKind::GtEq) => verum_ast::BinOp::Ge,
-                                            Some(TokenKind::LtEq) => verum_ast::BinOp::Le,
-                                            _ => verum_ast::BinOp::Gt,
-                                        };
-                                        let span = p.stream.make_span(arith_start);
-                                        expr = verum_ast::Expr::new(
-                                            verum_ast::ExprKind::Binary {
-                                                op,
-                                                left: Heap::new(expr),
-                                                right: Heap::new(rhs),
-                                            },
-                                            span,
-                                        );
-                                    } else {
-                                        p.stream.reset_to(cmp_cp);
-                                    }
-                                } else {
-                                    p.stream.reset_to(cmp_cp);
-                                }
-                            }
-                            Ok(GenericArg::Const(expr))
-                        } else {
-                            // Check if `>` after a type is actually a comparison operator
-                            // E.g.: Proof<n > 0> -- `n` parsed as type, `>` is comparison
-                            //
-
-                            // EXCLUSION: `(` as the first token of the RHS is ambiguous
-                            // with a DependentApp value-argument list `Outer<Type<…>(…)>`.
-                            // In the stdlib HoTT pattern `Foo<Bar<A>(v)>` the `(v)` is a
-                            // DependentApp suffix of Bar<A>, not a comparison rhs; eagerly
-                            // interpreting it as `Bar > (v)` would eat the outer `>` and
-                            // strand Foo's `<…>` unclosed. Users who *do* want a comparison
-                            // with a parenthesized rhs can wrap the whole predicate in
-                            // an explicit refinement (`T{ n > (expr) }`).
-                            if matches!(
-                                p.stream.peek_kind(),
-                                Some(TokenKind::Gt) | Some(TokenKind::GtEq) | Some(TokenKind::LtEq)
-                            ) {
-                                let cmp_cp = p.stream.position();
-                                let cmp_tok = p.stream.peek_kind().cloned();
-                                p.stream.advance();
-                                let has_rhs = matches!(
-                                    p.stream.peek_kind(),
-                                    Some(TokenKind::Integer(_))
-                                        | Some(TokenKind::Float(_))
-                                        | Some(TokenKind::Ident(_))
-                                        | Some(TokenKind::True)
-                                        | Some(TokenKind::False)
-                                        | Some(TokenKind::Minus)
-                                        | Some(TokenKind::Bang)
-                                );
-                                if has_rhs {
-                                    let rhs = p.parse_expr_bp(GENERIC_ARG_MIN_BP)?;
-                                    if matches!(
-                                        p.stream.peek_kind(),
-                                        Some(TokenKind::Gt) | Some(TokenKind::GtGt)
-                                    ) || p.pending_gt
-                                    {
-                                        // Convert type to expression and build comparison
-                                        let lhs = match &ty.kind {
-                                            TypeKind::Path(path) => verum_ast::Expr::new(
-                                                verum_ast::ExprKind::Path(path.clone()),
-                                                ty.span,
-                                            ),
-                                            _ => verum_ast::Expr::new(
-                                                verum_ast::ExprKind::Path(verum_ast::Path::new(
-                                                    List::from(vec![
-                                                        verum_ast::ty::PathSegment::Name(
-                                                            Ident::new(Text::from("_"), ty.span),
-                                                        ),
-                                                    ]),
-                                                    ty.span,
-                                                )),
-                                                ty.span,
-                                            ),
-                                        };
-                                        let op = match cmp_tok {
-                                            Some(TokenKind::Gt) => verum_ast::BinOp::Gt,
-                                            Some(TokenKind::GtEq) => verum_ast::BinOp::Ge,
-                                            Some(TokenKind::LtEq) => verum_ast::BinOp::Le,
-                                            _ => verum_ast::BinOp::Gt,
-                                        };
-                                        let span = p.stream.make_span(checkpoint_before_type);
-                                        return Ok(GenericArg::Const(verum_ast::Expr::new(
-                                            verum_ast::ExprKind::Binary {
-                                                op,
-                                                left: Heap::new(lhs),
-                                                right: Heap::new(rhs),
-                                            },
-                                            span,
-                                        )));
-                                    }
-                                }
-                                p.stream.reset_to(cmp_cp);
-                            }
-                            Ok(GenericArg::Type(ty))
-                        }
-                    } else {
-                        // Check if this looks like a const expression (ident, paren, etc.)
-                        // to avoid hanging on invalid tokens
-                        let can_be_const = p.stream.peek().is_some_and(|token| token.is_literal()) || matches!(
-                            p.stream.peek_kind(),
-                            Some(TokenKind::Ident(_))
-                                | Some(TokenKind::LParen)
-                                | Some(TokenKind::LBracket)     // Array literal: [3, 4]
-                                | Some(TokenKind::Minus)
-                                | Some(TokenKind::Bang)
-                                | Some(TokenKind::SelfValue)
-                                | Some(TokenKind::Proof)
-                                | Some(TokenKind::Exists)
-                                | Some(TokenKind::Forall)
-                                | Some(TokenKind::Pipe)         // Closure: |n| expr
-                                | Some(TokenKind::PipePipe)     // Closure: || expr
-                                | Some(TokenKind::Fn) // Function type: fn(...) -> T
-                        );
-
-                        // Quantified expressions (exists, forall) are valid in generic arguments
-                        // E.g.: Proof<exists x: Int . x > 10>
-                        // Use parse_expr_bp(7) to stop at `>` (comparison operators have BP 6)
-                        // This prevents the parser from consuming the closing `>` as part of the expression
-                        let is_quantifier_or_paren = matches!(
-                            p.stream.peek_kind(),
-                            Some(TokenKind::Exists)
-                                | Some(TokenKind::Forall)
-                                | Some(TokenKind::LParen)
-                        );
-
-                        if is_quantifier_or_paren {
-                            // Parse full expression, stopping before `>` operators
-                            // This handles both direct quantifiers and parenthesized expressions
-                            // E.g.: Proof<(exists x: Int . x > 10)>
-                            let expr = p.parse_expr_bp(GENERIC_ARG_MIN_BP)?;
-                            Ok(GenericArg::Const(expr))
-                        } else if can_be_const {
-                            // Parse as expression with binding power 7 to stop before `>` and `>=`
-                            // This handles:
-                            // - Simple identifiers: Vec<N>
-                            // - Arithmetic: Vec<N + 1>, List<T, plus(M, N)>
-                            // - Function calls: List<T, len(xs)>
-                            // - Negation: Array<T, -1>
-                            let expr = p.parse_expr_bp(GENERIC_ARG_MIN_BP)?;
-                            Ok(GenericArg::Const(expr))
-                        } else {
-                            Err(ParseError::invalid_syntax(
-                                "expected type or const expression in generic argument",
-                                p.stream.current_span(),
-                            ))
-                        }
-                    }
-                }
-            })?
-        };
-
-        // E051: Unclosed constraint generic (missing >)
-        if self.expect_gt().is_err() {
-            return Err(ParseError::unclosed_constraint_generic(
-                self.stream.make_span(start_pos),
-            ));
+    fn parse_generic_argument(&mut self) -> ParseResult<GenericArg> {
+        // Check for HKT placeholder: _
+        // This represents a type constructor hole in higher-kinded types
+        // Example: Functor<F<_>> where F is a type constructor
+        if let Some(Token {
+            kind: TokenKind::Ident(name),
+            ..
+        }) = self.stream.peek()
+            && name.as_str() == "_"
+        {
+            let span = self.stream.current_span();
+            self.stream.advance();
+            // Create an inferred type to represent the HKT placeholder
+            return Ok(GenericArg::Type(Type::inferred(span)));
         }
 
-        Ok(args)
+        // Check for lifetime argument: 'a, 'b, 'static
+        // Lifetimes in type arguments: Type<'a, T>
+        if matches!(self.stream.peek_kind(), Some(TokenKind::Lifetime(_))) {
+            let lifetime = self.parse_lifetime()?;
+            return Ok(GenericArg::Lifetime(lifetime));
+        }
+
+        // Check if this is definitely a const expression (integer/float literal,
+        // or array literal for const generic shapes like [3, 4])
+        // Integer, float literals, and array literals should NEVER be parsed as types
+        let is_definitely_const = matches!(
+            self.stream.peek_kind(),
+            Some(TokenKind::Integer(_)) | Some(TokenKind::Float(_)) | Some(TokenKind::LBracket)
+        );
+
+        if is_definitely_const {
+            self.parse_generic_const_argument()
+        } else {
+            self.parse_generic_type_argument()
+        }
+    }
+
+    fn parse_generic_const_argument(&mut self) -> ParseResult<GenericArg> {
+        // Parse as full const expression (handles 0 + n, 2 * k, etc.)
+        // Stop before generic delimiters and shift operators.
+        let const_start = self.stream.position();
+        let mut expr = self.parse_expr_bp(GENERIC_ARG_MIN_BP)?;
+        // Comparison heuristic: if `>` follows and has an RHS before another `>`,
+        // treat as comparison (e.g., Proof<3 > 0>)
+        if matches!(
+            self.stream.peek_kind(),
+            Some(TokenKind::Gt) | Some(TokenKind::GtEq) | Some(TokenKind::LtEq)
+        ) {
+            let cmp_cp = self.stream.position();
+            let cmp_tok = self.stream.peek_kind().cloned();
+            self.stream.advance();
+            let has_rhs = matches!(
+                self.stream.peek_kind(),
+                Some(TokenKind::Integer(_))
+                    | Some(TokenKind::Float(_))
+                    | Some(TokenKind::Ident(_))
+                    | Some(TokenKind::LParen)
+                    | Some(TokenKind::True)
+                    | Some(TokenKind::False)
+                    | Some(TokenKind::Minus)
+                    | Some(TokenKind::Bang)
+            );
+            if has_rhs {
+                let rhs = self.parse_expr_bp(GENERIC_ARG_MIN_BP)?;
+                if matches!(
+                    self.stream.peek_kind(),
+                    Some(TokenKind::Gt) | Some(TokenKind::GtGt)
+                ) || self.pending_gt
+                {
+                    let op = match cmp_tok {
+                        Some(TokenKind::Gt) => verum_ast::BinOp::Gt,
+                        Some(TokenKind::GtEq) => verum_ast::BinOp::Ge,
+                        Some(TokenKind::LtEq) => verum_ast::BinOp::Le,
+                        _ => verum_ast::BinOp::Gt,
+                    };
+                    let span = self.stream.make_span(const_start);
+                    expr = verum_ast::Expr::new(
+                        verum_ast::ExprKind::Binary {
+                            op,
+                            left: Heap::new(expr),
+                            right: Heap::new(rhs),
+                        },
+                        span,
+                    );
+                } else {
+                    self.stream.reset_to(cmp_cp);
+                }
+            } else {
+                self.stream.reset_to(cmp_cp);
+            }
+        }
+        Ok(GenericArg::Const(expr.into()))
+    }
+
+    fn parse_generic_type_argument(&mut self) -> ParseResult<GenericArg> {
+        // Check for associated type binding: Target=Type
+        // Peek ahead to see if we have Ident = Type pattern
+        let checkpoint = self.stream.position();
+        if let Some(Token {
+            kind: TokenKind::Ident(name),
+            span,
+        }) = self.stream.peek()
+        {
+            let ident_span = *span;
+            let ident_name = name.clone();
+            self.stream.advance(); // consume identifier
+
+            if self.stream.check(&TokenKind::Eq) {
+                self.stream.advance(); // consume '='
+                return self.parse_generic_binding(ident_name, ident_span, checkpoint);
+            }
+
+            // Not a binding, restore position and continue
+            self.stream.reset_to(checkpoint);
+        }
+
+        // The recursive type parse must not retain expression-construction locals.
+        let checkpoint_before_type = self.stream.position();
+        if let Some(ty) = self.optional(|parser| parser.parse_type()) {
+            self.finish_generic_type_argument(ty, checkpoint_before_type)
+        } else {
+            self.parse_generic_expression_argument()
+        }
+    }
+
+    fn parse_generic_binding(
+        &mut self,
+        name: Text,
+        name_span: verum_ast::Span,
+        start_pos: usize,
+    ) -> ParseResult<GenericArg> {
+        let ty = self.parse_type_no_refinement()?;
+        let span = self.stream.make_span(start_pos);
+        Ok(GenericArg::Binding(TypeBinding::new(
+            Ident::new(name, name_span),
+            ty,
+            span,
+        )))
+    }
+
+    /// Resolve value-expression suffixes only after nested type parsing returns.
+    fn finish_generic_type_argument(
+        &mut self,
+        ty: Type,
+        checkpoint_before_type: usize,
+    ) -> ParseResult<GenericArg> {
+        // Check if the next token is an arithmetic operator
+        // If so, this should be a const expression, not a type
+        let is_arithmetic_continuation = matches!(
+            self.stream.peek_kind(),
+            Some(TokenKind::Plus)
+                | Some(TokenKind::Minus)
+                | Some(TokenKind::Star)
+                | Some(TokenKind::Slash)
+                | Some(TokenKind::Percent)
+                | Some(TokenKind::EqEq)
+                | Some(TokenKind::BangEq)
+        );
+        if is_arithmetic_continuation {
+            self.stream.reset_to(checkpoint_before_type);
+            self.parse_generic_const_argument()
+        } else {
+            // Check if `>` after a type is actually a comparison operator
+            // E.g.: Proof<n > 0> -- `n` parsed as type, `>` is comparison
+            //
+
+            // EXCLUSION: `(` as the first token of the RHS is ambiguous
+            // with a DependentApp value-argument list `Outer<Type<…>(…)>`.
+            // In the stdlib HoTT pattern `Foo<Bar<A>(v)>` the `(v)` is a
+            // DependentApp suffix of Bar<A>, not a comparison rhs; eagerly
+            // interpreting it as `Bar > (v)` would eat the outer `>` and
+            // strand Foo's `<…>` unclosed. Users who *do* want a comparison
+            // with a parenthesized rhs can wrap the whole predicate in
+            // an explicit refinement (`T{ n > (expr) }`).
+            if matches!(
+                self.stream.peek_kind(),
+                Some(TokenKind::Gt) | Some(TokenKind::GtEq) | Some(TokenKind::LtEq)
+            ) {
+                let cmp_cp = self.stream.position();
+                let cmp_tok = self.stream.peek_kind().cloned();
+                self.stream.advance();
+                let has_rhs = matches!(
+                    self.stream.peek_kind(),
+                    Some(TokenKind::Integer(_))
+                        | Some(TokenKind::Float(_))
+                        | Some(TokenKind::Ident(_))
+                        | Some(TokenKind::True)
+                        | Some(TokenKind::False)
+                        | Some(TokenKind::Minus)
+                        | Some(TokenKind::Bang)
+                );
+                if has_rhs {
+                    let rhs = self.parse_expr_bp(GENERIC_ARG_MIN_BP)?;
+                    if matches!(
+                        self.stream.peek_kind(),
+                        Some(TokenKind::Gt) | Some(TokenKind::GtGt)
+                    ) || self.pending_gt
+                    {
+                        // Convert type to expression and build comparison
+                        let lhs = match &ty.kind {
+                            TypeKind::Path(path) => verum_ast::Expr::new(
+                                verum_ast::ExprKind::Path(path.clone()),
+                                ty.span,
+                            ),
+                            _ => verum_ast::Expr::new(
+                                verum_ast::ExprKind::Path(verum_ast::Path::new(
+                                    List::from(vec![verum_ast::ty::PathSegment::Name(Ident::new(
+                                        Text::from("_"),
+                                        ty.span,
+                                    ))]),
+                                    ty.span,
+                                )),
+                                ty.span,
+                            ),
+                        };
+                        let op = match cmp_tok {
+                            Some(TokenKind::Gt) => verum_ast::BinOp::Gt,
+                            Some(TokenKind::GtEq) => verum_ast::BinOp::Ge,
+                            Some(TokenKind::LtEq) => verum_ast::BinOp::Le,
+                            _ => verum_ast::BinOp::Gt,
+                        };
+                        let span = self.stream.make_span(checkpoint_before_type);
+                        return Ok(GenericArg::Const(
+                            verum_ast::Expr::new(
+                                verum_ast::ExprKind::Binary {
+                                    op,
+                                    left: Heap::new(lhs),
+                                    right: Heap::new(rhs),
+                                },
+                                span,
+                            )
+                            .into(),
+                        ));
+                    }
+                }
+                self.stream.reset_to(cmp_cp);
+            }
+            Ok(GenericArg::Type(ty))
+        }
+    }
+
+    fn parse_generic_expression_argument(&mut self) -> ParseResult<GenericArg> {
+        // Check if this looks like a const expression (ident, paren, etc.)
+        // to avoid hanging on invalid tokens
+        let can_be_const = self.stream.peek().is_some_and(|token| token.is_literal())
+            || matches!(
+                self.stream.peek_kind(),
+                Some(TokenKind::Ident(_))
+                | Some(TokenKind::LParen)
+                | Some(TokenKind::LBracket)     // Array literal: [3, 4]
+                | Some(TokenKind::Minus)
+                | Some(TokenKind::Bang)
+                | Some(TokenKind::SelfValue)
+                | Some(TokenKind::Proof)
+                | Some(TokenKind::Exists)
+                | Some(TokenKind::Forall)
+                | Some(TokenKind::Pipe)         // Closure: |n| expr
+                | Some(TokenKind::PipePipe)     // Closure: || expr
+                | Some(TokenKind::Fn) // Function type: fn(...) -> T
+            );
+
+        // Quantifiers, parenthesized expressions and value expressions share
+        // the same delimiter-aware binding power.
+        if can_be_const {
+            let expr = self.parse_expr_bp(GENERIC_ARG_MIN_BP)?;
+            Ok(GenericArg::Const(expr.into()))
+        } else {
+            Err(ParseError::invalid_syntax(
+                "expected type or const expression in generic argument",
+                self.stream.current_span(),
+            ))
+        }
     }
 
     /// Parse a const expression in generic argument position.

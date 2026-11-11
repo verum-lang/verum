@@ -983,7 +983,7 @@ fn substitute_refinement_binder(
             // The argument as an EXPRESSION: a meta argument is written
             // as a value, and the parser may deliver it as either form.
             let arg_expr = match arg {
-                verum_ast::ty::GenericArg::Const(e) => e.clone(),
+                verum_ast::ty::GenericArg::Const(e) => e.as_ref(),
                 // A meta argument is a VALUE, and the parser delivers
                 // it as a const argument. Anything else in that position
                 // is a type, and a type does not satisfy or violate a
@@ -993,7 +993,7 @@ fn substitute_refinement_binder(
             // Substitute the argument for the refinement's binder and
             // ask the constant evaluator. Anything it cannot decide is
             // left alone.
-            let bound = Self::substitute_refinement_binder(predicate, &arg_expr);
+            let bound = Self::substitute_refinement_binder(predicate, arg_expr);
             let mut evaluator = crate::const_eval::ConstEvaluator::new();
             match evaluator.eval(&bound) {
                 Ok(verum_common::ConstValue::Bool(true)) => {}
@@ -1002,7 +1002,7 @@ fn substitute_refinement_binder(
                         type_name: verum_common::Text::from(type_name),
                         position: index + 1,
                         argument: verum_common::Text::from(
-                            verum_ast::pretty::format_expr(&arg_expr),
+                            verum_ast::pretty::format_expr(arg_expr),
                         ),
                         predicate: verum_common::Text::from(
                             verum_ast::pretty::format_expr(predicate),

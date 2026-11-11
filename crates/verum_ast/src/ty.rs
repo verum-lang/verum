@@ -809,7 +809,9 @@ pub enum GenericArg {
     /// Type argument: List<Int>
     Type(Type),
     /// Const argument: Array<T, 10>
-    Const(Expr),
+    /// Keep expression storage indirect so ordinary type arguments do not
+    /// inherit the size of the expression AST in every generic argument list.
+    Const(Heap<Expr>),
     /// Lifetime argument (for future expansion)
     Lifetime(Lifetime),
     /// Associated type binding: Deref<Target=Vec<Int>>

@@ -252,22 +252,11 @@ struct DelimiterContext {
 const MAX_PARSER_OPERATIONS: usize = 1_000_000;
 
 /// Maximum recursion depth for nested expressions, types, and patterns.
-/// Prevents stack overflow on deeply nested input like `(((((...)))))`
-/// or `List<List<List<...>>>`.
-///
-/// Sized for rayon worker threads (macOS default stack = 512 KiB; Linux
-/// glibc default = 8 MiB but Rust threads often sized to 2 MiB). Each
-/// `parse_expr_bp` frame consumes ~2-3 KiB on aarch64 release builds
-/// once locals + ParseResult + saved registers are accounted for; 128
-/// frames × ~3 KiB ≈ 384 KiB, fitting inside 512 KiB with margin for
-/// the calling stack. Real program ASTs rarely exceed depth 30; 128 is
-/// more than any *human-written* program needs while staying safe on
-/// the smallest worker-thread stack we ship to.
-///
-/// Tuning history: the bound was 256 before T0.5; the resulting
-/// 768 KiB worst-case frame chain reliably hit SIGBUS on macOS
-/// rayon workers during stdlib loading. Halving to 128 closes the
-/// crash class.
+/// Grammar operations must keep their frames small enough to reach this
+/// guard on an ordinary worker stack. A logical budget alone does not
+/// bound physical stack usage: test valid nesting and refusal paths, rather
+/// than raising thread stacks or reducing this budget to hide large frames.
+/// `tests/type_stack_tests.rs` exercises generic nesting at the boundary.
 const MAX_RECURSION_DEPTH: usize = 128;
 
 /// Main recursive descent parser with helper methods for common parsing patterns.
@@ -629,11 +618,21 @@ impl<'a> RecursiveParser<'a> {
             return Ok(items);
         }
 
-        // Parse first item
-        items.push(parse_fn(self)?);
-
-        // Parse remaining items
-        while self.stream.consume(&TokenKind::Comma).is_some() {
+        loop {
+            // One parse site avoids keeping separate first-item and subsequent
+            // item temporaries alive across recursively parsed list elements.
+            let pos_before = self.stream.position();
+            let first = items.is_empty();
+            items.push(parse_fn(self)?);
+            if !first && self.stream.position() == pos_before {
+                return Err(ParseError::invalid_syntax(
+                    "parser made no progress in comma-separated list",
+                    self.stream.current_span(),
+                ));
+            }
+            if self.stream.consume(&TokenKind::Comma).is_none() {
+                break;
+            }
             // Allow trailing comma: check for common closing delimiters
             // Note: Only treat > as delimiter if we're not inside braces (for refinement types)
             // LBrace is added to support trailing comma in where clauses: where T: Clone, { ... }
@@ -645,18 +644,6 @@ impl<'a> RecursiveParser<'a> {
                 || (self.brace_depth == 0 && (self.stream.check(&TokenKind::Gt) || self.pending_gt))
             {
                 break;
-            }
-
-            // Safety: Track position to ensure forward progress
-            let pos_before = self.stream.position();
-            items.push(parse_fn(self)?);
-
-            // Ensure we advanced at least one token
-            if self.stream.position() == pos_before {
-                return Err(ParseError::invalid_syntax(
-                    "parser made no progress in comma-separated list",
-                    self.stream.current_span(),
-                ));
             }
         }
 

@@ -4769,7 +4769,7 @@ impl TypeChecker {
         match arg {
             Some(GenericArg::Const(expr)) => {
                 // Const expression - use directly
-                expr.clone()
+                expr.as_ref().clone()
             }
             Some(GenericArg::Type(ty)) => {
                 // Type argument - try to extract value from various type forms
