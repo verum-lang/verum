@@ -55,6 +55,17 @@ fn execute(functions: &str, expected: i64) {
 }
 
 #[test]
+fn cast_interpolation_keeps_the_colon_in_the_format_expression() {
+    execute(
+        r#"public fn probe() -> Int {
+            let value = 42;
+            if f"{value as Int:}" == "42" { 1 } else { 0 }
+        }"#,
+        1,
+    );
+}
+
+#[test]
 fn exact_refined_coverage_executes_through_the_produced_archive() {
     execute(
         "fn choose(value: Int{it >= 0 && it <= 100}) -> Int {

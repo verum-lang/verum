@@ -5,6 +5,76 @@ use verum_ast::FileId;
 use verum_fast_parser::VerumParser;
 
 #[test]
+fn casts_leave_format_specifiers_owned_by_the_interpolation() {
+    use verum_ast::{
+        Expr, ExprKind, TypeKind,
+        visitor::{Visitor, walk_expr},
+    };
+
+    #[derive(Default)]
+    struct Inspect {
+        casts: Vec<TypeKind>,
+        methods: Vec<String>,
+    }
+    impl Visitor for Inspect {
+        fn visit_expr(&mut self, expr: &Expr) {
+            match &expr.kind {
+                ExprKind::Cast { ty, .. } => self.casts.push(ty.kind.clone()),
+                ExprKind::MethodCall { method, .. } => self.methods.push(method.name.to_string()),
+                _ => {}
+            }
+            walk_expr(self, expr);
+        }
+    }
+
+    let parser = VerumParser::new();
+    for (source, expected_type, method) in [
+        (r#"f"{value as Int:04x}""#, TypeKind::Int, "to_hex"),
+        (r#"f"{value as Int:x}""#, TypeKind::Int, "to_hex"),
+        (r#"f"{value as Float:.4}""#, TypeKind::Float, "to_precision"),
+        (r#"f"\\u{{{value as Int:04x}}}""#, TypeKind::Int, "to_hex"),
+    ] {
+        let expression = parser.parse_expr_str(source, FileId::new(0)).expect(source);
+        let mut inspected = Inspect::default();
+        inspected.visit_expr(&expression);
+        assert_eq!(inspected.casts, vec![expected_type], "{source}");
+        assert!(
+            inspected.methods.iter().any(|actual| actual == method),
+            "{source}"
+        );
+    }
+    // Cast syntax admits a refined type, whereas the named sigma binding
+    // remains a separate type/binding production.
+    parser
+        .parse_expr_str("value as Int{> 0}", FileId::new(0))
+        .unwrap();
+    parser
+        .parse_type_str("value: Int where value > 0", FileId::new(0))
+        .unwrap();
+    assert!(
+        parser
+            .parse_expr_str("value as Int:04x", FileId::new(0))
+            .is_err()
+    );
+}
+
+#[test]
+fn real_stdlib_cast_interpolations_parse() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../core");
+    for relative in [
+        "base/primitives.vr",
+        "math/simple.vr",
+        "text/char.vr",
+        "text/text.vr",
+    ] {
+        let source = std::fs::read_to_string(root.join(relative)).unwrap();
+        VerumParser::new()
+            .parse_module_str(&source, FileId::new(0))
+            .expect(relative);
+    }
+}
+
+#[test]
 fn trailing_interpolation_tokens_are_refused() {
     let parser = VerumParser::new();
     for source in [

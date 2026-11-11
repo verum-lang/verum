@@ -84,6 +84,16 @@ fn standalone_server_analyzes_without_cargos_stack_environment() {
             vec![],
         ),
         (
+            // Empty format specs are legal and need no installed stdlib
+            // methods. The colon still belongs to interpolation, not a sigma type.
+            r#"fn valid(value: Int) -> Text { f"{value as Int:}" }"#,
+            vec![],
+        ),
+        (
+            r#"fn bad(value: Int) -> Int { f"{value as Int:}" }"#,
+            vec!["E400"],
+        ),
+        (
             "context Gate {}\nfn needs() using [Gate] {}\n\
              fn bad() {{provide Gate = (); needs();} needs();}",
             vec!["E613"],

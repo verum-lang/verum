@@ -183,8 +183,11 @@ impl<'a> RecursiveParser<'a> {
         self.parse_type_impl_ctx(true, true, true, true, TypeBoundary::Ordinary)
     }
 
+    /// Expression-context `type_expr`, including refinements but not a sigma
+    /// binding. A trailing colon belongs to the surrounding expression grammar,
+    /// for example the format specifier in `f"{value as Int:04x}"`.
     pub fn parse_type_with_lookahead(&mut self) -> ParseResult<Type> {
-        self.parse_type_impl(true, true, true)
+        self.parse_type_impl(true, true, false)
     }
 
     /// Parse a type without sigma type interpretation.
