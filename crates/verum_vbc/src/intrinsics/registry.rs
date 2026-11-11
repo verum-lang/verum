@@ -44,7 +44,9 @@ pub static INTRINSIC_REGISTRY: LazyLock<IntrinsicRegistry> = LazyLock::new(Intri
 
 const fn signal_watch(name: &'static str, op: crate::signal_watch::SignalWatchOp) -> Intrinsic {
     Intrinsic {
-        name, category: IntrinsicCategory::Platform,
+        // Installing/restoring a disposition and draining its counter change
+        // process state; these are permission-bearing system operations.
+        name, category: IntrinsicCategory::Syscall,
         hints: &[IntrinsicHint::IoEffect, IntrinsicHint::Unsafe, IntrinsicHint::RequiresPermission],
         param_count: 1, return_count: 1, strategy: CodegenStrategy::LinuxSignal(op),
         mlir_op: None, doc: "Observe Linux process signal deliveries under an exclusive disposition ticket",

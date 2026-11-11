@@ -17214,7 +17214,7 @@ mod tests {
         );
         assert_eq!(
             sweep(SysSubOpcode::from_byte, SysSubOpcode::to_byte),
-            13,
+            14,
             "SysSubOpcode variant count drift"
         );
         assert_eq!(
@@ -17239,8 +17239,12 @@ mod tests {
             Some(MemSubOpcode::ListStorageResize)
         );
         assert_eq!(
+            MemSubOpcode::from_byte(0x1F),
+            Some(MemSubOpcode::DerefScalarRef)
+        );
+        assert_eq!(
             sweep(MemSubOpcode::from_byte, MemSubOpcode::to_byte),
-            43, // Storage stride, checked accesses and owner resize.
+            44, // Includes declared-width scalar reference loads.
             "MemSubOpcode variant count drift"
         );
     }
