@@ -15284,7 +15284,7 @@ impl TypeChecker {
     ) -> crate::refinement::RefinementPredicate {
         let new_expr = self.substitute_meta_params_in_expr(&predicate.predicate);
         crate::refinement::RefinementPredicate {
-            predicate: new_expr,
+            predicate: new_expr.into(),
             binding: predicate.binding.clone(),
             span: predicate.span,
             // Substitution preserves where the predicate came from.

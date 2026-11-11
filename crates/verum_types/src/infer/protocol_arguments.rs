@@ -78,7 +78,7 @@ impl TypeChecker {
         }
         let base = self.normalize_type(&base);
         let refinement = refinement.map(|predicate| crate::refinement::RefinementPredicate {
-            predicate: (**predicate).clone(),
+            predicate: (**predicate).clone().into(),
             binding: crate::refinement::RefinementBinding::ValueParameter(name.name.clone()),
             span: ty.span,
             provenance: crate::refinement::PredicateProvenance::Declared,

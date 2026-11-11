@@ -473,7 +473,7 @@ fn test_evidence_with_refinement_checker() {
     // Create a refinement type: Int{x | x > 0}
     let base_ty = verum_types::ty::Type::int();
     let predicate = RefinementPredicate {
-        predicate: make_binary_expr(BinOp::Gt, make_var_expr("it"), make_int_literal(0)),
+        predicate: make_binary_expr(BinOp::Gt, make_var_expr("it"), make_int_literal(0)).into(),
         binding: RefinementBinding::Lambda(Text::from("it")),
         provenance: verum_types::refinement::PredicateProvenance::Declared,
         span: dummy_span(),

@@ -604,7 +604,7 @@ fn test_kind_inference_with_refinements() {
         predicate: Expr::new(
             ExprKind::Literal(Literal::new(LiteralKind::Bool(true), Span::dummy())),
             Span::dummy(),
-        ),
+        ).into(),
         binding: RefinementBinding::Inline,
         provenance: verum_types::refinement::PredicateProvenance::Declared,
         span: Span::dummy(),

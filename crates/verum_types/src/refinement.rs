@@ -91,8 +91,9 @@ pub enum RefinementBinding {
 /// Five refinement binding rules: (1) Inline T{pred} with implicit "it", (2) Lambda-style "where |x| pred", (3) Sigma-type "x: T where P(x)", (4) Named predicate "where pred_name", (5) Bare "where pred" (deprecated)
 #[derive(Debug, Clone, PartialEq)]
 pub struct RefinementPredicate {
-    /// The predicate expression (must evaluate to Bool)
-    pub predicate: Expr,
+    /// Immutable predicate syntax shared by type instances. Keeping the AST
+    /// out of the node also keeps primitive and variable types compact.
+    pub predicate: Arc<Expr>,
     /// Binding context, including an inline domain's declaring parameter.
     pub binding: RefinementBinding,
     /// Source location for error reporting
@@ -131,7 +132,7 @@ impl RefinementPredicate {
     /// Example: `Int{> 0}` - implicit 'it' binding
     pub fn inline(predicate: Expr, span: Span) -> Self {
         Self {
-            predicate,
+            predicate: predicate.into(),
             binding: RefinementBinding::Inline,
             span,
             provenance: PredicateProvenance::Declared,
@@ -146,7 +147,7 @@ impl RefinementPredicate {
     /// [`RefinementPredicate::provenance`].
     pub fn narrowed(predicate: Expr, span: Span) -> Self {
         Self {
-            predicate,
+            predicate: predicate.into(),
             binding: RefinementBinding::Inline,
             span,
             provenance: PredicateProvenance::Narrowed,
@@ -157,7 +158,7 @@ impl RefinementPredicate {
     /// Example: `Int where |x| x > 0` - explicit binding
     pub fn lambda(predicate: Expr, var_name: Text, span: Span) -> Self {
         Self {
-            predicate,
+            predicate: predicate.into(),
             binding: RefinementBinding::Lambda(var_name),
             span,
             provenance: PredicateProvenance::Declared,
@@ -168,7 +169,7 @@ impl RefinementPredicate {
     /// Example: `x: Int where x > 0` - dependent type binding
     pub fn sigma(predicate: Expr, var_name: Text, span: Span) -> Self {
         Self {
-            predicate,
+            predicate: predicate.into(),
             binding: RefinementBinding::Sigma(var_name),
             span,
             provenance: PredicateProvenance::Declared,
@@ -200,7 +201,7 @@ impl RefinementPredicate {
         );
 
         Self {
-            predicate,
+            predicate: predicate.into(),
             binding: RefinementBinding::Named(predicate_path),
             span,
             provenance: PredicateProvenance::Declared,
@@ -211,7 +212,7 @@ impl RefinementPredicate {
     /// Example: `Int where it > 0` - bare where clause
     pub fn bare(predicate: Expr, span: Span) -> Self {
         Self {
-            predicate,
+            predicate: predicate.into(),
             binding: RefinementBinding::Bare,
             span,
             provenance: PredicateProvenance::Declared,
@@ -239,7 +240,7 @@ impl RefinementPredicate {
         let predicate = Expr::new(ExprKind::Literal(true_literal), span);
 
         Self {
-            predicate,
+            predicate: predicate.into(),
             binding: RefinementBinding::Inline,
             span,
             provenance: PredicateProvenance::Declared,
@@ -294,7 +295,7 @@ impl RefinementPredicate {
             &self.predicate, &aliases, replacements,
         )?;
         Ok(Self {
-            predicate,
+            predicate: predicate.into(),
             // Alpha-conversion makes the formerly aliased subject explicit.
             binding: renamed.map(RefinementBinding::Lambda).unwrap_or_else(|| self.binding.clone()),
             span: self.span,
@@ -305,7 +306,7 @@ impl RefinementPredicate {
     /// Create a trivially true predicate (unrefined)
     pub fn trivial(span: Span) -> Self {
         Self {
-            predicate: Expr::literal(Literal::bool(true, span)),
+            predicate: Expr::literal(Literal::bool(true, span)).into(),
             binding: RefinementBinding::Inline,
             span,
             provenance: PredicateProvenance::Declared,

@@ -26,7 +26,7 @@ fn parameter(domain: &str) -> Type {
         name.name.clone(),
         carrier,
         refinement.as_ref().map(|p| RefinementPredicate {
-            predicate: (**p).clone(),
+            predicate: (**p).clone().into(),
             binding: RefinementBinding::Sigma(name.name.clone()),
             span: ty.span,
             provenance: PredicateProvenance::Declared,

@@ -195,7 +195,7 @@ impl TypeChecker {
             }
         }
         let pred = TyRefinementPredicate {
-            predicate: predicate.expr.clone(),
+            predicate: predicate.expr.clone().into(),
             binding: binding.clone(),
             span: predicate.span,
             // Lowered from a refinement written in the source.

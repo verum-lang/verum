@@ -8035,7 +8035,7 @@ impl TypeChecker {
                                     // produces `count <= 5`, which the checker can
                                     // then decide against any concrete `count`.
                                     subst_pred.predicate =
-                                        Self::const_fold_expr(&subst_pred.predicate);
+                                        Self::const_fold_expr(&subst_pred.predicate).into();
                                     Type::Refined {
                                         base: base.clone(),
                                         predicate: subst_pred,

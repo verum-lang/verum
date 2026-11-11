@@ -86,7 +86,7 @@ fn refined_int(predicate: Expr) -> RefinementType {
     RefinementType {
         base_type: verum_types::ty::Type::int(),
         predicate: RefinementPredicate {
-            predicate,
+            predicate: predicate.into(),
             binding: RefinementBinding::Lambda(Text::from("it")),
             provenance: PredicateProvenance::Declared,
             span: span(),
