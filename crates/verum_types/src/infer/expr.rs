@@ -6880,115 +6880,121 @@ impl TypeChecker {
     /// it either — this walk is the single place the nested case is driven.
     /// Stdlib-agnostic: resolution flows through `try_find_associated_type`.
     pub(super) fn resolve_assoc_projections_deep(&self, ty: &Type) -> Type {
-        self.resolve_assoc_projections_in_scope(ty, None, 0)
+        self.resolve_assoc_projections_in_scope(ty, None, None, 0)
+            .unwrap_or_else(|_| ty.clone())
     }
 
     pub(super) fn resolve_method_output_projections(
         &self, ty: &Type, receiver: &Type, protocol: &verum_ast::Path,
     ) -> Type {
-        self.resolve_assoc_projections_in_scope(ty, Some((receiver, protocol)), 0)
+        self.resolve_assoc_projections_in_scope(ty, Some((receiver, protocol)), None, 0)
+            .unwrap_or_else(|_| ty.clone())
+    }
+
+    pub(super) fn resolve_call_output_projections(
+        &self, ty: &Type, call: &super::call_obligations::CallProjectionScope<'_>,
+    ) -> Result<Type> {
+        self.resolve_assoc_projections_in_scope(ty, None, Some(call), 0)
     }
 
     fn resolve_assoc_projections_in_scope(
         &self,
         ty: &Type,
         selected: Option<(&Type, &verum_ast::Path)>,
+        call: Option<&super::call_obligations::CallProjectionScope<'_>>,
         depth: usize,
-    ) -> Type {
-        if depth >= 64 { return ty.clone(); }
-        let nested = |child: &Type| self.resolve_assoc_projections_in_scope(child, selected, depth + 1);
-        if let Type::Generic { name, args } = ty {
-            // Recognise BOTH the `::Assoc` form the VBC serializer emits AND
-            // the LEGACY bare-name form (`Generic{"Item",[Iter]}`) the
-            // pre-projection codegen still produces. The bare name is checked
-            // against the protocol registry (no hardcoded names, CLAUDE.md);
-            // `try_find_associated_type` returns None for non-associated names
-            // (List/Map/Maybe/…), so a real generic type is left unchanged
-            // (resolve MORE, never less).
-            let is_projection = name.as_str().starts_with("::")
-                || self
-                    .protocol_checker
-                    .read()
-                    .is_associated_type_name(name.as_str());
-            if is_projection && !args.is_empty() {
-                let assoc_name = name.as_str().strip_prefix("::").unwrap_or(name.as_str());
-                let base = nested(&args[0]);
-                // The projected-over base may be a reference: a `&mut F`
-                // parameter is stored in the descriptor as the bare generic (the
-                // producer strips the reference wrapper), so at the call site the
-                // generic `F` binds to the WHOLE `&mut ReadyFuture<Text>`.
-                // Associated-type resolution is over the pointee, so deref first.
-                let base_deref = match &base {
-                    Type::Reference { inner, .. }
-                    | Type::CheckedReference { inner, .. }
-                    | Type::UnsafeReference { inner, .. } => (**inner).clone(),
-                    other => other.clone(),
-                };
-                let assoc_text: Text = assoc_name.into();
+    ) -> Result<Type> {
+        if depth >= 64 {
+            return Err(TypeError::Other("associated projection normalization depth exceeded".into()));
+        }
+        let nested = |child: &Type| self.resolve_assoc_projections_in_scope(child, selected, call, depth + 1);
+        let instantiate = |ty: &Type| -> Result<Type> {
+            match call {
+                Some(call) => ty.try_apply_subst(call.arguments)
+                    .map(|ty| self.unifier.apply(&ty)).map_err(TypeError::Other),
+                None => Ok(ty.clone()),
+            }
+        };
+        let projection = super::associated_family_applications::checked_projection_parts(ty)
+            .or_else(|| match ty {
+                // Legacy descriptors may omit the projection marker. A real
+                // nominal declaration always takes precedence over that reading.
+                Type::Generic { name, args } if !args.is_empty()
+                    && self.ctx.lookup_type(name).is_none()
+                    && self.protocol_checker.read().is_associated_type_name(name) =>
+                    Some((&args[0], name.clone(), &args.as_slice()[1..])),
+                _ => None,
+            });
+        if let Some((receiver, assoc, arguments)) = projection {
+            let base = nested(receiver)?;
+            let arguments = arguments.iter().map(nested).collect::<Result<verum_common::List<_>>>()?;
+            if let Some(call) = call {
                 let checker = self.protocol_checker.read();
-                let found = match selected {
-                    Some((receiver, protocol)) if checker.types_structurally_equal(receiver, &base_deref) => {
-                        checker.resolve_selected_method_association(&base_deref, protocol, &assoc_text)
+                let owner = checker.associated_projection_owner(receiver, &assoc, &call.assumptions)
+                    .map_err(TypeError::Other)?;
+                if let Some(mut owner) = owner {
+                    owner.args = owner.args.iter().map(instantiate).collect::<Result<_>>()?;
+                    let resolved = checker.resolve_owned_associated_family(&base, &owner, &assoc, &arguments, &[])
+                        .map_err(TypeError::Other)?;
+                    drop(checker);
+                    if let Some(resolved) = resolved {
+                        // An implementation body has its own scope; caller
+                        // parameter identities must not authorize its members.
+                        return self.resolve_assoc_projections_in_scope(&resolved.result, None, None, depth + 1);
                     }
-                    _ => checker.try_find_associated_type(&base_deref, &assoc_text),
-                };
-                drop(checker);
-                if let Some(resolved) = found && resolved != *ty {
-                    return nested(&resolved);
+                    // An unresolved selected application never falls through
+                    // to an unrelated implementation with the same leaf name.
+                    return instantiate(ty);
                 }
             }
+            let base = match &base {
+                Type::Reference { inner, .. }
+                | Type::CheckedReference { inner, .. }
+                | Type::UnsafeReference { inner, .. } if call.is_none() => inner.as_ref(),
+                other => other,
+            };
+            let checker = self.protocol_checker.read();
+            let found = match selected {
+                Some((receiver, protocol)) if arguments.is_empty()
+                    && checker.types_structurally_equal(receiver, base) =>
+                    checker.resolve_selected_method_association(base, protocol, &assoc),
+                _ if call.is_some() || !arguments.is_empty() => checker.resolve_associated_family(
+                    base, &assoc, &arguments, &[],
+                ).map_err(TypeError::Other)?.map(|application| application.result),
+                _ => checker.try_find_associated_type(base, &assoc),
+            };
+            drop(checker);
+            if let Some(resolved) = found && resolved != *ty {
+                return nested(&resolved);
+            }
         }
-        match ty {
-            Type::Generic { name, args } => Type::Generic {
-                name: name.clone(),
-                args: args
-                    .iter()
-                    .map(nested)
-                    .collect(),
-            },
-            Type::Named { path, args } => Type::Named {
-                path: path.clone(),
-                args: args
-                    .iter()
-                    .map(nested)
-                    .collect(),
-            },
-            Type::Tuple(parts) => Type::Tuple(
-                parts
-                    .iter()
-                    .map(nested)
-                    .collect(),
-            ),
-            Type::Reference { mutable, inner } => Type::Reference {
-                mutable: *mutable,
-                inner: Box::new(nested(inner)),
-            },
-            Type::CheckedReference { mutable, inner } => Type::CheckedReference {
-                mutable: *mutable,
-                inner: Box::new(nested(inner)),
-            },
-            Type::UnsafeReference { mutable, inner } => Type::UnsafeReference {
-                mutable: *mutable,
-                inner: Box::new(nested(inner)),
-            },
-            Type::Future { output } => Type::Future {
-                output: Box::new(nested(output)),
-            },
-            Type::Array { element, size } => Type::Array {
-                element: Box::new(nested(element)),
-                size: *size,
-            },
-            Type::Slice { element } => Type::Slice {
-                element: Box::new(nested(element)),
-            },
-            Type::Variant(variants) if selected.is_some() => Type::Variant(
-                variants.iter().map(|(tag, payload)| (tag.clone(), nested(payload))).collect(),
-            ),
-            Type::Record(fields) if selected.is_some() => Type::Record(
-                fields.iter().map(|(name, field)| (name.clone(), nested(field))).collect(),
-            ),
-            _ => ty.clone(),
+        // Preserve nominal constructors and callable metadata while traversing
+        // their arguments. Expanding a nominal result here loses its source owner.
+        let mut result = ty.clone();
+        match &mut result {
+            Type::Generic { args, .. } | Type::Named { args, .. } | Type::Tuple(args) =>
+                *args = args.iter().map(nested).collect::<Result<_>>()?,
+            Type::Reference { inner, .. } | Type::CheckedReference { inner, .. }
+            | Type::UnsafeReference { inner, .. } | Type::Pointer { inner, .. }
+            | Type::VolatilePointer { inner, .. } | Type::Ownership { inner, .. }
+            | Type::GenRef { inner } | Type::Quantified { inner, .. } => **inner = nested(inner)?,
+            Type::Future { output } => **output = nested(output)?,
+            Type::Array { element, .. } | Type::Slice { element } | Type::Tensor { element, .. } =>
+                **element = nested(element)?,
+            Type::Record(fields) | Type::Variant(fields) if selected.is_some() || call.is_some() => {
+                for field in fields.values_mut() { *field = nested(field)?; }
+            }
+            Type::Function { params, return_type, .. } if call.is_some() => {
+                *params = params.iter().map(nested).collect::<Result<_>>()?;
+                **return_type = nested(return_type)?;
+            }
+            Type::TypeApp { constructor, args } if call.is_some() => {
+                **constructor = nested(constructor)?;
+                *args = args.iter().map(nested).collect::<Result<_>>()?;
+            }
+            _ => return instantiate(ty),
         }
+        Ok(result)
     }
 
     /// #47 — expected-parent hint with alias resolution: structural
@@ -8207,7 +8213,9 @@ impl TypeChecker {
                 // argument is a &checked reference to a local variable.
                 // Such references could escape through the function's return value,
                 // violating the safety guarantee of &checked (0ns overhead, no runtime checks).
-                let resolved_return = self.unifier.apply(&return_type);
+                let resolved_return = self.resolve_call_output(
+                    &return_type, &pending_protocol_bounds, &[], &crate::ty::Substitution::new(),
+                )?;
                 // Normalize TypeApp in return type (GAT/HKT)
                 let resolved_return = if Self::contains_type_app(&resolved_return) {
                     self.normalize_type(&resolved_return)

@@ -54,7 +54,10 @@ impl TypeChecker {
             let expected = self.unifier.apply(parameter);
             self.check_expr(argument, &expected)?;
         }
-        Ok(Some(InferResult::new(self.unifier.apply(&return_type))))
+        let result = self.resolve_call_output(
+            &return_type, &Map::new(), &[], &crate::ty::Substitution::new(),
+        )?;
+        Ok(Some(InferResult::new(result)))
     }
 
     pub(super) fn try_context_method_value(

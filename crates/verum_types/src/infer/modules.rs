@@ -24167,7 +24167,9 @@ impl TypeChecker {
                             self.enforce_call_type_bounds(&type_bounds, span)?;
 
                             // Apply substitution to get the concrete return type
-                            let subst_return_type = return_type.apply_subst(&combined_subst);
+                            let subst_return_type = self.resolve_call_output(
+                                return_type, &protocol_bounds, &where_clauses, &combined_subst,
+                            )?;
 
                             // CRITICAL FIX: Also apply unifier to resolve type variables from argument checking
                             // For generic methods like `map_left<L2>(self, f: fn(L) -> L2) -> Either<L2, R>`,

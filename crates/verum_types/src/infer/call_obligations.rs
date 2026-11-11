@@ -2,7 +2,7 @@
 
 use super::TypeChecker;
 use crate::context::{InstantiatedScheme, TypeScheme};
-use crate::ty::{Type, TypeVar};
+use crate::ty::{Substitution, Type, TypeVar};
 use crate::{Result, TypeError};
 use verum_ast::Span;
 use verum_common::{List, Map, Text, ToText};
@@ -15,7 +15,46 @@ pub(super) struct PendingValueObligation {
     span: Span,
 }
 
+pub(super) struct CallProjectionScope<'a> {
+    pub assumptions: List<crate::protocol::WhereClause>,
+    pub arguments: &'a Substitution,
+}
+
 impl TypeChecker {
+    /// The signature and its premises form one declaration-owned object.
+    /// Select projection owners in that object before applying call arguments.
+    pub(super) fn resolve_call_output(
+        &self,
+        ty: &Type,
+        bounds: &Map<TypeVar, List<crate::protocol::ProtocolBound>>,
+        clauses: &[crate::protocol::WhereClause],
+        arguments: &Substitution,
+    ) -> Result<Type> {
+        let mut assumptions = List::new();
+        for (variable, bounds) in bounds {
+            assumptions.push(crate::protocol::WhereClause {
+                ty: Type::Var(*variable), bounds: bounds.clone(),
+            });
+        }
+        assumptions.extend(clauses.iter().cloned());
+        // Captured generic function values retain the same fresh declaration
+        // variables in their pending obligations and their callable signature.
+        let variables = ty.free_vars();
+        if !variables.is_empty() {
+            for pending in &self.pending_value_obligations {
+                assumptions.extend(pending.protocol_bounds.iter()
+                    .filter(|(variable, _)| variables.contains(variable))
+                    .map(|(variable, bounds)| crate::protocol::WhereClause {
+                        ty: Type::Var(*variable), bounds: bounds.clone(),
+                    }));
+                assumptions.extend(pending.where_clauses.iter()
+                    .filter(|clause| clause.ty.free_vars().iter().any(|v| variables.contains(v)))
+                    .cloned());
+            }
+        }
+        self.resolve_call_output_projections(ty, &CallProjectionScope { assumptions, arguments })
+    }
+
     pub(super) fn check_callable_contexts(
         &self, contexts: &crate::di::requirement::ContextExpr, span: Span,
     ) -> Result<()> {

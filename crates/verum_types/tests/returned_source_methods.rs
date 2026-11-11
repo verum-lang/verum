@@ -49,6 +49,117 @@ fn plain_call_bounds_load_the_returned_values_own_implementation() {
     assert!(refused.iter().any(|error| error.contains("Stamp")), "{refused:?}");
 }
 
+fn check_projected_call(extra: &str, expression: &str, result: &str) -> List<Text> {
+    let handle = format!(r#"
+        mount demo.producer.Produce;
+        mount demo.returned.{{Receipt, receipt}};
+        public type Handle<T> is {{ data:T }};
+        implement<T> Produce for Handle<T> {{
+            type Output = Receipt<T>;
+            fn produce(self) -> Receipt<T> {{ receipt(self.data) }}
+        }}
+        public fn handle<T>(data:T) -> Handle<T> {{ Handle {{data}} }}
+        {extra}
+    "#);
+    check(&format!(r#"
+        mount demo.driver.{{driver, drive}};
+        mount demo.producer.ready;
+        fn probe() -> {result} {{ let rt = driver(); {expression} }}
+    "#), &[
+        ("demo.producer", r#"
+            public type Produce is protocol { type Output; fn produce(self) -> Self.Output; };
+            public type Ready<T> is { data:T };
+            implement<T> Produce for Ready<T> { type Output = T; fn produce(self) -> T { self.data } }
+            public fn ready<T>(data:T) -> Ready<T> { Ready {data} }
+        "#),
+        ("demo.handle", &handle),
+        ("demo.returned", r#"
+            public type Receipt<T> is { data:T };
+            implement<T> Receipt<T> { public fn take(self) -> T { self.data } }
+            public fn receipt<T>(data:T) -> Receipt<T> { Receipt {data} }
+        "#),
+        ("demo.driver", r#"
+            mount demo.producer.Produce;
+            mount demo.handle.{Handle, handle};
+            public type Driver is {};
+            implement Driver {
+                public fn spawn<F:Produce>(&self, value:F) -> Handle<F.Output> { handle(value.produce()) }
+                public fn drive<F:Produce>(&self, value:F) -> F.Output { value.produce() }
+            }
+            public fn drive<F:Produce>(value:F) -> F.Output { value.produce() }
+            public fn driver() -> Driver { Driver {} }
+        "#),
+    ])
+}
+
+#[test]
+fn declared_output_owner_survives_an_unrelated_homonym() {
+    let other = "public type Other is protocol { type Output; }; implement<T> Other for Handle<T> { type Output = Bool; }";
+    for expression in [
+        "rt.drive(rt.spawn(ready(42))).take()",
+        "drive(rt.spawn(ready(42))).take()",
+        "let apply = drive; apply(rt.spawn(ready(42))).take()",
+    ] {
+        let errors = check_projected_call(other, expression, "Int");
+        assert!(errors.is_empty(), "{expression}: {errors:#?}");
+    }
+}
+
+#[test]
+fn declared_output_owner_survives_a_forwarding_blanket() {
+    let other = "public type IntoProduce is protocol { type Output; }; implement<F:Produce> IntoProduce for F { type Output = F.Output; }";
+    let errors = check_projected_call(other, "rt.drive(rt.spawn(ready(42))).take()", "Int");
+    assert!(errors.is_empty(), "{errors:#?}");
+}
+
+#[test]
+fn a_homonymous_output_cannot_change_a_calls_result() {
+    let other = "public type Other is protocol { type Output; }; implement<T> Other for Handle<T> { type Output = Bool; }";
+    let errors = check_projected_call(other, "rt.drive(rt.spawn(ready(42)))", "Bool");
+    assert!(!errors.is_empty(), "foreign associated result was accepted");
+}
+
+#[test]
+fn converging_receiver_arguments_do_not_merge_their_declared_output_owners() {
+    for reverse in [false, true] {
+        let first = "public type Measure is protocol { type Value; fn measure(self) -> Self.Value; };";
+        let second = "public type Flag is protocol { type Value; fn flag(self) -> Self.Value; };";
+        let protocols = if reverse { format!("{second} {first}") } else { format!("{first} {second}") };
+        let library = format!(r#"
+            {protocols}
+            public type Reading is {{}};
+            implement Measure for Reading {{ type Value = Int; fn measure(self) -> Int {{ 42 }} }}
+            implement Flag for Reading {{ type Value = Bool; fn flag(self) -> Bool {{ true }} }}
+            public fn measure<T:Measure>(value:T) -> T.Value {{ value.measure() }}
+            public fn flag<T:Flag>(value:T) -> T.Value {{ value.flag() }}
+            public fn both<A:Measure,B:Flag>(a:A,b:B) -> (A.Value,B.Value) {{ (a.measure(),b.flag()) }}
+        "#);
+        for expression in ["both(a,b)", "(measure(a),flag(b))"] {
+            let errors = check(&format!(
+                "mount demo.reading.{{Reading,measure,flag,both}}; fn probe(a:Reading,b:Reading) -> (Int,Bool) {{ {expression} }}"
+            ), &[("demo.reading", &library)]);
+            assert!(errors.is_empty(), "{expression}, reverse={reverse}: {errors:#?}");
+        }
+    }
+}
+
+#[test]
+fn a_reference_projection_uses_the_reference_implementation() {
+    let library = r#"
+        public type Measure is protocol { type Value; fn measure(self) -> Self.Value; };
+        public type Reading is { data:Int };
+        implement Measure for Reading { type Value = Int; fn measure(self) -> Int { self.data } }
+        implement Measure for &Reading { type Value = Bool; fn measure(self) -> Bool { true } }
+        public fn measure<T:Measure>(value:T) -> T.Value { value.measure() }
+    "#;
+    for (result, accepted) in [("Bool", true), ("Int", false)] {
+        let errors = check(&format!(
+            "mount demo.reading.{{Reading,measure}}; fn probe(value:&Reading) -> {result} {{ measure(value) }}"
+        ), &[("demo.reading", library)]);
+        assert_eq!(errors.is_empty(), accepted, "{result}: {errors:#?}");
+    }
+}
+
 #[test]
 fn two_mount_paths_preregister_one_implementation_owner() {
     let library = r#"

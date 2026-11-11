@@ -54,6 +54,24 @@ fn declared_callback_and_closure_are_accepted() {
 }
 
 #[test]
+fn context_call_output_keeps_its_declared_protocol_owner() {
+    let declarations = r#"
+        type Measure is protocol { type Value; fn measure(self) -> Self.Value; };
+        type Flag is protocol { type Value; };
+        type Reading is { data:Int };
+        implement Measure for Reading { type Value = Int; fn measure(self) -> Int { self.data } }
+        implement Flag for Reading { type Value = Bool; }
+        context Measurements { fn read<T:Measure>(value:T) -> T.Value; }
+    "#;
+    for (result, accepted) in [("Int", true), ("Bool", false)] {
+        for expression in ["Measurements.read(value)", "let read = Measurements.read; read(value)"] {
+            let errors = check(&format!("{declarations} fn probe(value:Reading)->{result} using[Measurements] {{ {expression} }}"));
+            assert_eq!(errors.is_empty(), accepted, "{expression}, {result}: {errors:#?}");
+        }
+    }
+}
+
+#[test]
 fn incompatible_callback_contracts_are_rejected() {
     for caller in [
         "fn probe<G:fn(Text)->Bool>(cb:G)->Bool using[Jobs] { Jobs.run(cb) }",

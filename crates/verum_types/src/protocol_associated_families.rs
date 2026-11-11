@@ -54,6 +54,65 @@ pub struct FamilyApplication {
 }
 
 impl ProtocolChecker {
+    /// Select a member in the declaration's scope before substituting its
+    /// receiver. Two distinct parameters may later become the same concrete
+    /// type while projecting members of different protocols.
+    pub(crate) fn associated_projection_owner(
+        &self,
+        receiver: &Type,
+        name: &Text,
+        assumptions: &[WhereClause],
+    ) -> Result<Option<ProtocolBound>, Text> {
+        let mut owner: Option<ProtocolBound> = None;
+        for clause in assumptions {
+            if !self.types_structurally_equal(receiver, &clause.ty) { continue; }
+            for bound in &clause.bounds {
+                if bound.is_negative { continue; }
+                let key = self.make_protocol_key(&bound.protocol);
+                let Some(selected) = self.associated_declaration_application(
+                    &key, &bound.args, receiver, name, &mut Vec::new(),
+                )? else { continue; };
+                let protocol = verum_ast::Path::new(
+                    selected.owner.as_str().split('.').map(|part|
+                        verum_ast::PathSegment::Name(verum_ast::Ident::new(part, bound.protocol.span))
+                    ).collect(), bound.protocol.span,
+                );
+                let candidate = ProtocolBound::positive(protocol, selected.arguments);
+                if let Some(previous) = &owner {
+                    if !self.paths_equal(&previous.protocol, &candidate.protocol)
+                        || previous.args != candidate.args
+                    {
+                        return Err("associated projection has competing declaration owners".into());
+                    }
+                } else { owner = Some(candidate); }
+            }
+        }
+        Ok(owner)
+    }
+
+    /// Reduce through exactly the selected owner application, retaining all
+    /// implementation and family domain checks of ordinary family resolution.
+    pub(crate) fn resolve_owned_associated_family(
+        &self,
+        receiver: &Type,
+        owner: &ProtocolBound,
+        name: &Text,
+        arguments: &[Type],
+        assumptions: &[WhereClause],
+    ) -> Result<Option<FamilyApplication>, Text> {
+        let key = self.make_protocol_key(&owner.protocol);
+        let Some(declaration) = self.associated_declaration_application(
+            &key, &owner.args, receiver, name, &mut Vec::new(),
+        )? else { return Err("selected protocol does not declare this associated member".into()); };
+        let Some((implementation, substitution)) = self.find_impl_matching(
+            receiver, &owner.protocol, Some(&owner.args),
+        ) else { return Ok(None); };
+        self.instantiate_declared_family(
+            implementation, &declaration.declaration, receiver, name,
+            &declaration.arguments, arguments, &substitution, assumptions,
+        ).map(Some)
+    }
+
     /// Equations supplied by actual declaration premises for one selected
     /// associated member. A same-spelling member on another protocol is not
     /// evidence: both routes must reach the same declaration-owned family.
