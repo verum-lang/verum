@@ -834,44 +834,12 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
         //  the "extern fn should be marked `unsafe` under
         //  `[safety].ffi_boundary = strict`" warning, threaded
         //  from manifest via SafetyPolicy::from_features.
-        //  - mls_level — full ten-layer MLS classification stack
-        //  landed. The system enforces information-flow
-        //  constraints across the call graph; classified data
-        //  cannot silently flow into lower-classification sinks
-        //  without explicit `@declassify`:
-        //  * Phase 1 (#266): declaration gate — `extern fn`
-        //  / `unsafe fn` require `@classification(<level>)`.
-        //  * Phase 2a (#282): MlsLevel lattice primitive at
-        //  `verum_common::mls` — algebraic invariants
-        //  pinned (idempotence, commutativity, associativity,
-        //  absorption laws).
-        //  * Phase 2b surface (#288): parameter-level
-        //  `@classification` triggers the gate; function-
-        //  level @classification must subsume the highest
-        //  classified parameter.
-        //  * Phase 2b foundation (#289): TypeChecker carries
-        //  a `classification_map: HashMap<Text, MlsLevel>`
-        //  sidecar tracking per-binding classification.
-        //  * Phase 2b integration (#291): sidecar seeded from
-        //  AST `@classification` attributes at
-        //  `register_function_signature` time.
-        //  * Phase 2b followup (#292): expression
-        //  classification propagation through let-bindings
-        //  (`let x = secret` taints `x`).
-        //  * Phase 2b final helper (#293):
-        //  `check_classification_downflow` API enforces
-        //  the lattice contract `param.subsumes(arg)` at
-        //  call sites.
-        //  * Phase 2b final integration (#294):
-        //  `check_module_call_classifications` walker
-        //  invokes the helper at every call expression in
-        //  a module, recursing through nested expressions.
-        //  * Phase 2b @declassify (#295): functions carrying
-        //  `@declassify` are skipped by the walker — the
-        //  user explicitly opts into the boundary.
-        //  * Phase 3a (#283): low-classification sink
-        //  detection (Logger, FS, Network, Stdout, Stderr,
-        //  Tracing, Telemetry, FileSystem) at safety_gate.
+        //  - mls_level enables declaration and context-boundary gates in
+        //  safety_gate. The MlsLevel lattice and parameter classification
+        //  helpers do not yet constitute an integrated call-graph analysis:
+        //  check_module_call_classifications has no production caller, and
+        //  its sidecar is not lexical or carried in imported signatures.
+        //  Do not infer noninterference from passing the declaration gate.
         //
 
         // No runtime warn! needed — every value the user can set

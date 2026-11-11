@@ -965,7 +965,8 @@ mod mount_cycle_tests {
         let func = mk_function_decl_2b(params);
 
         let mut checker = TypeChecker::new();
-        let _ = checker.register_function_signature(&func);
+        checker.register_primitives();
+        checker.register_function_signature(&func).expect("valid classified declaration");
 
         assert_eq!(
             checker.binding_classification(&Text::from("data")),
@@ -984,7 +985,8 @@ mod mount_cycle_tests {
         let func = mk_function_decl_2b(params);
 
         let mut checker = TypeChecker::new();
-        let _ = checker.register_function_signature(&func);
+        checker.register_primitives();
+        checker.register_function_signature(&func).expect("valid classified declaration");
 
         // Unclassified binding returns Public via the default path
         // but should NOT have an explicit entry.
@@ -1008,7 +1010,8 @@ mod mount_cycle_tests {
         let func = mk_function_decl_2b(params);
 
         let mut checker = TypeChecker::new();
-        let _ = checker.register_function_signature(&func);
+        checker.register_primitives();
+        checker.register_function_signature(&func).expect("valid classified declaration");
 
         assert!(
             checker
@@ -1162,7 +1165,8 @@ mod mount_cycle_tests {
         params.push(mk_param("high", Some("top_secret")));
         let func = mk_function_decl_2b(params);
         let mut checker = TypeChecker::new();
-        let _ = checker.register_function_signature(&func);
+        checker.register_primitives();
+        checker.register_function_signature(&func).expect("valid classified declaration");
 
         let levels = checker
             .function_param_classifications(&Text::from("test_fn"))
@@ -1354,6 +1358,15 @@ mod mount_cycle_tests {
         }
     }
 
+    fn register_classification_module(checker: &mut TypeChecker, module: &verum_ast::Module) {
+        checker.register_primitives();
+        for item in &module.items {
+            if let verum_ast::ItemKind::Function(func) = &item.kind {
+                checker.register_function_signature(func).expect("valid classified declaration");
+            }
+        }
+    }
+
     #[test]
     fn module_walker_detects_secret_to_public_call_site_leak() {
         // Pin: caller passes a Secret-classified local to a
@@ -1369,11 +1382,7 @@ mod mount_cycle_tests {
         let mut checker = TypeChecker::new();
         // Register both functions so their param classifications
         // are visible to the walker.
-        for item in &module.items {
-            if let verum_ast::ItemKind::Function(func) = &item.kind {
-                let _ = checker.register_function_signature(func);
-            }
-        }
+        register_classification_module(&mut checker, &module);
 
         let errors = checker.check_module_call_classifications(&module);
         assert_eq!(
@@ -1404,11 +1413,7 @@ mod mount_cycle_tests {
         );
 
         let mut checker = TypeChecker::new();
-        for item in &module.items {
-            if let verum_ast::ItemKind::Function(func) = &item.kind {
-                let _ = checker.register_function_signature(func);
-            }
-        }
+        register_classification_module(&mut checker, &module);
 
         let errors = checker.check_module_call_classifications(&module);
         assert!(
@@ -1426,11 +1431,7 @@ mod mount_cycle_tests {
         let module = mk_module_with_call("plain_fn", ("arg", None), "x", vec![("x", "public")]);
 
         let mut checker = TypeChecker::new();
-        for item in &module.items {
-            if let verum_ast::ItemKind::Function(func) = &item.kind {
-                let _ = checker.register_function_signature(func);
-            }
-        }
+        register_classification_module(&mut checker, &module);
 
         let errors = checker.check_module_call_classifications(&module);
         assert!(
@@ -1452,11 +1453,7 @@ mod mount_cycle_tests {
         );
 
         let mut checker = TypeChecker::new();
-        for item in &module.items {
-            if let verum_ast::ItemKind::Function(func) = &item.kind {
-                let _ = checker.register_function_signature(func);
-            }
-        }
+        register_classification_module(&mut checker, &module);
 
         let errors = checker.check_module_call_classifications(&module);
         assert!(
@@ -1506,11 +1503,7 @@ mod mount_cycle_tests {
         // a Secret arg flows into a Public param.
         let module = mk_module_with_declassify_caller(true);
         let mut checker = TypeChecker::new();
-        for item in &module.items {
-            if let verum_ast::ItemKind::Function(func) = &item.kind {
-                let _ = checker.register_function_signature(func);
-            }
-        }
+        register_classification_module(&mut checker, &module);
         let errors = checker.check_module_call_classifications(&module);
         assert!(
             errors.is_empty(),
@@ -1526,11 +1519,7 @@ mod mount_cycle_tests {
         // hatch (it's not silently always-on).
         let module = mk_module_with_declassify_caller(false);
         let mut checker = TypeChecker::new();
-        for item in &module.items {
-            if let verum_ast::ItemKind::Function(func) = &item.kind {
-                let _ = checker.register_function_signature(func);
-            }
-        }
+        register_classification_module(&mut checker, &module);
         let errors = checker.check_module_call_classifications(&module);
         assert_eq!(errors.len(), 1, "without @declassify, the leak still fires");
     }
@@ -1575,11 +1564,7 @@ mod mount_cycle_tests {
         );
 
         let mut checker = TypeChecker::new();
-        for item in &module.items {
-            if let verum_ast::ItemKind::Function(func) = &item.kind {
-                let _ = checker.register_function_signature(func);
-            }
-        }
+        register_classification_module(&mut checker, &module);
 
         let errors = checker.check_module_call_classifications(&module);
         assert_eq!(
