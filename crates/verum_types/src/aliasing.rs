@@ -1387,14 +1387,14 @@ impl BorrowTracker {
         }
     }
 
-    /// Mark that we're entering an await expression
-    pub fn enter_await(&mut self) {
-        self.in_await = true;
+    /// Enter an await expression, retaining the enclosing state for nested awaits.
+    pub fn enter_await(&mut self) -> bool {
+        std::mem::replace(&mut self.in_await, true)
     }
 
     /// Mark that we're exiting an await expression
-    pub fn exit_await(&mut self) {
-        self.in_await = false;
+    pub fn exit_await(&mut self, enclosing: bool) {
+        self.in_await = enclosing;
     }
 
     /// Check if we're inside an async context

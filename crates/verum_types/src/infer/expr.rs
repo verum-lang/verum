@@ -147,6 +147,29 @@ impl TypeChecker {
         self.with_call_argument_context(|checker| checker.synth_field_use(expr, FieldUse::Borrow))
     }
 
+    fn with_async_context<T>(
+        &mut self,
+        enabled: bool,
+        check: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> Result<T> {
+        let previous = std::mem::replace(&mut self.in_async_context, enabled);
+        let result = check(self);
+        self.in_async_context = previous;
+        result
+    }
+
+    fn with_lexical_scope<T>(
+        &mut self,
+        check: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> Result<T> {
+        self.ctx.enter_scope();
+        self.borrow_tracker.enter_scope();
+        let result = check(self);
+        self.borrow_tracker.exit_scope();
+        self.ctx.exit_scope();
+        result
+    }
+
     fn check_borrow_operand(&mut self, expr: &Expr, expected: &Type) -> Result<InferResult> {
         if Self::named_field_place(expr).is_some() {
             let result = self.synth_borrowed_operand(expr)?;
@@ -11622,15 +11645,15 @@ impl TypeChecker {
         // the future may be polled on different threads.
 
         // Mark that we're in an await expression
-        self.borrow_tracker.enter_await();
+        let enclosing_await = self.borrow_tracker.enter_await();
 
         // Check await safety for all active borrows
-        self.borrow_tracker.check_await_safety()?;
-
-        let inner_result = self.synth_expr(inner_expr)?;
+        let inner_result = self.borrow_tracker.check_await_safety()
+            .and_then(|()| self.synth_expr(inner_expr));
 
         // Exit await context
-        self.borrow_tracker.exit_await();
+        self.borrow_tracker.exit_await(enclosing_await);
+        let inner_result = inner_result?;
 
         // =========================================================================
         // Protocol-based Future resolution
@@ -11790,10 +11813,7 @@ impl TypeChecker {
         // the enclosing function is async. This lets
         //  spawn { sleep(d).await; limiter.refill() }
         // typecheck inside a non-async helper.
-        let prev_async_context = std::mem::replace(&mut self.in_async_context, true);
-        let inner_result = self.synth_expr(expr);
-        self.in_async_context = prev_async_context;
-        let inner_result = inner_result?;
+        let inner_result = self.with_async_context(true, |checker| checker.synth_expr(expr))?;
 
         // If expr is a Future<T>, result is JoinHandle<T>
         // Otherwise, wrap the result type in JoinHandle
@@ -11819,9 +11839,7 @@ impl TypeChecker {
         use ExprKind::*;
         let ExprKind::Async(block) = &expr.kind else { unreachable!() };
         // Set async context for the block body
-        let prev_async_context = std::mem::replace(&mut self.in_async_context, true);
-        let block_result = self.infer_block(block)?;
-        self.in_async_context = prev_async_context;
+        let block_result = self.with_async_context(true, |checker| checker.infer_block(block))?;
 
         Ok(InferResult::new(Type::Future {
             output: Box::new(block_result.ty),
@@ -11831,23 +11849,20 @@ impl TypeChecker {
     fn infer_expr_unsafe_expr(&mut self, expr: &Expr) -> Result<InferResult> {
         use ExprKind::*;
         let ExprKind::Unsafe(block) = &expr.kind else { unreachable!() };
-        // Enter a new scope for the unsafe block
-        self.ctx.enter_scope();
-
         // Track unsafe context for Tier 2 reference creation
         // Spec: L0-critical/reference_system/reference_tiers/unsafe_without_block
         let prev_unsafe_context = self.in_unsafe_context;
         self.in_unsafe_context = true;
 
         // Infer the block's type from its body
-        let block_result = self.infer_block(block)?;
+        let block_result = self.infer_block(block);
 
-        // Restore unsafe context and exit scope
+        // The block owns its lexical scope. Restore permission before
+        // propagating an error to statement-level diagnostic recovery.
         self.in_unsafe_context = prev_unsafe_context;
-        self.ctx.exit_scope();
 
         // Return the block's type directly (unsafe doesn't wrap the type)
-        Ok(block_result)
+        block_result
     }
 
     fn infer_expr_comprehension(&mut self, current_expr: &Expr) -> Result<InferResult> {
@@ -14367,10 +14382,10 @@ impl TypeChecker {
     pub(super) fn infer_block(&mut self, block: &Block) -> Result<InferResult> {
         let _depth_guard = self.inc_inference_depth("infer_block")?;
         let constant_scope = self.const_eval.enter_source_scope(self.current_module_path.as_str());
-        let result = match self.cfg_filtered_block(block) {
-            Some(filtered) => self.infer_block_inner(&filtered),
-            None => self.infer_block_inner(block),
-        };
+        let result = self.with_lexical_scope(|checker| match checker.cfg_filtered_block(block) {
+            Some(filtered) => checker.infer_block_inner(&filtered),
+            None => checker.infer_block_inner(block),
+        });
         self.const_eval.leave_scope(constant_scope);
         result
     }
@@ -14417,9 +14432,6 @@ impl TypeChecker {
 
     /// Inner implementation of infer_block.
     fn infer_block_inner(&mut self, block: &Block) -> Result<InferResult> {
-        self.ctx.enter_scope();
-        self.borrow_tracker.enter_scope();
-
         // PASS 0: Register all local type definitions first (two-phase)
         // This enables local functions to reference locally-defined types in their signatures.
         // Phase 0a: Register type names as placeholders (allows forward references between types)
@@ -14516,8 +14528,6 @@ impl TypeChecker {
         };
 
         let validation = block.expr.as_ref().map(|tail| self.check_aggregate_escape(tail, &result.ty, false));
-        self.borrow_tracker.exit_scope();
-        self.ctx.exit_scope();
         validation.transpose()?;
         Ok(result)
     }
@@ -14571,18 +14581,15 @@ impl TypeChecker {
     pub(super) fn check_block(&mut self, block: &Block, expected: &Type) -> Result<InferResult> {
         let _depth_guard = self.inc_inference_depth("check_block")?;
         let constant_scope = self.const_eval.enter_source_scope(self.current_module_path.as_str());
-        let result = match self.cfg_filtered_block(block) {
-            Some(filtered) => self.check_block_inner(&filtered, expected),
-            None => self.check_block_inner(block, expected),
-        };
+        let result = self.with_lexical_scope(|checker| match checker.cfg_filtered_block(block) {
+            Some(filtered) => checker.check_block_inner(&filtered, expected),
+            None => checker.check_block_inner(block, expected),
+        });
         self.const_eval.leave_scope(constant_scope);
         result
     }
 
     fn check_block_inner(&mut self, block: &Block, expected: &Type) -> Result<InferResult> {
-        self.ctx.enter_scope();
-        self.borrow_tracker.enter_scope();
-
         // PASS 0: Register all local type definitions first (two-phase)
         // This enables local functions to reference locally-defined types in their signatures.
         // Phase 0a: Register type names as placeholders (allows forward references between types)
@@ -14655,8 +14662,6 @@ impl TypeChecker {
             self.unifier.unify(&Type::Unit, expected, block.span)
                 .map(|_| InferResult::new(Type::Unit))
         };
-        self.borrow_tracker.exit_scope();
-        self.ctx.exit_scope();
         result
     }
 }

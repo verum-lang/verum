@@ -113,3 +113,95 @@ fn borrowing_methods_do_not_consume_affine_receivers() {
     }
     assert!(!checker.in_call_arg_context);
 }
+
+#[test]
+fn failed_unsafe_block_does_not_authorize_a_later_invalid_cast() {
+    let (mut checker, _) = prepare("");
+    let later = Parser::new("true as (Int, Int)").parse_expr().unwrap();
+    let control = checker
+        .synth_expr(&later)
+        .expect_err("invalid cast in safe context");
+    assert!(
+        matches!(control, crate::TypeError::InvalidCast { .. }),
+        "{control:?}"
+    );
+    let invalid = Parser::new("unsafe {missing}").parse_expr().unwrap();
+    checker.synth_expr(&invalid).expect_err("undefined tail");
+    let error = checker
+        .synth_expr(&later)
+        .expect_err("unsafe permission ended with its block");
+    assert!(
+        matches!(error, crate::TypeError::InvalidCast { .. }),
+        "{error:?}"
+    );
+    assert!(!checker.in_unsafe_context);
+}
+
+#[test]
+fn failed_async_block_does_not_authorize_a_later_await() {
+    let (mut checker, _) = prepare("");
+    let invalid = Parser::new("async {missing}").parse_expr().unwrap();
+    checker.synth_expr(&invalid).expect_err("undefined tail");
+    let later = Parser::new("(1).await").parse_expr().unwrap();
+    let error = checker
+        .synth_expr(&later)
+        .expect_err("await outside async context");
+    assert!(
+        matches!(error, crate::TypeError::AsyncPropertyViolation { .. }),
+        "{error:?}"
+    );
+    assert!(!checker.in_async_context);
+}
+
+#[test]
+fn failed_blocks_restore_lexical_bindings() {
+    for source in [
+        "{let hidden = 1; missing}",
+        "unsafe {let hidden = 1; missing}",
+        "async {let hidden = 1; missing}",
+        "{fn nested(x: Missing) {} 1}",
+    ] {
+        let (mut checker, _) = prepare("");
+        let depth = checker.ctx.env.scope_depth();
+        let expression = Parser::new(source).parse_expr().expect(source);
+        checker.synth_expr(&expression).expect_err(source);
+        assert_eq!(checker.ctx.env.scope_depth(), depth, "{source}");
+        assert!(checker.ctx.env.lookup("hidden").is_none(), "{source}");
+        assert!(checker.ctx.env.lookup("nested").is_none(), "{source}");
+    }
+}
+
+#[test]
+fn failed_await_restores_the_enclosing_await_marker() {
+    for nested in [false, true] {
+        let (mut checker, _) = prepare("");
+        if nested {
+            assert!(!checker.borrow_tracker.enter_await());
+        }
+        let expression = Parser::new("missing.await").parse_expr().unwrap();
+        checker
+            .synth_expr(&expression)
+            .expect_err("undefined operand");
+        let previous = checker.borrow_tracker.enter_await();
+        assert_eq!(previous, nested);
+        checker.borrow_tracker.exit_await(previous);
+    }
+}
+
+#[test]
+fn valid_nested_blocks_preserve_permission_and_lexical_boundaries() {
+    for source in [
+        "unsafe {unsafe {1}; true as (Int, Int)}",
+        "async {async {1}; (1).await}",
+        "{let hidden = 1; {let hidden = 2; hidden} + hidden}",
+    ] {
+        let (mut checker, _) = prepare("");
+        let depth = checker.ctx.env.scope_depth();
+        let expression = Parser::new(source).parse_expr().expect(source);
+        checker.synth_expr(&expression).expect(source);
+        assert_eq!(checker.ctx.env.scope_depth(), depth, "{source}");
+        assert!(!checker.in_async_context, "{source}");
+        assert!(!checker.in_unsafe_context, "{source}");
+        assert!(checker.ctx.env.lookup("hidden").is_none(), "{source}");
+    }
+}
