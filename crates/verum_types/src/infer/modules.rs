@@ -18271,32 +18271,30 @@ impl TypeChecker {
         // tells the borrow tracker to allow immutable borrows during
         // argument evaluation, then convert them to the final state.
 
-        // NLL: Method calls use temporary borrows - set context flag
-        let old_call_context = self.in_call_arg_context;
-        self.in_call_arg_context = true;
+        self.with_method_call_context(receiver, span, |checker| {
+            checker.infer_method_call_inner(receiver, method, args, span)
+        })
+    }
 
-        // For two-phase borrows: mark receiver as having a pending mutable borrow
-        // This allows immutable borrows during argument evaluation
-        let receiver_name_for_2pb = self.extract_receiver_name(receiver);
-        if let Some(ref receiver_name) = receiver_name_for_2pb {
-            self.borrow_tracker
-                .begin_two_phase_borrow(receiver_name.clone(), span);
-        }
-
-        // Relies on RUST_MIN_STACK=16MB for stack safety on deeply nested method chains
-        // Method chains like builder.a().b().c().d() cause recursive synth_expr calls
-        let result = self.infer_method_call_inner(receiver, method, args, span);
-
-        // End two-phase borrow period and release mutable borrows on receiver
-        if let Some(ref receiver_name) = receiver_name_for_2pb {
-            self.borrow_tracker
-                .end_two_phase_borrow(receiver_name.clone());
-        }
-
-        // Restore context
-        self.in_call_arg_context = old_call_context;
-
-        result
+    /// Recursive and iterative method inference share the same temporary
+    /// receiver reservation and argument mode, including error recovery.
+    fn with_method_call_context<T>(
+        &mut self,
+        receiver: &Expr,
+        span: Span,
+        check: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> Result<T> {
+        self.with_call_argument_context(|checker| {
+            let receiver_name = checker.extract_receiver_name(receiver);
+            if let Some(name) = &receiver_name {
+                checker.borrow_tracker.begin_two_phase_borrow(name.clone(), span);
+            }
+            let result = check(checker);
+            if let Some(name) = receiver_name {
+                checker.borrow_tracker.end_two_phase_borrow(name);
+            }
+            result
+        })
     }
 
     /// Check if a method takes `self` by value (SelfValue or SelfValueMut).
@@ -18323,41 +18321,11 @@ impl TypeChecker {
         args: &[Expr],
         span: Span,
     ) -> Result<InferResult> {
-        // ============================================================
-        // NLL: Same logic as infer_method_call for proper borrow handling
-        // ============================================================
-
-        // NLL: Method calls use temporary borrows - set context flag
-        let old_call_context = self.in_call_arg_context;
-        self.in_call_arg_context = true;
-
-        // For two-phase borrows: mark receiver as having a pending mutable borrow
-        let receiver_name_for_2pb = self.extract_receiver_name(receiver);
-        if let Some(ref receiver_name) = receiver_name_for_2pb {
-            self.borrow_tracker
-                .begin_two_phase_borrow(receiver_name.clone(), span);
-        }
-
-        let result = self.infer_method_call_inner_impl(
-            receiver,
-            method,
-            type_args,
-            args,
-            span,
-            Some(recv_ty.clone()),
-            false,
-        );
-
-        // End two-phase borrow period and release mutable borrows on receiver
-        if let Some(ref receiver_name) = receiver_name_for_2pb {
-            self.borrow_tracker
-                .end_two_phase_borrow(receiver_name.clone());
-        }
-
-        // Restore context
-        self.in_call_arg_context = old_call_context;
-
-        result
+        self.with_method_call_context(receiver, span, |checker| {
+            checker.infer_method_call_inner_impl(
+                receiver, method, type_args, args, span, Some(recv_ty), false,
+            )
+        })
     }
 
     /// Variant of infer_method_call_with_recv_type that skips static method lookup.
@@ -18372,35 +18340,13 @@ impl TypeChecker {
         args: &[Expr],
         span: Span,
     ) -> Result<InferResult> {
-        // Same NLL logic as infer_method_call_with_recv_type
-        let old_call_context = self.in_call_arg_context;
-        self.in_call_arg_context = true;
-
-        let receiver_name_for_2pb = self.extract_receiver_name(receiver);
-        if let Some(ref receiver_name) = receiver_name_for_2pb {
-            self.borrow_tracker
-                .begin_two_phase_borrow(receiver_name.clone(), span);
-        }
-
-        // Pass true for skip_static_lookup to avoid using receiver.kind for static method resolution
-        let result = self.infer_method_call_inner_impl(
-            receiver,
-            method,
-            type_args,
-            args,
-            span,
-            Some(recv_ty),
-            true,
-        );
-
-        if let Some(ref receiver_name) = receiver_name_for_2pb {
-            self.borrow_tracker
-                .end_two_phase_borrow(receiver_name.clone());
-        }
-
-        self.in_call_arg_context = old_call_context;
-
-        result
+        self.with_method_call_context(receiver, span, |checker| {
+            // Chained receivers use their computed type, not the base expression
+            // as a static namespace.
+            checker.infer_method_call_inner_impl(
+                receiver, method, type_args, args, span, Some(recv_ty), true,
+            )
+        })
     }
 
     /// Inner implementation of method call inference

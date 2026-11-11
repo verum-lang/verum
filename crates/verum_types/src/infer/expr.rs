@@ -129,12 +129,22 @@ impl TypeChecker {
         Ok(result)
     }
 
-    pub(super) fn synth_borrowed_operand(&mut self, expr: &Expr) -> Result<InferResult> {
+    /// Arguments initially borrow their operands; the resolved parameter modes
+    /// determine consumption afterwards. Restore the enclosing mode even when
+    /// inference fails, so diagnostic recovery cannot suppress later moves.
+    pub(super) fn with_call_argument_context<T>(
+        &mut self,
+        check: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> Result<T> {
         let previous = self.in_call_arg_context;
         self.in_call_arg_context = true;
-        let result = self.synth_field_use(expr, FieldUse::Borrow);
+        let result = check(self);
         self.in_call_arg_context = previous;
         result
+    }
+
+    pub(super) fn synth_borrowed_operand(&mut self, expr: &Expr) -> Result<InferResult> {
+        self.with_call_argument_context(|checker| checker.synth_field_use(expr, FieldUse::Borrow))
     }
 
     fn check_borrow_operand(&mut self, expr: &Expr, expected: &Type) -> Result<InferResult> {
@@ -7250,23 +7260,23 @@ impl TypeChecker {
                             )),
                         ));
                     }
-                    let old_call_context = self.in_call_arg_context;
-                    self.in_call_arg_context = true;
-                    for (arg, param_ty) in
-                        args.iter().zip(params.iter())
-                    {
-                        let resolved_param =
-                            self.unifier.apply(param_ty);
-                        let resolved_param = if Self::contains_type_app(
-                            &resolved_param,
-                        ) {
-                            self.normalize_type(&resolved_param)
-                        } else {
-                            resolved_param
-                        };
-                        self.check_expr(arg, &resolved_param)?;
-                    }
-                    self.in_call_arg_context = old_call_context;
+                    self.with_call_argument_context(|checker| {
+                        for (arg, param_ty) in
+                            args.iter().zip(params.iter())
+                        {
+                            let resolved_param =
+                                checker.unifier.apply(param_ty);
+                            let resolved_param = if Self::contains_type_app(
+                                &resolved_param,
+                            ) {
+                                checker.normalize_type(&resolved_param)
+                            } else {
+                                resolved_param
+                            };
+                            checker.check_expr(arg, &resolved_param)?;
+                        }
+                        Ok(())
+                    })?;
                     self.consume_affine_call_args(args, &params)?;
                     let resolved_return =
                         self.unifier.apply(&return_type);
@@ -7321,21 +7331,21 @@ impl TypeChecker {
                         };
                         // Check arguments
                         // NLL: Set call argument context for proper borrow release
-                        let old_call_context = self.in_call_arg_context;
-                        self.in_call_arg_context = true;
-                        for (arg, param_ty) in args.iter().zip(params.iter()) {
-                            let resolved_param = self.unifier.apply(param_ty);
-                            // Normalize TypeApp projections (GAT/HKT) now that
-                            // type vars may be resolved from explicit type args.
-                            let resolved_param =
-                                if Self::contains_type_app(&resolved_param) {
-                                    self.normalize_type(&resolved_param)
-                                } else {
-                                    resolved_param
-                                };
-                            self.check_expr(arg, &resolved_param)?;
-                        }
-                        self.in_call_arg_context = old_call_context;
+                        self.with_call_argument_context(|checker| {
+                            for (arg, param_ty) in args.iter().zip(params.iter()) {
+                                let resolved_param = checker.unifier.apply(param_ty);
+                                // Normalize TypeApp projections (GAT/HKT) now that
+                                // type vars may be resolved from explicit type args.
+                                let resolved_param =
+                                    if Self::contains_type_app(&resolved_param) {
+                                        checker.normalize_type(&resolved_param)
+                                    } else {
+                                        resolved_param
+                                    };
+                                checker.check_expr(arg, &resolved_param)?;
+                            }
+                            Ok(())
+                        })?;
                         // Consume affine values passed by value
                         self.consume_affine_call_args(args, &params)?;
                         let resolved_return = self.unifier.apply(&return_type);
@@ -8066,126 +8076,110 @@ impl TypeChecker {
 
                 // Check each argument against parameter type with substitution
                 // NLL: Set call argument context for proper borrow release
-                let old_call_context = self.in_call_arg_context;
-                self.in_call_arg_context = true;
-                #[cfg(debug_assertions)]
-                let is_assert_eq = func_name
-                    .as_ref()
-                    .map(|n| n.as_str() == "assert_eq")
-                    .unwrap_or(false);
-
-                // ============================================================
-                // Dependent refinement substitution (Phase A.5 activation)
-                // ============================================================
-                //
-
-                // Look up the callee's parameter names so that refinement
-                // predicates on later parameters can be specialised with the
-                // concrete values of earlier arguments before being checked.
-                // Without this, a signature like
-                //
-
-                //  fn safe_get(len: Int, i: Int{>= 0, < len}) -> Int
-                //
-
-                // would leave `len` as a free variable in the predicate on
-                // `i` at call sites, silently admitting out-of-bounds calls
-                // like `safe_get(5, 10)`. With this substitution, the
-                // predicate becomes `10 >= 0 && 10 < 5` at the second
-                // argument check, which the refinement checker correctly
-                // rejects.
-                //
-
-                // `dep_param_names` is the list of parameter names in
-                // declaration order; empty strings stand in for positions
-                // where the parameter uses a non-identifier pattern (those
-                // positions skip substitution but don't break the loop).
-                //
-
-                // Guarded by `callee_name.is_some()` so closures and
-                // anonymous function values don't pay the lookup cost.
-                let dep_param_names: List<Text> = callee_name
-                    .as_ref()
-                    .and_then(|name| self.function_param_names.get(name).cloned())
-                    .unwrap_or_default();
-
-                for (i, (arg, param_ty)) in args.iter().zip(params.iter()).enumerate() {
-                    let resolved_param = self.unifier.apply(param_ty);
-                    // Normalize TypeApp nodes (GAT/HKT type application)
-                    // so that e.g. F<MaybeInstance><Int> reduces to Maybe<Int>
-                    let resolved_param = if Self::contains_type_app(&resolved_param) {
-                        self.normalize_type(&resolved_param)
-                    } else {
-                        resolved_param
-                    };
-
-                    // Apply dependent refinement substitution: if this
-                    // parameter is `Type::Refined { base, predicate }`, and
-                    // we know the names of earlier parameters, substitute
-                    // each earlier argument into the predicate so that
-                    // references like `len` become the concrete constant
-                    // passed at the call site. Empty-string parameter
-                    // names (non-identifier patterns) are skipped.
+                self.with_call_argument_context(|checker| {
+                    // ============================================================
+                    // Dependent refinement substitution (Phase A.5 activation)
+                    // ============================================================
                     //
 
-                    // The base type and any wrapping refinement structure
-                    // is otherwise preserved, so this only ever tightens
-                    // the predicate with more information.
-                    let check_ty =
-                        if let Type::Refined { base, predicate } = &resolved_param {
-                            if !dep_param_names.is_empty() && i > 0 {
-                                let mut replacements = List::new();
-                                for j in 0..i {
-                                    let earlier_name = match dep_param_names.get(j) {
-                                        Some(n) if !n.as_str().is_empty()
-                                            && !predicate.binds_subject(n.as_str()) => n.clone(),
-                                        _ => continue,
-                                    };
-                                    let arg_expr = match args.get(j) {
-                                        Some(a) => a,
-                                        None => continue,
-                                    };
-                                    replacements.push((earlier_name, arg_expr));
-                                }
-                                let mut subst_pred = predicate.substitute_parameters(&replacements)
-                                .map_err(|error| TypeError::OtherWithCodeSpanned {
-                                    code: "E500".into(), msg: error.message, span: error.span,
-                                })?;
-                                // Constant-fold arithmetic that became pure after
-                                // substitution. Without this, a predicate like
-                                // `count <= src_len - offset` becomes
-                                // `count <= 10 - 5` after substituting
-                                // `src_len → 10, offset → 5`, and the syntactic
-                                // refinement checker cannot decide it because it
-                                // does not reduce `10 - 5` to `5`. Folding here
-                                // produces `count <= 5`, which the checker can
-                                // then decide against any concrete `count`.
-                                subst_pred.predicate =
-                                    Self::const_fold_expr(&subst_pred.predicate);
-                                Type::Refined {
-                                    base: base.clone(),
-                                    predicate: subst_pred,
-                                }
-                            } else {
-                                resolved_param
-                            }
+                    // Look up the callee's parameter names so that refinement
+                    // predicates on later parameters can be specialised with the
+                    // concrete values of earlier arguments before being checked.
+                    // Without this, a signature like
+                    //
+
+                    //  fn safe_get(len: Int, i: Int{>= 0, < len}) -> Int
+                    //
+
+                    // would leave `len` as a free variable in the predicate on
+                    // `i` at call sites, silently admitting out-of-bounds calls
+                    // like `safe_get(5, 10)`. With this substitution, the
+                    // predicate becomes `10 >= 0 && 10 < 5` at the second
+                    // argument check, which the refinement checker correctly
+                    // rejects.
+                    //
+
+                    // `dep_param_names` is the list of parameter names in
+                    // declaration order; empty strings stand in for positions
+                    // where the parameter uses a non-identifier pattern (those
+                    // positions skip substitution but don't break the loop).
+                    //
+
+                    // Guarded by `callee_name.is_some()` so closures and
+                    // anonymous function values don't pay the lookup cost.
+                    let dep_param_names: List<Text> = callee_name
+                        .as_ref()
+                        .and_then(|name| checker.function_param_names.get(name).cloned())
+                        .unwrap_or_default();
+
+                    for (i, (arg, param_ty)) in args.iter().zip(params.iter()).enumerate() {
+                        let resolved_param = checker.unifier.apply(param_ty);
+                        // Normalize TypeApp nodes (GAT/HKT type application)
+                        // so that e.g. F<MaybeInstance><Int> reduces to Maybe<Int>
+                        let resolved_param = if Self::contains_type_app(&resolved_param) {
+                            checker.normalize_type(&resolved_param)
                         } else {
                             resolved_param
                         };
 
-                    #[cfg(debug_assertions)]
-                    if is_assert_eq {
-                        // eprintln!("[DEBUG assert_eq] arg[{}]: param_ty={}, resolved_param={}, arg.span={:?}",
-                        // i, param_ty, resolved_param, arg.span);
+                        // Apply dependent refinement substitution: if this
+                        // parameter is `Type::Refined { base, predicate }`, and
+                        // we know the names of earlier parameters, substitute
+                        // each earlier argument into the predicate so that
+                        // references like `len` become the concrete constant
+                        // passed at the call site. Empty-string parameter
+                        // names (non-identifier patterns) are skipped.
+                        //
+
+                        // The base type and any wrapping refinement structure
+                        // is otherwise preserved, so this only ever tightens
+                        // the predicate with more information.
+                        let check_ty =
+                            if let Type::Refined { base, predicate } = &resolved_param {
+                                if !dep_param_names.is_empty() && i > 0 {
+                                    let mut replacements = List::new();
+                                    for j in 0..i {
+                                        let earlier_name = match dep_param_names.get(j) {
+                                            Some(n) if !n.as_str().is_empty()
+                                                && !predicate.binds_subject(n.as_str()) => n.clone(),
+                                            _ => continue,
+                                        };
+                                        let arg_expr = match args.get(j) {
+                                            Some(a) => a,
+                                            None => continue,
+                                        };
+                                        replacements.push((earlier_name, arg_expr));
+                                    }
+                                    let mut subst_pred = predicate.substitute_parameters(&replacements)
+                                    .map_err(|error| TypeError::OtherWithCodeSpanned {
+                                        code: "E500".into(), msg: error.message, span: error.span,
+                                    })?;
+                                    // Constant-fold arithmetic that became pure after
+                                    // substitution. Without this, a predicate like
+                                    // `count <= src_len - offset` becomes
+                                    // `count <= 10 - 5` after substituting
+                                    // `src_len → 10, offset → 5`, and the syntactic
+                                    // refinement checker cannot decide it because it
+                                    // does not reduce `10 - 5` to `5`. Folding here
+                                    // produces `count <= 5`, which the checker can
+                                    // then decide against any concrete `count`.
+                                    subst_pred.predicate =
+                                        Self::const_fold_expr(&subst_pred.predicate);
+                                    Type::Refined {
+                                        base: base.clone(),
+                                        predicate: subst_pred,
+                                    }
+                                } else {
+                                    resolved_param
+                                }
+                            } else {
+                                resolved_param
+                            };
+
+                        checker.check_expr(arg, &check_ty)?;
                     }
-                    self.check_expr(arg, &check_ty)?;
-                    #[cfg(debug_assertions)]
-                    if is_assert_eq {
-                        let resolved_after = self.unifier.apply(param_ty);
-                        // eprintln!("[DEBUG assert_eq] after check arg[{}]: resolved_param_after={}", i, resolved_after);
-                    }
-                }
-                self.in_call_arg_context = old_call_context;
+                    Ok(())
+                })?;
 
                 self.check_call_loans(args, Some(&params), None)?;
 
@@ -8260,12 +8254,12 @@ impl TypeChecker {
 
                 // Now check arguments against parameter types
                 // NLL: Set call argument context for proper borrow release
-                let old_call_context = self.in_call_arg_context;
-                self.in_call_arg_context = true;
-                for (arg, param_ty) in args.iter().zip(param_types.iter()) {
-                    self.check_expr(arg, param_ty)?;
-                }
-                self.in_call_arg_context = old_call_context;
+                self.with_call_argument_context(|checker| {
+                    for (arg, param_ty) in args.iter().zip(param_types.iter()) {
+                        checker.check_expr(arg, param_ty)?;
+                    }
+                    Ok(())
+                })?;
 
                 Ok(InferResult::new(ret_ty))
             }
@@ -8335,13 +8329,13 @@ impl TypeChecker {
                         }
 
                         // Check each argument against parameter type
-                        let old_call_context = self.in_call_arg_context;
-                        self.in_call_arg_context = true;
-                        for (arg, param_ty) in args.iter().zip(params.iter()) {
-                            let resolved_param = self.unifier.apply(param_ty);
-                            self.check_expr(arg, &resolved_param)?;
-                        }
-                        self.in_call_arg_context = old_call_context;
+                        self.with_call_argument_context(|checker| {
+                            for (arg, param_ty) in args.iter().zip(params.iter()) {
+                                let resolved_param = checker.unifier.apply(param_ty);
+                                checker.check_expr(arg, &resolved_param)?;
+                            }
+                            Ok(())
+                        })?;
 
                         let resolved_return = self.unifier.apply(&return_type);
                         Ok(InferResult::new(resolved_return))
@@ -8437,10 +8431,10 @@ impl TypeChecker {
                     if args.len() == 1
                         && let Some(arg0) = args.get(0)
                     {
-                        let old_call_context = self.in_call_arg_context;
-                        self.in_call_arg_context = true;
-                        self.check_expr(arg0, &inner_ty)?;
-                        self.in_call_arg_context = old_call_context;
+                        self.with_call_argument_context(|checker| {
+                            checker.check_expr(arg0, &inner_ty)?;
+                            Ok(())
+                        })?;
                         return Ok(InferResult::new(func_ty.clone()));
                     }
                 }
