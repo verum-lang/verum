@@ -135,6 +135,16 @@ fn standalone_server_analyzes_without_cargos_stack_environment() {
             "fn valid(value: Int) -> Int {match value {..0 => 1, 0.. => 2}}",
             vec![],
         ),
+        (
+            "fn bad(value: Int{it >= 0 && it <= 100}) -> Int {
+                match value {_ if false => 99, 0 => 0, 50 => 1, 100 => 2}}",
+            vec!["E0601"],
+        ),
+        (
+            "fn valid(value: Int{it >= 0 && it <= 100}) -> Int {
+                match value {0..=100 => 1}}",
+            vec![],
+        ),
     ] {
         let (status, reply) = post(host, Some(token), &request(source));
         assert_eq!(status, 200, "{reply}");

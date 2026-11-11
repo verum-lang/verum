@@ -55,6 +55,16 @@ fn execute(functions: &str, expected: i64) {
 }
 
 #[test]
+fn exact_refined_coverage_executes_through_the_produced_archive() {
+    execute(
+        "fn choose(value: Int{it >= 0 && it <= 100}) -> Int {
+        match value {0..=100 => value + 1}}
+        public fn probe() -> Int {choose(0) + choose(50) + choose(100)}",
+        153,
+    );
+}
+
+#[test]
 fn nested_providers_restore_the_outer_value() {
     execute(
         "public fn probe() -> Int {

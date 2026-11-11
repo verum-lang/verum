@@ -80,7 +80,7 @@ impl ExhaustivenessDiagnostic {
         // Non-exhaustive error.
         if !self.is_exhaustive && config.report_errors {
             let max = config.max_witnesses.max(1);
-            let message = if self.has_unverified_guards {
+            let message = if self.has_unverified_guards || self.uncovered_cases.is_empty() {
                 "match coverage is not established; add an unconditional covering arm or simplify the patterns".to_string()
             } else if self.uncovered_cases.len() == 1 {
                 format!(
@@ -352,8 +352,8 @@ impl MatchCoverageInfo {
 
         if self.is_exhaustive {
             lines.push("✅ **Exhaustive**".to_string());
-        } else if self.has_unverified_guards {
-            lines.push("**Coverage not established**: conditional arms require a proof or an unconditional fallback.".to_string());
+        } else if self.has_unverified_guards || self.uncovered_count == 0 {
+            lines.push("**Coverage not established**: the constraints require a supported proof or an unconditional fallback.".to_string());
         } else {
             lines.push(format!(
                 "❌ **Non-exhaustive**: {} uncovered case(s)",
@@ -430,7 +430,7 @@ impl ExhaustivenessProvider {
         let mut fixes = Vec::new();
 
         if !diagnostic.is_exhaustive {
-            if !diagnostic.has_unverified_guards {
+            if !diagnostic.has_unverified_guards && !diagnostic.uncovered_cases.is_empty() {
                 fixes.push(create_add_patterns_fix(diagnostic, match_end_range));
             }
             fixes.push(create_add_wildcard_fix(diagnostic, match_end_range));
@@ -1122,6 +1122,32 @@ mod tests {
         let provider = ExhaustivenessProvider::new();
         assert_eq!(
             provider
+                .get_quick_fixes(&diagnostic, Range::default())
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn unknown_refinements_do_not_display_an_empty_counterexample() {
+        let diagnostic = ExhaustivenessDiagnostic {
+            range: Range::default(),
+            is_exhaustive: false,
+            has_unverified_guards: false,
+            uncovered_cases: List::new(),
+            redundant_patterns: List::new(),
+            all_guarded: false,
+            uri: test_uri(),
+        };
+        let diagnostics = diagnostic.to_lsp_diagnostics();
+        assert!(
+            diagnostics[0]
+                .message
+                .contains("coverage is not established")
+        );
+        assert!(!diagnostics[0].message.contains("not covered"));
+        assert_eq!(
+            ExhaustivenessProvider::new()
                 .get_quick_fixes(&diagnostic, Range::default())
                 .len(),
             1

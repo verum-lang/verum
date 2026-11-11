@@ -60,6 +60,28 @@ fn match_coverage_uses_real_guards_and_exact_numeric_domains() {
 }
 
 #[test]
+fn refinement_coverage_requires_every_admissible_value() {
+    check(
+        "fn bad(value: Int{it >= 0 && it <= 100}) -> Int {
+        match value {_ if false => 99, 0 => 0, 50 => 1, 100 => 2}}",
+        false,
+        &["E0601", "coverage is not established"],
+    );
+    check(
+        "fn valid(value: Int{it >= 0 && it <= 100}) -> Int {
+        match value {0..=100 => 1}}",
+        true,
+        &[],
+    );
+    check(
+        "fn unknown(value: Int{it % 2 == 0}) -> Int {
+        match value {0 => 1}}",
+        false,
+        &["E0601", "coverage is not established"],
+    );
+}
+
+#[test]
 fn invalid_calls_preserve_following_ownership_diagnostics() {
     for body in [
         "fn bad(original: Parcel) {need(true); (original, original);}",
