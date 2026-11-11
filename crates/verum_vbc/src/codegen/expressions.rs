@@ -19412,24 +19412,18 @@ impl VbcCodegen {
 
         // Compile each arm
         for (i, arm) in arms.iter().enumerate() {
-            let next_arm_label = if i < arms.len() - 1 {
-                Some(self.ctx.new_label(&format!("match_arm_{}", i + 1)))
-            } else {
-                None
-            };
+            let next_arm_label = self.ctx.new_label(&format!("match_arm_{}", i + 1));
 
             // Test pattern
             let match_reg = self.ctx.alloc_temp();
             self.compile_pattern_test(&arm.pattern, scrutinee_reg, match_reg)?;
 
             // If no match, jump to next arm
-            if let Some(ref next_label) = next_arm_label {
-                self.ctx
-                    .emit_forward_jump(next_label, |offset| Instruction::JmpNot {
-                        cond: match_reg,
-                        offset,
-                    });
-            }
+            self.ctx
+                .emit_forward_jump(&next_arm_label, |offset| Instruction::JmpNot {
+                    cond: match_reg,
+                    offset,
+                });
             self.ctx.free_temp(match_reg);
 
             // Bind pattern variables BEFORE guard check
@@ -19444,13 +19438,11 @@ impl VbcCodegen {
                     .compile_expr(guard)?
                     .or_internal("match guard has no value")?;
 
-                if let Some(ref next_label) = next_arm_label {
-                    self.ctx
-                        .emit_forward_jump(next_label, |offset| Instruction::JmpNot {
-                            cond: guard_reg,
-                            offset,
-                        });
-                }
+                self.ctx
+                    .emit_forward_jump(&next_arm_label, |offset| Instruction::JmpNot {
+                        cond: guard_reg,
+                        offset,
+                    });
                 self.ctx.free_temp(guard_reg);
             }
 
@@ -19492,11 +19484,13 @@ impl VbcCodegen {
                 .emit_forward_jump(&end_label, |offset| Instruction::Jmp { offset });
 
             // Define next arm label
-            if let Some(next_label) = next_arm_label {
-                self.ctx.define_label(&next_label);
-            }
+            self.ctx.define_label(&next_arm_label);
         }
 
+        // Even the final arm can fail its pattern or guard. The backend
+        // cannot substitute that arm's result for an unmatched value.
+        let message_id = self.intern_string("non-exhaustive match");
+        self.ctx.emit(Instruction::Panic { message_id });
         self.ctx.define_label(&end_label);
         if span.start < span.end {
             self.ctx.declared_result_types.insert(span, result_type);
