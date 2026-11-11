@@ -90,7 +90,10 @@ impl TypeChecker {
                 }
                 let (frame, local_parameters) = self.associated_parameter_frame(type_params)?;
                 self.push_decl_param_frame(frame);
-                let lowered = self.ast_to_type(ty);
+                // A family result is a declared type, like a callable result.
+                // Expanding a sum here erases its owner before callers can
+                // resolve the methods of the selected associated result.
+                let lowered = self.declared_type(ty);
                 self.pop_decl_param_frame();
                 let lowered = self.unifier.normalize_aliases(&lowered?);
                 let assignment = AssociatedTypeAssignment::mixed_family(local_parameters, lowered)

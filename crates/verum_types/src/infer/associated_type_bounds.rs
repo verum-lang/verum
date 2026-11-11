@@ -276,7 +276,7 @@ impl TypeChecker {
                 associated.binders = binders;
                 associated.default = default_type
                     .as_ref()
-                    .map(|ty| self.ast_to_type(ty))
+                    .map(|ty| self.declared_type(ty))
                     .transpose()?
                     .into();
                 if type_params.is_empty() {

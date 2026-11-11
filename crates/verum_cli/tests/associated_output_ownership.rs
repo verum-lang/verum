@@ -5,6 +5,23 @@ use tempfile::TempDir;
 use verum_common::Text;
 
 fn check(extra_producer: &str, extra_handle: &str, imports: &str, body: &str, result: &str) {
+    check_payload(extra_producer, extra_handle, imports, body, result, r#"
+        @no_implicit_prelude
+        module core.returned;
+        public type Receipt<T> is { data:T };
+        implement<T> Receipt<T> { public fn take(self) -> T { self.data } }
+        public fn receipt<T>(data:T) -> Receipt<T> { Receipt {data} }
+    "#);
+}
+
+fn check_payload(
+    extra_producer: &str,
+    extra_handle: &str,
+    imports: &str,
+    body: &str,
+    result: &str,
+    returned: &str,
+) {
     let root = TempDir::new().unwrap();
     let core = root.path().join("core");
     fs::create_dir(&core).unwrap();
@@ -42,13 +59,7 @@ fn check(extra_producer: &str, extra_handle: &str, imports: &str, body: &str, re
             }
             public fn driver() -> Driver { Driver {tag:1} }
         "#),
-        ("returned.vr", r#"
-            @no_implicit_prelude
-            module core.returned;
-            public type Receipt<T> is { data:T };
-            implement<T> Receipt<T> { public fn take(self) -> T { self.data } }
-            public fn receipt<T>(data:T) -> Receipt<T> { Receipt {data} }
-        "#),
+        ("returned.vr", returned),
     ] {
         let extra = match path { "producer.vr" => extra_producer, "handle.vr" => extra_handle, _ => "" };
         fs::write(core.join(path), format!("{source}\n{extra}")).unwrap();
@@ -76,6 +87,25 @@ fn check(extra_producer: &str, extra_handle: &str, imports: &str, body: &str, re
     } else {
         assert!(!output.status.success(), "foreign associated result was accepted: {diagnostics}");
         assert!(diagnostics.contains("error<E"), "{diagnostics}");
+    }
+}
+
+#[test]
+fn an_associated_sum_keeps_its_nominal_methods_across_modules() {
+    let returned = r#"
+        @no_implicit_prelude
+        module core.returned;
+        public type Receipt<T> is | Value(T);
+        implement<T> Receipt<T> {
+            public fn take(self) -> T { match self { Value(value) => value } }
+        }
+        public fn receipt<T>(data:T) -> Receipt<T> { Receipt.Value(data) }
+    "#;
+    for imports in ["", "mount core.returned.Receipt; mount core.handle.Handle;"] {
+        check_payload(
+            "", "", imports,
+            "let h = rt.spawn(ready(42)); rt.drive(h).take()", "Int", returned,
+        );
     }
 }
 

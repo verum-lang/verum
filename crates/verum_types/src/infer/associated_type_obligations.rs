@@ -205,7 +205,7 @@ impl TypeChecker {
             let mut values = Map::new();
             for (name, (parameters, ty, _)) in &provided {
                 if parameters.is_empty() {
-                    values.insert(name.clone(), self.ast_to_type(ty)?);
+                    values.insert(name.clone(), self.declared_type(ty)?);
                 }
             }
             for (name, associated) in &associated_types {
@@ -366,7 +366,7 @@ impl TypeChecker {
                                 }
                             }
                         }
-                        (self.ast_to_type(ty)?, *span)
+                        (self.declared_type(ty)?, *span)
                     } else {
                         (
                             associated

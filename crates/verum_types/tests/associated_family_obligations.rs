@@ -213,6 +213,68 @@ fn declared_associated_default_proves_matching_equality() {
 "#,
     );
 }
+
+#[test]
+fn associated_sum_defaults_keep_their_declared_methods() {
+    accept(r#"module families;
+        type Receipt<T> is | Value(T);
+        implement<T> Receipt<T> {
+            fn take(self) -> T { match self { Value(value) => value } }
+        }
+        type Produce is protocol {
+            type Output = Receipt<Int>;
+            fn produce(self) -> Self.Output;
+        };
+        type Source is { tag:Int };
+        implement Produce for Source {
+            fn produce(self) -> Receipt<Int> { Receipt.Value(self.tag) }
+        }
+        fn obtain<P:Produce>(source:P) -> P.Output { source.produce() }
+        fn probe(source:Source) -> Int { obtain(source).take() }
+    "#);
+}
+
+#[test]
+fn associated_sum_equalities_preserve_declared_nested_results() {
+    let source = r#"module families;
+        type Packet<T> is | Present(T) | Absent;
+        type Stream is protocol { type Item; };
+        type IntoStream is protocol {
+            type Item;
+            type Stream: Stream<Item = Self.Item>;
+        };
+        type Cursor<T> is { value:T };
+        implement<T> Stream for Cursor<T> { type Item = (Packet<T>, Packet<T>); }
+        implement<T> IntoStream for Cursor<T> {
+            type Item = (Packet<T>, Packet<T>);
+            type Stream = Cursor<T>;
+        }
+    "#;
+    accept(source);
+    reject(&source.replace("type Stream = Cursor<T>", "type Stream = Cursor<Bool>"));
+}
+
+#[test]
+fn associated_sum_equalities_preserve_explicit_bound_results() {
+    let source = r#"module families;
+        type Packet<T> is | Present(T) | Absent;
+        type Other<T> is | Present(T) | Absent;
+        type Stored<T> is Packet<T>;
+        type Stream is protocol { type Item; };
+        type Source is protocol { type Stream<T>: Stream<Item = Packet<T>>; };
+        type Cursor<T> is { value:T };
+        implement<T> Stream for Cursor<T> { type Item = Packet<T>; }
+        type Store is {};
+        implement Source for Store { type Stream<T> = Cursor<T>; }
+    "#;
+    accept(source);
+    accept(&source.replace("type Item = Packet<T>", "type Item = Stored<T>"));
+    reject(&source.replace("Stream<T> = Cursor<T>", "Stream<T> = Cursor<Bool>"));
+    let mismatches = errors(&source.replace("type Item = Packet<T>", "type Item = Other<T>"));
+    assert!(mismatches.iter().any(|error| error.contains("E405")
+        && error.contains("sets Item = families.Other")
+        && error.contains("expected families.Packet")), "{mismatches:#?}");
+}
 #[test]
 fn unknown_telescope_does_not_discharge_super_obligations() {
     use verum_types::protocol::ProtocolConstraints;

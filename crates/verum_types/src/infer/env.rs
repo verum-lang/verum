@@ -13230,7 +13230,7 @@ with .to_float() or .to_int() (at {:?})",
                             for argument in args {
                                 match argument {
                                     verum_ast::ty::GenericArg::Binding(binding) => {
-                                        let ty = self.ast_to_type(&binding.ty)?;
+                                        let ty = self.declared_type(&binding.ty)?;
                                         let ty = self.unifier.normalize_aliases(&ty);
                                         if associated_types.insert(binding.name.name.clone(), ty).is_some() {
                                             return Err(TypeError::OtherWithCodeSpanned {
