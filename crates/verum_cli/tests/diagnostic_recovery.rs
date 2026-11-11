@@ -146,3 +146,24 @@ fn provided_contexts_obey_lexical_boundaries_during_recovery() {
         &[],
     );
 }
+
+#[test]
+fn nested_functions_must_own_their_context_requirements() {
+    const DECLARATIONS: &str = "context Gate {} fn needs() using [Gate] {}";
+    check(
+        &format!(
+            "{DECLARATIONS} fn bad() {{provide Gate = ();
+            fn hidden() {{needs();}} hidden();}}"
+        ),
+        false,
+        &["E613"],
+    );
+    check(
+        &format!(
+            "{DECLARATIONS} fn valid() {{provide Gate = ();
+            fn nested() using [Gate] {{needs();}} nested(); needs();}}"
+        ),
+        true,
+        &[],
+    );
+}

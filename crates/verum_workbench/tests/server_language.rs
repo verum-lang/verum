@@ -99,6 +99,17 @@ fn standalone_server_analyzes_without_cargos_stack_environment() {
              fn valid() {provide Gate = (); {provide Gate = (); needs();} needs();}",
             vec![],
         ),
+        (
+            "context Gate {}\nfn needs() using [Gate] {}\n\
+             fn bad() {provide Gate = (); fn hidden() {needs();} hidden();}",
+            vec!["E613"],
+        ),
+        (
+            "context Gate {}\nfn needs() using [Gate] {}\n\
+             fn valid() {provide Gate = ();
+                 fn nested() using [Gate] {needs();} nested(); needs();}",
+            vec![],
+        ),
     ] {
         let (status, reply) = post(host, Some(token), &request(source));
         assert_eq!(status, 200, "{reply}");

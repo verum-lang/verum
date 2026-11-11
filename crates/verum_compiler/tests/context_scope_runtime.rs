@@ -87,3 +87,17 @@ fn early_returns_restore_the_callers_provider() {
         );
     }
 }
+
+#[test]
+fn nested_functions_use_the_provider_at_the_call_site() {
+    execute(
+        "public fn probe() -> Int {
+            provide Gate = Channel {value: 10};
+            fn nested() -> Int using [Gate] {read()}
+            let mut result = nested();
+            provide Gate = Channel {value: 20} in {result = result * 100 + nested();}
+            result * 100 + nested()
+        }",
+        102010,
+    );
+}
