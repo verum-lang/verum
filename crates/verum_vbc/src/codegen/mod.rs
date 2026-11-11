@@ -3876,12 +3876,10 @@ impl VbcCodegen {
     /// populated by `generate_default_protocol_methods` when a concrete
     /// `implement Base for Concrete` triggers materialisation of the
     /// inherited protocol's default-method bodies onto `Concrete.<method>`.
-    /// Per-item compile failure surfaces as a `tracing::warn!` and the
-    /// rest of the queue continues — some default methods reference
-    /// external symbols (FFI, intrinsics not yet available in VBC) that
-    /// can't compile in every load context.
+    /// A selected body must compile successfully before the caller publishes
+    /// executable code. Diagnostic recovery requires the explicit policy API.
     pub fn compile_pending_default_methods(&mut self) -> CodegenResult<()> {
-        self.compile_default_methods_with_policy(ItemFailurePolicy::StubAndContinue)
+        self.compile_default_methods_with_policy(ItemFailurePolicy::Strict)
     }
 
     /// Compile inherited bodies with the same failure policy as explicit bodies.
@@ -5933,6 +5931,9 @@ impl VbcCodegen {
                 }
             }
             ItemKind::Impl(impl_decl) => {
+                if self.retains_blanket_declaration(impl_decl) {
+                    return Ok(());
+                }
                 let selected_items = self.selected_impl_items(impl_decl)?;
                 // Compile each function individually, skipping those that fail
                 let type_name = self.extract_impl_type_name(&impl_decl.kind);
@@ -10024,6 +10025,9 @@ impl VbcCodegen {
                 }
 
                 self.record_blanket_impl(impl_decl, self.ctx.current_source_module.clone())?;
+                if self.retains_blanket_declaration(impl_decl) {
+                    return Ok(());
+                }
 
                 // For protocol impls, inherent methods take priority.
                 // If "AppConfig.new" already exists from inherent impl,

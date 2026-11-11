@@ -6,6 +6,16 @@ use verum_ast::{
 };
 
 impl VbcCodegen {
+    /// A retained template is lowered only after selecting its receiver. Its
+    /// parameter name is not a nominal owner for a second executable body.
+    pub(super) fn retains_blanket_declaration(&self, declaration: &ImplDecl) -> bool {
+        self.blanket_impls.iter().any(|blanket| {
+            blanket.source_module == self.ctx.current_source_module
+                && blanket.declaration.span == declaration.span
+                && blanket.declaration.as_ref() == declaration
+        })
+    }
+
     /// Both collection paths retain the same declaration and receiver binder.
     pub(super) fn record_blanket_impl(
         &mut self,
