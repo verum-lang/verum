@@ -1,75 +1,108 @@
-//! Accounting pins for the self-imposed memory ceiling.
-//!
-//! These lived as inline `#[cfg(test)]` tests and raced: the counters
-//! are process-global, the crate's ~190 other unit tests run in
-//! parallel in the same process, and "release reduces the live count"
-//! is false the instant a neighbour allocates between the two samples
-//! — the first CI run that actually executed the unit tier caught it
-//! (Unit ubuntu-latest, live_bytes_follow_allocation_and_release).
-//! An integration-test binary is its own process: the allocator here
-//! counts only what THIS file does, and the lifecycle assertions run
-//! in one test, in order.
-//!
-//! The allocator has to be INSTALLED for any of this to be
-//! measurable — the counters only move for allocations that go
-//! through it. The abort itself is deliberately not exercised: a test
-//! that aborts the process takes the test runner with it.
-
+//! Exact accounting through a direct allocator, independent of harness allocations.
+use std::alloc::{GlobalAlloc, Layout, handle_alloc_error};
+use std::ptr::NonNull;
+use std::sync::Barrier;
+use verum_common::List;
 use verum_common::memory_budget::{
-    live_bytes, peak_bytes, BudgetedAllocator, BYTES_PER_GB, DEFAULT_CEILING_GB,
+    BYTES_PER_GB, BudgetedAllocator, DEFAULT_CEILING_GB, live_bytes, peak_bytes,
 };
 
-#[global_allocator]
-static TEST_ALLOC: BudgetedAllocator = BudgetedAllocator::new();
+// Deliberately not the process's global allocator: harness/Barrier/List memory
+// must not be subtracted from a different instant or hidden behind a tolerance.
+static ALLOC: BudgetedAllocator = BudgetedAllocator::new();
 
-/// An allocation is counted, giving it back un-counts it, and the
-/// peak never goes down — one sequential lifecycle, because the three
-/// facts share the two global counters.
-#[test]
-fn accounting_follows_the_allocation_lifecycle() {
-    let before = live_bytes();
-    let block = vec![0u8; 4 * 1024 * 1024];
-    let during = live_bytes();
-    // The counter is process-global and the harness allocates around
-    // us, so `during == before + len` is not a fact — a neighbour may
-    // FREE between the two samples and it did: CI measured
-    // 5116 -> 4199396 against a 4194304-byte block, twenty-four bytes
-    // short, and the run went red on a counter that had worked
-    // perfectly. What this pins is that the allocation is COUNTED, and
-    // 99% of 4 MiB says that as well as 100% while surviving the noise.
-    // An uncounted allocation moves the figure by ~0%, not by 99.999%.
-    let observed = during.saturating_sub(before);
-    assert!(
-        observed >= block.len() / 100 * 99,
-        "4 MiB allocated but live moved only {} ({} -> {})",
-        observed,
-        before,
-        during
-    );
-
-    let peak_at_height = peak_bytes();
-    assert!(
-        peak_at_height >= during,
-        "peak {} below a live figure {} it must have witnessed",
-        peak_at_height,
-        during
-    );
-
-    drop(block);
-    assert!(
-        live_bytes() < during,
-        "release did not reduce the live count"
-    );
-    assert!(
-        peak_bytes() >= peak_at_height,
-        "peak fell from {} to {} — it is monotonic by construction",
-        peak_at_height,
-        peak_bytes()
-    );
+struct Block {
+    pointer: NonNull<u8>,
+    layout: Layout,
 }
 
-/// The default is a real number of bytes, not a placeholder — a zero
-/// default would silently disable the seatbelt everywhere.
+impl Block {
+    fn new(bytes: usize, zeroed: bool) -> Self {
+        let layout = Layout::from_size_align(bytes, 64).unwrap();
+        // SAFETY: the nonzero layout is valid; this Block exclusively owns the
+        // returned allocation and releases it through the same allocator.
+        let raw = unsafe {
+            if zeroed {
+                ALLOC.alloc_zeroed(layout)
+            } else {
+                ALLOC.alloc(layout)
+            }
+        };
+        let pointer = NonNull::new(raw).unwrap_or_else(|| handle_alloc_error(layout));
+        Self { pointer, layout }
+    }
+
+    fn resize(&mut self, bytes: usize) {
+        let layout = Layout::from_size_align(bytes, self.layout.align()).unwrap();
+        // SAFETY: the pointer is live and exclusively owned, its original
+        // layout is retained, and the new size is nonzero with the same alignment.
+        let raw = unsafe { ALLOC.realloc(self.pointer.as_ptr(), self.layout, bytes) };
+        self.pointer = NonNull::new(raw).unwrap_or_else(|| handle_alloc_error(layout));
+        self.layout = layout;
+    }
+}
+
+impl Drop for Block {
+    fn drop(&mut self) {
+        // SAFETY: this is the unique live pointer returned by ALLOC with exactly
+        // this layout, including the most recent successful reallocation.
+        unsafe { ALLOC.dealloc(self.pointer.as_ptr(), self.layout) };
+    }
+}
+
+#[test]
+fn concurrent_accounting_has_exact_live_bytes_and_monotone_high_water() {
+    assert_eq!(live_bytes(), 0);
+    assert_eq!(peak_bytes(), 0);
+    const WORKERS: usize = 8;
+    let weight: usize = (1..=WORKERS).sum();
+    let mut expected_peak = 0;
+    // Lower waves exercise allocations below a retained peak; higher waves
+    // require concurrent maxima to advance it. No sampling or timing assumptions.
+    for scale in [1, 4, 2, 8, 1] {
+        let barrier = Barrier::new(WORKERS + 1);
+        let mut observations = List::new();
+        std::thread::scope(|scope| {
+            for index in 1..=WORKERS {
+                let barrier = &barrier;
+                scope.spawn(move || {
+                    let mut zeroed = Block::new(index * scale * 256, true);
+                    let mut plain = Block::new(index * scale * 64, false);
+                    barrier.wait();
+                    barrier.wait();
+                    zeroed.resize(index * scale * 768);
+                    barrier.wait();
+                    barrier.wait();
+                    zeroed.resize(index * scale * 128);
+                    plain.resize(index * scale * 32);
+                    barrier.wait();
+                    barrier.wait();
+                    drop(zeroed);
+                    drop(plain);
+                    barrier.wait();
+                    barrier.wait();
+                });
+            }
+            for _ in 0..4 {
+                barrier.wait();
+                observations.push((live_bytes(), peak_bytes()));
+                barrier.wait();
+            }
+        });
+        // Assert after every worker has exited: an assertion failure must not
+        // leave other threads trapped at a barrier while the scope joins them.
+        for (actual, expected_live) in observations.into_iter().zip([
+            weight * scale * 320,
+            weight * scale * 832,
+            weight * scale * 160,
+            0,
+        ]) {
+            expected_peak = expected_peak.max(expected_live);
+            assert_eq!(actual, (expected_live, expected_peak), "scale {scale}");
+        }
+    }
+}
+
 #[test]
 fn default_ceiling_is_a_usable_size() {
     assert!(DEFAULT_CEILING_GB >= 8, "ceiling below the bake's own peak");

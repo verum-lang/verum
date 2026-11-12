@@ -29,3 +29,7 @@ backtrace = ["dep:backtrace"]
 anyhow-compat = ["dep:anyhow"]
 lsp = ["dep:tower-lsp"]
 
+
+[[bench]]
+name = "memory_budget"
+harness = false
