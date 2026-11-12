@@ -62,3 +62,7 @@ verum_smt = { workspace = true }
 name = "production_targets"
 harness = false
 
+[[bench]]
+name = "source_imports"
+harness = false
+

@@ -5,7 +5,23 @@ use verum_ast::{
     Span, TypeDecl,
     ty::{GenericParamKind, TypeBound, TypeBoundKind, TypeKind, WherePredicateKind},
 };
-use verum_common::{List, Map, Text};
+use verum_common::{List, Map, Shared, Text};
+
+// Hold the original immutable owner through lazy registration. Capturing all
+// scopes first preserves their source snapshots without copying unrelated bodies.
+enum BoundSource {
+    Local(Shared<verum_ast::Module>),
+    Registered(Shared<verum_modules::ModuleInfo>),
+}
+
+impl BoundSource {
+    fn ast(&self) -> &verum_ast::Module {
+        match self {
+            Self::Local(module) => module,
+            Self::Registered(module) => &module.ast,
+        }
+    }
+}
 
 fn refusal(span: Span, message: impl Into<Text>) -> TypeError {
     TypeError::OtherWithCodeSpanned {
@@ -379,7 +395,7 @@ impl TypeChecker {
         for owner in [self.current_module_path.as_str(), protocol_owner] {
             if scopes
                 .iter()
-                .any(|(prior, _): &(Text, verum_common::Shared<verum_ast::Module>)| prior == owner)
+                .any(|(prior, _): &(Text, BoundSource)| prior == owner)
             {
                 continue;
             }
@@ -390,15 +406,13 @@ impl TypeChecker {
                 .rev()
                 .find(|(path, _)| path == owner)
             {
-                scopes.push((Text::from(owner), module.clone()));
+                scopes.push((Text::from(owner), BoundSource::Local(module.clone())));
             } else if let Some(module) = self.module_registry.read().get_by_path(owner) {
-                scopes.push((
-                    Text::from(owner),
-                    verum_common::Shared::new(module.ast.clone()),
-                ));
+                scopes.push((Text::from(owner), BoundSource::Registered(module)));
             }
         }
-        for (owner, module) in scopes {
+        for (owner, source) in scopes {
+            let module = source.ast();
             let frames = std::mem::take(&mut self.decl_param_frames);
             let premises =
                 std::mem::take(&mut self.source_type_registration.projection_assumptions);
@@ -432,7 +446,7 @@ impl TypeChecker {
                         .strip_prefix(&format!("{owner}."))
                         .unwrap_or(name.as_str());
                     self.import_impl_blocks_for_type_in_module_selected(
-                        &module,
+                        module,
                         local,
                         &owner,
                         Some(&protocol),

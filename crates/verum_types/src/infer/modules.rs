@@ -5116,18 +5116,15 @@ impl TypeChecker {
                                         // (e.g. via core.prelude.*), so that blanket impl methods
                                         // like `transduce` from `implement<I: Iterator> I { ... }`
                                         // are available on all Iterator types.
-                                        let source_blanket_ast = self
+                                        if let Some(source) = self
                                             .get_module_with_path_aliases(
                                                 actual_source_path.as_str(),
                                                 registry,
                                             )
-                                            .map(|m| (m.ast.clone(), m.path.to_string()));
-                                        if let Some((blanket_ast, blanket_path)) =
-                                            source_blanket_ast
                                         {
                                             self.register_module_blanket_impls(
-                                                &blanket_ast,
-                                                &blanket_path,
+                                                &source.ast,
+                                                &source.path.to_string(),
                                             );
                                         }
                                     } // closes registry.get if-let
@@ -9383,12 +9380,12 @@ impl TypeChecker {
         }
 
         // Try to get the module from the registry
-        let module_ast_opt = {
+        let module = {
             let registry = self.module_registry.read();
-            registry.get_by_path(module_path).map(|m| m.ast.clone())
+            registry.get_by_path(module_path)
         };
 
-        if let Some(module_ast) = module_ast_opt {
+        if let Some(module) = module {
             // #[cfg(debug_assertions)]
             // eprintln!(
             // "[DEBUG] Loading stdlib protocol definitions from '{}'",
@@ -9396,7 +9393,7 @@ impl TypeChecker {
             // );
 
             // Register protocols from this module (will override hardcoded versions)
-            self.register_module_protocols(&module_ast, module_path);
+            self.register_module_protocols(&module.ast, module_path);
         }
     }
 
