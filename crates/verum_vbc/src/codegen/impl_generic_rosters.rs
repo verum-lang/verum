@@ -34,6 +34,14 @@ impl DeclaredGenericParameter {
 
 pub(super) type GenericRoster = Vec<DeclaredGenericParameter>;
 
+/// The declaring identity exists before an executable layout or descriptor.
+/// Keep it with the roster so every consumer uses the same source authority.
+#[derive(Debug, Clone)]
+pub(super) struct SourceGenericRoster {
+    identity: verum_common::Text,
+    parameters: Option<GenericRoster>,
+}
+
 pub(super) struct DeclaredGenericParameters {
     pub(super) scope: std::collections::HashMap<String, u16>,
     pub(super) parameters: smallvec::SmallVec<[TypeParamDescriptor; 2]>,
@@ -124,9 +132,11 @@ impl VbcCodegen {
             // carriers. A consumer needing source authority rejects that case.
             return Ok(arguments);
         };
-        let identity = self
-            .type_by_id(nominal)
-            .and_then(|descriptor| self.type_declaration_identity(descriptor));
+        let identity = self.source_generic_rosters.get(&nominal)
+            .map(|header| Cow::Borrowed(&header.identity))
+            .or_else(|| self.type_by_id(nominal)
+                .and_then(|descriptor| self.type_declaration_identity(descriptor))
+                .map(Cow::Owned));
         let invalid = |message: String| {
             let mut error =
                 CodegenError::with_span(CodegenErrorKind::InvalidSourceSignature(message), span);
@@ -152,9 +162,7 @@ impl VbcCodegen {
         }
         let mut nested_defaults = active_defaults.to_vec();
         nested_defaults.push(nominal);
-        let owner = self
-            .type_by_id(nominal)
-            .and_then(|descriptor| self.type_declaration_identity(descriptor))
+        let owner = identity.as_ref()
             .and_then(|name| name.rsplit_once('.').map(|(owner, _)| owner.to_owned()))
             .ok_or_else(|| invalid("nominal defaults lack their declaration owner".into()))?;
         let mut substitution = super::source_substitution::SourceTypeSubstitution::default();
@@ -367,9 +375,11 @@ impl VbcCodegen {
         Ok(DeclaredGenericParameters { scope, parameters })
     }
 
-    pub(super) fn claim_generic_roster(&mut self, id: TypeId, declaration: &TypeDecl) {
-        self.source_generic_rosters
-            .insert(id, Self::source_generic_roster(declaration));
+    pub(super) fn claim_generic_roster(&mut self, id: TypeId, declaration: &TypeDecl, identity: &str) {
+        self.source_generic_rosters.insert(id, SourceGenericRoster {
+            identity: identity.into(),
+            parameters: Self::source_generic_roster(declaration),
+        });
     }
 
     fn source_generic_roster(declaration: &TypeDecl) -> Option<GenericRoster> {
@@ -406,7 +416,7 @@ impl VbcCodegen {
         id: TypeId,
     ) -> Option<Cow<'_, [DeclaredGenericParameter]>> {
         if let Some(roster) = self.source_generic_rosters.get(&id) {
-            return roster
+            return roster.parameters
                 .as_ref()
                 .map(|roster| Cow::Borrowed(roster.as_slice()));
         }

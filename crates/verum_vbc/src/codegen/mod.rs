@@ -1067,7 +1067,7 @@ pub struct VbcCodegen {
     source_context_declarations: std::collections::HashMap<String, verum_ast::ContextDecl>,
     /// Source binder headers, keyed by the declaration's final nominal identity.
     /// None is a known unsupported header; an empty roster is a nongeneric type.
-    source_generic_rosters: HashMap<TypeId, Option<impl_generic_rosters::GenericRoster>>,
+    source_generic_rosters: HashMap<TypeId, impl_generic_rosters::SourceGenericRoster>,
     source_callable_rosters: Map<FunctionId, Option<impl_generic_rosters::GenericRoster>>,
     /// Complete implementation facts awaiting their already claimed source target.
     pending_implementation_attachments: Map<TypeId, verum_common::List<protocol_attachments::ImplementationAttachment>>,
@@ -3444,7 +3444,7 @@ impl VbcCodegen {
             claim.insert(declaration.visibility.clone());
         } else {
             if let Some(id) = self.type_name_to_id.get(&qualified).copied() {
-                self.claim_generic_roster(id, declaration);
+                self.claim_generic_roster(id, declaration, &qualified);
             }
             if trace_type_binding(type_name) {
                 eprintln!(
@@ -3482,7 +3482,7 @@ impl VbcCodegen {
         // entry). Lexical scoping: the declaring module owns its simple
         // key; the foreign layout stays reachable via its qualified key.
         let type_id = complete_id.or(canonical_id).unwrap_or_else(|| self.alloc_user_type_id());
-        self.claim_generic_roster(type_id, declaration);
+        self.claim_generic_roster(type_id, declaration, &qualified);
         // The qualified entry belongs to this declaration, independently of
         // whichever sibling currently occupies the convenience bare key.
         self.type_name_to_id.insert(format!("{module_name}.{type_name}"), type_id);
