@@ -190,9 +190,6 @@ impl TypeChecker {
         {
             return Ok((ty, Some(key)));
         }
-        if let Some(ty) = self.ctx.builtin_type_definition(name) {
-            return Ok((ty.clone(), None));
-        }
         let (head, tail) = name.split_once('.').unwrap_or((name, ""));
         if let Some((ty, key)) = self.source_mounted_archive_type(head, tail, span)? {
             return Ok((ty, Some(key)));
@@ -217,6 +214,11 @@ impl TypeChecker {
             }
             if let Some((ty, key)) = self.load_declaring_archive_type(name, span)? {
                 return Ok((ty, Some(key)));
+            }
+            // Ambient language declarations are the last scope. An explicit
+            // source mount or retained binding owns its name even on refusal.
+            if let Some(ty) = self.ctx.builtin_type_definition(name) {
+                return Ok((ty.clone(), None));
             }
         }
         Err(TypeError::TypeNotFound {
@@ -362,8 +364,12 @@ impl TypeChecker {
             .reexport_source_module_for(module, leaf)
             .unwrap_or_else(|| (leaf.into(), module.into()));
         let key: Text = format!("{owner}.{declared}").into();
-        if Self::metadata_type_with_declaring_key(metadata, &key).is_none() {
-            return Err(TypeError::TypeNotFound { name: path, span });
+        let descriptor = Self::metadata_type_with_declaring_key(metadata, &key)
+            .ok_or_else(|| TypeError::TypeNotFound { name: path.clone(), span })?;
+        if !descriptor.is_public {
+            return Err(TypeError::VisibilityError {
+                name: declared, visibility: "Private".into(), module_path: owner, span,
+            });
         }
         if let Some(resolved) =
             self.resolve_qualified_source_type_with_parameter_key(&path, span)?
