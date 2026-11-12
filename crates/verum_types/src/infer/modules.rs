@@ -17467,41 +17467,18 @@ impl TypeChecker {
         }
     }
 
-    /// Resolve a bare receiver type-name through `mount X as Y`
-    /// import-alias redirects to the canonical DECLARED name that
-    /// owns its variant constructors (T0244).
-    ///
-    /// `process_import_aliases` (see `decls.rs`) registers a re-exported
-    /// alias — e.g. `public mount .constraint.{LayoutConstraint as
-    /// Constraint, ...}` — as `ctx.type_defs["Constraint"] =
-    /// Type::Named{"LayoutConstraint"}`, a single-hop redirect. That
-    /// redirect never reaches `variant_constructor_parents`: that table
-    /// is keyed by the type's own declaration name only (set once,
-    /// where the `type ... is Variant | ...` body is registered).
-    /// Qualified variant construction (`Constraint.Length(10)`) names
-    /// the receiver by the alias, so comparing it directly against
-    /// `variant_constructor_parents` always misses — the call fell
-    /// through to ordinary method dispatch and reported a spurious
-    /// `no method named 'Length' found for type 'Constraint'`.
-    ///
-    /// Follows the `type_defs` redirect chain (bounded + cycle-safe)
-    /// until it reaches a name that is no longer a plain-rename
-    /// `Type::Named` pointing elsewhere. Returns the input unchanged
-    /// when it isn't an alias at all, so callers can compare BOTH the
-    /// original and canonical name and this is always safe to call
-    /// speculatively.
-    ///
-    /// `pub(crate)` (was private): campaign integration added a cross-module
-    /// call from `infer::expr` (T0545's UnknownVariantConstructor path); a
-    /// private method is unreachable from a sibling `impl TypeChecker` block in
-    /// another module.
+    /// Follow exact zero-argument aliases and import renames without dropping
+    /// their qualified owners. Applied aliases keep their arguments and must
+    /// be instantiated by the caller instead of collapsing to a bare head.
     pub(crate) fn canonical_alias_target(&self, name: &str) -> Text {
         let mut current: Text = Text::from(name);
-        let mut seen = std::collections::HashSet::new();
+        let mut seen = verum_common::Set::new();
         while seen.insert(current.clone()) {
-            let redirect = match self.ctx.lookup_type(current.as_str()) {
+            let target = self.ctx.type_aliases.get(&current)
+                .or_else(|| self.ctx.lookup_type(current.as_str()));
+            let redirect = match target {
                 Some(Type::Named { path, args }) if args.is_empty() => {
-                    path.as_ident().map(|id| Text::from(id.name.as_str()))
+                    Some(self.path_to_string(path))
                 }
                 _ => None,
             };
@@ -17977,7 +17954,9 @@ impl TypeChecker {
         // A rooted namespace is syntax, never a receiver value. Resolve the
         // first complete callable path through ordinary Call inference; later
         // methods operate only on the value that call actually returns.
-        if let Some(mut path) = self.rooted_field_path(current_receiver) {
+        if let Some(mut path) = self.rooted_field_path(current_receiver)
+            && self.declared_constructor_path(&path, current_receiver.span)?.is_none()
+        {
             let mut steps = chain.into_iter().rev();
             let (_, method, type_args, args, span) = steps.next().expect("method chain is nonempty");
             path.segments.push(verum_ast::ty::PathSegment::Name(method.clone()));

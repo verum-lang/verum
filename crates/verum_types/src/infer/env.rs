@@ -8758,7 +8758,7 @@ impl TypeChecker {
     }
 
     pub(super) fn source_type_declaration_key(owner: &str, name: &str) -> Text {
-        if owner.is_empty() || owner == "cog" {
+        if owner.is_empty() {
             name.into()
         } else {
             format!("{owner}.{name}").into()
@@ -8806,9 +8806,8 @@ impl TypeChecker {
     /// back to the unqualified one, so types compiled inside a module always
     /// see that module's own definitions first — regardless of load order.
     ///
-    /// No-op fallback (`current_module_path == "cog"` or empty) means
-    /// user-code phase / unknown-module context: register only flat, so
-    /// behaviour matches pre-change semantics there.
+    /// Only an unknown module scope lacks a qualified declaration key. The
+    /// cog root owns a namespace just like every other source module.
     pub(crate) fn define_type_in_current_module(&mut self, name: Text, mut ty: Type) {
         // The dictionary key and its nominal payload carry the same defining
         // owner. Only qualify this declaration's own head, never its arguments
@@ -8834,15 +8833,10 @@ impl TypeChecker {
         // E430 horizon leg: this file DECLARED the type.
         self.current_module_declared_types
             .insert(name.as_str().to_string());
-        let mod_path = self.current_module_path.clone();
-        // Always write the unqualified flat entry (back-compat + fast path).
+        // The short spelling is lexical; the declared key remains stable
+        // when another source module publishes a same-named type.
         self.ctx.define_type(name.clone(), ty.clone());
-        // Additionally publish under the fully qualified name when we have a
-        // real module path to attribute the type to.
-        if !mod_path.as_str().is_empty() && mod_path.as_str() != "cog" {
-            let qualified: Text = format!("{}.{}", mod_path, name).into();
-            self.ctx.define_type(qualified, ty);
-        }
+        if key != name { self.ctx.define_type(key, ty); }
 
         // Architectural: evict stale variant-constructor shadow on this
         // same simple name. A previously-loaded stdlib enum may have

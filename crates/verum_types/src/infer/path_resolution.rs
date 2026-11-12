@@ -186,12 +186,11 @@ impl TypeChecker {
         // flat name (see `define_type_in_current_module`). Here we prefer
         // that qualified lookup first, so the declaring module always
         // resolves its own types regardless of load order.
-        let mod_path = self.current_module_path.clone();
-        if !mod_path.as_str().is_empty() && mod_path.as_str() != "cog" {
-            let qualified: verum_common::Text = format!("{}.{}", mod_path, name).into();
-            if let Some(ty) = self.ctx.lookup_type(qualified.as_str()) {
-                return Ok((ty.clone(), Some(qualified)));
-            }
+        let qualified = self.declared_type_key(name);
+        if qualified.as_str() != name
+            && let Some(ty) = self.ctx.lookup_type(qualified.as_str())
+        {
+            return Ok((ty.clone(), Some(qualified)));
         }
 
         // Step 0.5: MOUNT-TYPE-AUTHORITY-1 — a file's explicitly
@@ -1516,6 +1515,54 @@ impl TypeChecker {
         })
     }
 
+    /// Resolve a constructor through the selected type declaration, retaining
+    /// its exact module key, visibility and parameter telescope. A missing
+    /// owner never asks the ambient constructor table for a same-named case.
+    pub(super) fn declared_constructor_path(
+        &mut self, path: &Path, span: Span,
+    ) -> Result<Option<InferResult>> {
+        use verum_ast::ty::PathSegment;
+        use verum_modules::{ModulePath, visibility::VisibilityChecker};
+        let Some((PathSegment::Name(case), prefix)) = path.segments.split_last() else {
+            return Ok(None);
+        };
+        if prefix.len() < 2 { return Ok(None); }
+        let prefix = Path::new(prefix.iter().cloned().collect(), span);
+        let owner_scope = ModulePath::from_str(self.current_module_path.as_str());
+        let qualified = verum_modules::imports::path_to_module_path_resolved(&prefix, &owner_scope).to_string();
+        let Some((module_name, type_name)) = qualified.rsplit_once('.') else { return Ok(None); };
+        // Registry aliases are declarations. Legacy namespace-prefix guesses
+        // in other lookup paths cannot authorize this qualified request.
+        let source_exists = self.module_registry.read().get_by_path_aliased(module_name).is_some();
+        let inline = self.inline_modules.get(&Text::from(module_name));
+        if !source_exists && inline.is_none() { return Ok(None); }
+        if let Some(declaration) = inline.and_then(|module| module.items.as_ref())
+            .and_then(|items| items.iter().find_map(|item| match &item.kind {
+                verum_ast::ItemKind::Type(decl) if decl.name.name.as_str() == type_name => Some(decl),
+                _ => None,
+            }))
+        {
+            let visibility = declaration.visibility.resolve_declared_scope(module_name)
+                .map_err(|message| TypeError::VisibilityError { name: type_name.into(), visibility: message,
+                    module_path: module_name.into(), span })?;
+            if !VisibilityChecker::new().is_visible(visibility.clone(), &ModulePath::from_str(module_name), &owner_scope) {
+                return Err(TypeError::VisibilityError { name: type_name.into(), visibility: format!("{visibility:?}").into(),
+                    module_path: module_name.into(), span });
+            }
+        }
+        let selected = match self.resolve_qualified_type_with_parameter_key(&prefix, span) {
+            Ok((_, Some(owner))) => self.canonical_alias_target(&owner),
+            Ok((_, None)) => return Ok(None),
+            Err(TypeError::TypeNotFound { name, .. }) if name.as_str() == qualified => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        let declared_case = self.unifier.declared_variant_template(&selected)
+            .is_some_and(|(_, body)| matches!(body, Type::Variant(cases) if cases.contains_key(&case.name)));
+        if !declared_case { return Ok(None); }
+        self.selected_constructor_value(selected.as_str(), case.name.as_str(), span)
+            .map(|ty| Some(InferResult::new(ty)))
+    }
+
     /// Resolve cog-rooted path (cog.module.item)
     pub(crate) fn resolve_crate_rooted_path(
         &mut self,
@@ -1523,6 +1570,8 @@ impl TypeChecker {
         span: Span,
     ) -> Result<InferResult> {
         use verum_ast::ty::PathSegment;
+
+        if let Some(value) = self.declared_constructor_path(path, span)? { return Ok(value); }
 
         // The module resolver handles crate:: resolution via resolve_path
         if let Maybe::Some(current_module) = self.current_module() {

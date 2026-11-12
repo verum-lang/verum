@@ -164,3 +164,28 @@ fn qualified_value_method_misses_and_bad_arguments_are_refused() {
         );
     }
 }
+
+#[test]
+fn rooted_constructors_preserve_declared_owners_and_generic_parameters() {
+    for expression in ["cog.State.Cold", "cog.State.Warm"] {
+        accepts(&format!("{QUALIFIED_VALUE_DECLARATIONS}\nfn probe()->State {{{expression}}}"), &[]);
+    }
+    accepts(&format!("{QUALIFIED_VALUE_DECLARATIONS}\nfn probe()->Int {{cog.State.Cold.degree()}}"), &[]);
+    accepts("public type Parcel<T> is | Empty | Full(T); fn first()->Parcel<Int> {cog.Parcel.Empty} fn second()->Parcel<Text> {cog.Parcel.Empty} fn third()->Parcel<Int> {cog.Parcel.Full(7)}", &[]);
+    accepts("public type State is | Cold | Warm; mount other.{State as Foreign}; fn foreign()->Foreign {Foreign.Hot} fn probe()->State {cog.State.Cold}", &[("other", "public type State is | Hot | Cold(Int);")]);
+    accepts("public type State is | Cold | Warm; type Phase is State; fn probe()->State {cog.Phase.Cold}", &[]);
+}
+
+#[test]
+fn rooted_constructor_paths_cannot_borrow_missing_or_private_owners() {
+    for source in [
+        "mount other.State; fn probe()->State {cog.absent.State.Cold}",
+        "public type State is | Cold | Warm; mount other.{State as Foreign}; fn probe()->State {cog.State.Hot}",
+        "fn Cold()->Int {7} fn probe()->Int {cog.absent.State.Cold}",
+    ] {
+        let errors = check(source, &[("other", "public type State is | Cold | Hot;")]);
+        assert!(errors.iter().any(|error| error.contains("UnboundVariable") || error.contains("TypeNotFound")), "{source}: {errors:?}");
+    }
+    let errors = check("fn probe() {let value=cog.hidden.State.Cold;}", &[("cog.hidden", "type State is | Cold | Warm;")]);
+    assert!(errors.iter().any(|error| error.contains("VisibilityError") || error.contains("E202")), "{errors:?}");
+}
