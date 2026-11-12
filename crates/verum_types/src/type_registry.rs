@@ -38,32 +38,19 @@
 //! }
 //! ```
 
-use std::collections::HashMap;
 use verum_ast::span::Span;
-use verum_common::{Maybe, Text};
+use verum_common::{Map, Maybe, Text};
 
 use crate::ty::Type;
-
-/// Maximum entries in expr_types before clearing
-/// MEMORY FIX: For 10K LOC files this prevents 2.4-10 MB accumulation
-const MAX_EXPR_TYPES: usize = 100_000;
-
-/// Maximum entries in var_types before clearing
-const MAX_VAR_TYPES: usize = 50_000;
-
-/// Maximum entries in func_return_types before clearing
-const MAX_FUNC_RETURN_TYPES: usize = 10_000;
 
 /// Registry mapping AST nodes to inferred types
 ///
 /// This structure enables type information to flow from the type checker
 /// to code generation without modifying the AST.
 ///
-/// # Performance
-///
-/// - Lookups: O(1) average case
-/// - Memory: ~16 bytes per registered type (Span + pointer)
-/// - Build time: < 1ms for typical modules
+/// These are compilation facts, not an evictable cache. Keep them until the
+/// compilation releases the registry or explicitly clears it. Resource limits
+/// must reject a compilation rather than silently erase facts needed by codegen.
 #[derive(Debug, Clone, Default)]
 pub struct TypeRegistry {
     /// Expression types indexed by span
@@ -71,33 +58,33 @@ pub struct TypeRegistry {
     /// Maps expression spans to their inferred types. This handles all
     /// expression-level type information including literals, variables,
     /// function calls, and compound expressions.
-    expr_types: HashMap<Span, Type>,
+    expr_types: Map<Span, Type>,
     /// Callable selected for an executed call, distinct from its result type.
-    call_targets: verum_common::Map<Span, Type>,
+    call_targets: Map<Span, Type>,
 
     /// Variable types indexed by (span, name)
     ///
     /// Maps variable declarations (parameters, locals) to their types.
     /// Uses both span and name for precise identification, handling cases
     /// where variables are shadowed or reused.
-    var_types: HashMap<(Span, Text), Type>,
+    var_types: Map<(Span, Text), Type>,
 
     /// Function return types indexed by span
     ///
     /// Maps function declaration spans to their return types. This enables
     /// codegen to determine the correct LLVM return type without re-analyzing
     /// the AST type annotation.
-    func_return_types: HashMap<Span, Type>,
+    func_return_types: Map<Span, Type>,
 }
 
 impl TypeRegistry {
     /// Create a new empty type registry
     pub fn new() -> Self {
         Self {
-            expr_types: HashMap::new(),
-            call_targets: verum_common::Map::new(),
-            var_types: HashMap::new(),
-            func_return_types: HashMap::new(),
+            expr_types: Map::new(),
+            call_targets: Map::new(),
+            var_types: Map::new(),
+            func_return_types: Map::new(),
         }
     }
 
@@ -123,10 +110,6 @@ impl TypeRegistry {
     /// registry.register_expr(plus_expr.span, Type::Int);
     /// ```
     pub fn register_expr(&mut self, span: Span, ty: Type) {
-        // MEMORY FIX: Clear if exceeding limit to prevent 2-10GB accumulation
-        if self.expr_types.len() >= MAX_EXPR_TYPES {
-            self.expr_types.clear();
-        }
         self.expr_types.insert(span, ty);
     }
 
@@ -146,10 +129,6 @@ impl TypeRegistry {
     /// registry.register_var(y_param.span, "y".into(), Type::Float);
     /// ```
     pub fn register_var(&mut self, span: Span, name: Text, ty: Type) {
-        // MEMORY FIX: Clear if exceeding limit
-        if self.var_types.len() >= MAX_VAR_TYPES {
-            self.var_types.clear();
-        }
         self.var_types.insert((span, name), ty);
     }
 
@@ -167,10 +146,6 @@ impl TypeRegistry {
     /// registry.register_func_return(func.span, Type::Int);
     /// ```
     pub fn register_func_return(&mut self, span: Span, ty: Type) {
-        // MEMORY FIX: Clear if exceeding limit
-        if self.func_return_types.len() >= MAX_FUNC_RETURN_TYPES {
-            self.func_return_types.clear();
-        }
         self.func_return_types.insert(span, ty);
     }
 
