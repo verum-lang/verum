@@ -537,7 +537,7 @@ fn cleanup_thread_allocator() {
 //  up whatever the calling convention left in the high half — usually
 //  a stale pointer value masquerading as an enormous argc.
 //  * The return type is `int` (Int32) — process exit codes are 32-bit.
-//  * argv stays `&&Byte` (pointer-width on every supported platform).
+//  * argv is a raw OS-owned table, never a managed borrow.
 // T0.4.3 — surface aligned with the C ABI. init_process_args takes the
 // Verum-side `Int` (i64) — the Int32→Int widening at the boundary is
 // absorbed by the typechecker.
@@ -548,7 +548,7 @@ module linux_entry {
 
     // External user main function. C: `int main(int argc, char **argv);`.
     extern {
-        fn verum_main(argc: Int32, argv: &&Byte) -> Int32;
+        fn verum_main(argc: Int32, argv: *const *const Byte) -> Int32;
     }
 
     /// Linux x86_64 entry point.
@@ -573,12 +573,12 @@ module linux_entry {
     /// bits of an 8-byte stack slot at [rsp]; the linux_x86_64_start asm
     /// reads it into EDI and calls into here.
     @no_mangle
-    public fn verum_entry(argc: Int32, argv: &&Byte) -> Int32 {
+    public fn verum_entry(argc: Int32, argv: *const *const Byte) -> Int32 {
         // Initialize auxiliary vector access (must be first - no libc)
         init_auxv(argv);
 
         // Store process arguments for env module
-        init_process_args(argc as Int, argv);
+        unsafe { init_process_args(argc as Int, argv); }
 
         // Initialize runtime
         match super.verum_init() {
@@ -606,15 +606,15 @@ module darwin_entry {
 
     // External user main function. C: `int main(int argc, char **argv);`.
     extern {
-        fn verum_main(argc: Int32, argv: &&Byte) -> Int32;
+        fn verum_main(argc: Int32, argv: *const *const Byte) -> Int32;
     }
 
     /// macOS entry point via dyld. argc is `int` (Int32) per dyld's
     /// invocation contract — the i32 argc arrives in EDI's low 32 bits.
     @no_mangle
-    public fn main(argc: Int32, argv: &&Byte) -> Int32 {
+    public fn main(argc: Int32, argv: *const *const Byte) -> Int32 {
         // Store process arguments for env module
-        init_process_args(argc as Int, argv);
+        unsafe { init_process_args(argc as Int, argv); }
 
         // Initialize runtime
         match super.verum_init() {

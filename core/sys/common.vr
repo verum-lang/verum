@@ -1927,10 +1927,10 @@ public fn cleanup_runtime() {
 static mut PROCESS_ARGC: Int = 0;
 
 /// Global storage for command line arguments array.
-static mut PROCESS_ARGV: &&Byte = unsafe { 0 as &&Byte };
+static mut PROCESS_ARGV: *const *const Byte = @intrinsic("null_ptr");
 
 /// Global storage for environment variables array.
-static mut PROCESS_ENVIRON: &&Byte = unsafe { 0 as &&Byte };
+static mut PROCESS_ENVIRON: *const *const Byte = @intrinsic("null_ptr");
 
 /// Initialize process arguments storage.
 ///
@@ -1941,7 +1941,10 @@ static mut PROCESS_ENVIRON: &&Byte = unsafe { 0 as &&Byte };
 
 /// On Linux, environ is the pointer after the null-terminated argv array.
 /// On macOS, environ is obtained via _NSGetEnviron().
-public fn init_process_args(argc: Int, argv: &&Byte) {
+/// Safety: call once before starting threads. The OS-owned argv table and
+/// its null-terminated strings must remain valid for the process lifetime.
+/// This boundary does not accept a managed borrow of a local array.
+public unsafe fn init_process_args(argc: Int, argv: *const *const Byte) {
     unsafe {
         PROCESS_ARGC = argc;
         PROCESS_ARGV = argv;
@@ -1956,7 +1959,7 @@ public fn init_process_args(argc: Int, argv: &&Byte) {
         @cfg(target_os = "macos")
         {
             // On macOS, use _NSGetEnviron()
-            PROCESS_ENVIRON = *sys.darwin.libsystem._NSGetEnviron();
+            PROCESS_ENVIRON = super.darwin.libsystem.process_environment();
         }
 
         // Default: leave PROCESS_ENVIRON as initialized (null)
@@ -1971,13 +1974,13 @@ public fn get_argc() -> Int {
 
 /// Get the command line arguments array.
 @inline
-public fn get_argv() -> &&Byte {
+public fn get_argv() -> *const *const Byte {
     unsafe { PROCESS_ARGV }
 }
 
 /// Get environment variables array (null-terminated array of "KEY=VALUE" strings).
 @inline
-public fn get_environ() -> &&Byte {
+public fn get_environ() -> *const *const Byte {
     unsafe { PROCESS_ENVIRON }
 }
 

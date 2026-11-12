@@ -584,7 +584,7 @@ extern {
     fn _NSGetArgv() -> &(&(&Byte));
 
     /// Get pointer to environ (crt_externs.h)
-    fn _NSGetEnviron() -> &(&(&Byte));
+    fn _NSGetEnviron() -> *const *const *const Byte;
 
     // =========================================================================
     // Signals
@@ -2042,10 +2042,13 @@ public fn safe_closedir(dirp: &DIR) -> Int32 {
 // Environment Variable Safe Wrappers
 // =============================================================================
 
-/// Get environment variable value
-///
+/// Borrow the OS environment table. It can be invalidated by environment
+/// mutation; dereferencing it requires synchronization by the caller.
+public fn process_environment() -> *const *const Byte {
+    unsafe { *_NSGetEnviron() }
+}
 
-/// Returns Maybe.None if the variable is not set.
+/// Get an environment variable, or Maybe.None when it is not set.
 public fn safe_getenv(name: &[Byte]) -> Maybe<Text> {
     // Manual byte-copy loop sidesteps the RUNTIME-3-DEEPER
     // slice-on-array recursion in the Tier-0 interpreter

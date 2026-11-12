@@ -2235,6 +2235,25 @@ impl CodegenContext {
     }
 
     fn emit_with_transfer(&mut self, instr: Instruction, transferred: Option<Reg>) {
+        // A raw pointer remains an address when returned by ordinary source
+        // code, just as at an extern boundary. PTR's erased ABI type also
+        // represents integers, so only the selected declaration establishes
+        // this fact. Managed/unsafe references have separate carrier rules.
+        let raw_result = match &instr {
+            Instruction::Call { dst, func_id, .. }
+            | Instruction::CallG { dst, func_id, .. } => {
+                self.lookup_function_by_id(FunctionId(*func_id))
+                    .and_then(|info| info.return_type_name.as_deref())
+                    .filter(|name| name.starts_with('*'))
+                    .and_then(|name| verum_fast_parser::Parser::new(name).parse_type().ok())
+                    .filter(|ty| matches!(ty.kind, verum_ast::ty::TypeKind::Pointer { .. }))
+                    .map(|_| *dst)
+            }
+            _ => None,
+        };
+        if let Some(destination) = raw_result {
+            self.mark_raw_pointer(destination);
+        }
         self.array_result_facts.observe(&instr);
         if transferred.is_some() {
             self.registers.value_uses.observe_with_transfer(

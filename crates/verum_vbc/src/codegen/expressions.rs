@@ -6146,8 +6146,10 @@ impl VbcCodegen {
                         _ => None,
                     },
                     _ if !is_heap_deref => inner_type.as_deref().and_then(|ty| {
-                        let id = self.nominal_type_id(reference_pointee_type_name(ty)?)?;
-                        Some((id, ty.starts_with("&unsafe ")))
+                        let raw = raw_pointer_pointee_type_name(ty);
+                        let pointee = raw.or_else(|| reference_pointee_type_name(ty))?;
+                        let id = self.nominal_type_id(pointee)?;
+                        Some((id, raw.is_some() || ty.starts_with("&unsafe ")))
                     }),
                     _ => None,
                 };
@@ -6292,6 +6294,13 @@ impl VbcCodegen {
                     // Generic Value-sized deref - tier affects whether we emit ChkRef.
                     let tier = self.get_deref_tier_for_expr(inner);
                     self.emit_deref_instruction(dest, inner_reg, tier);
+                }
+                // Loading an address from an OS pointer table produces another
+                // raw pointer. It is not a CBGR object or a Value-sized scalar.
+                if inner_type.as_deref().and_then(raw_pointer_pointee_type_name)
+                    .and_then(raw_pointer_pointee_type_name).is_some()
+                {
+                    self.ctx.mark_raw_pointer(dest);
                 }
             }
 
@@ -45712,8 +45721,17 @@ impl FreeVarAnalyzer {
     }
 }
 
-/// Remove exactly one reference layer from an AST-rendered type name.
-/// Operator lowering uses one layer; nominal method lookup may peel more.
+/// Remove exactly one raw pointer layer, retaining the pointee's own carrier.
+fn raw_pointer_pointee_type_name(t: &str) -> Option<&str> {
+    let t = t.trim();
+    t.strip_prefix("*const ")
+        .or_else(|| t.strip_prefix("*mut "))
+        .or_else(|| t.strip_prefix("*volatile mut "))
+        .or_else(|| t.strip_prefix("*volatile "))
+        .map(str::trim)
+}
+
+/// Remove one reference layer; nominal lookup and operators use this separately.
 fn reference_pointee_type_name(t: &str) -> Option<&str> {
     let t = t.trim();
     // Strip the reference prefix. The order matters: longer prefixes
