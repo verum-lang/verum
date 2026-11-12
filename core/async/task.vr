@@ -65,11 +65,13 @@ implement TaskId {
     }
 }
 
-implement Eq for TaskId {
+implement PartialEq for TaskId {
     fn eq(&self, other: &TaskId) -> Bool {
         self.id == other.id
     }
 }
+
+implement Eq for TaskId {}
 
 implement Hash for TaskId {
     fn hash(&self, hasher: &mut Hasher) {
@@ -214,7 +216,7 @@ implement Display for JoinError {
     }
 }
 
-implement Eq for JoinError {
+implement PartialEq for JoinError {
     fn eq(&self, other: &JoinError) -> Bool {
         match (self, other) {
             (Cancelled, Cancelled) => true,
@@ -223,6 +225,8 @@ implement Eq for JoinError {
         }
     }
 }
+
+implement Eq for JoinError {}
 
 // =============================================================================
 // Spawn Functions
