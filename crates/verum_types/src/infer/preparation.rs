@@ -127,6 +127,15 @@ impl TypeChecker {
     /// Register function, extern and constant signatures before checking bodies.
     #[must_use]
     pub fn prepare_module_values(&mut self, module: &Module) -> List<TypeError> {
+        let mut selected = module.clone();
+        selected.items.retain(|item| self.cfg_evaluator.should_include(&item.attributes));
+        self.source_type_registration.local_declarations.push((self.current_module_path.clone(), verum_common::Shared::new(selected)));
+        let result = self.prepare_module_values_in_source_scope(module);
+        self.source_type_registration.local_declarations.pop();
+        result
+    }
+
+    fn prepare_module_values_in_source_scope(&mut self, module: &Module) -> List<TypeError> {
         let mut errors = List::new();
         for item in &module.items {
             if let ItemKind::Function(decl) = &item.kind {

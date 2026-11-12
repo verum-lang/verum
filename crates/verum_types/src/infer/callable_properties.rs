@@ -140,7 +140,7 @@ impl TypeChecker {
     ) -> PropertyRequirement {
         let declared = PropertyRequirement::declared_function(function.is_pure, function.is_meta);
         if declared.may_be_async()
-            && self.source_body_is_sync(function, &self.current_module_path.clone(), &mut Vec::new())
+            && self.source_body_is_sync(function, &self.current_module_path.clone(), &mut List::new())
         {
             return PropertyRequirement::source_callable(false);
         }
@@ -151,13 +151,22 @@ impl TypeChecker {
         &mut self,
         function: &FunctionDecl,
         owner: &Text,
-        active: &mut Vec<(Text, Span)>,
+        active: &mut List<(Text, Span)>,
     ) -> bool {
+        if function.is_async || function.is_generator {
+            return false;
+        }
+        // The ABI is carried by the declaration, including across imports and
+        // metadata. Foreign calls return on the calling stack. They may perform
+        // IO, mutate and fail; synchronous is not a promise of purity.
+        if function.extern_abi.is_some() {
+            return true;
+        }
         let Some(body) = &function.body else {
             return false;
         };
         let key = (owner.clone(), function.span);
-        if function.is_async || active.len() >= 32 || active.contains(&key) {
+        if active.len() >= 32 || active.contains(&key) {
             return false;
         }
         let mut local = self.property_inferrer.infer_function_body(body);
@@ -209,7 +218,7 @@ impl TypeChecker {
         }
         active.push(key);
         let proven = source.unresolved.iter().all(|name| {
-            self.source_function_for_effect(owner, name)
+            self.source_function_for_properties(owner, name)
                 .is_some_and(|(target, declaration)| {
                     self.source_body_is_sync(&declaration, &target, active)
                 })
@@ -221,21 +230,28 @@ impl TypeChecker {
     /// Before a source method has been checked, only direct function bindings
     /// in its own module can complete the proof. Dynamic or ambiguous targets
     /// retain their open contract.
-    fn source_function_for_effect(
+    fn source_function_for_properties(
         &self,
         owner: &Text,
         name: &Text,
     ) -> Option<(Text, FunctionDecl)> {
         use super::source_declarations::{MountTargetKind, source_mount_targets};
+        if let Some((_, module)) = self.source_type_registration.local_declarations.iter().rev()
+            .find(|(path, _)| path == owner)
+        {
+            if let Some(declaration) = module.items.iter().find_map(|item| self.imported_function(item, name)) {
+                return Some((owner.clone(), declaration.clone()));
+            }
+            if module.items.iter().any(|item| match &item.kind {
+                ItemKind::Const(value) => &value.name.name == name,
+                ItemKind::Static(value) => &value.name.name == name,
+                _ => false,
+            }) { return None; }
+        }
         let registry = self.module_registry.read();
         let module = self.get_module_with_path_aliases(owner, &registry)?;
         let local = |module: &verum_modules::ModuleInfo, name: &Text| {
-            module.ast.items.iter().find_map(|item| match &item.kind {
-                ItemKind::Function(declaration) if &declaration.name.name == name => {
-                    Some(declaration.clone())
-                }
-                _ => None,
-            })
+            module.ast.items.iter().find_map(|item| self.imported_function(item, name)).cloned()
         };
         if let Some(function) = local(&module, name) {
             return Some((module.path.to_string().into(), function));

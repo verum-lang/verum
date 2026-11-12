@@ -9925,7 +9925,7 @@ impl TypeChecker {
 
     /// A function declared inside an extern block participates in the same
     /// source import and alias binding as a function with a Verum body.
-    fn imported_function<'a>(&self, item: &'a verum_ast::Item, name: &str) -> Option<&'a verum_ast::FunctionDecl> {
+    pub(super) fn imported_function<'a>(&self, item: &'a verum_ast::Item, name: &str) -> Option<&'a verum_ast::FunctionDecl> {
         match &item.kind {
             verum_ast::ItemKind::Function(function) if function.name.as_str() == name => Some(function),
             verum_ast::ItemKind::ExternBlock(block) if self.cfg_evaluator.should_include(&item.attributes) => {
