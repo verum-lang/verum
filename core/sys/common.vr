@@ -26,12 +26,13 @@ mount core.base.coercion.{IntCoercible};
 // Error Types
 // =============================================================================
 
-/// Operating system error with code and message.
+/// Raw operating-system failure data. Codes belong to the originating OS;
+/// the message is diagnostic text and does not determine the error category.
 public type OSError is {
     /// Error code (errno on Unix, GetLastError on Windows).
-    code: Int,
+    public code: Int,
     /// Human-readable error message.
-    message: Text,
+    public message: Text,
 };
 
 implement OSError {
