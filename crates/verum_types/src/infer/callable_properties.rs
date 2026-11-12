@@ -12,7 +12,8 @@ fn intrinsic_requirement(name: &str) -> Option<PropertyRequirement> {
     // optimizer hint. A constant has no runtime operations. Other lowering
     // classes need their own evidence; registration alone proves no bound.
     if let Some(info) = lookup_intrinsic(name)
-        && matches!(info.intrinsic.strategy, CodegenStrategy::CompileTimeConstant)
+        && matches!(info.intrinsic.strategy, CodegenStrategy::CompileTimeConstant
+            | CodegenStrategy::TargetHasAtomic | CodegenStrategy::TargetHasFeature)
     {
         return Some(PropertyRequirement::AtMost(PropertySet::pure()));
     }

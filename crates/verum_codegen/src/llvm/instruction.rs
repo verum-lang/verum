@@ -28,6 +28,7 @@ use super::well_known_types::{WellKnownType as WKT, WellKnownTypeExt};
 use verum_common::well_known_types::type_names as tn;
 
 mod drop_typed;
+mod target_query;
 
 /// Emit a diagnosable runtime abort for an operation that has no honest
 /// Tier-1 lowering.
@@ -2505,6 +2506,9 @@ fn lower_instruction_impl<'ctx>(
             ctx.set_register(dst.0, ctx.types().i64_type().const_int(mode as u8 as u64, false).into());
             Ok(())
         }
+
+        Instruction::TargetHasAtomic { dst, type_ref } => target_query::atomic(ctx, *dst, type_ref),
+        Instruction::TargetHasFeature { dst, feature } => target_query::feature(ctx, *dst, *feature),
 
         Instruction::TypeLayout { dst, type_ref, property } => {
             let module = ctx.vbc_module().or_internal("TypeLayout requires declaration metadata")?;
@@ -31646,6 +31650,9 @@ fn lower_extended<'ctx>(
         )),
         Some(ExtendedSubOpcode::TypeResource) => Err(LlvmLoweringError::unsupported(
             "TypeResource requires the canonical decoded instruction",
+        )),
+        Some(ExtendedSubOpcode::TargetHasAtomic | ExtendedSubOpcode::TargetHasFeature) => Err(LlvmLoweringError::unsupported(
+            "target queries require the canonical decoded instruction",
         )),
         Some(ExtendedSubOpcode::TypeLayout) => Err(LlvmLoweringError::unsupported(
             "TypeLayout requires the canonical decoded instruction",

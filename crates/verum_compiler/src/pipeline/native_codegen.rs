@@ -344,71 +344,13 @@ impl<'s> CompilationPipeline<'s> {
         // is deterministic from the same inputs the cache key hashes.)
         let _ = force_full;
 
-        // Target identity (triple / CPU / features) — hoisted ahead
-        // of lowering: these strings are pure host/options queries
-        // (no LLVM target-registry init required) and participate in
-        // the object-cache key.  The TargetMachine itself is still
-        // created inside `lower_optimize_and_emit_object` (miss path
-        // only), after `Target::initialize_all`.
-        //
-        // **CPU/features dispatch** (#82 cross-compile correctness).
-        //
-        // For native (host == target) builds: use host CPU + features
-        // for maximum performance.
-        //
-        // For cross builds: use "generic" CPU + empty features.
-        // Pre-fix the host CPU name (e.g. `apple-m3`) was forwarded
-        // into every TargetMachine regardless of arch, which LLVM
-        // rejects with `'apple-m3' is not a recognized processor for
-        // this target` followed by `LLVM ERROR: 64-bit code requested
-        // on a subtarget that doesn't support it!` — every cross-arch
-        // build crashed.
-        //
-        // Detection: compare target architecture to host architecture
-        // via the TargetMachine's default-host triple.
-        let (triple_str, cpu_str, features_str) = {
-            use verum_codegen::llvm::verum_llvm::targets::TargetMachine;
-            let triple_str: String = match self.session.options().target_triple {
-                Some(ref target) => target.as_str().to_string(),
-                None => TargetMachine::get_default_triple()
-                    .as_str()
-                    .to_string_lossy()
-                    .into_owned(),
-            };
-            let is_wasm = triple_str.contains("wasm");
-            let host_triple_for_cpu = TargetMachine::get_default_triple()
-                .as_str()
-                .to_string_lossy()
-                .into_owned();
-            // Heuristic: if target arch differs from host, host CPU is
-            // not applicable.  Use simple substring match on arch prefix.
-            let host_arch = host_triple_for_cpu.split('-').next().unwrap_or("");
-            let target_arch = triple_str.split('-').next().unwrap_or("");
-            let cross_arch = !target_arch.is_empty() && target_arch != host_arch;
-
-            let (cpu_str, features_str): (&'static str, &'static str) = if is_wasm || cross_arch {
-                ("generic", "")
-            } else {
-                // Native build — use host CPU info for max perf.
-                let cpu = TargetMachine::get_host_cpu_name();
-                let features = TargetMachine::get_host_cpu_features();
-                // Leak to static — called once per compilation, acceptable
-                let cpu_s: &'static str = Box::leak(
-                    cpu.to_str()
-                        .unwrap_or("generic")
-                        .to_string()
-                        .into_boxed_str(),
-                );
-                let feat_s: &'static str =
-                    Box::leak(features.to_str().unwrap_or("").to_string().into_boxed_str());
-                (cpu_s, feat_s)
-            };
-            debug!(
-                "LLVM target: triple={}, cpu={}, features={} (cross_arch={})",
-                triple_str, cpu_str, features_str, cross_arch
-            );
-            (triple_str, cpu_str, features_str)
-        };
+        // Cache identity, reflection, lowering and emission use one selection.
+        let target_settings = self.session.target_settings()?;
+        // Validate before deriving cache keys or emitting any target-dependent IR.
+        let _machine = target_settings.machine()?;
+        let (triple_str, cpu_str, features_str) = (
+            target_settings.triple.as_str(), target_settings.cpu.as_str(), target_settings.features.as_str(),
+        );
 
         // Fingerprint of every out-of-module input the LLVM leg
         // reads: compiler binary stamp (also covers the EMBEDDED
@@ -676,8 +618,8 @@ impl<'s> CompilationPipeline<'s> {
         module_name: &str,
         build_dir: &Path,
         obj_path: &Path,
-        cpu_str: &'static str,
-        features_str: &'static str,
+        cpu_str: &str,
+        features_str: &str,
         passes: &str,
     ) -> Result<bool> {
         // Phase 1.75: CBGR escape analysis
@@ -775,7 +717,7 @@ impl<'s> CompilationPipeline<'s> {
             task_stack_size: rt.task_stack_size,
         };
 
-        let lowering_config = verum_codegen::llvm::LoweringConfig::new(module_name)
+        let mut lowering_config = verum_codegen::llvm::LoweringConfig::new(module_name)
             .with_opt_level(self.session.options().optimization_level)
             .with_debug_info(self.session.options().debug_info)
             .with_coverage(self.session.options().coverage)
@@ -788,6 +730,8 @@ impl<'s> CompilationPipeline<'s> {
             .with_futures_enabled(rt.futures)
             .with_nurseries_enabled(rt.nurseries)
             .with_shape_manifest(self.session.arch_shape_manifest_json());
+        lowering_config.target_cpu = cpu_str.into();
+        lowering_config.target_features = features_str.into();
 
         // Cross-compilation: the module's own triple is what every
         // per-platform decision in verum_codegen reads back through

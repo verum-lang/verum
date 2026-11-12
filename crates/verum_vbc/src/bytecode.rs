@@ -104,11 +104,20 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             encode_type_ref(type_ref, output);
         }
 
-        Instruction::TypeResource { dst, type_ref } => {
+        Instruction::TypeResource { dst, type_ref } | Instruction::TargetHasAtomic { dst, type_ref } => {
             output.push(Opcode::Extended.to_byte());
-            output.push(ExtendedSubOpcode::TypeResource.to_byte());
+            output.push(if matches!(instr, Instruction::TargetHasAtomic { .. }) {
+                ExtendedSubOpcode::TargetHasAtomic
+            } else { ExtendedSubOpcode::TypeResource }.to_byte());
             encode_reg(*dst, output);
             encode_type_ref(type_ref, output);
+        }
+
+        Instruction::TargetHasFeature { dst, feature } => {
+            output.push(Opcode::Extended.to_byte());
+            output.push(ExtendedSubOpcode::TargetHasFeature.to_byte());
+            encode_reg(*dst, output);
+            encode_reg(*feature, output);
         }
 
         Instruction::DropTyped { src, type_ref } => {
@@ -5263,6 +5272,12 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     let type_ref = decode_type_ref(data, offset)?;
                     Ok(Instruction::TypeResource { dst, type_ref })
                 }
+                Some(ExtendedSubOpcode::TargetHasAtomic) => Ok(Instruction::TargetHasAtomic {
+                    dst: decode_reg(data, offset)?, type_ref: decode_type_ref(data, offset)?,
+                }),
+                Some(ExtendedSubOpcode::TargetHasFeature) => Ok(Instruction::TargetHasFeature {
+                    dst: decode_reg(data, offset)?, feature: decode_reg(data, offset)?,
+                }),
                 Some(ExtendedSubOpcode::BindMethodReceiver) => Ok(Instruction::BindMethodReceiver {
                     type_ref: decode_type_ref(data, offset)?,
                 }),

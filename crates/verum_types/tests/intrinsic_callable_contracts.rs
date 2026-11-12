@@ -88,6 +88,17 @@ fn registered_constants_satisfy_meta_purity() {
 }
 
 #[test]
+fn registered_target_queries_satisfy_meta_purity() {
+    for source in [
+        "meta fn target_has_atomic<T>() -> Bool { @intrinsic(\"target_has_atomic\", T) }",
+        "meta fn target_has_feature(name: Text) -> Bool { @intrinsic(\"target_has_feature\", name) }",
+    ] {
+        let accepted = errors(source);
+        assert!(accepted.is_empty(), "{source}: {accepted:?}");
+    }
+}
+
+#[test]
 fn runtime_and_unknown_operations_do_not_acquire_constant_contracts() {
     for source in [
         "meta fn probe(number: Int) -> Int { @intrinsic(\"syscall0\", number) }",

@@ -237,6 +237,8 @@ impl VbcEscapeAnalyzer {
                 Instruction::LoadK { dst, .. }
                 | Instruction::LoadI { dst, .. }
                 | Instruction::TypeResource { dst, .. }
+                | Instruction::TargetHasAtomic { dst, .. }
+                | Instruction::TargetHasFeature { dst, .. }
                 | Instruction::TypeLayout { dst, .. }
                 | Instruction::LoadF { dst, .. }
                 | Instruction::LoadTrue { dst }

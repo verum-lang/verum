@@ -143,7 +143,8 @@ pub const VERSION_MAJOR: u16 = 2;
 // v2.48: closed sequence values in generic witness vectors.
 // v2.49: SysExtended.LinuxSignalWatch (operation, dst, operand).
 // v2.50: native aggregate layouts retain ARRAY carriers for inline fixed arrays.
-pub const VERSION_MINOR: u16 = 50;
+// v2.51: typed, target-bound atomic and CPU-feature queries.
+pub const VERSION_MINOR: u16 = 51;
 
 /// Minor-version floors for sections whose presence readers gate on.  The
 /// register-type-hints section has been written unconditionally since minor 2,

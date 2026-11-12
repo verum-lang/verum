@@ -195,6 +195,10 @@ pub enum CodegenStrategy {
 
     /// Compile-time constant.
     CompileTimeConstant,
+    /// Type-witness query against explicit backend target capabilities.
+    TargetHasAtomic,
+    /// Text query against the configured backend CPU feature catalog.
+    TargetHasFeature,
 
     /// Runtime operation reached through its declared callable and ABI.
     /// Preserve the selected FunctionId; neither host constant folding nor an
@@ -1432,6 +1436,17 @@ pub fn tensor_carrier_sub_ops() -> &'static std::collections::HashSet<u8> {
         }
         set
     })
+}
+
+/// Widths with registered VBC atomic storage operations.
+pub fn supports_atomic_storage(bits: u32) -> bool {
+    static WIDTHS: LazyLock<verum_common::Set<u32>> = LazyLock::new(|| ALL_INTRINSICS.iter().filter_map(|intrinsic| {
+        match intrinsic.strategy {
+            CodegenStrategy::OpcodeWithSize(Opcode::AtomicLoad, bytes) => Some(u32::from(bytes) * 8),
+            _ => None,
+        }
+    }).collect());
+    WIDTHS.contains(&bits)
 }
 
 static ALL_INTRINSICS: &[Intrinsic] = &[
@@ -5565,6 +5580,18 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     // =========================================================================
     // Platform Detection Intrinsics
     // =========================================================================
+    Intrinsic {
+        name: "target_has_atomic", category: IntrinsicCategory::Platform,
+        hints: &[IntrinsicHint::Pure], param_count: 1, return_count: 1,
+        strategy: CodegenStrategy::TargetHasAtomic, mlir_op: None,
+        doc: "Query declared scalar atomic storage for the configured target",
+    },
+    Intrinsic {
+        name: "target_has_feature", category: IntrinsicCategory::Platform,
+        hints: &[IntrinsicHint::Pure], param_count: 1, return_count: 1,
+        strategy: CodegenStrategy::TargetHasFeature, mlir_op: None,
+        doc: "Query enabled CPU features of the configured target",
+    },
     Intrinsic {
         name: "is_debug",
         category: IntrinsicCategory::Platform,

@@ -692,9 +692,14 @@ impl<'a> Validator<'a> {
             }
             Instruction::LoadT { dst, type_ref }
             | Instruction::TypeResource { dst, type_ref }
+            | Instruction::TargetHasAtomic { dst, type_ref }
             | Instruction::TypeLayout { dst, type_ref, .. } => {
                 self.check_reg(*dst, max_reg, &func_name);
                 self.validate_type_ref(type_ref, 0);
+            }
+            Instruction::TargetHasFeature { dst, feature } => {
+                self.check_reg(*dst, max_reg, &func_name);
+                self.check_reg(*feature, max_reg, &func_name);
             }
             Instruction::SetCallWitness { type_args } => {
                 self.validate_call_witnesses(type_args, func);

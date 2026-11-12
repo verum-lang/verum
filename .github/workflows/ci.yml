@@ -747,6 +747,12 @@ jobs:
           --test theorem_statement_authority
           --test theorem_proof_gate_tests
 
+      - name: Target queries through actual standard-library declarations
+        timeout-minutes: 5
+        run: >-
+          cargo test --locked --release -p verum_compiler
+          --test stdlib_future_declarations actual_platform_queries
+
       # Reuses the release CLI; includes an actual interpreter positive control.
       - name: Project run tier selection
         timeout-minutes: 5

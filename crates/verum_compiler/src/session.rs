@@ -1127,6 +1127,14 @@ VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
         self.cfg_evaluator.config()
     }
 
+    /// Shared CPU/feature selection for VM queries and native code generation.
+    pub fn target_settings(&self) -> verum_codegen::llvm::error::Result<verum_codegen::llvm::target_settings::TargetSettings> {
+        verum_codegen::llvm::target_settings::TargetSettings::resolve(
+            self.options.target_triple.as_deref(), self.options.target_cpu.as_deref(),
+            self.options.target_features.as_deref(),
+        )
+    }
+
     /// Load a source file and return its FileId
     pub fn load_file(&self, path: &Path) -> Result<FileId> {
         // Check if already loaded

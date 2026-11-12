@@ -70,6 +70,7 @@ pub mod instruction;
 pub mod module;
 mod receiver_methods;
 pub mod type_layout;
+pub mod target;
 pub mod const_sequence;
 pub mod drop_plan;
 pub mod types;

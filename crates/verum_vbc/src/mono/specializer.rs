@@ -644,6 +644,7 @@ impl<'a> BytecodeSpecializer<'a> {
             I::BindMethodReceiver { type_ref }
             | I::DropTyped { type_ref, .. }
             | I::TypeResource { type_ref, .. }
+            | I::TargetHasAtomic { type_ref, .. }
             | I::LoadT { type_ref, .. }
             | I::TypeLayout { type_ref, .. } => {
                 *type_ref = self.substitution.apply(type_ref)?;
@@ -855,6 +856,8 @@ impl<'a> BytecodeSpecializer<'a> {
             I::Mov { dst, .. }
             | I::LoadI { dst, .. }
             | I::TypeResource { dst, .. }
+            | I::TargetHasAtomic { dst, .. }
+            | I::TargetHasFeature { dst, .. }
             | I::TypeLayout { dst, .. }
             | I::LoadK { dst, .. }
             | I::Call { dst, .. }

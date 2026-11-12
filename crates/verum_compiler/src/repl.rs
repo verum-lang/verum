@@ -374,6 +374,7 @@ impl Repl {
             .ok_or_else(|| anyhow::anyhow!("internal: REPL wrapper {} not found", func_name))?;
 
         let mut interpreter = Interpreter::new(vbc_module);
+        interpreter.state.config.target_capabilities = Some(std::sync::Arc::new(self.session.target_settings()?.capabilities()?));
         interpreter
             .execute_function(func_id)
             .map_err(|e| anyhow::anyhow!("runtime error: {:?}", e))?;

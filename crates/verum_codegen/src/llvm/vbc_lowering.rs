@@ -175,6 +175,10 @@ pub struct LoweringConfig {
     pub module_name: Text,
     /// Target triple (e.g., "x86_64-unknown-linux-gnu").
     pub target_triple: Option<Text>,
+    /// CPU and feature settings used by both lowering and object emission.
+    pub target_cpu: Text,
+    /// LLVM feature toggles, including explicit disables.
+    pub target_features: Text,
     /// Optimization level (0-3).
     pub opt_level: u8,
     /// Enable CBGR check elimination.
@@ -280,6 +284,8 @@ impl Default for LoweringConfig {
         Self {
             module_name: Text::from("verum_module"),
             target_triple: None,
+            target_cpu: Text::new(),
+            target_features: Text::new(),
             opt_level: 2,
             cbgr_elimination: true,
             default_tier: RefTier::Tier0,
@@ -558,6 +564,8 @@ pub(crate) fn is_primitive_type_name(name: &str) -> bool {
 
 /// Main VBC → LLVM IR lowering context.
 pub struct VbcToLlvmLowering<'ctx> {
+    target_machine: Option<verum_llvm::targets::TargetMachine>,
+    target_error: Option<Text>,
     /// LLVM context.
     context: &'ctx Context,
     /// LLVM module being built.
@@ -773,48 +781,17 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         };
         module.set_triple(&triple);
 
-        // Initialize ALL targets ONCE per process — not just the native
-        // one. `from_triple` below resolves through the registered-target
-        // table, so a native-only registration makes every FOREIGN triple
-        // fail there, silently skipping `set_data_layout` and leaving the
-        // module with no data layout at all — the exact condition the
-        // comment above warns about. `native_codegen.rs` already states
-        // this policy for the emit-side TargetMachine ("verum supports
-        // cross-compilation by default (#82)"); the lowering side must
-        // match it or `--target` produces a layout-less module.
-        //
-        // LLVM's target initialization is NOT idempotent — calling it
-        // multiple times can corrupt internal state, causing intermittent
-        // SIGSEGV in module verification or code generation.
-        static INIT: std::sync::Once = std::sync::Once::new();
-        INIT.call_once(|| {
-            verum_llvm::targets::Target::initialize_all(
-                &verum_llvm::targets::InitializationConfig::default(),
-            );
-            // SIMPLIFYCFG-SINK-NULL-1 (task #21 layer 2) is fixed AT THE
-            // SOURCE in the in-tree LLVM fork: sinkCommonCodeFromPredecessors'
-            // profitability scans now guard LockstepReverseIterator
-            // exhaustion instead of dereferencing (*LRI)[0] blind
-            // (llvm-project/llvm/lib/Transforms/Utils/SimplifyCFG.cpp).
-            // A cl-option containment (-simplifycfg-sink-common=false)
-            // was tried first and did NOT take effect through
-            // LLVMParseCommandLineOptions at this init point — and a
-            // transform-wide switch-off is a compromise regardless; the
-            // fork patch removes the crash class while keeping the
-            // optimization.
-        });
-        if let Ok(target) = verum_llvm::targets::Target::from_triple(&triple) {
-            if let Some(tm) = target.create_target_machine(
-                &triple,
-                "generic",
-                "",
-                verum_llvm::OptimizationLevel::None,
-                verum_llvm::targets::RelocMode::Default,
-                verum_llvm::targets::CodeModel::Default,
-            ) {
-                let td = tm.get_target_data();
-                module.set_data_layout(&td.get_data_layout());
-            }
+        // Reflection and lowering share a validated target machine and layout.
+        let settings = super::target_settings::TargetSettings {
+            triple: triple.as_str().to_string_lossy().as_ref().into(),
+            cpu: config.target_cpu.clone(), features: config.target_features.clone(),
+        };
+        let (target_machine, target_error) = match settings.machine() {
+            Ok(machine) => (Some(machine), None),
+            Err(error) => (None, Some(Text::from(error.to_string()))),
+        };
+        if let Some(tm) = target_machine.as_ref() {
+            module.set_data_layout(&tm.get_target_data().get_data_layout());
         }
 
         let types = TypeLowering::new(context);
@@ -862,6 +839,8 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
 
         Self {
             context,
+            target_machine,
+            target_error,
             module,
             types,
             config,
@@ -958,6 +937,9 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         expected: Option<&str>,
     ) -> Result<()> {
         use verum_vbc::module::EntryMain;
+        if let Some(error) = &self.target_error {
+            return Err(super::error::LlvmLoweringError::unsupported(error.clone()));
+        }
         let entry_index = match vbc_module.entry_main_for(expected) {
             EntryMain::Unique { index } => Some(index),
             verdict if expected.is_some() => {
@@ -2649,6 +2631,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             func_name,
         );
         ctx.signal_runtime = Some(&self.signal_runtime);
+        ctx.target_machine = self.target_machine.as_ref();
 
         // Hand the AOT permission policy to the function context so
         // `PermissionAssert` lowering can resolve it. Cloned `Arc` —

@@ -85,7 +85,10 @@ impl<'s> CompilationPipeline<'s> {
         // permission gate at compile time, sealing the resolved
         // grants in the binary so `--aot` runs of script-shaped
         // sources enforce identically to the interpreter.
-        let config = config.with_permission_policy(self.session.aot_permission_policy());
+        let mut config = config.with_permission_policy(self.session.aot_permission_policy());
+        let target = self.session.target_settings()?;
+        config.target_cpu = target.cpu;
+        config.target_features = target.features;
 
         info!("  Lowering VBC to LLVM IR (opt level: {})", opt_level);
 
@@ -188,7 +191,7 @@ impl<'s> CompilationPipeline<'s> {
         llvm_module: &verum_codegen::llvm::verum_llvm::module::Module<'_>,
     ) -> Result<PathBuf> {
         use verum_codegen::llvm::verum_llvm::targets::{
-            CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine,
+            CodeModel, FileType, InitializationConfig, RelocMode, Target,
         };
 
         // Initialize LLVM targets ONCE per process.
@@ -239,7 +242,8 @@ impl<'s> CompilationPipeline<'s> {
         };
 
         // Create target machine
-        let triple = TargetMachine::get_default_triple();
+        let settings = self.session.target_settings()?;
+        let triple = verum_codegen::llvm::verum_llvm::targets::TargetTriple::create(&settings.triple);
         let target = Target::from_triple(&triple)
             .map_err(|e| anyhow::anyhow!("Failed to get target: {}", e))?;
 
@@ -269,8 +273,8 @@ impl<'s> CompilationPipeline<'s> {
         let target_machine = target
             .create_target_machine(
                 &triple,
-                "generic",
-                "",
+                &settings.cpu,
+                &settings.features,
                 opt_level,
                 RelocMode::Default,
                 CodeModel::Default,

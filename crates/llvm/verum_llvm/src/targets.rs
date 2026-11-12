@@ -192,6 +192,14 @@ pub struct Target {
 }
 
 impl Target {
+    /// Refuse unknown CPU names or malformed/unknown feature toggles.
+    pub fn validate_subtarget(&self, triple: &TargetTriple, cpu: &str, features: &str) -> bool {
+        let (Ok(cpu), Ok(features)) = (std::ffi::CString::new(cpu), std::ffi::CString::new(features)) else { return false; };
+        // SAFETY: the target and all NUL-terminated strings remain live during
+        // this synchronous compiler-host metadata inspection.
+        unsafe { verum_llvm_sys::target_machine::verum_llvm_validate_subtarget(
+            self.target, triple.as_ptr(), cpu.as_ptr(), features.as_ptr()) }
+    }
     pub unsafe fn new(target: LLVMTargetRef) -> Self {
         assert!(!target.is_null());
 

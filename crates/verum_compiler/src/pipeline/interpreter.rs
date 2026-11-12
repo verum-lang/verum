@@ -119,6 +119,7 @@ impl<'s> CompilationPipeline<'s> {
     ) -> Result<()> {
         crate::api::ensure_scripting_compiler_installed();
         let mut interpreter = VbcInterpreter::try_new(module)?;
+        interpreter.state.config.target_capabilities = Some(std::sync::Arc::new(self.session.target_settings()?.capabilities()?));
         let rt = &self.session.language_features().runtime;
         interpreter.state.config.async_scheduler = rt.async_scheduler.as_str().to_string();
         interpreter.state.config.async_worker_threads = rt.async_worker_threads;
@@ -531,6 +532,7 @@ impl<'s> CompilationPipeline<'s> {
 
         // Step 2: Create VBC interpreter with output capture enabled
         let mut interpreter = VbcInterpreter::new(vbc_module);
+        interpreter.state.config.target_capabilities = Some(std::sync::Arc::new(self.session.target_settings()?.capabilities()?));
         interpreter.state.enable_output_capture();
         interpreter.state.config.count_instructions = true;
         interpreter.state.config.max_instructions = 1_000_000_000; // 1B instruction limit for tests (minimax/DP algorithms)

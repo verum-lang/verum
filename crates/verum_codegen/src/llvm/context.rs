@@ -181,6 +181,8 @@ pub enum CaptureKind {
 /// Manages register values, basic blocks, and statistics for a single
 /// function being lowered.
 pub struct FunctionContext<'a, 'ctx> {
+    /// The same configured machine that supplies this module's target layout.
+    pub(crate) target_machine: Option<&'a verum_llvm::targets::TargetMachine>,
     /// Sticky VBC-authored type hints (see set_sticky_type_hint).
     sticky_type_hints: std::collections::HashMap<u16, String>,
     /// Registers holding a `LoadT { Generic(_) }` result (#44-B). At
@@ -869,6 +871,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
         Self {
             sticky_type_hints: std::collections::HashMap::new(),
+            target_machine: None,
             loadt_generic_regs: std::collections::HashSet::new(),
             function,
             module,
@@ -990,6 +993,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
 
         Self {
             sticky_type_hints: std::collections::HashMap::new(),
+            target_machine: None,
             loadt_generic_regs: std::collections::HashSet::new(),
             function,
             module,

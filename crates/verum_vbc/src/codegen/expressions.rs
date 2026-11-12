@@ -35093,6 +35093,21 @@ impl VbcCodegen {
             }
         };
 
+        // A target type query must retain its lexical type witness. Compiling
+        // T as an ordinary value would erase generic and nominal identity.
+        if matches!(intrinsic_info.intrinsic.strategy, crate::intrinsics::registry::CodegenStrategy::TargetHasAtomic) {
+            let [_, operand] = args.as_slice() else {
+                return Err(CodegenError::internal("target_has_atomic requires one type operand"));
+            };
+            let ty = self.declaration_property_operand_in_scope(operand, self.ctx.current_source_module.as_deref(), true)
+                .ok_or_else(|| CodegenError::internal("target_has_atomic requires a type, not a runtime value"))?;
+            let type_ref = self.resolve_type_ref_scoped_with_count(&ty, &self.ctx.current_generic_param_ids, true,
+                self.ctx.current_source_module.as_deref(), &mut |count| self.const_eval_i64(count).ok().flatten().and_then(|value| u64::try_from(value).ok()))?;
+            let type_ref = self.resolve_declared_associated_types(&type_ref).unwrap_or(type_ref);
+            self.ctx.emit(Instruction::TargetHasAtomic { dst: dest, type_ref });
+            return Ok(Some(dest));
+        }
+
         // Compile remaining arguments
         let mut arg_regs = Vec::with_capacity(args.len().saturating_sub(1));
         for arg in args.iter().skip(1) {
@@ -35804,6 +35819,11 @@ impl VbcCodegen {
             }
             CodegenStrategy::CompileTimeConstant => {
                 self.emit_intrinsic_compile_time_constant(intrinsic.name, dest)?;
+            }
+            CodegenStrategy::TargetHasAtomic => return Err(CodegenError::internal("atomic capability query requires its declaration-owned type operand")),
+            CodegenStrategy::TargetHasFeature => {
+                let [feature] = args else { return Err(CodegenError::internal("target_has_feature requires one Text operand")); };
+                self.ctx.emit(Instruction::TargetHasFeature { dst: dest, feature: *feature });
             }
             CodegenStrategy::ArithExtendedOpcode(sub_op) => {
                 self.emit_intrinsic_arith_extended(*sub_op, args, dest);

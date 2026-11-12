@@ -9819,6 +9819,10 @@ pub enum ExtendedSubOpcode {    /// Reserved no-op — forward-compat anchor. Al
     DropTyped = 0x09,
     /// Carry a caller-scoped receiver declaration to the immediately following instance call.
     BindMethodReceiver = 0x0a,
+    /// Target atomic support: destination and declaration-owned TypeRef.
+    TargetHasAtomic = 0x0b,
+    /// Target CPU feature: destination and Text operand registers.
+    TargetHasFeature = 0x0c,
 
     /// Process termination — reads one `Int` register and terminates
     /// the process with that exit code. Format: `[0x1F][0x10][reg:u16]`.
@@ -10079,6 +10083,8 @@ impl ExtendedSubOpcode {
             0x08 => Some(Self::NewClosureWitnessed),
             0x09 => Some(Self::DropTyped),
             0x0a => Some(Self::BindMethodReceiver),
+            0x0b => Some(Self::TargetHasAtomic),
+            0x0c => Some(Self::TargetHasFeature),
             0x10 => Some(Self::ProcessExit),
             0x11 => Some(Self::PanicValue),
             0x20 => Some(Self::ScriptEngineNew),
@@ -10169,6 +10175,8 @@ impl ExtendedSubOpcode {
             Self::NewClosureWitnessed => "EXT_NEW_CLOSURE_WITNESSED",
             Self::DropTyped => "EXT_DROP_TYPED",
             Self::BindMethodReceiver => "EXT_BIND_METHOD_RECEIVER",
+            Self::TargetHasAtomic => "EXT_TARGET_HAS_ATOMIC",
+            Self::TargetHasFeature => "EXT_TARGET_HAS_FEATURE",
             Self::GetFieldNamed => "EXT_GET_FIELD_NAMED",
             Self::SetFieldNamed => "EXT_SET_FIELD_NAMED",
             Self::ProcessExit => "EXT_PROCESS_EXIT",
@@ -10680,6 +10688,20 @@ pub enum Instruction {    // ===================================================
         dst: Reg,
         /// Declaration-owned type, substituted by the frame or monomorphizer.
         type_ref: TypeRef,
+    },
+    /// Query atomic storage support after substituting the exact type witness.
+    TargetHasAtomic {
+        /// Destination Bool register.
+        dst: Reg,
+        /// Exact operand type; aliases preserve their declaration identity.
+        type_ref: TypeRef,
+    },
+    /// Query the configured target's enabled CPU features.
+    TargetHasFeature {
+        /// Destination Bool register.
+        dst: Reg,
+        /// Text containing an LLVM CPU feature name.
+        feature: Reg,
     },
     /// Load small immediate (-64..63).
     LoadSmallI {

@@ -2372,6 +2372,9 @@ impl NurseryRegistry {
 /// Interpreter configuration.
 #[derive(Debug, Clone)]
 pub struct InterpreterConfig {
+    /// Explicit compilation/execution target. Missing facts refuse queries;
+    /// the interpreter never substitutes its build host for an unknown target.
+    pub target_capabilities: Option<Arc<crate::target::TargetCapabilities>>,
     /// Maximum call stack depth.
     pub max_stack_depth: usize,
 
@@ -2424,6 +2427,7 @@ pub struct InterpreterConfig {
 impl Default for InterpreterConfig {
     fn default() -> Self {
         Self {
+            target_capabilities: None,
             // Production-sized call stack. Each frame is ~64 bytes (regs +
             // bookkeeping), so 16384 frames ≈ 1 MB on the interpreter's
             // heap-allocated CallStack — well below the OS thread stack

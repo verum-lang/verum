@@ -4,6 +4,34 @@ use verum_compiler::{CompilationPipeline, CompilerOptions, CoreConfig, Session};
 use verum_vbc::{Instruction, archive::read_archive_from_file, bytecode::decode_instructions};
 
 #[test]
+fn actual_platform_queries_survive_archive_bootstrap_and_target_rebinding() {
+    let root = tempfile::tempdir().unwrap();
+    let core = root.path().join("core");
+    fs::create_dir_all(core.join("intrinsics")).unwrap();
+    fs::write(core.join("mod.vr"), "module core; public module intrinsics { public module platform; }").unwrap();
+    // A focused bootstrap of the two actual definitions, not a full-stdlib claim.
+    let mut source = "module core.intrinsics.platform;\n".to_owned();
+    let mut count = 0;
+    for line in include_str!("../../../core/intrinsics/platform.vr").lines() {
+        if line.starts_with("public meta fn target_has_atomic") || line.starts_with("public meta fn target_has_feature") {
+            source.push_str(line);
+            source.push('\n');
+            count += 1;
+        }
+    }
+    assert_eq!(count, 2);
+    fs::write(core.join("intrinsics/platform.vr"), source).unwrap();
+    let archive = bootstrap(&core);
+    for (bits, expected) in [(0, 19), (64, 73)] {
+        let facts = verum_vbc::target::TargetCapabilities { max_atomic_bits: bits, pointer_bits: 64, features: Default::default() };
+        assert_eq!(execute_with_target(&archive,
+            "module app; mount core.intrinsics.platform.{target_has_atomic, target_has_feature};
+             fn main() -> Int { if target_has_atomic<UInt64>() && !target_has_feature(\"unknown-cpu-feature\") { 73 } else { 19 } }",
+            Some(std::sync::Arc::new(facts))), expected);
+    }
+}
+
+#[test]
 fn imported_future_outputs_and_contextual_owner_arguments_survive_bootstrap() {
     check_bootstrap(false);
 }
@@ -745,6 +773,11 @@ fn try_bootstrap(core: &std::path::Path) -> anyhow::Result<verum_vbc::archive::V
 }
 
 fn execute(archive: &verum_vbc::archive::VbcArchive, source: &str) -> i64 {
+    execute_with_target(archive, source, None)
+}
+
+fn execute_with_target(archive: &verum_vbc::archive::VbcArchive, source: &str,
+    target: Option<std::sync::Arc<verum_vbc::target::TargetCapabilities>>) -> i64 {
     let app = verum_fast_parser::Parser::new(source)
         .parse_module()
         .unwrap();
@@ -761,9 +794,9 @@ fn execute(archive: &verum_vbc::archive::VbcArchive, source: &str) -> i64 {
         .unwrap();
     let app = codegen.finalize_module_from_state().unwrap();
     let main = app.find_function_by_name("app.main").unwrap();
-    let value = verum_vbc::interpreter::Interpreter::new(std::sync::Arc::new(app))
-        .execute_function(main)
-        .unwrap();
+    let mut interpreter = verum_vbc::interpreter::Interpreter::new(std::sync::Arc::new(app));
+    interpreter.state.config.target_capabilities = target;
+    let value = interpreter.execute_function(main).unwrap();
     assert!(value.is_int());
     value.as_i64()
 }

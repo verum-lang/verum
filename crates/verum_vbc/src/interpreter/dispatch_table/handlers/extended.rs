@@ -161,6 +161,30 @@ pub(in super::super) fn handle_extended(
             // older interpreters.
             Ok(DispatchResult::Continue)
         }
+        Some(ExtendedSubOpcode::TargetHasAtomic) => {
+            let dst = read_reg(state)?;
+            let ty = super::bytecode_io::read_type_ref(state)?;
+            let ty = state.resolve_generic_witness(&ty)?;
+            let target = state.config.target_capabilities.as_ref().ok_or_else(|| InterpreterError::Panic {
+                message: "execution target capabilities were not supplied".into(),
+            })?;
+            let supported = target.has_atomic(&state.module, &ty).map_err(|error| InterpreterError::Panic { message: error.to_string() })?;
+            state.set_reg(dst, crate::value::Value::from_bool(supported));
+            Ok(DispatchResult::Continue)
+        }
+        Some(ExtendedSubOpcode::TargetHasFeature) => {
+            let dst = read_reg(state)?;
+            let operand = read_reg(state)?;
+            let feature = state.read_text(state.get_reg(operand)).ok_or_else(|| InterpreterError::Panic {
+                message: "target_has_feature requires Text".into(),
+            })?;
+            let target = state.config.target_capabilities.as_ref().ok_or_else(|| InterpreterError::Panic {
+                message: "execution target capabilities were not supplied".into(),
+            })?;
+            let supported = target.has_feature(&feature);
+            state.set_reg(dst, crate::value::Value::from_bool(supported));
+            Ok(DispatchResult::Continue)
+        }
         Some(ExtendedSubOpcode::TypeResource) => {
             let dst = read_reg(state)?;
             let ty = super::bytecode_io::read_type_ref(state)?;

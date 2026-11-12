@@ -67,6 +67,9 @@ pub enum LLVMGlobalISelAbortMode {
 }
 
 unsafe extern "C" {
+    /// Validate CPU/features against LLVM's target catalog before construction.
+    pub fn verum_llvm_validate_subtarget(target: LLVMTargetRef, triple: *const libc::c_char,
+        cpu: *const libc::c_char, features: *const libc::c_char) -> bool;
     /// Read LLVM's selected function subtarget, without architecture guesses.
     pub fn verum_llvm_subtarget_info(
         machine: LLVMTargetMachineRef,
