@@ -23989,12 +23989,12 @@ bake to have this verified.",
         {
             return Ok(Some(result));
         }
-        if let Some(mut r) = self.try_resolve_super_path_call(
-            receiver, method, args, span, skip_static_lookup,
+        if let Some(mut r) = self.try_resolve_namespace_call(
+            receiver, method, type_args, args, span, skip_static_lookup,
         )? {
             if crate::ctor_trace_enabled() {
                 eprintln!(
-                    "[ctor-trace] pre-recv SUPER-PATH {} -> {}",
+                    "[ctor-trace] pre-recv NAMESPACE {} -> {}",
                     method.name, r.ty
                 );
             }
@@ -24314,375 +24314,59 @@ bake to have this verified.",
     /// CBGR implementation: epoch-based generation tracking, acquire-release memory ordering, lock-free ABA-protected maps, ThinRef 16 bytes, FatRef 24 bytes — #auto-dereference
     /// Resolve `super.method(args)` calls, module-alias calls
     /// (`mount X as A` then `A.method()`), and DI context method dispatch.
-    fn try_resolve_super_path_call(
+    /// Namespace spelling does not define a different call operation. Resolve
+    /// its declaration-owned path and use ordinary call inference, retaining
+    /// generic obligations, permissions and the exact selected callable bound.
+    fn try_resolve_namespace_call(
         &mut self,
         receiver: &Expr,
         method: &Ident,
+        type_args: &List<verum_ast::ty::GenericArg>,
         args: &[Expr],
         span: Span,
         skip_static_lookup: bool,
     ) -> Result<Option<InferResult>> {
-        // Handle super path function calls
-        // When we have `super.func(args)`, this is parsed as a method call
-        // but should be resolved as a parent module function call.
-        // Circular import handling: detection and error reporting for cyclic module dependencies — Relative module paths
-        if let ExprKind::Path(path) = &receiver.kind
-            && !path.segments.is_empty()
-            && matches!(
-                path.segments.first(),
-                Some(verum_ast::ty::PathSegment::Super)
-            )
-        {
-            // Resolve super.func() by looking up in parent module
-            let method_name = method.name.as_str();
-
-            // Get current module path and compute parent path
-            let current_module_path = self.current_module_path.clone();
-            if let Some(parent_path) =
-                self.compute_parent_module_path(&current_module_path, &path.segments)
-            {
-                // Build the full function path in the parent module
-                let full_path = if parent_path.is_empty() {
-                    verum_common::Text::from(method_name)
-                } else {
-                    verum_common::Text::from(format!("{}.{}", parent_path, method_name))
-                };
-
-                // Look up function in parent module's inline modules
-                // Clone items to avoid borrow conflict with infer_function_type
-                let items_opt = self
-                    .inline_modules
-                    .get(&verum_common::Text::from(parent_path.clone()))
-                    .and_then(|m| m.items.clone());
-
-                if let Some(items) = items_opt {
-                    for item in items.iter() {
-                        if let verum_ast::ItemKind::Function(func_decl) = &item.kind {
-                            if func_decl.name.name.as_str() == method_name {
-                                // Found the function - infer its type and return
-                                let func_type = self.infer_function_type(func_decl)?;
-                                if let Type::Function {
-                                    params,
-                                    return_type,
-                                    ..
-                                } = &func_type
-                                {
-                                    // Check argument count
-                                    // Allow ±1 tolerance for self-param counting
-                                    // T1270: a ±1 tolerance is not the self-parameter rule.
-                                    let params = match Self::effective_params(params.as_slice(), args.len(), None) {
-                                        Some(effective) => effective,
-                                        None => {
-                                            return Err(self.arity_error(method.name.clone(), params.len(), args.len(), span));
-                                        }
-                                    };
-
-                                    // Type check each argument
-                                    for (arg, param_ty) in args.iter().zip(params.iter()) {
-                                        let resolved_param = self.unifier.apply(param_ty);
-                                        self.check_expr(arg, &resolved_param)?;
-                                    }
-
-                                    let resolved_return = self.unifier.apply(return_type);
-                                    {
-                            if crate::ctor_trace_enabled() {
-                                eprintln!(
-                                    "[ctor-trace] pre-recv TYPEEXPR-ARM@{} {} -> {}",
-                                    line!(),
-                                    method.name, resolved_return
-                                );
-                            }
-                            return Ok(Some(InferResult::new(resolved_return)));
-                        }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Function not found in parent module
-                return Err(TypeError::UnboundVariable {
-                    name: verum_common::Text::from(format!("super.{}", method_name)),
-                    span,
-                });
-            }
+        use verum_ast::ty::PathSegment;
+        if skip_static_lookup { return Ok(None); }
+        let mut root = receiver;
+        let mut suffix = List::new();
+        while let ExprKind::Field { expr, field } = &root.kind {
+            suffix.push(field.clone());
+            root = expr;
         }
-
-        // Module-alias dispatch — `mount X as A;` then `A.method(...)`
-        // routes to `X.method(...)` rather than synth_expr'ing `A` as a
-        // value. Without this, a stdlib function with the same name as
-        // the user's alias (e.g. core.sys.linux.syscall.stat vs
-        // `mount core.net.h3.qpack.static_table as stat;`) wins at
-        // value-lookup and the whole `stat.get(0)` call breaks with a
-        // spurious method-dispatch error.
-        //
-
-        // Only fires on the first call of a chain (`!skip_static_lookup`).
-        if !skip_static_lookup
-            && let ExprKind::Path(path) = &receiver.kind
-            && path.segments.len() == 1
-            && let Some(verum_ast::ty::PathSegment::Name(ident)) = path.segments.first()
-            && let Some(module_path) = self.module_aliases.get(&ident.name).cloned()
-            && !self.ctx.env.is_locally_bound(ident.name.as_str())
-            // Source namespaces use the inline resolver's visibility and arity checks.
-            && !self.inline_modules.contains_key(&ident.name)
-        {
-            let method_name = method.name.as_str();
-            let qualified: Text = format!("{}.{}", module_path, method_name).into();
-            // `core.X.Y` → also probe `X.Y`: archives register descriptors
-            // by their `module.simple` form which strips the `core.` root
-            // prefix (see `archive_ctx_loader::register_module` qualified
-            // computation and `verum_vbc/src/codegen/mod.rs`
-            // `current_source_module` promotion).  Without the stripped
-            // probe, `mount core.sys.bitfield; bitfield.test_bit(...)`
-            // misses the archive-stored `sys.bitfield.test_bit` and falls
-            // into UnboundVariable.
-            let stripped: Option<Text> = module_path
-                .as_str()
-                .strip_prefix("core.")
-                .map(|rest| format!("{}.{}", rest, method_name).into());
-
-            // A module/type mount carries its full owner through lookup.
-            // The lazy metadata loader may use a legacy bare descriptor only
-            // after checking its declared parent; a bare env slot has no such
-            // provenance and cannot satisfy this qualified request.
-            let env_hit = self
-                .ctx
-                .env
-                .lookup(&qualified)
-                .cloned()
-                .or_else(|| stripped.as_ref().and_then(|s| self.ctx.env.lookup(s).cloned()))
-                .or_else(|| self.lookup_function_in_module(qualified.as_str()))
-                .or_else(|| stripped.as_ref()
-                    .and_then(|s| self.lookup_function_in_module(s.as_str())));
-            let env_hit = match env_hit {
-                Some(s) => Some(s),
-                None => self.lookup_static_or_load_from_metadata(qualified.as_str()),
-            };
-            // T1032 — LAST RESORT: mount the path on demand, the way the
-            // fully-qualified form already does.
-            //
-            // `mount core.configuration.toml as tf; tf.parse(s)` reported
-            // `unbound variable: core.configuration.toml.parse` while the
-            // same string written out — `core.configuration.toml.parse(s)`
-            // — type-checks WITH NO MOUNT AT ALL. Measured, and the reason
-            // is not a spelling: `resolve_qualified_path_expr`
-            // (infer/expr.rs) does not look the name up, it SYNTHESISES a
-            // `MountDecl` for the path, runs `check_import` inside a pushed
-            // scope, and reads the item out by its bare name. A qualified
-            // path IS a mount of that symbol used once, as the comment
-            // there says.
-            //
-            // The alias branch above only ever performed lookups, so every
-            // name that needs the archive walked in through a door it never
-            // opened. Adding a seventh spelling would not have helped, and
-            // was measured not to: probing the lazy loader with all three
-            // forms instead of one left the verdict byte-identical.
-            //
-            // The scope is pushed and popped exactly as there, so `parse`
-            // stays unbound afterwards and the aliased form does not
-            // silently act as an import.
-            let env_hit = match env_hit {
-                Some(s) => Some(s),
-                None => {
-                    let mount_path = verum_ast::ty::Path::new(
-                        module_path
-                            .as_str()
-                            .split('.')
-                            .chain(std::iter::once(method_name))
-                            .map(|seg| {
-                                verum_ast::ty::PathSegment::Name(verum_ast::ty::Ident::new(
-                                    seg, span,
-                                ))
-                            })
-                            .collect(),
-                        span,
-                    );
-                    let decl = verum_ast::MountDecl {
-                        visibility: verum_ast::decl::Visibility::Private,
-                        tree: verum_ast::decl::MountTree {
-                            kind: verum_ast::decl::MountTreeKind::Path(mount_path),
-                            alias: verum_common::Maybe::None,
-                            span,
-                        },
-                        alias: verum_common::Maybe::None,
-                        span,
-                    };
-                    self.ctx.env.push_scope();
-                    let import_res = self.check_import(&decl);
-                    let imported = import_res.is_ok();
-                    let found = if imported {
-                        self.ctx.env.lookup(method_name).cloned()
-                    } else {
-                        None
-                    };
-                    if crate::ctor_trace_enabled() {
-                        // T1032: the synthetic mount works for some modules
-                        // and not others, while mounting the SAME path by
-                        // hand works for all of them. Say which of the two
-                        // steps gives up.
-                        eprintln!(
-                            "[ctor-trace] alias-mount path={}.{} import_ok={} bare_found={} err={}",
-                            module_path,
-                            method_name,
-                            imported,
-                            found.is_some(),
-                            match &import_res {
-                                Ok(_) => "-".to_string(),
-                                Err(e) => format!("{}", e),
-                            }
-                        );
-                    }
-                    self.ctx.env.pop_scope();
-                    found
-                }
-            };
-            if let Some(scheme) = env_hit {
-                // INSTANTIATE-AT-USE (persistent-var-leak class, the
-                // [[persistent-var-leak-value-position-variant]] twin):
-                // reading `scheme.ty` verbatim lets the FIRST call site
-                // bind the scheme's quantified vars globally — every
-                // later use of the same aliased fn inherits the first
-                // call's types.
-                let func_type = self.unifier.apply(&scheme.instantiate());
-                if let Type::Function {
-                    params,
-                    return_type,
-                    ..
-                } = &func_type
-                {
-                    if params.len() == args.len() {
-                        for (arg, param_ty) in args.iter().zip(params.iter()) {
-                            let resolved_param = self.unifier.apply(param_ty);
-                            self.check_expr(arg, &resolved_param)?;
-                        }
-                        let resolved_return = self.unifier.apply(return_type);
-                        if crate::ctor_trace_enabled() {
-                            eprintln!(
-                                "[ctor-trace] alias-arm env_hit {}.{} -> {}",
-                                module_path, method_name, resolved_return
-                            );
-                        }
-                        {
-                            if crate::ctor_trace_enabled() {
-                                eprintln!(
-                                    "[ctor-trace] pre-recv TYPEEXPR-ARM@{} {} -> {}",
-                                    line!(),
-                                    method.name, resolved_return
-                                );
-                            }
-                            return Ok(Some(InferResult::new(resolved_return)));
-                        }
-                    }
-                }
+        let ExprKind::Path(path) = &root.kind else { return Ok(None); };
+        let mut segments: List<PathSegment> = match path.segments.first() {
+            Some(PathSegment::Super) => {
+                let Some(parent) = self.compute_parent_module_path(
+                    &self.current_module_path, &path.segments,
+                ) else { return Ok(None); };
+                parent.split('.').filter(|name| !name.is_empty())
+                    .map(|name| PathSegment::Name(Ident::new(name, span))).collect()
             }
-
-            // Slow path: walk inline_modules AST items.
-            let items_opt = self
-                .inline_modules
-                .get(&module_path)
-                .map(|m| m.items.clone())
-                .and_then(|items| items);
-            if let Some(items) = items_opt {
-                for item in items.iter() {
-                    if let verum_ast::ItemKind::Function(func_decl) = &item.kind {
-                        if func_decl.name.name.as_str() == method_name
-                            && func_decl.visibility == verum_ast::decl::Visibility::Public
-                        {
-                            let func_type = self.infer_function_type(func_decl)?;
-                            if let Type::Function {
-                                params,
-                                return_type,
-                                ..
-                            } = &func_type
-                            {
-                                if params.len() == args.len() {
-                                    for (arg, param_ty) in args.iter().zip(params.iter()) {
-                                        let resolved_param = self.unifier.apply(param_ty);
-                                        self.check_expr(arg, &resolved_param)?;
-                                    }
-                                    let resolved_return = self.unifier.apply(return_type);
-                                    if crate::ctor_trace_enabled() {
-                                        eprintln!(
-                                            "[ctor-trace] alias-arm ast-walk {}.{} -> {}",
-                                            module_path, method_name, resolved_return
-                                        );
-                                    }
-                                    {
-                            if crate::ctor_trace_enabled() {
-                                eprintln!(
-                                    "[ctor-trace] pre-recv TYPEEXPR-ARM@{} {} -> {}",
-                                    line!(),
-                                    method.name, resolved_return
-                                );
-                            }
-                            return Ok(Some(InferResult::new(resolved_return)));
-                        }
-                                }
-                            }
-                        }
-                    }
-                }
+            Some(PathSegment::Name(ident))
+                if !self.ctx.env.is_locally_bound(ident.name.as_str()) => {
+                let Some(owner) = self.module_aliases.get(&ident.name) else { return Ok(None); };
+                let mut segments: List<_> = owner.as_str().split('.')
+                    .map(|name| PathSegment::Name(Ident::new(name, span))).collect();
+                segments.extend(path.segments.iter().skip(1).cloned());
+                segments
             }
+            _ => return Ok(None),
+        };
+        segments.extend(suffix.into_iter().rev().map(PathSegment::Name));
+        segments.push(PathSegment::Name(method.clone()));
+        let path = verum_ast::Path::new(segments, span);
+        // Lazily register the exact metadata owner, including a same-named
+        // companion module. This loader enforces owner and visibility; the
+        // ordinary call path then consumes that same declaration scheme.
+        let _ = self.lookup_static_or_load_from_metadata(self.path_to_string(&path).as_str());
 
-            // Registry fallback: walk the parsed AST of the aliased
-            // module, find the named public function, infer its type,
-            // and type-check the call against it.
-            let registry = self.module_registry.read();
-            if let Some(module_info) = registry.get_by_path(module_path.as_str()) {
-                let items: Vec<_> = module_info.ast.items.iter().cloned().collect();
-                drop(registry);
-                for item in items.iter() {
-                    if let verum_ast::ItemKind::Function(func_decl) = &item.kind {
-                        if func_decl.name.name.as_str() == method_name
-                            && func_decl.visibility == verum_ast::decl::Visibility::Public
-                        {
-                            let func_type = self.infer_function_type(func_decl)?;
-                            if let Type::Function {
-                                params,
-                                return_type,
-                                ..
-                            } = &func_type
-                            {
-                                if params.len() == args.len() {
-                                    for (arg, param_ty) in args.iter().zip(params.iter()) {
-                                        let resolved_param = self.unifier.apply(param_ty);
-                                        self.check_expr(arg, &resolved_param)?;
-                                    }
-                                    let resolved_return = self.unifier.apply(return_type);
-                                    if crate::ctor_trace_enabled() {
-                                        eprintln!(
-                                            "[ctor-trace] alias-arm ast-walk {}.{} -> {}",
-                                            module_path, method_name, resolved_return
-                                        );
-                                    }
-                                    {
-                            if crate::ctor_trace_enabled() {
-                                eprintln!(
-                                    "[ctor-trace] pre-recv TYPEEXPR-ARM@{} {} -> {}",
-                                    line!(),
-                                    method.name, resolved_return
-                                );
-                            }
-                            return Ok(Some(InferResult::new(resolved_return)));
-                        }
-                                }
-                            }
-                        }
-                    }
-                }
-            } else {
-                drop(registry);
-            }
-
-            // Function not found in aliased module.
-            return Err(TypeError::UnboundVariable {
-                name: verum_common::Text::from(format!("{}.{}", module_path, method_name)),
-                span,
-            });
-        }
-
-        Ok(None)
+        let call = Expr::new(ExprKind::Call {
+            func: Box::new(Expr::new(ExprKind::Path(path), span)),
+            type_args: type_args.clone(),
+            args: args.iter().cloned().collect(),
+        }, span);
+        self.synth_expr(&call).map(Some)
     }
 
     /// Resolve module-qualified function calls: `module.func(args)` or
@@ -24780,6 +24464,7 @@ bake to have this verified.",
                                 self.check_expr(arg, &resolved_param)?;
                             }
 
+                            self.type_registry.register_call_target(span, self.unifier.apply(&func_result.ty));
                             let resolved_return = self.unifier.apply(return_type);
                             return Ok(Some(InferResult::new(resolved_return)));
                         } else {
@@ -24870,7 +24555,8 @@ bake to have this verified.",
                                     self.check_expr(arg, &resolved_param)?;
                                 }
 
-                                let resolved_return = self.unifier.apply(return_type);
+                                self.type_registry.register_call_target(span, self.unifier.apply(&func_result.ty));
+                            let resolved_return = self.unifier.apply(return_type);
                                 return Ok(Some(InferResult::new(resolved_return)));
                             }
                             // Non-function resolution: fall through to
@@ -24901,7 +24587,7 @@ bake to have this verified.",
             {
                 let seg_vec: Vec<&str> = segments.to_vec();
                 if let Some(r) =
-                    self.try_resolve_global_module_fn_call(&seg_vec, method, type_args, args)?
+                    self.try_resolve_global_module_fn_call(&seg_vec, method, type_args, args, span)?
                 {
                     return Ok(Some(r));
                 }
@@ -24950,7 +24636,7 @@ bake to have this verified.",
                 }
             }
             if all_names {
-                if let Some(r) = self.try_resolve_global_module_fn_call(&seg_vec, method, type_args, args)? {
+                if let Some(r) = self.try_resolve_global_module_fn_call(&seg_vec, method, type_args, args, span)? {
                     return Ok(Some(r));
                 }
                 if self.module_member_is_missing(&seg_vec, method, skip_static_lookup) {
@@ -25290,16 +24976,6 @@ bake to have this verified.",
         method: &Ident,
         type_args: &List<verum_ast::ty::GenericArg>,
         args: &[Expr],
-    ) -> Result<Option<InferResult>> {
-        self.try_resolve_global_module_fn_call_at(segments, method, type_args, args, method.span)
-    }
-
-    fn try_resolve_global_module_fn_call_at(
-        &mut self,
-        segments: &[&str],
-        method: &Ident,
-        type_args: &List<verum_ast::ty::GenericArg>,
-        args: &[Expr],
         span: Span,
     ) -> Result<Option<InferResult>> {
         let base_bound = self.ctx.env.lookup(segments[0]).is_some();
@@ -25463,6 +25139,7 @@ bake to have this verified.",
                         }
                         self.enforce_call_type_bounds(&instance.type_bounds, span)?;
                         self.enforce_call_protocol_bounds(&instance.protocol_bounds, span)?;
+                        self.type_registry.register_call_target(span, self.unifier.apply(&func_type));
                         let resolved_return = self.unifier.apply(return_type);
                         return Ok(Some(InferResult::new(resolved_return)));
                     }
