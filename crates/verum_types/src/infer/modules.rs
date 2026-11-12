@@ -22010,7 +22010,7 @@ impl TypeChecker {
             return Ok(InferResult::method(recv_ty, Some(crate::core_metadata::ReceiverKind::SelfRef)));
         }
 
-        if let Some(r) = self.try_fallback_name_dispatch(&recv_ty, recv_ty_raw, method, args, span)? {
+        if let Some(r) = self.try_fallback_name_dispatch(&recv_ty, recv_ty_raw, method, type_args, args, span)? {
             return Ok(r);
         }
 
@@ -22812,99 +22812,28 @@ impl TypeChecker {
         recv_ty: &Type,
         recv_ty_raw: &Type,
         method: &Ident,
+        type_args: &List<verum_ast::ty::GenericArg>,
         args: &[Expr],
         span: Span,
     ) -> Result<Option<InferResult>> {
-        // TYPE ALIAS METHOD RESOLUTION FALLBACK
-        // When a method is not found on the receiver type directly, search for
-        // implement blocks on type aliases whose target type is compatible with recv_ty.
-        // This enables transparent type alias semantics where:
-        //  type EpochCaps = u32;
-        //  implement EpochCaps { fn epoch(self) -> u32 { ... } }
-        //  let x: Int = ref.epoch_caps(); // epoch_caps() returns Int
-        //  x.epoch() // finds EpochCaps::epoch because u32 == Int
+        // Transparent aliases may own methods. Selection retains the entire
+        // scheme so alias calls cannot omit generic or callable obligations.
+        let alias_scheme = {
+            let methods = self.inherent_methods.read();
+            self.ctx.type_aliases.iter().find_map(|(name, target)| {
+                if target == recv_ty {
+                    methods.get(name).and_then(|entries| entries.get(&method.name)).cloned()
+                } else {
+                    None
+                }
+            })
+        };
+        if let Some(scheme) = alias_scheme
+            && let Some(result) = self.check_selected_inherent_method(
+                recv_ty, method, type_args, args, span, &scheme,
+            )?
         {
-            let alias_method_info = {
-                let methods_guard = self.inherent_methods.read();
-                let method_name_text = verum_common::Text::from(method.name.as_str());
-
-                // First check: only look at aliases that have the method registered.
-                // This avoids iterating through all aliases and calling the Numeric protocol checker.
-                let mut found = None;
-                let mut found_alias_name: Option<verum_common::Text> = None;
-                for (alias_name, alias_target) in &self.ctx.type_aliases {
-                    // Quick check: does this alias even have the method?
-                    let has_method = methods_guard
-                        .get(alias_name)
-                        .and_then(|methods| methods.get(&method_name_text))
-                        .is_some();
-                    if !has_method {
-                        continue;
-                    }
-
-                    // Check if alias target is compatible with the receiver type.
-                    // Direct equality check (since u32/i32/etc all resolve to Type::Int).
-                    let compatible =
-                        *alias_target == *recv_ty || alias_target.to_text() == recv_ty.to_text();
-
-                    if compatible {
-                        if let Some(methods) = methods_guard.get(alias_name) {
-                            if let Some(scheme) = methods.get(&method_name_text) {
-                                let impl_vc = scheme.impl_var_count;
-                                let (ty, fresh_vars, type_bounds) =
-                                    scheme.instantiate_with_type_bounds();
-                                found = Some(((ty, fresh_vars, impl_vc), type_bounds, scheme.receiver_kind));
-                                found_alias_name = Some(alias_name.clone());
-                                break;
-                            }
-                        }
-                    }
-                }
-                (found, found_alias_name)
-            };
-
-            if let (
-                Some(((method_ty, _ordered_fresh_vars, _impl_var_count), type_bounds, receiver_kind)),
-                Some(_alias_name),
-            ) = (alias_method_info.0, alias_method_info.1)
-            {
-                // #91/#95 — alias-target dispatch.  Not stamped: the
-                // resolution path runs ONLY for instance calls
-                // (receiver is a value of the aliased type), not for
-                // `<alias>.method()` which goes through the static
-                // path.  Stamping would shape an instance call as a
-                // static Call and miscount arity.  Instance dispatch
-                // stays on the legacy CallM-based path; this
-                // resolution site contributes type-bounds context
-                // but no fast-path optimisation.
-                // Register type bounds for fresh type variables
-                for (fresh_var, bounds) in &type_bounds {
-                    for bound in bounds {
-                        self.register_type_var_type_bound(*fresh_var, bound.clone());
-                    }
-                }
-                // Type check the call
-                if let Type::Function {
-                    params,
-                    return_type,
-                    ..
-                } = &method_ty
-                {
-                    // T1270: a ±1 tolerance is not the self-parameter rule.
-                    let params = match Self::effective_params(params.as_slice(), args.len(), None) {
-                        Some(effective) => effective,
-                        None => {
-                            return Err(self.arity_error(verum_common::Text::from(method.name.as_str()), params.len(), args.len(), span));
-                        }
-                    };
-                    for (arg, param_ty) in args.iter().zip(params.iter()) {
-                        let resolved_param = self.unifier.apply(param_ty);
-                        self.check_expr(arg, &resolved_param)?;
-                    }
-                    let resolved_return = self.unifier.apply(return_type);
-                    return Ok(Some(InferResult::method(resolved_return, receiver_kind)));
-                }
-            }
+            return Ok(Some(result));
         }
 
         // GENERIC BASE-NAME FALLBACK: When all other lookup paths fail, try
@@ -22983,138 +22912,16 @@ impl TypeChecker {
             }
 
             let method_name_text = verum_common::Text::from(method.name.as_str());
-            let fallback_method_info = {
-                let methods_guard = self.inherent_methods.read();
-                base_name_candidates.iter().find_map(|candidate_name| {
-                    methods_guard.get(candidate_name).and_then(|methods| {
-                        methods.get(&method_name_text).cloned().map(|scheme| {
-                            let impl_vc = scheme.impl_var_count;
-                            let (ty, fresh_vars, type_bounds) =
-                                scheme.instantiate_with_type_bounds();
-                            (
-                                candidate_name.clone(),
-                                (ty, fresh_vars, impl_vc),
-                                type_bounds,
-                                scheme.receiver_kind,
-                            )
-                        })
-                    })
+            let scheme = {
+                let methods = self.inherent_methods.read();
+                base_name_candidates.iter().find_map(|name| {
+                    methods.get(name).and_then(|entries| entries.get(&method_name_text)).cloned()
                 })
             };
-
-            if let Some((
-                _matched_name,
-                (method_ty, ordered_fresh_vars, impl_var_count),
-                type_bounds,
-                receiver_kind,
-            )) = fallback_method_info
-            {
-                // Register type bounds
-                for (fresh_var, bounds) in &type_bounds {
-                    for bound in bounds {
-                        self.register_type_var_type_bound(*fresh_var, bound.clone());
-                    }
-                }
-
-                if let Type::Function {
-                    params,
-                    return_type,
-                    ..
-                } = &method_ty
-                {
-                    // T1270: a ±1 tolerance is not the self-parameter rule.
-                    let params = match Self::effective_params(params.as_slice(), args.len(), None) {
-                        Some(effective) => effective,
-                        None => {
-                            return Err(self.arity_error(method_name_text, params.len(), args.len(), span));
-                        }
-                    };
-
-                    // Bind type variables from receiver type args
-                    let receiver_type_args: List<Type> = match &recv_ty {
-                        Type::Named { args, .. } | Type::Generic { args, .. } => args.clone(),
-                        // ARRAY-ITER-CONCRETIZE-1: surface the element as
-                        // the receiver's single type arg so the impl-level
-                        // var of `implement<T> [T]` binds (SliceIter<T>).
-                        Type::Array { element, .. } | Type::Slice { element } => {
-                            let mut l: List<Type> = List::new();
-                            l.push((**element).clone());
-                            l
-                        }
-                        _ => {
-                            // Also try recv_ty_raw
-                            match &recv_ty_raw {
-                                Type::Named { args, .. } | Type::Generic { args, .. } => {
-                                    args.clone()
-                                }
-                                _ => List::new(),
-                            }
-                        }
-                    };
-
-                    if std::env::var("VERUM_TRACE_METHOD_LOOKUP").is_ok() {
-                        eprintln!(
-                            "[self-bind] method={} impl_vc={} fresh={} recv_args={}",
-                            method.name.as_str(),
-                            impl_var_count,
-                            ordered_fresh_vars.len(),
-                            receiver_type_args.len()
-                        );
-                    }
-                    let bind_limit = Self::resolve_bind_limit(
-                        impl_var_count,
-                        ordered_fresh_vars.len(),
-                        receiver_type_args.len(),
-                    );
-                    let mut combined_subst = crate::ty::Substitution::new();
-                    for (type_var, type_arg) in ordered_fresh_vars
-                        .iter()
-                        .take(bind_limit)
-                        .zip(receiver_type_args.iter())
-                    {
-                        if let Ok(subst) =
-                            self.unifier.unify(&Type::Var(*type_var), type_arg, span)
-                        {
-                            combined_subst = combined_subst.compose(&subst)
-                                .map_err(|message| TypeError::UniverseBinding { message, span })?;
-                        }
-                    }
-
-                    self.apply_fn_bound_extraction(&type_bounds, span);
-
-                    // OVERLOAD GUARD: same as early/primary paths.
-                    // `params` is a slice since T1270 made `effective_params`
-                    // return one, so the `.clone()` this line used to carry
-                    // copied the REFERENCE and did nothing — rustc's
-                    // `noop_method_call` said so. Iterating the slice directly
-                    // is what the code already meant.
-                    let mut signature_mismatch = false;
-                    for (arg, param_ty) in args.iter().zip(params.iter()) {
-                        if matches!(&arg.kind, ExprKind::Closure { .. }) {
-                            let subst_param_ty = param_ty.apply_subst(&combined_subst);
-                            let resolved_param = self.unifier.apply(&subst_param_ty);
-                            if !matches!(
-                                &resolved_param,
-                                Type::Function { .. } | Type::Var(_) | Type::Placeholder { .. }
-                            ) {
-                                signature_mismatch = true;
-                                break;
-                            }
-                        }
-                    }
-                    if !signature_mismatch {
-                        // Type check arguments
-                        for (arg, param_ty) in args.iter().zip(params.iter()) {
-                            let subst_param_ty = param_ty.apply_subst(&combined_subst);
-                            self.check_expr(arg, &subst_param_ty)?;
-                        }
-
-                        let subst_return_type = return_type.apply_subst(&combined_subst);
-                        let final_return_type = self.unifier.apply(&subst_return_type);
-                        return Ok(Some(InferResult::method(final_return_type, receiver_kind)));
-                    }
-                    // signature_mismatch: fall through to generic method fallbacks
-                }
+            if let Some(scheme) = scheme {
+                return self.check_selected_inherent_method(
+                    recv_ty_raw, method, type_args, args, span, &scheme,
+                );
             }
         }
         Ok(None)
@@ -23677,261 +23484,91 @@ impl TypeChecker {
             })
         };
 
-        let method_info_opt = method_info_opt.map(|scheme| -> Result<_> {
-            let instance = self.instantiate_call_scheme(&scheme, span)?;
-            Ok((instance, scheme.impl_var_count))
-        }).transpose()?;
+        let result = match method_info_opt {
+            Some(scheme) => self.check_selected_inherent_method(recv_ty, method, type_args, args, span, &scheme)?,
+            None => None,
+        };
+        Ok((result, specialization_rejected))
+    }
 
-        if let Some(type_name_text) = exact_type_name.or(unwrapped_type_name) {
-            // Clone the method type to avoid borrow issues with check_expr
-            // Uses shared RwLock for order-independent resolution
-            // CRITICAL FIX: Use instantiate_with_type_bounds to get ordered type variables AND bounds
-            // This ensures that receiver type args are bound to the correct type params
-            // AND that function type bounds (like F: fn(T) -> U) are preserved for closure checking.
-            let _ = type_name_text; // Used in original code but now method_info_opt is computed above
+    /// Every selected inherent method keeps the same instantiation, obligations
+    /// and callable evidence, regardless of how its receiver was represented.
+    fn check_selected_inherent_method(
+        &mut self,
+        recv_ty: &Type,
+        method: &Ident,
+        type_args: &List<verum_ast::ty::GenericArg>,
+        args: &[Expr],
+        span: Span,
+        scheme: &TypeScheme,
+    ) -> Result<Option<InferResult>> {
+        let instance = self.instantiate_call_scheme(scheme, span)?;
+        let crate::context::InstantiatedScheme {
+            ty: method_ty, fresh_vars, explicit_method_vars,
+            type_bounds, protocol_bounds, where_clauses, receiver_kind, impl_self_type, ..
+        } = instance;
+        let Type::Function { params, return_type, .. } = &method_ty else {
+            return Ok(None);
+        };
+        let params = Self::effective_params(params.as_slice(), args.len(), None)
+            .ok_or_else(|| self.arity_error(method.name.clone(), params.len(), args.len(), span))?;
 
-            if let Some((instance, impl_var_count)) = method_info_opt {
-                let crate::context::InstantiatedScheme {
-                    ty: method_ty, fresh_vars: ordered_fresh_vars, explicit_method_vars: explicit_vars,
-                    type_bounds, protocol_bounds, where_clauses, receiver_kind, impl_self_type, ..
-                } = instance;
-                // CRITICAL: Register type bounds for fresh type variables
-                // This enables closure type inference for generic methods like map<U, F: fn(T) -> U>
-                // #[cfg(debug_assertions)]
-                // if method.name.as_str() == "min" || method.name.as_str() == "max" {
-                //  eprintln!("[DEBUG inherent_methods path] Method '{}' found in inherent_methods:", method.name.as_str());
-                //  eprintln!(" method_ty={:?}", method_ty);
-                //  if let Type::Function { params, .. } = &method_ty {
-                //  eprintln!(" params.len()={}", params.len());
-                //  }
-                //  eprintln!(" args.len()={}", args.len());
-                // }
-                // #[cfg(debug_assertions)]
-                // if method.name.as_str() == "eq" {
-                //  eprintln!("[DEBUG inherent_methods path] Method 'eq' found in inherent_methods: method_ty={:?}", method_ty);
-                // }
-                // if method.name.as_str() == "map" {
-                //  eprintln!("[DEBUG method_call] map: type_bounds has {} entries", type_bounds.len());
-                //  for (fresh_var, bounds) in &type_bounds {
-                //  eprintln!(" fresh_var={:?}, bounds={:?}", fresh_var, bounds);
-                //  }
-                // }
-
-                for (fresh_var, bounds) in &type_bounds {
-                    // if method.name.as_str() == "map" {
-                    //  eprintln!("[DEBUG method_call] Registering {} bounds for var {:?}", bounds.len(), fresh_var);
-                    // }
-                    for bound in bounds {
-                        self.register_type_var_type_bound(*fresh_var, bound.clone());
+        let mut substitution = if let Some(pattern) = &impl_self_type {
+            self.unifier.unify(pattern, recv_ty, span)?
+        } else {
+            let receiver_args = match recv_ty {
+                Type::Named { args, .. } | Type::Generic { args, .. } => args.clone(),
+                Type::Array { element, .. } | Type::Slice { element } => {
+                    List::from_single((**element).clone())
+                }
+                Type::Variant(variants) => {
+                    let extracted = self.extract_type_args_from_variant(recv_ty);
+                    if !extracted.is_empty() {
+                        extracted
+                    } else {
+                        // Preserve the legacy structural-variant carrier order.
+                        let mut names: List<_> = variants.keys().collect();
+                        names.sort();
+                        names.into_iter().filter_map(|name| {
+                            variants.get(name).filter(|ty| !matches!(ty, Type::Unit)).cloned()
+                        }).collect()
                     }
                 }
-                // Found the method - type check the call
-                if let Type::Function {
-                    params,
-                    return_type,
-                    ..
-                } = &method_ty
-                {
-                    let method_name_text = verum_common::Text::from(method.name.as_str());
-                    // Check argument count (method params don't include self)
-                    // T1270: a ±1 tolerance is not the self-parameter rule.
-                    let params = match Self::effective_params(params.as_slice(), args.len(), None) {
-                        Some(effective) => effective,
-                        None => {
-                            return Err(self.arity_error(method_name_text, params.len(), args.len(), span));
-                        }
-                    };
+                _ => List::new(),
+            };
+            let limit = Self::resolve_bind_limit(scheme.impl_var_count, fresh_vars.len(), receiver_args.len());
+            let mut substitution = crate::ty::Substitution::new();
+            for (variable, argument) in fresh_vars.iter().take(limit).zip(receiver_args.iter()) {
+                let bound = self.unifier.unify(&Type::Var(*variable), argument, span)?;
+                substitution = substitution.compose(&bound)
+                    .map_err(|message| TypeError::UniverseBinding { message, span })?;
+            }
+            substitution
+        };
+        substitution = substitution.compose(&self.bind_explicit_method_arguments(
+            explicit_method_vars.as_ref(), type_args, method, span,
+        )?).map_err(|message| TypeError::UniverseBinding { message, span })?;
+        self.apply_fn_bound_extraction(&type_bounds, span);
 
-                    // CRITICAL FIX: Bind type variables in the method signature to receiver's type args
-                    // e.g., for Wrapper<Int>.get() where return type is &τ_fresh,
-                    // we bind τ_fresh = Int, making return type &τ_fresh become &Int.
-                    //
-
-                    // The ordered_fresh_vars from instantiate_with_fresh_vars preserves the
-                    // order of type params from the implement block, so zip correctly matches
-                    // receiver type args to their corresponding type variables.
-                    let receiver_type_args = match &recv_ty {
-                        Type::Named { args, .. } => args.clone(),
-                        Type::Generic { args, .. } => args.clone(),
-                        // ARRAY-ITER-CONCRETIZE-1: surface the element as
-                        // the receiver's single type arg so the impl-level
-                        // var of `implement<T> [T]` binds (SliceIter<T>).
-                        // This is THE binder the metadata-carried
-                        // impl_var_count feeds (the [self-bind] site) —
-                        // its sibling extraction sites already carry this
-                        // arm; without it recv_args=0 zeroed the
-                        // bind_limit for slice/array receivers and the
-                        // carry never fired.
-                        Type::Array { element, .. } | Type::Slice { element } => {
-                            let mut l: List<Type> = List::new();
-                            l.push((**element).clone());
-                            l
-                        }
-                        // CRITICAL FIX: Handle Variant types with type parameters
-                        // Variant types like Result<T, E> need to extract type args from their variants
-                        // For Result<T, E>: Variant { "Ok" -> T, "Err" -> E }
-                        // We need to extract [T, E] in the order the implement block expects
-                        Type::Variant(variants) => {
-                            // Extract type args based on semantic variant meaning
-                            // This must match how `implement<T, E> Result<T, E>` is declared
-                            // Result<T, E> = Ok(T) | Err(E), so: T from "Ok", E from "Err"
-                            // Maybe<T> = None | Some(T), so: T from "Some"
-                            let mut args = List::new();
-
-                            // Generic variant type handling (stdlib-agnostic).
-                            //
-
-                            // For ANY variant type (Result, Maybe, Validated, user-defined, etc.),
-                            // extract type arguments using the registered type metadata:
-                            // 1. Look up type name from variant_type_names registry
-                            // 2. Look up __type_var_order_{name} to get TypeVars in declaration order
-                            // 3. Look up original (unsubstituted) variant type from type context
-                            // 4. Unify original with substituted type to get TypeVar -> concrete type mapping
-                            // 5. Return type args in the correct declaration order
-                            let variant_ty = Type::Variant(variants.clone());
-                            let extracted = self.extract_type_args_from_variant(&variant_ty);
-                            if std::env::var("VERUM_TRACE_VARARGS").is_ok() {
-                                eprintln!(
-                                    "[varargs] caller got {} arg(s) for {}",
-                                    extracted.len(),
-                                    variant_ty.to_text()
-                                );
-                            }
-                            if !extracted.is_empty() {
-                                for arg in extracted {
-                                    args.push(arg);
-                                }
-                            } else {
-                                // Final fallback: extract non-Unit payloads (may be wrong for complex types)
-                                let mut variant_names: Vec<_> = variants.keys().collect();
-                                variant_names.sort();
-                                for name in variant_names {
-                                    if let Some(ty) = variants.get(name) {
-                                        if !matches!(ty, Type::Unit) {
-                                            args.push(ty.clone());
-                                        }
-                                    }
-                                }
-                            }
-                            // #[cfg(debug_assertions)]
-                            // eprintln!("[DEBUG method_call] Variant receiver extracted type_args: {:?}",
-                            // args.iter().map(|t| format!("{}", t)).collect::<Vec<_>>());
-                            args
-                        }
-                        _ => {
-                            // #[cfg(debug_assertions)]
-                            // eprintln!("[DEBUG method_call] recv_ty={:?} has no extractable type args", recv_ty);
-                            List::new()
-                        }
-                    };
-                    // Collect substitution from unification using the ORDERED fresh vars.
-                    // This ensures L maps to receiver_type_args[0], R to [1], etc.
-                    //
-
-                    // CRITICAL: When impl_var_count > 0, only bind the first impl_var_count
-                    // type vars from receiver type args. Method-level vars (like F in
-                    // modify<F: Fn(T) -> T>) must NOT be bound from receiver type args —
-                    // they are inferred from the method's arguments instead.
-                    if std::env::var("VERUM_TRACE_METHOD_LOOKUP").is_ok() {
-                        eprintln!(
-                            "[self-bind] method={} impl_vc={} fresh={} recv_args={}",
-                            method.name.as_str(),
-                            impl_var_count,
-                            ordered_fresh_vars.len(),
-                            receiver_type_args.len()
-                        );
-                    }
-                    let bind_limit = Self::resolve_bind_limit(
-                        impl_var_count,
-                        ordered_fresh_vars.len(),
-                        receiver_type_args.len(),
-                    );
-                    let mut combined_subst = crate::ty::Substitution::new();
-                    if let Some(pattern) = &impl_self_type {
-                        combined_subst = self.unifier.unify(pattern, &recv_ty, span)?;
-                    } else {
-                    for (type_var, type_arg) in ordered_fresh_vars
-                        .iter()
-                        .take(bind_limit)
-                        .zip(receiver_type_args.iter())
-                    {
-                        // Unify the type variable with the receiver's type argument
-                        if let Ok(subst) =
-                            self.unifier.unify(&Type::Var(*type_var), type_arg, span)
-                        {
-                            combined_subst = combined_subst.compose(&subst)
-                                .map_err(|message| TypeError::UniverseBinding { message, span })?;
-                        }
-                    }
-                    }
-                    combined_subst = combined_subst.compose(&self.bind_explicit_method_arguments(
-                        explicit_vars.as_ref(), type_args, method, span,
-                    )?).map_err(|message| TypeError::UniverseBinding { message, span })?;
-                    self.apply_fn_bound_extraction(&type_bounds, span);
-
-                    // `params` is a slice since T1270; the `.clone()` that
-                    // stood here copied the reference and was a no-op, and the
-                    // comment above it ("clone to avoid borrow issues") described
-                    // a borrow problem that no longer exists.
-
-                    // OVERLOAD GUARD: If any argument is a closure but the corresponding
-                    // parameter type (after substitution) is a concrete non-function type,
-                    // this inherent method signature doesn't match the call. Skip to protocol
-                    // fallback which may have a predicate-accepting overload.
-                    // Example: List.position(value: &T) vs Iterator.position(pred: fn(&T)->Bool)
-                    {
-                        let mut signature_mismatch = false;
-                        for (arg, param_ty) in args.iter().zip(params.iter()) {
-                            if matches!(&arg.kind, ExprKind::Closure { .. }) {
-                                let subst_param_ty = param_ty.apply_subst(&combined_subst);
-                                let resolved_param = self.unifier.apply(&subst_param_ty);
-                                // If the param type is concrete and not a function type / type var,
-                                // a closure argument cannot possibly match.
-                                if !matches!(
-                                    &resolved_param,
-                                    Type::Function { .. }
-                                        | Type::Var(_)
-                                        | Type::Placeholder { .. }
-                                ) {
-                                    signature_mismatch = true;
-                                    break;
-                                }
-                            }
-                        }
-                        if signature_mismatch {
-                            // Don't return error — fall through to protocol/blanket/fallback paths
-                            // which may have a matching overload accepting a closure.
-                        } else {
-                            // Type check each argument (with substituted param types)
-                            for (arg, param_ty) in args.iter().zip(params.iter()) {
-                                let subst_param_ty = param_ty.apply_subst(&combined_subst);
-                                self.check_expr(arg, &subst_param_ty)?;
-                            }
-
-                            self.enforce_call_where_clauses(&where_clauses, span)?;
-                            self.enforce_call_protocol_bounds(&protocol_bounds, span)?;
-                            self.enforce_call_type_bounds(&type_bounds, span)?;
-
-                            // Apply substitution to get the concrete return type
-                            let subst_return_type = self.resolve_call_output(
-                                return_type, &protocol_bounds, &where_clauses, &combined_subst,
-                            )?;
-
-                            // CRITICAL FIX: Also apply unifier to resolve type variables from argument checking
-                            // For generic methods like `map_left<L2>(self, f: fn(L) -> L2) -> Either<L2, R>`,
-                            // L2 is inferred from the closure argument, not from receiver type args.
-                            // The closure checking at line 17776 unifies L2 with the closure return type,
-                            // but this unification is in the unifier, not in combined_subst.
-                            // Without this, return type still has unresolved L2 type variable.
-                            let final_return_type = self.unifier.apply(&subst_return_type);
-
-                            return Ok((Some(InferResult::method(final_return_type, receiver_kind)), false));
-                        }
-                    }
+        // A concrete non-callable parameter cannot accept a closure. Let the
+        // caller continue overload resolution before checking any arguments.
+        for (argument, parameter) in args.iter().zip(params.iter()) {
+            if matches!(argument.kind, ExprKind::Closure { .. }) {
+                let parameter = self.unifier.apply(&parameter.apply_subst(&substitution));
+                if !matches!(parameter, Type::Function { .. } | Type::Var(_) | Type::Placeholder { .. }) {
+                    return Ok(None);
                 }
             }
         }
-        Ok((None, specialization_rejected))
+        for (argument, parameter) in args.iter().zip(params.iter()) {
+            self.check_expr(argument, &parameter.apply_subst(&substitution))?;
+        }
+        self.enforce_call_where_clauses(&where_clauses, span)?;
+        self.enforce_call_protocol_bounds(&protocol_bounds, span)?;
+        self.enforce_call_type_bounds(&type_bounds, span)?;
+        let output = self.resolve_call_output(return_type, &protocol_bounds, &where_clauses, &substitution)?;
+        self.type_registry.register_call_target(span, self.unifier.apply(&method_ty));
+        Ok(Some(InferResult::method(self.unifier.apply(&output), receiver_kind)))
     }
 
     /// Handle method calls on built-in non-nominal types that are not covered by the

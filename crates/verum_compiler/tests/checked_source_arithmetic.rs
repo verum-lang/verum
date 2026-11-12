@@ -23,6 +23,10 @@ fn checked_unsigned_methods_execute_full_width_values_and_overflow() {
                 public pure fn checked_add(self, rhs: UInt64) -> Maybe<UInt64> { add(self, rhs) }
             }
             type Duration is (UInt64);
+            type PositiveDuration is Duration where |duration| duration.0 > 0;
+            implement PositiveDuration {
+                pure fn raw(&self) -> UInt64 { self.0 }
+            }
             implement Duration {
                 pure fn capped(&self, other: Duration) -> Duration {
                     let a: UInt64 = self.0; let b: UInt64 = other.0;
@@ -63,6 +67,10 @@ fn checked_unsigned_methods_execute_full_width_values_and_overflow() {
             }
             public pure fn capped() -> Bool {
                 Duration(0xFFFFFFFFFFFFFFFF_u64).capped(Duration(1_u64)).0 == 0xFFFFFFFFFFFFFFFF_u64
+            }
+            public pure fn refined_carrier() -> Bool {
+                let duration = Duration(73_u64) as PositiveDuration;
+                duration.raw() == 73_u64
             }"),
     ] { std::fs::write(core.join(path), source).unwrap(); }
     let output = root.path().join("runtime.vbca");
@@ -89,6 +97,7 @@ fn checked_unsigned_methods_execute_full_width_values_and_overflow() {
             "multiply",
             "product_overflow",
             "capped",
+            "refined_carrier",
         ] {
             let entry = module
                 .find_function_by_name(&format!("core.duration.{name}"))
