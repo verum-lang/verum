@@ -332,6 +332,7 @@ quoting either anywhere a reader will act on it. The gate
     `nightly-aot.yml` as a non-blocking measurement lane.
 - Benchmarks in `benches/` (criterion)
 - One implementation per feature
+- Before prerelease, remove superseded Verum platform APIs and migrate their callers; do not retain compatibility wrappers solely for an unreleased API. Preserve the `@deprecated` language facility and its conformance tests for user libraries.
 
 ### Documentation
 

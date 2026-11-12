@@ -213,19 +213,6 @@ impl VerificationPipeline {
         pipeline
     }
 
-    /// Backwards-compat alias for [`Self::static_analysis_pipeline`].
-    /// New callers should use the explicit name to make the
-    /// SMT-absence intentional. This alias will be removed in a
-    /// future major version.
-    #[deprecated(
-        since = "0.2.0",
-        note = "Use static_analysis_pipeline() — this name was misleading because \
-                no SMT pass is included. See task #202 for the rationale."
-    )]
-    pub fn default_pipeline() -> Self {
-        Self::static_analysis_pipeline()
-    }
-
     /// Create the **full-verification** pipeline: static-analysis
     /// passes + `SmtVerificationPass` for actual SMT discharge of
     /// refinement obligations. Fail-fast applies (#187 contract):

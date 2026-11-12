@@ -99,18 +99,6 @@ pub enum DType {
 
 impl DType {
     // ========================================================================
-    // Deprecated Aliases (backward compatibility)
-    // ========================================================================
-
-    /// Alias for Complex64 (deprecated).
-    #[deprecated(since = "0.2.0", note = "Use Complex64 instead")]
-    pub const C64: DType = DType::Complex64;
-
-    /// Alias for Complex128 (deprecated).
-    #[deprecated(since = "0.2.0", note = "Use Complex128 instead")]
-    pub const C128: DType = DType::Complex128;
-
-    // ========================================================================
     // Size and Alignment
     // ========================================================================
 

@@ -1524,29 +1524,6 @@ pub fn dispatch_uniform(
     }
 }
 
-/// Check if currently in training mode.
-///
-/// **Note:** This function is deprecated. The dispatch handler now reads
-/// training mode directly from `state.context_stack.get_training_mode()`,
-/// which properly respects the scoped `TrainingMode` context.
-///
-/// This function remains for backwards compatibility and testing, but
-/// will always return false. Use the context-based approach instead.
-///
-/// # Example
-/// ```verum
-/// provide TrainingMode = true {
-///  // is_training() returns true here
-///  let dropout_active = is_training();
-/// }
-/// // is_training() returns false here
-/// ```
-#[deprecated(note = "Use state.context_stack.get_training_mode() instead")]
-pub fn dispatch_is_training() -> bool {
-    // Always returns false - context-based version is used in dispatch.rs
-    false
-}
-
 /// Generate a random float in [0, 1).
 pub fn dispatch_random_float_01() -> f64 {
     use std::collections::hash_map::RandomState;

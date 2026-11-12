@@ -259,46 +259,6 @@ impl FileWatcher {
     }
 }
 
-// Keep the old Watcher struct for backward compatibility
-/// Watch mode runner (legacy).
-#[deprecated(since = "0.2.0", note = "Use FileWatcher instead")]
-pub struct Watcher {
-    config: WatchConfig,
-    runner_config: RunnerConfig,
-    last_run: Option<Instant>,
-    pending_events: List<WatchEvent>,
-}
-
-#[allow(deprecated)]
-impl Watcher {
-    /// Create a new watcher.
-    pub fn new(watch_config: WatchConfig, runner_config: RunnerConfig) -> Self {
-        Self {
-            config: watch_config,
-            runner_config,
-            last_run: None,
-            pending_events: List::new(),
-        }
-    }
-
-    /// Run watch mode (blocking).
-    pub async fn run(&mut self) -> Result<(), RunnerError> {
-        // Delegate to the new FileWatcher
-        let mut file_watcher = FileWatcher::new(self.config.clone(), self.runner_config.clone());
-        file_watcher.run().await
-    }
-
-    /// Check if a file should trigger a re-run.
-    pub fn should_trigger(&self, path: &PathBuf) -> bool {
-        if let Some(ext) = path.extension() {
-            let ext_str: Text = ext.to_string_lossy().to_string().into();
-            self.config.extensions.contains(&ext_str)
-        } else {
-            false
-        }
-    }
-}
-
 /// State for tracking affected tests.
 #[derive(Debug, Default)]
 pub struct AffectedTests {
@@ -551,9 +511,8 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
     fn test_watcher_should_trigger() {
-        let watcher = Watcher::new(WatchConfig::default(), RunnerConfig::default());
+        let watcher = FileWatcher::new(WatchConfig::default(), RunnerConfig::default());
 
         assert!(watcher.should_trigger(&PathBuf::from("test.vr")));
         assert!(watcher.should_trigger(&PathBuf::from("src/lib.verum")));
