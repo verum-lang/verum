@@ -38,6 +38,7 @@ fn parallel_admission_preserves_lexical_owners_and_cross_module_calls() {
     std::fs::write(core.join("first.vr"), "module core.first; public type Cell is { public value: Int }; public fn make() -> Cell { Cell { value: 73 } }").unwrap();
     std::fs::write(core.join("second.vr"), "module core.second; public type Cell is { public value: Bool }; public fn make() -> Cell { Cell { value: true } }").unwrap();
     std::fs::write(core.join("consumer.vr"), "module core.consumer; mount core.first.make; public fn answer() -> Int { make().value }").unwrap();
+    let mut serial_archive = None;
     for num_threads in [1, 2, 4] {
         let output = root.path().join(format!("runtime-{num_threads}.vbca"));
         let mut session = Session::new(CompilerOptions { input: core.join("mod.vr"), num_threads, ..Default::default() });
@@ -46,5 +47,28 @@ fn parallel_admission_preserves_lexical_owners_and_cross_module_calls() {
         assert!(result.errors.is_empty(), "{:?}", result.errors);
         assert_eq!(session.error_count(), 0);
         assert!(output.exists());
+        let bytes = std::fs::read(&output).unwrap();
+        if let Some(serial) = &serial_archive {
+            assert_eq!(&bytes, serial, "worker count changed the archive");
+        } else {
+            serial_archive = Some(bytes);
+        }
+        let archive = verum_vbc::archive::read_archive_from_file(&output).unwrap();
+        let app = verum_fast_parser::Parser::new(
+            "module app; mount core.consumer.answer; fn main() -> Int { answer() }",
+        ).parse_module().unwrap();
+        let mut codegen = verum_vbc::codegen::VbcCodegen::with_config(
+            verum_vbc::codegen::CodegenConfig::new("app"),
+        );
+        verum_compiler::archive_ctx_loader::ArchiveCtxCache::new(&archive)
+            .apply_lazy_with_types(&mut codegen, &app, &[]).unwrap();
+        codegen.collect_unit_declarations(&[&app]).unwrap();
+        codegen.resolve_pending_imports();
+        codegen.compile_unit_items(&[&app], verum_vbc::codegen::ItemFailurePolicy::Strict).unwrap();
+        let module = codegen.finalize_module_from_state().unwrap();
+        let entry = module.find_function_by_name("app.main").unwrap();
+        let result = verum_vbc::interpreter::Interpreter::new(std::sync::Arc::new(module))
+            .execute_function(entry).unwrap();
+        assert_eq!(result.try_as_i64(), Some(73));
     }
 }
