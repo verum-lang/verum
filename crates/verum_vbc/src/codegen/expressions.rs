@@ -16193,6 +16193,20 @@ impl VbcCodegen {
             })
             .map(|info| info.id.0);
 
+        // A known nominal receiver cannot acquire a missing implementation by
+        // postponing lookup to CallM. Dynamic/protocol and generic receivers
+        // retain their declared dispatch path.
+        if resolved_method.is_none()
+            && let Some(receiver_type) = receiver_result_declaration.as_ref().map(crate::receiver_methods::pointee)
+            && !receiver_type.is_generic()
+            && let Some(owner) = receiver_type.base_type_id().and_then(|id| self.type_by_id(id))
+            && matches!(owner.kind, crate::types::TypeKind::Record | crate::types::TypeKind::Sum
+                | crate::types::TypeKind::Newtype | crate::types::TypeKind::Unit)
+            && !effective_method_name.starts_with("dyn:")
+        {
+            return Err(CodegenError::with_span(CodegenErrorKind::UndefinedFunction(effective_method_name), method.span));
+        }
+
         let devirt_func_id: Option<u32> = if exact_receiver_target.is_some() {
             exact_receiver_target
         } else if effective_method_name.starts_with("dyn:")

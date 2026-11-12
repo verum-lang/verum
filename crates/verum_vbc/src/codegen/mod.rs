@@ -74,6 +74,7 @@ mod protocol_attachments;
 mod receiver_specialization;
 mod impl_method_registrations;
 mod blanket_impls;
+mod implementation_obligations;
 mod cfg_selection;
 mod protocol_results;
 mod residuals;
@@ -1387,6 +1388,8 @@ pub struct VbcCodegen {
     /// receiver panics at runtime ("method not found on value") because the
     /// default body was registered under the generic-param name.
     blanket_impls: Vec<BlanketImpl>,
+    implementation_headers: verum_common::List<implementation_obligations::ImplementationHeader>,
+    obligation_blanket_cursor: usize,
 
     /// Static variable initializer function IDs.
     /// These are registered as global constructors so they run before main().
@@ -2675,6 +2678,8 @@ impl VbcCodegen {
             pending_default_registrations: Vec::new(),
             concrete_impl_bindings: HashMap::new(),
             blanket_impls: Vec::new(),
+            implementation_headers: Default::default(),
+            obligation_blanket_cursor: 0,
             // Static variable initializer functions (become global constructors)
             static_init_functions: Vec::new(),
             // Pending @thread_local static initializations
@@ -3641,6 +3646,9 @@ impl VbcCodegen {
                 {
                     continue;
                 }
+                if !self.blanket_requirements_hold(&blanket, &receiver, implementation, &deferred_scope.dense)? {
+                    continue;
+                }
                 let derived = self.with_protocol_source_scope(
                     blanket.source_module.clone(), blanket_substitution.clone(), Some(receiver.clone()),
                     |cg| cg.resolve_protocol_application(protocol, protocol_args, &HashMap::new(), &declared_ids, &blanket.declaration.generics),
@@ -3682,6 +3690,16 @@ impl VbcCodegen {
                         blanket.source_module.clone(), None,
                     );
                     method.implementation.source_substitution = blanket_substitution.for_function(body_func);
+                    if self.pending_default_registrations.iter().any(|pending| {
+                        pending.receiver_name == method.receiver_name
+                            && pending.implementation.receiver == method.implementation.receiver
+                            && pending.function.name.name == method.function.name.name
+                            && !pending.implementation.source_substitution.is_empty()
+                            && (pending.lexical_owner != method.lexical_owner || pending.function != method.function)
+                    }) {
+                        return Err(CodegenError::with_span(CodegenErrorKind::InvalidSourceSignature(
+                            format!("ambiguous blanket implementations for '{full_method_name}'")), body_func.span));
+                    }
                     self.pending_default_registrations.push(method);
                 }
                 per_proto_overrides
@@ -5229,11 +5247,26 @@ impl VbcCodegen {
     /// panics "not found" at runtime.
     pub fn collect_blanket_impls(&mut self, module: &Module) -> CodegenResult<()> {
         let owner = self.source_file_owner(module, &self.config.module_name);
-        for item in &module.items {
-            if self.should_compile_item(item)
-                && let ItemKind::Impl(declaration) = &item.kind
-            {
-                self.record_blanket_impl(declaration, owner.clone())?;
+        let mut pending = verum_common::List::from_iter([(module.items.as_slice(), owner)]);
+        while let Some((items, owner)) = pending.pop() {
+            let header_owner = owner.clone().unwrap_or_else(|| self.config.module_name.clone());
+            for item in items {
+                if !self.should_compile_item(item) { continue; }
+                match &item.kind {
+                    ItemKind::Impl(declaration) => {
+                        self.record_implementation_header(declaration, &header_owner)?;
+                        self.record_blanket_impl(declaration, owner.clone())?;
+                    }
+                    ItemKind::Module(child) => {
+                        if let Some(items) = &child.items {
+                            let child_owner = owner.as_ref().filter(|owner| !owner.is_empty())
+                                .map(|owner| format!("{owner}.{}", child.name.name))
+                                .unwrap_or_else(|| child.name.name.to_string());
+                            pending.push((items.as_slice(), Some(child_owner)));
+                        }
+                    }
+                    _ => {},
+                }
             }
         }
         Ok(())
