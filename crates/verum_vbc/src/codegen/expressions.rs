@@ -2734,9 +2734,19 @@ impl VbcCodegen {
             }
         }
 
-        // #122 progressive-suffix: rewrite `core.`-rooted absolute
-        // paths to their registered form before any lookup below.
-        if let Some(sub) = self.resolve_core_rooted_suffix(&parts) {
+        let rooted = matches!(path.segments.first(), Some(PathSegment::Cog | PathSegment::Super | PathSegment::Relative));
+        if let Some(absolute) = self.resolve_module_path_head(&parts) { parts = absolute; }
+        if rooted && let Some((_, owner)) = parts.split_last() {
+            self.validate_rooted_type_owner(&owner.join("."), path.span)?;
+        }
+        if let Some(owner) = self.declared_unit_constructor_owner(&parts) {
+            let case = parts.last().expect("a declared constructor has a member");
+            return self.compile_variant_constructor_hinted(case, &verum_common::List::new(), Some(&owner));
+        }
+
+        // A syntactically rooted path has already selected its absolute owner;
+        // the legacy spelling compatibility probe cannot change that owner.
+        if !rooted && let Some(sub) = self.resolve_core_rooted_suffix(&parts) {
             parts = sub;
         }
 
@@ -2787,7 +2797,7 @@ impl VbcCodegen {
         //
         // Same direction as the equivalent suffix probes added in
         // `compile_field_access` and `compile_method_call` (task #121).
-        if parts.len() >= 2 {
+        if parts.len() >= 2 && !rooted {
             let qualified_verum = parts.join(".");
             let suffix_verum = format!(".{}", qualified_verum);
             let suffix_rust = format!("::{}", qualified_name);
@@ -6320,6 +6330,17 @@ impl VbcCodegen {
         args: &verum_common::List<Expr>,
         type_args: &verum_common::List<verum_ast::ty::GenericArg>,
     ) -> CodegenResult<Option<Reg>> {
+        // Rooted call syntax and dotted method syntax share declaration lookup.
+        // In particular, the prefix may denote a constructed value rather than
+        // a namespace; stripping the root before that decision loses its owner.
+        if let ExprKind::Path(path) = &func.kind
+            && matches!(path.segments.first(), Some(PathSegment::Cog | PathSegment::Super | PathSegment::Relative))
+            && let Some((PathSegment::Name(member), prefix)) = path.segments.split_last()
+            && !prefix.is_empty()
+        {
+            let receiver = Expr::new(ExprKind::Path(Path::new(prefix.iter().cloned().collect(), func.span)), func.span);
+            return self.compile_method_call(&receiver, member, args, None, type_args);
+        }
         // Get function name from path. Also remember whether the path was
         // rooted at a module-path keyword (`super`, `cog`, or `.`) — those
         // segments don't appear in any registered function name, but they
@@ -11866,6 +11887,38 @@ impl VbcCodegen {
         ))
     }
 
+    /// An exact descriptor still needs source visibility; cached executable
+    /// aliases cannot grant access to another module's private type members.
+    fn validate_rooted_type_owner(&self, owner: &str, span: verum_ast::Span) -> CodegenResult<()> {
+        if self.type_name_to_id.contains_key(owner) && self.nominal_type_id(owner).is_none() {
+            return Err(CodegenError::with_span(CodegenErrorKind::TypeInference(format!(
+                "type `{owner}` is not visible from `{}`", self.lexical_type_scope(),
+            )), span));
+        }
+        Ok(())
+    }
+
+    /// A unit constructor is already a value; only its selected declaration
+    /// supplies that fact. This is shared by path emission and call dispatch.
+    fn declared_unit_constructor_owner(&self, parts: &[String]) -> Option<verum_common::Text> {
+        let (case, owner) = parts.split_last()?;
+        let sum = self.declared_sum_descriptor(&owner.join("."))?;
+        sum.variants.iter().any(|variant|
+            variant.kind == crate::types::VariantKind::Unit
+                && self.ctx.strings.get(variant.name.0 as usize) == Some(case))
+            .then(|| self.type_declaration_identity(sum)).flatten()
+    }
+
+    /// Alias targets carry the same selected declaration and generic binders
+    /// as field and method lowering. Do not recover their owner from a leaf name.
+    fn declared_sum_descriptor(&self, qualifier: &str) -> Option<&crate::types::TypeDescriptor> {
+        let declared = self.nominal_type_id(qualifier).and_then(|id| self.type_by_id(id))?;
+        let selected = if declared.kind == crate::types::TypeKind::Alias {
+            self.expand_declared_alias(declared.alias_target.clone()?)?.base_type_id()?
+        } else { declared.id };
+        self.type_by_id(selected).filter(|ty| ty.kind == crate::types::TypeKind::Sum && !ty.variants.is_empty())
+    }
+
     /// An explicit constructor qualifier denotes a single nominal sum in the
     /// source file's scope, including a renamed mount. A variant of a different
     /// type can never provide its tag, payload count, or heap identity.
@@ -11875,9 +11928,7 @@ impl VbcCodegen {
         member: &str,
         argument_count: usize,
     ) -> CodegenResult<Option<(String, u32)>> {
-        let Some(sum) = self.nominal_type_id(qualifier).and_then(|id| self.type_by_id(id))
-            .filter(|ty| ty.kind == crate::types::TypeKind::Sum && !ty.variants.is_empty())
-        else {
+        let Some(sum) = self.declared_sum_descriptor(qualifier) else {
             return Ok(None);
         };
         let Some(owner) = self.type_declaration_identity(sum) else {
@@ -13567,10 +13618,12 @@ impl VbcCodegen {
 
         // Resolve the complete declared namespace before module-call lookup can
         // reduce it to a leaf. Dotted and imported owners denote the same sum.
-        if method.name.chars().next().is_some_and(char::is_uppercase)
-            && let Some(owner) = static_receiver_type.clone().or_else(|| {
+        if let Some(owner) = static_receiver_type.clone().or_else(|| {
                 self.try_flatten_module_path_resolved(receiver).map(|parts| parts.join("."))
             })
+            && (method.name.chars().next().is_some_and(char::is_uppercase)
+                || self.declared_sum_descriptor(&owner).is_some_and(|sum| sum.variants.iter().any(|variant|
+                    self.ctx.strings.get(variant.name.0 as usize).is_some_and(|name| name == method.name.as_str()))))
             && self.declared_constructor(&owner, method.name.as_str(), args.len())?.is_some()
         {
             return self.compile_variant_constructor_hinted(method.name.as_str(), args, Some(&owner));
@@ -14137,7 +14190,36 @@ impl VbcCodegen {
         // inside `core/sys/common.vr::ctx_get` resolves to
         // `sys.darwin.tls.ctx_get` and matches the qualified registration
         // installed for every top-level function.
-        if let Some(mut parts) = self.try_flatten_module_path_resolved(receiver) {
+        let receiver_path = self.try_flatten_module_path_resolved(receiver);
+        let receiver_is_constructor_value = receiver_path.as_ref()
+            .is_some_and(|parts| self.declared_unit_constructor_owner(parts).is_some());
+        // The selected declaration decides whether the dotted receiver is a
+        // namespace or an actual constructed value. Its spelling cannot turn
+        // a unit constructor into a forward function reference.
+        if let Some(mut parts) = receiver_path.filter(|_| !receiver_is_constructor_value) {
+            if self.path_was_rooted_module_path(receiver) {
+                let owner = parts.join(".");
+                self.validate_rooted_type_owner(&owner, receiver.span)?;
+                let scope = self.ctx.current_source_module.as_deref().unwrap_or(&self.config.module_name);
+                let selected = if let Some(declaration) = self.nominal_type_id(&owner)
+                    .and_then(|id| self.type_by_id(id))
+                    .and_then(|ty| self.type_declaration_identity(ty))
+                {
+                    self.registered_receiver_method(&declaration, method.name.as_str())
+                } else {
+                    self.resolve_source_callable_export(&format!("{owner}.{}", method.name), scope)
+                        .map_err(|message| CodegenError::with_span(CodegenErrorKind::TypeInference(message), receiver.span))?
+                        .map(|(key, _)| key)
+                }.ok_or_else(|| CodegenError::undefined_function(format!("{owner}.{}", method.name)))?;
+                // Normalize the selected declaration before ordinary call
+                // lowering. Defaults, foreign ABI and generic witnesses keep
+                // their existing shared implementation, rather than entering
+                // the narrower static-method path with an invented receiver.
+                let callable = Expr::new(ExprKind::Path(Path::new(selected.split('.')
+                    .map(|part| PathSegment::Name(verum_ast::Ident::new(part, receiver.span))).collect(),
+                    receiver.span)), receiver.span);
+                return self.compile_call(&callable, args, type_args);
+            }
             parts.push(method.name.to_string());
             if std::env::var_os("VERUM_TRACE_TPCALL").is_some() {
                 eprintln!(
@@ -23722,6 +23804,8 @@ impl VbcCodegen {
         // module's parent before lookup.
         if let Some(mut parts) = self.try_flatten_module_path_resolved(base) {
             let owner = parts.join(".");
+            let rooted = self.path_was_rooted_module_path(base);
+            if rooted { self.validate_rooted_type_owner(&owner, base.span)?; }
             if field.chars().next().is_some_and(char::is_uppercase)
                 && self.declared_constructor(&owner, field, 0)?.is_some()
             {
@@ -23736,7 +23820,7 @@ impl VbcCodegen {
             // (variant parent-naming from `parts[len-2]`,
             // `__const_val_N` inlining, closure emission) then works
             // off the true registered path unchanged.
-            if let Some(sub) = self.resolve_core_rooted_suffix(&parts) {
+            if !rooted && let Some(sub) = self.resolve_core_rooted_suffix(&parts) {
                 parts = sub;
             }
 
@@ -24020,14 +24104,15 @@ impl VbcCodegen {
                 }
             }
 
-            // If this looks like a module path (starts with super/crate/.) but we can't resolve it,
-            // emit a placeholder instruction rather than failing with "standalone super"
-            if is_qualified_module_path {
-                // For bootstrap: return a stub for unresolved module paths
-                // The actual resolution would happen at link time
-                let dest = self.ctx.alloc_temp();
-                self.ctx.emit(Instruction::LoadNil { dst: dest });
-                return Ok(Some(dest));
+            // An unresolved rooted namespace is not a runtime value. A
+            // declared constant receiver can continue to ordinary field
+            // projection; a namespace miss must remain a source diagnostic.
+            let receiver_is_value = self.ctx.lookup_qualified_function(&owner)
+                .is_some_and(|info| info.is_const);
+            if is_qualified_module_path && !receiver_is_value {
+                return Err(CodegenError::with_span(CodegenErrorKind::UndefinedVariable(
+                    parts.join("."),
+                ), base.span));
             }
         }
 

@@ -171,6 +171,7 @@ fn rooted_constructors_preserve_declared_owners_and_generic_parameters() {
         accepts(&format!("{QUALIFIED_VALUE_DECLARATIONS}\nfn probe()->State {{{expression}}}"), &[]);
     }
     accepts(&format!("{QUALIFIED_VALUE_DECLARATIONS}\nfn probe()->Int {{cog.State.Cold.degree()}}"), &[]);
+    accepts("public type Mode is | idle | active; implement Mode { public fn marker(&self)->Int {19} } fn first()->Int {cog.Mode.idle.marker()} fn second()->Mode {cog.Mode.active}", &[]);
     accepts("public type Parcel<T> is | Empty | Full(T); fn first()->Parcel<Int> {cog.Parcel.Empty} fn second()->Parcel<Text> {cog.Parcel.Empty} fn third()->Parcel<Int> {cog.Parcel.Full(7)}", &[]);
     accepts("public type State is | Cold | Warm; mount other.{State as Foreign}; fn foreign()->Foreign {Foreign.Hot} fn probe()->State {cog.State.Cold}", &[("other", "public type State is | Hot | Cold(Int);")]);
     accepts("public type State is | Cold | Warm; type Phase is State; fn probe()->State {cog.Phase.Cold}", &[]);
