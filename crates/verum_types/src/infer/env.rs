@@ -12367,7 +12367,14 @@ with .to_float() or .to_int() (at {:?})",
                 self.handle_assignment(left, _span);
 
                 let right_result = self.synth_expr(right)?;
+                let mut origins = self.aggregate_origins(right, &self.unifier.apply(&right_result.ty));
+                if !origins.is_empty() && let Some((holder, _)) = self.borrow_place(left) {
+                    for source in self.ctx.env.reference_candidates(&holder) {
+                        if !origins.contains(&source) { origins.push(source); }
+                    }
+                }
                 self.with_checked_write(left, |tc| tc.check_expr_assignment_target(left, &right_result.ty))?;
+                self.retain_assignment_origins(left, &origins)?;
 
                 Ok(InferResult::new(Type::unit()))
             }

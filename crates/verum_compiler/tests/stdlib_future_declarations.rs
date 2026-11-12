@@ -44,6 +44,29 @@ fn imported_fixed_width_arithmetic_executes_after_archive_bootstrap() {
 }
 
 #[test]
+fn iteration_loans_end_or_escape_with_their_actual_values() {
+    let root = tempfile::tempdir().unwrap();
+    let core = root.path().join("core");
+    fs::create_dir_all(core.join("reader")).unwrap();
+    fs::write(core.join("mod.vr"), "module core; public module reader;").unwrap();
+    let reader = core.join("reader/mod.vr");
+    let source = "module core.reader; public fn read() -> Int {
+        let mut values = [1, 2];
+        for item in &values { let _read = *item; }
+        values[0] = 71;
+        let spare = 0; let mut held = &spare;
+        for item in &values { held = item; }
+        values[0] + *held
+    }";
+    fs::write(&reader, source).unwrap();
+    let archive = bootstrap(&core);
+    assert_eq!(execute(&archive, "module app; mount core.reader.read; fn main() -> Int { read() }"), 73);
+    fs::write(&reader, source.replace("values[0] + *held", "values[0] = 90; *held")).unwrap();
+    let error = format!("{:#}", try_bootstrap(&core).err().expect("escaped loan released"));
+    assert!(error.contains("E310") && error.contains("values"), "{error}");
+}
+
+#[test]
 fn imported_associated_sum_survives_nested_async_signature_and_execution() {
     let root = tempfile::tempdir().unwrap();
     let core = root.path().join("core");

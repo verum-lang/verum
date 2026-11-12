@@ -100,6 +100,44 @@ pub(super) fn forwarded_parameter(decl: &FunctionDecl) -> Option<usize> {
 }
 
 impl TypeChecker {
+    pub(super) fn retain_iteration_origin(&mut self, origin: &RecordReceiver, span: verum_ast::Span) -> crate::Result<()> {
+        let root = self.ctx.env.record_storage_name(origin.binding)
+            .ok_or(crate::TypeError::UnknownRecordOrigin { span })?;
+        let field = (!origin.fields.is_empty()).then(|| origin.fields.join("."));
+        if !self.borrow_tracker.retain_place_loans(&root, field.as_deref(), self.borrow_tracker.scope_depth()) {
+            self.retain_origin(origin, None, span)?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn retain_assignment_origins(
+        &mut self,
+        destination: &Expr,
+        origins: &[RecordReceiver],
+    ) -> crate::Result<()> {
+        if origins.is_empty() { return Ok(()); }
+        let (holder, _) = self.borrow_place(destination)
+            .ok_or(crate::TypeError::UnknownRecordOrigin { span: destination.span })?;
+        let region = self.ctx.env.binding_loan_region(&holder)
+            .ok_or(crate::TypeError::UnknownRecordOrigin { span: destination.span })?;
+        for origin in origins {
+            let root = self.ctx.env.record_storage_name(origin.binding)
+                .ok_or(crate::TypeError::UnknownRecordOrigin { span: destination.span })?;
+            if self.ctx.env.storage_loan_region(origin.binding).is_some_and(|source| source > region) {
+                return Err(crate::TypeError::DanglingReference {
+                    var: root, ref_span: destination.span, drop_span: destination.span,
+                });
+            }
+            let field = (!origin.fields.is_empty()).then(|| origin.fields.join("."));
+            if !self.borrow_tracker.retain_place_loans(&root, field.as_deref(), region) {
+                self.retain_origin(origin, None, destination.span)?;
+                self.borrow_tracker.retain_place_loans(&root, field.as_deref(), region);
+            }
+        }
+        self.ctx.env.assign_reference_origins(&holder, origins);
+        Ok(())
+    }
+
     pub(super) fn with_result_borrow_scope(
         &mut self,
         infer: impl FnOnce(&mut Self) -> crate::Result<super::InferResult>,
@@ -505,7 +543,7 @@ impl TypeChecker {
         match &unparen(expr).kind {
             ExprKind::Path(path) => self.ctx.env.record_source(&path.as_ident()?.name, true),
             ExprKind::Unary {
-                op: UnOp::Ref,
+                op: UnOp::Ref | UnOp::RefMut | UnOp::RefChecked | UnOp::RefCheckedMut,
                 expr,
             } => {
                 let (origin, ty) = self.borrowed_record_place(expr)?;
@@ -677,7 +715,7 @@ impl TypeChecker {
         }
     }
 
-    fn borrowed_record_place(&mut self, expr: &Expr) -> Option<(RecordReceiver, Type)> {
+    pub(super) fn borrowed_record_place(&mut self, expr: &Expr) -> Option<(RecordReceiver, Type)> {
         match &unparen(expr).kind {
             ExprKind::Path(path) => {
                 let name = &path.as_ident()?.name;

@@ -452,6 +452,7 @@ impl TypeChecker {
                 self.ctx
                     .env
                     .insert(name.name.as_str(), binding_scheme.clone());
+                self.ctx.env.set_binding_loan_region(&name.name, self.borrow_tracker.scope_depth());
                 if *mutable {
                     self.ctx.env.mark_mutable_place(name.name.as_str());
                 }

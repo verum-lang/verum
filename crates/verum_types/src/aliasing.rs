@@ -311,6 +311,32 @@ impl BorrowTracker {
         self.scope_depth += 1;
     }
 
+    pub(crate) fn scope_depth(&self) -> usize {
+        self.scope_depth
+    }
+
+    /// Storing a reference in an outer place transfers its live loans to that
+    /// place's region. Preserve loan identity and access mode, including mutable
+    /// loans; a scope boundary cannot turn an exclusive loan into a shared one.
+    pub(crate) fn retain_place_loans(&mut self, target: &Text, field: Option<&str>, region: usize) -> bool {
+        let loans: List<_> = self.ref_to_borrow.values().filter(|loan| {
+            loan.target == *target && match (loan.field_path.as_deref(), field) {
+                (Some(a), Some(b)) => a == b || a.strip_prefix(b).is_some_and(|s| s.starts_with('.'))
+                    || b.strip_prefix(a).is_some_and(|s| s.starts_with('.')),
+                _ => true,
+            }
+        }).cloned().collect();
+        let found = !loans.is_empty();
+        for mut loan in loans {
+            if loan.scope_depth > region {
+                self.release_borrow_by_id(loan.id);
+                loan.scope_depth = region;
+                self.restore_live_loan(loan);
+            }
+        }
+        found
+    }
+
     /// Exit the current scope, releasing all borrows created in it
     pub fn exit_scope(&mut self) {
         if let Some(parent_depth) = self.scope_stack.pop() {
@@ -362,7 +388,8 @@ impl BorrowTracker {
             }
         }
         for loan in alternative.ref_to_borrow.values() {
-            if !self.ref_to_borrow.contains_key(&loan.id) {
+            if self.ref_to_borrow.get(&loan.id).is_none_or(|current| loan.scope_depth < current.scope_depth) {
+                self.release_borrow_by_id(loan.id);
                 self.restore_live_loan(loan.clone());
             }
         }

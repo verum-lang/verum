@@ -1083,6 +1083,7 @@ pub(crate) enum ReferenceOrigin {
 #[derive(Clone, Debug, Default)]
 struct RecordPlace {
     id: Option<u64>,
+    loan_region: Option<usize>,
     mutable: bool,
     projection: Option<Span>,
     reference: Option<ReferenceOrigin>,
@@ -1418,6 +1419,37 @@ impl TypeEnv {
         self.record_places.entry(name.into()).or_default().reference = Some(source);
     }
 
+    pub(crate) fn set_binding_loan_region(&mut self, name: &str, region: usize) {
+        self.record_places.entry(name.into()).or_default().loan_region = Some(region);
+    }
+
+    pub(crate) fn binding_loan_region(&mut self, name: &str) -> Option<usize> {
+        self.local_record_place(name)?.loan_region
+    }
+
+    pub(crate) fn storage_loan_region(&self, id: u64) -> Option<usize> {
+        let mut scope = Some(self);
+        while let Some(env) = scope {
+            if let Some(place) = env.record_places.values().find(|place| place.id == Some(id)) {
+                return place.loan_region;
+            }
+            scope = env.parent.as_deref();
+        }
+        None
+    }
+
+    /// Assignments may run conditionally or zero times in a loop. Retain every
+    /// possible origin in the destination's owning scope, including its old value.
+    pub(crate) fn assign_reference_origins(&mut self, name: &str, sources: &[crate::ty::RecordReceiver]) {
+        let mut candidates = self.reference_candidates(name);
+        for source in sources {
+            if !candidates.contains(source) { candidates.push(source.clone()); }
+        }
+        if let Some(place) = self.local_record_place(name) {
+            place.reference = Some(ReferenceOrigin::Candidates(candidates.into_boxed_slice()));
+        }
+    }
+
     fn local_record_place(&mut self, name: &str) -> Option<&mut RecordPlace> {
         let key = Text::from(name);
         let mut scope = self;
@@ -1445,6 +1477,7 @@ impl TypeEnv {
             if permitted {
                 *place = RecordPlace {
                     mutable: true,
+                    loan_region: place.loan_region,
                     ..Default::default()
                 };
             }

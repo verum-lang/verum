@@ -11653,6 +11653,7 @@ impl TypeChecker {
                         self.ctx
                             .env
                             .insert("self", TypeScheme::mono(param_ty.clone()));
+                        self.ctx.env.set_binding_loan_region("self", self.borrow_tracker.scope_depth());
                         if self.reference_mode(&param_ty, param.span)?.is_some() {
                             self.ctx.env.set_reference_origin("self", crate::context::ReferenceOrigin::Parameter);
                         }

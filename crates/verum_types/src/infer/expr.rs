@@ -6380,109 +6380,48 @@ impl TypeChecker {
         if crate::ctor_trace_enabled() {
             eprintln!("[ctor-trace] infer_for_loop ENTER span={:?}", expr.span);
         }
-                    let iter_result = self.synth_expr(iter)?;
-
-                    let elem_ty = self.synchronous_iteration_item(iter, &iter_result.ty)?;
-                    let elem_ty = self.unifier.apply(&elem_ty);
-
-                    // Enter loop context for affine tracking
-                    self.affine_tracker.enter_loop();
-
-                    // ============================================================
-                    // Iterator Invalidation Tracking
-                    // CBGR checking: generation counter validation at each dereference, epoch-based tracking prevents wraparound — .2 - Iterator safety
-                    // ============================================================
-                    // Track iterators to prevent modifications to collections
-                    // during iteration, which would invalidate the iterator.
-
-                    // Extract collection name from iterable expression for tracking
-                    // Handle various iterator expression patterns:
-                    // - `for item in items` -> Path(items)
-                    // - `for item in &items` -> Unary(Ref, Path(items))
-                    // - `for item in &mut items` -> Unary(RefMut, Path(items))
-                    // - `for item in items.iter()` -> MethodCall(items, "iter", [])
-                    let collection_name: Option<Text> = match &iter.kind {
-                        ExprKind::Path(path) => path.segments.first().and_then(|seg| match seg {
-                            verum_ast::ty::PathSegment::Name(id) => {
-                                Some(verum_common::Text::from(id.name.as_str()))
-                            }
-                            _ => None,
-                        }),
-                        // Handle &items and &mut items
-                        ExprKind::Unary { op, expr: inner }
-                            if matches!(op, UnOp::Ref | UnOp::RefMut) =>
-                        {
-                            if let ExprKind::Path(path) = &inner.kind {
-                                path.segments.first().and_then(|seg| match seg {
-                                    verum_ast::ty::PathSegment::Name(id) => {
-                                        Some(verum_common::Text::from(id.name.as_str()))
-                                    }
-                                    _ => None,
-                                })
-                            } else {
-                                None
-                            }
-                        }
-                        // Handle items.iter() and items.iter_mut()
-                        ExprKind::MethodCall {
-                            receiver, method, ..
-                        } if method.name.as_str() == "iter"
-                            || method.name.as_str() == "iter_mut" =>
-                        {
-                            self.extract_receiver_name(receiver)
-                        }
-                        _ => None,
-                    };
-
-                    // Register iterator if we can track the collection
-                    let iter_var_name = verum_common::Text::from("__iter");
-                    if let Some(ref collection) = collection_name {
-                        // Determine if this is a mutable iterator
-                        let is_mutable_iter = match &iter.kind {
-                            ExprKind::Unary { op, .. } if matches!(op, UnOp::RefMut) => true,
-                            ExprKind::MethodCall { method, .. }
-                                if method.name.as_str() == "iter_mut" =>
-                            {
-                                true
-                            }
-                            _ => false,
-                        };
-                        let _ = self.borrow_tracker.register_iterator(
-                            iter_var_name.clone(),
-                            collection.clone(),
-                            is_mutable_iter,
-                            iter.span,
-                        );
+        self.with_lexical_scope(|checker| {
+            // The iterand's temporary loans belong to the loop, not its caller.
+            let iter_result = checker.synth_expr(iter)?;
+            let elem_ty = checker.synchronous_iteration_item(iter, &iter_result.ty)?;
+            let elem_ty = checker.unifier.apply(&elem_ty);
+            let mut sources = checker.aggregate_origins(iter, &iter_result.ty);
+            if sources.is_empty() {
+                if let Some((source, _)) = checker.borrowed_record_place(iter) {
+                    sources.push(source);
+                } else if checker.carries_stored_loan(&elem_ty) {
+                    // A computed iterand owns temporary storage. References
+                    // into it cannot be assigned to a longer-lived holder.
+                    let temporary = "<temporary iterand>";
+                    checker.ctx.env.insert_mono(temporary, iter_result.ty.clone());
+                    checker.ctx.env.set_binding_loan_region(temporary, checker.borrow_tracker.scope_depth());
+                    sources.extend(checker.ctx.env.record_source(temporary, false));
+                }
+            }
+            for source in &sources {
+                checker.retain_iteration_origin(source, iter.span)?;
+            }
+            let bindings = checker.collect_pattern_bindings(pattern, &elem_ty)?;
+            checker.affine_tracker.enter_loop();
+            checker.refinement_evidence.push_scope();
+            let result = (|| {
+                checker.bind_pattern(pattern, &elem_ty)?;
+                for (name, ty) in &bindings {
+                    if checker.carries_stored_loan(ty) && !sources.is_empty() {
+                        checker.ctx.env.set_reference_origin(name,
+                            crate::context::ReferenceOrigin::Candidates(sources.clone().into()));
                     }
-
-                    self.ctx.enter_scope();
-                    self.borrow_tracker.enter_scope();
-                    self.refinement_evidence.push_scope();
-
-                    self.bind_pattern(pattern, &elem_ty)?;
-
-                    // Add pattern evidence for for-loop pattern
-                    // Refinement types enhancement: flow-sensitive refinement propagation, evidence tracking for verified predicates — Refinement Evidence Propagation
-                    // For `for Some(x) in items`, we know x is Some within the body
-                    if let Maybe::Some(iter_name) = self.extract_simple_var_name(iter) {
-                        self.add_pattern_evidence(pattern, iter_name, pattern.span);
-                    }
-
-                    self.infer_block(body)?;
-
-                    self.refinement_evidence.pop_scope();
-                    self.borrow_tracker.exit_scope();
-                    self.ctx.exit_scope();
-
-                    // Release iterator tracking
-                    if collection_name.is_some() {
-                        self.borrow_tracker.release_iterator(iter_var_name.as_str());
-                    }
-
-                    // Exit loop context
-                    self.affine_tracker.exit_loop();
-
-                    Ok(InferResult::new(Type::unit()))
+                }
+                if let Some(name) = checker.extract_simple_var_name(iter) {
+                    checker.add_pattern_evidence(pattern, name, pattern.span);
+                }
+                checker.infer_block(body)?;
+                Ok(InferResult::new(Type::unit()))
+            })();
+            checker.refinement_evidence.pop_scope();
+            checker.affine_tracker.exit_loop();
+            result
+        })
     }
 
     /// Type-infer a `select { ... }` expression.
