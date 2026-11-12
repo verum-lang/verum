@@ -6,7 +6,7 @@ await mkdir('dist', { recursive: true });
 const result = await build({
   entryPoints: ['src/main.ts'], bundle: true, minify: true,
   target: ['es2022'], outfile: 'dist/app.js', metafile: true,
-  legalComments: 'external', charset: 'utf8',
+  legalComments: 'eof', charset: 'utf8',
   external: ['/fonts/*'],
 });
 const brand = await readFile(new URL('../../../assets/brand/exports/verum-emblem-128.png', import.meta.url));
