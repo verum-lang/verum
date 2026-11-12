@@ -69,9 +69,14 @@ fn inferred_constructor_carriers_survive_archive_bootstrap_and_execution() {
             public fn same<A, B: Same<A>>(a: A, b: B) -> B { b }"),
         ("reader/mod.vr", "module core.reader; mount core.values.{Event, Other, same};
             fn score_empty(value: Event<Int>) -> Int { match value { Event.Empty => 2, _ => 0 } }
+            type Input is { count: Int };
+            implement Input {
+                fn map<R>(self, f: fn(Int) -> R) -> R { f(self.count) }
+            }
             public fn read() -> Int {
                 let expected: Event<Int> = Event.Empty;
-                let value = Event.Value(19);
+                let input = Input { count: 19 };
+                let value = input.map(|n| Event.Value(n));
                 let pair = Event.Pair(23, 29);
                 let empty = Event.Empty;
                 let first = match same(expected, value) { Event.Value(n) => n, _ => 0 };
@@ -88,7 +93,7 @@ fn inferred_constructor_carriers_survive_archive_bootstrap_and_execution() {
     assert_eq!(execute(&archive, "module app; mount core.reader.read; fn main() -> Int { read() }"), 73);
     let file = core.join("reader/mod.vr");
     let source = fs::read_to_string(&file).unwrap();
-    fs::write(&file, source.replace("let value = Event.Value(19)", "let value = Other.Value(19)")).unwrap();
+    fs::write(&file, source.replace("Event.Value(n)", "Other.Value(n)")).unwrap();
     let error = format!("{:#}", try_bootstrap(&core).err().expect("different nominal owner accepted"));
     assert!(error.contains("Same"), "{error}");
 }

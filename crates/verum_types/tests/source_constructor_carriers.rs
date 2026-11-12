@@ -71,3 +71,61 @@ fn constructor_function_values_preserve_synchronous_callable_contracts() {
         fn run() -> Event<Int> { let constructor = Event.Value; apply(constructor) }";
     assert!(errors(source).is_empty(), "{:?}", errors(source));
 }
+
+#[test]
+fn a_constructor_callback_keeps_its_contract_with_captured_fields() {
+    let source = "type Outcome<T, E> is Success(T) | Failure(E);
+        implement<T, E> Outcome<T, E> {
+            fn map_error<F>(self, f: fn(E) -> F) -> Outcome<T, F> {
+                match self { Success(value) => Success(value), Failure(error) => Failure(f(error)) }
+            }
+        }
+        type Problem is Empty | System(Int, Bool);
+        type Device is { number: Int };
+        implement Device {
+            fn poll(&self, input: Outcome<Int, Bool>) -> Outcome<Int, Problem> {
+                input.map_error(|error| Problem.System(self.number, error))
+            }
+        }";
+    for source in [
+        source.to_owned(),
+        source.replace(
+            "fn map_error<F>(self, f: fn(E) -> F)",
+            "fn map_error<F, O: fn(E) -> F>(self, f: O)",
+        ),
+    ] {
+        let result = errors(&source);
+        assert!(result.is_empty(), "{source}: {result:?}");
+        let asynchronous = source
+            .replace(
+                "type Device is",
+                "async fn suspend(error: Bool) -> Bool { error } type Device is",
+            )
+            .replace(
+                "Problem.System(self.number, error)",
+                "Problem.System(self.number, suspend(error))",
+            );
+        let rejected = errors(&asynchronous);
+        assert!(
+            rejected.iter().any(|e| e.contains("async")),
+            "async payload was not refused: {rejected:?}"
+        );
+        let static_call = source
+            .replace(
+                "implement Device {",
+                "implement Device { fn echo(e: Bool) -> Bool { e }",
+            )
+            .replace(
+                "Problem.System(self.number, error)",
+                "Problem.System(self.number, Device.echo(error))",
+            );
+        let result = errors(&static_call);
+        assert!(result.is_empty(), "{static_call}: {result:?}");
+        let asynchronous_static = static_call.replace("fn echo", "async fn echo");
+        let rejected = errors(&asynchronous_static);
+        assert!(
+            rejected.iter().any(|e| e.contains("async")),
+            "async static call was not refused: {rejected:?}"
+        );
+    }
+}

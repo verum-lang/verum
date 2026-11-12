@@ -26098,6 +26098,7 @@ bake to have this verified.",
                                                         // Apply substitution to return type
                                                         let resolved_return =
                                                             self.unifier.apply(return_type);
+                                                        self.type_registry.register_call_target(span, self.unifier.apply(&method_ty));
                                                         return Ok(Some(InferResult::new(
                                                             resolved_return,
                                                         )));
@@ -26193,6 +26194,7 @@ bake to have this verified.",
                         }
 
                         let resolved_return = self.unifier.apply(return_type);
+                        self.type_registry.register_call_target(span, self.unifier.apply(&instance.ty));
                         if crate::ctor_trace_enabled() {
                             eprintln!(
                                 "[ctor-trace] path-static ENV-QUALIFIED {} -> {}",
@@ -26281,6 +26283,7 @@ bake to have this verified.",
 
                                 // Apply accumulated substitution to return type
                                 let resolved_return = self.unifier.apply(return_type);
+                                self.type_registry.register_call_target(span, self.unifier.apply(&instance.ty));
                                 return Ok(Some(InferResult::new(resolved_return)));
                             }
                             // Args not compatible — fall through to protocol_checker
