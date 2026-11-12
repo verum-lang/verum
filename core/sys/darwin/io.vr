@@ -690,7 +690,7 @@ public fn is_kqueue_available() -> Bool {
 // This means we register interest and perform actual I/O when fd is ready.
 
 /// Convert local DarwinIoDriverError to IOEngine's EngineIoError
-fn convert_error(err: DarwinIoDriverError) -> EngineIoError {
+public(cog) fn convert_error(err: DarwinIoDriverError) -> EngineIoError {
     match err {
         WouldBlock => EngineIoError.WouldBlock,
         Interrupted => EngineIoError.Interrupted,
@@ -704,7 +704,7 @@ fn convert_error(err: DarwinIoDriverError) -> EngineIoError {
         TimedOut => EngineIoError.TimedOut,
         QueueFull => EngineIoError.SubmissionQueueFull,
         DarwinIoDriverError.Closed => EngineIoError.Closed,
-        Other { code, message } => EngineIoError.Other(message),
+        Other { code, message } => EngineIoError.Other(f"kqueue error {code}: {message}"),
     }
 }
 

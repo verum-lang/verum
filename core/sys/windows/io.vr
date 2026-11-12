@@ -734,6 +734,28 @@ public fn async_write(
 // IOEngine Protocol Implementation for IocpDriver
 // =============================================================================
 
+/// Preserve driver error categories and unknown native error details at the
+/// portable engine boundary, including initialization failures.
+public(cog) fn convert_error(err: WindowsIoDriverError) -> EngineIoError {
+    match err {
+        WindowsIoDriverError.WouldBlock => EngineIoError.WouldBlock,
+        WindowsIoDriverError.Interrupted => EngineIoError.Interrupted,
+        WindowsIoDriverError.NotFound { path } => EngineIoError.NotFound { path: path },
+        WindowsIoDriverError.AlreadyExists => EngineIoError.AlreadyExists,
+        WindowsIoDriverError.InvalidInput { reason } => EngineIoError.InvalidInput { reason: reason },
+        WindowsIoDriverError.PermissionDenied => EngineIoError.PermissionDenied,
+        WindowsIoDriverError.ConnectionRefused => EngineIoError.ConnectionRefused,
+        WindowsIoDriverError.ConnectionReset => EngineIoError.ConnectionReset,
+        WindowsIoDriverError.BrokenPipe => EngineIoError.BrokenPipe,
+        WindowsIoDriverError.TimedOut => EngineIoError.TimedOut,
+        WindowsIoDriverError.QueueFull => EngineIoError.SubmissionQueueFull,
+        WindowsIoDriverError.Closed => EngineIoError.Closed,
+        WindowsIoDriverError.EndOfFile => EngineIoError.EndOfFile,
+        WindowsIoDriverError.Cancelled => EngineIoError.Cancelled,
+        WindowsIoDriverError.Other { code, message } => EngineIoError.Other(f"IOCP error {code}: {message}"),
+    }
+}
+
 implement IOEngine for IocpDriver {
     /// Submit a prefix of the batch. A synthetic no-op has no OVERLAPPED
     /// allocation. File operations require an associated handle and a live

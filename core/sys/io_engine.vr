@@ -879,31 +879,31 @@ public type IOEngine is protocol {
 /// On Windows, returns IOCP driver.
 @cfg(target_os = "linux")
 public fn create_io_engine(sq_entries: UInt32) -> Result<some E: IOEngine, EngineIoError> {
-    mount sys.linux.io.{IoUringDriver, EpollDriver, IoDriver};
+    mount sys.linux.io.{IoUringDriver, EpollDriver, LinuxIoDriver, convert_error};
 
     // Try io_uring first (Linux 5.1+)
     match IoUringDriver.new(sq_entries) {
-        Result.Ok(driver) => Result.Ok(IoDriver.Uring(driver)),
+        Result.Ok(driver) => Result.Ok(LinuxIoDriver.Uring(driver)),
         Result.Err(_) => {
             // Fall back to epoll
-            let epoll = EpollDriver.new()?;
-            Result.Ok(IoDriver.Epoll(epoll))
+            let epoll = EpollDriver.new().map_err(convert_error)?;
+            Result.Ok(LinuxIoDriver.Epoll(epoll))
         }
     }
 }
 
 @cfg(target_os = "macos")
 public fn create_io_engine(sq_entries: UInt32) -> Result<some E: IOEngine, EngineIoError> {
-    mount sys.darwin.io.KqueueDriver;
+    mount sys.darwin.io.{KqueueDriver, convert_error};
 
-    KqueueDriver.new()
+    KqueueDriver.new().map_err(convert_error)
 }
 
 @cfg(target_os = "windows")
 public fn create_io_engine(num_concurrent: UInt32) -> Result<some E: IOEngine, EngineIoError> {
-    mount sys.windows.io.IocpDriver;
+    mount sys.windows.io.{IocpDriver, convert_error};
 
-    IocpDriver.new_with_concurrency(num_concurrent)
+    IocpDriver.new_with_concurrency(num_concurrent).map_err(convert_error)
 }
 
 // =============================================================================

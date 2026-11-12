@@ -1365,12 +1365,13 @@ implement LinuxIoDriver {
 // for the Linux-specific LinuxIoDriver type.
 
 /// Convert local LinuxIoDriverError to IOEngine's IoError
-fn convert_error(err: LinuxIoDriverError) -> EngineIoError {
+public(cog) fn convert_error(err: LinuxIoDriverError) -> EngineIoError {
     match err {
-        UringSetupFailed { code } => EngineIoError.Other("io_uring setup failed"),
-        MmapFailed { code } => EngineIoError.Other("mmap failed"),
+        UringSetupFailed { code } => EngineIoError.Other(f"io_uring setup failed: errno {code}"),
+        MmapFailed { code } => EngineIoError.Other(f"mmap failed: errno {code}"),
         SubmitFailed { code } => EngineIoError.from_errno(code as Int32),
         WaitFailed { code } => EngineIoError.from_errno(code as Int32),
+        RegisterFailed { errno } => EngineIoError.from_errno(errno as Int32),
         QueueFull => EngineIoError.SubmissionQueueFull,
         Unsupported => EngineIoError.NotSupported,
         EpollFailed { code } => EngineIoError.from_errno(code as Int32),

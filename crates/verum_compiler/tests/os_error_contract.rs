@@ -2,7 +2,7 @@
 //! This isolates their public contract; the full stdlib bake is a separate gate.
 use std::sync::Arc;
 use verum_ast::{ItemKind, decl::{ImplItemKind, ImplKind}, ty::TypeKind};
-use verum_common::Text;
+use verum_common::{List, Text};
 use verum_compiler::{CompilationPipeline, CompilerOptions, CoreConfig, Session, archive_ctx_loader::ArchiveCtxCache};
 use verum_fast_parser::Parser;
 use verum_vbc::{deserialize::deserialize_module, interpreter::Interpreter, serialize::serialize_module};
@@ -38,38 +38,26 @@ fn source_contract(source: &str, owner: &str, methods: &[&str]) -> Text {
     selected
 }
 
-#[test]
-fn os_error_data_and_adapter_survive_cross_module_archive_execution() {
+fn source_function<'a>(source: &'a str, name: &str) -> &'a str {
+    let ast = Parser::new(source).parse_module().expect("stdlib grammar");
+    let function = ast.items.iter().find(|item| {
+        matches!(&item.kind, ItemKind::Function(function) if function.name.name == name)
+    }).expect("actual free function");
+    declaration_text(source, function.span)
+}
+
+fn execute_contract(modules: &[(&str, Text)], consumer: &str) {
     let root = tempfile::tempdir().unwrap();
     let core = root.path().join("core");
     std::fs::create_dir_all(core.join("sys")).unwrap();
     std::fs::write(core.join("mod.vr"), "module core; public module sys; public module consumer;").unwrap();
-    std::fs::write(core.join("sys/mod.vr"), "module core.sys; public module common; public module io_engine;").unwrap();
-    let error = source_contract(include_str!("../../../core/sys/common.vr"), "OSError", &["new", "into_message"]);
-    let engine = source_contract(include_str!("../../../core/sys/io_engine.vr"), "EngineIoError", &["from_errno", "from_os"]);
-    std::fs::write(core.join("sys/common.vr"), format!("module core.sys.common;\n{error}")).unwrap();
-    std::fs::write(core.join("sys/io_engine.vr"), format!("module core.sys.io_engine; mount core.sys.common.OSError;\n{engine}")).unwrap();
-    std::fs::write(core.join("consumer.vr"), r#"
-        module core.consumer;
-        mount core.sys.common.OSError;
-        mount core.sys.io_engine.EngineIoError;
-        public fn probe() -> Int {
-            let error = OSError.new(2, "missing item");
-            if error.code != 2 { return 1; }
-            if error.message != "missing item" { return 2; }
-            let converted = EngineIoError.from_os(error);
-            match converted {
-                EngineIoError.NotFound { path } => if path != "" { return 3; },
-                _ => return 4,
-            }
-            let data = OSError { code: 13, message: "access refused" };
-            if data.into_message() != "access refused" { return 5; }
-            match EngineIoError.from_os(OSError.new(13, "denied")) {
-                EngineIoError.PermissionDenied => 73,
-                _ => 6,
-            }
-        }
-    "#).unwrap();
+    let mut namespace = Text::from("module core.sys;");
+    for (name, source) in modules {
+        namespace.push_str(&format!(" public module {name};"));
+        std::fs::write(core.join("sys").join(format!("{name}.vr")), format!("module core.sys.{name};\n{source}")).unwrap();
+    }
+    std::fs::write(core.join("sys/mod.vr"), namespace).unwrap();
+    std::fs::write(core.join("consumer.vr"), consumer).unwrap();
     let output = root.path().join("runtime.vbca");
     let mut session = Session::new(CompilerOptions { input: core.join("mod.vr"), ..Default::default() });
     let result = CompilationPipeline::new_core(&mut session, CoreConfig::new(&core).with_output(&output))
@@ -93,4 +81,76 @@ fn os_error_data_and_adapter_survive_cross_module_archive_execution() {
         });
         assert_eq!(result.try_as_i64(), Some(73));
     }
+}
+
+#[test]
+fn os_error_data_and_adapter_survive_cross_module_archive_execution() {
+    let error = source_contract(include_str!("../../../core/sys/common.vr"), "OSError", &["new", "into_message"]);
+    let engine = source_contract(include_str!("../../../core/sys/io_engine.vr"), "EngineIoError", &["from_errno", "from_os"]);
+    execute_contract(&[("common", error), ("io_engine", format!("mount core.sys.common.OSError;\n{engine}").into())], r#"
+        module core.consumer;
+        mount core.sys.common.OSError;
+        mount core.sys.io_engine.EngineIoError;
+        public fn probe() -> Int {
+            let error = OSError.new(2, "missing item");
+            if error.code != 2 { return 1; }
+            if error.message != "missing item" { return 2; }
+            let converted = EngineIoError.from_os(error);
+            match converted {
+                EngineIoError.NotFound { path } => if path != "" { return 3; },
+                _ => return 4,
+            }
+            let data = OSError { code: 13, message: "access refused" };
+            if data.into_message() != "access refused" { return 5; }
+            match EngineIoError.from_os(OSError.new(13, "denied")) {
+                EngineIoError.PermissionDenied => 73,
+                _ => 6,
+            }
+        }
+    "#);
+}
+
+#[test]
+fn platform_error_adapters_preserve_categories_and_failure_details() {
+    let mut modules = List::new();
+    modules.push(("io_engine", source_contract(
+        include_str!("../../../core/sys/io_engine.vr"), "EngineIoError", &["from_errno"],
+    )));
+    for (module, source, owner) in [
+        ("linux", include_str!("../../../core/sys/linux/io.vr"), "LinuxIoDriverError"),
+        ("darwin", include_str!("../../../core/sys/darwin/io.vr"), "DarwinIoDriverError"),
+        ("windows", include_str!("../../../core/sys/windows/io.vr"), "WindowsIoDriverError"),
+    ] {
+        modules.push((module, format!("mount core.sys.io_engine.EngineIoError;\n{}\n{}",
+            source_contract(source, owner, &[]), source_function(source, "convert_error")).into()));
+    }
+    let mut consumer = Text::from(r#"module core.consumer;
+        mount core.sys.io_engine.EngineIoError;
+        mount core.sys.linux.{LinuxIoDriverError, convert_error as linux_error};
+        mount core.sys.darwin.{DarwinIoDriverError, convert_error as darwin_error};
+        mount core.sys.windows.{WindowsIoDriverError, convert_error as windows_error};
+        public fn probe() -> Int {
+    "#);
+    let checks = [
+        ("linux_error(LinuxIoDriverError.UringSetupFailed { code: 19 })", "Other(message)", "message == \"io_uring setup failed: errno 19\""),
+        ("linux_error(LinuxIoDriverError.MmapFailed { code: 12 })", "Other(message)", "message == \"mmap failed: errno 12\""),
+        ("linux_error(LinuxIoDriverError.RegisterFailed { errno: 13 })", "PermissionDenied", "true"),
+        ("linux_error(LinuxIoDriverError.EpollFailed { code: 2 })", "NotFound { path }", "path == \"\""),
+        ("linux_error(LinuxIoDriverError.QueueFull)", "SubmissionQueueFull", "true"),
+        ("linux_error(LinuxIoDriverError.Unsupported)", "NotSupported", "true"),
+        ("darwin_error(DarwinIoDriverError.Other { code: -73, message: \"native failure\" })", "Other(message)", "message == \"kqueue error -73: native failure\""),
+        ("darwin_error(DarwinIoDriverError.NotFound { path: \"missing-file\" })", "NotFound { path }", "path == \"missing-file\""),
+        ("darwin_error(DarwinIoDriverError.InvalidInput { reason: \"invalid-change\" })", "InvalidInput { reason }", "reason == \"invalid-change\""),
+        ("darwin_error(DarwinIoDriverError.Closed)", "Closed", "true"),
+        ("windows_error(WindowsIoDriverError.Other { code: 4294967295_u32, message: \"native failure\" })", "Other(message)", "message == \"IOCP error 4294967295: native failure\""),
+        ("windows_error(WindowsIoDriverError.NotFound { path: \"missing-file\" })", "NotFound { path }", "path == \"missing-file\""),
+        ("windows_error(WindowsIoDriverError.InvalidInput { reason: \"invalid-handle\" })", "InvalidInput { reason }", "reason == \"invalid-handle\""),
+        ("windows_error(WindowsIoDriverError.Cancelled)", "Cancelled", "true"),
+        ("windows_error(WindowsIoDriverError.EndOfFile)", "EndOfFile", "true"),
+    ];
+    for (index, (expression, pattern, condition)) in checks.iter().enumerate() {
+        consumer.push_str(&format!("if !(match {expression} {{ EngineIoError.{pattern} => {condition}, _ => false }}) {{ return {}; }}\n", index + 1));
+    }
+    consumer.push_str("73 }");
+    execute_contract(&modules, &consumer);
 }
