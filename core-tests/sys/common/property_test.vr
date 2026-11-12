@@ -316,30 +316,31 @@ fn law_oserror_is_success_iff_code_zero_exhaustive() {
 }
 
 @test
-fn law_oserror_interrupted_iff_code_four() {
-    // interrupted() exactly the predicate `code == 4`.
-    let codes: List<Int> = [0, 3, 4, 5, 11, 35, 10035];
+fn law_oserror_interrupted_uses_native_code_domain() {
+    let codes: List<Int> = [0, 3, 4, 5, 11, 35, 10004, 10035];
     for c in codes.iter() {
         let e = OSError.new(*c, "x".clone());
-        assert_eq(e.interrupted(), (*c == 4));
+        let mut expected = false;
+        @cfg(any(target_os = "linux", target_os = "macos"))
+        { expected = *c == 4; }
+        @cfg(target_os = "windows")
+        { expected = *c == 10004; }
+        assert_eq(e.interrupted(), expected);
     }
 }
 
 @test
-fn law_oserror_would_block_three_known_codes() {
-    // would_block() is true exactly for codes {11, 35, 10035}.
-    let codes: List<Int> = [0, 1, 2, 4, 11, 13, 35, 50, 100, 10000, 10035];
-    let expected: List<Bool> = [
-        false, false, false, false, true, false, true, false, false, false, true,
-    ];
-    let mut i: Int = 0;
-    let n = codes.len();
-    while i < n {
-        let c = codes.get(i as USize).unwrap();
-        let exp = expected.get(i as USize).unwrap();
-        let e = OSError.new(c, "x".clone());
-        assert_eq(e.would_block(), exp);
-        i = i + 1;
+fn law_oserror_would_block_uses_native_code_domain() {
+    let codes: List<Int> = [0, 1, 2, 4, 11, 13, 35, 50, 100, 997, 10000, 10035];
+    for c in codes.iter() {
+        let mut expected = false;
+        @cfg(target_os = "linux")
+        { expected = *c == 11; }
+        @cfg(target_os = "macos")
+        { expected = *c == 35; }
+        @cfg(target_os = "windows")
+        { expected = *c == 997 || *c == 10035; }
+        assert_eq(OSError.new(*c, "x").would_block(), expected);
     }
 }
 

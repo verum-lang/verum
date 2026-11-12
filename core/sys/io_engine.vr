@@ -50,7 +50,9 @@ module core.sys.io_engine;
 // =============================================================================
 
 mount sys.common.{OSError, FileDesc, IOVec};
+mount core.sys.error.{OSErrorKind, native_error_kind};
 mount core.base.coercion.{IntCoercible};
+mount core.base.result.Result;
 
 // =============================================================================
 // Core Types with Refinement Constraints
@@ -425,20 +427,20 @@ implement CompletionResult {
         if self.result >= 0 {
             Result.Ok(self.result as UInt32)
         } else {
-            Result.Err(EngineIoError.from_errno(-self.result))
+            Result.Err(EngineIoError.from_os_code(-(self.result as Int)))
         }
     }
 
     /// Check if this is a cancellation result
     @inline
     public pure fn was_cancelled(&self) -> Bool {
-        self.result == -125  // ECANCELED
+        self.result < 0 && (native_error_kind(-(self.result as Int)) is OSErrorKind.Cancelled)
     }
 
     /// Check if this is a timeout result
     @inline
     public pure fn was_timeout(&self) -> Bool {
-        self.result == -62   // ETIME (Linux io_uring timeout)
+        self.result < 0 && (native_error_kind(-(self.result as Int)) is OSErrorKind.TimedOut)
     }
 }
 
@@ -572,70 +574,30 @@ implement Eq for EngineIoError {
 
 
 implement EngineIoError {
-    /// Create from POSIX errno value
-    /// Handles both Linux and Darwin (BSD) errno differences
-    public pure fn from_errno(err: Int32) -> EngineIoError {
-        match err {
-            11 | 35 => WouldBlock,                            // EAGAIN (11 Linux, 35 Darwin) / EWOULDBLOCK
-            4 => Interrupted,                                  // EINTR
-            2 => NotFound { path: "" },                       // ENOENT
-            17 => AlreadyExists,                               // EEXIST
-            22 => InvalidInput { reason: "Invalid argument" }, // EINVAL
-            13 | 1 => PermissionDenied,                       // EACCES (13) / EPERM (1)
-            111 | 61 => ConnectionRefused,                     // ECONNREFUSED (111 Linux, 61 Darwin)
-            104 | 54 => ConnectionReset,                       // ECONNRESET (104 Linux, 54 Darwin)
-            32 => BrokenPipe,                                  // EPIPE
-            110 | 60 => TimedOut,                              // ETIMEDOUT (110 Linux, 60 Darwin)
-            38 | 78 => NotSupported,                           // ENOSYS (38 Linux, 78 Darwin)
-            125 | 89 => Cancelled,                             // ECANCELED (125 Linux, 89 Darwin)
-            62 => TimedOut,                                    // ETIME (io_uring specific timeout)
-            107 | 57 => NotConnected,                            // ENOTCONN (107 Linux, 57 Darwin)
-            // Preserve the actual errno value in the
-            // diagnostic message — pre-fix `Other("Unknown
-            // error")` discarded the integer, leaving callers
-            // and operators no way to identify the underlying
-            // syscall failure beyond "something went wrong".
-            _ => Other(f"Unknown errno: {err}"),
-        }
+    /// Interpret a raw code in the target OS ABI (errno or WinError).
+    public pure fn from_os_code(code: Int) -> EngineIoError {
+        EngineIoError.from_os(OSError.from_code(code))
     }
 
-    /// Alias for from_errno (POSIX error code)
-    public pure fn from_os_error(err: Int32) -> EngineIoError {
-        EngineIoError.from_errno(err)
-    }
-
-    /// Convert a structured `OSError {code, message}` into a tagged
-    /// `EngineIoError`. Use this with `.map_err(EngineIoError.from_os)` when the
-    /// source is a `Result<T, OSError>` (the shape returned by every
-    /// `safe_*` syscall wrapper in `core.sys`). Without this adapter
-    /// callers had to use `.map_err(EngineIoError.from_os_error)` which
-    /// silently fed an `OSError` struct into a function that expects
-    /// `Int32`, producing nonsense `EngineIoError` values at runtime.
+    /// Convert a native OS failure, retaining the code and original diagnostic
+    /// message when no portable category is known. No narrowing cast is used.
     public pure fn from_os(err: OSError) -> EngineIoError {
-        EngineIoError.from_errno(err.code as Int32)
-    }
-
-    /// Create from Windows error code
-    @cfg(target_os = "windows")
-    public pure fn from_win32(err: UInt32) -> EngineIoError {
-        match err {
-            997 => WouldBlock,              // ERROR_IO_PENDING
-            995 => Cancelled,               // ERROR_OPERATION_ABORTED
-            2 => NotFound { path: "" },     // ERROR_FILE_NOT_FOUND
-            3 => NotFound { path: "" },     // ERROR_PATH_NOT_FOUND
-            80 => AlreadyExists,            // ERROR_FILE_EXISTS
-            5 => PermissionDenied,          // ERROR_ACCESS_DENIED
-            1225 => ConnectionRefused,      // ERROR_CONNECTION_REFUSED
-            1236 => ConnectionReset,        // ERROR_CONNECTION_ABORTED
-            109 => BrokenPipe,              // ERROR_BROKEN_PIPE
-            121 => TimedOut,                // ERROR_SEM_TIMEOUT
-            1460 => TimedOut,               // ERROR_TIMEOUT
-            50 => NotSupported,             // ERROR_NOT_SUPPORTED
-            // Preserve the Win32 error code so operators can
-            // look it up in the System Error Codes
-            // documentation. Pre-fix `Other("Windows error")`
-            // discarded the number entirely.
-            _ => Other(f"Win32 error: {err}"),
+        match err.kind() {
+            OSErrorKind.WouldBlock => EngineIoError.WouldBlock,
+            OSErrorKind.Interrupted => EngineIoError.Interrupted,
+            OSErrorKind.NotFound => EngineIoError.NotFound { path: "" },
+            OSErrorKind.AlreadyExists => EngineIoError.AlreadyExists,
+            OSErrorKind.InvalidInput => EngineIoError.InvalidInput { reason: err.message },
+            OSErrorKind.PermissionDenied => EngineIoError.PermissionDenied,
+            OSErrorKind.ConnectionRefused => EngineIoError.ConnectionRefused,
+            OSErrorKind.ConnectionReset => EngineIoError.ConnectionReset,
+            OSErrorKind.BrokenPipe => EngineIoError.BrokenPipe,
+            OSErrorKind.TimedOut => EngineIoError.TimedOut,
+            OSErrorKind.NotSupported => EngineIoError.NotSupported,
+            OSErrorKind.Cancelled => EngineIoError.Cancelled,
+            OSErrorKind.NotConnected => EngineIoError.NotConnected,
+            OSErrorKind.EndOfFile => EngineIoError.EndOfFile,
+            OSErrorKind.Unknown => EngineIoError.Other(f"OS error {err.code}: {err.message}"),
         }
     }
 
@@ -658,6 +620,7 @@ implement EngineIoError {
             EndOfFile => "End of file",
             Cancelled => "Operation cancelled",
             NotSupported => "Operation not supported",
+            NotConnected => "Not connected",
             Other(msg) => msg,
         }
     }
@@ -696,14 +659,6 @@ implement EngineIoError {
         }
     }
 
-    /// Get the raw error code if available
-    @inline
-    public pure fn raw_code(&self) -> Maybe<Int32> {
-        match self {
-            Other(_) => Maybe.None,
-            _ => Maybe.None,
-        }
-    }
 }
 
 // =============================================================================

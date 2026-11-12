@@ -773,7 +773,7 @@ implement IOEngine for IocpDriver {
                     );
                     if !posted {
                         if submitted > 0 { return Result.Ok(submitted); }
-                        return Result.Err(EngineIoError.from_win32(GetLastError()));
+                        return Result.Err(EngineIoError.from_os_code(GetLastError() as Int));
                     }
                     self.pending += 1;
                     submitted += 1;
@@ -837,7 +837,7 @@ implement IOEngine for IocpDriver {
                 }
                 return Result.Err(EngineIoError.TimedOut);
             }
-            return Result.Err(EngineIoError.from_win32(error));
+            return Result.Err(EngineIoError.from_os_code(error as Int));
         }
 
         // Convert overlapped entries to CompletionResult
@@ -892,7 +892,7 @@ implement IOEngine for IocpDriver {
         );
 
         if !result {
-            Result.Err(EngineIoError.from_win32(GetLastError()))
+            Result.Err(EngineIoError.from_os_code(GetLastError() as Int))
         } else {
             Result.Ok(())
         }
@@ -930,7 +930,7 @@ implement IOEngine for IocpDriver {
         self.iocp = Handle.INVALID;
 
         if !result {
-            Result.Err(EngineIoError.from_win32(GetLastError()))
+            Result.Err(EngineIoError.from_os_code(GetLastError() as Int))
         } else {
             Result.Ok(())
         }

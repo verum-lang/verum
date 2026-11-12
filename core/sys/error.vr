@@ -1,0 +1,87 @@
+module core.sys.error;
+
+// Codes are interpreted in the target OS ABI, never in a union of numerical
+// tables from different systems. Win32 and Winsock use the shared WinError
+// number space. Unknown codes remain unclassified and keep their raw data.
+@cfg(target_os = "linux")
+mount core.sys.linux.errno as native_errno;
+@cfg(target_os = "macos")
+mount core.sys.darwin.errno as native_errno;
+@cfg(target_os = "windows")
+mount core.sys.windows.winerror as winerror;
+
+/// Portable categories of native errors. `Unknown` means that no portable
+/// category is known; the enclosing OSError retains the exact code/message.
+public type OSErrorKind is
+    WouldBlock | Interrupted | NotFound | AlreadyExists | InvalidInput
+    | PermissionDenied | ConnectionRefused | ConnectionReset | BrokenPipe
+    | TimedOut | NotSupported | Cancelled | NotConnected | EndOfFile | Unknown;
+
+@cfg(any(target_os = "linux", target_os = "macos"))
+public(cog) pure fn native_error_kind(code: Int) -> OSErrorKind {
+    match code {
+        native_errno.EAGAIN => OSErrorKind.WouldBlock,
+        native_errno.EINTR => OSErrorKind.Interrupted,
+        native_errno.ENOENT => OSErrorKind.NotFound,
+        native_errno.EEXIST => OSErrorKind.AlreadyExists,
+        native_errno.EINVAL => OSErrorKind.InvalidInput,
+        native_errno.EACCES | native_errno.EPERM => OSErrorKind.PermissionDenied,
+        native_errno.ECONNREFUSED => OSErrorKind.ConnectionRefused,
+        native_errno.ECONNRESET => OSErrorKind.ConnectionReset,
+        native_errno.EPIPE => OSErrorKind.BrokenPipe,
+        native_errno.ETIMEDOUT | native_errno.ETIME => OSErrorKind.TimedOut,
+        native_errno.ENOSYS | native_errno.ENOTSUP | native_errno.EOPNOTSUPP => OSErrorKind.NotSupported,
+        native_errno.ECANCELED => OSErrorKind.Cancelled,
+        native_errno.ENOTCONN => OSErrorKind.NotConnected,
+        _ => OSErrorKind.Unknown,
+    }
+}
+
+@cfg(target_os = "windows")
+public(cog) pure fn native_error_kind(code: Int) -> OSErrorKind {
+    match code {
+        winerror.ERROR_IO_PENDING | winerror.WSAEWOULDBLOCK => OSErrorKind.WouldBlock,
+        winerror.WSAEINTR => OSErrorKind.Interrupted,
+        winerror.ERROR_FILE_NOT_FOUND | winerror.ERROR_PATH_NOT_FOUND => OSErrorKind.NotFound,
+        winerror.ERROR_FILE_EXISTS | winerror.ERROR_ALREADY_EXISTS => OSErrorKind.AlreadyExists,
+        winerror.ERROR_INVALID_PARAMETER | winerror.WSAEINVAL => OSErrorKind.InvalidInput,
+        winerror.ERROR_ACCESS_DENIED | winerror.WSAEACCES => OSErrorKind.PermissionDenied,
+        winerror.ERROR_CONNECTION_REFUSED | winerror.WSAECONNREFUSED => OSErrorKind.ConnectionRefused,
+        winerror.WSAECONNRESET => OSErrorKind.ConnectionReset,
+        winerror.ERROR_BROKEN_PIPE => OSErrorKind.BrokenPipe,
+        winerror.ERROR_SEM_TIMEOUT | winerror.WAIT_TIMEOUT | winerror.ERROR_TIMEOUT | winerror.WSAETIMEDOUT => OSErrorKind.TimedOut,
+        winerror.ERROR_NOT_SUPPORTED | winerror.WSAEOPNOTSUPP => OSErrorKind.NotSupported,
+        winerror.ERROR_OPERATION_ABORTED => OSErrorKind.Cancelled,
+        winerror.WSAENOTCONN => OSErrorKind.NotConnected,
+        winerror.ERROR_HANDLE_EOF => OSErrorKind.EndOfFile,
+        _ => OSErrorKind.Unknown,
+    }
+}
+
+@cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))
+public(cog) pure fn native_error_kind(code: Int) -> OSErrorKind {
+    // No ABI table has been declared for this target. Do not infer a Linux,
+    // BSD or Win32 meaning from a coincidentally equal integer.
+    OSErrorKind.Unknown
+}
+
+public(cog) pure fn native_error_message(code: Int) -> Text {
+    if code == 0 { return "Success"; }
+    match native_error_kind(code) {
+        OSErrorKind.WouldBlock => "Operation would block",
+        OSErrorKind.Interrupted => "Interrupted system call",
+        OSErrorKind.NotFound => "No such file or directory",
+        OSErrorKind.AlreadyExists => "File exists",
+        OSErrorKind.InvalidInput => "Invalid argument",
+        OSErrorKind.PermissionDenied => "Permission denied",
+        OSErrorKind.ConnectionRefused => "Connection refused",
+        OSErrorKind.ConnectionReset => "Connection reset",
+        OSErrorKind.BrokenPipe => "Broken pipe",
+        OSErrorKind.TimedOut => "Operation timed out",
+        OSErrorKind.NotSupported => "Operation not supported",
+        OSErrorKind.Cancelled => "Operation cancelled",
+        OSErrorKind.NotConnected => "Not connected",
+        OSErrorKind.EndOfFile => "End of file",
+        OSErrorKind.Unknown => "Unclassified OS error",
+    }
+}

@@ -85,7 +85,7 @@ fn test_oserror_question_mark_propagation() {
     // task #11's blanket-impl pre-pass for the `Try` protocol on
     // user-defined error types.
     fn inner() -> Result<Int, OSError> {
-        Result.Err(OSError.new(11, "EAGAIN".clone()))
+        Result.Err(OSError.new(42, "propagation marker"))
     }
     fn outer() -> Result<Int, OSError> {
         let v = inner()?;
@@ -94,8 +94,8 @@ fn test_oserror_question_mark_propagation() {
     match outer() {
         Ok(_) => assert(false),
         Err(e) => {
-            assert_eq(e.code, 11);
-            assert(e.would_block());
+            assert_eq(e.code, 42);
+            assert_eq(e.message, "propagation marker");
         }
     };
 }
@@ -110,12 +110,19 @@ fn test_oserror_list_filter_by_predicate() {
         OSError.new(11, "EAGAIN".clone()),
         OSError.new(13, "EACCES".clone()),
         OSError.new(35, "EAGAIN".clone()),
+        OSError.new(997, "ERROR_IO_PENDING"),
+        OSError.new(10035, "WSAEWOULDBLOCK"),
     ];
     let blockers: List<OSError> = errs.iter()
         .filter(|e| e.would_block())
         .map(|e| e.clone())
         .collect();
-    assert_eq(blockers.len(), 2);
+    let mut expected = 0;
+    @cfg(any(target_os = "linux", target_os = "macos"))
+    { expected = 1; }
+    @cfg(target_os = "windows")
+    { expected = 2; }
+    assert_eq(blockers.len(), expected);
 }
 
 @test

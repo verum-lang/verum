@@ -1,0 +1,51 @@
+module core.sys.windows.winerror;
+
+// Windows WinError number space shared by Win32 and Winsock.
+// Kept independent of API bindings and runtime initialization.
+// https://learn.microsoft.com/en-us/windows/win32/debug/system-error-codes
+// https://learn.microsoft.com/en-us/windows/win32/winsock/windows-sockets-error-codes-2
+
+public const ERROR_SUCCESS: UInt32 = 0;
+public const ERROR_INVALID_FUNCTION: UInt32 = 1;
+public const ERROR_FILE_NOT_FOUND: UInt32 = 2;
+public const ERROR_PATH_NOT_FOUND: UInt32 = 3;
+public const ERROR_TOO_MANY_OPEN_FILES: UInt32 = 4;
+public const ERROR_ACCESS_DENIED: UInt32 = 5;
+public const ERROR_INVALID_HANDLE: UInt32 = 6;
+public const ERROR_NOT_ENOUGH_MEMORY: UInt32 = 8;
+public const ERROR_INVALID_DATA: UInt32 = 13;
+public const ERROR_OUTOFMEMORY: UInt32 = 14;
+public const ERROR_NO_MORE_FILES: UInt32 = 18;
+public const ERROR_WRITE_PROTECT: UInt32 = 19;
+public const ERROR_NOT_READY: UInt32 = 21;
+public const ERROR_SHARING_VIOLATION: UInt32 = 32;
+public const ERROR_LOCK_VIOLATION: UInt32 = 33;
+public const ERROR_HANDLE_EOF: UInt32 = 38;
+public const ERROR_NOT_SUPPORTED: UInt32 = 50;
+public const ERROR_FILE_EXISTS: UInt32 = 80;
+public const ERROR_INVALID_PARAMETER: UInt32 = 87;
+public const ERROR_BROKEN_PIPE: UInt32 = 109;
+public const ERROR_DISK_FULL: UInt32 = 112;
+public const ERROR_SEM_TIMEOUT: UInt32 = 121;
+public const ERROR_INSUFFICIENT_BUFFER: UInt32 = 122;
+public const ERROR_INVALID_NAME: UInt32 = 123;
+public const ERROR_DIR_NOT_EMPTY: UInt32 = 145;
+public const ERROR_ALREADY_EXISTS: UInt32 = 183;
+public const ERROR_MORE_DATA: UInt32 = 234;
+public const WAIT_TIMEOUT: UInt32 = 258;
+public const ERROR_NO_MORE_ITEMS: UInt32 = 259;
+public const ERROR_OPERATION_ABORTED: UInt32 = 995;
+public const ERROR_IO_INCOMPLETE: UInt32 = 996;
+public const ERROR_IO_PENDING: UInt32 = 997;
+public const ERROR_CONNECTION_REFUSED: UInt32 = 1225;
+public const ERROR_TIMEOUT: UInt32 = 1460;
+
+public const WSAEINTR: Int = 10004;
+public const WSAEACCES: Int = 10013;
+public const WSAEINVAL: Int = 10022;
+public const WSAEWOULDBLOCK: Int = 10035;
+public const WSAEOPNOTSUPP: Int = 10045;
+public const WSAECONNRESET: Int = 10054;
+public const WSAENOTCONN: Int = 10057;
+public const WSAETIMEDOUT: Int = 10060;
+public const WSAECONNREFUSED: Int = 10061;

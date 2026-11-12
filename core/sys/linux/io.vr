@@ -1369,12 +1369,12 @@ public(cog) fn convert_error(err: LinuxIoDriverError) -> EngineIoError {
     match err {
         UringSetupFailed { code } => EngineIoError.Other(f"io_uring setup failed: errno {code}"),
         MmapFailed { code } => EngineIoError.Other(f"mmap failed: errno {code}"),
-        SubmitFailed { code } => EngineIoError.from_errno(code as Int32),
-        WaitFailed { code } => EngineIoError.from_errno(code as Int32),
-        RegisterFailed { errno } => EngineIoError.from_errno(errno as Int32),
+        SubmitFailed { code } => EngineIoError.from_os_code(code),
+        WaitFailed { code } => EngineIoError.from_os_code(code),
+        RegisterFailed { errno } => EngineIoError.from_os_code(errno),
         QueueFull => EngineIoError.SubmissionQueueFull,
         Unsupported => EngineIoError.NotSupported,
-        EpollFailed { code } => EngineIoError.from_errno(code as Int32),
+        EpollFailed { code } => EngineIoError.from_os_code(code),
         Cancelled => EngineIoError.Cancelled,
         Timeout => EngineIoError.TimedOut,
     }

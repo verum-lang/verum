@@ -39,6 +39,9 @@ module core.sys.windows;
 // Module Declarations
 // =============================================================================
 
+/// Win32 and Winsock error codes (no runtime dependencies)
+public module winerror;
+
 /// NT status codes and helpers
 public module ntstatus;
 

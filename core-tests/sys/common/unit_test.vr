@@ -270,6 +270,7 @@ fn test_oserror_is_success_nonzero_code_is_failure() {
 }
 
 @test
+@cfg(any(target_os = "linux", target_os = "macos"))
 fn test_oserror_interrupted_eintr() {
     // EINTR = 4 on every POSIX platform Verum supports.
     let e = OSError.new(4, "EINTR".clone());
@@ -280,6 +281,7 @@ fn test_oserror_interrupted_eintr() {
 }
 
 @test
+@cfg(target_os = "linux")
 fn test_oserror_would_block_linux_eagain() {
     // Linux EAGAIN == EWOULDBLOCK == 11.
     let e = OSError.new(11, "EAGAIN".clone());
@@ -287,6 +289,7 @@ fn test_oserror_would_block_linux_eagain() {
 }
 
 @test
+@cfg(target_os = "macos")
 fn test_oserror_would_block_darwin_eagain() {
     // macOS EAGAIN == EWOULDBLOCK == 35.
     let e = OSError.new(35, "EAGAIN".clone());
@@ -294,10 +297,28 @@ fn test_oserror_would_block_darwin_eagain() {
 }
 
 @test
+@cfg(target_os = "windows")
 fn test_oserror_would_block_windows_wsa() {
     // WSAEWOULDBLOCK == 10035.
     let e = OSError.new(10035, "WSAEWOULDBLOCK".clone());
     assert(e.would_block());
+}
+
+@test
+@cfg(target_os = "windows")
+fn test_oserror_interruption_uses_winsock_domain() {
+    assert(OSError.new(10004, "WSAEINTR").interrupted());
+    assert(!OSError.new(4, "ERROR_TOO_MANY_OPEN_FILES").interrupted());
+    assert(!OSError.new(11, "ERROR_BAD_FORMAT").would_block());
+}
+
+@test
+@cfg(any(target_os = "linux", target_os = "macos"))
+fn test_oserror_deadlock_is_not_would_block() {
+    @cfg(target_os = "linux")
+    { assert(!OSError.from_code(35).would_block()); }
+    @cfg(target_os = "macos")
+    { assert(!OSError.from_code(11).would_block()); }
 }
 
 @test

@@ -311,6 +311,8 @@ public const ESOCKTNOSUPPORT: Int = 94;
 
 /// Operation not supported on transport endpoint
 public const EOPNOTSUPP: Int = 95;
+/// POSIX synonym for operation not supported in the Linux ABI.
+public const ENOTSUP: Int = EOPNOTSUPP;
 
 /// Protocol family not supported
 public const EPFNOSUPPORT: Int = 96;

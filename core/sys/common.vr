@@ -6,6 +6,8 @@
 module core.sys.common;
 
 mount core.base.coercion.{IntCoercible};
+public mount core.sys.error.OSErrorKind;
+mount core.sys.error.{native_error_kind, native_error_message};
 
 // =============================================================================
 // common.vr - Common low-level system types
@@ -45,47 +47,31 @@ implement OSError {
     public fn into_message(self) -> Text { self.message }
 
     /// Create an OS error from just an error code.
-    public fn from_code(code: Int) -> OSError {
+    public pure fn from_code(code: Int) -> OSError {
         OSError {
             code: code,
-            message: errno_to_message(code),
+            message: native_error_message(code),
         }
     }
 
     /// Check if this represents success (code == 0).
-    fn is_success(&self) -> Bool {
+    public fn is_success(&self) -> Bool {
         self.code == 0
     }
 
-    /// Check if this is EAGAIN / EWOULDBLOCK.
-    ///
-
-    /// errno values for "would block" differ across platforms:
-    ///  * Linux: EAGAIN = EWOULDBLOCK = 11
-    ///  * macOS: EAGAIN = EWOULDBLOCK = 35
-    ///  * Windows: WSAEWOULDBLOCK = 10035 (winsock-side)
-    ///
-
-    /// Verum's `core/io/protocols.vr.from_raw_os_error` uses
-    /// platform-conditioned tables (#67) — this helper accepts ALL
-    /// known would-block codes since OSError is the cross-platform
-    /// shim type (the actual platform-conditional dispatch lives in
-    /// the per-platform errno module). Including all known values is
-    /// safe here because no other errno on any platform reuses 11,
-    /// 35, or 10035 for a different meaning.
-    fn would_block(&self) -> Bool {
-        self.code == 11      // Linux EAGAIN/EWOULDBLOCK
-            || self.code == 35   // macOS EAGAIN/EWOULDBLOCK
-            || self.code == 10035 // Windows WSAEWOULDBLOCK
+    /// Interpret this error in the target operating system's native code domain.
+    public pure fn kind(&self) -> OSErrorKind {
+        native_error_kind(self.code)
     }
 
-    /// Check if this is EINTR (interrupted system call).
-    ///
+    /// Check for native would-block or pending-I/O conditions.
+    public fn would_block(&self) -> Bool {
+        self.kind() is OSErrorKind.WouldBlock
+    }
 
-    /// EINTR is 4 on Linux / macOS / Windows POSIX shim — uniform
-    /// across the platforms Verum supports.
+    /// Check for native interrupted-system-call errors.
     public fn interrupted(&self) -> Bool {
-        self.code == 4
+        self.kind() is OSErrorKind.Interrupted
     }
 }
 
@@ -102,7 +88,7 @@ implement Debug for OSError {
 implement Display for OSError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         f.write_str(&self.message)?;
-        f.write_str(" (errno ")?;
+        f.write_str(" (OS code ")?;
         f.write_int(self.code)?;
         f.write_str(")")
     }
@@ -2168,44 +2154,5 @@ public fn unset_env(name: &[Byte]) -> Result<(), OSError> {
         } else {
             return Result.Err(OSError.new(-1, "SetEnvironmentVariableA(null) failed"));
         }
-    }
-}
-
-// =============================================================================
-// Helper Functions
-// =============================================================================
-
-/// Convert errno code to human-readable message.
-fn errno_to_message(code: Int) -> Text {
-    // Common errno values
-    match code {
-        0 => "Success",
-        1 => "Operation not permitted",
-        2 => "No such file or directory",
-        3 => "No such process",
-        4 => "Interrupted system call",
-        5 => "Input/output error",
-        6 => "No such device or address",
-        7 => "Argument list too long",
-        8 => "Exec format error",
-        9 => "Bad file descriptor",
-        10 => "No child processes",
-        11 => "Resource temporarily unavailable",
-        12 => "Cannot allocate memory",
-        13 => "Permission denied",
-        14 => "Bad address",
-        17 => "File exists",
-        19 => "No such device",
-        20 => "Not a directory",
-        21 => "Is a directory",
-        22 => "Invalid argument",
-        23 => "Too many open files in system",
-        24 => "Too many open files",
-        28 => "No space left on device",
-        32 => "Broken pipe",
-        38 => "Function not implemented",
-        110 => "Connection timed out",
-        111 => "Connection refused",
-        _ => "Unknown error",
     }
 }
