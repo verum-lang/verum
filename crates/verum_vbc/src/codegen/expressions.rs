@@ -40138,65 +40138,53 @@ impl VbcCodegen {
             }
             // Platform detection intrinsics
             "is_debug" => {
-                // In VBC interpreter, always report debug mode
-                self.ctx.emit(Instruction::LoadTrue { dst: dest });
+                self.ctx.emit(if self.config.target_config.debug_assertions {
+                    Instruction::LoadTrue { dst: dest }
+                } else { Instruction::LoadFalse { dst: dest } });
             }
             "target_os" => {
-                // OS codes: 0=unknown, 1=linux, 2=macos, 3=windows, 4=wasm
-                #[cfg(target_os = "linux")]
-                let os_code: i64 = 1;
-                #[cfg(target_os = "macos")]
-                let os_code: i64 = 2;
-                #[cfg(target_os = "windows")]
-                let os_code: i64 = 3;
-                #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
-                let os_code: i64 = 0;
+                let os_code = match self.config.target_config.target_os.as_str() {
+                    "linux" => 1, "macos" => 2, "windows" => 3,
+                    "wasi" | "wasm" => 4, "freebsd" => 5, _ => 0,
+                };
                 self.ctx.emit(Instruction::LoadI {
                     dst: dest,
                     value: os_code,
                 });
             }
             "target_arch" => {
-                // Arch codes: 0=unknown, 1=x86_64, 2=aarch64, 3=riscv64, 4=wasm32
-                #[cfg(target_arch = "x86_64")]
-                let arch_code: i64 = 1;
-                #[cfg(target_arch = "aarch64")]
-                let arch_code: i64 = 2;
-                #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-                let arch_code: i64 = 0;
+                let arch_code = match self.config.target_config.target_arch.as_str() {
+                    "x86_64" => 1, "aarch64" => 2, "riscv64" => 3,
+                    "wasm32" => 4, "arm" => 5, _ => 0,
+                };
                 self.ctx.emit(Instruction::LoadI {
                     dst: dest,
                     value: arch_code,
                 });
             }
             "is_release" => {
-                // Mirror of `is_debug` (which reports debug mode in the VBC
-                // interpreter): release is its complement. Without this case
-                // `is_release()` resolved to nil (CONTROL/PLATFORM-NIL class).
-                self.ctx.emit(Instruction::LoadFalse { dst: dest });
+                self.ctx.emit(if self.config.target_config.debug_assertions {
+                    Instruction::LoadFalse { dst: dest }
+                } else { Instruction::LoadTrue { dst: dest } });
             }
             "target_pointer_width" => {
-                // Pointer width in BITS for the target. The existing platform
-                // intrinsics use host `#[cfg]` for the interpreter path.
-                #[cfg(target_pointer_width = "64")]
-                let width: i64 = 64;
-                #[cfg(target_pointer_width = "32")]
-                let width: i64 = 32;
-                #[cfg(not(any(
-                    target_pointer_width = "64",
-                    target_pointer_width = "32"
-                )))]
-                let width: i64 = 64;
+                let declared = &self.config.target_config.target_pointer_width;
+                let width = declared.parse::<u16>().ok().filter(|width| *width != 0)
+                    .ok_or_else(|| CodegenError::unsupported_expr(format!(
+                        "target pointer width '{declared}' is not a positive bit width"
+                    )))?;
                 self.ctx.emit(Instruction::LoadI {
                     dst: dest,
-                    value: width,
+                    value: i64::from(width),
                 });
             }
             "target_is_little_endian" => {
-                #[cfg(target_endian = "little")]
-                let little: bool = true;
-                #[cfg(target_endian = "big")]
-                let little: bool = false;
+                let little = match self.config.target_config.target_endian.as_str() {
+                    "little" => true, "big" => false,
+                    value => return Err(CodegenError::unsupported_expr(format!(
+                        "unknown target byte order '{value}'"
+                    ))),
+                };
                 if little {
                     self.ctx.emit(Instruction::LoadTrue { dst: dest });
                 } else {
@@ -40250,7 +40238,9 @@ impl VbcCodegen {
                 });
             }
             _ => {
-                self.ctx.emit(Instruction::LoadNil { dst: dest });
+                return Err(CodegenError::unsupported_expr(format!(
+                    "constant intrinsic '{name}' has no lowering"
+                )));
             }
         }
 

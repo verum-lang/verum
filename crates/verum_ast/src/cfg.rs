@@ -253,9 +253,12 @@ impl TargetConfig {
             3 => {
                 // Distinguish arch-vendor-os (e.g., x86_64-apple-darwin)
                 // from arch-os-env (e.g., thumbv7em-none-eabihf)
-                if parts[1] == "none" || parts[1] == "unknown" {
+                if parts[1] == "none" {
                     (parts[0], "unknown", parts[1], parts[2])
                 } else {
+                    // `unknown` is a vendor in arch-unknown-os triples.
+                    // Treating it as an OS discards Linux/FreeBSD/etc. and
+                    // changes both conditional compilation and target queries.
                     (parts[0], parts[1], parts[2], "")
                 }
             }
