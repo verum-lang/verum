@@ -180,6 +180,7 @@ export const translations = {
   'Select a declaration from the current source analysis.': 'Выберите объявление из текущего анализа кода.',
   'Mounts': 'Импорты',
   'Go to definition': 'Перейти к определению',
+  'Show type and documentation': 'Показать тип и документацию',
   'Format document': 'Форматировать документ',
   'The document changed while formatting. Run the command again.': 'Документ изменился во время форматирования. Повторите команду.',
   'The formatter returned invalid edits. No changes were applied.': 'Форматирование вернуло некорректные изменения. Документ не изменён.',

@@ -1467,6 +1467,7 @@ const commandRegistry = new CommandRegistry([
   command('editor.nextDiagnostic', m('Next diagnostic'), 'F8', editorAction(() => navigateEditor(editor.actions.nextDiagnostic)), ['editor'], editor.hasDiagnostics),
   command('editor.previousDiagnostic', m('Previous diagnostic'), 'Shift+F8', editorAction(() => navigateEditor(editor.actions.previousDiagnostic)), ['editor'], editor.hasDiagnostics),
   command('editor.definition', m('Go to definition'), 'F12', editorAction(editor.definition), ['editor'], () => currentPath.endsWith('.vr')),
+  command('editor.hover', m('Show type and documentation'), 'Mod+Shift+Space', editorAction(editor.actions.hover), ['editor'], () => currentPath.endsWith('.vr')),
   command('editor.format', m('Format document'), 'Alt+Shift+F', editorAction(editor.format), ['editor'], () => currentPath.endsWith('.vr')),
   command('editor.find', m('Find in source'), 'Mod+F', editorAction(editor.actions.find), ['editor']),
   command('editor.line', m('Go to line'), 'Alt+G', editorAction(editor.actions.gotoLine), ['editor']),

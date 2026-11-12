@@ -1,5 +1,5 @@
 import { EditorState, Compartment } from '@codemirror/state';
-import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, drawSelection, rectangularSelection, hoverTooltip } from '@codemirror/view';
+import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, drawSelection, rectangularSelection, hoverTooltip, activateHover, closeHoverTooltips, hasHoverTooltips } from '@codemirror/view';
 import { diagnosticCount, lintGutter, nextDiagnostic, previousDiagnostic, setDiagnostics } from '@codemirror/lint';
 import { defaultKeymap, history, historyKeymap, undo, redo, toggleComment, isolateHistory } from '@codemirror/commands';
 import { searchKeymap, highlightSelectionMatches, searchPanelOpen, closeSearchPanel, openSearchPanel, gotoLine, SearchQuery, getSearchQuery, setSearchQuery } from '@codemirror/search';
@@ -88,9 +88,18 @@ export function makeEditor(parent: HTMLElement, source: string, onChange: (sourc
   let hooks: LanguageHooks | null = null;
   let originalSeparators = source.includes('\r') ? source : null;
   let verumEnabled = true;
+  let hoverGeneration = 0, pendingHovers = 0;
   const syntax = new Compartment();
   // These bindings belong to Studio's editable registry, including their removal.
-  const actions = { undo, redo, find: openSearchPanel, gotoLine, comment: toggleComment, complete: startCompletion, nextDiagnostic, previousDiagnostic };
+  const hover = (editor: EditorView) => {
+    if (!hooks || !verumEnabled) return false;
+    activateHover(editor, editor.state.selection.main.head, 1, {
+      tooltip: languageHover,
+      until: transaction => transaction.docChanged || !!transaction.selection,
+    });
+    return true;
+  };
+  const actions = { undo, redo, find: openSearchPanel, gotoLine, comment: toggleComment, complete: startCompletion, hover, nextDiagnostic, previousDiagnostic };
   const managed = new Set(Object.values(actions));
   const editingKeys = [...completionKeymap, ...defaultKeymap, ...historyKeymap, ...searchKeymap].filter(binding => !binding.run || !managed.has(binding.run));
   async function definition() {
@@ -111,6 +120,20 @@ export function makeEditor(parent: HTMLElement, source: string, onChange: (sourc
     if (changes.length) view.dispatch({ changes, annotations: isolateHistory.of('full'), userEvent: 'input.format' });
     view.focus();
   }
+  const languageHover = hoverTooltip(async (_view, position) => {
+    if (!hooks || !verumEnabled) return null;
+    const revision = hooks.revision(), generation = hoverGeneration;
+    pendingHovers++;
+    try {
+      const reply = await languageRequest<{ contents: unknown; range?: Range } | null>(revision, 'textDocument/hover', positionAt(revision.source, position));
+      if (!reply.result || generation !== hoverGeneration || !sameRevision(revision, hooks.revision())) return null;
+      const dom = renderHoverContent(reply.result.contents, view.dom.ownerDocument);
+      if (!dom) return null;
+      const range = reply.result.range ? rangeOffsets(revision.source, reply.result.range) : null;
+      return { pos: range?.from ?? position, end: range?.to, above: true, create: () => ({ dom }) };
+    } catch { return null; }
+    finally { pendingHovers--; }
+  });
   const stateFor = (source: string) => EditorState.create({ doc: source, extensions: [
       lineNumbers(), lintGutter(), highlightActiveLineGutter(), history(), drawSelection(), rectangularSelection(),
       highlightActiveLine(), highlightSelectionMatches(), bracketMatching(), indentOnInput(), syntax.of(verumEnabled ? verum : []),
@@ -135,19 +158,13 @@ export function makeEditor(parent: HTMLElement, source: string, onChange: (sourc
           }) };
         } catch { return null; }
       }] }),
-      keymap.of(editingKeys),
-      hoverTooltip(async (_view, position) => {
-        if (!hooks || !verumEnabled) return null;
-        const revision = hooks.revision();
-        try {
-          const reply = await languageRequest<{ contents: unknown; range?: Range } | null>(revision, 'textDocument/hover', positionAt(revision.source, position));
-          if (!reply.result || !sameRevision(revision, hooks.revision())) return null;
-          const dom = renderHoverContent(reply.result.contents, view.dom.ownerDocument);
-          if (!dom) return null;
-          const range = reply.result.range ? rangeOffsets(revision.source, reply.result.range) : null;
-          return { pos: range?.from ?? position, end: range?.to, above: true, create: () => ({ dom }) };
-        } catch { return null; }
-      }),
+      keymap.of([{ key: 'Escape', run: editor => {
+        if (!hasHoverTooltips(editor.state) && !pendingHovers) return false;
+        hoverGeneration++;
+        editor.dispatch({ effects: closeHoverTooltips });
+        return true;
+      } }, ...editingKeys]),
+      languageHover,
       EditorState.tabSize.of(4),
       language.of(editorLanguage(verumEnabled)),
       theme.of(editorTheme(document.documentElement.dataset.theme === 'dark')),
