@@ -128,6 +128,7 @@ impl SemanticAnalysisPhase {
         let graph = verum_common::Shared::new(parking_lot::RwLock::new(session.module_registry().read().clone()));
         crate::owned_source_semantics::register_sources(&graph,
             selected.iter().map(|(owner, path, module)| (owner.as_str(), path.as_str(), module)))?;
+        let mut failures: List<Text> = List::new();
         for (owner, path, module) in &selected {
             let mut checker = self.configured_checker();
             if let Err(errors) = crate::owned_source_semantics::check_source_types(
@@ -135,7 +136,7 @@ impl SemanticAnalysisPhase {
                 |error| error.to_diagnostic_with_span(Some(|span| session.convert_span(span))),
             ) {
                 let details = errors.iter().map(|diagnostic| {
-                    let mut line = String::new();
+                    let mut line = Text::new();
                     if let Some(span) = diagnostic.primary_span() {
                         line.push_str(&format!("{span}: "));
                     }
@@ -149,9 +150,18 @@ impl SemanticAnalysisPhase {
                         line.push_str(&note.message);
                     }
                     line
-                }).collect::<Vec<_>>().join("\n");
-                anyhow::bail!("semantic checking failed in {owner} ({path}): {details}");
+                }).collect::<List<_>>().join("\n");
+                tracing::warn!(module = owner.as_str(), source = path.as_str(), errors = errors.len(),
+                    "source admission failed; checking remaining independent modules");
+                failures.push(format!("{owner} ({path}): {details}").into());
+                session.emit_diagnostics(errors);
             }
+        }
+        // Each owner uses its own checker. A failed module cannot poison a
+        // sibling's local inference state, and none may proceed to lowering
+        // until the entire original-source roster has been admitted.
+        if !failures.is_empty() {
+            anyhow::bail!("semantic checking failed in {} module(s):\n{}", failures.len(), failures.join("\n"));
         }
         Ok(())
     }
