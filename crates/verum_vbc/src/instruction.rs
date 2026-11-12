@@ -9395,108 +9395,6 @@ impl LogSubOpcode {
     }
 }
 
-/// Meta-reflection sub-opcodes for type introspection.
-///
-/// Used with the MetaReflect opcode (0xBB) to provide zero-cost type introspection.
-///
-/// # Sub-opcode Space Allocation
-///
-/// - 0x00-0x0F: Type information queries
-/// - 0x10-0x1F: Type relationship queries
-/// - 0x20-0x2F: Reserved for future use
-///
-/// # Performance
-///
-/// - Interpreter: ~2ns per operation (direct match dispatch)
-/// - AOT (LLVM): Constant-folded at compile time when possible
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[repr(u8)]
-pub enum MetaReflectOp {
-    /// Get type ID for a value or type.
-    ///
-    /// Format: `dst:reg, value:reg`
-    /// Returns a unique u64 identifier for the type.
-    TypeId = 0x00,
-
-    /// Get type name as Text.
-    ///
-    /// Format: `dst:reg, value:reg`
-    /// Returns the fully-qualified type name.
-    TypeName = 0x01,
-
-    /// Check if type requires drop (destructor).
-    ///
-    /// Format: `dst:reg, value:reg`
-    /// Returns bool: true if type has non-trivial destructor.
-    NeedsDrop = 0x02,
-
-    /// Check if type is Copy.
-    ///
-    /// Format: `dst:reg, value:reg`
-    /// Returns bool: true if type implements Copy.
-    IsCopy = 0x03,
-
-    /// Check if type is Send (thread-safe).
-    ///
-    /// Format: `dst:reg, value:reg`
-    /// Returns bool: true if type can be sent between threads.
-    IsSend = 0x04,
-
-    /// Check if type is Sync (shared reference thread-safe).
-    ///
-    /// Format: `dst:reg, value:reg`
-    /// Returns bool: true if shared references are thread-safe.
-    IsSync = 0x05,
-
-    /// Get type's minimum alignment requirement.
-    ///
-    /// Format: `dst:reg, type_id:reg`
-    /// Returns usize: alignment in bytes.
-    MinAlign = 0x06,
-
-    /// Get type's preferred alignment for performance.
-    ///
-    /// Format: `dst:reg, type_id:reg`
-    /// Returns usize: preferred alignment in bytes.
-    PrefAlign = 0x07,
-}
-
-impl MetaReflectOp {
-    /// Creates a MetaReflect sub-opcode from a byte value.
-    pub fn from_byte(byte: u8) -> Option<Self> {
-        match byte {
-            0x00 => Some(Self::TypeId),
-            0x01 => Some(Self::TypeName),
-            0x02 => Some(Self::NeedsDrop),
-            0x03 => Some(Self::IsCopy),
-            0x04 => Some(Self::IsSend),
-            0x05 => Some(Self::IsSync),
-            0x06 => Some(Self::MinAlign),
-            0x07 => Some(Self::PrefAlign),
-            _ => None,
-        }
-    }
-
-    /// Returns the byte value of this MetaReflect sub-opcode.
-    pub fn to_byte(self) -> u8 {
-        self as u8
-    }
-
-    /// Returns the mnemonic string for this MetaReflect sub-opcode.
-    pub fn mnemonic(self) -> &'static str {
-        match self {
-            Self::TypeId => "META_TYPE_ID",
-            Self::TypeName => "META_TYPE_NAME",
-            Self::NeedsDrop => "META_NEEDS_DROP",
-            Self::IsCopy => "META_IS_COPY",
-            Self::IsSend => "META_IS_SEND",
-            Self::IsSync => "META_IS_SYNC",
-            Self::MinAlign => "META_MIN_ALIGN",
-            Self::PrefAlign => "META_PREF_ALIGN",
-        }
-    }
-}
-
 // =============================================================================
 // TextSubOpcode — Text Parsing and Conversion Operations (TextExtended 0x79)
 // =============================================================================
@@ -9825,6 +9723,8 @@ pub enum ExtendedSubOpcode {    /// Reserved no-op — forward-compat anchor. Al
     TargetHasFeature = 0x0c,
     /// Checked program-local type identity: destination and complete TypeRef.
     TypeIdentity = 0x0d,
+    /// Type inspection: destination, query discriminator, complete TypeRef.
+    TypeInspect = 0x0e,
 
     /// Process termination — reads one `Int` register and terminates
     /// the process with that exit code. Format: `[0x1F][0x10][reg:u16]`.
@@ -10088,6 +9988,7 @@ impl ExtendedSubOpcode {
             0x0b => Some(Self::TargetHasAtomic),
             0x0c => Some(Self::TargetHasFeature),
             0x0d => Some(Self::TypeIdentity),
+            0x0e => Some(Self::TypeInspect),
             0x10 => Some(Self::ProcessExit),
             0x11 => Some(Self::PanicValue),
             0x20 => Some(Self::ScriptEngineNew),
@@ -10181,6 +10082,7 @@ impl ExtendedSubOpcode {
             Self::TargetHasAtomic => "EXT_TARGET_HAS_ATOMIC",
             Self::TargetHasFeature => "EXT_TARGET_HAS_FEATURE",
             Self::TypeIdentity => "EXT_TYPE_IDENTITY",
+            Self::TypeInspect => "EXT_TYPE_INSPECT",
             Self::GetFieldNamed => "EXT_GET_FIELD_NAMED",
             Self::SetFieldNamed => "EXT_SET_FIELD_NAMED",
             Self::ProcessExit => "EXT_PROCESS_EXIT",
@@ -10623,6 +10525,27 @@ impl LayoutProperty {
     }
 }
 
+/// Declaration inspection evaluated after generic substitution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(u8)]
+pub enum TypeInspection {
+    /// Diagnostic name of the complete type, never a cast authority.
+    Name = 0,
+    /// Whether the selected destruction plan performs cleanup.
+    NeedsDrop = 1,
+}
+
+impl TypeInspection {
+    /// Decode the wire query, refusing unsupported values.
+    pub fn from_byte(value: u8) -> Option<Self> {
+        match value {
+            0 => Some(Self::Name),
+            1 => Some(Self::NeedsDrop),
+            _ => None,
+        }
+    }
+}
+
 /// Full instruction with opcode and operands.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Instruction {    // ========================================================================
@@ -10684,6 +10607,15 @@ pub enum Instruction {    // ===================================================
         dst: Reg,
         /// Full type, substituted by the current frame or monomorphizer.
         type_ref: TypeRef,
+    },
+    /// Inspect the complete declaration after frame or monomorphizer substitution.
+    TypeInspect {
+        /// Destination Text or Bool register, as selected by the query.
+        dst: Reg,
+        /// Full declaration-owned type.
+        type_ref: TypeRef,
+        /// The requested semantic information.
+        query: TypeInspection,
     },
     /// Query a declared type layout without erasing generic parameter identity.
     TypeLayout {

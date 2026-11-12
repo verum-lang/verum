@@ -4,6 +4,27 @@ use crate::{Instruction, Reg, intrinsics::registry::CodegenStrategy};
 use verum_ast::Expr;
 
 impl VbcCodegen {
+    /// A property result has its own declaration; it does not inherit its receiver.
+    pub(super) fn type_property_result(&self, expr: &Expr) -> Option<crate::types::TypeRef> {
+        use crate::types::{TypeId, TypeRef};
+        use verum_ast::{ExprKind, TypeProperty};
+        let (ty, property) = match &expr.kind {
+            ExprKind::TypeProperty { ty, property } => (ty.clone(), *property),
+            ExprKind::Field { expr, field } => (
+                self.declaration_property_operand_in_scope(expr, self.ctx.current_source_module.as_deref(), true)?,
+                TypeProperty::from_str(field.as_str())?,
+            ),
+            _ => return None,
+        };
+        Some(TypeRef::Concrete(match property {
+            TypeProperty::Name => TypeId::TEXT,
+            TypeProperty::Id => TypeId::U64,
+            TypeProperty::IsSigned => TypeId::BOOL,
+            TypeProperty::Size | TypeProperty::Alignment | TypeProperty::Stride | TypeProperty::Bits => TypeId::INT,
+            TypeProperty::Min | TypeProperty::Max => return self.resolve_query_type(&ty).ok(),
+        }))
+    }
+
     /// Shared by both intrinsic spellings, before ordinary operand evaluation.
     pub(super) fn emit_type_operand_intrinsic(
         &mut self,
@@ -16,6 +37,7 @@ impl VbcCodegen {
             CodegenStrategy::TypeLayout(_)
                 | CodegenStrategy::TargetHasAtomic
                 | CodegenStrategy::TypeIdentity
+                | CodegenStrategy::TypeInspect(_)
         ) {
             return Ok(false);
         }
@@ -42,6 +64,7 @@ impl VbcCodegen {
             },
             CodegenStrategy::TargetHasAtomic => Instruction::TargetHasAtomic { dst, type_ref },
             CodegenStrategy::TypeIdentity => Instruction::TypeIdentity { dst, type_ref },
+            CodegenStrategy::TypeInspect(query) => Instruction::TypeInspect { dst, type_ref, query: *query },
             _ => unreachable!("selected above"),
         };
         self.ctx.emit(instruction);

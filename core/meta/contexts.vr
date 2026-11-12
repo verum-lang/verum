@@ -386,14 +386,6 @@ public context TypeInfo {
     /// - Empty list for non-enum types
     fn variants_of<T>() -> List<VariantInfo>;
 
-    /// Get size in bytes. Prefer: `T.size` type property
-    @deprecated("Use T.size type property instead")
-    fn size_of<T>() -> Int;
-
-    /// Get alignment in bytes. Prefer: `T.alignment` type property
-    @deprecated("Use T.alignment type property instead")
-    fn align_of<T>() -> Int;
-
     /// Get generic type parameters
     fn generics_of<T>() -> List<GenericParam>;
 

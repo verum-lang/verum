@@ -8,7 +8,6 @@
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `type_name(T)` | `(Type) -> Text` | Get type name |
-//! | `type_id(T)` | `(Type) -> UInt` | Get unique type identifier |
 //! | `type_of(expr)` | `(Expr) -> Type` | Get type of expression |
 //!
 //! ## Structure Introspection
@@ -52,7 +51,7 @@ use verum_ast::ty::{PathSegment, TypeKind};
 use verum_common::{Heap, List, Maybe, Text};
 
 use super::context_requirements::{BuiltinInfo, BuiltinRegistry};
-use super::type_props::{compute_type_id, compute_type_name};
+use super::type_props::compute_type_name;
 use super::{ConstValue, MetaContext, MetaError};
 use crate::meta::TypeKind as MetaTypeKind;
 
@@ -94,10 +93,6 @@ pub fn register_builtins(map: &mut BuiltinRegistry) {
             "Get the name of a type as text",
             "(Type) -> Text",
         ),
-    );
-    map.insert(
-        Text::from("type_id"),
-        BuiltinInfo::meta_types(meta_type_id, "Get unique type identifier", "(Type) -> UInt"),
     );
     map.insert(
         Text::from("type_of"),
@@ -524,26 +519,6 @@ fn meta_type_name(_ctx: &mut MetaContext, args: List<ConstValue>) -> Result<Cons
     }
 }
 
-/// Get unique type identifier
-fn meta_type_id(_ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {
-    if args.len() != 1 {
-        return Err(MetaError::ArityMismatch {
-            expected: 1,
-            got: args.len(),
-        });
-    }
-
-    match &args[0] {
-        ConstValue::Type(ty) => {
-            let id = compute_type_id(&ty.kind);
-            Ok(ConstValue::UInt(id.into()))
-        }
-        _ => Err(MetaError::TypeMismatch {
-            expected: Text::from("Type"),
-            found: args[0].type_name(),
-        }),
-    }
-}
 
 /// Get the type of an expression (placeholder)
 fn meta_type_of(_ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {

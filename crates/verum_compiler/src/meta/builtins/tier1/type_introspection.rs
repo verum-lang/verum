@@ -7,7 +7,6 @@
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
 //! | `type_name(T)` | `(Type) -> Text` | Get type name |
-//! | `type_id(T)` | `(Type) -> UInt` | Get unique type identifier |
 //! | `type_of(expr)` | `(Expr) -> Type` | Get type of expression |
 //!
 //! ## Type Kind Checks
@@ -42,7 +41,7 @@ use verum_common::{List, Text};
 
 use crate::meta::TypeKind as MetaTypeKind;
 use crate::meta::builtins::context_requirements::{BuiltinInfo, BuiltinRegistry};
-use crate::meta::builtins::type_props::{compute_type_id, compute_type_name};
+use crate::meta::builtins::type_props::compute_type_name;
 use crate::meta::context::{ConstValue, MetaContext};
 use crate::meta::error::MetaError;
 
@@ -70,10 +69,6 @@ pub fn register_builtins(map: &mut BuiltinRegistry) {
             "Get the name of a type as text",
             "(Type) -> Text",
         ),
-    );
-    map.insert(
-        Text::from("type_id"),
-        BuiltinInfo::meta_types(meta_type_id, "Get unique type identifier", "(Type) -> UInt"),
     );
     map.insert(
         Text::from("type_of"),
@@ -249,54 +244,6 @@ fn meta_type_name(_ctx: &mut MetaContext, args: List<ConstValue>) -> Result<Cons
     }
 }
 
-/// Get unique type identifier
-fn meta_type_id(_ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {
-    if args.is_empty() {
-        return Err(MetaError::ArityMismatch {
-            expected: 1,
-            got: 0,
-        });
-    }
-
-    // Handle multiple args (tuple type) like type_name does
-    if args.len() > 1 {
-        let all_types = args.iter().all(|a| matches!(a, ConstValue::Type(_)));
-        if all_types {
-            // Compute a combined hash for tuple types
-            let combined: u64 = args
-                .iter()
-                .enumerate()
-                .map(|(i, a)| {
-                    if let ConstValue::Type(ty) = a {
-                        compute_type_id(&ty.kind).wrapping_mul((i as u64).wrapping_add(1))
-                    } else {
-                        0
-                    }
-                })
-                .fold(0u64, |acc, x| acc.wrapping_add(x));
-            return Ok(ConstValue::UInt(combined.into()));
-        }
-    }
-
-    match &args[0] {
-        ConstValue::Type(ty) => {
-            let id = compute_type_id(&ty.kind);
-            Ok(ConstValue::UInt(id.into()))
-        }
-        // When type_of returns a text, compute ID from the name
-        ConstValue::Text(name) => {
-            use std::collections::hash_map::DefaultHasher;
-            use std::hash::{Hash, Hasher};
-            let mut hasher = DefaultHasher::new();
-            name.as_str().hash(&mut hasher);
-            Ok(ConstValue::UInt(hasher.finish().into()))
-        }
-        _ => Err(MetaError::TypeMismatch {
-            expected: Text::from("Type"),
-            found: args[0].type_name(),
-        }),
-    }
-}
 
 /// Get the type of an expression (placeholder)
 fn meta_type_of(_ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {

@@ -19,7 +19,7 @@
 // - float: Floating-point math, classification
 // - memory: Memory operations (memcpy, memset, etc.)
 // - atomic: Atomic operations and memory ordering
-// - type_info: Type metadata (size_of, align_of, etc.)
+// - type_info: Declaration-owned destruction and minimum alignment queries
 // - conversion: Type conversions and casts
 // - control: Control flow hints and traps
 // - platform: Platform detection and CPU features
@@ -88,7 +88,7 @@ public mount .memory.*;
 /// Atomic intrinsics: atomic_load, atomic_store, atomic_cmpxchg, fence
 public mount .atomic.*;
 
-/// Type information intrinsics: size_of, align_of, type_id, type_name
+/// Type information beyond the built-in type properties.
 public mount .type_info.*;
 
 /// Conversion intrinsics: int_to_float, bitcast, transmute, byte conversions
@@ -249,11 +249,4 @@ public mount .memory.{
     slice_subslice,
     slice_subslice_mut,
     slice_split_at_mut,
-};
-
-// --- From type_info (resolve generic overload ambiguity) ---
-public mount .type_info.{
-    align_of,
-    size_of,
-    type_id,
 };

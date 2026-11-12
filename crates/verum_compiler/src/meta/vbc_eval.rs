@@ -42,9 +42,28 @@ pub fn vbc_eval_meta_expr(
     span: Span,
     context_items: &[verum_ast::Item],
 ) -> Result<ConstValue, String> {
+    eval_scoped_expression(expr, span, "__synthetic", context_items)
+}
+
+/// Declaration properties use the ordinary VBC operation in their source scope.
+/// Errors stay errors; there is no name-table or tree-walk fallback.
+pub(crate) fn vbc_eval_declared_property(
+    expr: &Expr,
+    owner: &str,
+    context_items: &[verum_ast::Item],
+) -> Result<ConstValue, String> {
+    eval_scoped_expression(expr, expr.span, owner, context_items)
+}
+
+fn eval_scoped_expression(
+    expr: &Expr,
+    span: Span,
+    owner: &str,
+    context_items: &[verum_ast::Item],
+) -> Result<ConstValue, String> {
     let synthetic = MetaFunction {
         name: Text::from("__vbc_meta_eval"),
-        module: Text::from("__synthetic"),
+        module: Text::from(owner),
         params: List::new(),
         return_type: Type::inferred(span),
         body: expr.clone(),
@@ -54,7 +73,7 @@ pub fn vbc_eval_meta_expr(
         stage_level: 0,
         span,
     };
-    let mut executor = VbcExecutor::new();
+    let mut executor = VbcExecutor::with_config(verum_vbc::codegen::CodegenConfig::new(owner));
     let raw = executor
         .execute_raw_with_items(&synthetic, context_items, &[])
         .map_err(|e| format!("vbc meta engine: {e:?}"))?;

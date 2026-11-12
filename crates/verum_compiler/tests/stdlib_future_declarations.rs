@@ -37,24 +37,13 @@ fn actual_layout_queries_survive_archive_bootstrap_and_generic_calls() {
     let core = root.path().join("core");
     fs::create_dir_all(core.join("intrinsics")).unwrap();
     fs::write(core.join("mod.vr"), "module core; public module intrinsics { public module type_info; }").unwrap();
-    let mut source = "module core.intrinsics.type_info;\n".to_owned();
-    let mut count = 0;
-    for line in include_str!("../../../core/intrinsics/type_info.vr").lines() {
-        if ["size_of", "align_of", "stride_of", "bits_of"].iter()
-            .any(|name| line.starts_with(&format!("public meta fn {name}<"))) {
-            source.push_str(line);
-            source.push('\n');
-            count += 1;
-        }
-    }
-    assert_eq!(count, 4);
-    fs::write(core.join("intrinsics/type_info.vr"), source).unwrap();
+    fs::write(core.join("intrinsics/type_info.vr"), "module core.intrinsics.type_info;
+        public fn inspect<T>() -> Int { T.size + T.alignment + T.stride + T.bits }").unwrap();
     let archive = bootstrap(&core);
     assert_eq!(execute(&archive,
-        "module app; mount core.intrinsics.type_info.{size_of, align_of, stride_of, bits_of};
+        "module app; mount core.intrinsics.type_info.inspect;
          type Word is UInt16;
-         fn inspect<T>() -> USize { size_of<T>() + align_of<T>() + stride_of<T>() + bits_of<T>() }
-         fn main() -> Int { inspect<Word>() as Int }"), 22);
+         fn main() -> Int { inspect<Word>() }"), 22);
 }
 
 #[test]
@@ -63,27 +52,79 @@ fn actual_identity_query_survives_archive_bootstrap_and_generic_calls() {
     let core = root.path().join("core");
     fs::create_dir_all(core.join("intrinsics")).unwrap();
     fs::write(core.join("mod.vr"), "module core; public module intrinsics { public module type_info; }").unwrap();
-    let declaration = include_str!("../../../core/intrinsics/type_info.vr").lines()
-        .find(|line| line.starts_with("public meta fn type_id<")).unwrap();
-    fs::write(core.join("intrinsics/type_info.vr"), format!("module core.intrinsics.type_info;\n{declaration}\n
-        public type Mark<T> is {{ value: T }};
-        public fn mark_identity<T>() -> UInt64 {{ type_id<Mark<T>>() }}")).unwrap();
+    fs::write(core.join("intrinsics/type_info.vr"), "module core.intrinsics.type_info;
+        public fn identity<T>() -> UInt64 { T.id }
+        public type Mark<T> is { value: T };
+        public fn mark_identity<T>() -> UInt64 { identity<Mark<T>>() }").unwrap();
     let archive = bootstrap(&core);
     assert_eq!(execute(&archive,
-        "module app; mount core.intrinsics.type_info.{type_id, Mark as ArchivedMark, mark_identity};
+        "module app; mount core.intrinsics.type_info.{identity, Mark as ArchivedMark, mark_identity};
          type Tag<T> is {value:T}; type Alias<T> is Tag<T>;
          type Mark<T> is {value:T};
          fn property<T>() -> UInt64 { T.id }
          fn main() -> Int {
             assert(mark_identity<Int>() == property<ArchivedMark<Int>>());
             assert(mark_identity<Int>() != property<Mark<Int>>());
-            if type_id<Tag<Int>>() == property<Alias<Int>>() && type_id<Tag<Int>>() != type_id<Tag<Bool>>() {73} else {19}
+            if identity<Tag<Int>>() == property<Alias<Int>>() && identity<Tag<Int>>() != identity<Tag<Bool>>() {73} else {19}
          }"), 73);
 }
 
 #[test]
+fn actual_inspection_queries_survive_archive_bootstrap() {
+    let root = tempfile::tempdir().unwrap();
+    let core = root.path().join("core");
+    fs::create_dir_all(core.join("intrinsics")).unwrap();
+    fs::write(core.join("mod.vr"), "module core; public module intrinsics { public module type_info; }").unwrap();
+    let mut source = "module core.intrinsics.type_info;\n".to_owned();
+    let mut count = 0;
+    for line in include_str!("../../../core/intrinsics/type_info.vr").lines() {
+        if line.starts_with("public meta fn ") {
+            source.push_str(line);
+            source.push('\n');
+            count += 1;
+        }
+    }
+    assert_eq!(count, 2);
+    source.push_str("\npublic type Byte is { first: UInt64, second: UInt64 };\n
+        public meta fn shadow_size() -> Int { Byte.size }\n
+        public meta fn shadow_name() -> Text { Byte.name }\n");
+    fs::write(core.join("intrinsics/type_info.vr"), source).unwrap();
+    let archive = bootstrap(&core);
+    assert_eq!(execute(&archive,
+        "module app; mount core.intrinsics.type_info.{needs_drop, min_align, shadow_size, shadow_name};
+         type Tag<T> is { value: T };
+         type Word is UInt32;
+         fn name<T>() -> Text { T.name }
+         fn main() -> Int {
+            assert(!needs_drop<Int>());
+            assert(needs_drop<Tag<Int>>());
+            assert(min_align() == UInt8.alignment as USize);
+            assert(shadow_size() == 16);
+            assert(shadow_name() == \"core.intrinsics.type_info.Byte\");
+            if name<Word>() == \"UInt32\" { 73 } else { 19 }
+         }"), 73);
+
+    // Execute every migrated conformance case against the real declarations.
+    let suite = include_str!("../../../vcs/specs/core/intrinsics/type_info_test.vr");
+    let cases: verum_common::List<_> = suite.lines()
+        .filter_map(|line| line.strip_prefix("fn test_").and_then(|rest| rest.split_once("()")))
+        .map(|(name, _)| format!("test_{name}();"))
+        .collect();
+    assert!(!cases.is_empty());
+    let main_start = suite.find("fn main() {").unwrap();
+    let main_end = main_start + suite[main_start..].find('}').unwrap() + 1;
+    let mut executed = suite.to_owned();
+    executed.replace_range(main_start..main_end, &format!("fn main() -> Int {{ {} 73 }}", cases.join("\n")));
+    executed = executed.replace("module test.stdlib.intrinsics.type_info_test;", "module app;");
+    assert_eq!(execute(&archive, &executed), 73);
+}
+
+#[test]
 fn actual_identity_documentation_example_checks_and_executes() {
-    let source = include_str!("fixtures/type_identity.vr");
+    for (source, entry) in [
+        (include_str!("fixtures/type_identity.vr"), "main"),
+        (include_str!("fixtures/type_name.vr"), "reflection.main"),
+    ] {
     let module = verum_fast_parser::Parser::new(source).parse_module().unwrap();
     let mut checker = verum_types::TypeChecker::new();
     checker.register_builtins();
@@ -92,8 +133,9 @@ fn actual_identity_documentation_example_checks_and_executes() {
     assert!(checker.take_deferred_errors().is_empty());
     assert!(!checker.diagnostics().iter().any(|diagnostic| diagnostic.is_error()));
     let module = verum_vbc::codegen::VbcCodegen::new().compile_module(&module).unwrap();
-    let main = module.find_function_by_name("main").unwrap();
+    let main = module.find_function_by_name(entry).unwrap();
     verum_vbc::interpreter::Interpreter::new(std::sync::Arc::new(module)).execute_function(main).unwrap();
+    }
 }
 
 #[test]
@@ -832,7 +874,8 @@ fn try_bootstrap(core: &std::path::Path) -> anyhow::Result<verum_vbc::archive::V
     });
     let result =
         CompilationPipeline::new_core(&mut session, CoreConfig::new(core).with_output(&output))
-            .compile_core()?;
+            .compile_core();
+    let result = result.map_err(|error| anyhow::anyhow!("{error}\n{}", session.format_diagnostics()))?;
     anyhow::ensure!(result.errors.is_empty(), "{:?}", result.errors);
     Ok(read_archive_from_file(&output)?)
 }

@@ -12,10 +12,7 @@
 //   * T.name       — type name as Text
 //   * T.id         — unique type identifier (UInt64)
 //
-// The legacy meta-fn form (`size_of<T>()`, `align_of<T>()`, etc.) is
-// `@deprecated` per the module docs. Verum's canonical surface for
-// type information is the type-property syntax — that's what this
-// suite tests.
+// Queries retain declaration identity through generic specialization.
 // =============================================================================
 
 // =============================================================================

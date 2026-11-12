@@ -1,43 +1,5 @@
-// =============================================================================
-// core/intrinsics/type_info.vr - Type Information Intrinsics
-// =============================================================================
-// Layer: Stdlib (1)
-// Dependencies: Maybe.None (compiler-provided)
-//
-
-// # PREFERRED: Type Properties
-//
-
-// Verum provides compile-time type properties as the preferred way to access
-// type information. Use these instead of function calls:
-//
-
-// | Property | Description | Example |
-// |----------------|--------------------------------|------------------|
-// | `T.size` | Size in bytes | `Int.size` → 8 |
-// | `T.alignment` | Memory alignment | `Int.alignment` |
-// | `T.stride` | Array element stride | `T.stride` |
-// | `T.bits` | Size in bits | `Int.bits` → 64 |
-// | `T.min` | Minimum value (numeric) | `Int.min` |
-// | `T.max` | Maximum value (numeric) | `Int.max` |
-// | `T.name` | Type name as Text | `Int.name` |
-// | `T.id` | Checked identity within the linked program | `Int.id` |
-//
-
-// # Legacy Functions
-//
-
-// The functions below are provided for compatibility. Prefer type properties:
-// - `size_of<T>()` → use `T.size` instead
-// - `align_of<T>()` → use `T.alignment` instead
-// - `stride_of<T>()` → use `T.stride` instead
-// - `bits_of<T>()` → use `T.bits` instead
-// - `type_id<T>()` → use `T.id` instead
-// - `type_name<T>()` → use `T.name` instead
-//
-
-// Spec: 17-meta-system.md
-// =============================================================================
+// Type information uses declaration-owned properties: T.size, T.alignment,
+// T.stride, T.bits, T.name and T.id. Queries below expose additional facts.
 
 @arch_module(
     foundation: Foundation.ZfcTwoInacc,
@@ -46,45 +8,9 @@
 )
 module core.intrinsics.type_info;
 
-// =============================================================================
-// SECTION 1: Size and Alignment (prefer T.size, T.alignment, T.stride, T.bits)
-// =============================================================================
-
-/// Size of type in bytes. Prefer: `T.size`
-@deprecated("Use T.size type property instead")
-public meta fn size_of<T>() -> USize { @intrinsic("size_of", T) }
-
-/// Alignment of type in bytes. Prefer: `T.alignment`
-@deprecated("Use T.alignment type property instead")
-public meta fn align_of<T>() -> USize { @intrinsic("align_of", T) }
-
-/// Stride of type (size rounded up to alignment). Prefer: `T.stride`
-@deprecated("Use T.stride type property instead")
-public meta fn stride_of<T>() -> USize { @intrinsic("stride_of", T) }
-
-/// Size of type in bits. Prefer: `T.bits`
-@deprecated("Use T.bits type property instead")
-public meta fn bits_of<T>() -> USize { @intrinsic("bits_of", T) }
-
-// =============================================================================
-// SECTION 2: Type Identification (prefer T.id, T.name)
-// =============================================================================
-
-/// Checked program-local identity, including generic arguments. Prefer: `T.id`.
-/// Not a persistent schema identifier; incomplete witnesses and collisions fail.
-@deprecated("Use T.id type property instead")
-public meta fn type_id<T>() -> UInt64 { @intrinsic("type_id", T) }
-
-/// Type name (compile-time only). Prefer: `T.name`
-@deprecated("Use T.name type property instead")
-public meta fn type_name<T>() -> Text { @intrinsic("type_name", T) }
-
-// =============================================================================
-// SECTION 3: Type Properties
-// =============================================================================
-
-/// Check if type needs drop
+/// Whether the declaration-owned destruction plan performs cleanup.
+/// Missing destruction evidence is an error, never a guessed answer.
 public meta fn needs_drop<T>() -> Bool { @intrinsic("needs_drop", T) }
 
 /// Minimum alignment of all primitive types
-public meta fn min_align() -> USize { @intrinsic("min_align") }
+public meta fn min_align() -> USize { UInt8.alignment as USize }

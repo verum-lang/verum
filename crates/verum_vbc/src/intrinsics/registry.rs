@@ -199,6 +199,8 @@ pub enum CodegenStrategy {
     TypeLayout(crate::instruction::LayoutProperty),
     /// Complete declaration-owned identity, with collision refusal.
     TypeIdentity,
+    /// Inspect an exact declaration after generic substitution.
+    TypeInspect(crate::instruction::TypeInspection),
     /// Type-witness query against explicit backend target capabilities.
     TargetHasAtomic,
     /// Text query against the configured backend CPU feature catalog.
@@ -998,10 +1000,6 @@ pub enum InlineSequenceId {
     // =========================================================================
     // Type Introspection Operations
     // =========================================================================
-    /// type_name: get human-readable type name
-    TypeName,
-    /// needs_drop: check if type needs drop glue
-    NeedsDrop,
     /// pow_f32: 32-bit power function
     PowF32,
     /// char_is_alphanumeric: Unicode alphanumeric check
@@ -12909,7 +12907,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         param_count: 1, // declaration-owned type operand
         return_count: 1, // checked program-local type id
         strategy: CodegenStrategy::TypeIdentity,
-        mlir_op: Some("verum.type_id"),
+        mlir_op: None,
         doc: "Checked identity of a complete type within one linked program",
     },
     Intrinsic {
@@ -12920,11 +12918,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
             IntrinsicHint::ConstEval,
             IntrinsicHint::Generic,
         ],
-        param_count: 0,  // type parameter only
+        param_count: 1,  // declaration-owned type operand
         return_count: 1, // type name string
-        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::TypeName),
-        mlir_op: Some("verum.type_name"),
-        doc: "Get human-readable type name (compile-time evaluated)",
+        strategy: CodegenStrategy::TypeInspect(crate::instruction::TypeInspection::Name),
+        mlir_op: None,
+        doc: "Diagnostic name of the complete declared type",
     },
     Intrinsic {
         name: "NEEDS_DROP",
@@ -12934,11 +12932,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
             IntrinsicHint::ConstEval,
             IntrinsicHint::Generic,
         ],
-        param_count: 0,  // type parameter only
+        param_count: 1,  // declaration-owned type operand
         return_count: 1, // bool
-        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::NeedsDrop),
-        mlir_op: Some("verum.needs_drop"),
-        doc: "Check if type needs drop glue (compile-time evaluated)",
+        strategy: CodegenStrategy::TypeInspect(crate::instruction::TypeInspection::NeedsDrop),
+        mlir_op: None,
+        doc: "Whether the selected declaration-owned destruction plan performs cleanup",
     },
     // =========================================================================
     // Additional intrinsics for user-facing stdlib functions

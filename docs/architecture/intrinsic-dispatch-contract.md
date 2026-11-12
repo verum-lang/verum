@@ -34,6 +34,17 @@ Cloning or deserializing a module creates a fresh scope. Unresolved projections,
 missing declarations, excessive nesting, and callable metadata lacking a full
 computational contract cannot yield an identifier.
 
+`T.name` and the internal name/drop queries carry the same complete witness
+through `TypeInspect`. Names use declaration owners and normalized arguments;
+`needs_drop` reads the actual destruction plan. An unavailable plan is an error.
+The legacy `MetaReflect` encoding cannot establish these facts and is refused
+by both execution tiers.
+
+Staged layout/name properties execute the ordinary VBC query in their source
+scope. Standalone syntax cannot materialize a program-local type identity; the
+meta evaluator refuses it instead of hashing a display name. Public layout and
+identity APIs use type properties; there are no parallel deprecated wrappers.
+
 Gates: `verum_vbc/tests/type_identity.rs`,
 `verum_compiler/tests/stdlib_future_declarations.rs::actual_identity_query_survives_archive_bootstrap_and_generic_calls`
 and `verum_codegen/tests/target_capabilities.rs` exercise both intrinsic surfaces,

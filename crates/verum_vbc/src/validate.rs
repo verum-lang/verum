@@ -693,7 +693,7 @@ impl<'a> Validator<'a> {
             Instruction::LoadT { dst, type_ref }
             | Instruction::TypeResource { dst, type_ref }
             | Instruction::TargetHasAtomic { dst, type_ref }
-            | Instruction::TypeIdentity { dst, type_ref }
+            | Instruction::TypeIdentity { dst, type_ref } | Instruction::TypeInspect { dst, type_ref, .. }
             | Instruction::TypeLayout { dst, type_ref, .. } => {
                 self.check_reg(*dst, max_reg, &func_name);
                 self.validate_type_ref(type_ref, 0);

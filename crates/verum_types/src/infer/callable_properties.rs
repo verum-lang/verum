@@ -24,7 +24,8 @@ fn intrinsic_requirement(name: &str) -> Option<PropertyRequirement> {
     if let Some(info) = lookup_intrinsic(name)
         && matches!(info.intrinsic.strategy, CodegenStrategy::CompileTimeConstant
             | CodegenStrategy::TargetHasAtomic | CodegenStrategy::TargetHasFeature
-            | CodegenStrategy::TypeLayout(_) | CodegenStrategy::TypeIdentity)
+            | CodegenStrategy::TypeLayout(_) | CodegenStrategy::TypeIdentity
+            | CodegenStrategy::TypeInspect(_))
     {
         return Some(PropertyRequirement::AtMost(PropertySet::pure()));
     }

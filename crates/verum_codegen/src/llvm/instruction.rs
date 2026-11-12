@@ -2527,6 +2527,8 @@ fn lower_instruction_impl<'ctx>(
             Ok(())
         }
 
+        Instruction::TypeInspect { dst, type_ref, query } => lower_type_inspection(ctx, *dst, type_ref, *query),
+
         Instruction::TypeLayout { dst, type_ref, property } => {
             let module = ctx.vbc_module().or_internal("TypeLayout requires declaration metadata")?;
             if let Some(value) = verum_vbc::type_layout::query(module, type_ref, *property) {
@@ -8626,11 +8628,9 @@ fn lower_instruction_impl<'ctx>(
             ctx.set_register(dst.0, null.into());
             Ok(())
         }
-        Instruction::MetaReflect { dst, type_id: _ } => {
-            let null = ctx.types().ptr_type().const_null();
-            ctx.set_register(dst.0, null.into());
-            Ok(())
-        }
+        Instruction::MetaReflect { .. } => Err(LlvmLoweringError::unsupported(
+            "legacy MetaReflect lacks a complete type witness; use typed declaration queries",
+        )),
 
         // ====================================================================
         // Verification (debug-mode: assert; release-mode: no-op)
@@ -31674,6 +31674,9 @@ fn lower_extended<'ctx>(
         Some(ExtendedSubOpcode::TypeLayout) => Err(LlvmLoweringError::unsupported(
             "TypeLayout requires the canonical decoded instruction",
         )),
+        Some(ExtendedSubOpcode::TypeInspect) => Err(LlvmLoweringError::unsupported(
+            "TypeInspect requires the canonical decoded instruction",
+        )),
         Some(ExtendedSubOpcode::TypeIdentity) => Err(LlvmLoweringError::unsupported(
             "TypeIdentity requires the canonical decoded instruction",
         )),
@@ -43095,6 +43098,67 @@ fn propagate_value_type_facts<'ctx>(
     }
 }
 
+/// Static Text uses the same immutable descriptor as a pooled source literal.
+/// The caller supplies a collision-checked module-local key.
+fn static_text<'ctx>(ctx: &FunctionContext<'_, 'ctx>, text: &str, key: &str) -> Result<IntValue<'ctx>> {
+    let i64_type = ctx.types().i64_type();
+    let module = ctx.get_module();
+    let global_name = format!("verum_text_{key}");
+    let pointer = if let Some(existing) = module.get_global(&global_name) {
+        existing.as_pointer_value()
+    } else {
+        let data = ctx.builder().build_global_string_ptr(text, &format!("verum_text_data_{key}")).or_llvm_err()?;
+        let descriptor = ctx.llvm_context().const_struct(&[
+            data.as_pointer_value().const_to_int(i64_type).into(),
+            i64_type.const_int(text.len() as u64, false).into(),
+            i64_type.const_zero().into(),
+        ], false);
+        let global = module.add_global(descriptor.get_type(), None, &global_name);
+        global.set_initializer(&descriptor);
+        global.set_constant(true);
+        global.set_linkage(verum_llvm::module::Linkage::Private);
+        global.set_unnamed_addr(true);
+        // Static and heap Text descriptors obey the same structural equality ABI.
+        global.set_alignment(16);
+        global.as_pointer_value()
+    };
+    Ok(pointer.const_to_int(i64_type))
+}
+
+fn lower_type_inspection<'ctx>(
+    ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, ty: &TypeRef,
+    query: verum_vbc::instruction::TypeInspection,
+) -> Result<()> {
+    use verum_vbc::instruction::TypeInspection;
+    let module = ctx.vbc_module().or_internal("type inspection requires declaration metadata")?;
+    let result: std::result::Result<BasicValueEnum<'ctx>, verum_common::Text> = match query {
+        TypeInspection::Name => verum_vbc::type_information::name(module, ty)
+            .and_then(|name| module.type_identity(ty).map(|id| (name, id)))
+            .and_then(|(name, id)| static_text(ctx, &name, &format!("type_{id}"))
+                .map(Into::into).map_err(|error| error.to_string().into())),
+        TypeInspection::NeedsDrop => verum_vbc::type_information::needs_drop(module, ty)
+            .map(|value| ctx.types().bool_type().const_int(u64::from(value), false).into()),
+    };
+    match result {
+        Ok(value) => {
+            ctx.set_register(dst.0, value);
+            match query {
+                TypeInspection::Name => ctx.mark_string_register(dst.0),
+                TypeInspection::NeedsDrop => ctx.mark_bool_register(dst.0),
+            }
+        }
+        Err(reason) if ty.is_generic() => {
+            emit_runtime_abort(ctx, &reason, "inspection_unresolved")?;
+            ctx.builder().build_unreachable().or_llvm_err()?;
+            let dead = ctx.llvm_context().append_basic_block(ctx.function(), "inspection_dead");
+            ctx.builder().position_at_end(dead);
+            ctx.set_register(dst.0, ctx.types().i64_type().get_undef().into());
+        }
+        Err(reason) => return Err(LlvmLoweringError::type_lowering(reason)),
+    }
+    Ok(())
+}
+
 fn lower_load_const<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
     dst: Reg,
@@ -43136,99 +43200,7 @@ fn lower_load_const<'ctx>(
         Constant::Float(v) => ctx.types().f64_type().const_float(*v).into(),
         Constant::String(str_id) => {
             let s = vbc_mod.get_string(*str_id).unwrap_or("");
-            // ============================================================
-            // **Static Text literal — zero-allocation path.**
-            //
-            // Pre-fix: every `LoadK String` emitted a runtime call
-            // to `verum_text_alloc` which heap-allocated 24 bytes
-            // for the `{ptr, len, cap}` Text object — even though
-            // the data is statically known at compile time.  For
-            // hello-world that's a malloc + 3 stores + a return
-            // value cast, just to wrap a `__rodata` string.
-            //
-            // Post-fix: emit a static Text global in `__rodata`
-            // with the same `{ptr_to_data, len, 0}` layout that
-            // `verum_text_alloc` produces.  `cap=0` is the
-            // pre-existing "immutable static literal" marker; the
-            // text-method stdlib already respects it (mutating
-            // methods check cap > 0 before writing).
-            //
-            // Performance:
-            //  * Zero malloc / free per literal.
-            //  * Zero runtime call.
-            //  * LLVM constant-propagates the pointer; on aarch64
-            //    `LoadK String` becomes `adrp + add` (2 instrs).
-            //  * The linker dedupes identical `__rodata` literals
-            //    automatically (private + unnamed_addr).
-            //
-            // Architectural mirror in interpreter: VBC-level
-            // ConstId → Value singleton cache (#93).
-            // ============================================================
-            let i64_type = ctx.types().i64_type();
-            let module = ctx.get_module();
-
-            // Reuse a single global Text struct per ConstId — different
-            // VBC instructions referencing the same string-pool entry
-            // share the same `__rodata` slot.  The mangling embeds
-            // `const_id` (not `str_id`) because the constant pool is
-            // already deduplicated upstream by the VBC string table.
-            let global_name = format!("verum_text_const_{}", const_id);
-            let text_obj_ptr = if let Some(existing) = module.get_global(&global_name) {
-                existing.as_pointer_value()
-            } else {
-                // Step 1: emit the raw bytes as a private rodata string.
-                // `build_global_string_ptr` appends a NUL terminator
-                // (harmless — Verum Text stores explicit length, but
-                // having NUL means C-side helpers like `verum_text_get_ptr`
-                // produce a usable c_str without copying).
-                let data_global = ctx
-                    .builder()
-                    .build_global_string_ptr(s, &format!("verum_text_data_{}", const_id))
-                    .or_llvm_err()?;
-                let data_ptr_as_i64 = data_global
-                    .as_pointer_value()
-                    .const_to_int(i64_type);
-
-                // Step 2: emit the `{ptr_i64, len, cap=0}` struct as a
-                // global constant.  Match the runtime `verum_text_alloc`
-                // layout exactly: 3 contiguous i64s, no struct padding.
-                let len_const = i64_type.const_int(s.len() as u64, false);
-                let zero = i64_type.const_zero();
-                let struct_init = ctx.llvm_context().const_struct(
-                    &[
-                        data_ptr_as_i64.into(),
-                        len_const.into(),
-                        zero.into(),
-                    ],
-                    false, // packed=false → matches malloc'd alignment of 8
-                );
-
-                let struct_ty = struct_init.get_type();
-                let text_global = module.add_global(struct_ty, None, &global_name);
-                text_global.set_initializer(&struct_init);
-                text_global.set_constant(true);
-                text_global.set_linkage(verum_llvm::module::Linkage::Private);
-                text_global.set_unnamed_addr(true);
-                // T0332: the structural-equality authority's guarded
-                // header probe (`verum_generic_eq` → is-text test)
-                // accepts a candidate Text pointer only when it is
-                // 16-byte aligned — the heap allocator's contract. A
-                // default-aligned (8) rodata Text failed the probe, so
-                // literal Texts fell to the raw bit-compare and
-                // `contains`/`index_of` over literal lists answered
-                // false. Static literals must satisfy the SAME
-                // alignment contract as heap Texts.
-                text_global.set_alignment(16);
-                text_global.as_pointer_value()
-            };
-
-            // Result: ptrtoint(@verum_text_const_<id>) — i64-shaped to
-            // match the rest of the VBC register file (Value-tagged at
-            // call sites).  LLVM compiles this to a single
-            // `ptrtoint`-of-constant which becomes an `adrp+add` pair
-            // at codegen time.
-            let result = text_obj_ptr.const_to_int(i64_type);
-            result.into()
+            static_text(ctx, s, &format!("const_{const_id}")).map(Into::into)?
         }
         Constant::Function(func_id) => {
             let declaration = vbc_mod.get_function(*func_id).ok_or_else(|| {

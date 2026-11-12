@@ -14,6 +14,7 @@ use verum_common::{List, Map, Set, Text};
 type Key = (Text, Text);
 #[derive(Debug, Clone, Default)]
 pub(crate) struct SourceConstants {
+    pub(crate) declaration_items: Map<Text, Arc<List<Item>>>,
     declarations: Map<Key, Expr>,
     pub(crate) materializing: bool,
     values: Map<Key, ConstValue>,
@@ -189,6 +190,9 @@ impl ConstLowering {
             })
     }
     fn register_items(&mut self, owner: &str, items: &[Item]) -> Result<(), MetaError> {
+        self.context.source_constants.declaration_items.insert(owner.into(), Arc::new(items.iter()
+            .filter(|item| !matches!(item.kind, ItemKind::Function(_) | ItemKind::Static(_)))
+            .cloned().collect()));
         for item in items {
             match &item.kind {
                 ItemKind::Function(f) if f.is_meta && f.generics.is_empty() => {

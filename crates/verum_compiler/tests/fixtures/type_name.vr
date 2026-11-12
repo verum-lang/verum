@@ -1,0 +1,13 @@
+module reflection;
+
+type Word is UInt32;
+type Tag<T> is { value: T };
+type Alias<T> is Tag<T>;
+
+fn declared_name<T>() -> Text { T.name }
+
+fn main() {
+    assert(declared_name<Word>() == "UInt32");
+    assert(declared_name<Tag<Word>>() == "reflection.Tag<UInt32>");
+    assert(declared_name<Alias<Word>>() == declared_name<Tag<UInt32>>());
+}

@@ -222,7 +222,7 @@ pub(super) fn resolve_type_methods(
         }
         match instruction {
             I::Nop => {}
-            I::LoadI { dst, .. } | I::TypeResource { dst, .. } | I::TypeIdentity { dst, .. } | I::TypeLayout { dst, .. }
+            I::LoadI { dst, .. } | I::TypeResource { dst, .. } | I::TypeIdentity { dst, .. } | I::TypeInspect { dst, .. } | I::TypeLayout { dst, .. }
             | I::TargetHasAtomic { dst, .. } | I::TargetHasFeature { dst, .. } => {
                 values.insert(dst.0, TypeRef::Concrete(TypeId::INT));
                 tokens.remove(&dst.0);

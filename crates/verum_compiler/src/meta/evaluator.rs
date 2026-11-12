@@ -327,22 +327,6 @@ fn is_likely_type_name(name: &str) -> bool {
     }
 }
 
-/// Convert a primitive type name to a Type
-fn primitive_type_from_name(name: &str) -> Type {
-    use verum_ast::ty::TypeKind;
-    let kind = match name {
-        "Int" => TypeKind::Int,
-        "Float" => TypeKind::Float,
-        "Bool" => TypeKind::Bool,
-        "Text" => TypeKind::Text,
-        "Char" => TypeKind::Char,
-        "Unit" => TypeKind::Unit,
-        "Never" => TypeKind::Never,
-        _ => TypeKind::Unknown, // Fallback
-    };
-    Type::new(kind, Span::default())
-}
-
 /// Try to convert a Path to a Type (for generic types like List<Int>)
 fn path_to_type(path: &Path) -> Option<Type> {
     use verum_ast::ty::TypeKind;
@@ -460,6 +444,7 @@ impl MetaContext {
                 message: "typed cast carrier is unsupported by compile-time runtime-value materialization".into(),
             }),
             ExprKind::Paren(inner) => self.ast_expr_to_meta_expr(inner),
+            ExprKind::TypeProperty { ty, property } => self.eval_type_property(ty, *property).map(MetaExpr::Literal),
             ExprKind::MetaFunction { name, args, .. } if name.as_str() == "const" && args.len() == 1 => self.ast_expr_to_meta_expr(&args[0]),
             ExprKind::Quote { .. } => Ok(MetaExpr::Quote(expr.clone())),
             ExprKind::Literal(lit) => {
@@ -481,10 +466,7 @@ impl MetaContext {
                     // Check if this is a primitive type name - treat as type literal
                     if self.has_source_variable(name) {
                         Ok(MetaExpr::Variable(Text::from(name)))
-                    } else if is_primitive_type_name(name) {
-                        let ty = primitive_type_from_name(name);
-                        Ok(MetaExpr::Literal(ConstValue::Type(ty)))
-                    } else if is_likely_type_name(name) {
+                    } else if is_primitive_type_name(name) || is_likely_type_name(name) {
                         // PascalCase name - likely a user-defined type (Point, Color, etc.)
                         // Treat as a type literal using Path TypeKind
                         let ty = path_to_type(path)
@@ -1557,6 +1539,10 @@ impl MetaContext {
 
     /// Evaluate field access on a value
     fn eval_field_access(&self, value: ConstValue, field: &Text) -> Result<ConstValue, MetaError> {
+        if let ConstValue::Type(ty) = &value
+            && let Some(property) = TypeProperty::from_str(field) {
+            return self.eval_type_property(ty, property);
+        }
         // In meta context, we don't have actual struct definitions,
         // so field access is limited
         Err(MetaError::Other(Text::from(format!(
@@ -1800,40 +1786,19 @@ impl MetaContext {
         ty: &Type,
         property: TypeProperty,
     ) -> Result<ConstValue, MetaError> {
-        use super::builtins::type_props::{
-            compute_type_alignment, compute_type_id, compute_type_is_signed, compute_type_max,
-            compute_type_min, compute_type_name, compute_type_size, compute_type_stride,
-        };
-
         match property {
-            TypeProperty::Size => {
-                let size = compute_type_size(&ty.kind)?;
-                Ok(ConstValue::Int(size.into()))
-            }
-            TypeProperty::Alignment => {
-                let align = compute_type_alignment(&ty.kind)?;
-                Ok(ConstValue::Int(align.into()))
-            }
-            TypeProperty::Stride => {
-                let stride = compute_type_stride(&ty.kind)?;
-                Ok(ConstValue::Int(stride.into()))
-            }
-            TypeProperty::Bits => {
-                let size = compute_type_size(&ty.kind)?;
-                Ok(ConstValue::Int((size * 8).into()))
-            }
-            TypeProperty::Min => compute_type_min(&ty.kind),
-            TypeProperty::Max => compute_type_max(&ty.kind),
-            TypeProperty::Name => {
-                let name = compute_type_name(&ty.kind);
-                Ok(ConstValue::Text(name))
-            }
-            TypeProperty::Id => {
-                let id = compute_type_id(&ty.kind);
-                Ok(ConstValue::UInt(id.into()))
-            }
-            TypeProperty::IsSigned => Ok(ConstValue::Bool(compute_type_is_signed(&ty.kind))),
+            TypeProperty::Id => return Err(MetaError::MetaEvaluationFailed {
+                message: "type identity requires the linked program's complete declaration witness; it cannot be materialized from standalone syntax".into(),
+            }),
+            TypeProperty::Min => return super::builtins::type_props::compute_type_min(&ty.kind),
+            TypeProperty::Max => return super::builtins::type_props::compute_type_max(&ty.kind),
+            _ => (),
         }
+        let expression = Expr::new(ExprKind::TypeProperty { ty: ty.clone(), property }, ty.span);
+        let items = self.source_constants.declaration_items.get(&self.current_module)
+            .map(|items| items.as_slice()).unwrap_or(&[]);
+        super::vbc_eval::vbc_eval_declared_property(&expression, &self.current_module, items)
+            .map_err(|message| MetaError::MetaEvaluationFailed { message: message.into() })
     }
 
     /// Check if a value matches a pattern

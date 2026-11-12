@@ -121,6 +121,21 @@ fn identity_surfaces_infer_the_same_unsigned_carrier() {
 }
 
 #[test]
+fn inspection_result_and_purity_follow_the_selected_operation() {
+    let alignment = errors("meta fn min_align() -> USize { UInt8.alignment as USize }");
+    assert!(alignment.is_empty(), "{alignment:?}");
+    for (operation, result) in [("type_name", "Text"), ("needs_drop", "Bool")] {
+        for body in [format!("@intrinsic(\"{operation}\", T)"), format!("@vbc({}, T)", operation.to_uppercase())] {
+            let source = format!("meta fn probe<T>() -> {result} {{ {body} }}");
+            let accepted = errors(&source);
+            assert!(accepted.is_empty(), "{source}: {accepted:?}");
+        }
+    }
+    assert!(errors("meta fn wrong<T>() -> Bool { @intrinsic(\"type_name\", T) }")
+        .iter().any(|error| error.contains("Mismatch")));
+}
+
+#[test]
 fn runtime_and_unknown_operations_do_not_acquire_constant_contracts() {
     for source in [
         "meta fn probe(number: Int) -> Int { @intrinsic(\"syscall0\", number) }",

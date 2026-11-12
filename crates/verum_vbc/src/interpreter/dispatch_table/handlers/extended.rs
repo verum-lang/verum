@@ -194,6 +194,31 @@ pub(in super::super) fn handle_extended(
             state.set_reg(dst, crate::value::Value::from_i64(id as i64));
             Ok(DispatchResult::Continue)
         }
+        Some(ExtendedSubOpcode::TypeInspect) => {
+            use crate::instruction::TypeInspection;
+            let dst = read_reg(state)?;
+            let raw = read_u8(state)?;
+            let query = TypeInspection::from_byte(raw).ok_or_else(|| InterpreterError::InvalidBytecode {
+                pc: state.pc() as usize,
+                message: format!("invalid type inspection {raw}"),
+            })?;
+            let ty = super::bytecode_io::read_type_ref(state)?;
+            let ty = state.resolve_generic_witness(&ty)?;
+            let value = match query {
+                TypeInspection::Name => {
+                    let name = crate::type_information::name(&state.module, &ty)
+                        .map_err(|message| InterpreterError::Panic { message: message.into() })?;
+                    super::string_helpers::alloc_string_value(state, &name)?
+                }
+                TypeInspection::NeedsDrop => {
+                    let needs_drop = crate::type_information::needs_drop(&state.module, &ty)
+                        .map_err(|message| InterpreterError::Panic { message: message.into() })?;
+                    crate::value::Value::from_bool(needs_drop)
+                }
+            };
+            state.set_reg(dst, value);
+            Ok(DispatchResult::Continue)
+        }
         Some(ExtendedSubOpcode::TypeResource) => {
             let dst = read_reg(state)?;
             let ty = super::bytecode_io::read_type_ref(state)?;

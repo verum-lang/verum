@@ -379,56 +379,10 @@ fn test_type_property_name() {
 }
 
 #[test]
-fn test_type_property_id() {
+fn isolated_meta_types_cannot_fabricate_program_identity() {
     let ctx = MetaContext::new();
-    let ty = int_type();
-
-    let result = ctx.eval_type_property(&ty, verum_ast::expr::TypeProperty::Id);
-    assert!(result.is_ok());
-
-    // T.id should return a u64 hash, verify it's a non-zero integer
-    if let ConstValue::UInt(id) = result.unwrap() {
-        assert!(id != 0, "Type ID should be non-zero");
-    } else {
-        panic!("Expected ConstValue::UInt for type ID");
+    for ty in [int_type(), text_type()] {
+        let error = ctx.eval_type_property(&ty, verum_ast::expr::TypeProperty::Id).unwrap_err();
+        assert!(error.to_string().contains("linked program"), "{error}");
     }
-}
-
-#[test]
-fn test_type_property_id_consistency() {
-    let ctx = MetaContext::new();
-
-    // Same type should always produce same ID
-    let ty1 = int_type();
-    let ty2 = int_type();
-
-    let id1 = ctx
-        .eval_type_property(&ty1, verum_ast::expr::TypeProperty::Id)
-        .unwrap();
-    let id2 = ctx
-        .eval_type_property(&ty2, verum_ast::expr::TypeProperty::Id)
-        .unwrap();
-
-    assert_eq!(id1, id2, "Same type should produce same ID");
-}
-
-#[test]
-fn test_type_property_id_uniqueness() {
-    let ctx = MetaContext::new();
-
-    // Different types should produce different IDs
-    let int_ty = int_type();
-    let text_ty = text_type();
-
-    let int_id = ctx
-        .eval_type_property(&int_ty, verum_ast::expr::TypeProperty::Id)
-        .unwrap();
-    let text_id = ctx
-        .eval_type_property(&text_ty, verum_ast::expr::TypeProperty::Id)
-        .unwrap();
-
-    assert_ne!(
-        int_id, text_id,
-        "Different types should produce different IDs"
-    );
 }

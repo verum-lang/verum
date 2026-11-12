@@ -338,27 +338,6 @@ public type TensorDebugInfo is {
 };
 
 // =============================================================================
-// Type-Level Intrinsics
-// =============================================================================
-
-//Get runtime type ID
-public fn type_id<T>() -> TypeId {
-    @vbc(TYPE_GET_ID, @type_name<T>())
-}
-
-// TypeId is now defined in core/base/protocols.vr
-
-//Get type size in bytes
-public fn type_size<T>() -> USize {
-    @vbc(TYPE_SIZE, @type_name<T>())
-}
-
-//Get type alignment
-public fn type_align<T>() -> USize {
-    @vbc(TYPE_ALIGN, @type_name<T>())
-}
-
-// =============================================================================
 // FFI Internals
 // =============================================================================
 

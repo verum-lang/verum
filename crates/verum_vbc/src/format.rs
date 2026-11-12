@@ -146,7 +146,8 @@ pub const VERSION_MAJOR: u16 = 2;
 // v2.51: typed, target-bound atomic and CPU-feature queries.
 /// Minor 52 adds the declared storage-bit-count layout query.
 /// Minor 53 carries complete type identity queries.
-pub const VERSION_MINOR: u16 = 53;
+/// Minor 54 carries declaration-owned names and destruction-plan queries.
+pub const VERSION_MINOR: u16 = 54;
 
 /// Minor-version floors for sections whose presence readers gate on.  The
 /// register-type-hints section has been written unconditionally since minor 2,

@@ -28689,6 +28689,9 @@ impl VbcCodegen {
     /// Best-effort static type NAME of an expression, used for overload and
     /// variant disambiguation. `None` when the shape carries no usable name.
     pub fn extract_expr_type_name(&self, expr: &Expr) -> Option<String> {
+        if let Some(ty) = self.type_property_result(expr) {
+            return self.scoped_callable_type_name(&ty, Some(&self.ctx.current_generic_param_ids)).map(|name| name.to_string());
+        }
         if let Some(result) = self.scoped_call_result_type_name(expr) {
             return result;
         }
@@ -29783,6 +29786,9 @@ impl VbcCodegen {
     /// For inline record literals, extracts the type name directly.
     /// Used by `compile_binary` to set `protocol_id` in CmpG for custom Eq dispatch.
     pub fn infer_expr_type_name(&self, expr: &Expr) -> Option<String> {
+        if let Some(ty) = self.type_property_result(expr) {
+            return self.scoped_callable_type_name(&ty, Some(&self.ctx.current_generic_param_ids)).map(|name| name.to_string());
+        }
         if let Some(name) = self.declared_binding_type_name(expr) {
             return Some(name.to_string());
         }
@@ -35809,7 +35815,7 @@ impl VbcCodegen {
             CodegenStrategy::CompileTimeConstant => {
                 self.emit_intrinsic_compile_time_constant(intrinsic.name, dest)?;
             }
-            CodegenStrategy::TypeLayout(_) | CodegenStrategy::TypeIdentity | CodegenStrategy::TargetHasAtomic => return Err(CodegenError::internal("type query requires its declaration-owned type operand")),
+            CodegenStrategy::TypeLayout(_) | CodegenStrategy::TypeIdentity | CodegenStrategy::TypeInspect(_) | CodegenStrategy::TargetHasAtomic => return Err(CodegenError::internal("type query requires its declaration-owned type operand")),
             CodegenStrategy::TargetHasFeature => {
                 let [feature] = args else { return Err(CodegenError::internal("target_has_feature requires one Text operand")); };
                 self.ctx.emit(Instruction::TargetHasFeature { dst: dest, feature: *feature });
@@ -38509,111 +38515,6 @@ impl VbcCodegen {
                 );
             }
 
-            // =================================================================
-            // Type Introspection Operations
-            // =================================================================
-            // These are typically compile-time evaluated, but for interpreter
-            // we emit runtime calls or constant loads
-            InlineSequenceId::TypeName => {
-                // TypeName is a compile-time operation that returns the name of a type.
-                // Try to resolve from: (1) generic type params, (2) current function's
-                // parent type name, (3) fall back to "unknown".
-                let type_name = if let Some(param) = self
-                    .ctx
-                    .generic_type_params
-                    .iter()
-                    .next()
-                    .filter(|_| self.ctx.generic_type_params.len() == 1)
-                {
-                    // Single generic param — likely the TypeName<T> target
-                    param.clone()
-                } else {
-                    // Look up the current function's associated type info
-                    let fn_type_name = self.ctx.current_function.as_ref().and_then(|fname| {
-                        self.ctx
-                            .lookup_function(fname)
-                            .and_then(|fi| fi.parent_type_name.clone())
-                    });
-                    fn_type_name.unwrap_or_else(|| "unknown".to_string())
-                };
-                let const_id = self.ctx.add_const_string(&type_name);
-                self.ctx.emit(Instruction::LoadK {
-                    dst: dest,
-                    const_id: const_id.0,
-                });
-            }
-            InlineSequenceId::NeedsDrop => {
-                // NeedsDrop checks whether a type requires drop glue.
-                // Primitive types (Int, Float, Bool, Char, Unit) never need drop.
-                // User-defined types conservatively need drop unless proven otherwise.
-                let needs_drop = if let Some(ty) = self
-                    .ctx
-                    .generic_type_params
-                    .iter()
-                    .next()
-                    .filter(|_| self.ctx.generic_type_params.len() == 1)
-                    .cloned()
-                {
-                    !matches!(
-                        ty.as_str(),
-                        "Int"
-                            | "Float"
-                            | "Bool"
-                            | "Char"
-                            | "Unit"
-                            | "Int8"
-                            | "Int16"
-                            | "Int32"
-                            | "Int64"
-                            | "UInt8"
-                            | "UInt16"
-                            | "UInt32"
-                            | "UInt64"
-                            | "Float32"
-                            | "Float64"
-                    )
-                } else {
-                    // Look up the current function's parent type and check for Drop impl
-                    let parent = self.ctx.current_function.as_ref().and_then(|fname| {
-                        self.ctx
-                            .lookup_function(fname)
-                            .and_then(|fi| fi.parent_type_name.clone())
-                    });
-                    if let Some(ref parent_name) = parent {
-                        if let Some(type_id) = self.type_name_to_id.get(parent_name) {
-                            self.types
-                                .iter()
-                                .any(|td| td.id == *type_id && td.drop_fn.is_some())
-                        } else {
-                            !matches!(
-                                parent_name.as_str(),
-                                "Int"
-                                    | "Float"
-                                    | "Bool"
-                                    | "Char"
-                                    | "Unit"
-                                    | "Int8"
-                                    | "Int16"
-                                    | "Int32"
-                                    | "Int64"
-                                    | "UInt8"
-                                    | "UInt16"
-                                    | "UInt32"
-                                    | "UInt64"
-                                    | "Float32"
-                                    | "Float64"
-                            )
-                        }
-                    } else {
-                        // Conservative default: assume drop is needed for unknown types
-                        true
-                    }
-                };
-                self.ctx.emit(Instruction::LoadI {
-                    dst: dest,
-                    value: if needs_drop { 1 } else { 0 },
-                });
-            }
             InlineSequenceId::PowF32 => {
                 // pow_f32(base, exp) - use MathExtended with PowF32 sub-opcode
                 use crate::instruction::MathSubOpcode;
@@ -44110,6 +44011,12 @@ impl VbcCodegen {
 
         let dest = self.ctx.alloc_temp();
 
+        if *property == TypeProperty::Name {
+            let type_ref = self.resolve_query_type(ty)?;
+            self.ctx.emit(Instruction::TypeInspect { dst: dest, type_ref, query: crate::instruction::TypeInspection::Name });
+            return Ok(Some(dest));
+        }
+
         if *property == TypeProperty::Id {
             let type_ref = self.resolve_query_type(ty)?;
             self.ctx.emit(Instruction::TypeIdentity { dst: dest, type_ref });
@@ -44269,15 +44176,8 @@ impl VbcCodegen {
                     });
                 }
             }
-            TypeProperty::Name => {
-                let const_id = self.ctx.add_const_string(&type_name);
-                self.ctx.emit(Instruction::LoadK {
-                    dst: dest,
-                    const_id: const_id.0,
-                });
-            }
             TypeProperty::Size | TypeProperty::Alignment | TypeProperty::Stride
-            | TypeProperty::Bits | TypeProperty::IsSigned | TypeProperty::Id => unreachable!("resolved by the declaration query"),
+            | TypeProperty::Bits | TypeProperty::IsSigned | TypeProperty::Id | TypeProperty::Name => unreachable!("resolved by the declaration query"),
         }
 
         Ok(Some(dest))

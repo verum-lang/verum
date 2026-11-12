@@ -71,6 +71,7 @@ pub mod module;
 mod receiver_methods;
 pub mod type_layout;
 pub mod type_identity;
+pub mod type_information;
 pub mod target;
 pub mod const_sequence;
 pub mod drop_plan;

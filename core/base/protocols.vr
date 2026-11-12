@@ -1391,14 +1391,6 @@ implement TypeId {
 
     /// The identifier of a type named at the call site.
     ///
-    /// Four call sites in core/runtime spell it `TypeId.of<T>()` and
-    /// one spells it `TypeId.of_val(&x)`; neither existed, so runtime
-    /// type dispatch, task spawning and error-recovery matching all
-    /// failed to type-check (T1061).  Both forward to the `T.id` type
-    /// property, which is what `core/intrinsics/type_info.vr` points
-    /// at — its `type_id<T>()` carries `@deprecated("Use T.id type
-    /// property instead")`, so building on it would have added a
-    /// caller to something already on the way out.
     fn of<T>() -> TypeId {
         TypeId(T.id)
     }

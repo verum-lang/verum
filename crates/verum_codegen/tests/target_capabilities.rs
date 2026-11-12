@@ -56,6 +56,9 @@ fn source_queries_agree_in_vm_and_native_after_real_specialization() {
         type Tag<T> is { value:T };
         type Alias<T> is Tag<T>;
         fn identity_probe() -> UInt64 { type_id<Tag<Word>>() }
+        fn inspect_name<T>() -> Text { T.name }
+        fn name_probe() -> Text { inspect_name<Tag<Word>>() }
+        fn drop_probe() -> Bool { @intrinsic("needs_drop", Tag<Word>) }
         fn atomic_probe() -> Int { if outer<Word>() && layout<Word>() == 44
             && type_id<Tag<Word>>() == type_id<Alias<UInt32>>()
             && type_id<Tag<Word>>() != type_id<Tag<UInt64>>() { 73 } else { 19 } }
@@ -98,6 +101,11 @@ fn source_queries_agree_in_vm_and_native_after_real_specialization() {
     assert_eq!(vm.execute_function(entry).unwrap().try_as_i64(), Some(73));
     let identity_entry = vbc.find_function_by_name("identity_probe").unwrap();
     let expected_identity = vm.execute_function(identity_entry).unwrap().as_i64() as u64;
+    let name_entry = vbc.find_function_by_name("name_probe").unwrap();
+    let value = vm.execute_function(name_entry).unwrap();
+    let expected_name = vm.state.read_text(value).unwrap();
+    let drop_entry = vbc.find_function_by_name("drop_probe").unwrap();
+    assert_eq!(vm.execute_function(drop_entry).unwrap().try_as_bool(), Some(true));
     let context = Context::create();
     let mut config = LoweringConfig::debug("target_queries")
         .with_debug_info(false)
@@ -108,7 +116,7 @@ fn source_queries_agree_in_vm_and_native_after_real_specialization() {
     lowering.lower_module(&vbc).unwrap();
     let module = lowering.into_module();
     module.verify().unwrap();
-    for name in ["atomic_probe", "feature_probe", "identity_probe"] {
+    for name in ["atomic_probe", "feature_probe", "identity_probe", "name_probe", "drop_probe"] {
         assert!(
             module
                 .get_function(name)
@@ -123,7 +131,7 @@ fn source_queries_agree_in_vm_and_native_after_real_specialization() {
             function.set_linkage(
                 if matches!(
                     function.get_name().to_str().unwrap(),
-                    "atomic_probe" | "feature_probe" | "identity_probe"
+                    "atomic_probe" | "feature_probe" | "identity_probe" | "name_probe" | "drop_probe"
                 ) {
                     Linkage::External
                 } else {
@@ -140,7 +148,7 @@ fn source_queries_agree_in_vm_and_native_after_real_specialization() {
         )
         .unwrap();
     module.verify().unwrap();
-    for name in ["atomic_probe", "feature_probe", "identity_probe"] {
+    for name in ["atomic_probe", "feature_probe", "identity_probe", "name_probe", "drop_probe"] {
         assert!(
             module.get_function(name).is_some(),
             "missing {name} after DCE"
@@ -160,6 +168,13 @@ fn source_queries_agree_in_vm_and_native_after_real_specialization() {
             .get_function::<unsafe extern "C" fn() -> u64>("identity_probe")
             .unwrap();
         assert_eq!(identity.call(), expected_identity);
+        let name = engine.get_function::<unsafe extern "C" fn() -> u64>("name_probe").unwrap();
+        let descriptor = std::slice::from_raw_parts(name.call() as *const u64, 3);
+        assert_eq!(descriptor[2], 0, "native reflection uses immutable Text");
+        let bytes = std::slice::from_raw_parts(descriptor[0] as *const u8, descriptor[1] as usize);
+        assert_eq!(std::str::from_utf8(bytes).unwrap(), expected_name.as_str());
+        let drop = engine.get_function::<unsafe extern "C" fn() -> bool>("drop_probe").unwrap();
+        assert!(drop.call());
         let feature = engine
             .get_function::<unsafe extern "C" fn(u64) -> bool>("feature_probe")
             .unwrap();

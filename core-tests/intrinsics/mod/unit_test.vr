@@ -20,8 +20,8 @@ mount core.prelude.*;
 mount core.intrinsics.{
     // atomic explicit list
     MemoryOrder,
-    // type_info explicit list
-    size_of, align_of,
+    // type_info property beyond the built-in layout surface
+    min_align,
     // runtime/time explicit list
     monotonic_nanos,
     // runtime/text explicit list
@@ -57,16 +57,7 @@ fn test_umbrella_atomic_memory_order_resolves() {
 
 @test
 fn test_umbrella_type_info_resolves() {
-    // The meta-fn forms are @deprecated legacy (the canonical surface is
-    // the `T.size` type-property syntax — see type_info suite) and the
-    // generic instantiation returns 0 through EVERY path today; the
-    // umbrella pin is RESOLUTION, so assert the calls bind and yield an
-    // Int, and pin the canonical property against it.
-    let s = size_of<Int>() as Int;
-    let a = align_of<Int>() as Int;
-    assert(s >= 0);
-    assert(a >= 0);
-    assert_eq(Int.size, 8);
+    assert_eq(min_align(), UInt8.alignment as USize);
 }
 
 @test

@@ -81,6 +81,7 @@ impl VbcCodegen {
         use crate::types::{CbgrTier, Mutability};
         if depth >= 64 { return None; }
         let expr = Self::normalized_place(expr);
+        if let Some(result) = self.type_property_result(expr) { return Some(result); }
         let nested = |value, emitted| self.copy_source_type_inner(value, emitted, depth + 1);
         match &expr.kind {
             ExprKind::Return(_) | ExprKind::Break { .. } | ExprKind::Continue { .. } =>

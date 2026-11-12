@@ -12648,12 +12648,16 @@ impl TypeChecker {
         expr: &Expr,
     ) -> Result<Type> {
         use ExprKind::*;
-        if super::callable_properties::intrinsic_operation_name(name.name.as_str(), args)
+        if let Some(operation) = super::callable_properties::intrinsic_operation_name(name.name.as_str(), args)
             .and_then(|operation| verum_vbc::intrinsics::lookup_intrinsic(&operation))
-            .is_some_and(|operation| matches!(operation.intrinsic.strategy,
-                verum_vbc::intrinsics::registry::CodegenStrategy::TypeIdentity))
         {
-            return Ok(Type::uint64());
+            use verum_vbc::{instruction::TypeInspection, intrinsics::registry::CodegenStrategy};
+            match operation.intrinsic.strategy {
+                CodegenStrategy::TypeIdentity => return Ok(Type::uint64()),
+                CodegenStrategy::TypeInspect(TypeInspection::Name) => return Ok(Type::text()),
+                CodegenStrategy::TypeInspect(TypeInspection::NeedsDrop) => return Ok(Type::bool()),
+                _ => (),
+            }
         }
         // Infer type based on the meta-function name
         let result_type = match name.name.as_str() {

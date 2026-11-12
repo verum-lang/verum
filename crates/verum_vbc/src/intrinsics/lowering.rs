@@ -312,7 +312,7 @@ impl IntrinsicLowering {
             // cannot fabricate an operation or a result for the caller.
             CodegenStrategy::RuntimeCall | CodegenStrategy::LinuxSignal(_)
             | CodegenStrategy::TargetHasAtomic | CodegenStrategy::TargetHasFeature
-            | CodegenStrategy::TypeLayout(_) | CodegenStrategy::TypeIdentity => None,
+            | CodegenStrategy::TypeLayout(_) | CodegenStrategy::TypeIdentity | CodegenStrategy::TypeInspect(_) => None,
             CodegenStrategy::ArithExtendedOpcode(sub_op) => {
                 self.lower_arith_extended_opcode(intrinsic, *sub_op, operands)
             }
@@ -3299,30 +3299,6 @@ impl IntrinsicLowering {
                 operands: operands.to_vec(),
                 region: None,
             }),
-
-            // =====================================================================
-            // Type Introspection Operations
-            // =====================================================================
-
-            InlineSequenceId::TypeName => {
-                self.emit(MlirOp {
-                    name: "verum.type_name".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::Ptr], // Returns string pointer
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-
-            InlineSequenceId::NeedsDrop => {
-                self.emit(MlirOp {
-                    name: "verum.needs_drop".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I1], // Returns bool
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
 
             // Additional user-facing intrinsics
             InlineSequenceId::PowF32 => self.emit(MlirOp {

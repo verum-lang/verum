@@ -646,7 +646,7 @@ impl<'a> BytecodeSpecializer<'a> {
             | I::TypeResource { type_ref, .. }
             | I::TargetHasAtomic { type_ref, .. }
             | I::LoadT { type_ref, .. }
-            | I::TypeIdentity { type_ref, .. }
+            | I::TypeIdentity { type_ref, .. } | I::TypeInspect { type_ref, .. }
             | I::TypeLayout { type_ref, .. } => {
                 *type_ref = self.substitution.apply(type_ref)?;
             }
@@ -859,7 +859,7 @@ impl<'a> BytecodeSpecializer<'a> {
             | I::TypeResource { dst, .. }
             | I::TargetHasAtomic { dst, .. }
             | I::TargetHasFeature { dst, .. }
-            | I::TypeIdentity { dst, .. }
+            | I::TypeIdentity { dst, .. } | I::TypeInspect { dst, .. }
             | I::TypeLayout { dst, .. }
             | I::LoadK { dst, .. }
             | I::Call { dst, .. }

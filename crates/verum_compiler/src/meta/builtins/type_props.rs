@@ -751,24 +751,6 @@ pub fn compute_type_is_signed(ty: &TypeKind) -> bool {
     type_names::is_signed_integer_type(name.as_str()) || type_names::is_float_type(name.as_str())
 }
 
-/// Compute a unique type ID based on type structure using Blake3.
-pub fn compute_type_id(ty: &TypeKind) -> u64 {
-    // TYPEINFO-ID-CANON-1 (task #2): canonicalise aliases so the meta
-    // `type_id` agrees with the VBC/AOT `.id` alias contract
-    // (Int == Int64, Byte == UInt8, …).
-    use verum_common::well_known_types::type_names;
-    let name = compute_type_name(ty);
-    let canon = type_names::canonical_identity_name(name.as_str());
-    let key: &str = if canon == type_names::NON_PRIMITIVE_IDENTITY {
-        name.as_str()
-    } else {
-        canon
-    };
-    let mut hasher = crate::hash::ContentHash::new();
-    hasher.update_str(key);
-    hasher.finalize().to_u64()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
