@@ -349,7 +349,7 @@ pub(crate) fn has_declassify_attr_on_function(func: &verum_ast::decl::FunctionDe
 pub(crate) fn collect_inline_mount_reexports_recursive(
     items: &[verum_ast::Item],
     current_module_path: &str,
-    out: &mut Vec<(Text, Option<Text>)>,
+    out: &mut List<(Text, Option<Text>)>,
 ) {
     use verum_ast::decl::MountTreeKind;
     use verum_ast::ty::PathSegment;

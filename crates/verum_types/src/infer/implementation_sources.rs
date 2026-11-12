@@ -14,6 +14,30 @@ pub(super) struct ImportedStructuralMethod {
 }
 
 impl TypeChecker {
+    /// Named exports are already bound through ExportTable. Follow only the
+    /// remaining implementation surface of glob re-exports, once per owner,
+    /// without re-registering every named declaration at each facade hop.
+    pub(super) fn import_non_nominal_reexports(
+        &mut self,
+        owner: &str,
+        registry: &verum_modules::ModuleRegistry,
+    ) -> Result<()> {
+        let mut pending = List::from_single(Text::from(owner));
+        let mut visited = verum_common::Set::new();
+        while let Some(owner) = pending.pop() {
+            if !visited.insert(owner.clone()) { continue; }
+            let source = registry.get_by_path(&owner);
+            let inline = source.is_none().then(|| self.inline_modules.get(&owner).and_then(|module| module.items.clone())).flatten();
+            let Some(items) = source.as_ref().map(|module| &module.ast.items).or(inline.as_ref()) else { continue; };
+            self.import_structural_methods(&owner, items)?;
+            self.import_primitive_impl_blocks(&owner, items)?;
+            let mut mounts = List::new();
+            super::collect_inline_mount_reexports_recursive(items, &owner, &mut mounts);
+            pending.extend(mounts.into_iter().filter_map(|(path, item)| item.is_none().then_some(path)));
+        }
+        Ok(())
+    }
+
     pub(super) fn metadata_implementation_target(descriptor: &TypeDescriptor) -> Type {
         // Only the global opaque catalogue represents a structural receiver.
         // Its element and extent are bound by the implementation header.

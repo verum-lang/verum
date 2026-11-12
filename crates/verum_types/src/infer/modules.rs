@@ -1114,7 +1114,7 @@ impl TypeChecker {
         // the compiler), the recursion is fully general — it works for
         // ANY inline submodule that contains public Mount re-exports,
         // not just the canonical `prelude` name.
-        let mut reexport_paths: Vec<(Text, Option<Text>)> = Vec::new();
+        let mut reexport_paths: List<(Text, Option<Text>)> = List::new();
         if let Some(items) = &module.items {
             collect_inline_mount_reexports_recursive(
                 items.as_slice(),
@@ -1378,8 +1378,7 @@ impl TypeChecker {
         let already_bound = self.ctx.env.lookup(&name_text).is_some()
             || self.ctx.type_defs.contains_key(&name_text);
         if !already_bound {
-            let mut reexport_pairs: Vec<(verum_common::Text, Option<verum_common::Text>)> =
-                Vec::new();
+            let mut reexport_pairs = List::new();
             if let Some(items) = &module.items {
                 collect_inline_mount_reexports_recursive(
                     items.as_slice(),
@@ -2365,8 +2364,7 @@ impl TypeChecker {
                         // through to the cross-file path that never walked the
                         // re-export chain.
                         let inline_reexport_items: std::collections::HashSet<String> = {
-                            let mut pairs: Vec<(verum_common::Text, Option<verum_common::Text>)> =
-                                Vec::new();
+                            let mut pairs = List::new();
                             if let Some(items) = inline_mod.items.as_ref() {
                                 collect_inline_mount_reexports_recursive(
                                     items.as_slice(),
@@ -9702,6 +9700,7 @@ impl TypeChecker {
             // add methods to built-in primitive types. These must be imported even though
             // Int itself isn't an export - it's a language built-in.
             self.import_primitive_impl_blocks(module_path.as_str(), &module_info.ast.items)?;
+            self.import_non_nominal_reexports(module_path, registry)?;
 
             // Cross-file submodule re-export propagation (mirrors the
             // inline-module fix at `import_all_from_inline_module_impl`).
@@ -9732,13 +9731,16 @@ impl TypeChecker {
             // architectural rule (no hardcoded stdlib knowledge in
             // the compiler), the walk is fully general — any nested
             // public submodule with public Mount re-exports surfaces.
-            let mut submodule_reexports: Vec<(Text, Option<Text>)> = Vec::new();
-            // A facade's own glob mounts also export non-nominal methods.
-            // ExportTable contains named declarations only, so replaying just
-            // its leaves loses implementations on scalars and structural types.
-            collect_inline_mount_reexports_recursive(
-                &module_info.ast.items, module_path, &mut submodule_reexports,
-            );
+            let mut submodule_reexports: List<(Text, Option<Text>)> = List::new();
+            for item in &module_info.ast.items {
+                if let verum_ast::ItemKind::Module(submod) = &item.kind
+                    && submod.visibility == verum_ast::decl::Visibility::Public
+                    && let Some(items) = &submod.items
+                {
+                    let owner = format!("{}.{}", module_path, submod.name.name);
+                    collect_inline_mount_reexports_recursive(items, &owner, &mut submodule_reexports);
+                }
+            }
             for (path, item_name_opt) in submodule_reexports {
                 match item_name_opt {
                     None => {
@@ -9873,7 +9875,7 @@ impl TypeChecker {
     /// extend them with methods via implement blocks.
     ///
     /// Uses `primitive_impls_registered_modules` to avoid redundant processing.
-    fn import_primitive_impl_blocks(
+    pub(super) fn import_primitive_impl_blocks(
         &mut self,
         module_path: &str,
         items: &[verum_ast::Item],
