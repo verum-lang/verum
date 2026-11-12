@@ -1288,7 +1288,7 @@ fn resolve_glob_reexports_one_pass(
     for (module_id, source_path_str) in &glob_reexports {
         // Get the source module's exports
         if let Maybe::Some(source_info_shared) =
-            module_registry.get_by_path(source_path_str.as_str())
+            module_registry.get_by_path_aliased(source_path_str.as_str())
         {
             let source_info: &crate::ModuleInfo = &source_info_shared;
             let source_exports = &source_info.exports;
@@ -1544,7 +1544,7 @@ fn collect_specific_links_for_kind_resolution(
                     {
                         // Look up the source module's exports
                         if let verum_common::Maybe::Some(source_info) =
-                            module_registry.get_by_path(resolved_module_path.as_str())
+                            module_registry.get_by_path_aliased(resolved_module_path.as_str())
                         {
                             if let Some(source_export) =
                                 source_info.exports.get(&Text::from(item_name))
@@ -1566,7 +1566,7 @@ fn collect_specific_links_for_kind_resolution(
             if let Some(resolved_module_path) = resolve_link_path(prefix, current_module_path) {
                 // Look up the source module
                 if let verum_common::Maybe::Some(source_info) =
-                    module_registry.get_by_path(resolved_module_path.as_str())
+                    module_registry.get_by_path_aliased(resolved_module_path.as_str())
                 {
                     // Process each item in the nested link
                     for subtree in trees {

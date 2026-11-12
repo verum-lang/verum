@@ -84,6 +84,23 @@ fn absolute_and_explicit_relative_paths_agree_for_imports_and_reexports() {
 }
 
 #[test]
+fn registered_namespace_aliases_preserve_reexport_kind_and_owner() {
+    for suffix in [".answer", ".{answer}", ".*"] {
+        let mut registry = ModuleRegistry::new();
+        let expected = register(&mut registry, "workspace.provider", "public fn answer() -> Int { 73 }");
+        register(&mut registry, "facade.short", "public fn answer() -> Int { 0 }");
+        registry.register_path_alias("short", "workspace.provider");
+        let facade = register(&mut registry, "facade", &format!("public mount short{suffix};"));
+        resolve_glob_reexports(&mut registry).unwrap();
+        resolve_specific_reexport_kinds(&mut registry).unwrap();
+        let info = registry.get(facade).unwrap();
+        let answer = info.exports.get(&Text::from("answer")).expect("alias re-export");
+        assert_eq!(answer.kind, ExportKind::Function, "{suffix}");
+        assert_eq!(answer.source_module, expected, "{suffix}");
+    }
+}
+
+#[test]
 fn bare_reexport_never_falls_back_to_an_unrelated_child() {
     for suffix in [".*", ".{answer}"] {
         let mut registry = ModuleRegistry::new();

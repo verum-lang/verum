@@ -3324,7 +3324,7 @@ impl TypeChecker {
                         // #[cfg(debug_assertions)]
                         // eprintln!("[DEBUG] About to extract_function_type_from_module for '{}'", item_name);
                         if let Some(scheme) =
-                            self.extract_function_type_from_module(&module_info.ast, item_name, &module_info.path.to_string())
+                            self.source_qualified_function(module_info.clone(), item_name.into())
                         {
                             if std::env::var("VERUM_TRACE_TASK20").is_ok() {
                                 eprintln!("[task20] AST direct: mod='{}' item='{}' type={:?}",
