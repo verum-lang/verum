@@ -18,6 +18,7 @@ enum HeadIdentity {
     Builtin(Text),
     Nominal,
     Reference,
+    Refinement,
 }
 
 fn nominal_key(ty: &Type) -> Option<(Text, usize)> {
@@ -122,6 +123,9 @@ impl ProtocolChecker {
         if ty.reference_parts().is_some() {
             return Some(HeadIdentity::Reference);
         }
+        if matches!(ty, Type::Refined { .. }) {
+            return Some(HeadIdentity::Refinement);
+        }
         if !matches!(ty, Type::Unknown)
             && let Some(name) = ty.primitive_name()
         {
@@ -183,7 +187,7 @@ impl ProtocolChecker {
     pub(crate) fn builtin_source_receiver_name(&self, ty: &Type) -> Option<Text> {
         match self.head_identity(ty)? {
             HeadIdentity::Builtin(identity) => Some(identity),
-            HeadIdentity::Nominal | HeadIdentity::Reference => None,
+            HeadIdentity::Nominal | HeadIdentity::Reference | HeadIdentity::Refinement => None,
         }
     }
 
@@ -212,6 +216,12 @@ impl ProtocolChecker {
             // implementation is selected for its declared receiver itself.
             (Some(HeadIdentity::Reference), Some(HeadIdentity::Builtin(_) | HeadIdentity::Nominal))
             | (Some(HeadIdentity::Builtin(_) | HeadIdentity::Nominal), Some(HeadIdentity::Reference)) => true,
+            // Refinement erasure is a value conversion, not receiver identity.
+            // A closed carrier cannot instantiate into a refinement (or vice
+            // versa). Unknown heads and variables still supply no disjointness
+            // evidence, and two refined heads still need their full predicates.
+            (Some(HeadIdentity::Refinement), Some(HeadIdentity::Builtin(_) | HeadIdentity::Nominal | HeadIdentity::Reference))
+            | (Some(HeadIdentity::Builtin(_) | HeadIdentity::Nominal | HeadIdentity::Reference), Some(HeadIdentity::Refinement)) => true,
             _ => false,
         }
     }
