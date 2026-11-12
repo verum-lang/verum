@@ -101,14 +101,15 @@ impl TypeChecker {
     /// mount. A glob imports the signatures of its public inherent members.
     pub(super) fn import_structural_methods(
         &mut self,
-        module: &verum_modules::ModuleInfo,
+        module_path: &str,
+        items: &[verum_ast::Item],
     ) -> Result<()> {
         use verum_ast::{
             ItemKind, TypeKind,
             decl::{ImplItemKind, ImplKind, Visibility},
         };
-        let owner: Text = module.path.to_string().into();
-        for item in &module.ast.items {
+        let owner: Text = module_path.into();
+        for item in items {
             let ItemKind::Impl(declaration) = &item.kind else {
                 continue;
             };

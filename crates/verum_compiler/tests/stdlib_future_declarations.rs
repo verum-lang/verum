@@ -14,6 +14,36 @@ fn glob_imported_future_output_keeps_declaration_authority() {
 }
 
 #[test]
+fn imported_fixed_width_arithmetic_executes_after_archive_bootstrap() {
+    let root = tempfile::tempdir().unwrap();
+    let core = root.path().join("core");
+    for (file, source) in [
+        ("mod.vr", "module core; public module values; public module scalars; public module reader;
+            public module prelude { public mount super.values.*; public mount super.scalars.*; }"),
+        ("values/mod.vr", "module core.values; public type Maybe<T> is None | Some(T);"),
+        ("scalars/mod.vr", "module core.scalars; mount core.values.Maybe;
+            implement UInt64 {
+                public fn checked_add(self, rhs: UInt64) -> Maybe<UInt64> {
+                    @intrinsic(\"checked_add_u64\", self, rhs)
+                }
+            }"),
+        ("reader/mod.vr", "module core.reader;
+            public fn read() -> Int {
+                let maximum: UInt64 = 18446744073709551615;
+                let ordinary: UInt64 = 36;
+                let sum = match ordinary.checked_add(37) { Maybe.Some(n) => n as Int, Maybe.None => 0 };
+                match maximum.checked_add(1) { Maybe.None => sum, Maybe.Some(_) => 0 }
+            }"),
+    ] {
+        let path = core.join(file);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, source).unwrap();
+    }
+    let archive = bootstrap(&core);
+    assert_eq!(execute(&archive, "module app; mount core.reader.read; fn main() -> Int { read() }"), 73);
+}
+
+#[test]
 fn imported_associated_sum_survives_nested_async_signature_and_execution() {
     let root = tempfile::tempdir().unwrap();
     let core = root.path().join("core");

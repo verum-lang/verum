@@ -141,3 +141,34 @@ fn qualified_primitive_spellings_retain_their_actual_records() {
         );
     }
 }
+
+#[test]
+fn imported_scalar_methods_follow_the_declared_receiver() {
+    for (declared, used) in [
+        ("UInt64", "UInt64"), ("u64", "UInt64"), ("UInt64", "u64"),
+        ("UInt16", "u16"), ("Int32", "i32"), ("Float32", "f32"),
+        ("Bool", "Bool"),
+    ] {
+        let provider = format!("implement {declared} {{ public fn marked(self) -> Bool {{ true }} }}");
+        accepts(&provider, &format!("mount example.types.*; fn use_it(x: {used}) -> Bool {{ x.marked() }}"));
+        refuses(&provider, &format!("mount example.types.*; fn use_it(x: {used}) -> Int {{ x.marked() }}"));
+        refuses(&provider, "mount example.types.*; fn wrong_receiver(x: Text) -> Bool { x.marked() }");
+        refuses(&provider, &format!("fn not_imported(x: {used}) -> Bool {{ x.marked() }}"));
+    }
+}
+
+#[test]
+fn imported_scalar_method_can_use_a_source_alias() {
+    accepts(
+        "type Word is UInt64; implement Word { public fn marked(self) -> Bool { true } }",
+        "mount example.types.*; fn use_it(x: UInt64) -> Bool { x.marked() }",
+    );
+}
+
+#[test]
+fn primitive_spelling_does_not_attach_a_record_method_to_a_scalar() {
+    refuses(
+        "public type UInt64 is { public value: Int }; implement UInt64 { public fn marked(self) -> Bool { true } }",
+        "mount example.types.*; fn use_it(x: u64) -> Bool { x.marked() }",
+    );
+}

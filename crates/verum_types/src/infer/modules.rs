@@ -1159,6 +1159,8 @@ impl TypeChecker {
         }
 
         if let Some(items) = &module.items {
+            self.import_structural_methods(module_name, items)?;
+            self.import_primitive_impl_blocks(module_name, items)?;
             for item in items.iter() {
                 let (item_name, visibility) = match &item.kind {
                     verum_ast::ItemKind::Function(func) => {
@@ -8780,12 +8782,8 @@ impl TypeChecker {
         // Modules like core.primitives define `implement Int { ... }` blocks that
         // add methods to built-in primitive types (Int, Float, Bool, etc.).
         // These must be imported when ANY item from the module is imported.
-        if let Err(e) = self.import_primitive_impl_blocks(module_path, ast) {
-            tracing::debug!(
-                "Note: Could not import primitive impl blocks from '{}': {}",
-                module_path,
-                e
-            );
+        if let Err(error) = self.import_primitive_impl_blocks(module_path, &ast.items) {
+            self.deferred_soundness_errors.push(error);
         }
     }
 
@@ -9680,7 +9678,7 @@ impl TypeChecker {
 
         // Look up the source module in the registry
         if let Some(module_info) = registry.get_by_path(module_path.as_str()) {
-            self.import_structural_methods(&module_info)?;
+            self.import_structural_methods(module_path, &module_info.ast.items)?;
             // Pre-register all function signatures to enable forward references
             // within the imported module itself
             self.preregister_module_function_signatures(&module_info, registry);
@@ -9703,7 +9701,7 @@ impl TypeChecker {
             // Modules like core.primitives define `implement Int { ... }` blocks that
             // add methods to built-in primitive types. These must be imported even though
             // Int itself isn't an export - it's a language built-in.
-            self.import_primitive_impl_blocks(module_path.as_str(), &module_info.ast)?;
+            self.import_primitive_impl_blocks(module_path.as_str(), &module_info.ast.items)?;
 
             // Cross-file submodule re-export propagation (mirrors the
             // inline-module fix at `import_all_from_inline_module_impl`).
@@ -9735,25 +9733,12 @@ impl TypeChecker {
             // the compiler), the walk is fully general — any nested
             // public submodule with public Mount re-exports surfaces.
             let mut submodule_reexports: Vec<(Text, Option<Text>)> = Vec::new();
-            for item in &module_info.ast.items {
-                if let verum_ast::ItemKind::Module(submod) = &item.kind {
-                    if !matches!(submod.visibility, verum_ast::decl::Visibility::Public) {
-                        continue;
-                    }
-                    if let Maybe::Some(sub_items) = &submod.items {
-                        let nested_path = format!(
-                            "{}.{}",
-                            module_path.as_str(),
-                            submod.name.name.as_str()
-                        );
-                        collect_inline_mount_reexports_recursive(
-                            sub_items.as_slice(),
-                            nested_path.as_str(),
-                            &mut submodule_reexports,
-                        );
-                    }
-                }
-            }
+            // A facade's own glob mounts also export non-nominal methods.
+            // ExportTable contains named declarations only, so replaying just
+            // its leaves loses implementations on scalars and structural types.
+            collect_inline_mount_reexports_recursive(
+                &module_info.ast.items, module_path, &mut submodule_reexports,
+            );
             for (path, item_name_opt) in submodule_reexports {
                 match item_name_opt {
                     None => {
@@ -9891,7 +9876,7 @@ impl TypeChecker {
     fn import_primitive_impl_blocks(
         &mut self,
         module_path: &str,
-        ast: &verum_ast::Module,
+        items: &[verum_ast::Item],
     ) -> Result<()> {
         // Check if we've already processed primitive impls for this module
         if self
@@ -9903,31 +9888,37 @@ impl TypeChecker {
         self.primitive_impls_registered_modules
             .insert(module_path.to_string());
 
-        // List of primitive type names to check for implement blocks
-        // Note: These correspond to TypeKind variants in verum_ast::ty
-        const PRIMITIVE_TYPES: &[&str] = &[
-            wkt_names::INT,
-            wkt_names::FLOAT,
-            wkt_names::BOOL,
-            wkt_names::CHAR,
-            wkt_names::TEXT,
-            "Unit",
-        ];
-
-        for type_name in PRIMITIVE_TYPES {
-            // Try to import impl blocks for this primitive type
-            // This will find and register methods from `implement Int { ... }` etc.
-            if let Err(e) = self.import_impl_blocks_for_type_in_module(ast, type_name, module_path) {
-                // Log but don't fail - not all modules have primitive impls
-                tracing::debug!(
-                    "Note: Could not import impl blocks for primitive '{}': {}",
-                    type_name,
-                    e
-                );
+        // Primitive receivers have no nominal declaration to mount. Discover
+        // their implementations from the module, resolving each concrete head
+        // in its declaring scope (including aliases), just like nominal imports.
+        // In particular, a record spelled like a scalar is not that scalar.
+        let result = self.with_source_signature_scope(module_path, |checker| {
+            for item in items {
+                let verum_ast::ItemKind::Impl(declaration) = &item.kind else { continue };
+                if !checker.cfg_evaluator.should_include(&item.attributes) { continue; }
+                let target = match &declaration.kind {
+                    verum_ast::decl::ImplKind::Inherent(target)
+                    | verum_ast::decl::ImplKind::Protocol { for_type: target, .. } => target,
+                };
+                // Parameterized heads belong to the blanket/nominal importer.
+                if checker.is_blanket_impl_for_type(target, &declaration.generics)
+                    || !matches!(&target.kind, verum_ast::TypeKind::Path(_))
+                        && target.kind.primitive_name().is_none()
+                { continue; }
+                let receiver = checker.ast_to_type_for_protocol_impl(target)?;
+                let name = Text::from(receiver.to_string());
+                let scalar = receiver.primitive_name().is_some()
+                    || verum_common::well_known_types::type_names::is_primitive_value_type(&name);
+                if scalar {
+                    checker.register_imported_impls(&name, List::from_single(declaration), None)?;
+                }
             }
+            Ok(())
+        });
+        if result.is_err() {
+            self.primitive_impls_registered_modules.remove(module_path);
         }
-
-        Ok(())
+        result
     }
 
     /// A function declared inside an extern block participates in the same

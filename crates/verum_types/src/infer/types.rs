@@ -276,6 +276,10 @@ impl TypeChecker {
                 // the selected declaration, never the spelling at its use site.
                 let (resolved, declaration) =
                     self.resolve_qualified_type_with_parameter_key(path, ast_ty.span)?;
+                let normalized = self.unifier.normalize_aliases(&resolved);
+                if normalized != resolved {
+                    return Ok(normalized);
+                }
                 if matches!(resolved, Type::Named { .. } | Type::Generic { .. } | Type::Var(_)) {
                     return Ok(resolved);
                 }
