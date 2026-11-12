@@ -316,171 +316,23 @@ fn test_sandbox_clone_preserves_asset_loading_state() {
 }
 
 // ============================================================================
-// Type Size and Alignment Computation Tests
+// Refusing removed name-based reflection
 // ============================================================================
 
-// Note: In Verum language proper, use T.size type property instead of size_of()
-// See: vcs/specs/L3-extended/meta/compile_time/type_introspection.vr
-// This test validates internal MetaSandbox functionality
 #[test]
-fn test_builtin_function_size_of() {
+fn sandbox_does_not_guess_layout_from_type_names_or_values() {
+    use verum_common::List;
     use verum_compiler::meta::{ConstValue, MetaContext};
-
     let sandbox = MetaSandbox::new();
     let ctx = MetaContext::new();
-
-    // Test size_of for primitive types via Text values
-    let test_cases = [
-        (Text::from("i8"), 1),
-        (Text::from("u8"), 1),
-        (Text::from("i16"), 2),
-        (Text::from("u16"), 2),
-        (Text::from("i32"), 4),
-        (Text::from("u32"), 4),
-        (Text::from("i64"), 8),
-        (Text::from("u64"), 8),
-        (Text::from("f32"), 4),
-        (Text::from("f64"), 8),
-        (Text::from("bool"), 1),
-        (Text::from("char"), 4),
-        (Text::from("isize"), 8),
-        (Text::from("usize"), 8),
-    ];
-
-    for (type_name, expected_size) in test_cases {
-        let args = vec![ConstValue::Text(type_name.clone())];
-        let result = sandbox.execute_builtin_function(&Text::from("size_of"), &args, &ctx);
-
-        assert!(
-            result.is_ok(),
-            "size_of failed for type: {}",
-            type_name.as_str()
-        );
-        if let Ok(ConstValue::Int(size)) = result {
-            assert_eq!(
-                size,
-                expected_size,
-                "Expected size {} for type {}, got {}",
-                expected_size,
-                type_name.as_str(),
-                size
-            );
+    for name in ["size_of", "align_of", "stride_of", "bits_of", "type_id", "type_name"] {
+        for args in [
+            List::new(),
+            List::from_iter([ConstValue::Text(Text::from("Int"))]),
+            List::from_iter([ConstValue::Text(Text::from("Map"))]),
+            List::from_iter([ConstValue::Int(42)]),
+        ] {
+            assert!(sandbox.execute_builtin_function(&Text::from(name), &args, &ctx).is_err(), "{name} guessed a result for {args:?}");
         }
-    }
-}
-
-// Note: In Verum language proper, use T.alignment type property instead of align_of()
-// See: vcs/specs/L3-extended/meta/compile_time/type_introspection.vr
-// This test validates internal MetaSandbox functionality
-#[test]
-fn test_builtin_function_align_of() {
-    use verum_compiler::meta::{ConstValue, MetaContext};
-
-    let sandbox = MetaSandbox::new();
-    let ctx = MetaContext::new();
-
-    // Test align_of for primitive types
-    let test_cases = [
-        (Text::from("i8"), 1),
-        (Text::from("u8"), 1),
-        (Text::from("i16"), 2),
-        (Text::from("u16"), 2),
-        (Text::from("i32"), 4),
-        (Text::from("u32"), 4),
-        (Text::from("i64"), 8),
-        (Text::from("u64"), 8),
-        (Text::from("f32"), 4),
-        (Text::from("f64"), 8),
-        (Text::from("bool"), 1),
-        (Text::from("char"), 4),
-    ];
-
-    for (type_name, expected_align) in test_cases {
-        let args = vec![ConstValue::Text(type_name.clone())];
-        let result = sandbox.execute_builtin_function(&Text::from("align_of"), &args, &ctx);
-
-        assert!(
-            result.is_ok(),
-            "align_of failed for type: {}",
-            type_name.as_str()
-        );
-        if let Ok(ConstValue::Int(align)) = result {
-            assert_eq!(
-                align,
-                expected_align,
-                "Expected alignment {} for type {}, got {}",
-                expected_align,
-                type_name.as_str(),
-                align
-            );
-        }
-    }
-}
-
-// Note: In Verum language proper, use type properties: List.size, Map.size, Text.size
-// This test validates internal MetaSandbox functionality
-#[test]
-fn test_size_of_collection_types() {
-    use verum_compiler::meta::{ConstValue, MetaContext};
-
-    let sandbox = MetaSandbox::new();
-    let ctx = MetaContext::new();
-
-    // Collection types are heap-allocated, so we check their handle sizes
-    let args = vec![ConstValue::Text(Text::from("List"))];
-    let result = sandbox.execute_builtin_function(&Text::from("size_of"), &args, &ctx);
-    assert!(result.is_ok());
-    if let Ok(ConstValue::Int(size)) = result {
-        assert_eq!(size, 24, "List should be 24 bytes (ptr + len + capacity)");
-    }
-
-    let args = vec![ConstValue::Text(Text::from("Map"))];
-    let result = sandbox.execute_builtin_function(&Text::from("size_of"), &args, &ctx);
-    assert!(result.is_ok());
-    if let Ok(ConstValue::Int(size)) = result {
-        assert_eq!(size, 8, "Map should be 8 bytes (heap pointer)");
-    }
-
-    let args = vec![ConstValue::Text(Text::from("Text"))];
-    let result = sandbox.execute_builtin_function(&Text::from("size_of"), &args, &ctx);
-    assert!(result.is_ok());
-    if let Ok(ConstValue::Int(size)) = result {
-        assert_eq!(size, 24, "Text should be 24 bytes (ptr + len + capacity)");
-    }
-}
-
-#[test]
-fn test_size_of_requires_argument() {
-    use verum_compiler::meta::{ConstValue, MetaContext};
-
-    let sandbox = MetaSandbox::new();
-    let ctx = MetaContext::new();
-
-    // size_of without arguments should fail
-    let args: Vec<ConstValue> = vec![];
-    let result = sandbox.execute_builtin_function(&Text::from("size_of"), &args, &ctx);
-    assert!(result.is_err(), "size_of should require an argument");
-
-    // align_of without arguments should fail
-    let result = sandbox.execute_builtin_function(&Text::from("align_of"), &args, &ctx);
-    assert!(result.is_err(), "align_of should require an argument");
-}
-
-#[test]
-fn test_size_of_tuple_values() {
-    use verum_compiler::meta::{ConstValue, MetaContext};
-
-    let sandbox = MetaSandbox::new();
-    let ctx = MetaContext::new();
-
-    // Tuple of two i32s should be 8 bytes
-    let args = vec![ConstValue::Tuple(
-        vec![ConstValue::Int(0), ConstValue::Int(0)].into(),
-    )];
-    let result = sandbox.execute_builtin_function(&Text::from("size_of"), &args, &ctx);
-    assert!(result.is_ok());
-    if let Ok(ConstValue::Int(size)) = result {
-        // Two i64 values (8 bytes each) = 16 bytes
-        assert_eq!(size, 16, "Tuple of two i64s should be 16 bytes");
     }
 }

@@ -165,11 +165,11 @@ const MIN_VAL: UInt64 = min3(5, 12, 8);    // 5
 // COMPILE-TIME TYPE PROPERTIES
 // ============================================================
 
-const INT_SIZE: Int = @size_of(Int);
+const INT_SIZE: Int = Int.size;
 // Type alias for pointer type in @size_of
 type IntPtr is *const Int;
-const PTR_SIZE: Int = @size_of(IntPtr);
-const ARRAY_SIZE: Int = @size_of([Int; 10]);
+const PTR_SIZE: Int = IntPtr.size;
+const ARRAY_SIZE: Int = [Int; 10].size;
 
 // ============================================================
 // META-ФУНКЦИИ С GENERIC ПАРАМЕТРАМИ

@@ -7,9 +7,6 @@
 //!
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
-//! | `size_of(T)` | `(Type) -> Int` | Get type size in bytes |
-//! | `align_of(T)` | `(Type) -> Int` | Get type alignment in bytes |
-//! | `stride_of(T)` | `(Type) -> Int` | Get array element stride |
 //! | `type_bits(T)` | `(Type) -> Int` | Get type size in bits |
 //! | `type_min(T)` | `(Type) -> T` | Get minimum value for numeric type |
 //! | `type_max(T)` | `(Type) -> T` | Get maximum value for numeric type |
@@ -17,9 +14,6 @@
 //! ## Type Properties Syntax (Preferred)
 //!
 //! New code should use **Type Properties** syntax where available:
-//!  - `T.size` instead of `size_of(T)`
-//!  - `T.alignment` instead of `align_of(T)`
-//!  - `T.stride` instead of `stride_of(T)`
 //!  - `T.bits` instead of `type_bits(T)`
 //!  - `T.min` instead of `type_min(T)`
 //!  - `T.max` instead of `type_max(T)`
@@ -48,26 +42,6 @@ use super::{ConstValue, MetaContext, MetaError};
 /// access type layout information from the type registry.
 pub fn register_builtins(map: &mut BuiltinRegistry) {
     map.insert(
-        Text::from("size_of"),
-        BuiltinInfo::meta_types(meta_size_of, "Get type size in bytes", "(Type) -> Int"),
-    );
-    map.insert(
-        Text::from("align_of"),
-        BuiltinInfo::meta_types(
-            meta_align_of,
-            "Get type alignment in bytes",
-            "(Type) -> Int",
-        ),
-    );
-    map.insert(
-        Text::from("stride_of"),
-        BuiltinInfo::meta_types(
-            meta_stride_of,
-            "Get array element stride in bytes",
-            "(Type) -> Int",
-        ),
-    );
-    map.insert(
         Text::from("type_bits"),
         BuiltinInfo::meta_types(meta_type_bits, "Get type size in bits", "(Type) -> Int"),
     );
@@ -87,69 +61,6 @@ pub fn register_builtins(map: &mut BuiltinRegistry) {
             "(Type) -> T",
         ),
     );
-}
-
-/// Get type size in bytes
-fn meta_size_of(_ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {
-    if args.len() != 1 {
-        return Err(MetaError::ArityMismatch {
-            expected: 1,
-            got: args.len(),
-        });
-    }
-
-    match &args[0] {
-        ConstValue::Type(ty) => {
-            let size = compute_type_size(&ty.kind)?;
-            Ok(ConstValue::Int(size.into()))
-        }
-        _ => Err(MetaError::TypeMismatch {
-            expected: Text::from("Type"),
-            found: args[0].type_name(),
-        }),
-    }
-}
-
-/// Get type alignment in bytes
-fn meta_align_of(_ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {
-    if args.len() != 1 {
-        return Err(MetaError::ArityMismatch {
-            expected: 1,
-            got: args.len(),
-        });
-    }
-
-    match &args[0] {
-        ConstValue::Type(ty) => {
-            let align = compute_type_alignment(&ty.kind)?;
-            Ok(ConstValue::Int(align.into()))
-        }
-        _ => Err(MetaError::TypeMismatch {
-            expected: Text::from("Type"),
-            found: args[0].type_name(),
-        }),
-    }
-}
-
-/// Get type stride (size with alignment padding for arrays)
-fn meta_stride_of(_ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {
-    if args.len() != 1 {
-        return Err(MetaError::ArityMismatch {
-            expected: 1,
-            got: args.len(),
-        });
-    }
-
-    match &args[0] {
-        ConstValue::Type(ty) => {
-            let stride = compute_type_stride(&ty.kind)?;
-            Ok(ConstValue::Int(stride.into()))
-        }
-        _ => Err(MetaError::TypeMismatch {
-            expected: Text::from("Type"),
-            found: args[0].type_name(),
-        }),
-    }
 }
 
 /// Get type size in bits

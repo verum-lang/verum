@@ -6,7 +6,6 @@
 //!
 //! | Function | Signature | Description |
 //! |----------|-----------|-------------|
-//! | `type_name(T)` | `(Type) -> Text` | Get type name |
 //! | `type_of(expr)` | `(Expr) -> Type` | Get type of expression |
 //!
 //! ## Type Kind Checks
@@ -62,14 +61,6 @@ pub fn register_builtins(map: &mut BuiltinRegistry) {
     // Basic Type Info (Tier 1 - MetaTypes)
     // ========================================================================
 
-    map.insert(
-        Text::from("type_name"),
-        BuiltinInfo::meta_types(
-            meta_type_name,
-            "Get the name of a type as text",
-            "(Type) -> Text",
-        ),
-    );
     map.insert(
         Text::from("type_of"),
         BuiltinInfo::meta_types(
@@ -165,84 +156,6 @@ pub fn register_builtins(map: &mut BuiltinRegistry) {
 // ============================================================================
 // Basic Type Info
 // ============================================================================
-
-/// Get type name as Text
-fn meta_type_name(_ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {
-    if args.is_empty() {
-        return Err(MetaError::ArityMismatch {
-            expected: 1,
-            got: 0,
-        });
-    }
-
-    // Multiple arguments means a tuple type: type_name(Int, Text) -> "(Int, Text)"
-    // This happens because type_name((Int, Text)) parses as type_name(Int, Text)
-    if args.len() > 1 {
-        let all_types = args.iter().all(|a| matches!(a, ConstValue::Type(_)));
-        if all_types {
-            let names: Vec<String> = args
-                .iter()
-                .map(|a| {
-                    if let ConstValue::Type(ty) = a {
-                        compute_type_name(&ty.kind).to_string()
-                    } else {
-                        "unknown".to_string()
-                    }
-                })
-                .collect();
-            return Ok(ConstValue::Text(Text::from(format!(
-                "({})",
-                names.join(", ")
-            ))));
-        }
-        return Err(MetaError::ArityMismatch {
-            expected: 1,
-            got: args.len(),
-        });
-    }
-
-    match &args[0] {
-        ConstValue::Type(ty) => {
-            let name = compute_type_name(&ty.kind);
-            Ok(ConstValue::Text(name))
-        }
-        // Handle tuple of types
-        ConstValue::Tuple(elements) => {
-            let names: Vec<String> = elements
-                .iter()
-                .map(|e| {
-                    if let ConstValue::Type(ty) = e {
-                        compute_type_name(&ty.kind).to_string()
-                    } else {
-                        "unknown".to_string()
-                    }
-                })
-                .collect();
-            Ok(ConstValue::Text(Text::from(format!(
-                "({})",
-                names.join(", ")
-            ))))
-        }
-        // Handle Expr that might represent a type
-        ConstValue::Expr(expr) => {
-            if let verum_ast::ExprKind::TypeExpr(ty) = &expr.kind {
-                let name = compute_type_name(&ty.kind);
-                Ok(ConstValue::Text(name))
-            } else {
-                Err(MetaError::TypeMismatch {
-                    expected: Text::from("Type"),
-                    found: args[0].type_name(),
-                })
-            }
-        }
-        // When type_of returns a text (the type name), just pass it through
-        ConstValue::Text(name) => Ok(ConstValue::Text(name.clone())),
-        _ => Err(MetaError::TypeMismatch {
-            expected: Text::from("Type"),
-            found: args[0].type_name(),
-        }),
-    }
-}
 
 
 /// Get the type of an expression (placeholder)
@@ -557,8 +470,7 @@ mod tests {
     fn test_type_name() {
         let mut ctx = MetaContext::new();
         let ty = verum_ast::ty::Type::int(Span::dummy());
-        let args = List::from(vec![ConstValue::Type(ty)]);
-        let result = meta_type_name(&mut ctx, args).unwrap();
+        let result = ctx.eval_type_property(&ty, verum_ast::expr::TypeProperty::Name).unwrap();
         assert_eq!(result, ConstValue::Text(Text::from("Int")));
     }
 

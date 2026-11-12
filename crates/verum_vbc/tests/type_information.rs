@@ -4,6 +4,17 @@ use verum_fast_parser::Parser;
 use verum_vbc::{codegen::VbcCodegen, interpreter::Interpreter};
 
 #[test]
+fn obsolete_meta_calls_cannot_lower_to_placeholder_constants() {
+    for name in ["size_of", "align_of", "type_id", "type_name"] {
+        let source = format!("fn probe() {{ let value = @{name}(Bool); }}");
+        let error = VbcCodegen::new()
+            .compile_module(&Parser::new(&source).parse_module().unwrap())
+            .unwrap_err();
+        assert!(error.to_string().contains(name), "{error}");
+    }
+}
+
+#[test]
 fn inspection_follows_complete_generic_declarations_after_archive_roundtrip() {
     let source = r#"
         module reflection;

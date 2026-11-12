@@ -265,9 +265,6 @@ mod tests {
         let builtins = ctx.builtins();
 
         // Check that key builtins are registered
-        assert!(builtins.contains_key(&Text::from("size_of")));
-        assert!(builtins.contains_key(&Text::from("align_of")));
-        assert!(builtins.contains_key(&Text::from("type_name")));
         assert!(builtins.contains_key(&Text::from("fields_of")));
         assert!(builtins.contains_key(&Text::from("variants_of")));
         assert!(builtins.contains_key(&Text::from("list_len")));
@@ -298,8 +295,8 @@ mod tests {
         let builtins = ctx.builtins();
 
         // Reflection functions require MetaTypes
-        let type_name_info = builtins.get(&Text::from("type_name")).unwrap();
-        assert_eq!(type_name_info.required_context, RequiredContext::MetaTypes);
+        let kind_of_info = builtins.get(&Text::from("kind_of")).unwrap();
+        assert_eq!(kind_of_info.required_context, RequiredContext::MetaTypes);
 
         let fields_of_info = builtins.get(&Text::from("fields_of")).unwrap();
         assert_eq!(fields_of_info.required_context, RequiredContext::MetaTypes);
@@ -353,7 +350,7 @@ mod tests {
         let ctx = MetaContext::new();
 
         // Tier 1 should NOT be available without context
-        assert!(!ctx.can_call_builtin(&Text::from("type_name")));
+        assert!(!ctx.can_call_builtin(&Text::from("kind_of")));
         assert!(!ctx.can_call_builtin(&Text::from("target_os")));
         assert!(!ctx.can_call_builtin(&Text::from("compile_error")));
     }
@@ -364,7 +361,7 @@ mod tests {
         ctx.enabled_contexts.enable(RequiredContext::MetaTypes);
 
         // MetaTypes functions should now be available
-        assert!(ctx.can_call_builtin(&Text::from("type_name")));
+        assert!(ctx.can_call_builtin(&Text::from("kind_of")));
         assert!(ctx.can_call_builtin(&Text::from("fields_of")));
 
         // But MetaRuntime functions should still not be available
@@ -376,7 +373,7 @@ mod tests {
         let ctx = MetaContext::new();
 
         let meta_types_builtins = ctx.builtins_requiring_context(RequiredContext::MetaTypes);
-        assert!(meta_types_builtins.contains(&Text::from("type_name")));
+        assert!(meta_types_builtins.contains(&Text::from("kind_of")));
         assert!(meta_types_builtins.contains(&Text::from("fields_of")));
 
         let meta_runtime_builtins = ctx.builtins_requiring_context(RequiredContext::MetaRuntime);
@@ -521,17 +518,17 @@ mod tests {
         let mut ctx = MetaContext::new();
         ctx.enabled_contexts.enable(RequiredContext::MetaTypes);
         // Sanity: with reflection enabled the call goes through.
-        assert!(ctx.can_call_builtin(&Text::from("type_name")));
+        assert!(ctx.can_call_builtin(&Text::from("kind_of")));
 
         // Now seal the sandbox: reflection_disabled overrides the
         // user's `using [MetaTypes]` capability.
         ctx.reflection_disabled = true;
         assert!(
-            !ctx.can_call_builtin(&Text::from("type_name")),
+            !ctx.can_call_builtin(&Text::from("kind_of")),
             "reflection_disabled must override user-supplied MetaTypes capability"
         );
         let err = ctx
-            .get_builtin(&Text::from("type_name"))
+            .get_builtin(&Text::from("kind_of"))
             .expect_err("get_builtin must fail under reflection_disabled");
         // Error is MissingContext (the sandbox rejection reuses the
         // capability-missing error shape — the diagnostic builder
@@ -585,7 +582,7 @@ mod tests {
         ctx.reflection_disabled = true;
         let available = ctx.available_builtins();
         assert!(
-            !available.contains(&Text::from("type_name")),
+            !available.contains(&Text::from("kind_of")),
             "type_name (MetaTypes) must NOT be in available list under seal"
         );
         assert!(

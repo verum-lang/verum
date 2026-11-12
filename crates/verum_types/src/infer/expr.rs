@@ -8038,9 +8038,6 @@ impl TypeChecker {
                     // is exactly the circular dependency it forbids.
                     "min" | "max" |
                     "join" | "concat" |
-                    // Meta reflection builtins accept variable args
-                    // (e.g. type_name(Int, Text) for tuple type)
-                    "type_name" | "type_id" | "size_of" | "align_of" |
                     "text_concat" | "compile_error" | "compile_warning" |
                     // Meta code generation builtins are variadic
                     "concat_idents" | "format_ident" | "quote" |

@@ -198,7 +198,7 @@ const _SIZE_CHECK: () = {
     // assertion has to satisfy, and restoring them is how an implementation
     // proves itself.  The type checker already holds a `ConstEvaluator`, which
     // is the half that exists.
-    // @static_assert(@size_of(Int) == 8);
+    // @static_assert(Int.size == 8);
     // The block's value, now that its only statement is commented out:
     // an empty `{ }` parses as an empty MAP, not an empty block.
     ()
@@ -206,7 +206,7 @@ const _SIZE_CHECK: () = {
 
 const _ALIGN_CHECK: () = {
     // Проверка выравнивания
-    // @static_assert(@align_of(Int) >= 4);
+    // @static_assert(Int.alignment >= 4);
     // The block's value, now that its only statement is commented out:
     // an empty `{ }` parses as an empty MAP, not an empty block.
     ()

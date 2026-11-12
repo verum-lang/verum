@@ -47,6 +47,24 @@ fn actual_layout_queries_survive_archive_bootstrap_and_generic_calls() {
 }
 
 #[test]
+fn actual_retired_reflection_names_use_declared_calls() {
+    let root = tempfile::tempdir().unwrap();
+    let core = root.path().join("core");
+    fs::create_dir_all(&core).unwrap();
+    fs::write(core.join("mod.vr"), "module core; public module queries;").unwrap();
+    let mut declarations = "module core.queries;\n".to_owned();
+    let mut calls = "module app; mount core.queries.*; fn main() -> Int {\n".to_owned();
+    for name in ["size_of", "align_of", "stride_of", "bits_of", "type_id", "type_name"] {
+        declarations.push_str(&format!("public fn {name}(value: Int) -> Int {{ value + 1 }}\n"));
+        calls.push_str(&format!("assert({name}(72) == 73);\n"));
+    }
+    calls.push_str("73 }");
+    fs::write(core.join("queries.vr"), declarations).unwrap();
+    let archive = bootstrap(&core);
+    assert_eq!(execute(&archive, &calls), 73);
+}
+
+#[test]
 fn actual_identity_query_survives_archive_bootstrap_and_generic_calls() {
     let root = tempfile::tempdir().unwrap();
     let core = root.path().join("core");

@@ -169,10 +169,10 @@ fn test_generic_type_properties() {
     assert(float_size == 8, "generic_size.<Float>() should be 8");
 
     // Container size includes element type
-    let int_container_size: Int = @size_of(Container<Int>);
+    let int_container_size: Int = Container<Int>.size;
     assert(int_container_size == 16, "Container<Int> should be 16 bytes");
 
-    let point_container_size: Int = @size_of(Container<Point>);
+    let point_container_size: Int = Container<Point>.size;
     assert(point_container_size == 24, "Container<Point> should be 24 bytes");
 }
 

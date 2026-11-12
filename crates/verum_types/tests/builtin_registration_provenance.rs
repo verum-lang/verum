@@ -231,7 +231,7 @@ fn intrinsic_and_meta_builtin_provenance_survives_a_later_primitive_pass() {
             let mut checker = checker(eager, reverse);
             checker.register_builtins();
             checker.register_primitives();
-            for name in ["print", "type_name", "TokenStream"] {
+            for name in ["print", "fields_of", "TokenStream"] {
                 assert!(
                     missing_import(&mut checker, name).is_none(),
                     "eager={eager}, reverse={reverse}: {name}"

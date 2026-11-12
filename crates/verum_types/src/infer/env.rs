@@ -5461,26 +5461,6 @@ impl TypeChecker {
         // COMPILER INTRINSICS
         // Spec: These are compiler magic, not stdlib
         // ============================================================
-        // Type introspection - registered as generic functions fn<T>() -> Int
-        // Note: Also registered in register_meta_builtins with regular arg support.
-        // The meta_builtins version overrides this one.
-        {
-            let tv = TypeVar::fresh();
-            let fn_ty = Type::function(List::from_iter([Type::Var(tv)]), Type::Int);
-            self.define_builtin_value(
-                verum_common::Text::from("size_of"),
-                TypeScheme::poly(List::from_iter([tv]), fn_ty),
-            );
-        }
-        {
-            let tv = TypeVar::fresh();
-            let fn_ty = Type::function(List::from_iter([Type::Var(tv)]), Type::Int);
-            self.define_builtin_value(
-                verum_common::Text::from("align_of"),
-                TypeScheme::poly(List::from_iter([tv]), fn_ty),
-            );
-        }
-
         // Panic (never returns)
         self.define_builtin_value(
             verum_common::Text::from("panic"),
@@ -6938,15 +6918,11 @@ pub const META_REFLECTION_BUILTIN_NAMES: &[&str] = &[
     "is_enum",
     "is_tuple",
     "implements",
-    "type_name",
     "simple_name_of",
     "kind_of",
     "fields_of",
     "type_fields",
     "variants_of",
-    "type_id",
-    "size_of",
-    "align_of",
 ];
 
 /// Canonical list of I/O + arithmetic builtin names that may be
@@ -7355,8 +7331,6 @@ impl TypeChecker {
             builtin_infinite_loop_scheme,
         );
 
-        // NOTE: size_of<T>() and align_of<T>() are DEPRECATED.
-        // Use Type Properties instead: T.size, T.alignment
         // Comprehension expressions: "[expr for x in iter if cond]" list comprehension syntax
 
         // offset_of(type_name: Text, field_name: Text) -> Int
@@ -7456,24 +7430,6 @@ impl TypeChecker {
             self.function_required_params
                 .insert(verum_common::Text::from(name), 0);
         }
-
-        // type_name<T>() -> Text
-        let type_name_t = TypeVar::fresh();
-        let type_name_ty = Type::function(List::new(), Type::text());
-        let type_name_scheme = TypeScheme::poly(List::from_iter([type_name_t]), type_name_ty);
-        self.define_builtin_value(verum_common::Text::from("type_name"), type_name_scheme);
-
-        // size_of<T>() -> Int (kept for compat even though deprecated)
-        let size_of_t = TypeVar::fresh();
-        let size_of_ty = Type::function(List::new(), Type::Int);
-        let size_of_scheme = TypeScheme::poly(List::from_iter([size_of_t]), size_of_ty);
-        self.define_builtin_value(verum_common::Text::from("size_of"), size_of_scheme);
-
-        // align_of<T>() -> Int (kept for compat even though deprecated)
-        let align_of_t = TypeVar::fresh();
-        let align_of_ty = Type::function(List::new(), Type::Int);
-        let align_of_scheme = TypeScheme::poly(List::from_iter([align_of_t]), align_of_ty);
-        self.define_builtin_value(verum_common::Text::from("align_of"), align_of_scheme);
 
         // len<T>(T) -> Int — generic length function
         let len_t = TypeVar::fresh();
@@ -7972,7 +7928,7 @@ impl TypeChecker {
                 self.define_builtin_value($name, TypeScheme::mono(Type::function($params, $ret)));
             };
         }
-        // Generic meta builtin: accepts type parameters (e.g., type_name<Int>())
+        // Generic meta builtin: accepts type parameters (e.g., fields_of<Point>())
         macro_rules! reg_generic {
             ($name:expr, $params:expr, $ret:expr) => {{
                 self.meta_builtin_names
@@ -8059,8 +8015,7 @@ impl TypeChecker {
         reg!("gensym", List::from_iter([Type::Text]), Type::Text);
 
         // ---- Reflection (generic + optional regular arg for both call styles) ----
-        // These can be called as type_name(Int), type_name<Int>(), etc.
-        reg_generic!("type_name", List::from_iter([Type::Unknown]), Type::Text);
+        // These introspection operations accept an explicit type argument.
         reg_generic!(
             "simple_name_of",
             List::from_iter([Type::Unknown]),
@@ -8095,9 +8050,6 @@ impl TypeChecker {
             List::from_iter([Type::Unknown]),
             Type::list(Type::Unknown)
         );
-        reg_generic!("type_id", List::from_iter([Type::Unknown]), Type::Int);
-        reg_generic!("size_of", List::from_iter([Type::Unknown]), Type::Int);
-        reg_generic!("align_of", List::from_iter([Type::Unknown]), Type::Int);
 
         reg_generic!("size_of_val", List::from_iter([Type::Unknown]), Type::Int);
         reg_generic!("min_align_of", List::from_iter([Type::Unknown]), Type::Int);
@@ -8519,7 +8471,6 @@ impl TypeChecker {
         reg_num_poly!("pow", 2);
 
         // ---- Type properties (generic + optional regular arg) ----
-        reg_generic!("stride_of", List::from_iter([Type::Unknown]), Type::Int);
         reg_generic!("type_bits", List::from_iter([Type::Unknown]), Type::Int);
         reg_generic!("type_min", List::from_iter([Type::Unknown]), Type::Int);
         reg_generic!("type_max", List::from_iter([Type::Unknown]), Type::Int);
@@ -13579,8 +13530,8 @@ mod builtin_protection_pin_tests {
 
         // Meta reflection builtins: never overwritten once present.
         assert!(
-            !checker.insert_fn_scheme_guarded("type_name", mono_text_sig()),
-            "meta builtin 'type_name' must never be overwritten",
+            !checker.insert_fn_scheme_guarded("fields_of", mono_text_sig()),
+            "meta builtin 'fields_of' must never be overwritten",
         );
     }
 }

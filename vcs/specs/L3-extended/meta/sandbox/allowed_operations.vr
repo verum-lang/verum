@@ -105,12 +105,12 @@ meta fn fibonacci(n: UInt64) -> UInt64 {
 // 5. COMPILE-TIME ИНФОРМАЦИЯ
 // ============================================================
 
-const INT_SIZE: Int = @size_of(Int);
-const BOOL_SIZE: Int = @size_of(Bool);
+const INT_SIZE: Int = Int.size;
+const BOOL_SIZE: Int = Bool.size;
 
 // Use type alias for pointer types in @size_of
 type IntPtr is *const Int;
-const PTR_SIZE: Int = @size_of(IntPtr);
+const PTR_SIZE: Int = IntPtr.size;
 
 // ============================================================
 // 6. TYPE INTROSPECTION (READ-ONLY)
@@ -121,8 +121,8 @@ type Point is {
     y: Int,
 };
 
-const POINT_SIZE: Int = @size_of(Point);
-const POINT_ALIGN: Int = @align_of(Point);
+const POINT_SIZE: Int = Point.size;
+const POINT_ALIGN: Int = Point.alignment;
 
 // ============================================================
 // 7. БИТОВЫЕ ОПЕРАЦИИ
@@ -202,11 +202,11 @@ meta fn abs_diff(a: Int64, b: Int64) -> Int64 {
 // contract an implementation has to meet.
 //
 // const _SIZE_CHECK: () = {
-//     @static_assert(@size_of(Int) == 8);
+//     @static_assert(Int.size == 8);
 // };
 //
 // const _ALIGN_CHECK: () = {
-//     @static_assert(@align_of(Int) >= 4);
+//     @static_assert(Int.alignment >= 4);
 // };
 
 // ============================================================

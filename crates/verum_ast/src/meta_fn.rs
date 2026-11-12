@@ -230,14 +230,8 @@ pub static REGISTRY: &[MetaFn] = &[
     row("is_enum", Exact(1), &[TypeName], Unimplemented, true),
     row("is_tuple", Exact(1), &[TypeName], Unimplemented, true),
     row("implements", Exact(2), &[TypeName, TypeName], Unimplemented, true),
-    // `@size_of(T)` / `@align_of(T)` route to the SAME compile-time constant
-    // the `@intrinsic("size_of", T)` spelling uses, so the two cannot
-    // disagree. That constant is a PLACEHOLDER 8 for every type — a defect of
-    // its own, recorded in the debt register — but a wrong number a reader can
-    // see beats the `nil` these answered before, and `core/runtime/config.vr`
-    // multiplies an allocation count by it.
-    row("size_of", Exact(1), &[TypeName], Implemented, false),
-    row("align_of", Exact(1), &[TypeName], Implemented, false),
+    row("size_of", Exact(1), &[TypeName], Unimplemented, false),
+    row("align_of", Exact(1), &[TypeName], Unimplemented, false),
     row("type_id", Exact(1), &[TypeName], Unimplemented, false),
     // ---- escape hatches into the backends -----------------------------
     row("intrinsic", AtLeast(1), &[TextLiteral, Any], Implemented, false),

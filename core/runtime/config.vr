@@ -1223,7 +1223,7 @@ fn __wait_for_single_object(handle: Int);
 
 // Array allocation helper
 fn alloc_array<T>(count: Int) -> &[T] {
-    let size = count * @size_of(T);
-    let ptr = mem.alloc(size, @align_of(T));
+    let size = count * T.stride;
+    let ptr = mem.alloc(size, T.alignment);
     unsafe { slice_from_raw_parts(ptr as &T, count) }
 }

@@ -95,7 +95,6 @@ impl AllowlistRegistry {
 
         // Type introspection intrinsics
         funcs.insert(Text::from("type_of"));
-        funcs.insert(Text::from("type_name"));
         funcs.insert(Text::from("type_fields"));
         funcs.insert(Text::from("fields_of"));
         funcs.insert(Text::from("variants_of"));

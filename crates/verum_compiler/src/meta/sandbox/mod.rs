@@ -327,26 +327,6 @@ impl MetaSandbox {
                 };
                 Ok(ConstValue::Int(len))
             }
-            "size_of" => {
-                if args.is_empty() {
-                    return Err(SandboxError::UnsafeOperation {
-                        operation: Text::from("size_of"),
-                        reason: Text::from("size_of expects exactly 1 argument"),
-                    });
-                }
-                let size = compute_size_of(&args[0])?;
-                Ok(ConstValue::Int(size.into()))
-            }
-            "align_of" => {
-                if args.is_empty() {
-                    return Err(SandboxError::UnsafeOperation {
-                        operation: Text::from("align_of"),
-                        reason: Text::from("align_of expects exactly 1 argument"),
-                    });
-                }
-                let align = compute_align_of(&args[0])?;
-                Ok(ConstValue::Int(align.into()))
-            }
             _ => Err(SandboxError::UnsafeOperation {
                 operation: name.clone(),
                 reason: Text::from("Unknown builtin function"),
@@ -358,132 +338,6 @@ impl MetaSandbox {
 impl Default for MetaSandbox {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-// ============================================================================
-// Size and Alignment Computation (moved from original sandbox.rs)
-// ============================================================================
-
-/// Compute the size in bytes for a type or value.
-///
-/// Primitive sizes delegate to `verum_common::layout::primitive_size_by_name`
-/// (the canonical drift-pinned size oracle); compound stdlib types
-/// (collections, wrappers, smart pointers) keep their own arms here.
-fn compute_size_of(arg: &ConstValue) -> Result<i64, SandboxError> {
-    match arg {
-        ConstValue::Text(type_name) => {
-            let name = type_name.as_str();
-            // Canonical size for every primitive alias
-            if let Some(bytes) = verum_common::layout::primitive_size_by_name(name) {
-                return Ok(bytes as i64);
-            }
-            match name {
-                // Pointer types — 8 bytes on every supported target
-                "ptr" | "Ptr" | "&" | "*const" | "*mut" => Ok(8),
-
-                // Collection types (stdlib-specific layout)
-                "List" | "Array" => Ok(24),
-                "Text" | "String" => Ok(24),
-                "Map" | "HashMap" => Ok(8),
-                "Set" | "HashSet" => Ok(8),
-
-                // Optional/Result types
-                "Maybe" | "Option" => Ok(16),
-                "Result" => Ok(16),
-
-                // Smart pointers
-                "Heap" | "Box" => Ok(8),
-                "Shared" | "Rc" | "Arc" => Ok(16),
-
-                // Function pointers
-                "fn" | "Fn" => Ok(8),
-
-                _ => Err(SandboxError::UnsafeOperation {
-                    operation: Text::from("size_of"),
-                    reason: Text::from(format!("Unknown type: {}", name)),
-                }),
-            }
-        }
-        ConstValue::Unit => Ok(0),
-        ConstValue::Bool(_) => Ok(1),
-        ConstValue::Int(_) => Ok(8),
-        ConstValue::UInt(_) => Ok(8),
-        ConstValue::Float(_) => Ok(8),
-        ConstValue::Array(_) => Ok(24),
-        ConstValue::Tuple(elements) => {
-            let mut total = 0i64;
-            for elem in elements.iter() {
-                total += compute_size_of(elem)?;
-            }
-            Ok(total)
-        }
-        ConstValue::Map(_) => Ok(48), // BTreeMap overhead
-        ConstValue::Set(_) => Ok(24), // BTreeSet overhead
-        ConstValue::Expr(_) => Ok(8),
-        ConstValue::Type(_) => Ok(8),
-        ConstValue::Pattern(_) => Ok(8),
-        ConstValue::Item(_) => Ok(8),
-        ConstValue::Items(_) => Ok(8),
-        ConstValue::Bytes(b) => Ok(b.len() as i64),
-        ConstValue::Char(_) => Ok(4),
-        ConstValue::Maybe(_) => Ok(16),
-    }
-}
-
-/// Compute the alignment in bytes for a type or value
-fn compute_align_of(arg: &ConstValue) -> Result<i64, SandboxError> {
-    match arg {
-        ConstValue::Text(type_name) => {
-            let name = type_name.as_str();
-            // Primitives: natural alignment equals size on every
-            // supported target. Single source of truth via the
-            // canonical `primitive_size_by_name` registry; compound
-            // stdlib types keep their explicit pointer-width arms.
-            if let Some(bytes) = verum_common::layout::primitive_size_by_name(name) {
-                // Unit aligns to 1 in the source registry (size=0); align
-                // semantics expect a non-zero alignment so coerce.
-                return Ok(if bytes == 0 { 1 } else { bytes as i64 });
-            }
-            match name {
-                "ptr" | "Ptr" | "&" | "*const" | "*mut" | "fn" | "Fn" => Ok(8),
-                "List" | "Array" | "Text" | "String" => Ok(8),
-                "Map" | "HashMap" | "Set" | "HashSet" => Ok(8),
-                "Maybe" | "Option" | "Result" => Ok(8),
-                "Heap" | "Box" | "Shared" | "Rc" | "Arc" => Ok(8),
-
-                _ => Err(SandboxError::UnsafeOperation {
-                    operation: Text::from("align_of"),
-                    reason: Text::from(format!("Unknown type: {}", type_name.as_str())),
-                }),
-            }
-        }
-        ConstValue::Unit => Ok(1),
-        ConstValue::Bool(_) => Ok(1),
-        ConstValue::Int(_) => Ok(8),
-        ConstValue::UInt(_) => Ok(8),
-        ConstValue::Float(_) => Ok(8),
-        ConstValue::Array(_) => Ok(8),
-        ConstValue::Tuple(elements) => {
-            let mut max_align = 1i64;
-            for elem in elements.iter() {
-                let align = compute_align_of(elem)?;
-                if align > max_align {
-                    max_align = align;
-                }
-            }
-            Ok(max_align)
-        }
-        ConstValue::Bytes(_) => Ok(1),
-        ConstValue::Char(_) => Ok(4),
-        ConstValue::Maybe(_) => Ok(8),
-        ConstValue::Map(_) => Ok(8),
-        ConstValue::Set(_) => Ok(8),
-        ConstValue::Expr(_) => Ok(8),
-        ConstValue::Type(_) => Ok(8),
-        ConstValue::Pattern(_) => Ok(8),
-        ConstValue::Item(_) => Ok(8),
-        ConstValue::Items(_) => Ok(8),
     }
 }
 
@@ -530,39 +384,5 @@ mod tests {
         assert!(sandbox.is_ffi_function(&Text::from("std.ffi.call")));
     }
 
-    #[test]
-    fn test_size_of() {
-        assert_eq!(
-            compute_size_of(&ConstValue::Text(Text::from("Int8"))).unwrap(),
-            1
-        );
-        assert_eq!(
-            compute_size_of(&ConstValue::Text(Text::from("Int32"))).unwrap(),
-            4
-        );
-        assert_eq!(
-            compute_size_of(&ConstValue::Text(Text::from("Int64"))).unwrap(),
-            8
-        );
-        assert_eq!(
-            compute_size_of(&ConstValue::Text(Text::from("Bool"))).unwrap(),
-            1
-        );
-    }
 
-    #[test]
-    fn test_align_of() {
-        assert_eq!(
-            compute_align_of(&ConstValue::Text(Text::from("Int8"))).unwrap(),
-            1
-        );
-        assert_eq!(
-            compute_align_of(&ConstValue::Text(Text::from("Int32"))).unwrap(),
-            4
-        );
-        assert_eq!(
-            compute_align_of(&ConstValue::Text(Text::from("Int64"))).unwrap(),
-            8
-        );
-    }
 }

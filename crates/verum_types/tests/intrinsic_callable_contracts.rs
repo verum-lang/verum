@@ -108,6 +108,24 @@ fn registered_layout_queries_satisfy_meta_purity() {
 }
 
 #[test]
+fn retired_reflection_functions_require_an_actual_declaration() {
+    for name in ["size_of", "align_of", "stride_of", "bits_of", "type_id", "type_name"] {
+        for call in [format!("{name}<Int>()"), format!("{name}(Int)")] {
+            let rejected = errors(&format!("fn probe() {{ let value = {call}; }}"));
+            assert!(rejected.iter().any(|error| error.contains(name)), "ambient {call} was accepted: {rejected:?}");
+        }
+        let source = format!("fn {name}(value: Int) -> Int {{ value + 1 }} fn probe() -> Int {{ {name}(72) }}");
+        let accepted = errors(&source);
+        assert!(accepted.is_empty(), "{name} declaration was intercepted: {accepted:?}");
+        let rejected = errors(&source.replace(&format!("{name}(72)"), &format!("{name}(72, 1)")));
+        assert!(!rejected.is_empty(), "{name} acquired a variadic builtin contract");
+    }
+    for name in ["size_of", "align_of", "type_id", "type_name"] {
+        assert!(!errors(&format!("fn probe() {{ let value = @{name}(Bool); }}")).is_empty(), "@{name} accepted an obsolete query");
+    }
+}
+
+#[test]
 fn identity_surfaces_infer_the_same_unsigned_carrier() {
     for source in ["Int.id", "@intrinsic(\"type_id\", Int)", "@vbc(TYPE_ID, Int)"] {
         let expression = Parser::new(source).parse_expr().unwrap();

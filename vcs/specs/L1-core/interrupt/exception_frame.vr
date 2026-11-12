@@ -34,11 +34,11 @@ fn test_exception_frame_layout() {
     // The frame should have the expected size for the target
     @cfg(target_arch = "x86_64") {
         // 6 x 8 bytes = 48 bytes
-        assert(@size_of(ExceptionFrame) == 48);
+        assert(ExceptionFrame.size == 48);
     }
     @cfg(target_arch = "aarch64") {
         // 4 x 8 + 31 x 8 = 280 bytes
-        assert(@size_of(ExceptionFrame) == 280);
+        assert(ExceptionFrame.size == 280);
     }
 }
 

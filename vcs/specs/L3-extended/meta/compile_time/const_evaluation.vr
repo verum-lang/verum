@@ -54,8 +54,9 @@ const DEBUG: Bool = @cfg(debug);
 const MAX_THREADS: UInt64 = if @cfg(target_os = "linux") { 256 } else { 128 };
 
 // Константы с размерами типов
-const PTR_SIZE: USize = @size_of(Int);  // Use Int as proxy for pointer size on 64-bit
-const WORD_SIZE: USize = @size_of(USize);
+type IntPointer is *const Int;
+const PTR_SIZE: USize = IntPointer.size as USize;
+const WORD_SIZE: USize = USize.size as USize;
 const IS_64_BIT: Bool = PTR_SIZE == 8;
 
 // Выравнивание

@@ -427,7 +427,7 @@ public fn setsockopt_int(fd: FileDesc, level: Int, optname: Int, value: Int) -> 
         level,
         optname,
         &val as &unsafe Byte,
-        @size_of(Int) as Int,
+        Int.size as Int,
     );
     if result == SOCKET_ERROR {
         Result.Err(wsa_error())
@@ -439,7 +439,7 @@ public fn setsockopt_int(fd: FileDesc, level: Int, optname: Int, value: Int) -> 
 /// Get socket error status.
 public fn getsockopt_error(fd: FileDesc) -> Result<Int, OSError> {
     let mut val: Int = 0;
-    let mut len: Int = @size_of(Int) as Int;
+    let mut len: Int = Int.size as Int;
     let result = ws2_getsockopt(
         fd.0 as UInt64,
         SOL_SOCKET,
@@ -554,7 +554,7 @@ public fn set_socket_timeout(fd: FileDesc, send_ms: Int, recv_ms: Int) -> Result
             SOL_SOCKET,
             SO_SNDTIMEO,
             &send_timeout as &unsafe Byte,
-            @size_of(UInt32) as Int,
+            UInt32.size as Int,
         );
         if r == SOCKET_ERROR {
             return Result.Err(wsa_error());
@@ -568,7 +568,7 @@ public fn set_socket_timeout(fd: FileDesc, send_ms: Int, recv_ms: Int) -> Result
             SOL_SOCKET,
             SO_RCVTIMEO,
             &recv_timeout as &unsafe Byte,
-            @size_of(UInt32) as Int,
+            UInt32.size as Int,
         );
         if r == SOCKET_ERROR {
             return Result.Err(wsa_error());
@@ -605,7 +605,7 @@ public fn join_multicast_v4(fd: FileDesc, multiaddr: UInt32, interface_addr: UIn
         IPPROTO_IP,
         IP_ADD_MEMBERSHIP,
         &mreq as &unsafe Byte,
-        @size_of(IpMreq) as Int,
+        IpMreq.size as Int,
     );
     if result == SOCKET_ERROR { Result.Err(wsa_error()) } else { Result.Ok(()) }
 }
@@ -621,7 +621,7 @@ public fn leave_multicast_v4(fd: FileDesc, multiaddr: UInt32, interface_addr: UI
         IPPROTO_IP,
         IP_DROP_MEMBERSHIP,
         &mreq as &unsafe Byte,
-        @size_of(IpMreq) as Int,
+        IpMreq.size as Int,
     );
     if result == SOCKET_ERROR { Result.Err(wsa_error()) } else { Result.Ok(()) }
 }

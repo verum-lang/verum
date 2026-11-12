@@ -4678,7 +4678,7 @@ impl MetaContext {
             // Common builtins
             "print" | "assert" | "panic" | "unreachable" | "sizeof" | "alignof" |
             // Meta builtins
-            "type_name" | "fields_of" | "variants_of" | "ident" | "concat" |
+            "fields_of" | "variants_of" | "ident" | "concat" |
             "stringify" | "lift" | "gensym" | "unquote"
             )
     }

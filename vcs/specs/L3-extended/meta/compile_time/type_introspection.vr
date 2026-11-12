@@ -14,19 +14,19 @@
 // ============================================================
 
 // Примитивные типы и их размеры
-const INT_SIZE: Int = @size_of(Int);
-const INT_ALIGN: Int = @align_of(Int);
+const INT_SIZE: Int = Int.size;
+const INT_ALIGN: Int = Int.alignment;
 
-const BOOL_SIZE: Int = @size_of(Bool);
-const BOOL_ALIGN: Int = @align_of(Bool);
+const BOOL_SIZE: Int = Bool.size;
+const BOOL_ALIGN: Int = Bool.alignment;
 
-const FLOAT64_SIZE: Int = @size_of(Float64);
-const FLOAT64_ALIGN: Int = @align_of(Float64);
+const FLOAT64_SIZE: Int = Float64.size;
+const FLOAT64_ALIGN: Int = Float64.alignment;
 
 // Type alias for pointer (needed for @size_of)
 type IntPtr is *const Int;
-const PTR_SIZE: Int = @size_of(IntPtr);
-const PTR_ALIGN: Int = @align_of(IntPtr);
+const PTR_SIZE: Int = IntPtr.size;
+const PTR_ALIGN: Int = IntPtr.alignment;
 
 // ============================================================
 // ПОЛЬЗОВАТЕЛЬСКИЕ ТИПЫ
@@ -38,8 +38,8 @@ type Point is {
     y: Int,
 };
 
-const POINT_SIZE: Int = @size_of(Point);
-const POINT_ALIGN: Int = @align_of(Point);
+const POINT_SIZE: Int = Point.size;
+const POINT_ALIGN: Int = Point.alignment;
 
 // Структура с различными полями
 type MixedRecord is {
@@ -48,8 +48,8 @@ type MixedRecord is {
     value: Float64,
 };
 
-const MIXED_SIZE: Int = @size_of(MixedRecord);
-const MIXED_ALIGN: Int = @align_of(MixedRecord);
+const MIXED_SIZE: Int = MixedRecord.size;
+const MIXED_ALIGN: Int = MixedRecord.alignment;
 
 // ============================================================
 // SUM TYPES (ENUMS)
@@ -60,16 +60,16 @@ type SimpleEnum is
     | Second
     | Third;
 
-const SIMPLE_ENUM_SIZE: Int = @size_of(SimpleEnum);
-const SIMPLE_ENUM_ALIGN: Int = @align_of(SimpleEnum);
+const SIMPLE_ENUM_SIZE: Int = SimpleEnum.size;
+const SIMPLE_ENUM_ALIGN: Int = SimpleEnum.alignment;
 
 type DataEnum is
     | Empty
     | Single(Int)
     | Pair { x: Int, y: Int };
 
-const DATA_ENUM_SIZE: Int = @size_of(DataEnum);
-const DATA_ENUM_ALIGN: Int = @align_of(DataEnum);
+const DATA_ENUM_SIZE: Int = DataEnum.size;
+const DATA_ENUM_ALIGN: Int = DataEnum.alignment;
 
 // ============================================================
 // GENERIC TYPES
@@ -82,8 +82,8 @@ type Wrapper<T> is {
 type WrapperInt is Wrapper<Int>;
 type WrapperBool is Wrapper<Bool>;
 
-const WRAPPER_INT_SIZE: Int = @size_of(WrapperInt);
-const WRAPPER_BOOL_SIZE: Int = @size_of(WrapperBool);
+const WRAPPER_INT_SIZE: Int = WrapperInt.size;
+const WRAPPER_BOOL_SIZE: Int = WrapperBool.size;
 
 // Pair type
 type Pair<A, B> is {
@@ -92,18 +92,18 @@ type Pair<A, B> is {
 };
 
 type IntBoolPair is Pair<Int, Bool>;
-const PAIR_SIZE: Int = @size_of(IntBoolPair);
+const PAIR_SIZE: Int = IntBoolPair.size;
 
 // ============================================================
 // МАССИВЫ
 // ============================================================
 
-const ARRAY_4_SIZE: Int = @size_of([Int; 4]);
-const ARRAY_8_SIZE: Int = @size_of([Int; 8]);
-const ARRAY_16_SIZE: Int = @size_of([Int; 16]);
+const ARRAY_4_SIZE: Int = [Int; 4].size;
+const ARRAY_8_SIZE: Int = [Int; 8].size;
+const ARRAY_16_SIZE: Int = [Int; 16].size;
 
 // Массив структур
-const POINT_ARRAY_SIZE: Int = @size_of([Point; 4]);
+const POINT_ARRAY_SIZE: Int = [Point; 4].size;
 
 // ============================================================
 // NEWTYPES
@@ -112,8 +112,8 @@ const POINT_ARRAY_SIZE: Int = @size_of([Point; 4]);
 type UserId is (Int);
 type Timestamp is (Int64);
 
-const USERID_SIZE: Int = @size_of(UserId);
-const TIMESTAMP_SIZE: Int = @size_of(Timestamp);
+const USERID_SIZE: Int = UserId.size;
+const TIMESTAMP_SIZE: Int = Timestamp.size;
 
 // ============================================================
 // COMPILE-TIME ASSERTIONS
@@ -133,21 +133,21 @@ const _INT_SIZE_CHECK: () = {
     // assertion has to satisfy, and restoring them is how an implementation
     // proves itself.  The type checker already holds a `ConstEvaluator`, which
     // is the half that exists.
-    // @static_assert(@size_of(Int) == 8);
+    // @static_assert(Int.size == 8);
     // The block's value, now that its only statement is commented out:
     // an empty `{ }` parses as an empty MAP, not an empty block.
     ()
 };
 
 const _BOOL_SIZE_CHECK: () = {
-    // @static_assert(@size_of(Bool) == 1);
+    // @static_assert(Bool.size == 1);
     // The block's value, now that its only statement is commented out:
     // an empty `{ }` parses as an empty MAP, not an empty block.
     ()
 };
 
 const _PTR_SIZE_CHECK: () = {
-    // @static_assert(@size_of(IntPtr) == 8);
+    // @static_assert(IntPtr.size == 8);
     // The block's value, now that its only statement is commented out:
     // an empty `{ }` parses as an empty MAP, not an empty block.
     ()
@@ -155,14 +155,14 @@ const _PTR_SIZE_CHECK: () = {
 
 // Проверки выравнивания
 const _INT_ALIGN_CHECK: () = {
-    // @static_assert(@align_of(Int) >= 4);
+    // @static_assert(Int.alignment >= 4);
     // The block's value, now that its only statement is commented out:
     // an empty `{ }` parses as an empty MAP, not an empty block.
     ()
 };
 
 const _FLOAT_ALIGN_CHECK: () = {
-    // @static_assert(@align_of(Float64) >= 4);
+    // @static_assert(Float64.alignment >= 4);
     // The block's value, now that its only statement is commented out:
     // an empty `{ }` parses as an empty MAP, not an empty block.
     ()
@@ -193,8 +193,8 @@ meta fn aligned_size(size: Int, alignment: Int) -> Int {
 // ИСПОЛЬЗОВАНИЕ META ФУНКЦИЙ
 // ============================================================
 
-const INT_FITS_8: Bool = fits_in_bytes(@size_of(Int), 8);
-const POINT_FITS_32: Bool = fits_in_bytes(@size_of(Point), 32);
+const INT_FITS_8: Bool = fits_in_bytes(Int.size, 8);
+const POINT_FITS_32: Bool = fits_in_bytes(Point.size, 32);
 
 const PADDING_EXAMPLE: Int = padding_for_alignment(5, 8);  // 3
 const ALIGNED_EXAMPLE: Int = aligned_size(5, 8);           // 8
@@ -208,8 +208,8 @@ type FixedBuffer<const N: Int> is {
 };
 
 // Размер буфера вычисляется во время компиляции
-const SMALL_BUFFER_SIZE: Int = @size_of(FixedBuffer<16>);
-const LARGE_BUFFER_SIZE: Int = @size_of(FixedBuffer<256>);
+const SMALL_BUFFER_SIZE: Int = FixedBuffer<16>.size;
+const LARGE_BUFFER_SIZE: Int = FixedBuffer<256>.size;
 
 // ============================================================
 // СЛОЖНЫЕ ТИПЫ
@@ -221,7 +221,7 @@ type Node<T> is {
 };
 
 type NodeInt is Node<Int>;
-const NODE_SIZE: Int = @size_of(NodeInt);
+const NODE_SIZE: Int = NodeInt.size;
 
 // Optional-like type
 type Maybe<T> is
@@ -229,7 +229,7 @@ type Maybe<T> is
     | Some(T);
 
 type MaybeInt is Maybe<Int>;
-const MAYBE_INT_SIZE: Int = @size_of(MaybeInt);
+const MAYBE_INT_SIZE: Int = MaybeInt.size;
 
 // Result-like type
 type Result<T, E> is
@@ -237,7 +237,7 @@ type Result<T, E> is
     | Err(E);
 
 type IntResult is Result<Int, Int>;
-const RESULT_SIZE: Int = @size_of(IntResult);
+const RESULT_SIZE: Int = IntResult.size;
 
 mount core.prelude.*;
 

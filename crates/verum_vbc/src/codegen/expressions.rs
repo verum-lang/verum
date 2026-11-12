@@ -1304,16 +1304,6 @@ impl VbcCodegen {
             ExprKind::Call {
                 func,
                 args,
-                // VBC-GENERIC-INSTANTIATION-1 (task #3): the concrete type
-                // argument of a legacy meta-fn (`size_of<Int>()`) is NOT
-                // reliably visible here — monomorphisation moves it into
-                // `resolved_call_target` and clears `type_args` before VBC
-                // codegen, so a call-site const-fold can't read it at this
-                // layer.  The canonical `T.size` / `T.id` forms (compiled via
-                // `compile_type_property`, which DOES see the type) are the
-                // supported surface; the `@deprecated` fn form is tracked in
-                // task #3.
-                //
                 // T0178: the `transmute` reinterpret decision DOES consult
                 // these turbofish args (`transmute<Int, Float>(x)`) when they
                 // survive to here; when they don't, it falls back to argument
@@ -34385,6 +34375,15 @@ impl VbcCodegen {
         name: &verum_ast::ty::Ident,
         args: &verum_common::List<Expr>,
     ) -> CodegenResult<Option<Reg>> {
+        // Standalone VBC consumers can lower AST without the source checker.
+        // The shared registry's refusal must hold at this boundary as well.
+        if verum_ast::meta_fn::lookup(name.name.as_str())
+            .is_some_and(|entry| entry.status == verum_ast::meta_fn::Status::Unimplemented)
+        {
+            return Err(CodegenError::undefined_function(format!(
+                "meta-function `@{}` has no implementation", name.name
+            )));
+        }
         let dest = self.ctx.alloc_temp();
 
         match name.name.as_str() {
@@ -34700,26 +34699,6 @@ impl VbcCodegen {
                 self.ctx.emit(Instruction::LoadNil { dst: dest });
             }
 
-            // ---- compile-time size and alignment ------------------------------
-            //
-            // Routed to the SAME constant the `@intrinsic("size_of", T)`
-            // spelling uses, so the two cannot disagree. That constant is a
-            // PLACEHOLDER 8 for every type — its own comment says so — and
-            // `core/runtime/config.vr:1226` multiplies an allocation count by
-            // it. A wrong number a reader can see is not a fix, but it is a
-            // different defect from the `nil` these answered before, and the
-            // debt register now carries it as one.
-            //
-            // `@type_name` and `@type_id` are NOT routed here even though that
-            // helper has arms for them: those arms read the enclosing
-            // function's single generic parameter, not the argument the call
-            // names, so `@type_name(Int)` would answer whatever `T` happens to
-            // be in scope. The registry keeps both `Unimplemented` and the
-            // checker refuses them, which is the honest answer until the
-            // argument's type is threaded in.
-            "size_of" | "align_of" => {
-                self.emit_intrinsic_compile_time_constant(name.name.as_str(), dest)?;
-            }
             "list_with_capacity" => {
                 // @list_with_capacity(N) — create an empty list (capacity hint ignored at Tier 0)
                 self.ctx.emit(Instruction::NewList { dst: dest , capacity_hint: 0 });
@@ -39996,45 +39975,6 @@ impl VbcCodegen {
     /// Emits a compile-time constant for intrinsics.
     fn emit_intrinsic_compile_time_constant(&mut self, name: &str, dest: Reg) -> CodegenResult<()> {
         match name {
-            "size_of" | "align_of" => {
-                // These should be resolved at compile time
-                // Emit a placeholder for now
-                if std::env::var("VERUM_TRACE_TYPEPROP").is_ok() {
-                    eprintln!(
-                        "[TYPEPROP] size_of/align_of PLACEHOLDER-8 fired (fn={:?} generic_params={:?})",
-                        self.ctx.current_function, self.ctx.generic_type_params
-                    );
-                }
-                self.ctx.emit(Instruction::LoadI {
-                    dst: dest,
-                    value: 8,
-                });
-            }
-            "type_name" => {
-                // Type information - resolve from context if possible
-                let type_name = if let Some(param) = self
-                    .ctx
-                    .generic_type_params
-                    .iter()
-                    .next()
-                    .filter(|_| self.ctx.generic_type_params.len() == 1)
-                    .cloned()
-                {
-                    param
-                } else {
-                    let fn_type_name = self.ctx.current_function.as_ref().and_then(|fname| {
-                        self.ctx
-                            .lookup_function(fname)
-                            .and_then(|fi| fi.parent_type_name.clone())
-                    });
-                    fn_type_name.unwrap_or_else(|| "unknown".to_string())
-                };
-                let const_id = self.ctx.add_const_string(&type_name);
-                self.ctx.emit(Instruction::LoadK {
-                    dst: dest,
-                    const_id: const_id.0,
-                });
-            }
             // Platform detection intrinsics
             "is_debug" => {
                 self.ctx.emit(if self.config.target_config.debug_assertions {

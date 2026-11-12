@@ -24,6 +24,15 @@ fn default_span() -> Span {
     Span::default()
 }
 
+#[test]
+fn retired_reflection_names_have_no_ambient_meta_implementation() {
+    let ctx = MetaContext::new();
+    for name in ["size_of", "align_of", "stride_of", "bits_of", "type_id", "type_name"] {
+        assert!(!ctx.builtins().contains_key(&Text::from(name)), "{name}");
+        assert!(ctx.get_builtin(&Text::from(name)).is_err(), "{name}");
+    }
+}
+
 fn int_type() -> verum_ast::ty::Type {
     verum_ast::ty::Type::int(default_span())
 }
