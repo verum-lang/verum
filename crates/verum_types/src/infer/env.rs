@@ -9258,19 +9258,21 @@ impl TypeChecker {
         actual: usize,
         span: verum_ast::span::Span,
     ) -> crate::TypeError {
+        self.local_error(|| crate::TypeError::wrong_arg_count(
+            method.clone(), expected, actual, span,
+        ))
+    }
+
+    /// Preserve a verdict established from resolved local facts even when the
+    /// surrounding single-file recovery tolerates unavailable dependencies.
+    pub(crate) fn local_error(
+        &mut self,
+        make_error: impl Fn() -> crate::TypeError,
+    ) -> crate::TypeError {
         if self.stdlib_single_file_mode {
-            // `TypeError` is not Clone, and adding the derive to reach one
-            // site would be a wider change than the fact being recorded.
-            // Two identical values cost less than a new trait bound on a
-            // 200-variant enum.
-            self.push_diagnostic_for(crate::TypeError::wrong_arg_count(
-                method.clone(),
-                expected,
-                actual,
-                span,
-            ));
+            self.push_diagnostic_for(make_error());
         }
-        crate::TypeError::wrong_arg_count(method, expected, actual, span)
+        make_error()
     }
 
     /// Add a diagnostic (warning, note, etc.)

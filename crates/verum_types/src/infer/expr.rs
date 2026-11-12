@@ -7977,11 +7977,7 @@ impl TypeChecker {
         params: &List<Type>,
         contexts: &Maybe<crate::di::requirement::ContextExpr>,
     ) -> Result<()> {
-        let ExprKind::Call {
-            func,
-            args,
-            type_args,
-        } = &expr.kind
+        let ExprKind::Call { func, args, .. } = &expr.kind
         else {
             unreachable!()
         };
@@ -8064,12 +8060,11 @@ impl TypeChecker {
         let total_params = params.len();
         let provided_args = args.len();
 
-        let has_explicit_type_args = !type_args.is_empty();
-        if provided_args < required_params
-            && !has_explicit_type_args
-            && !self.stdlib_single_file_mode
-        {
-            return Err(TypeError::OtherWithCodeSpanned {
+        // Type arguments instantiate the callable's signature; they neither
+        // supply runtime values nor change its parameter count. The same
+        // contract applies in unsafe bodies and standard-library sources.
+        if provided_args < required_params {
+            return Err(self.local_error(|| TypeError::OtherWithCodeSpanned {
                 code: verum_common::Text::from("E102"),
                 msg: verum_common::Text::from(format!(
                     "Function requires at least {} argument{}, got {}{}",
@@ -8082,41 +8077,11 @@ impl TypeChecker {
                         .unwrap_or_default()
                 )),
                 span: expr.span,
-            });
+            }));
         }
 
-        // In unsafe contexts, arity mismatches are often caused by
-        // FFI function name collisions (e.g., extern `read` vs method `read`).
-        // Allow extra args in unsafe contexts to avoid false positives.
-        //
-
-        // Also allow extra args when the function is generic and arguments
-        // look like type names (PascalCase). This handles meta intrinsics
-        // like `stride_of(U8)` where the stdlib declares `stride_of<T>()`
-        // but the call passes the type as a regular arg.
-        let all_args_are_type_like = args.iter().all(|arg| {
-            if let ExprKind::Path(path) = &arg.kind {
-                if let Some(ident) = path.as_ident() {
-                    let name = ident.as_str();
-                    name.chars()
-                        .next()
-                        .map(|c| c.is_ascii_uppercase())
-                        .unwrap_or(false)
-                } else {
-                    false
-                }
-            } else {
-                matches!(&arg.kind, ExprKind::TypeExpr(_))
-            }
-        });
-        let is_generic_type_call = has_explicit_type_args || all_args_are_type_like;
-        if provided_args > total_params
-            && !is_variadic
-            && !self.in_unsafe_context
-            && !is_generic_type_call
-            && !self.stdlib_single_file_mode
-        {
-            return Err(TypeError::OtherWithCodeSpanned {
+        if provided_args > total_params && !is_variadic {
+            return Err(self.local_error(|| TypeError::OtherWithCodeSpanned {
                 code: verum_common::Text::from("E102"),
                 msg: verum_common::Text::from(format!(
                     "Function accepts at most {} argument{}, got {}{}",
@@ -8129,7 +8094,7 @@ impl TypeChecker {
                         .unwrap_or_default()
                 )),
                 span: expr.span,
-            });
+            }));
         }
 
         // ============================================================
