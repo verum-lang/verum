@@ -25601,6 +25601,14 @@ bake to have this verified.",
                     .and_then(|ty| match ty {
                         Type::Named { path, .. } => Some(self.path_to_string(&path)),
                         Type::Generic { name, .. } => Some(name),
+                        Type::Variant(_) | Type::Record(_) | Type::Tuple(_) | Type::Refined { .. } => {
+                            // Structural elaboration does not own a declaration's
+                            // static methods. Keep its lexical source identity.
+                            self.declaring_source_type_declaration(type_name.as_str())
+                                .map(|(declaration, owner)| Self::source_type_declaration_key(
+                                    owner.as_str(), declaration.name.name.as_str(),
+                                ))
+                        }
                         _ => None,
                     });
                 let type_name = nominal_owner.unwrap_or_else(|| type_name.into());

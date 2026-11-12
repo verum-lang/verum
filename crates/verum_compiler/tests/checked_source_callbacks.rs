@@ -85,3 +85,49 @@ fn imported_source_factories_execute_through_a_static_callback() {
         assert_eq!(result.try_as_i64(), Some(73));
     }
 }
+
+#[test]
+fn a_forward_static_method_keeps_the_declaring_sum_owner() {
+    use verum_compiler::{CompilationPipeline, CompilerOptions, CoreConfig, Session};
+    let root = tempfile::tempdir().unwrap();
+    let core = root.path().join("core");
+    std::fs::create_dir(&core).unwrap();
+    std::fs::write(core.join("mod.vr"), "module core; public module transport;").unwrap();
+    std::fs::write(core.join("transport.vr"), r#"
+        module core.transport;
+        type Outcome<T, E> is Ok(T) | Err(E);
+        type Completion is { result: Int32 };
+        implement Completion {
+            fn to_result(&self) -> Outcome<UInt32, TransportError> {
+                if self.result >= 0 { Outcome.Ok(self.result as UInt32) }
+                else { Outcome.Err(TransportError.from_code(-self.result)) }
+            }
+        }
+        type TransportError is Blocked | Missing { path: Text } | Other(Text);
+        implement TransportError {
+            pure fn from_code(code: Int32) -> TransportError {
+                match code { 2 => Missing { path: "" }, 11 => Blocked, _ => Other("unknown") }
+            }
+        }
+        public fn probe() -> Int {
+            let failed = match (Completion { result: -11 }).to_result() {
+                Outcome.Err(TransportError.Blocked) => 73, _ => 0,
+            };
+            match (Completion { result: 1 }).to_result() {
+                Outcome.Ok(1) => failed, _ => 0,
+            }
+        }
+    "#).unwrap();
+    let output = root.path().join("runtime.vbca");
+    let mut session = Session::new(CompilerOptions { input: core.join("mod.vr"), ..Default::default() });
+    let result = CompilationPipeline::new_core(&mut session, CoreConfig::new(&core).with_output(&output))
+        .compile_core().unwrap_or_else(|error| panic!("{error}\n{}", session.format_diagnostics()));
+    assert!(result.errors.is_empty(), "{:?}", result.errors);
+    let module = verum_vbc::archive::read_archive_from_file(&output).unwrap().load_module("core").unwrap();
+    let restored = deserialize_module(&serialize_module(&module).unwrap()).unwrap();
+    for module in [module, restored] {
+        let entry = module.find_function_by_name("core.transport.probe").unwrap();
+        let result = Interpreter::new(Arc::new(module)).execute_function(entry).unwrap();
+        assert_eq!(result.try_as_i64(), Some(73));
+    }
+}
