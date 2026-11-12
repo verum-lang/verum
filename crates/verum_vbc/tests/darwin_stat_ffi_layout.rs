@@ -8,7 +8,7 @@
 //! ORDER. Measured under T1192 — `File.size()` returned `675893106`, which
 //! is the file's `st_atimespec.tv_nsec`, and that single number was
 //! compatible with three different defects at once. This asks the layout
-//! builder for all sixteen offsets and compares each to the platform.
+//! builder for every offset and the complete writable buffer size.
 //!
 //! WHY IT READS THE TREE. The declaration under test is
 //! `core/sys/darwin/libsystem.vr`; a test carrying its own COPY of that
@@ -24,7 +24,8 @@
 //!     st_atimespec 32(16) st_mtimespec 48(16) st_ctimespec 64(16)
 //!     st_birthtimespec 80(16)
 //!     st_size 96(8) st_blocks 104(8) st_blksize 112(4)
-//!     st_flags 116(4) st_gen 120(4)          sizeof = 144
+//!     st_flags 116(4) st_gen 120(4) st_lspare 124(4)
+//!     st_qspare 128(16)                     sizeof = 144
 //!
 //! Instrument first written by session verum-23 as a printing probe; the
 //! reading-from-the-tree and the assertions are this file's addition — a
@@ -57,6 +58,8 @@ const C_LAYOUT: &[(&str, u32)] = &[
     ("st_blksize", 112),
     ("st_flags", 116),
     ("st_gen", 120),
+    ("st_lspare", 124),
+    ("st_qspare", 128),
 ];
 
 fn repo_root() -> PathBuf {
@@ -128,6 +131,14 @@ fn darwin_stat_layout_matches_the_platform() {
             )
         });
 
+    assert_eq!(layout.size, 144, "the OS writes the entire stat buffer, including reserved storage");
+    assert_eq!(layout.align, 8);
+    #[cfg(target_os = "macos")]
+    {
+        assert_eq!(layout.size as usize, std::mem::size_of::<libc::stat>());
+        assert_eq!(layout.align as usize, std::mem::align_of::<libc::stat>());
+    }
+
     // ORDER is checked against the SOURCE, not against the layout.
     //
     // `FfiStructField::name` is a GLOBAL interned field id from the
@@ -145,7 +156,7 @@ fn darwin_stat_layout_matches_the_platform() {
         .lines()
         .skip(1)
         .filter_map(|l| {
-            let t = l.trim();
+            let t = l.trim().strip_prefix("public ").unwrap_or(l.trim());
             t.split(':').next().filter(|n| {
                 !n.is_empty()
                     && !t.starts_with("//")

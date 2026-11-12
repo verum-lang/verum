@@ -698,24 +698,25 @@ public const AT_NO_AUTOMOUNT: Int = 0x800;   // Don't trigger automount
 
 /// Stat structure for fstat/stat.
 @repr(C)
+/// Raw OS metadata. Named fields are public; padding stays private.
 public type Stat is {
-    st_dev: UInt64,
-    st_ino: UInt64,
-    st_nlink: UInt64,
-    st_mode: UInt32,
-    st_uid: UInt32,
-    st_gid: UInt32,
+    public st_dev: UInt64,
+    public st_ino: UInt64,
+    public st_nlink: UInt64,
+    public st_mode: UInt32,
+    public st_uid: UInt32,
+    public st_gid: UInt32,
     _pad0: UInt32,
-    st_rdev: UInt64,
-    st_size: Int64,
-    st_blksize: Int64,
-    st_blocks: Int64,
-    st_atime_sec: Int64,
-    st_atime_nsec: Int64,
-    st_mtime_sec: Int64,
-    st_mtime_nsec: Int64,
-    st_ctime_sec: Int64,
-    st_ctime_nsec: Int64,
+    public st_rdev: UInt64,
+    public st_size: Int64,
+    public st_blksize: Int64,
+    public st_blocks: Int64,
+    public st_atime_sec: Int64,
+    public st_atime_nsec: Int64,
+    public st_mtime_sec: Int64,
+    public st_mtime_nsec: Int64,
+    public st_ctime_sec: Int64,
+    public st_ctime_nsec: Int64,
     _unused: [Int64; 3],
 };
 

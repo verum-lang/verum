@@ -795,23 +795,26 @@ public type KEvent64 is {
 /// put it on offset 8 anyway, so a probe that checked `st_ino` alone
 /// agreed and proved nothing — every other field after `st_dev` was
 /// displaced.
+/// Raw OS metadata. Named fields are public; reserved storage stays private.
 public type DarwinStat is {
-    st_dev: Int32,
-    st_mode: UInt16,
-    st_nlink: UInt16,
-    st_ino: UInt64,
-    st_uid: UInt32,
-    st_gid: UInt32,
-    st_rdev: Int32,
-    st_atime: DarwinTimespec,
-    st_mtime: DarwinTimespec,
-    st_ctime: DarwinTimespec,
-    st_birthtime: DarwinTimespec,
-    st_size: Int64,
-    st_blocks: Int64,
-    st_blksize: Int32,
-    st_flags: UInt32,
-    st_gen: UInt32,
+    public st_dev: Int32,
+    public st_mode: UInt16,
+    public st_nlink: UInt16,
+    public st_ino: UInt64,
+    public st_uid: UInt32,
+    public st_gid: UInt32,
+    public st_rdev: Int32,
+    public st_atime: DarwinTimespec,
+    public st_mtime: DarwinTimespec,
+    public st_ctime: DarwinTimespec,
+    public st_birthtime: DarwinTimespec,
+    public st_size: Int64,
+    public st_blocks: Int64,
+    public st_blksize: Int32,
+    public st_flags: UInt32,
+    public st_gen: UInt32,
+    st_lspare: Int32,
+    st_qspare: [Int64; 2],
 };
 
 /// A zeroed `DarwinStat` — the buffer `fstat(2)` and `stat(2)` fill in.
@@ -844,6 +847,7 @@ public fn safe_stat_zeroed() -> DarwinStat {
             st_birthtime: DarwinTimespec { tv_sec: 0, tv_nsec: 0 },
             st_size: 0, st_blocks: 0, st_blksize: 0,
         st_flags: 0, st_gen: 0,
+        st_lspare: 0, st_qspare: [0 as Int64; 2],
     };
 }
 
