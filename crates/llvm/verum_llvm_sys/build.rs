@@ -20,6 +20,7 @@ const LLVM_MIN_MAJOR: u32 = 21;
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=wrappers/target.c");
+    println!("cargo:rerun-if-changed=wrappers/subtarget.cpp");
     println!("cargo:rerun-if-changed=src/lld/linker.cpp");
     println!("cargo:rerun-if-env-changed=VERUM_LLVM_DIR");
 
@@ -64,6 +65,7 @@ fn main() {
 
     // Compile C wrappers (target initialization macros)
     compile_target_wrappers(&include_dir);
+    compile_cpp_binding("wrappers/subtarget.cpp", &include_dir, "verum_subtarget_binding");
 
     // Compile LLD C++ wrapper if feature enabled and LLD headers available
     #[cfg(feature = "lld")]
@@ -408,8 +410,13 @@ fn compile_lld_wrapper(llvm_dir: &Path) {
 
     let include_dir = llvm_dir.join("include");
 
+    compile_cpp_binding(&wrapper_path, &include_dir, "verum_lld_wrapper");
+}
+
+/// LLVM/LLD compiler-host bindings only; these never implement Verum operations.
+fn compile_cpp_binding(source: impl AsRef<Path>, include_dir: &Path, name: &str) {
     let mut build = cc::Build::new();
-    build.cpp(true).file(&wrapper_path).include(&include_dir);
+    build.cpp(true).file(source).include(include_dir);
 
     // Platform-specific C++ flags
     #[cfg(target_os = "windows")]
@@ -433,7 +440,7 @@ fn compile_lld_wrapper(llvm_dir: &Path) {
         build.flag("-stdlib=libc++");
     }
 
-    build.compile("verum_lld_wrapper");
+    build.compile(name);
 }
 
 /// Link system libraries required by LLVM

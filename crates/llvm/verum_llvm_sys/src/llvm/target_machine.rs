@@ -67,6 +67,14 @@ pub enum LLVMGlobalISelAbortMode {
 }
 
 unsafe extern "C" {
+    /// Read LLVM's selected function subtarget, without architecture guesses.
+    pub fn verum_llvm_subtarget_info(
+        machine: LLVMTargetMachineRef,
+        function: LLVMValueRef,
+        max_atomic_bits: *mut u32,
+        feature: unsafe extern "C" fn(*const u8, usize, bool, *mut libc::c_void),
+        context: *mut libc::c_void,
+    ) -> bool;
     pub fn LLVMGetFirstTarget() -> LLVMTargetRef;
     pub fn LLVMGetNextTarget(T: LLVMTargetRef) -> LLVMTargetRef;
     pub fn LLVMGetTargetFromName(Name: *const ::libc::c_char) -> LLVMTargetRef;

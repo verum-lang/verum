@@ -95,6 +95,15 @@ pub enum FileType {
     Object,
 }
 
+/// Facts from LLVM's actual function subtarget, including implied CPU features.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubtargetInfo {
+    /// Naturally aligned atomics wider than this require runtime library calls.
+    pub max_atomic_bits: u32,
+    /// Complete feature catalog: known disabled features remain distinguishable.
+    pub features: verum_common::OrderedMap<verum_common::Text, bool>,
+}
+
 impl FileType {
     fn as_llvm_file_type(&self) -> LLVMCodeGenFileType {
         match *self {
@@ -817,6 +826,35 @@ impl TargetMachine {
 
     pub fn get_feature_string(&self) -> &CStr {
         unsafe { CStr::from_ptr(LLVMGetTargetMachineFeatureString(self.target_machine)) }
+    }
+
+    /// Inspect the exact subtarget used for a function (including attributes).
+    /// `None` means LLVM supplied no lowering metadata, not "no atomics".
+    pub fn subtarget_info(&self, function: crate::values::FunctionValue<'_>) -> Option<SubtargetInfo> {
+        unsafe extern "C" fn feature(name: *const u8, len: usize, enabled: bool, context: *mut libc::c_void) {
+            // SAFETY: LLVM lends this byte range for this synchronous callback;
+            // context points to the live exclusive SubtargetInfo below.
+            let (name, (info, valid)) = unsafe {
+                (std::slice::from_raw_parts(name, len), &mut *context.cast::<(SubtargetInfo, bool)>())
+            };
+            // LLVM feature names are ASCII identifiers. Preserve invalid bytes
+            // as a refusal instead of introducing replacement-character names.
+            if let Ok(name) = std::str::from_utf8(name) {
+                info.features.insert(name.into(), enabled);
+            } else {
+                *valid = false;
+            }
+        }
+        let mut result = (SubtargetInfo { max_atomic_bits: 0, features: Default::default() }, true);
+        let mut max_atomic_bits = 0;
+        // SAFETY: both LLVM handles are live; outputs and callback context stay
+        // borrowed exclusively until this synchronous host metadata call returns.
+        let ok = unsafe { verum_llvm_sys::target_machine::verum_llvm_subtarget_info(
+            self.target_machine, function.as_value_ref(), &mut max_atomic_bits,
+            feature, (&mut result as *mut (SubtargetInfo, bool)).cast(),
+        ) };
+        result.0.max_atomic_bits = max_atomic_bits;
+        (ok && result.1).then_some(result.0)
     }
 
     /// Create TargetData from this target machine
