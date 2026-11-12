@@ -162,6 +162,10 @@ fn resolved_export_origins_precede_source_order_mount_fallbacks() {
             "public mount providers.late.Token; public mount providers.early.*;",
             "providers.late",
         ),
+        (
+            "public mount providers.{early.*, late.Token};",
+            "providers.early",
+        ),
     ] {
         let mut registry = ModuleRegistry::new();
         for owner in ["providers.early", "providers.late"] {
@@ -269,4 +273,112 @@ fn only_explored_mount_alternatives_contribute_registry_observations() {
             if explored { "alternative" } else { "selected" }
         );
     }
+}
+
+#[test]
+fn grouped_imports_typecheck_against_complete_source_owners() {
+    for (mount, first, second) in [
+        (
+            "mount providers.{early.Token as First, late.Token as Second};",
+            "First",
+            "Second",
+        ),
+        (
+            "mount providers.{early.{Token as First}, late.{Token as Second}};",
+            "First",
+            "Second",
+        ),
+        ("mount providers.{early.*, flag.*};", "Token", "Flag"),
+    ] {
+        let mut registry = ModuleRegistry::new();
+        register(
+            &mut registry,
+            "providers.early",
+            "public type Token is { public value: Int };",
+        );
+        register(
+            &mut registry,
+            "providers.late",
+            "public type Token is { public value: Bool };",
+        );
+        register(
+            &mut registry,
+            "providers",
+            "public type Token is { public value: Float };",
+        );
+        register(
+            &mut registry,
+            "providers.flag",
+            "public type Flag is { public value: Bool };",
+        );
+        register(
+            &mut registry,
+            "consumer",
+            &format!(
+                "{mount} fn first(value: {first}) -> Int {{ value.value }} fn second(value: {second}) -> Bool {{ value.value }}"
+            ),
+        );
+        let errors = check(&registry, "consumer");
+        assert!(errors.is_empty(), "{mount}: {errors:?}");
+    }
+}
+
+#[test]
+fn grouped_type_imports_refuse_missing_and_private_leaf_owners() {
+    for provider in [None, Some("type Token is { public value: Bool };")] {
+        let mut registry = ModuleRegistry::new();
+        register(
+            &mut registry,
+            "providers",
+            "public type Token is { public value: Int };",
+        );
+        if let Some(source) = provider {
+            register(&mut registry, "providers.owned", source);
+        }
+        register(
+            &mut registry,
+            "consumer",
+            "mount providers.{owned.Token as Hidden}; fn identity(value: Hidden) -> Hidden { value }",
+        );
+        let errors = check(&registry, "consumer");
+        assert!(
+            !errors.is_empty(),
+            "a parent homonym must not supply {provider:?}"
+        );
+    }
+}
+
+#[test]
+fn builtin_aliases_cannot_hide_missing_or_private_declarations() {
+    for provider in ["", "type Absent is { value: Bool };"] {
+        let mut registry = ModuleRegistry::new();
+        register(&mut registry, "provider", provider);
+        register(&mut registry, "consumer", "mount provider.{Absent as Int};");
+        assert!(!check(&registry, "consumer").is_empty(), "{provider}");
+    }
+}
+
+#[test]
+fn grouped_self_alias_requires_an_accessible_namespace() {
+    for parent in [None, Some("module hidden;"), Some("public module hidden;")] {
+        let mut registry = ModuleRegistry::new();
+        if let Some(source) = parent {
+            register(&mut registry, "provider", source);
+            register(&mut registry, "provider.hidden", "public fn make() -> Int { 7 }");
+        }
+        register(&mut registry, "consumer", "mount provider.hidden.{self as service};");
+        let errors = check(&registry, "consumer");
+        assert_eq!(errors.is_empty(), parent == Some("public module hidden;"), "{parent:?}: {errors:?}");
+    }
+}
+
+#[test]
+fn grouped_self_alias_dispatches_the_namespace_without_importing_its_items() {
+    let mut registry = ModuleRegistry::new();
+    register(&mut registry, "provider", "public fn make() -> Int { 7 }");
+    register(&mut registry, "consumer", "mount provider.{self as service}; fn check() -> Int { service.make() }");
+    let errors = check(&registry, "consumer");
+    assert!(errors.is_empty(), "{errors:?}");
+    register(&mut registry, "bare", "mount provider.{self as service}; fn check() -> Int { make() }");
+    assert!(!check(&registry, "bare").is_empty());
 }

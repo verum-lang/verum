@@ -196,7 +196,11 @@ impl TypeChecker {
         let params = match ty { Type::Function { params, .. } => Some(params), _ => None };
         let scheme = Self::sum_constructor_scheme(&owner, &parameters, params, declaration.span)?;
         if publish_short { self.ctx.env.insert(name.clone(), scheme.clone()); }
-        self.ctx.env.insert(format!("{owner}.{name}"), scheme.clone());
+        // Lazy source loading uses a temporary lexical scope. Keep the exact
+        // constructor with the same transaction as its owning declaration;
+        // publication must survive that scope only after the whole load succeeds.
+        self.source_type_registration.constructor_values
+            .insert(format!("{owner}.{name}").into(), scheme.clone());
         self.ctx.env.insert(format!("{}.{}", declaration.name.name, name), scheme);
         Ok(())
     }
@@ -485,7 +489,10 @@ impl TypeChecker {
             crate::computational_properties::PropertySet::pure(),
         );
         self.ctx.env.insert_mono(name.as_str(), constructor.clone());
-        self.ctx.env.insert_mono(owner, constructor);
+        // A source declaration can fail after a nested constructor was loaded.
+        // Publish its canonical value only when the enclosing load commits.
+        self.source_type_registration.constructor_values
+            .insert(owner, crate::context::TypeScheme::mono(constructor));
     }
 
     /// Inner body of register_type_declaration that may return early with errors.

@@ -622,19 +622,7 @@ impl TypeChecker {
             if fd.is_const || (fd.name != source.name.name && fd.name != declared) {
                 return Err(failure("typed source signature does not match its function descriptor".into()));
             }
-            let saved_owner = std::mem::replace(&mut self.current_module_path, owner.clone());
-            let saved_scope = std::mem::replace(&mut self.resolving_source_signature, true);
-            self.push_decl_param_frame(indexmap::IndexMap::new());
-            self.ctx.enter_scope();
-            let result = self.register_function_signature(source).and_then(|()| {
-                self.ctx.env.lookup(source.name.name.as_str()).cloned().ok_or_else(||
-                    failure("typed source signature did not produce a callable scheme".into()))
-            });
-            self.ctx.exit_scope();
-            self.pop_decl_param_frame();
-            self.resolving_source_signature = saved_scope;
-            self.current_module_path = saved_owner;
-            result
+            self.scheme_from_source_function(source, owner.as_str())
         })();
         match result {
             Ok(scheme) => Some(scheme),
@@ -643,6 +631,29 @@ impl TypeChecker {
                 None
             }
         }
+    }
+
+    /// Source and archive consumers admit the same complete telescope. The
+    /// lexical scope owns parameter kinds, defaults, bounds and dependencies.
+    pub(super) fn scheme_from_source_function(
+        &mut self,
+        source: &verum_ast::FunctionDecl,
+        owner: &str,
+    ) -> crate::Result<crate::context::TypeScheme> {
+        self.with_source_signature_scope(owner, |checker| {
+            checker.push_decl_param_frame(indexmap::IndexMap::new());
+            checker.ctx.enter_scope();
+            let result = checker.register_function_signature(source).and_then(|()| {
+                checker.ctx.env.lookup(source.name.name.as_str()).cloned().ok_or_else(||
+                    crate::TypeError::UniverseBinding {
+                        message: "source signature did not produce a callable scheme".into(),
+                        span: source.span,
+                    })
+            });
+            checker.ctx.exit_scope();
+            checker.pop_decl_param_frame();
+            result
+        })
     }
 
     fn legacy_scheme_from_function_descriptor(

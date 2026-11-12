@@ -390,28 +390,16 @@ impl TypeChecker {
                         span,
                     })
                 }
-                Err(_) => {
-                    // Name not resolved - for well-known types, create forward references
-                    // rather than erroring. This handles stdlib types that are used in
-                    // test files but not explicitly imported.
-                    match wellknown_forward_reference(name, span) {
-                        Some(ty) => Ok((ty, None)),
-                        None => Err(TypeError::TypeNotFound {
-                            name: name.to_text(),
-                            span,
-                        }),
-                    }
-                }
-            }
-        } else {
-            // No module context - for well-known types, create forward references
-            match wellknown_forward_reference(name, span) {
-                Some(ty) => Ok((ty, None)),
-                None => Err(TypeError::TypeNotFound {
+                Err(_) => Err(TypeError::TypeNotFound {
                     name: name.to_text(),
                     span,
                 }),
             }
+        } else {
+            Err(TypeError::TypeNotFound {
+                name: name.to_text(),
+                span,
+            })
         }
     }
 
@@ -926,6 +914,27 @@ impl TypeChecker {
         self.synth_expr(&receiver)
     }
 
+    /// Identify the first actual inline declaration in a lexical or absolute
+    /// path. Canonical module keys may occupy several syntax segments.
+    fn inline_namespace_prefix(&self, path: &Path) -> Option<(Text, usize)> {
+        use verum_ast::ty::PathSegment;
+        let PathSegment::Name(first) = path.segments.first()? else { return None; };
+        if self.ctx.env.is_locally_bound(first.name.as_str()) { return None; }
+        if let Some(owner) = self.inline_namespace_owner(first.name.as_str()) {
+            return Some((owner, 1));
+        }
+        let mut owner = Text::new();
+        for (index, segment) in path.segments.iter().enumerate().take(path.segments.len().saturating_sub(1)) {
+            let PathSegment::Name(name) = segment else { return None; };
+            if index != 0 { owner.push('.'); }
+            owner.push_str(name.name.as_str());
+            if self.inline_modules.get(&owner).is_some_and(|module| module.items.is_some()) {
+                return Some((owner, index + 1));
+            }
+        }
+        None
+    }
+
     /// Resolve a path that starts with an inline module.
     /// Handles paths like `api.v2.func()` where `api` is an inline module.
     ///
@@ -969,8 +978,10 @@ impl TypeChecker {
             return Err(TypeError::Other("Empty path".into()));
         }
 
-        // Start with the first segment (inline module)
-        let first_module_name = verum_common::Text::from(segments[0]);
+        let (first_module_name, consumed) = self.inline_namespace_prefix(path)
+            .ok_or_else(|| TypeError::UnboundVariable {
+                name: self.path_to_string(path), span,
+            })?;
         let mut current_module = self
             .inline_modules
             .get(&first_module_name)
@@ -982,7 +993,7 @@ impl TypeChecker {
 
         // Navigate through intermediate segments (modules)
         // For path `api.v2.func`, navigate: api -> v2 -> func
-        for (i, &segment_name) in segments.iter().enumerate().skip(1) {
+        for (i, &segment_name) in segments.iter().enumerate().skip(consumed) {
             let segment_text = verum_common::Text::from(segment_name);
 
             // Check if this is the last segment (item to resolve)
@@ -1241,10 +1252,7 @@ impl TypeChecker {
                     // Check if first segment is an inline module
                     // This handles paths like `api.v2.func()` where `api` is an inline module
                     // Module declaration: inline "module name { ... }" or file-based (foo.vr defines module foo) — Inline Modules
-                    if self
-                        .inline_modules
-                        .contains_key(&verum_common::Text::from(name))
-                    {
+                    if self.inline_namespace_prefix(path).is_some() {
                         return self.resolve_inline_module_path(path, span);
                     }
 
@@ -1867,132 +1875,4 @@ impl TypeChecker {
             span,
         })
     }
-}
-
-/// Returns true if `name` is a well-known type that should be treated as a
-/// forward reference rather than generating a "type not found" error.
-/// This handles stdlib types commonly used in test files that may not be
-/// explicitly imported. The type checker creates an opaque Named type for these.
-/// The two bare-name sites where an unresolved type name either becomes an
-/// opaque forward reference or an `E101 type not found`.
-///
-/// Measured 2026-09-03, parameter position, one value of difference between
-/// subject and control:
-///
-/// ```text
-///     fn f(x: Blorbulator<Int>)  ->  error<E101>: type not found   REFUSED
-///     fn f(x: Box<Int>)          ->  0 errors                      ACCEPTED
-///     fn f(x: HashMap<Text,Int>) ->  0 errors                      ACCEPTED
-///     fn f(x: Arc<Int>)          ->  0 errors                      ACCEPTED
-/// ```
-///
-/// `Box`, `HashMap` and `Arc` are three of the SEVENTY-FOUR names on
-/// `is_wellknown_type_name`'s list that `core/` declares nowhere — and three
-/// that the language renamed on purpose (`Heap`, `Map`, `Shared`). The
-/// suppression turns exactly the Rust habit the rename exists to correct into
-/// silence.
-///
-/// Two env vars, so the list can be measured rather than argued about:
-///
-///   * `VERUM_TRACE_WK_FALLBACK=1`  — print every name this fires for, with
-///     its span, so a corpus run yields the census of who depends on it.
-///   * `VERUM_NO_WELLKNOWN_FALLBACK=1` — return `None`, i.e. restore the
-///     error, so the radius is an A/B inside ONE binary.
-fn wellknown_forward_reference(name: &str, span: Span) -> Option<Type> {
-    if !is_wellknown_type_name(name) {
-        return None;
-    }
-    if std::env::var("VERUM_TRACE_WK_FALLBACK").is_ok() {
-        eprintln!("[wk-fallback] {} @ {:?}", name, span);
-    }
-    if std::env::var("VERUM_NO_WELLKNOWN_FALLBACK").is_ok() {
-        return None;
-    }
-    Some(Type::Named {
-        path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(name, span)),
-        args: List::new(),
-    })
-}
-
-pub(crate) fn is_wellknown_type_name(name: &str) -> bool {
-    // Single uppercase letter = likely a generic type parameter (T, U, V, A, B, etc.)
-    if name.len() == 1 && name.chars().next().is_some_and(|c| c.is_ascii_uppercase()) {
-        return true;
-    }
-
-    // Common module names used as path prefixes (treated as opaque types to suppress errors)
-    if matches!(name, "std" | "core" | "sys" | "reqwest" | "networking") {
-        return true;
-    }
-
-    // Only match types that start with an uppercase letter (type names)
-    // and are commonly used across stdlib
-    matches!(
-        name,
-        // Time/date types
-        "DateTime" | "Duration" | "Instant" | "SystemTime" | "NaiveDate"
-        | "FixedOffset" | "Utc" | "TimeZone" | "Date" | "Time" | "Tz"
-        // Sync types
-        | "AsyncMutex" | "RwLock" | "Semaphore" | "Barrier" | "Condvar"
-        | "OwnedMutexGuard" | "MutexGuard" | "RwLockReadGuard" | "RwLockWriteGuard"
-        // Collection types
-        | "PriorityQueue" | "BTreeMap" | "BTreeSet" | "LinkedList" | "VecDeque"
-        | "BinaryHeap" | "HashMap" | "HashSet" | "Deque" | "Queue" | "Stack"
-        // Atomic types
-        | "AtomicUInt" | "AtomicCell" | "AtomicBool" | "AtomicInt" | "AtomicPtr"
-        // Network types
-        | "TcpListener" | "TcpStream" | "UdpSocket" | "Socket" | "IpAddr" | "SocketAddr"
-        | "Ipv4Addr" | "Ipv6Addr"
-        // Error types
-        | "ChannelError" | "PanicError" | "OverflowError" | "NoReceivers"
-        | "SendError" | "RecvError" | "TryRecvError" | "TimeoutError"
-        | "ParseIntError" | "RegexError" | "TryFromSliceError"
-        | "FetchError" | "ConcurrencyError" | "CancelledError"
-        | "DbError" | "IoError"
-        // Database types
-        | "Database" | "Connection" | "Transaction" | "Pool" | "PoolConfig"
-        // IO types
-        | "File" | "BufReader" | "BufWriter" | "Stdin" | "Stdout" | "Stderr"
-        | "Path" | "PathBuf" | "Bytes" | "BytesMut"
-        // User/domain types commonly used in tests
-        | "User" | "UserId" | "Resource" | "Config" | "Context"
-        // Regex
-        | "Regex" | "Match" | "Captures"
-        // Request/response
-        | "Request" | "Response" | "StatusCode" | "Headers" | "Body"
-        // Async types
-        | "JoinHandle" | "JoinSet" | "TaskHandle" | "Waker" | "RawWaker"
-        | "BoxFuture"
-        // Misc stdlib types
-        | "TreeNode" | "Node" | "Arc" | "Weak" | "Pin" | "Box"
-        | "NonZero" | "Ordering" | "Range" | "RangeInclusive"
-        | "LazyStatic" | "Local" | "Level" | "ThreadRng" | "StdRng"
-        // Supervisor/actor types
-        | "Supervisor" | "SupervisorSpec" | "ChildSpec" | "RetryConfig"
-        | "SupervisorStrategy"
-        // Stream types
-        | "StreamIter" | "StreamNext" | "Timeout"
-        // Channel types
-        | "Sender" | "Receiver" | "OneshotSender" | "OneshotReceiver"
-        | "BroadcastSender" | "BroadcastReceiver"
-        // Event types
-        | "EventBus" | "EventHandler" | "EventLoop"
-        // API types
-        | "PublicApi" | "Client" | "Server"
-        // Transducer types
-        | "Transducer" | "Reducer" | "SliceIter"
-        // Variant constructors used as types
-        | "Disconnected" | "Closed" | "Failed"
-        // Char type alias
-        | "Char"
-        // Function protocol types (used in type annotations like Heap<Fn(Int) -> Int>)
-        | "Fn" | "FnMut" | "FnOnce"
-        // Compiler/benchmark utility types
-        | "Ast" | "Module" | "Token" | "Lexer" | "Parser"
-        | "TypeInfo" | "TypeChecker" | "SmtSolver" | "Verifier"
-        // GC types
-        | "GcConfig" | "GcStats" | "Gc"
-        // SIMD types
-        | "SimdVector" | "SimdResult" | "f32x4" | "f32x8" | "f64x4" | "i32x8"
-    )
 }

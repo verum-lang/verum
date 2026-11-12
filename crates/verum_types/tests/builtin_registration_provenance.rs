@@ -266,3 +266,14 @@ fn actual_builtin_registration_preserves_existing_overwrite_behavior() {
     assert!(missing_import(&mut checker, "Bool").is_none());
     assert!(missing_import(&mut checker, "print").is_none());
 }
+
+#[test]
+fn renaming_a_failed_mount_to_a_builtin_does_not_supply_its_source() {
+    for full in [false, true] {
+        let mut checker = checker(false, false);
+        register(&mut checker, full);
+        for name in ["Absent as Int", "Parcel as Bool", "Bool as Int", "Int64 as Bool"] {
+            assert!(missing_import(&mut checker, name).is_some(), "{name}");
+        }
+    }
+}

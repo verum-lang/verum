@@ -329,3 +329,79 @@ fn forward_placeholder_unification_preserves_exact_owner() {
         }
     }
 }
+
+#[test]
+fn a_failed_lazy_group_does_not_publish_qualified_constructor_values() {
+    let broken = "type Wrapped is (Int); type Parent is (Wrapped, Missing);";
+    let mut c = checker();
+    c.set_module_registry_direct(registry("demo", broken));
+    let ast = parse(broken);
+    let verum_ast::ItemKind::Type(parent) = &ast.items[1].kind else { panic!() };
+    assert!(c.register_type_declaration(parent).is_err());
+    for name in ["demo.Wrapped", "demo.Parent"] {
+        assert!(c.context_mut().env.lookup(name).is_none(), "failed load published {name}");
+    }
+    let corrected = broken.replace("Missing", "Bool");
+    c.set_module_registry_direct(registry("demo", &corrected));
+    let ast = parse(&corrected);
+    let verum_ast::ItemKind::Type(parent) = &ast.items[1].kind else { panic!() };
+    c.register_type_declaration(parent).expect("corrected source load");
+    for name in ["demo.Wrapped", "demo.Parent"] {
+        assert!(c.context_mut().env.lookup(name).is_some(), "accepted load lost {name}");
+    }
+}
+
+#[test]
+fn failed_constructor_replacement_preserves_accepted_value_authority() {
+    let mut c = checker();
+    accept(&mut c, "type Wrapped is (Int);");
+    let before = c.context_mut().env.lookup("demo.Wrapped").unwrap().ty.clone();
+    let broken = "type Wrapped is (Bool); type Parent is (Wrapped, Missing);";
+    c.set_module_registry_direct(registry("demo", broken));
+    let ast = parse(broken);
+    let verum_ast::ItemKind::Type(parent) = &ast.items[1].kind else { panic!() };
+    assert!(c.register_type_declaration(parent).is_err());
+    assert_eq!(c.context_mut().env.lookup("demo.Wrapped").unwrap().ty, before);
+    assert!(c.context_mut().env.lookup("demo.Parent").is_none());
+}
+
+#[test]
+fn lazy_sum_constructor_publication_is_atomic_for_every_form() {
+    let declaration = "type Packet<T> is Idle | One(T) | Pair(Int, Bool) | Record { value: Int };";
+    let broken = format!("{declaration} type Parent is (Packet<Int>, Missing);");
+    let mut c = checker();
+    c.set_module_registry_direct(registry("demo", &broken));
+    let ast = parse(&broken);
+    let verum_ast::ItemKind::Type(parent) = &ast.items[1].kind else { panic!() };
+    assert!(c.register_type_declaration(parent).is_err());
+    for name in ["demo.Packet.Idle", "demo.Packet.One", "demo.Packet.Pair", "demo.Packet.Record", "demo.Parent"] {
+        assert!(c.context_mut().env.lookup(name).is_none(), "failed load published {name}");
+    }
+    let corrected = broken.replace("Missing", "Bool");
+    c.set_module_registry_direct(registry("demo", &corrected));
+    let ast = parse(&corrected);
+    let verum_ast::ItemKind::Type(parent) = &ast.items[1].kind else { panic!() };
+    c.register_type_declaration(parent).expect("corrected source load");
+    for name in ["demo.Packet.Idle", "demo.Packet.One", "demo.Packet.Pair", "demo.Packet.Record", "demo.Parent"] {
+        assert!(c.context_mut().env.lookup(name).is_some(), "accepted load lost {name}");
+    }
+}
+
+#[test]
+fn failed_sum_replacement_preserves_accepted_constructor_values() {
+    let mut c = checker();
+    accept(&mut c, "type Packet is Idle | One(Int) | Pair(Int, Bool) | Record { value: Int };");
+    let names = ["demo.Packet.Idle", "demo.Packet.One", "demo.Packet.Pair", "demo.Packet.Record"];
+    let before: List<_> = names.iter()
+        .map(|name| c.context_mut().env.lookup(name).expect("accepted constructor").ty.clone())
+        .collect();
+    let broken = "type Packet is Idle | One(Bool) | Pair(Bool, Int) | Record { value: Bool }; type Parent is (Packet, Missing);";
+    c.set_module_registry_direct(registry("demo", broken));
+    let ast = parse(broken);
+    let verum_ast::ItemKind::Type(parent) = &ast.items[1].kind else { panic!() };
+    assert!(c.register_type_declaration(parent).is_err());
+    for (name, ty) in names.into_iter().zip(before) {
+        assert_eq!(c.context_mut().env.lookup(name).expect("previous constructor").ty, ty, "failed replacement changed {name}");
+    }
+    assert!(c.context_mut().env.lookup("demo.Parent").is_none());
+}

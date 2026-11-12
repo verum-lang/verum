@@ -122,6 +122,7 @@ pub use observations::ModuleObservations;
 pub mod error;
 pub mod exports;
 pub mod imports;
+pub use verum_ast::mount_paths;
 pub mod loader;
 // File-relative mount resolution (#5 / P1.5) — plugs
 // `mount ./helper.vr;` into the existing module-path

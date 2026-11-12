@@ -331,10 +331,10 @@ impl VbcCodegen {
                 }
                 paths.visit_item(item);
                 if let ItemKind::Mount(decl) = &item.kind {
-                    visit_named_mounts(&decl.tree, "", decl.alias.as_ref(), &mut |alias, target| {
+                    visit_named_mounts(&decl.tree, decl.alias.as_ref(), &mut |alias, target| {
                         bindings.insert(alias.to_owned(), target);
                     });
-                    globs.extend(Self::extract_glob_mount_paths(&decl.tree, &[])
+                    globs.extend(Self::extract_glob_mount_paths(&decl.tree)
                         .into_iter().map(|parts| {
                             Self::resolve_module_path_head_in_scope(&parts, &owner)
                                 .unwrap_or(parts).join(".")

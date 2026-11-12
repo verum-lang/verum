@@ -14197,10 +14197,24 @@ impl VbcCodegen {
         // namespace or an actual constructed value. Its spelling cannot turn
         // a unit constructor into a forward function reference.
         if let Some(mut parts) = receiver_path.filter(|_| !receiver_is_constructor_value) {
-            if self.path_was_rooted_module_path(receiver) {
-                let owner = parts.join(".");
+            let scope = self.ctx.current_source_module.as_deref().unwrap_or(&self.config.module_name);
+            let rooted = self.path_was_rooted_module_path(receiver);
+            let namespace_alias = if !rooted
+                && let Some(head) = parts.first()
+                && !self.ctx.registers.contains(head)
+                && let Some(binding) = self.source_type_binding(scope, head)
+            {
+                let target = binding.ok_or_else(|| CodegenError::with_span(
+                    CodegenErrorKind::TypeInference(format!("ambiguous or unresolved namespace `{head}`")),
+                    receiver.span,
+                ))?;
+                let mut owner = target.to_string();
+                for segment in parts.iter().skip(1) { owner.push('.'); owner.push_str(segment); }
+                self.declared_namespace_mount(&owner, scope)?.then_some(owner)
+            } else { None };
+            if rooted || namespace_alias.is_some() {
+                let owner = namespace_alias.unwrap_or_else(|| parts.join("."));
                 self.validate_rooted_type_owner(&owner, receiver.span)?;
-                let scope = self.ctx.current_source_module.as_deref().unwrap_or(&self.config.module_name);
                 let selected = if let Some(declaration) = self.nominal_type_id(&owner)
                     .and_then(|id| self.type_by_id(id))
                     .and_then(|ty| self.type_declaration_identity(ty))

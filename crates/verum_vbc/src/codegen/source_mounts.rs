@@ -14,39 +14,32 @@ pub(super) fn mount_path_parts(written: &str) -> Vec<String> {
     }
 }
 
+/// Grouped `self` selects the enclosing namespace. Both declaration discovery
+/// and executable import registration must preserve that same selected path.
+pub(super) fn named_mount_segments(path: &verum_ast::Path) -> &[verum_ast::PathSegment] {
+    let segments = path.segments.as_slice();
+    if segments.len() > 1 && matches!(segments.last(), Some(verum_ast::PathSegment::SelfValue)) {
+        &segments[..segments.len() - 1]
+    } else {
+        segments
+    }
+}
+
 pub(super) fn visit_named_mounts(
     tree: &MountTree,
-    prefix: &str,
     outer_alias: Option<&verum_ast::ty::Ident>,
     visit: &mut impl FnMut(&str, String),
 ) {
-    let path = |path: &verum_ast::Path| {
-        let path = path.to_string().replace("::", ".");
-        if prefix.is_empty() {
-            path
-        } else {
-            format!("{prefix}.{path}")
-        }
-    };
-    match &tree.kind {
-        MountTreeKind::Path(target) => {
-            let full = path(target);
-            let alias = tree
-                .alias
-                .as_ref()
-                .or(outer_alias)
-                .map(|id| id.name.as_str())
-                .unwrap_or_else(|| full.rsplit('.').next().unwrap());
-            let alias = alias.to_owned();
-            visit(&alias, full);
-        }
-        MountTreeKind::Nested { prefix, trees } => {
-            let prefix = path(prefix);
-            for tree in trees {
-                visit_named_mounts(tree, &prefix, None, visit);
-            }
-        }
-        MountTreeKind::Glob(_) | MountTreeKind::File { .. } => {}
+    use verum_ast::mount_paths::{MountPathKind, mount_paths};
+    let outer_alias = matches!(tree.kind, MountTreeKind::Path(_)).then_some(outer_alias).flatten();
+    for entry in mount_paths(tree).filter(|entry| entry.kind == MountPathKind::Named) {
+        let selected_len = named_mount_segments(&entry.path).len();
+        let mut target = entry.path;
+        target.segments.truncate(selected_len);
+        let full = target.to_string().replace("::", ".");
+        let alias = entry.alias.or(outer_alias).map(|name| name.name.as_str())
+            .unwrap_or_else(|| full.rsplit('.').next().unwrap());
+        visit(&alias.to_owned(), full);
     }
 }
 
@@ -228,7 +221,7 @@ impl VbcCodegen {
         owner: &str,
         mount: &verum_ast::MountDecl,
     ) {
-        visit_named_mounts(&mount.tree, "", mount.alias.as_ref(), &mut |alias, written| {
+        visit_named_mounts(&mount.tree, mount.alias.as_ref(), &mut |alias, written| {
             let target = self.select_source_mount_path(&written, owner);
             self.record_source_type_mount(owner, alias, &target);
         });
@@ -432,7 +425,7 @@ impl VbcCodegen {
                 }
                 ItemKind::Axiom(d) => declare(&d.name, &d.visibility, Value),
                 ItemKind::Mount(mount) => {
-                    for parts in Self::extract_glob_mount_paths(&mount.tree, &[]) {
+                    for parts in Self::extract_glob_mount_paths(&mount.tree) {
                         let path = WrittenMountPath(parts.join(".").into());
                         if mount.visibility.is_public() {
                             exports.globs.insert(path.clone());
@@ -444,7 +437,6 @@ impl VbcCodegen {
                     }
                     visit_named_mounts(
                         &mount.tree,
-                        "",
                         mount.alias.as_ref(),
                         &mut |alias, target| {
                             let target = WrittenMountPath(target.into());

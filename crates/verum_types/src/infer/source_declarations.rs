@@ -41,62 +41,30 @@ pub(super) fn source_mount_targets(
     name: &str,
     mut visit: impl FnMut(ModulePath, MountTargetKind),
 ) {
-    use verum_ast::{
-        decl::{MountTree, MountTreeKind},
-        ty::{Path, PathSegment},
+    use verum_ast::{decl::MountTreeKind, ty::PathSegment};
+    use verum_modules::{
+        imports::path_to_module_path_resolved,
+        mount_paths::{mount_paths, MountPathKind},
     };
-    use verum_modules::imports::path_to_module_path_resolved;
-
-    fn walk<'a>(
-        tree: &'a MountTree,
-        alias: Option<&verum_ast::Ident>,
-        name: &str,
-        prefixes: &mut Vec<&'a Path>,
-        visit: &mut impl FnMut(&[&Path], &Path, MountTargetKind),
-    ) {
-        match &tree.kind {
-            MountTreeKind::Path(leaf) => {
-                let Some(PathSegment::Name(last)) = leaf.segments.last() else {
-                    return;
+    let root_alias = match &mount.tree.kind {
+        MountTreeKind::Path(_) => mount.alias.as_ref(),
+        _ => None,
+    };
+    for leaf in mount_paths(&mount.tree) {
+        let kind = match leaf.kind {
+            MountPathKind::Named => {
+                let Some(PathSegment::Name(original)) = leaf.path.segments.last() else {
+                    continue;
                 };
-                let binding = tree.alias.as_ref().or(alias).unwrap_or(last);
-                if binding.name == name {
-                    visit(prefixes, leaf, MountTargetKind::Named);
+                if leaf.alias.or(root_alias).unwrap_or(original).name != name {
+                    continue;
                 }
+                MountTargetKind::Named
             }
-            MountTreeKind::Nested { prefix, trees } => {
-                prefixes.push(prefix);
-                for child in trees {
-                    walk(child, None, name, prefixes, visit);
-                }
-                prefixes.pop();
-            }
-            MountTreeKind::Glob(path) => visit(prefixes, path, MountTargetKind::Glob),
-            MountTreeKind::File { .. } => {}
-        }
+            MountPathKind::Glob => MountTargetKind::Glob,
+        };
+        visit(path_to_module_path_resolved(&leaf.path, owner), kind);
     }
-    walk(
-        &mount.tree,
-        mount.alias.as_ref(),
-        name,
-        &mut Vec::new(),
-        &mut |prefixes, leaf, kind| {
-            if prefixes.is_empty() {
-                visit(path_to_module_path_resolved(leaf, owner), kind);
-            } else {
-                let segments = prefixes
-                    .iter()
-                    .copied()
-                    .chain(std::iter::once(leaf))
-                    .flat_map(|part| part.segments.iter().cloned())
-                    .collect();
-                visit(
-                    path_to_module_path_resolved(&Path::new(segments, mount.span), owner),
-                    kind,
-                );
-            }
-        },
-    );
 }
 
 impl TypeChecker {

@@ -38,16 +38,14 @@ modifying the compiler.
 - `protected_stdlib_variants` hardcoded None, Some, Ok, Err names — **GONE** (measured 2026-09-03: zero occurrences of `protected_stdlib_variants` or a hardcoded `"Some" | "None"` pair anywhere in `crates/`). This line said NEEDS FIX for long enough to send readers hunting for code that no longer exists; an instruction file that loads into every session costs more when stale than when absent.
 - `List.of` / `Set.of` were literals in the checker's variadic-name list AND a `SPECIAL CASE` in `infer/modules.rs`, so a 3-argument call type-checked against `core/collections/list.vr`'s 1-argument `fn of` and died at VBC codegen with `undefined function: List.of` — **removed 2026-09-03**. The shape to recognise: the compiler knowing a name the library does not have at the arity the compiler assumed.
 - The synthetic iterator path in `infer/modules.rs` still defaults `try_fold` to `Result<Acc, E>` when the closure has no function type.
-- **TWO WELL-KNOWN-NAME LISTS, measured 2026-09-03.** The rule's most expensive
+- **Name-list authority is forbidden.** The rule's most expensive
   form is not an assumption about one type — it is a LIST of names the compiler
   knows and the library does not declare.
-  - **Types**: `is_wellknown_type_name` (`infer/path_resolution.rs`, trace
-    `VERUM_TRACE_WK_FALLBACK`) carries seventy-four names. Measured with one
-    value of difference: `fn f(x: Blorbulator<Int>)` is refused `E101`, while
-    `Box<Int>`, `HashMap<Text,Int>` and `Arc<Int>` are ACCEPTED — three names
-    `core/` declares nowhere, and precisely the three the language renamed on
-    purpose to `Heap`, `Map`, `Shared`. The suppression turns the Rust habit
-    the rename exists to correct into silence.
+  - **Types**: the `is_wellknown_type_name` fallback is removed. Unknown
+    nominal types must fail regardless of spelling, including single uppercase
+    names that have no declared binder. Resolve actual lexical, source, prelude
+    or archive declarations and registered language primitives. Tests in
+    `tests/source_type_import_bindings.rs` cover declared and undeclared names.
   - **Functions**: `min`, `max` and `abs` resolve with no mount and no
     declaration (`print(min(1,2))` prints 1 in an otherwise empty file, while
     an undeclared name gives `E100`), and a unit's OWN `fn min` loses to them —

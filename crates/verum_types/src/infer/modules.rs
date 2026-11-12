@@ -690,115 +690,10 @@ impl TypeChecker {
                     return Ok(());
                 }
             }
-            MountTreeKind::Nested { prefix, trees } => {
-                let module_name = process_path(prefix);
-                // Try inline module resolution (with and without cog. prefix).
-                //
-                // **Coverage gate.** The inline-module short-circuit
-                // ONLY fires when the inline module actually exports
-                // every requested item DIRECTLY (as a top-level
-                // Function/Type/Const).  If the inline module merely
-                // re-exports the items via `public mount`, fall through
-                // to the cross-file path so the re-export chain is
-                // walked through the registry.
-                //
-                // Without this gate, `import_item_from_inline_module`
-                // returns Ok early (relying on "process_import will
-                // handle the re-export") but process_import has the
-                // same inline-modules short-circuit — neither side
-                // actually registers the type, leading to silent E101
-                // at the use site.
-                let resolved_name = if self.inline_modules.contains_key(&module_name) {
-                    Some(module_name.clone())
-                } else {
-                    let cog_name: verum_common::Text = format!("cog.{}", module_name).into();
-                    if self.inline_modules.contains_key(&cog_name) {
-                        Some(cog_name)
-                    } else {
-                        None
-                    }
-                };
-                if let Some(resolved) = resolved_name {
-                    let inline_covers_all = if let Some(inline_mod) =
-                        self.inline_modules.get(&resolved).cloned()
-                    {
-                        let inline_items = inline_mod
-                            .items
-                            .as_ref()
-                            .map(|items| {
-                                items
-                                    .iter()
-                                    .filter_map(|item| match &item.kind {
-                                        verum_ast::ItemKind::Function(f)
-                                            if matches!(
-                                                f.visibility,
-                                                verum_ast::decl::Visibility::Public
-                                            ) =>
-                                        {
-                                            Some(f.name.name.as_str().to_string())
-                                        }
-                                        verum_ast::ItemKind::Type(t)
-                                            if matches!(
-                                                t.visibility,
-                                                verum_ast::decl::Visibility::Public
-                                            ) =>
-                                        {
-                                            Some(t.name.name.as_str().to_string())
-                                        }
-                                        verum_ast::ItemKind::Const(c)
-                                            if matches!(
-                                                c.visibility,
-                                                verum_ast::decl::Visibility::Public
-                                            ) =>
-                                        {
-                                            Some(c.name.name.as_str().to_string())
-                                        }
-                                        _ => None,
-                                    })
-                                    .collect::<std::collections::HashSet<_>>()
-                            })
-                            .unwrap_or_default();
-                        trees.iter().all(|tree| {
-                            if let MountTreeKind::Path(p) = &tree.kind {
-                                let want = process_path(p);
-                                inline_items.contains(want.as_str())
-                            } else {
-                                true
-                            }
-                        })
-                    } else {
-                        false
-                    };
-                    if inline_covers_all {
-                        for tree in trees {
-                            if let MountTreeKind::Path(p) = &tree.kind {
-                                let item_name = process_path(p);
-                                self.import_item_from_inline_module(
-                                    resolved.as_str(),
-                                    item_name.as_str(),
-                                )?;
-                                // Task #13: braced-item ALIASES
-                                // (`mount X.{Widget as W}`) were dropped
-                                // by this shortcut — only the original
-                                // name got registered and `W.make(7)`
-                                // failed E100 'unbound variable: W'
-                                // (the cross-file `process_import` route
-                                // threads `local_name`, but this early
-                                // return meant it never ran).  Bind the
-                                // alias to the freshly-imported item.
-                                if let Maybe::Some(alias) = &tree.alias {
-                                    self.register_mount_item_alias(
-                                        item_name.as_str(),
-                                        alias,
-                                    );
-                                }
-                            }
-                        }
-                        return Ok(());
-                    }
-                    // Inline module exists but doesn't cover all items
-                    // directly — fall through to cross-file resolution.
-                }
+            MountTreeKind::Nested { .. } => {
+                let current_path = self.current_module_path.clone();
+                let registry = self.module_registry.read().clone();
+                return self.process_import(import, current_path.as_str(), &registry);
             }
             // #5 / P1.5 — file-relative mounts are resolved by
             // the session loader before reaching the inline-
@@ -914,6 +809,25 @@ impl TypeChecker {
         }
 
         Ok(())
+    }
+
+    /// Select a declared inline namespace in its lexical scope. Explicit mounts
+    /// keep their owner; a local value cannot become a namespace by spelling.
+    pub(super) fn inline_namespace_owner(&self, name: &str) -> Option<Text> {
+        if self.ctx.env.is_locally_bound(name) { return None; }
+        let has_body = |key: &str| self.inline_modules.get(&Text::from(key))
+            .is_some_and(|module| module.items.is_some());
+        if let Some(owner) = self.module_aliases.get(&Text::from(name)) {
+            return has_body(owner.as_str()).then(|| owner.clone());
+        }
+        let mut scope = self.current_module_path.as_str();
+        loop {
+            let owner = format!("{scope}.{name}");
+            if has_body(&owner) { return Some(owner.into()); }
+            let Some((parent, _)) = scope.rsplit_once('.') else { break; };
+            scope = parent;
+        }
+        has_body(name).then(|| self.inline_module_declaration_path(name).into())
     }
 
     fn inline_module_declaration_path(&self, key: &str) -> String {
@@ -2097,6 +2011,9 @@ impl TypeChecker {
                         path_starts_with_crate(path),
                     ) {
                         if let Ok(()) = self.import_item_from_inline_module(&module_key, &item_name) {
+                            if let Some(alias) = import.tree.alias.as_ref().or(import.alias.as_ref()) {
+                                self.register_mount_item_alias(&item_name, alias);
+                            }
                             return Ok(());
                         }
                     }
@@ -2161,8 +2078,16 @@ impl TypeChecker {
                     // Normalize the module path (handles std.*, stdlib modules, and relative paths)
                     let module_path = normalize_module_path(&full_path_str[..dot_pos]);
                     let item_name = &full_path_str[dot_pos + 1..];
-                    // Mark as explicit import (single-path imports are explicit)
-                    self.explicit_imports.insert(item_name.to_string());
+                    // A rename binds only the local spelling. Claiming the original
+                    // name would suppress an unrelated glob or local declaration.
+                    let local_name = match (&import.tree.alias, &import.alias) {
+                        (Maybe::Some(alias), _) | (Maybe::None, Maybe::Some(alias)) => {
+                            Some(alias.name.as_str())
+                        }
+                        _ => None,
+                    };
+                    let register_name = local_name.unwrap_or(item_name);
+                    self.explicit_imports.insert(register_name.to_string());
 
                     // §Y close: track the source module path under
                     // `imported_names` so `lookup_record_type` can
@@ -2178,12 +2103,7 @@ impl TypeChecker {
                     // regardless of whether `foo` is inline-declared or
                     // file-backed.
                     {
-                        let local_name = match (&import.tree.alias, &import.alias) {
-                            (Maybe::Some(a), _) => a.name.as_str(),
-                            (Maybe::None, Maybe::Some(a)) => a.name.as_str(),
-                            _ => item_name,
-                        };
-                        let name_text = verum_common::Text::from(local_name);
+                        let name_text = verum_common::Text::from(register_name);
                         let source = verum_common::Text::from(format!(
                             "cog.{}",
                             module_path.as_str()
@@ -2202,13 +2122,7 @@ impl TypeChecker {
                     // tries to resolve `Z` and fails with `unbound
                     // variable: Z` even though the underlying item is
                     // wired through.
-                    let local_name: Option<&str> = match (&import.tree.alias, &import.alias) {
-                        (Maybe::Some(a), _) => Some(a.name.as_str()),
-                        (Maybe::None, Maybe::Some(a)) => Some(a.name.as_str()),
-                        _ => None,
-                    };
                     if let Some(alias_str) = local_name {
-                        self.explicit_imports.insert(alias_str.to_string());
                         self.import_item_from_module_with_alias_and_span(
                             &module_path,
                             item_name,
@@ -2296,278 +2210,78 @@ impl TypeChecker {
                 self.import_all_from_module(&module_path, registry)?;
             }
 
-            MountTreeKind::Nested { prefix, trees } => {
-                // Try inline module resolution first.
-                //
-                // **Coverage gate** (mirrors check_import). Same
-                // discipline: only short-circuit to the inline-module
-                // path when the inline module exports every requested
-                // item DIRECTLY.  If the inline module re-exports via
-                // `public mount`, fall through to the cross-file
-                // path so the registry walks the re-export chain.
-                let simple_nested_path = simple_process_path(prefix);
-                let nested_candidates = if path_starts_with_crate(prefix) {
-                    vec![simple_nested_path.clone()]
-                } else {
-                    vec![
-                        simple_nested_path.clone(),
-                        verum_common::Text::from(format!("cog.{}", simple_nested_path)),
-                    ]
-                };
-                for candidate in &nested_candidates {
-                    if let Some(inline_mod) = self.inline_modules.get(candidate).cloned() {
-                        let inline_direct_items = inline_mod
-                            .items
-                            .as_ref()
-                            .map(|items| {
-                                items
-                                    .iter()
-                                    .filter_map(|item| match &item.kind {
-                                        verum_ast::ItemKind::Function(f)
-                                            if matches!(
-                                                f.visibility,
-                                                verum_ast::decl::Visibility::Public
-                                            ) =>
-                                        {
-                                            Some(f.name.name.as_str().to_string())
-                                        }
-                                        verum_ast::ItemKind::Type(t)
-                                            if matches!(
-                                                t.visibility,
-                                                verum_ast::decl::Visibility::Public
-                                            ) =>
-                                        {
-                                            Some(t.name.name.as_str().to_string())
-                                        }
-                                        verum_ast::ItemKind::Const(c)
-                                            if matches!(
-                                                c.visibility,
-                                                verum_ast::decl::Visibility::Public
-                                            ) =>
-                                        {
-                                            Some(c.name.name.as_str().to_string())
-                                        }
-                                        _ => None,
-                                    })
-                                    .collect::<std::collections::HashSet<_>>()
-                            })
-                            .unwrap_or_default();
-                        // Also gather names this inline module re-exports via
-                        // `public mount .sub.{name}`. The inline-module import
-                        // path now follows those re-export chains to the
-                        // canonical defining submodule (see
-                        // `import_item_from_inline_module`), so a re-exported
-                        // name is just as resolvable through the inline path as
-                        // a direct declaration. Counting them here lets the
-                        // umbrella pattern (`mount core.sys.{extract_bits}`)
-                        // resolve under strict compilation instead of falling
-                        // through to the cross-file path that never walked the
-                        // re-export chain.
-                        let inline_reexport_items: std::collections::HashSet<String> = {
-                            let mut pairs = List::new();
-                            if let Some(items) = inline_mod.items.as_ref() {
-                                collect_inline_mount_reexports_recursive(
-                                    items.as_slice(),
-                                    candidate.as_str(),
-                                    &mut pairs,
-                                );
-                            }
-                            pairs
-                                .into_iter()
-                                .filter_map(|(_, n)| n.map(|t| t.as_str().to_string()))
-                                .collect()
-                        };
-                        let direct_covers_all = trees.iter().all(|tree| {
-                            if let MountTreeKind::Path(p) = &tree.kind {
-                                let want = simple_process_path(p);
-                                inline_direct_items.contains(want.as_str())
-                                    || inline_reexport_items.contains(want.as_str())
-                            } else {
-                                true
-                            }
-                        });
-                        if direct_covers_all {
-                            let mut all_ok = true;
-                            for tree in trees {
-                                if let MountTreeKind::Path(p) = &tree.kind {
-                                    let item_name = simple_process_path(p);
-                                    if self
-                                        .import_item_from_inline_module(
-                                            candidate.as_str(),
-                                            item_name.as_str(),
-                                        )
-                                        .is_err()
-                                    {
-                                        all_ok = false;
-                                        break;
-                                    }
-                                }
-                            }
-                            if all_ok {
-                                return Ok(());
-                            }
-                        }
-                        // Fall through to cross-file resolution.
-                    }
-                }
-                // import module.path.{item1, item2}
-                let raw_prefix = extract_path(prefix);
-                let is_rel = is_relative_path(prefix);
-                let resolved = resolve_relative(raw_prefix.as_str(), is_rel);
-
-                // Normalize the module path (handles std.*, stdlib modules, and relative paths)
-                let module_path = normalize_module_path(resolved.as_str());
-
-                // #[cfg(debug_assertions)]
-                // eprintln!(
-                // "[DEBUG] Resolved module path: '{}' -> '{}'",
-                // prefix_str.as_str(),
-                // module_path.as_str()
-                // );
-
-                // Import each item with span-aware error reporting
-                // Collect first error but continue processing all items to avoid cascading failures
-                let mut first_error: Option<TypeError> = None;
-                for tree in trees {
-                    if let MountTreeKind::Path(item_path) = &tree.kind {
-                        // Skip `self` imports in nested mounts (e.g., mount core.collections.{self, List})
-                        // `self` brings the module itself into scope, not an item from it
-                        let is_self_import = item_path.segments.len() == 1
-                            && matches!(
-                                item_path.segments.first(),
-                                Some(verum_ast::ty::PathSegment::SelfValue)
-                            );
-                        if is_self_import {
-                            // Register the module name as an alias if specified
-                            // e.g., mount core.io.{self as io} -> alias "io" to the module
-                            if let Some(alias) = &tree.alias {
-                                let alias_ty = Type::Named {
-                                    path: verum_ast::ty::Path::new(
-                                        verum_common::List::from(vec![
-                                            verum_ast::ty::PathSegment::Name(
-                                                verum_ast::Ident::new(
-                                                    module_path.clone(),
-                                                    tree.span,
-                                                ),
-                                            ),
-                                        ]),
-                                        tree.span,
-                                    ),
-                                    args: List::new(),
-                                };
-                                self.ctx
-                                    .env
-                                    .insert(alias.name.clone(), TypeScheme::mono(alias_ty));
-                            }
-                            continue;
-                        }
-                        let item_name = extract_path(item_path);
-                        // Skip empty item names (e.g., from unresolved self/super segments)
-                        if item_name.is_empty() {
-                            continue;
-                        }
-                        // Check for import alias (e.g., `IoError as EngineIoError`)
-                        let local_name: Option<&str> = tree.alias.as_ref().map(|a| a.name.as_str());
-                        // Use span-aware import for proper error reporting
-                        // If import fails but the item is already registered as a builtin,
-                        // silently continue (the builtin provides the type).
-                        // Mark this name as explicitly imported BEFORE the import call.
-                        // This ensures that even if the import triggers transitive loads
-                        // (which may try to import a conflicting name via glob), the
-                        // explicit import takes precedence.
-                        let register_name = local_name.unwrap_or(item_name.as_str());
-                        self.explicit_imports.insert(register_name.to_string());
-
-                        // T1030: a brace-list entry may name a SUBMODULE, not
-                        // an item. `mount core.configuration.toml;` resolves,
-                        // and `mount core.configuration.{ConfigValue};`
-                        // resolves — but `mount core.configuration.{toml};`
-                        // reported ``cannot find `toml` in module
-                        // `core.configuration` ``, because the only surface
-                        // this arm consults is the module's ITEM list, and a
-                        // submodule is not an item.
-                        //
-                        // Measured on 74656bd14: of the 96 E401 diagnostics
-                        // the failing `core/` files produce, 36 are this —
-                        // a re-export of a submodule that exists on disk.
-                        //
-                        // Answered with the same call the whole-module arm
-                        // makes, so the two spellings cannot drift apart.
-                        {
-                            let sub_path = verum_common::Text::from(
-                                format!("{}.{}", module_path.as_str(), item_name).as_str(),
-                            );
-                            if let Some(m) = self.mount_module_target(sub_path.as_str(), registry)
-                            {
-                                self.import_all_from_module(&m, registry)?;
-                                continue;
-                            }
-                        }
-
-                        // §Y close: track the source module path for
-                        // `lookup_record_type` mount-scoped resolution.
-                        // Mirror of the population in the
-                        // `MountTreeKind::Path` arm above; the Nested arm
-                        // is the path that `mount X.{Item}` actually
-                        // takes after parsing.  Without this, every
-                        // braced import was invisible to the bare-name
-                        // resolver, leaving `type_defs` last-write-wins
-                        // as the only signal.
-                        {
-                            let name_text = verum_common::Text::from(register_name);
-                            let source = verum_common::Text::from(format!(
-                                "cog.{}",
-                                module_path.as_str()
-                            ));
-                            // IMPORT-SOURCE-FUNNEL-1.
-                            self.record_import_source(name_text, source);
-                        }
-
-                        let import_result = self.import_item_from_module_with_alias_and_span(
-                            &module_path,
-                            item_name.as_str(),
-                            local_name,
-                            registry,
-                            tree.span,
+            MountTreeKind::Nested { .. } => {
+                use verum_modules::mount_paths::{mount_paths, MountPathKind};
+                let mut first_error = None;
+                for leaf in mount_paths(&import.tree) {
+                    // A self leaf binds only the declared namespace. Resolve and
+                    // check it before publishing an alias; a nominal type binding
+                    // is not a module binding and cannot supply namespace dispatch.
+                    if leaf.kind == MountPathKind::Named
+                        && matches!(leaf.path.segments.last(), Some(verum_ast::PathSegment::SelfValue))
+                    {
+                        let namespace = verum_ast::Path::new(
+                            leaf.path.segments[..leaf.path.segments.len() - 1]
+                                .iter().cloned().collect(),
+                            leaf.span,
                         );
-                        if let Err(e) = import_result {
-                            let check_name = local_name.unwrap_or(item_name.as_str());
-                            let check_text = verum_common::Text::from(check_name);
-                            // T0528 — this leniency exists for ONE case:
-                            // `mount base.{Bool}`-style mounts of LANGUAGE
-                            // builtins (primitives, sized integers, builtin
-                            // fns), which no stdlib module declares.  It
-                            // used to test env/`type_defs` membership —
-                            // i.e. "SOMETHING ambient has this name" —
-                            // which also swallowed every wrong mount whose
-                            // name collided with a stranger module's item.
-                            // Measured (baked flow): mounting nonexistent
-                            // `Config` raised E402, then core.context's
-                            // ambient `Config` ate it — the vacuous-green
-                            // instrument.  Narrowed to the checker's OWN
-                            // registration snapshot: only names seeded by
-                            // `register_primitives`/`register_builtins`
-                            // may suppress an explicit-mount resolution
-                            // error (name-resolution.md §3.4, stage B).
-                            let is_checker_builtin =
-                                self.builtin_ambient_names.contains(&check_text);
-                            if !is_checker_builtin {
-                                // Collect error but continue processing remaining items
-                                if first_error.is_none() {
-                                    first_error = Some(e);
-                                }
-                            }
-                            // Language builtin: the mount is redundant but
-                            // harmless — the ambient binding is the
-                            // checker's own, so the name means exactly what
-                            // the author assumes.
+                        let requested = normalize_module_path(&extract_path(&namespace));
+                        let result = if let Some(owner) = self.mount_module_target(requested.as_str(), registry) {
+                            self.check_namespace_visibility(&owner, registry, leaf.span)
+                                .map(|()| {
+                                    let name = leaf.alias.map(|alias| alias.name.clone())
+                                        .or_else(|| owner.as_str().rsplit('.').next().map(Text::from));
+                                    if let Some(name) = name {
+                                        self.module_aliases.insert(name, owner);
+                                    }
+                                })
+                        } else {
+                            Err(TypeError::ImportModuleNotFound {
+                                module_path: requested,
+                                available_modules: List::new(),
+                                notes: List::new(),
+                                span: leaf.span,
+                            })
+                        };
+                        if let Err(error) = result
+                            && first_error.is_none()
+                        {
+                            first_error = Some(error);
                         }
+                        continue;
                     }
-                    // Other kinds (Glob, Nested) can be handled recursively if needed
+                    // A redundant mount may name an ambient builtin directly.
+                    // A rename requires an actual resolved declaration: the local
+                    // binding name cannot establish the missing source's identity.
+                    let builtin = leaf.kind == MountPathKind::Named
+                        && matches!(leaf.path.segments.last(),
+                            Some(verum_ast::PathSegment::Name(name))
+                                if self.builtin_ambient_names.contains(&name.name)
+                                    && leaf.alias.is_none_or(|alias| alias.name == name.name));
+                    let leaf_import = verum_ast::MountDecl {
+                        visibility: import.visibility.clone(),
+                        alias: None,
+                        span: leaf.span,
+                        tree: verum_ast::MountTree {
+                            kind: match leaf.kind {
+                                MountPathKind::Named => MountTreeKind::Path(leaf.path),
+                                MountPathKind::Glob => MountTreeKind::Glob(leaf.path),
+                            },
+                            alias: leaf.alias.cloned(),
+                            span: leaf.span,
+                        },
+                    };
+                    // Each leaf is non-grouped, so call depth is constant even
+                    // for deeply nested source groups. Use the ordinary import
+                    // path for inline/source/archive owners and alias registration.
+                    if let Err(error) = self.process_import(&leaf_import, current_module_path, registry)
+                        && !builtin && first_error.is_none()
+                    {
+                        first_error = Some(error);
+                    }
                 }
-                // Return the first collected error after processing all items
-                if let Some(e) = first_error {
-                    return Err(e);
+                if let Some(error) = first_error {
+                    return Err(error);
                 }
             }
             // #5 / P1.5 — file-relative mounts are session-loader-resolved
@@ -4287,6 +4001,45 @@ impl TypeChecker {
         Some(items)
     }
 
+    /// A namespace alias cannot make a declared private module public. Walk
+    /// canonical ancestors without loading their contents or cloning their ASTs.
+    fn check_namespace_visibility(
+        &self,
+        owner: &Text,
+        registry: &verum_modules::ModuleRegistry,
+        span: Span,
+    ) -> Result<()> {
+        let mut namespace = owner.as_str();
+        while let Some((parent, name)) = namespace.rsplit_once('.') {
+            let inline = self.inline_modules.get(&Text::from(namespace));
+            let parent_module = registry.get_by_path_aliased(parent);
+            let declaration = inline.or_else(|| {
+                parent_module.as_ref()?.ast.items.iter()
+                    .filter(|item| self.cfg_evaluator.should_include(&item.attributes))
+                    .find_map(|item| match &item.kind {
+                        verum_ast::ItemKind::Module(declaration)
+                            if declaration.name.name == name => Some(declaration),
+                        _ => None,
+                    })
+            });
+            if let Some(declaration) = declaration {
+                let visibility = declaration.visibility.resolve_declared_scope(parent)
+                    .map_err(|reason| TypeError::VisibilityError {
+                        name: name.into(), visibility: reason,
+                        module_path: parent.into(), span,
+                    })?;
+                if !visibility.visible_from(parent.split('.'), self.current_module_path.as_str().split('.')) {
+                    return Err(TypeError::VisibilityError {
+                        name: name.into(), visibility: visibility.as_str().into(),
+                        module_path: parent.into(), span,
+                    });
+                }
+            }
+            namespace = parent;
+        }
+        Ok(())
+    }
+
     /// Normalise a mount-path spelling to the spelling the archive
     /// descriptors use: `cog.` prefixes are stripped, `std.` reads as
     /// `core.`.  `None` for an empty path.
@@ -4672,22 +4425,19 @@ impl TypeChecker {
                             // Register the type declaration - this handles variants, records, etc.
                             // Set flag so register_type_declaration_body knows this is an explicit import
                             // and allows overwriting any existing type (even from metadata/global passes).
-                            let is_explicit =
-                                import_span.is_some() && self.explicit_imports.contains(item_name);
-                            if is_explicit {
-                                self.in_explicit_import_registration = true;
-                            }
-                            // A mount binds a declaration from its source module; it
-                            // must not publish a new nominal type under the consumer.
-                            // Use the same owner scope as the imported impl blocks.
-                            let reg_result = self.register_type_declaration_in_module(
+                            let is_explicit = import_span.is_some()
+                                && self.explicit_imports.contains(register_name);
+                            let previous_explicit = self.in_explicit_import_registration;
+                            self.in_explicit_import_registration = is_explicit;
+                            // Loading a declaration does not mount its original spelling.
+                            // Keep its canonical owner, then publish only this mount's
+                            // selected local binding below.
+                            let reg_result = self.load_source_type_declaration_with_parameter_key(
                                 &type_decl,
-                                source_module_path.as_str(),
+                                &source_module_path,
+                                import_span.unwrap_or(type_decl.span),
                             );
-                            // Reset flag after registration completes (success or failure)
-                            if is_explicit {
-                                self.in_explicit_import_registration = false;
-                            }
+                            self.in_explicit_import_registration = previous_explicit;
                             if let Err(e) = reg_result {
                                 if e.is_soundness_critical() {
                                     return Err(e);
@@ -4701,67 +4451,28 @@ impl TypeChecker {
                                 // e
                                 // );
                                 // Fall through to fallback registration
-                            } else {
-                                // #[cfg(debug_assertions)]
-                                // eprintln!(
-                                // "[DEBUG] Successfully registered type '{}' from module '{}'",
-                                // item_name,
-                                // resolved_module_path.as_str()
-                                // );
+                            } else if let Ok((registered_type, declaration_key)) = reg_result {
                                 registered_successfully = true;
-
-                                // ALIASED-TYPE-IMPORT-1 (T0244): `register_type_declaration`
-                                // binds the type under its OWN declared name
-                                // (`type_decl.name`) — it has no notion of a local
-                                // rename. `register_name` differs from that TRUE
-                                // name exactly when this import resolved through a
-                                // `mount X as Y` re-export chain (directly here, or
-                                // transitively via `find_type_declaration_with_source_module`
-                                // matching a `tree.alias` upstream — e.g. `Constraint`
-                                // resolving to `core.term.layout.constraint`'s
-                                // `LayoutConstraint`). Bind the alias as a `Type::Named`
-                                // redirect so later lookups of `register_name` — type
-                                // annotations, `is`/`match` patterns, and qualified
-                                // variant construction (`Constraint.Length(10)`) —
-                                // resolve through to the real type instead of finding
-                                // nothing. Mirrors the redirect shape
-                                // `process_import_aliases` registers for the
-                                // source-driven global-pass pipeline; this is the
-                                // counterpart for the per-file archive/lazy-loader
-                                // path that an ordinary `verum run`/`verum test`
-                                // compile actually uses.
+                                // A rename is a binding to the selected declaration,
+                                // not a new type in the consumer's module.
                                 let true_name = type_decl.name.name.as_str();
-                                if register_name != true_name {
-                                    use verum_ast::ty::{Ident, Path};
-                                    let alias_target = Type::Named {
-                                        path: Path::new(
-                                            format!("{}.{}", source_module_path, true_name)
-                                                .split('.')
-                                                .map(|part| {
-                                                    verum_ast::ty::PathSegment::Name(Ident::new(
-                                                        part,
-                                                        Span::dummy(),
-                                                    ))
-                                                })
-                                                .collect(),
-                                            Span::dummy(),
-                                        ),
+                                let binding = if register_name == true_name {
+                                    registered_type
+                                } else {
+                                    Type::Named {
+                                        path: Self::text_to_path(&declaration_key),
                                         args: List::new(),
-                                    };
-                                    self.ctx.define_type(
-                                        verum_common::Text::from(register_name),
-                                        alias_target,
-                                    );
-                                    // A tuple/newtype also exports a constructor
-                                    // value. Bind the exact source constructor,
-                                    // never the last same-named ambient value.
-                                    let constructor_key =
-                                        format!("{}.{}", source_module_path, true_name);
-                                    if let Some(constructor) =
-                                        self.ctx.env.lookup(&constructor_key).cloned()
-                                    {
-                                        self.ctx.env.insert(register_name, constructor);
                                     }
+                                };
+                                self.ctx.define_type(register_name, binding);
+
+                                // The selected type may also export a value constructor.
+                                // Bind the exact source value under this mount's spelling.
+                                if let Some(constructor) = self.source_type_registration
+                                    .constructor_values.get(&declaration_key)
+                                    .or_else(|| self.ctx.env.lookup(&declaration_key)).cloned()
+                                {
+                                    self.ctx.env.insert(register_name, constructor);
                                 }
 
                                 // CRITICAL FIX: Also import implement block methods for the type.
@@ -16038,14 +15749,10 @@ impl TypeChecker {
             // STDLIB-AGNOSTIC: All types (including Maybe, Result) are looked up uniformly.
             // No special cases for specific type names - the definition lookup handles all.
             Type::Named { path, args } => {
-                let type_name = path
-                    .segments
-                    .last()
-                    .map(|seg| match seg {
-                        verum_ast::ty::PathSegment::Name(ident) => ident.name.as_str(),
-                        _ => "",
-                    })
-                    .unwrap_or("");
+                // A nominal path identifies its declaring module. Dropping
+                // that prefix lets a same-named local type supply the body.
+                let type_key = self.path_to_string(path);
+                let type_name = type_key.as_str();
 
                 if std::env::var("VERUM_TRACE_ALIASEXP").is_ok() {
                     eprintln!(
@@ -16068,16 +15775,7 @@ impl TypeChecker {
                             // self-referential placeholder (type alias stores Named{self} in type_defs).
                             // If so, resolve through the alias table instead.
                             let is_self_ref = if let Type::Named { path: def_path, .. } = def_ty {
-                                def_path
-                                    .segments
-                                    .last()
-                                    .map(|seg| match seg {
-                                        verum_ast::ty::PathSegment::Name(id) => {
-                                            id.name.as_str() == type_name
-                                        }
-                                        _ => false,
-                                    })
-                                    .unwrap_or(false)
+                                self.path_to_string(def_path) == type_key
                             } else {
                                 false
                             };
@@ -17910,7 +17608,8 @@ impl TypeChecker {
         let base_is_inline_namespace = matches!(&current_receiver.kind, ExprKind::Path(path)
             if path.segments.len() == 1
                 && matches!(path.segments.first(), Some(verum_ast::ty::PathSegment::Name(ident))
-                    if self.inline_modules.contains_key(&ident.name)
+                    if (self.inline_namespace_owner(ident.name.as_str()).is_some()
+                        || self.inline_modules.contains_key(&ident.name))
                         && self.ctx.env.lookup(ident.name.as_str()).is_none()
                         && self.ctx.lookup_type(ident.name.as_str()).is_none()));
         let base_is_module_path = !base_is_module_alias && {
@@ -24258,7 +23957,11 @@ bake to have this verified.",
             }
             Some(PathSegment::Name(ident))
                 if !self.ctx.env.is_locally_bound(ident.name.as_str()) => {
-                let Some(owner) = self.module_aliases.get(&ident.name) else { return Ok(None); };
+                let owner = self.module_aliases.get(&ident.name).cloned().or_else(|| {
+                    self.ctx.lookup_type(ident.name.as_str()).is_none()
+                        .then(|| self.inline_namespace_owner(ident.name.as_str())).flatten()
+                });
+                let Some(owner) = owner else { return Ok(None); };
                 let mut segments: List<_> = owner.as_str().split('.')
                     .map(|name| PathSegment::Name(Ident::new(name, span))).collect();
                 segments.extend(path.segments.iter().skip(1).cloned());
@@ -24272,14 +23975,40 @@ bake to have this verified.",
         // Lazily register the exact metadata owner, including a same-named
         // companion module. This loader enforces owner and visibility; the
         // ordinary call path then consumes that same declaration scheme.
-        let _ = self.lookup_static_or_load_from_metadata(self.path_to_string(&path).as_str());
+        let qualified = self.path_to_string(&path);
+        let source = qualified.rsplit_once('.').and_then(|(owner, member)| {
+            let registry = self.module_registry.read();
+            self.get_module_with_path_aliases(owner, &registry)
+                .map(|module| (module, Text::from(member)))
+        });
+        if let Some((module, member)) = source {
+            let scheme = self.source_qualified_function(module, member)
+                .ok_or_else(|| TypeError::UnboundVariable { name: qualified.clone(), span })?;
+            // Publish only this qualified callable, never the namespace's bare
+            // items. Ordinary call inference then retains its generic bounds.
+            self.ctx.env.insert(qualified, scheme);
+        } else {
+            let _ = self.lookup_static_or_load_from_metadata(qualified.as_str());
+        }
 
+        self.infer_namespace_callable(path, type_args, args, span).map(Some)
+    }
+
+    /// Namespace selection publishes the exact scheme; ordinary calls own
+    /// generic binding, bounds, permissions and value-argument checking.
+    fn infer_namespace_callable(
+        &mut self,
+        path: verum_ast::Path,
+        type_args: &List<verum_ast::ty::GenericArg>,
+        args: &[Expr],
+        span: Span,
+    ) -> Result<InferResult> {
         let call = Expr::new(ExprKind::Call {
             func: Box::new(Expr::new(ExprKind::Path(path), span)),
             type_args: type_args.clone(),
             args: args.iter().cloned().collect(),
         }, span);
-        self.synth_expr(&call).map(Some)
+        self.synth_expr(&call)
     }
 
     /// Resolve module-qualified function calls: `module.func(args)` or
@@ -24870,31 +24599,59 @@ bake to have this verified.",
         module: Shared<verum_modules::ModuleInfo>,
         name: Text,
     ) -> Option<TypeScheme> {
+        // A namespace record without source definitions does not erase the
+        // archive declaration. A real source body keeps authority below,
+        // including changed signatures and private or missing members.
+        if module.ast.items.is_empty() {
+            let metadata = self.core_metadata.clone()?;
+            let owner = module.path.to_string();
+            let qualified: Text = format!("{owner}.{name}").into();
+            let declares = |descriptor: &crate::core_metadata::FunctionDescriptor| {
+                let origin = descriptor.origin_module_path.as_ref()
+                    .filter(|origin| !origin.is_empty()).unwrap_or(&descriptor.module_path);
+                origin.as_str() == owner && descriptor.name == name && descriptor.parent_type.is_none()
+            };
+            let descriptor = if let Some(descriptor) = metadata.functions.get(&qualified) {
+                declares(descriptor).then_some(descriptor)?
+            } else {
+                // Directory-packed archives may index a file declaration by
+                // its storage owner. The index narrows candidates; only the
+                // descriptor's complete declaring identity authorizes one.
+                let index = self.metadata_name_index().ok()?;
+                let mut candidates = index.function_keys_ending_with(name.as_str())
+                    .filter_map(|key| metadata.functions.get(key).map(|descriptor| (key, descriptor)))
+                    .filter(|(key, descriptor)| declares(descriptor)
+                        && **key == verum_common::qualified_name::qualify_module_name(
+                            &descriptor.module_path, &descriptor.name));
+                let first = candidates.next()?.1;
+                if candidates.next().is_some() { return None; }
+                first
+            };
+            if !descriptor.is_public && owner != self.current_module_path.as_str() { return None; }
+            let scheme = self.scheme_from_function_descriptor(descriptor, &metadata)?;
+            self.register_required_params_from_descriptor(qualified.as_str(), descriptor);
+            return Some(scheme);
+        }
         let (source, original) = {
             let registry = self.module_registry.read();
             self.source_export_declaration(module, name, &registry)?
         };
+        if let Some(function) = source.ast.items.iter().find_map(|item| self.imported_function(item, &original)) {
+            return match self.scheme_from_source_function(function, &source.path.to_string()) {
+                Ok(scheme) => Some(scheme),
+                Err(error) => {
+                    self.deferred_soundness_errors.push(error);
+                    None
+                }
+            };
+        }
         self.extract_function_type_from_module(&source.ast, &original, &source.path.to_string())
     }
 
-    /// Resolve `<dotted.module.path>.fn(args)` against the global
-    /// registries: env, module function tables, and (lazily) the
-    /// CoreMetadata free-fn descriptors registered under file-declared
-    /// module keys.  Probes progressively-stripped prefixes,
-    /// most-qualified first.  Guarded on the base segment not being a
-    /// bound VALUE so genuine field chains
-    /// (`self.cfg.parser.parse(...)`) are never hijacked.
-    /// Resolve `a.b.c.f(args)` against the global registry / archive
-    /// metadata, where `a.b.c` is a module path rather than a value.
-    ///
-    /// The arity comparison below is a FILTER, and a filter that finds
-    /// nothing answers `None` — which the caller reads as "not a module
-    /// call", falls through to leniency, and lets the call satisfy any
-    /// declared type. So a real callee invoked with the wrong number of
-    /// arguments was indistinguishable from a name that does not exist,
-    /// and both were silent (T0806). The name-hit is remembered: if no
-    /// candidate matches exactly and some candidate matched by NAME,
-    /// that is an arity error and is reported as one.
+    /// Select a dotted namespace's declaration before applying the ordinary
+    /// call rules. Arity, explicit generic arguments and bounds cannot change
+    /// because a call uses an imported, qualified or re-exported spelling.
+    /// A bound value receiver never participates in namespace selection.
     fn try_resolve_global_module_fn_call(
         &mut self,
         segments: &[&str],
@@ -24971,7 +24728,7 @@ bake to have this verified.",
         } else {
             None
         };
-        let mut arity_mismatch: Option<usize> = None;
+
         for cand in &candidates {
             let scheme = source_scheme.clone().unwrap_or_else(|| self
                 .ctx
@@ -25045,46 +24802,11 @@ bake to have this verified.",
                 }
             }
             if let Some(scheme) = scheme {
-                let instance = self.instantiate_call_scheme(&scheme, span)?;
-                let explicit_slots = &instance.explicit_method_vars;
-                if !type_args.is_empty() {
-                    self.bind_explicit_method_arguments(explicit_slots.as_ref(), type_args, method, span)?;
-                }
-                let func_type = self.unifier.try_apply(&instance.ty, span)?;
-                if let Type::Function {
-                    params,
-                    return_type,
-                    ..
-                } = &func_type
-                {
-                    if params.len() == args.len() {
-                        for (arg, param_ty) in args.iter().zip(params.iter()) {
-                            let resolved_param = self.unifier.apply(param_ty);
-                            self.check_expr(arg, &resolved_param)?;
-                        }
-                        self.enforce_call_type_bounds(&instance.type_bounds, span)?;
-                        self.enforce_call_protocol_bounds(&instance.protocol_bounds, span)?;
-                        self.type_registry.register_call_target(span, self.unifier.apply(&func_type));
-                        let resolved_return = self.unifier.apply(return_type);
-                        return Ok(Some(InferResult::new(resolved_return)));
-                    }
-                    // The NAME resolves here; only the count is wrong.
-                    // Remember the most-qualified such candidate — the
-                    // list is probed most-qualified first — and report it
-                    // if nothing later matches exactly.
-                    if arity_mismatch.is_none() {
-                        arity_mismatch = Some(params.len());
-                    }
-                }
+                self.ctx.env.insert(cand.as_str(), scheme);
+                let path = verum_ast::Path::new(cand.split('.')
+                    .map(|name| verum_ast::PathSegment::Name(Ident::new(name, span))).collect(), span);
+                return self.infer_namespace_callable(path, type_args, args, span).map(Some);
             }
-        }
-        if let Some(expected) = arity_mismatch {
-            return Err(self.arity_error(
-                method.name.clone(),
-                expected,
-                args.len(),
-                span,
-            ));
         }
         Ok(None)
     }

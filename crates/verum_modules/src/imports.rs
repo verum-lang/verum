@@ -435,9 +435,9 @@ impl ImportResolver {
             MountTreeKind::Glob(path) => {
                 self.resolve_glob_import(path, importing_module, module_exports, module_paths, span)
             }
-            MountTreeKind::Nested { prefix, trees } => self.resolve_nested_import(
+            MountTreeKind::Nested { prefix, .. } => self.resolve_nested_import(
                 prefix,
-                trees,
+                tree,
                 importing_module,
                 module_exports,
                 module_paths,
@@ -788,186 +788,38 @@ impl ImportResolver {
         ))
     }
 
-    /// Resolve an import tree against an EXTERNAL prefix already
-    /// computed by `resolve_nested_import`.  The leaf trees within
-    /// a nested form (`{Foo, Bar}`) are bare symbol names, not
-    /// absolute paths — this helper joins them to the resolved
-    /// prefix before delegating to symbol-table lookup.
-    fn resolve_import_tree_with_prefix(
-        &self,
-        tree: &MountTree,
-        prefix: &ModulePath,
-        importing_module: ModuleId,
-        module_exports: &Map<ModuleId, ExportTable>,
-        module_paths: &Map<ModuleId, ModulePath>,
-        span: Span,
-    ) -> ModuleResult<ResolvedImport> {
-        match &tree.kind {
-            MountTreeKind::Path(leaf) => {
-                // Leaf path: append its segments to the prefix +
-                // resolve as a simple import.
-                let target_module = self.find_module_by_path(prefix, module_paths)?;
-                let item_name_text = match leaf.segments.last() {
-                    Some(PathSegment::Name(ident)) => ident.name.clone(),
-                    _ => {
-                        return Err(ModuleError::InvalidPath {
-                            path: Text::from(format!("{:?}", leaf)),
-                            reason: Text::from("leaf path must be a name"),
-                            span: Some(span),
-                        });
-                    }
-                };
-                let exports =
-                    module_exports
-                        .get(&target_module)
-                        .ok_or_else(|| ModuleError::ModuleNotFound {
-                            path: prefix.clone(),
-                            searched_paths: List::new(),
-                            suggestions: List::new(),
-                            span: Some(span),
-                        })?;
-                let exported_item = match exports.get(&item_name_text) {
-                    Maybe::Some(item) => item,
-                    Maybe::None => {
-                        let available_items: List<Text> = exports
-                            .all_exports()
-                            .map(|(name, _)| name.clone())
-                            .collect::<List<_>>();
-                        let suggestions = crate::suggestions::find_similar_items(
-                            item_name_text.as_str(),
-                            &available_items,
-                        );
-                        return Err(ModuleError::ItemNotFound {
-                            item_name: item_name_text.clone(),
-                            module_path: prefix.clone(),
-                            available_items,
-                            suggestions,
-                            span: Some(span),
-                        });
-                    }
-                };
-                let importing_path = module_paths
-                    .get(&importing_module)
-                    .cloned()
-                    .unwrap_or_else(|| ModulePath::from_str("unknown"));
-                if !exports.is_visible_from_path(&item_name_text, &importing_path) {
-                    return Err(ModuleError::PrivateAccess {
-                        item_name: item_name_text.clone(),
-                        item_module: prefix.clone(),
-                        accessing_module: importing_path,
-                        span: Some(span),
-                    });
-                }
-                // Honour the per-tree alias when present.
-                let final_name = match &tree.alias {
-                    Maybe::Some(alias) => alias.name.clone(),
-                    Maybe::None => item_name_text.clone(),
-                };
-                let imported_item = ImportedItem::new(
-                    final_name,
-                    item_name_text,
-                    target_module,
-                    exported_item.kind,
-                    span,
-                );
-                Ok(ResolvedImport::single(
-                    prefix.clone(),
-                    imported_item,
-                    importing_module,
-                    span,
-                ))
-            }
-            MountTreeKind::Glob(_) => {
-                // Glob inside a nested form: resolve directly via the
-                // existing glob path; the prefix is already part of
-                // the leaf's path representation.
-                self.resolve_import_tree(
-                    tree,
-                    importing_module,
-                    module_exports,
-                    module_paths,
-                    span,
-                )
-            }
-            MountTreeKind::Nested { .. } => {
-                // Nested-within-nested: recurse via the standard tree
-                // resolver, which will call back into us for the
-                // inner nesting.
-                self.resolve_import_tree(
-                    tree,
-                    importing_module,
-                    module_exports,
-                    module_paths,
-                    span,
-                )
-            }
-            MountTreeKind::File { .. } => self.resolve_import_tree(
-                tree,
-                importing_module,
-                module_exports,
-                module_paths,
-                span,
-            ),
-        }
-    }
-
-    /// Resolve nested imports: `import std.io.{File, Read, Write}`
+    /// Resolve grouped imports through the same complete leaf paths used by
+    /// exports and source declaration lookup. The root prefix remains the
+    /// diagnostic surface; each leaf chooses its own actual declaring module.
     fn resolve_nested_import(
         &self,
         prefix: &Path,
-        trees: &[MountTree],
+        tree: &MountTree,
         importing_module: ModuleId,
         module_exports: &Map<ModuleId, ExportTable>,
         module_paths: &Map<ModuleId, ModulePath>,
         span: Span,
     ) -> ModuleResult<ResolvedImport> {
-        // Resolve the prefix relative to the importing module's
-        // location (#187 root-cause fix).  Pre-fix the prefix kept
-        // `super` as a literal segment, and the inner trees were
-        // resolved AS IF ABSOLUTE — so a nested form like
-        // `mount super.rules.k_var.{k_var_sound}` had its trees
-        // looked up at the bare path `k_var_sound` (root scope) and
-        // failed silently.
-        //
-        // Post-fix:
-        //   1. Resolve the prefix to the absolute parent module.
-        //   2. For each leaf tree, prepend the resolved prefix to
-        //      the tree's path so the inner resolver sees the full
-        //      `<absolute-prefix>.<leaf>` form.
-        let prefix_path = if let Some(importing_path) =
-            module_paths.get(&importing_module)
-        {
+        use crate::mount_paths::{mount_paths, MountPathKind};
+        let prefix_path = if let Some(importing_path) = module_paths.get(&importing_module) {
             path_to_module_path_resolved(prefix, importing_path)
         } else {
             path_to_module_path(prefix)
         };
         let mut all_items = List::new();
-
-        for tree in trees {
-            // Build a synthetic absolute path for each leaf by
-            // joining the resolved prefix + the leaf's last segment.
-            // This is the load-bearing piece — the leaf's symbol
-            // name (e.g., `k_var_sound`) gets attached to the
-            // resolved-prefix module path.
-            let resolved =
-                self.resolve_import_tree_with_prefix(
-                    tree,
-                    &prefix_path,
-                    importing_module,
-                    module_exports,
-                    module_paths,
-                    span,
-                )?;
+        for leaf in mount_paths(tree) {
+            let resolved = match leaf.kind {
+                MountPathKind::Named => self.resolve_simple_import_aliased(
+                    &leaf.path, leaf.alias, importing_module,
+                    module_exports, module_paths, leaf.span,
+                )?,
+                MountPathKind::Glob => self.resolve_glob_import(
+                    &leaf.path, importing_module, module_exports, module_paths, leaf.span,
+                )?,
+            };
             all_items.extend(resolved.items);
         }
-
-        Ok(ResolvedImport::new(
-            prefix_path,
-            all_items,
-            false,
-            importing_module,
-            span,
-        ))
+        Ok(ResolvedImport::new(prefix_path, all_items, false, importing_module, span))
     }
 
     /// Find a module by its path

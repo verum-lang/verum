@@ -20,6 +20,8 @@ pub(crate) struct SourceTypeRegistration {
     pub headers: Vec<super::source_protocol_header::SourceProtocolHeader>,
     pub projection_assumptions: Vec<crate::protocol::WhereClause>,
     pub callable_assumptions: List<(Type, Type)>,
+    /// Qualified constructor values staged with the declaration transaction.
+    pub constructor_values: Map<Text, crate::context::TypeScheme>,
     pub completed: Map<Text, TypeDecl>,
     pub pending: Map<Text, TypeDecl>,
     pub depth: usize,
@@ -145,6 +147,7 @@ impl super::TypeChecker {
         if outermost {
             let pending = std::mem::take(&mut self.source_type_registration.pending);
             let aliases = std::mem::take(&mut self.source_type_registration.aliases);
+            let constructors = std::mem::take(&mut self.source_type_registration.constructor_values);
             let protocols = std::mem::take(&mut self.source_type_registration.protocols);
             if let Some(failure) = self.source_type_registration.failure.take() {
                 self.ctx.finish_type_definition_journal(false);
@@ -197,6 +200,11 @@ impl super::TypeChecker {
                 self.protocol_checker.write().register_type_declaration_kind(
                     key.clone(), declaration.body.kind(), arity, alias,
                 );
+            }
+            // Lazy loads may finish inside a temporary value scope. Canonical
+            // constructor identity survives it only after the entire load succeeds.
+            for (name, constructor) in constructors {
+                self.ctx.env.insert_root(name, constructor);
             }
             self.source_type_registration.completed.extend(pending);
         }

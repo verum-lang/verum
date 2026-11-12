@@ -6967,12 +6967,10 @@ impl TypeChecker {
         // Call Graph Building for Negative Context Verification
         // Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.4 - Negative Contexts
         // ============================================================
-        // Extract function name and record call site for transitive checking
-        let callee_name: Option<Text> = match &func.kind {
-            ExprKind::Path(path) => path.segments.last().and_then(|seg| match seg {
-                verum_ast::ty::PathSegment::Name(id) => Some(id.name.clone()),
-                _ => None,
-            }),
+        // A qualified call owns a qualified scheme. Reducing it to the leaf
+        // silently drops explicit arguments and may select a caller homonym.
+        let callee_name = match &func.kind {
+            ExprKind::Path(path) => Some(self.path_to_string(path)),
             _ => None,
         };
 
@@ -7350,15 +7348,14 @@ impl TypeChecker {
 
                             // Bind explicit type arg to this explicit var
                             if let Some(type_arg) = type_args.get(explicit_var_index) {
-                                if let verum_ast::ty::GenericArg::Type(ast_ty) = type_arg {
-                                    let provided_ty = self.ast_to_type(ast_ty)?;
-                                    // Unify the fresh var with the provided type
-                                    self.unifier.unify(
-                                        &Type::Var(*fresh_var),
-                                        &provided_ty,
-                                        expr.span,
-                                    )?;
-                                }
+                                let ast_ty = type_arg.type_for_declared_slot().ok_or_else(||
+                                    TypeError::OtherWithCodeSpanned { code: "E400".into(),
+                                        msg: format!("Function '{}' requires a type argument in this generic slot", name).into(),
+                                        span: expr.span,
+                                    }
+                                )?;
+                                let provided_ty = self.ast_to_type(&ast_ty)?;
+                                self.unifier.unify(&Type::Var(*fresh_var), &provided_ty, expr.span)?;
                             }
                             explicit_var_index += 1;
                         }

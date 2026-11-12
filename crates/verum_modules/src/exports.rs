@@ -958,7 +958,6 @@ pub fn extract_exports_with_policy(
                     add_reexports_from_link(
                         &mount_decl.tree,
                         module_id,
-                        item.span,
                         &mut export_table,
                     )?;
                 }
@@ -1054,87 +1053,27 @@ pub fn extract_exports_with_policy(
 fn add_reexports_from_link(
     tree: &verum_ast::decl::MountTree,
     module_id: ModuleId,
-    span: verum_ast::span::Span,
     export_table: &mut ExportTable,
 ) -> ModuleResult<()> {
-    use verum_ast::decl::MountTreeKind;
-
+    use crate::mount_paths::{mount_paths, MountPathKind};
     use verum_ast::ty::PathSegment;
 
-    match &tree.kind {
-        MountTreeKind::Path(path) => {
-            // Single item link: `pub link .errors.RegistryError`
-            // The last segment is the item name; use alias if present
-            if let Some(last_segment) = path.segments.last()
-                && let PathSegment::Name(ident) = last_segment
-            {
-                let item_name = if let Some(ref alias) = tree.alias {
-                    alias.name.as_str()
-                } else {
-                    ident.name.as_str()
-                };
-                // Re-exports are treated as Type by default (we don't know the actual kind yet)
-                // The actual kind will be resolved when the link is processed
-                let mut exported = ExportedItem::new(
-                    item_name,
-                    ExportKind::Type, // Default to Type for re-exports
-                    Visibility::Public,
-                    module_id,
-                    span,
-                );
-                exported.original_name = tree.alias.as_ref().map(|_| ident.name.clone());
-                export_table.add_export(exported)?;
-            }
+    for leaf in mount_paths(tree) {
+        if leaf.kind != MountPathKind::Named {
+            continue;
         }
-        MountTreeKind::Glob(_) => {
-            // Glob links: `pub link .package.*`
-            // We can't know the items at this stage without resolving the link
-            // These will need to be handled during link resolution
-        }
-        MountTreeKind::Nested { prefix: _, trees } => {
-            // Nested links: `pub link .package.{Package, PackageVersion}`
-            for subtree in trees {
-                match &subtree.kind {
-                    MountTreeKind::Path(path) => {
-                        // Each path in the nested link is an item name
-                        // If an alias is present (e.g., `safe_read as read`), use the alias
-                        if let Some(first_segment) = path.segments.first()
-                            && let PathSegment::Name(ident) = first_segment
-                        {
-                            let item_name = if let Some(ref alias) = subtree.alias {
-                                alias.name.as_str()
-                            } else {
-                                ident.name.as_str()
-                            };
-                            let mut exported = ExportedItem::new(
-                                item_name,
-                                ExportKind::Type, // Default to Type for re-exports
-                                Visibility::Public,
-                                module_id,
-                                subtree.span,
-                            );
-                            exported.original_name = subtree.alias.as_ref().map(|_| ident.name.clone());
-                            export_table.add_export(exported)?;
-                        }
-                    }
-                    MountTreeKind::Glob(_) | MountTreeKind::Nested { .. } => {
-                        // Recursively handle nested structures
-                        add_reexports_from_link(subtree, module_id, span, export_table)?;
-                    }
-                    MountTreeKind::File { .. } => {
-                        // Relative-file-path mounts (`mount ./foo.vr`) are
-                        // resolved by the session loader (Session::cog_root +
-                        // importing source dir), NOT the module-path pipeline.
-                        // Re-export resolution skips them — File mounts don't
-                        // contribute to module-path-resolved re-exports.
-                    }
-                }
-            }
-        }
-        MountTreeKind::File { .. } => {
-            // Top-level `pub mount ./foo.vr` — same as the nested case:
-            // file-mount resolution lives in the session loader, not here.
-        }
+        let Some(PathSegment::Name(original)) = leaf.path.segments.last() else {
+            continue;
+        };
+        let binding = leaf.alias.unwrap_or(original);
+        // This records a declaration pending source resolution. The ordinary
+        // import pass still validates its existence, visibility and actual kind.
+        let mut exported = ExportedItem::new(
+            binding.name.clone(), ExportKind::Type, Visibility::Public,
+            module_id, leaf.span,
+        );
+        exported.original_name = leaf.alias.map(|_| original.name.clone());
+        export_table.add_export(exported)?;
     }
     Ok(())
 }
@@ -1186,7 +1125,6 @@ fn propagate_submodule_reexports(
                     add_reexports_from_link(
                         &mount_decl.tree,
                         module_id,
-                        sub_item.span,
                         export_table,
                     )?;
                 }
@@ -1524,137 +1462,47 @@ fn collect_specific_links_for_kind_resolution(
         crate::path::ModuleId,
     )>,
 ) {
-    use verum_ast::decl::MountTreeKind;
+    use crate::mount_paths::{mount_paths, MountPathKind};
     use verum_ast::ty::PathSegment;
 
-    match &tree.kind {
-        MountTreeKind::Path(path) => {
-            // Single item link: `pub link .errors.RegistryError`
-            // The path segments before the last are the module path, the last is the item name
-            if path.segments.len() >= 2 {
-                if let Some(PathSegment::Name(item_ident)) = path.segments.last() {
-                    let item_name = item_ident.name.as_str();
-
-                    // Get the module path (all segments except the last)
-                    let module_path = verum_ast::ty::Path {
-                        segments: path
-                            .segments
-                            .iter()
-                            .take(path.segments.len() - 1)
-                            .cloned()
-                            .collect(),
-                        span: path.span,
-                    };
-
-                    if let Some(resolved_module_path) =
-                        resolve_link_path(&module_path, current_module_path)
-                    {
-                        // Look up the source module's exports
-                        if let verum_common::Maybe::Some(source_info) =
-                            module_registry.get_by_path_aliased(resolved_module_path.as_str())
-                        {
-                            if let Some(source_export) =
-                                source_info.exports.get(&Text::from(item_name))
-                            {
-                                result.push((
-                                    target_module_id,
-                                    tree.alias.as_ref().map_or_else(|| Text::from(item_name), |alias| alias.name.clone()),
-                                    source_export.kind,
-                                    source_info.id,
-                                ));
-                            }
-                        }
-                    }
-                }
-            }
+    for leaf in mount_paths(tree) {
+        if leaf.kind != MountPathKind::Named || leaf.path.segments.len() < 2 {
+            continue;
         }
-        MountTreeKind::Nested { prefix, trees } => {
-            // Nested links: `pub link .package.{Package, PackageVersion}`
-            if let Some(resolved_module_path) = resolve_link_path(prefix, current_module_path) {
-                // Look up the source module
-                if let verum_common::Maybe::Some(source_info) =
-                    module_registry.get_by_path_aliased(resolved_module_path.as_str())
-                {
-                    // Process each item in the nested link
-                    for subtree in trees {
-                        match &subtree.kind {
-                            MountTreeKind::Path(item_path) => {
-                                // Each path is an item name (possibly with renaming, but we care about the first segment)
-                                if let Some(PathSegment::Name(item_ident)) =
-                                    item_path.segments.first()
-                                {
-                                    let item_name = item_ident.name.as_str();
-
-                                    // Look up in source module's exports
-                                    if let Some(source_export) =
-                                        source_info.exports.get(&Text::from(item_name))
-                                    {
-                                        result.push((
-                                            target_module_id,
-                                            subtree.alias.as_ref().map_or_else(|| Text::from(item_name), |alias| alias.name.clone()),
-                                            source_export.kind,
-                                            source_info.id,
-                                        ));
-                                    }
-                                }
-                            }
-                            MountTreeKind::Glob(_) => {
-                                // Skip globs, handled by resolve_glob_reexports
-                            }
-                            MountTreeKind::Nested { .. } => {
-                                // Recursively handle nested
-                                collect_specific_links_for_kind_resolution(
-                                    subtree,
-                                    target_module_id,
-                                    current_module_path,
-                                    module_registry,
-                                    result,
-                                );
-                            }
-                            MountTreeKind::File { .. } => {
-                                // Relative-file mounts handled by session loader.
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        MountTreeKind::Glob(_) => {
-            // Skip globs, handled by resolve_glob_reexports
-        }
-        MountTreeKind::File { .. } => {
-            // Relative-file mounts handled by session loader.
+        let Some(PathSegment::Name(original)) = leaf.path.segments.last() else {
+            continue;
+        };
+        let module_path = verum_ast::Path::new(
+            leaf.path.segments[..leaf.path.segments.len() - 1].iter().cloned().collect(),
+            leaf.path.span,
+        );
+        if let Some(path) = resolve_link_path(&module_path, current_module_path)
+            && let Some(source) = module_registry.get_by_path_aliased(&path)
+            && let Some(exported) = source.exports.get(&original.name)
+        {
+            result.push((
+                target_module_id,
+                leaf.alias.unwrap_or(original).name.clone(),
+                exported.kind,
+                source.id,
+            ));
         }
     }
 }
 
-/// Collect glob link paths from a link tree.
+/// Collect complete glob paths, retaining every enclosing group prefix.
 fn collect_glob_links(
     tree: &verum_ast::decl::MountTree,
     module_id: crate::path::ModuleId,
     current_module_path: &crate::path::ModulePath,
     result: &mut verum_common::List<(crate::path::ModuleId, Text, Span)>,
 ) {
-    use verum_ast::decl::MountTreeKind;
-
-    match &tree.kind {
-        MountTreeKind::Glob(path) => {
-            // Resolve the path to an absolute module path
-            if let Some(resolved_path) = resolve_link_path(path, current_module_path) {
-                result.push((module_id, resolved_path, tree.span));
-            }
-        }
-        MountTreeKind::Nested { prefix: _, trees } => {
-            // Recursively check nested trees
-            for subtree in trees {
-                collect_glob_links(subtree, module_id, current_module_path, result);
-            }
-        }
-        MountTreeKind::Path(_) => {
-            // Not a glob link
-        }
-        MountTreeKind::File { .. } => {
-            // File mounts are not glob links — session loader resolves them.
+    use crate::mount_paths::{mount_paths, MountPathKind};
+    for leaf in mount_paths(tree) {
+        if leaf.kind == MountPathKind::Glob
+            && let Some(path) = resolve_link_path(&leaf.path, current_module_path)
+        {
+            result.push((module_id, path, leaf.span));
         }
     }
 }

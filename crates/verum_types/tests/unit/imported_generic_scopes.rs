@@ -14,11 +14,13 @@ implement<T> Imported<T> {
 fn declarations() -> (TypeChecker, verum_ast::Module) {
     let module = Parser::new(SOURCE).parse_module().unwrap();
     let mut checker = TypeChecker::new();
+    checker.set_current_module_path("provider");
     for item in &module.items {
         if let verum_ast::ItemKind::Type(decl) = &item.kind {
             checker.register_type_declaration(decl).unwrap();
         }
     }
+    checker.set_current_module_path("consumer");
     (checker, module)
 }
 
@@ -29,7 +31,7 @@ fn lazy_import_preserves_the_enclosing_type_parameters_and_self() {
     checker.ctx.define_type("T", outer.clone());
     checker.ctx.define_type("Self", Type::Bool);
     checker
-        .import_impl_blocks_for_type_in_module(&module, "Imported", "")
+        .import_impl_blocks_for_type_in_module(&module, "Imported", "provider")
         .unwrap();
     assert_eq!(checker.ctx.lookup_type("T"), Some(&outer));
     assert_eq!(checker.ctx.lookup_type("Self"), Some(&Type::Bool));
@@ -41,7 +43,7 @@ fn lazy_import_does_not_leave_new_parameter_names_in_the_caller() {
     checker.ctx.remove_type(&Text::from("T"));
     checker.ctx.remove_type(&Text::from("Self"));
     checker
-        .import_impl_blocks_for_type_in_module(&module, "Imported", "")
+        .import_impl_blocks_for_type_in_module(&module, "Imported", "provider")
         .unwrap();
     assert!(checker.ctx.lookup_type("T").is_none());
     assert!(checker.ctx.lookup_type("Self").is_none());
@@ -51,11 +53,11 @@ fn lazy_import_does_not_leave_new_parameter_names_in_the_caller() {
 fn method_shadowing_preserves_impl_and_method_quantifier_identity() {
     let (mut checker, module) = declarations();
     checker
-        .import_impl_blocks_for_type_in_module(&module, "Imported", "")
+        .import_impl_blocks_for_type_in_module(&module, "Imported", "provider")
         .unwrap();
     let methods = checker.inherent_methods.read();
     let methods = methods
-        .get(&Text::from("Imported"))
+        .get(&Text::from("provider.Imported"))
         .expect("imported methods");
     let choose = methods.get(&Text::from("choose")).unwrap();
     assert_eq!(choose.impl_var_count, 1);
@@ -79,4 +81,20 @@ fn method_shadowing_preserves_impl_and_method_quantifier_identity() {
         };
         assert_eq!(return_type.as_ref(), &Type::Var(choose.vars[0]), "{name}");
     }
+}
+
+#[test]
+fn imported_implementation_cannot_borrow_another_declaring_owner() {
+    let (mut checker, module) = declarations();
+    assert!(
+        checker
+            .import_impl_blocks_for_type_in_module(&module, "Imported", "unrelated")
+            .is_err()
+    );
+    assert!(
+        !checker
+            .inherent_methods
+            .read()
+            .contains_key(&Text::from("unrelated.Imported"))
+    );
 }

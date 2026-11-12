@@ -9189,7 +9189,7 @@ impl VbcCodegen {
                 // static methods (`Text.from_utf8_lossy`, `List.of`)
                 // because `mount core.*` previously degenerated into a
                 // single `core/mod.vr` candidate (which holds no mounts).
-                let globs = Self::extract_glob_mount_paths(&mount_decl.tree, &[]);
+                let globs = Self::extract_glob_mount_paths(&mount_decl.tree);
                 for module_path in globs {
                     let mut glob_resolved = false;
                     let file_candidates =
@@ -9278,47 +9278,16 @@ impl VbcCodegen {
     /// Sibling to `extract_mount_file_paths`; the glob form needs a
     /// distinct extraction path because the resolver expands a glob
     /// into a directory walk rather than a single-file candidate.
-    fn extract_glob_mount_paths(tree: &MountTree, prefix: &[String]) -> Vec<Vec<String>> {
-        let mut results = Vec::new();
-        match &tree.kind {
-            MountTreeKind::Path(_) => {}
-            MountTreeKind::Glob(path) => {
-                let mut segments: Vec<String> = prefix.to_vec();
-                for segment in path.segments.iter() {
-                    match segment {
-                        PathSegment::Name(ident) => segments.push(ident.name.to_string()),
-                        PathSegment::Super => segments.push("super".to_string()),
-                        PathSegment::Cog => segments.push("cog".to_string()),
-                        PathSegment::Relative => segments.push(".".to_string()),
-                        PathSegment::SelfValue => segments.push("self".to_string()),
-                    }
-                }
-                if !segments.is_empty() {
-                    results.push(segments);
-                }
-            }
-            MountTreeKind::Nested {
-                prefix: nested_prefix,
-                trees,
-            } => {
-                let mut segments: Vec<String> = prefix.to_vec();
-                for segment in nested_prefix.segments.iter() {
-                    match segment {
-                        PathSegment::Name(ident) => segments.push(ident.name.to_string()),
-                        PathSegment::Super => segments.push("super".to_string()),
-                        PathSegment::Cog => segments.push("cog".to_string()),
-                        PathSegment::Relative => segments.push(".".to_string()),
-                        PathSegment::SelfValue => segments.push("self".to_string()),
-                    }
-                }
-                for child in trees.iter() {
-                    let child_results = Self::extract_glob_mount_paths(child, &segments);
-                    results.extend(child_results);
-                }
-            }
-            MountTreeKind::File { .. } => {}
-        }
-        results
+    fn extract_glob_mount_paths(tree: &MountTree) -> Vec<Vec<String>> {
+        use verum_ast::mount_paths::{MountPathKind, mount_paths};
+        mount_paths(tree).filter(|entry| entry.kind == MountPathKind::Glob)
+            .map(|entry| entry.path.segments.iter().map(|segment| match segment {
+                PathSegment::Name(ident) => ident.name.to_string(),
+                PathSegment::Super => "super".to_owned(),
+                PathSegment::Cog => "cog".to_owned(),
+                PathSegment::Relative => ".".to_owned(),
+                PathSegment::SelfValue => "self".to_owned(),
+            }).collect::<Vec<_>>()).filter(|parts| !parts.is_empty()).collect()
     }
 
     /// Extracts module path segments from a mount tree.
@@ -12027,7 +11996,7 @@ impl VbcCodegen {
     /// registers `sys_write` as pointing to `sys.linux.syscall.write`.
     /// **REEXPORT-QUALIFIED-KEY-1** — the ONE success path for a
     /// resolved `mount` binding.  Every resolution branch in
-    /// `process_import_tree` funnels here (they used to each repeat
+    /// `process_import_path` funnels here (they used to each repeat
     /// the same three-step block).
     ///
     /// Besides the local authoritative alias, the function is ALSO
@@ -12335,7 +12304,7 @@ impl VbcCodegen {
         //     parser stores the alias on each inner `MountTree.alias`,
         //     `MountDecl.alias` is `None`.
         //
-        // Pre-fix `process_import_tree` only inspected `tree.alias`,
+        // Pre-fix `process_import_path` only inspected `tree.alias`,
         // so every simple-path alias was silently dropped — the
         // alias key never landed in `ctx.functions`. This was the
         // remaining 20% of #122 that the cross-instance ctx bridge
@@ -12345,21 +12314,25 @@ impl VbcCodegen {
             verum_common::Maybe::Some(ident) => Some(ident),
             verum_common::Maybe::None => None,
         };
-        self.process_import_tree(&import.tree, &[], outer_alias)
+        for entry in verum_ast::mount_paths::mount_paths(&import.tree) {
+            let outer_alias = matches!(import.tree.kind, MountTreeKind::Path(_))
+                .then_some(outer_alias).flatten();
+            self.process_import_path(&entry, outer_alias)?;
+        }
+        Ok(())
     }
 
-    /// Recursively processes an import tree to register function aliases.
-    fn process_import_tree(
+    /// Register one complete path from the common AST traversal.
+    fn process_import_path(
         &mut self,
-        tree: &MountTree,
-        prefix: &[String],
+        entry: &verum_ast::mount_paths::MountPath<'_>,
         outer_alias: Option<&verum_ast::ty::Ident>,
     ) -> CodegenResult<()> {
-        match &tree.kind {
-            MountTreeKind::Path(path) => {
-                // Build the full qualified name by combining prefix and path
-                let mut full_path: Vec<String> = prefix.to_vec();
-                for segment in path.segments.iter() {
+        use verum_ast::mount_paths::MountPathKind;
+        match entry.kind {
+            MountPathKind::Named => {
+                let mut full_path: Vec<String> = Vec::new();
+                for segment in source_mounts::named_mount_segments(&entry.path) {
                     match segment {
                         PathSegment::Name(ident) => {
                             full_path.push(ident.name.to_string());
@@ -12390,7 +12363,7 @@ impl VbcCodegen {
                 // `mount X.{fn as alias}`) wins; falling back to the
                 // outer-decl alias (simple form `mount X.fn as alias;`),
                 // then to the function name itself.
-                let alias_name = match &tree.alias {
+                let alias_name = match entry.alias {
                     verum_common::Maybe::Some(alias) => alias.name.to_string(),
                     verum_common::Maybe::None => match outer_alias {
                         Some(ident) => ident.name.to_string(),
@@ -12900,7 +12873,7 @@ impl VbcCodegen {
                 // shadow legitimate single-name bindings.
                 //
                 // Honours the same `core.` ↔ bare prefix asymmetry as
-                // every other branch in `process_import_tree`: stdlib
+                // every other branch in `process_import_path`: stdlib
                 // modules declare themselves with `module sys.X;`
                 // (no leading `core.`), so the registry key for an
                 // export of `mount core.sys.bitfield.USIZE_BITS` is
@@ -12938,7 +12911,7 @@ impl VbcCodegen {
                         // Honour the alias precedence — if the user wrote
                         // `mount X.Y.Z as W;`, the module is accessible
                         // under `W`, not `Z`. Otherwise the leaf name.
-                        let module_alias_name = match &tree.alias {
+                        let module_alias_name = match entry.alias {
                             verum_common::Maybe::Some(a) => a.name.to_string(),
                             verum_common::Maybe::None => match outer_alias {
                                 Some(ident) => ident.name.to_string(),
@@ -12957,11 +12930,11 @@ impl VbcCodegen {
                 self.defer_named_mount(full_path, alias_name);
                 Ok(())
             }
-            MountTreeKind::Glob(glob_path) => {
+            MountPathKind::Glob => {
                 // Glob import: `mount io.*;` imports all exported names from the io module.
                 // Build the module prefix from the path segments.
-                let mut module_prefix: Vec<String> = prefix.to_vec();
-                for segment in glob_path.segments.iter() {
+                let mut module_prefix: Vec<String> = Vec::new();
+                for segment in &entry.path.segments {
                     match segment {
                         PathSegment::Name(ident) => {
                             module_prefix.push(ident.name.to_string());
@@ -13008,42 +12981,6 @@ impl VbcCodegen {
 
                 Ok(())
             }
-            MountTreeKind::Nested {
-                prefix: nested_prefix,
-                trees,
-            } => {
-                // Build the new prefix
-                let mut new_prefix: Vec<String> = prefix.to_vec();
-                for segment in nested_prefix.segments.iter() {
-                    match segment {
-                        PathSegment::Name(ident) => {
-                            new_prefix.push(ident.name.to_string());
-                        }
-                        PathSegment::Super => new_prefix.push("super".to_string()),
-                        PathSegment::Cog => new_prefix.push("cog".to_string()),
-                        PathSegment::Relative => new_prefix.push(".".to_string()),
-                        PathSegment::SelfValue => new_prefix.push("self".to_string()),
-                    }
-                }
-
-                // Process each nested tree with the accumulated prefix.
-                // Nested-form does not propagate the outer-decl alias to
-                // children: an outer `as ALIAS` on `mount X.{a, b, c}`
-                // is grammatically ambiguous (which child gets it?)
-                // and is treated as a no-op for codegen — children use
-                // their own per-tree alias if any.
-                for sub_tree in trees.iter() {
-                    self.process_import_tree(sub_tree, &new_prefix, None)?;
-                }
-
-                Ok(())
-            }
-            // #5 / P1.5 — file-relative mount aliases are
-            // already wired by the session loader (which
-            // registers each loaded file as a module under
-            // the alias). The VBC codegen import-aliasing
-            // pass doesn't add another mapping.
-            MountTreeKind::File { .. } => Ok(()),
         }
     }
 
@@ -13394,7 +13331,7 @@ impl VbcCodegen {
             }
 
             // Deferred bare-mount module-alias check.  Mirror of the
-            // synchronous branch in `process_import_tree` — by the time
+            // synchronous branch in `process_import_path` — by the time
             // this fires the archive has finished loading, so if a
             // `mount X.Y.Z;` couldn't resolve as a function/type/const
             // during the first pass, it may still be a *module* with
@@ -27835,7 +27772,7 @@ impl ArchiveBodyRemap<'_> {
     /// BY CONSTRUCTION.  The user-written segment count is the
     /// ambiguity floor (we never match on fewer segments than the
     /// call spelled), and ties rank exactly like the
-    /// `process_import_tree` re-export tie-break: fewest dots →
+    /// `process_import_path` re-export tie-break: fewest dots →
     /// module-parent before type-parent → lexicographic — stable
     /// across bakes.
     ///

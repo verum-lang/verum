@@ -112,6 +112,13 @@ impl MetadataNameIndex {
             .filter(move |key| key.as_str().starts_with(&head))
     }
 
+    pub(crate) fn function_keys_ending_with<'a>(
+        &'a self,
+        item: &str,
+    ) -> impl Iterator<Item = &'a Text> {
+        Self::matching_suffix(&self.functions, item)
+    }
+
     pub(crate) fn type_keys_ending_with<'a>(
         &'a self,
         item: &str,
