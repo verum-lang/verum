@@ -258,9 +258,13 @@ impl BudgetedAllocator {
     #[inline]
     fn account(&self, added: usize) {
         let live = LIVE_BYTES.fetch_add(added, Ordering::Relaxed) + added;
-        // `fetch_max` keeps the peak truthful under threads without a
-        // lock; a slightly stale peak is acceptable, a torn one is not.
-        PEAK_BYTES.fetch_max(live, Ordering::Relaxed);
+        // The peak only increases. A stale observation can cause an extra
+        // fetch_max, but cannot hide a new maximum: if live <= observed_peak,
+        // the actual peak is already at least live. Keep exact accounting and
+        // the ceiling check below even when no peak update is necessary.
+        if live > PEAK_BYTES.load(Ordering::Relaxed) {
+            PEAK_BYTES.fetch_max(live, Ordering::Relaxed);
+        }
 
         let ceiling = ceiling_bytes();
         if ceiling == 0 || live <= ceiling {
