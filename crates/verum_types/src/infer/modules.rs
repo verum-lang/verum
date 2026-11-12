@@ -18728,17 +18728,12 @@ impl TypeChecker {
                                     recv_type_name, method.name, params, return_type,
                                 );
                             }
-                            for (arg, param_ty) in args.iter().zip(params.iter()) {
-                                let resolved_param = self.unifier.apply(param_ty);
-                                self.check_expr(arg, &resolved_param)?;
-                            }
-                            let resolved_return = self.unifier.apply(&return_type);
-                            return Ok(InferResult::new(resolved_return));
+                            return self.check_constructor_call(args, &params, &return_type, span);
                         }
                     } else if args.is_empty() {
                         // Unit variant invoked with explicit empty args
                         // (`T.None()`) — return the constructed value.
-                        return Ok(InferResult::new(self.unifier.apply(&return_type)));
+                        return self.check_constructor_call(args, &[], &return_type, span);
                     }
                 }
             }

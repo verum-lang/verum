@@ -123,6 +123,23 @@ fn source_arguments_preserve_the_same_directional_contract() {
 }
 
 #[test]
+fn a_payload_constructor_has_no_hidden_async_call() {
+    for body in ["Event.Value(n)", "Event.Value(n + 1)", "Value(n)",
+                 "Event.Pair(n, n)", "Pair(n, n)", "Event.Empty()"] {
+        let source = format!("type Event is Empty | Value(Int) | Pair(Int, Int);
+            fn apply(f: fn(Int) -> Event) -> Event {{ f(17) }}
+            fn result() -> Event {{ apply(|n| {body}) }}");
+        let errors = check(&source);
+        assert!(errors.is_empty(), "{source}: {errors:?}");
+    }
+    let source = "type Event is Empty | Value(Int);
+        fn apply(f: fn(Int) -> Event) -> Event { f(17) }
+        async fn pending(n: Int) -> Int { n }
+        fn result() -> Event { apply(|n| Event.Value(pending(n))) }";
+    assert!(!check(source).is_empty(), "constructor arguments lost their async property");
+}
+
+#[test]
 fn async_blocks_have_the_type_of_their_eager_result() {
     for source in [
         "fn value() -> Int { async { 17 } }",

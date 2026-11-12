@@ -56,6 +56,44 @@ fn imported_associated_sum_survives_nested_async_signature_and_execution() {
 }
 
 #[test]
+fn inferred_constructor_carriers_survive_archive_bootstrap_and_execution() {
+    let root = tempfile::tempdir().unwrap();
+    let core = root.path().join("core");
+    for (file, source) in [
+        ("mod.vr", "module core; public module values; public module reader;"),
+        ("values/mod.vr", "module core.values;
+            public type Event<T> is Empty | Value(T) | Pair(T, T);
+            public type Other<T> is Empty | Value(T) | Pair(T, T);
+            public type Same<T> is protocol {};
+            implement<T> Same<T> for T {}
+            public fn same<A, B: Same<A>>(a: A, b: B) -> B { b }"),
+        ("reader/mod.vr", "module core.reader; mount core.values.{Event, Other, same};
+            fn score_empty(value: Event<Int>) -> Int { match value { Event.Empty => 2, _ => 0 } }
+            public fn read() -> Int {
+                let expected: Event<Int> = Event.Empty;
+                let value = Event.Value(19);
+                let pair = Event.Pair(23, 29);
+                let empty = Event.Empty;
+                let first = match same(expected, value) { Event.Value(n) => n, _ => 0 };
+                let second = match same(expected, pair) { Event.Pair(a, b) => a + b, _ => 0 };
+                let third = score_empty(empty);
+                first + second + third
+            }"),
+    ] {
+        let path = core.join(file);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, source).unwrap();
+    }
+    let archive = bootstrap(&core);
+    assert_eq!(execute(&archive, "module app; mount core.reader.read; fn main() -> Int { read() }"), 73);
+    let file = core.join("reader/mod.vr");
+    let source = fs::read_to_string(&file).unwrap();
+    fs::write(&file, source.replace("let value = Event.Value(19)", "let value = Other.Value(19)")).unwrap();
+    let error = format!("{:#}", try_bootstrap(&core).err().expect("different nominal owner accepted"));
+    assert!(error.contains("Same"), "{error}");
+}
+
+#[test]
 fn inline_reexport_matches_the_declaring_generic_sum_after_bootstrap() {
     let root = tempfile::tempdir().unwrap();
     let core = root.path().join("core");

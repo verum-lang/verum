@@ -1180,12 +1180,9 @@ impl TypeChecker {
                     // Now type-check each call argument against
                     // the substituted param type (combines
                     // user's concrete args + unifier's bindings).
-                    for (arg, param_ty) in call_args.iter().zip(params.iter()) {
-                        let substituted = Self::substitute_named_params_in_type(param_ty, &subst);
-                        let resolved_param = self.unifier.apply(&substituted);
-                        self.check_expr(arg, &resolved_param)?;
-                    }
-                    return Ok(Some(InferResult::new(expected.clone())));
+                    let params: List<_> = params.iter().map(|ty|
+                        Self::substitute_named_params_in_type(ty, &subst)).collect();
+                    return self.check_constructor_call(call_args, &params, expected, expr.span).map(Some);
                 }
             }
         }
@@ -1204,19 +1201,15 @@ impl TypeChecker {
                     // parent (typically a stdlib variant like
                     // `ProveResult.Ok(Proof)`) and check-erred the
                     // `()` arg against `Proof`.
-                    self.check_expr(&call_args[0], payload_ty)?;
-                    Ok(Some(InferResult::new(expected.clone())))
+                    self.check_constructor_call(call_args, std::slice::from_ref(payload_ty), expected, expr.span).map(Some)
                 } else if call_args.is_empty() && matches!(payload_ty, Type::Unit) {
                     // Unit variant: None
-                    Ok(Some(InferResult::new(expected.clone())))
+                    self.check_constructor_call(call_args, &[], expected, expr.span).map(Some)
                 } else if call_args.len() > 1 {
                     // Multi-arg: treat as tuple payload
                     if let Type::Tuple(tuple_types) = payload_ty {
                         if tuple_types.len() == call_args.len() {
-                            for (arg, ty) in call_args.iter().zip(tuple_types.iter()) {
-                                self.check_expr(arg, ty)?;
-                            }
-                            return Ok(Some(InferResult::new(expected.clone())));
+                            return self.check_constructor_call(call_args, tuple_types, expected, expr.span).map(Some);
                         }
                     }
                     // Fall through to synth_and_check
@@ -1273,18 +1266,20 @@ impl TypeChecker {
                     && let Some(payload_ty) = variants.get(method.name.as_str())
                 {
                     let payload_ty = payload_ty.clone();
-                    // Single positional payload (`Result.Ok(v)`,
-                    // `Result.Err(e)`, `Maybe.Some(x)`, and the explicit
-                    // `Result.Ok(())` unit form): bind the one argument
-                    // against the expected variant payload and return the
-                    // expected type. Record-style payloads arrive as a
-                    // `Record` expr (a different arm), and multi-arg /
-                    // arity-mismatched calls fall through to the synth
-                    // path which type-checks them in full — so only the
-                    // single-arg case short-circuits here.
+                    // Contextual nullary and positional constructors share
+                    // argument, ownership and callable checking. Named fields
+                    // use the Record expression path; arity mismatches reach
+                    // ordinary synthesis for its complete diagnostic.
                     if call_args.len() == 1 && !matches!(payload_ty, Type::Record(_)) {
-                        self.check_expr(&call_args[0], &payload_ty)?;
-                        return Ok(InferResult::new(expected.clone()));
+                        return self.check_constructor_call(call_args, std::slice::from_ref(&payload_ty), expected, expr.span);
+                    }
+                    if call_args.is_empty() && matches!(payload_ty, Type::Unit) {
+                        return self.check_constructor_call(call_args, &[], expected, expr.span);
+                    }
+                    if let Type::Tuple(params) = payload_ty
+                        && params.len() == call_args.len() && call_args.len() > 1
+                    {
+                        return self.check_constructor_call(call_args, &params, expected, expr.span);
                     }
                 }
             }
@@ -7167,34 +7162,8 @@ impl TypeChecker {
                             )),
                         ));
                     }
-                    self.with_call_argument_context(|checker| {
-                        for (arg, param_ty) in
-                            args.iter().zip(params.iter())
-                        {
-                            let resolved_param =
-                                checker.unifier.apply(param_ty);
-                            let resolved_param = if Self::contains_type_app(
-                                &resolved_param,
-                            ) {
-                                checker.normalize_type(&resolved_param)
-                            } else {
-                                resolved_param
-                            };
-                            checker.check_expr(arg, &resolved_param)?;
-                        }
-                        Ok(())
-                    })?;
-                    self.consume_affine_call_args(args, &params)?;
-                    let resolved_return =
-                        self.unifier.apply(&return_type);
-                    let resolved_return = if Self::contains_type_app(
-                        &resolved_return,
-                    ) {
-                        self.normalize_type(&resolved_return)
-                    } else {
-                        resolved_return
-                    };
-                    return Ok(CallPreparation::Inferred(InferResult::new(resolved_return)));
+                    return self.check_constructor_call(args, &params, &return_type, expr.span)
+                        .map(CallPreparation::Inferred);
                 }
             }
         }
@@ -9101,36 +9070,8 @@ impl TypeChecker {
                 // LogLevel.Trace` → E404, T0701 ctor leg).
                 let resolved = self.expand_generic_to_variant(&resolved)?;
                 if let Type::Variant(variants) = &resolved {
-                    if let Some(payload_ty) = variants.get(field_name) {
-                        if matches!(payload_ty, Type::Unit) {
-                            // Instantiate-at-use: the registered body's
-                            // persistent payload vars must never reach
-                            // call-site unification (see
-                            // `instantiate_variant_value`).
-                            return Ok(InferResult::new(
-                                self.instantiate_variant_value(&resolved),
-                            ));
-                        } else {
-                            let fresh =
-                                self.instantiate_variant_value(&resolved);
-                            let fresh_payload = match &fresh {
-                                Type::Variant(vs) => vs
-                                    .get(field_name)
-                                    .cloned()
-                                    .unwrap_or_else(|| payload_ty.clone()),
-                                _ => payload_ty.clone(),
-                            };
-                            let params = match &fresh_payload {
-                                Type::Tuple(tuple_types) => tuple_types.clone(),
-                                other => {
-                                    let mut p = List::new();
-                                    p.push(other.clone());
-                                    p
-                                }
-                            };
-                            let constructor_ty = Type::function(params, fresh);
-                            return Ok(InferResult::new(constructor_ty));
-                        }
+                    if variants.contains_key(field_name) {
+                        return self.selected_constructor_value(type_name, field_name, expr.span).map(InferResult::new);
                     }
                     // T0545: the mounted authority answered with a sum
                     // body that does NOT declare `field_name` — record
@@ -9153,35 +9094,8 @@ impl TypeChecker {
             if let Some(ty) = flat_expanded
                 && let Type::Variant(variants) = &ty
             {
-                if let Some(payload_ty) = variants.get(field_name) {
-                    // Found variant constructor - return function type
-                    if matches!(payload_ty, Type::Unit) {
-                        // Nullary variant — instantiate-at-use (persistent
-                        // payload vars must not leak into the unifier).
-                        return Ok(InferResult::new(
-                            self.instantiate_variant_value(&ty),
-                        ));
-                    } else {
-                        // Constructor function: fn(payload_ty) -> VariantType
-                        let fresh = self.instantiate_variant_value(&ty);
-                        let fresh_payload = match &fresh {
-                            Type::Variant(vs) => vs
-                                .get(field_name)
-                                .cloned()
-                                .unwrap_or_else(|| payload_ty.clone()),
-                            _ => payload_ty.clone(),
-                        };
-                        let params = match &fresh_payload {
-                            Type::Tuple(tuple_types) => tuple_types.clone(),
-                            other => {
-                                let mut p = List::new();
-                                p.push(other.clone());
-                                p
-                            }
-                        };
-                        let constructor_ty = Type::function(params, fresh);
-                        return Ok(InferResult::new(constructor_ty));
-                    }
+                if variants.contains_key(field_name) {
+                    return self.selected_constructor_value(type_name, field_name, expr.span).map(InferResult::new);
                 }
                 // T0545: flat-slot authority — captured only when the
                 // mount-scoped authority did not already answer.

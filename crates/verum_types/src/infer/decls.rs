@@ -191,17 +191,12 @@ impl TypeChecker {
     fn register_sum_constructor(
         &mut self, declaration: &TypeDecl, name: &Text, ty: Type, publish_short: bool,
     ) -> Result<()> {
-        let mut scheme = crate::context::TypeScheme::mono(ty);
-        for parameter in self.declared_nominal_arguments(&declaration.name.name, declaration.span)? {
-            match parameter {
-                Type::Var(variable) => scheme.vars.push(variable),
-                value @ Type::Meta { .. } => scheme.value_parameters.push(value),
-                _ => return Err(TypeError::OtherWithCodeSpanned { code: "E407".into(),
-                    msg: "sum constructor parameter lacks a declaration-owned identity".into(),
-                    span: declaration.span }),
-            }
-        }
+        let owner = self.declared_type_key(&declaration.name.name);
+        let parameters = self.declared_nominal_arguments(&declaration.name.name, declaration.span)?;
+        let params = match ty { Type::Function { params, .. } => Some(params), _ => None };
+        let scheme = Self::sum_constructor_scheme(&owner, &parameters, params, declaration.span)?;
         if publish_short { self.ctx.env.insert(name.clone(), scheme.clone()); }
+        self.ctx.env.insert(format!("{owner}.{name}"), scheme.clone());
         self.ctx.env.insert(format!("{}.{}", declaration.name.name, name), scheme);
         Ok(())
     }

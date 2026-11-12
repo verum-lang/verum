@@ -32,6 +32,7 @@ mod atomic_access;
 mod call_obligations;
 mod context_methods;
 mod callable_properties;
+mod constructor_calls;
 mod preparation;
 mod dependent_records;
 mod reference_origin;

@@ -792,6 +792,13 @@ impl Unifier {
         self.variant_parameters.insert(type_name, parameters);
     }
 
+    /// The declaration owns both the sum body and its parameter telescope.
+    /// Consumers must instantiate them together, without reconstructing slots
+    /// from payloads or depending on a temporary value scope.
+    pub(crate) fn declared_variant_template(&self, name: &Text) -> Option<(&List<Type>, &Type)> {
+        Some((self.variant_parameters.get(name)?, self.original_variant_types.get(name)?))
+    }
+
     /// Match an instance against its declared body. Instantiating the telescope
     /// handles unused, reordered and value slots without guessing from payloads.
     fn unify_declared_variant(
