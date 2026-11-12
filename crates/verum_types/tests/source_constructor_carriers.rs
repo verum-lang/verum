@@ -73,6 +73,72 @@ fn constructor_function_values_preserve_synchronous_callable_contracts() {
 }
 
 #[test]
+fn selected_data_constructors_preserve_purity_directly_and_as_values() {
+    for body in [
+        "Event.Value(value)",
+        "let constructor = Event.Value; constructor(value)",
+        "Event.Pair(value, true)",
+    ] {
+        let source = format!(
+            "type Event<T> is Empty | Value(T) | Pair(T, Bool);
+            pure fn package(value: Int) -> Event<Int> {{ {body} }}"
+        );
+        let result = errors(&source);
+        assert!(result.is_empty(), "{source}: {result:?}");
+    }
+    let source = "type Duration is (Int);
+        pure fn package(value: Int) -> Duration { Duration(value) }";
+    assert!(errors(source).is_empty(), "{:?}", errors(source));
+}
+
+#[test]
+fn data_construction_does_not_erase_argument_or_shadowed_callable_hazards() {
+    for source in [
+        "type Event is Value(Int); async fn pending() -> Int { 7 }
+         pure fn bad() -> Event { Event.Value(pending()) }",
+        "type Event is Value(Int); extern \"C\" { fn observe() -> Int; }
+         pure fn bad() -> Event { Event.Value(unsafe { observe() }) }",
+        "type Duration is (Int); async fn pending() -> Int { 7 }
+         pure fn bad() -> Duration { Duration(pending()) }",
+        "type Duration is (Int); fn external_factory(value: Int) -> Duration;
+         pure fn bad() -> Duration { let Duration = external_factory; Duration(7) }",
+    ] {
+        let rejected = errors(source);
+        assert!(
+            rejected.iter().any(|error| error.contains("pure function")),
+            "{source}: {rejected:?}"
+        );
+    }
+}
+
+#[test]
+fn checked_arithmetic_has_a_construction_bound_from_its_operation() {
+    for (name, ty) in [
+        ("checked_add", "Int"),
+        ("checked_sub", "Int"),
+        ("checked_mul", "Int"),
+        ("checked_div", "Int"),
+        ("checked_add_u64", "UInt64"),
+        ("checked_sub_u64", "UInt64"),
+        ("checked_mul_u64", "UInt64"),
+    ] {
+        let source = format!(
+            "type Maybe<T> is None | Some(T);
+            pure fn calculate(a: {ty}, b: {ty}) -> Maybe<{ty}> {{ @intrinsic(\"{name}\", a, b) }}"
+        );
+        let result = errors(&source);
+        assert!(result.is_empty(), "{source}: {result:?}");
+        let source = source.replace("a, b)", "pending(a), b)")
+            + &format!(" async fn pending(a: {ty}) -> {ty} {{ a }}");
+        let rejected = errors(&source);
+        assert!(
+            rejected.iter().any(|error| error.contains("pure function")),
+            "{source}: {rejected:?}"
+        );
+    }
+}
+
+#[test]
 fn a_constructor_callback_keeps_its_contract_with_captured_fields() {
     let source = "type Outcome<T, E> is Success(T) | Failure(E);
         implement<T, E> Outcome<T, E> {

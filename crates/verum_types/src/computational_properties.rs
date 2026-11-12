@@ -220,6 +220,16 @@ impl PropertyRequirement {
         else { Self::Excludes(PropertySet::single(ComputationalProperty::Async)) }
     }
 
+    /// Construction of fresh data can allocate and fail, but does not invoke
+    /// user code or observe external state. Operand computations are joined
+    /// separately; this bound cannot certify a factory or callback.
+    pub fn value_construction() -> Self {
+        Self::AtMost(PropertySet::from_properties([
+            ComputationalProperty::Allocates,
+            ComputationalProperty::Fallible,
+        ]))
+    }
+
     pub fn may_be_async(&self) -> bool {
         match self {
             Self::Unrestricted => true,

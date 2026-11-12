@@ -1236,6 +1236,8 @@ pub struct Intrinsic {
 pub enum IntrinsicCallBound {
     /// No runtime computational properties.
     Pure,
+    /// Constructs fresh data; may allocate and fail, without user callbacks.
+    ValueConstruction,
     /// Executes on the calling stack; may still allocate, mutate, fail or diverge.
     Synchronous,
     /// The lowering has not established a narrower bound.
@@ -1250,6 +1252,19 @@ impl Intrinsic {
             | CodegenStrategy::TargetHasAtomic | CodegenStrategy::TargetHasFeature
             | CodegenStrategy::TypeLayout(_) | CodegenStrategy::TypeIdentity
             | CodegenStrategy::TypeInspect(_) => IntrinsicCallBound::Pure,
+            // Both tiers compute the result from scalar operands and construct
+            // a fresh Maybe value. Overflow is represented in that value; the
+            // allocation can fail, but no callback or external state is read.
+            CodegenStrategy::ArithExtendedOpcode(
+                ArithSubOpcode::CheckedAddI | ArithSubOpcode::CheckedSubI
+                | ArithSubOpcode::CheckedMulI | ArithSubOpcode::CheckedDivI
+                | ArithSubOpcode::CheckedAddU | ArithSubOpcode::CheckedSubU
+                | ArithSubOpcode::CheckedMulU,
+            )
+            | CodegenStrategy::InlineSequence(
+                InlineSequenceId::CheckedAdd | InlineSequenceId::CheckedSub
+                | InlineSequenceId::CheckedMul | InlineSequenceId::CheckedDiv,
+            ) => IntrinsicCallBound::ValueConstruction,
             // These lowerings cannot invoke a user callable or suspend a task.
             // This establishes only absence of suspension, not a complete
             // computational footprint or a proof of purity.

@@ -21,7 +21,7 @@ impl TypeChecker {
             Some(params) => Type::function_with_requirement(
                 params,
                 result,
-                PropertyRequirement::source_callable(false),
+                PropertyRequirement::value_construction(),
             ),
             None => result,
         };
@@ -103,16 +103,15 @@ impl TypeChecker {
         } else {
             result
         };
-        // Constructing a selected data case invokes no user callable. Keep a
-        // conservative synchronous bound; arguments retain their own properties
-        // in the ordinary expression traversal (including async arguments).
+        // Only the selected data constructor owns this bound. Arguments retain
+        // their own properties in ordinary expression traversal.
         let target = Type::function_with_requirement(
             params
                 .iter()
                 .map(|ty| self.unifier.apply(ty))
                 .collect::<List<_>>(),
             result.clone(),
-            PropertyRequirement::source_callable(false),
+            PropertyRequirement::value_construction(),
         );
         self.type_registry.register_call_target(span, target);
         Ok(InferResult::method(

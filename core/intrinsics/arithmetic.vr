@@ -184,13 +184,13 @@ public fn checked_shr<T>(x: T, n: UInt32) -> Maybe<T> {
 
 // --- UInt64-specific checked arithmetic (uses unsigned overflow detection) ---
 /// Checked unsigned 64-bit addition (returns Maybe.None on overflow)
-public fn checked_add_u64(a: UInt64, b: UInt64) -> Maybe<UInt64> { @intrinsic("checked_add_u64", a, b) }
+public pure fn checked_add_u64(a: UInt64, b: UInt64) -> Maybe<UInt64> { @intrinsic("checked_add_u64", a, b) }
 
 /// Checked unsigned 64-bit subtraction (returns Maybe.None on underflow)
-public fn checked_sub_u64(a: UInt64, b: UInt64) -> Maybe<UInt64> { @intrinsic("checked_sub_u64", a, b) }
+public pure fn checked_sub_u64(a: UInt64, b: UInt64) -> Maybe<UInt64> { @intrinsic("checked_sub_u64", a, b) }
 
 /// Checked unsigned 64-bit multiplication (returns Maybe.None on overflow)
-public fn checked_mul_u64(a: UInt64, b: UInt64) -> Maybe<UInt64> { @intrinsic("checked_mul_u64", a, b) }
+public pure fn checked_mul_u64(a: UInt64, b: UInt64) -> Maybe<UInt64> { @intrinsic("checked_mul_u64", a, b) }
 
 // =============================================================================
 // SECTION 3: Overflow-Checked Arithmetic

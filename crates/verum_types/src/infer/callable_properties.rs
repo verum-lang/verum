@@ -20,6 +20,7 @@ pub(super) fn intrinsic_operation_name(surface: &str, args: &[Expr]) -> Option<T
 fn intrinsic_requirement(name: &str) -> Option<PropertyRequirement> {
     match lookup_intrinsic(name).map(|info| info.intrinsic.call_bound()) {
         Some(IntrinsicCallBound::Pure) => Some(PropertyRequirement::AtMost(PropertySet::pure())),
+        Some(IntrinsicCallBound::ValueConstruction) => Some(PropertyRequirement::value_construction()),
         Some(IntrinsicCallBound::Synchronous) => Some(PropertyRequirement::source_callable(false)),
         _ => AtomicAccess::from_intrinsic(name).map(AtomicAccess::properties),
     }

@@ -2019,13 +2019,13 @@ implement UInt64 {
     public fn from_be_bytes(bytes: [Byte; 8]) -> UInt64 { from_be_bytes_8(bytes) }
 
     /// Checked addition (returns Maybe.None on overflow).
-    public fn checked_add(self, rhs: UInt64) -> Maybe<UInt64> { checked_add_u64(self, rhs) }
+    public pure fn checked_add(self, rhs: UInt64) -> Maybe<UInt64> { checked_add_u64(self, rhs) }
 
     /// Checked subtraction (returns Maybe.None on underflow).
-    public fn checked_sub(self, rhs: UInt64) -> Maybe<UInt64> { checked_sub_u64(self, rhs) }
+    public pure fn checked_sub(self, rhs: UInt64) -> Maybe<UInt64> { checked_sub_u64(self, rhs) }
 
     /// Checked multiplication (returns Maybe.None on overflow).
-    public fn checked_mul(self, rhs: UInt64) -> Maybe<UInt64> { checked_mul_u64(self, rhs) }
+    public pure fn checked_mul(self, rhs: UInt64) -> Maybe<UInt64> { checked_mul_u64(self, rhs) }
 
     /// Wrapping addition.
     public fn wrapping_add(self, rhs: UInt64) -> UInt64 { wrapping_add(self, rhs) }
