@@ -100,7 +100,28 @@ pub(super) fn forwarded_parameter(decl: &FunctionDecl) -> Option<usize> {
 }
 
 impl TypeChecker {
-    fn reference_mode(&self, ty: &Type, span: verum_ast::Span) -> crate::Result<Option<bool>> {
+    pub(super) fn with_result_borrow_scope(
+        &mut self,
+        infer: impl FnOnce(&mut Self) -> crate::Result<super::InferResult>,
+    ) -> crate::Result<super::InferResult> {
+        self.borrow_tracker.enter_scope();
+        let result = infer(self);
+        if result
+            .as_ref()
+            .is_ok_and(|result| self.carries_stored_loan(&self.unifier.apply(&result.ty)))
+        {
+            self.borrow_tracker.exit_scope_retaining_loans();
+        } else {
+            self.borrow_tracker.exit_scope();
+        }
+        result
+    }
+
+    pub(super) fn reference_mode(
+        &self,
+        ty: &Type,
+        span: verum_ast::Span,
+    ) -> crate::Result<Option<bool>> {
         match ty {
             Type::Named { .. }
             | Type::Generic { .. }
@@ -263,9 +284,6 @@ impl TypeChecker {
         ty: &Type,
         returning: bool,
     ) -> crate::Result<()> {
-        if self.reference_mode(ty, expr.span)?.is_some() {
-            return Ok(());
-        }
         for source in self.aggregate_origins(expr, ty) {
             if let Some(var) = self
                 .ctx
@@ -288,11 +306,11 @@ impl TypeChecker {
         ty: &Type,
         span: verum_ast::Span,
     ) -> crate::Result<()> {
+        self.check_aggregate_escape(expr, ty, true)?;
         if self.reference_mode(ty, span)?.is_some() {
-            self.check_return_lifetime(expr, span)
-        } else {
-            self.check_aggregate_escape(expr, ty, true)
+            self.check_return_lifetime(expr, span)?;
         }
+        Ok(())
     }
 
     /// Unlike a witness identity, a lifetime restriction may conservatively
@@ -301,20 +319,25 @@ impl TypeChecker {
         &mut self,
         value: &Expr,
         holder: &str,
+        shared: bool,
     ) -> crate::Result<Option<ReferenceOrigin>> {
         if let Some(origin) = self.reference_result_origin(value) {
-            if matches!(
-                &unparen(value).kind,
-                ExprKind::Call { .. } | ExprKind::Path(_)
-            ) {
+            if shared
+                && matches!(
+                    &unparen(value).kind,
+                    ExprKind::Call { .. } | ExprKind::Path(_)
+                )
+            {
                 self.retain_origin(&origin, Some(holder), value.span)?;
             }
             return Ok(Some(ReferenceOrigin::Exact(origin)));
         }
         let mut candidates = Vec::new();
         self.collect_reference_candidates(value, &mut candidates);
-        for source in &candidates {
-            self.retain_origin(source, None, value.span)?;
+        if shared {
+            for source in &candidates {
+                self.retain_origin(source, Some(holder), value.span)?;
+            }
         }
         Ok((!candidates.is_empty())
             .then(|| ReferenceOrigin::Candidates(candidates.into_boxed_slice())))
@@ -390,11 +413,14 @@ impl TypeChecker {
                 if let Some((root, path)) = self.borrow_place(expr)
                     && let Some(mut storage) = self.ctx.env.record_source(&root, false)
                 {
-                    if let Some(path) = path {
+                    if let Some(path) = &path {
                         storage.fields.extend(path.split('.').map(Into::into));
                     }
                     add(found, storage);
-                    for referent in self.ctx.env.reference_candidates(&root) {
+                    for mut referent in self.ctx.env.reference_candidates(&root) {
+                        if let Some(path) = &path {
+                            referent.fields.extend(path.split('.').map(Into::into));
+                        }
                         add(found, referent);
                     }
                 }

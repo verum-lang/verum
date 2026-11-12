@@ -10255,8 +10255,9 @@ impl TypeChecker {
                     // Resolve an alias while its initializer's lexical bindings
                     // are still visible (the new pattern may shadow one).
                     let origin = if let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind {
-                        if self.is_shared_reference_head(&scheme.ty, val.span)? {
-                            self.bind_reference_result(val, &name.name)?
+                        if self.reference_mode(&scheme.ty, val.span)?.is_some() {
+                            let shared = self.is_shared_reference_head(&scheme.ty, val.span)?;
+                            self.bind_reference_result(val, &name.name, shared)?
                         } else {
                             self.bind_aggregate_result(val, &scheme.ty)?
                         }

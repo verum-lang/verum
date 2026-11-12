@@ -319,14 +319,6 @@ impl TypeChecker {
     // `pub(crate)` internals.
     //
 
-    // An earlier attempt at widening this to `pub` surfaced stack
-    // overflows inside `bind_pattern_scheme` on deeply nested variant
-    // patterns. The root cause was the default 8 MB Rust test thread
-    // stack being too small for the compiler's recursive AST traversal,
-    // NOT an actual infinite recursion. The fix was to set
-    // `RUST_MIN_STACK = "16777216"` in `.cargo/config.toml` (see the
-    // extensive comment there). With that in place, the tests run to
-    // completion and widening this method to `pub` is safe.
     pub fn bind_pattern(&mut self, pattern: &Pattern, ty: &Type) -> Result<()> {
         self.bind_pattern_scheme(pattern, TypeScheme::mono(ty.clone()))
     }
@@ -334,7 +326,7 @@ impl TypeChecker {
     pub(super) fn bind_parameter_pattern(&mut self, pattern: &Pattern, ty: &Type) -> Result<()> {
         self.bind_pattern(pattern, ty)?;
         if let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind
-            && self.is_shared_reference_head(ty, pattern.span)? {
+            && self.reference_mode(ty, pattern.span)?.is_some() {
             self.ctx.env.set_reference_origin(&name.name, crate::context::ReferenceOrigin::Parameter);
         }
         Ok(())

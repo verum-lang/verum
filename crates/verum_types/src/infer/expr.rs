@@ -185,6 +185,18 @@ impl TypeChecker {
         result
     }
 
+    fn with_lexical_result_scope(
+        &mut self,
+        check: impl FnOnce(&mut Self) -> Result<InferResult>,
+    ) -> Result<InferResult> {
+        self.ctx.enter_scope();
+        self.context_checker.enter_scope();
+        let result = self.with_result_borrow_scope(check);
+        self.context_checker.exit_scope();
+        self.ctx.exit_scope();
+        result
+    }
+
     fn with_try_recover_context<T>(
         &mut self,
         error_type: &Type,
@@ -993,12 +1005,14 @@ impl TypeChecker {
         scrutinee: &Expr,
         arms: &List<verum_ast::pattern::MatchArm>,
     ) -> Result<InferResult> {
+        self.with_result_borrow_scope(|checker| checker.check_match_in_scope(expr, expected, scrutinee, arms))
+    }
+
+    fn check_match_in_scope(
+        &mut self, expr: &Expr, expected: &Type, scrutinee: &Expr,
+        arms: &List<verum_ast::pattern::MatchArm>,
+    ) -> Result<InferResult> {
         use ExprKind::*;
-        // T0264: bound the scrutinee borrow's region to the match. A
-        // borrow taken directly in a scrutinee (`match &v { .. }`) must
-        // end at match end; the result is value-typed (auto-deref), so
-        // no reference escapes and releasing it here is sound.
-        self.borrow_tracker.enter_scope();
         let scrutinee_ty = self.synth_expr(scrutinee)?.ty;
         // Resolve any associated-type projection in the scrutinee (e.g.
         // `y.poll(cx)` returning `Poll<Y.Output>`) so pattern binding and
@@ -1013,6 +1027,8 @@ impl TypeChecker {
         // `match` in tail position of a typed function comes through
         // HERE, not through the synth path.
         let affine_at_match = self.affine_tracker.snapshot_alternatives();
+        let loans_at_match = self.borrow_tracker.clone_for_branch();
+        let mut escaping_loans = loans_at_match.clone_for_branch();
         // A `match` has TWO walkers, one per direction. This probe
         // names WHICH one ran: an instrument that can only see one of
         // them reports a fix as inert when it is merely in the other
@@ -1023,12 +1039,14 @@ impl TypeChecker {
         let mut affine_per_arm: Vec<crate::affine::AffineAlternatives> = Vec::new();
         for arm in arms.iter() {
             self.affine_tracker.restore_alternatives(&affine_at_match);
+            self.borrow_tracker = loans_at_match.clone_for_branch();
             let arm_result =
                 self.infer_scoped_match_arm(arm, &scrutinee_ty, None, Some(expected), &sources)?;
             // An arm that diverges never reaches the code after the
             // match, so what it consumed cannot reach it either.
             if !self.is_never_type(&arm_result.ty) {
                 affine_per_arm.push(self.affine_tracker.snapshot_alternatives());
+                escaping_loans.merge_live_loans(&self.borrow_tracker);
             }
         }
         if affine_per_arm.is_empty() {
@@ -1037,7 +1055,7 @@ impl TypeChecker {
             self.affine_tracker.merge_alternatives(&affine_per_arm);
         }
 
-        self.borrow_tracker.exit_scope(); // T0264: release scrutinee borrow at match end
+        self.borrow_tracker = escaping_loans;
 
         self.check_match_coverage(&scrutinee_ty, arms, expr.span)?;
 
@@ -5661,7 +5679,11 @@ impl TypeChecker {
             if !sources.is_empty() {
                 for (name, ty) in &bindings {
                     if self.carries_stored_loan(ty) {
-                        for source in sources { self.retain_origin(source, None, arm.pattern.span)?; }
+                        // Borrowed patterns project the scrutinee's existing
+                        // loan. Only owned aggregates need new retained loans.
+                        if scrutinee_ty.reference_parts().is_none() {
+                            for source in sources { self.retain_origin(source, None, arm.pattern.span)?; }
+                        }
                         self.ctx.env.set_reference_origin(name,
                             crate::context::ReferenceOrigin::Candidates(sources.into()));
                     }
@@ -5678,7 +5700,11 @@ impl TypeChecker {
         })();
         let linear_errors = self.affine_tracker.exit_pattern_scope(ownership, arm.body.span);
         self.refinement_evidence.pop_scope();
-        self.borrow_tracker.exit_scope();
+        if result.as_ref().is_ok_and(|result| self.carries_stored_loan(&self.unifier.apply(&result.ty))) {
+            self.borrow_tracker.exit_scope_retaining_loans();
+        } else {
+            self.borrow_tracker.exit_scope();
+        }
         self.ctx.exit_scope();
         // Restore lexical state even when the arm failed. Outer consumption
         // remains in the tracker; only arm-owned pattern names leave scope.
@@ -5688,6 +5714,10 @@ impl TypeChecker {
     }
 
     fn infer_match_expr(&mut self, expr: &Expr) -> Result<InferResult> {
+        self.with_result_borrow_scope(|checker| checker.infer_match_in_scope(expr))
+    }
+
+    fn infer_match_in_scope(&mut self, expr: &Expr) -> Result<InferResult> {
         use crate::refinement_evidence::{PathCondition, PathConditionKind};
         let ExprKind::Match { expr: scrutinee, arms } = &expr.kind
             else { unreachable!() };
@@ -5698,8 +5728,6 @@ impl TypeChecker {
                     // NOTE: Affine tracking for scrutinee is handled by synth_expr
                     // Do NOT add explicit use_value here - it would cause double-consume errors
                     // since infer_path_expr already calls use_value for Path expressions
-                    // T0264: scope the scrutinee borrow to the match (released below).
-                    self.borrow_tracker.enter_scope();
                     let scrut_result = self.synth_expr(scrutinee)?;
                     // Resolve associated-type projections in the scrutinee (e.g.
                     // `y.poll(cx)` returning `Poll<Y.Output>`) so pattern binding
@@ -5747,7 +5775,6 @@ impl TypeChecker {
                             }
                             let dep_result =
                                 self.check_dependent_match(&scrut_ty, arms, expr.span);
-                            self.borrow_tracker.exit_scope(); // T0264: balance the match scope
                             return dep_result;
                         }
                     }
@@ -5774,6 +5801,8 @@ impl TypeChecker {
                     // `merge_alternatives` folds them back with the union, so
                     // a value consumed in ONE arm is still gone afterwards.
                     let affine_at_match = self.affine_tracker.snapshot_alternatives();
+                    let loans_at_match = self.borrow_tracker.clone_for_branch();
+                    let mut escaping_loans = loans_at_match.clone_for_branch();
                     if std::env::var_os("VERUM_TRACE_AFFINE").is_some() {
                         eprintln!("[affine] match walker=SYNTH arm-loop, {} arms", arms.len());
                     }
@@ -5782,6 +5811,7 @@ impl TypeChecker {
                     // First pass: check all arms and collect their types
                     for arm in arms.iter() {
                         self.affine_tracker.restore_alternatives(&affine_at_match);
+                        self.borrow_tracker = loans_at_match.clone_for_branch();
                         let resolved_scrut_ty = self.unifier.apply(&binding_ty);
                         let arm_result = self.infer_scoped_match_arm(
                             arm, &resolved_scrut_ty, scrutinee_var.as_ref(), None, &sources,
@@ -5802,6 +5832,7 @@ impl TypeChecker {
                         // is the authority, and it is already computed above.
                         if !is_arm_never {
                             affine_per_arm.push(self.affine_tracker.snapshot_alternatives());
+                            escaping_loans.merge_live_loans(&self.borrow_tracker);
                         }
                     }
                     if affine_per_arm.is_empty() {
@@ -5821,7 +5852,7 @@ impl TypeChecker {
 
                     self.check_match_coverage(&scrut_ty, arms, expr.span)?;
 
-                    self.borrow_tracker.exit_scope(); // T0264: release scrutinee borrow at match end
+                    self.borrow_tracker = escaping_loans;
                     Ok(InferResult::new(result_ty))
     }
 
@@ -14265,11 +14296,10 @@ impl TypeChecker {
 
     /// Infer type for a block.
     ///
-    /// Relies on RUST_MIN_STACK=16MB for stack safety on deep recursion.
     pub(super) fn infer_block(&mut self, block: &Block) -> Result<InferResult> {
         let _depth_guard = self.inc_inference_depth("infer_block")?;
         let constant_scope = self.const_eval.enter_source_scope(self.current_module_path.as_str());
-        let result = self.with_lexical_scope(|checker| match checker.cfg_filtered_block(block) {
+        let result = self.with_lexical_result_scope(|checker| match checker.cfg_filtered_block(block) {
             Some(filtered) => checker.infer_block_inner(&filtered),
             None => checker.infer_block_inner(block),
         });
@@ -14468,7 +14498,7 @@ impl TypeChecker {
     pub(super) fn check_block(&mut self, block: &Block, expected: &Type) -> Result<InferResult> {
         let _depth_guard = self.inc_inference_depth("check_block")?;
         let constant_scope = self.const_eval.enter_source_scope(self.current_module_path.as_str());
-        let result = self.with_lexical_scope(|checker| match checker.cfg_filtered_block(block) {
+        let result = self.with_lexical_result_scope(|checker| match checker.cfg_filtered_block(block) {
             Some(filtered) => checker.check_block_inner(&filtered, expected),
             None => checker.check_block_inner(block, expected),
         });

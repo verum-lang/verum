@@ -8547,7 +8547,7 @@ impl TypeChecker {
                 if let Some(verum_ast::ty::PathSegment::Name(ident)) = path.segments.first() {
                     let var_name = verum_common::Text::from(ident.name.as_str());
                     // Check if returning a reference that was created from a local
-                    if let Some(borrow) = self.borrow_tracker.get_held_borrow(&var_name) {
+                    for borrow in self.borrow_tracker.get_held_borrows(&var_name) {
                         if self.is_local_variable(&borrow.target) {
                             return Err(TypeError::DanglingReference {
                                 var: borrow.target.clone(),
@@ -8658,7 +8658,7 @@ impl TypeChecker {
                     // Is it a checked reference type?
                     if matches!(var_ty, Type::CheckedReference { .. }) {
                         // Check if the borrow target is a local variable
-                        if let Some(borrow) = self.borrow_tracker.get_held_borrow(&var_name) {
+                        for borrow in self.borrow_tracker.get_held_borrows(&var_name) {
                             if self.is_local_variable(&borrow.target) {
                                 return Some(borrow.target.clone());
                             }

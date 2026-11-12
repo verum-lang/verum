@@ -213,9 +213,9 @@ pub struct BorrowTracker {
     /// Variables that have been reborrowed (allows &mut from &mut)
     reborrowed_from: Map<Text, Text>,
 
-    /// NLL: Maps holder variable name to the RefId it holds
+    /// NLL: Every possible loan carried by a holder, including branch results.
     /// When `let x = &foo.bar`, tracks that `x` holds a reference to `foo.bar`
-    ref_holders: Map<Text, RefId>,
+    ref_holders: Map<Text, List<RefId>>,
 
     /// NLL: Maps RefId to its holder variable name (reverse lookup)
     ref_id_to_holder: Map<RefId, Text>,
@@ -255,9 +255,9 @@ pub struct BorrowTracker {
 
     // ==================== NLL Last Borrow Tracking ====================
     // Spec: L0-critical/reference_system/access_rules/ref_scope_valid
-    /// The most recently created borrow (RefId, target, is_mutable).
-    /// Used to link variables to borrows in let statements.
-    last_borrow: Option<(RefId, Text, bool)>,
+    /// Loans produced by the current expression, awaiting a let-bound holder.
+    /// A control-flow join may carry several mutually exclusive origins.
+    last_borrow: List<RefId>,
 
     // ==================== Current Closure Context ====================
     // Spec: L0-critical/reference_system/access_rules/ref_closure_capture
@@ -294,7 +294,7 @@ impl BorrowTracker {
             // Two-phase borrow tracking
             two_phase_borrows: Set::new(),
             // NLL last borrow tracking
-            last_borrow: None,
+            last_borrow: List::new(),
             // Closure scope tracking
             closure_scope_stack: List::new(),
         }
@@ -321,6 +321,59 @@ impl BorrowTracker {
                 }
             }
             self.scope_depth = parent_depth;
+        }
+    }
+
+    /// A reference-bearing result transfers the region's loans to its caller.
+    /// Keep their identities and access modes; ending a pattern scope does not
+    /// make a still-reachable reference cease to borrow its source.
+    pub(crate) fn exit_scope_retaining_loans(&mut self) {
+        let Some(parent) = self.scope_stack.pop() else {
+            return;
+        };
+        let loans: List<_> = self
+            .borrows_by_scope
+            .remove(&self.scope_depth)
+            .into_iter()
+            .flatten()
+            .filter_map(|id| self.ref_to_borrow.get(&id).cloned())
+            .collect();
+        let mut last = self.last_borrow.clone();
+        self.scope_depth = parent;
+        for mut loan in loans {
+            if !last.contains(&loan.id) {
+                last.push(loan.id);
+            }
+            self.release_borrow_by_id(loan.id);
+            loan.scope_depth = parent;
+            self.restore_live_loan(loan);
+        }
+        last.retain(|id| self.ref_to_borrow.contains_key(id));
+        self.last_borrow = last;
+    }
+
+    /// Alternative branches do not execute together. Their possible escaping
+    /// loans constrain the continuation by union, never by intersection.
+    pub(crate) fn merge_live_loans(&mut self, alternative: &Self) {
+        let mut pending = self.last_borrow.clone();
+        for id in &alternative.last_borrow {
+            if !pending.contains(id) {
+                pending.push(*id);
+            }
+        }
+        for loan in alternative.ref_to_borrow.values() {
+            if !self.ref_to_borrow.contains_key(&loan.id) {
+                self.restore_live_loan(loan.clone());
+            }
+        }
+        self.last_borrow = pending;
+    }
+
+    fn restore_live_loan(&mut self, loan: Borrow) {
+        if let Some(field) = &loan.field_path {
+            self.register_field_borrow(format!("{}.{}", loan.target, field).into(), loan);
+        } else {
+            self.register_borrow(loan);
         }
     }
 
@@ -356,10 +409,9 @@ impl BorrowTracker {
         };
 
         let ref_id = borrow.id;
-        let target_clone = target.clone();
         self.register_borrow(borrow);
         // Track for NLL: link variable -> borrow in let statements
-        self.last_borrow = Some((ref_id, target_clone, false));
+        self.last_borrow = List::from_iter([ref_id]);
         Ok(ref_id)
     }
 
@@ -435,10 +487,9 @@ impl BorrowTracker {
         };
 
         let ref_id = borrow.id;
-        let target_clone = target.clone();
         self.register_borrow(borrow);
         // Track for NLL: link variable -> borrow in let statements
-        self.last_borrow = Some((ref_id, target_clone, true));
+        self.last_borrow = List::from_iter([ref_id]);
         Ok(ref_id)
     }
 
@@ -560,17 +611,9 @@ impl BorrowTracker {
             }
         }
 
-        // Check: no remaining immutable borrows (held by named variables)
-        if let Some(immut_borrows) = self.active_immut_borrows.get(&target) {
-            if let Some(existing) = immut_borrows.first() {
-                return Err(TypeError::BorrowConflict {
-                    var: target,
-                    existing_borrow_span: existing.span,
-                    existing_is_mut: false,
-                    new_borrow_span: span,
-                    new_is_mut: true,
-                });
-            }
+        // The whole-value argument overlaps every retained field loan too.
+        if let Some(error) = self.check_place_borrow(&target, None, true, span) {
+            return Err(error);
         }
 
         // Create the temporary mutable borrow (not tracked - it's only for the call)
@@ -747,7 +790,10 @@ impl BorrowTracker {
     /// Called when `let x = &foo;` to track that `x` holds a reference.
     pub fn register_holder(&mut self, holder: impl Into<Text>, ref_id: RefId) {
         let holder = holder.into();
-        self.ref_holders.insert(holder.clone(), ref_id);
+        let loans = self.ref_holders.entry(holder.clone()).or_default();
+        if !loans.contains(&ref_id) {
+            loans.push(ref_id);
+        }
         self.ref_id_to_holder.insert(ref_id, holder);
     }
 
@@ -756,21 +802,22 @@ impl BorrowTracker {
     /// a reference to `value`. This enables `*x` to release the borrow.
     /// Spec: L0-critical/reference_system/access_rules/ref_scope_valid
     pub fn link_holder_to_last_borrow(&mut self, holder: impl Into<Text>) {
-        if let Some((ref_id, _target, _is_mut)) = self.last_borrow.take() {
-            let holder = holder.into();
-            self.ref_holders.insert(holder.clone(), ref_id);
-            self.ref_id_to_holder.insert(ref_id, holder);
+        let holder = holder.into();
+        for ref_id in std::mem::take(&mut self.last_borrow) {
+            if self.ref_to_borrow.contains_key(&ref_id) {
+                self.register_holder(holder.clone(), ref_id);
+            }
         }
     }
 
     /// NLL: Check if there is a last borrow that can be linked to a holder.
     pub fn has_last_borrow(&self) -> bool {
-        self.last_borrow.is_some()
+        !self.last_borrow.is_empty()
     }
 
     /// NLL: Clear the last borrow tracking (e.g., after processing non-reference let).
     pub fn clear_last_borrow(&mut self) {
-        self.last_borrow = None;
+        self.last_borrow.clear();
     }
 
     /// Mark a variable as being used (for NLL liveness tracking).
@@ -792,9 +839,10 @@ impl BorrowTracker {
     /// ```
     pub fn release_borrow_at_last_use(&mut self, holder: &str) {
         let holder_text = Text::from(holder);
-        if let Some(ref_id) = self.ref_holders.remove(&holder_text) {
-            self.ref_id_to_holder.remove(&ref_id);
-            self.release_borrow_by_id(ref_id);
+        if let Some(loans) = self.ref_holders.remove(&holder_text) {
+            for ref_id in loans {
+                self.release_borrow_by_id(ref_id);
+            }
         }
     }
 
@@ -804,12 +852,13 @@ impl BorrowTracker {
         self.ref_holders.contains_key(&Text::from(holder))
     }
 
-    /// NLL: Get the borrow held by a variable, if any.
-    pub fn get_held_borrow(&self, holder: &str) -> Option<&Borrow> {
-        let holder_text = Text::from(holder);
+    /// NLL: Inspect every possible referent; no branch may hide a local loan.
+    pub fn get_held_borrows(&self, holder: &str) -> impl Iterator<Item = &Borrow> {
         self.ref_holders
-            .get(&holder_text)
-            .and_then(|ref_id| self.ref_to_borrow.get(ref_id))
+            .get(&Text::from(holder))
+            .into_iter()
+            .flatten()
+            .filter_map(|ref_id| self.ref_to_borrow.get(ref_id))
     }
 
     /// NLL: Release all borrows held by variables in a set.
@@ -849,30 +898,21 @@ impl BorrowTracker {
     }
 
     /// Release all field borrows for a target (NLL release for function calls).
-    /// When calling a function with `&mut whole_struct`, release field borrows.
-    /// This simulates NLL: field borrows end when whole struct is borrowed for a call.
+    /// Temporary field loans can end at a call boundary. A named holder keeps
+    /// its loan alive until its scope or a proven last use ends it.
     pub fn release_field_borrows_for_call(&mut self, target: &str) {
-        let target_prefix = format!("{}.", target);
-        let mut to_remove: List<Text> = List::new();
-
-        for (field_key, _borrow) in self.field_borrows.iter() {
-            if field_key.starts_with(&target_prefix) {
-                to_remove.push(field_key.clone());
-            }
-        }
-
-        for field_key in to_remove.iter() {
-            if let Some(borrow) = self.field_borrows.remove(field_key) {
-                self.ref_to_borrow.remove(&borrow.id);
-                // Remove from borrows_by_scope
-                for (_, borrow_list) in self.borrows_by_scope.iter_mut() {
-                    borrow_list.retain(|id| *id != borrow.id);
-                }
-                // Clean up holder tracking
-                if let Some(holder) = self.ref_id_to_holder.remove(&borrow.id) {
-                    self.ref_holders.remove(&holder);
-                }
-            }
+        let loans: List<_> = self
+            .ref_to_borrow
+            .values()
+            .filter(|loan| {
+                loan.target == target
+                    && loan.field_path.is_some()
+                    && !self.ref_id_to_holder.contains_key(&loan.id)
+            })
+            .map(|loan| loan.id)
+            .collect();
+        for loan in loans {
+            self.release_borrow_by_id(loan);
         }
     }
 
@@ -881,22 +921,14 @@ impl BorrowTracker {
     /// Field borrows are only checked within the same statement.
     pub fn clear_field_borrows(&mut self) {
         // Collect all field borrow ref IDs first
-        let field_ref_ids: List<RefId> = self.field_borrows.values().map(|b| b.id).collect();
-
-        // Clear the field borrows map
-        self.field_borrows = Map::new();
-
-        // Remove from ref_to_borrow and borrows_by_scope
-        for ref_id in field_ref_ids.iter() {
-            self.ref_to_borrow.remove(ref_id);
-            // Also clean up from borrows_by_scope
-            for (_, borrow_list) in self.borrows_by_scope.iter_mut() {
-                borrow_list.retain(|id| *id != *ref_id);
-            }
-            // Clean up holder tracking
-            if let Some(holder) = self.ref_id_to_holder.remove(ref_id) {
-                self.ref_holders.remove(&holder);
-            }
+        let loans: List<_> = self
+            .ref_to_borrow
+            .values()
+            .filter(|loan| loan.field_path.is_some())
+            .map(|loan| loan.id)
+            .collect();
+        for loan in loans {
+            self.release_borrow_by_id(loan);
         }
     }
 
@@ -978,25 +1010,42 @@ impl BorrowTracker {
         })
     }
 
-    pub(crate) fn overlapping_borrow(&self, target: &str, projection: Option<&str>, mutable: bool) -> Option<&Borrow> {
+    pub(crate) fn overlapping_borrow(
+        &self,
+        target: &str,
+        projection: Option<&str>,
+        mutable: bool,
+    ) -> Option<&Borrow> {
         let key = Text::from(target);
-        self.active_mut_borrows.get(&key).and_then(|loans| loans.first())
-            .or_else(|| self.active_immut_borrows.get(&key).and_then(|loans|
-                if mutable { loans.first() } else { None }))
+        self.active_mut_borrows
+            .get(&key)
+            .and_then(|loans| loans.first())
+            .or_else(|| {
+                self.active_immut_borrows
+                    .get(&key)
+                    .and_then(|loans| if mutable { loans.first() } else { None })
+            })
             // Each reader owns a distinct loan, including two readers of
             // the same field in different scopes.
-            .or_else(|| self.ref_to_borrow.values().find(|loan| {
-                if loan.field_path.is_none() || loan.target != key || (!mutable && !loan.is_mutable) {
-                    return false;
-                }
-                let (Some(write), Some(borrow)) = (projection, loan.field_path.as_ref()) else {
-                    return true;
-                };
-                // Field/index labels never contain dots. Zipping until either
-                // path ends treats an ancestor/descendant pair as overlapping.
-                write.split('.').zip(borrow.as_str().split('.')).all(|(a, b)| a == b)
-            }))
-
+            .or_else(|| {
+                self.ref_to_borrow.values().find(|loan| {
+                    if loan.field_path.is_none()
+                        || loan.target != key
+                        || (!mutable && !loan.is_mutable)
+                    {
+                        return false;
+                    }
+                    let (Some(write), Some(borrow)) = (projection, loan.field_path.as_ref()) else {
+                        return true;
+                    };
+                    // Field/index labels never contain dots. Zipping until either
+                    // path ends treats an ancestor/descendant pair as overlapping.
+                    write
+                        .split('.')
+                        .zip(borrow.as_str().split('.'))
+                        .all(|(a, b)| a == b)
+                })
+            })
     }
 
     /// Clone the tracker for branch analysis
@@ -1059,9 +1108,18 @@ impl BorrowTracker {
         let ref_id = borrow.id;
         let scope_depth = borrow.scope_depth;
 
-        self.last_borrow = Some((ref_id, borrow.target.clone(), borrow.is_mutable));
+        self.last_borrow = List::from_iter([ref_id]);
         self.ref_to_borrow.insert(ref_id, borrow.clone());
-        self.field_borrows.insert(field_key, borrow);
+        // Mutually exclusive branches may contribute different modes. Keep
+        // the strongest live mode in this derived index, independent of order.
+        self.field_borrows
+            .entry(field_key)
+            .and_modify(|current| {
+                if borrow.is_mutable {
+                    *current = borrow.clone();
+                }
+            })
+            .or_insert(borrow);
 
         let scope_borrows = self.borrows_by_scope.entry(scope_depth).or_default();
         scope_borrows.push(ref_id);
@@ -1072,9 +1130,22 @@ impl BorrowTracker {
             let target = &borrow.target;
 
             if let Some(field_path) = &borrow.field_path {
-                // Remove field borrow
                 let field_key = Text::from(format!("{}.{}", target, field_path));
-                self.field_borrows.remove(&field_key);
+                // The field index is a view of live loans. Removing one reader
+                // must not hide a sibling reader or a branch's alternative.
+                if let Some(other) = self
+                    .ref_to_borrow
+                    .values()
+                    .filter(|other| {
+                        other.target == *target && other.field_path.as_ref() == Some(field_path)
+                    })
+                    .max_by_key(|other| other.is_mutable)
+                    .cloned()
+                {
+                    self.field_borrows.insert(field_key, other);
+                } else {
+                    self.field_borrows.remove(&field_key);
+                }
             } else if borrow.is_mutable {
                 // Remove from mutable borrows
                 if let Some(mut_list) = self.active_mut_borrows.get_mut(target) {
@@ -1093,6 +1164,18 @@ impl BorrowTracker {
                 }
             }
         }
+        for loans in self.borrows_by_scope.values_mut() {
+            loans.retain(|id| *id != ref_id);
+        }
+        if let Some(holder) = self.ref_id_to_holder.remove(&ref_id) {
+            if let Some(loans) = self.ref_holders.get_mut(&holder) {
+                loans.retain(|id| *id != ref_id);
+                if loans.is_empty() {
+                    self.ref_holders.remove(&holder);
+                }
+            }
+        }
+        self.last_borrow.retain(|id| *id != ref_id);
     }
 
     // ==================== Closure Capture Tracking ====================
@@ -1541,10 +1624,16 @@ mod tests {
     fn cancelling_a_nested_closure_keeps_other_capture_reservations() {
         let mut tracker = BorrowTracker::new();
         let outer = tracker.enter_closure(false);
-        tracker.register_capture(outer, "shared", None, CaptureMode::Borrow, dummy_span()).unwrap();
+        tracker
+            .register_capture(outer, "shared", None, CaptureMode::Borrow, dummy_span())
+            .unwrap();
         let inner = tracker.enter_closure(false);
-        tracker.register_capture(inner, "shared", None, CaptureMode::Borrow, dummy_span()).unwrap();
-        tracker.register_capture(inner, "only_inner", None, CaptureMode::Borrow, dummy_span()).unwrap();
+        tracker
+            .register_capture(inner, "shared", None, CaptureMode::Borrow, dummy_span())
+            .unwrap();
+        tracker
+            .register_capture(inner, "only_inner", None, CaptureMode::Borrow, dummy_span())
+            .unwrap();
         tracker.cancel_closure(inner);
         assert_eq!(tracker.current_closure_id(), Some(outer));
         assert!(!tracker.is_captured("only_inner"));

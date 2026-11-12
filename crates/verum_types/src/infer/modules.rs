@@ -11661,7 +11661,7 @@ impl TypeChecker {
                         self.ctx
                             .env
                             .insert("self", TypeScheme::mono(param_ty.clone()));
-                        if self.is_shared_reference_head(&param_ty, param.span)? {
+                        if self.reference_mode(&param_ty, param.span)?.is_some() {
                             self.ctx.env.set_reference_origin("self", crate::context::ReferenceOrigin::Parameter);
                         }
                         if matches!(param.kind, FunctionParamKind::SelfValueMut | FunctionParamKind::SelfOwnMut) {
