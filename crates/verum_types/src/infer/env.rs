@@ -4816,7 +4816,7 @@ impl TypeChecker {
         let name = name.into();
         self.builtin_ambient_names.insert(name.clone());
         self.protocol_checker.write().register_builtin_type_identity(&ty);
-        self.ctx.define_type(name, ty);
+        self.ctx.define_builtin_type(name, ty);
     }
 
     fn define_builtin_value(&mut self, name: impl Into<Text>, scheme: TypeScheme) {

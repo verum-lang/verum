@@ -2017,6 +2017,9 @@ pub struct TypeContext {
     /// Used for resolving `type Int is i64;` style aliases
     /// When looking up a type, we follow alias chains until we reach a non-alias type
     pub type_aliases: Map<Text, Type>,
+    /// Language declarations captured only by their actual registrars. Source
+    /// aliases and cached consumer spellings cannot grant or replace this authority.
+    builtin_type_definitions: Map<Text, Type>,
     /// Exact writes made while a source declaration and its dependencies load.
     /// This journals type namespaces only, not the complete type checker.
     type_definition_journal: Option<TypeDefinitionJournal>,
@@ -2122,6 +2125,7 @@ impl TypeContext {
             env: TypeEnv::new(),
             type_defs: Map::new(),
             type_aliases: Map::new(),
+            builtin_type_definitions: Map::new(),
             type_definition_journal: None,
             module_type_defs: Map::new(),
             module_type_aliases: Map::new(),
@@ -2204,7 +2208,7 @@ impl TypeContext {
 
         // RawPtr is an alias for raw mutable pointer (void* equivalent)
         // CBGR implementation: epoch-based generation tracking, acquire-release memory ordering, lock-free ABA-protected maps, ThinRef 16 bytes, FatRef 24 bytes — #raw-pointers
-        self.define_alias(
+        self.define_builtin_alias(
             "RawPtr",
             Type::Pointer {
                 mutable: true,
@@ -2215,7 +2219,7 @@ impl TypeContext {
         // u32 type alias: use UInt32 (4 bytes) rather than Int (8 bytes)
         // to match the type system's from_le_bytes/to_le_bytes byte counts.
         // CBGR generation counters that need the full range should use Int directly.
-        self.define_alias(
+        self.define_builtin_alias(
             "u32",
             Type::Named {
                 path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
@@ -2227,7 +2231,7 @@ impl TypeContext {
         );
 
         // Epoch type for CBGR epoch tracking
-        self.define_alias("Epoch", Type::Int);
+        self.define_builtin_alias("Epoch", Type::Int);
     }
 
     /// Add protocol implementations for language primitive types.
@@ -2671,6 +2675,25 @@ impl TypeContext {
         } else {
             TypeScheme::poly(quantified, ty)
         }
+    }
+
+    /// Register a language type independently of mutable source lookup slots.
+    pub(crate) fn define_builtin_type(&mut self, name: impl Into<Text>, ty: Type) {
+        let name = name.into();
+        self.builtin_type_definitions.insert(name.clone(), ty.clone());
+        self.define_type(name, ty);
+    }
+
+    fn define_builtin_alias(&mut self, name: impl Into<Text>, target: Type) {
+        let name = name.into();
+        self.builtin_type_definitions.insert(name.clone(), target.clone());
+        self.define_alias(name, target);
+    }
+
+    /// Return the declaration installed by the language registrar, not a
+    /// same-named binding a different source scope may have left in the cache.
+    pub(crate) fn builtin_type_definition(&self, name: &str) -> Option<&Type> {
+        self.builtin_type_definitions.get(&Text::from(name))
     }
 
     /// Register a type alias: `type Alias is Target;`

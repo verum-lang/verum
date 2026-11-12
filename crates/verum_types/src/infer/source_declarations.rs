@@ -190,10 +190,7 @@ impl TypeChecker {
         {
             return Ok((ty, Some(key)));
         }
-        if let Some(ty) = self.ctx.lookup_type(name)
-            && (ty.primitive_name().is_some()
-                || verum_common::well_known_types::type_names::is_primitive_value_type(name))
-        {
+        if let Some(ty) = self.ctx.builtin_type_definition(name) {
             return Ok((ty.clone(), None));
         }
         let (head, tail) = name.split_once('.').unwrap_or((name, ""));
