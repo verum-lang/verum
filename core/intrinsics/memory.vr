@@ -37,8 +37,6 @@
 )
 module core.intrinsics.memory;
 
-mount core.intrinsics.type_info.{size_of};
-
 // =============================================================================
 // SECTION 1: Bulk Memory Operations
 // =============================================================================
