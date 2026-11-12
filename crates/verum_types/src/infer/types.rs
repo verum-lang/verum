@@ -1164,482 +1164,495 @@ fn substitute_refinement_binder(
         use verum_ast::ty::TypeKind;
         let TypeKind::Generic { base, args } = &ast_ty.kind
             else { unreachable!() };
-                // Generic type with arguments: List<T>, Tensor<Float, [2, 3]>
-                // Subtyping: structural subtyping for records, refinement subtyping (T{P} <: T when P holds), protocol-based nominal subtyping — .2 - Generic type arguments
-                // Keep the selected declaration's parameter namespace before
-                // resolving arguments can enter another declaration. A structural
-                // sum no longer carries an owner once this base is expanded.
-                let (base_ty, parameter_key) = if let TypeKind::Path(path) = &base.kind {
-                    let builtin = if path.segments.len() == 1 {
-                        match &path.segments[0] {
-                            verum_ast::ty::PathSegment::Name(name) =>
-                                resolve_builtin_meta_type(name.name.as_str()),
-                            _ => None,
-                        }
-                    } else {
-                        None
+        // Select the declaration before resolving arguments can enter another
+        // declaration. Keep recursive argument elaboration separate from the
+        // telescope/substitution workspace used only after its children return.
+        let (base_ty, parameter_key) = self.elaborate_generic_base(base)?;
+        let source_arguments = elaborated.is_none();
+        let type_args = match elaborated {
+            Some(arguments) => arguments,
+            None => self.elaborate_generic_arguments(args, parameter_key.as_ref(), form)?,
+        };
+        self.finish_generic_application(ast_ty, base_ty, parameter_key, type_args, source_arguments, form)
+    }
+
+    fn elaborate_generic_base(&mut self, base: &verum_ast::Type) -> Result<(Type, Option<Text>)> {
+        use verum_ast::ty::TypeKind;
+        if let TypeKind::Path(path) = &base.kind {
+            if path.segments.len() == 1
+                && let verum_ast::ty::PathSegment::Name(name) = &path.segments[0]
+                && let Some(builtin) = resolve_builtin_meta_type(name.name.as_str())
+            {
+                return Ok((builtin, None));
+            }
+            self.resolve_qualified_type_with_parameter_key(path, base.span)
+        } else {
+            let ty = if matches!(base.kind, TypeKind::Qualified { .. }) {
+                self.ast_to_qualified_type(base, true)?
+            } else {
+                self.ast_to_type(base)?
+            };
+            Ok((ty, None))
+        }
+    }
+
+    fn elaborate_generic_arguments(
+        &mut self,
+        args: &[verum_ast::ty::GenericArg],
+        parameter_key: Option<&Text>,
+        form: ApplicationForm,
+    ) -> Result<List<Type>> {
+        let mut type_args = List::new();
+        for arg in args {
+            use verum_ast::ty::GenericArg;
+            let projected = match arg {
+                GenericArg::Const(_) if parameter_key.is_some_and(|owner|
+                    self.nominal_argument_is_type(owner, type_args.len())
+                ) => arg.type_for_declared_slot().map(GenericArg::Type),
+                _ => None,
+            };
+            match projected.as_ref().unwrap_or(arg) {
+                GenericArg::Type(ty) => {
+                    let arg_ty = match form {
+                        ApplicationForm::DeclaredSum => self.declared_type(ty)?,
+                        _ => self.ast_to_type(ty)?,
                     };
-                    if let Some(builtin) = builtin {
-                        (builtin, None)
-                    } else {
-                        self.resolve_qualified_type_with_parameter_key(path, base.span)?
-                    }
-                } else {
-                    (if matches!(base.kind, TypeKind::Qualified { .. }) {
-                        self.ast_to_qualified_type(base, true)?
-                    } else { self.ast_to_type(base)? }, None)
-                };
-
-                // DEBUG: trace HKT TypeApp construction
-
-                // Separate type arguments and lifetime arguments
-                // Lifetime annotations have no semantic type argument slot.
-                let mut type_args: List<Type> = List::new();
-
-                let source_arguments = elaborated.is_none();
-                if let Some(arguments) = elaborated {
-                    type_args = arguments;
-                } else {
-                for arg in args {
-                    use verum_ast::ty::GenericArg;
-                    let projected = match arg {
-                        GenericArg::Const(_) if parameter_key.as_ref().is_some_and(|owner|
-                            self.nominal_argument_is_type(owner, type_args.len())
-                        ) => arg.type_for_declared_slot().map(GenericArg::Type),
+                    type_args.push(arg_ty);
+                }
+                GenericArg::Const(expr) => {
+                    self.check_record_index_expression(expr)?;
+                    // Const generic arguments are compile-time values.
+                    // Represent them as `Type::Meta` with the concrete `value` set
+                    // (see `eval_const_arg`) so dimension mismatches like
+                    // `Matrix<Float, 7, 7>` vs `Matrix<Float, 5, 5>` are caught
+                    // during unification instead of being collapsed to the same
+                    // `Int`-typed argument list.
+                    let symbolic = match &expr.kind {
+                        ExprKind::Path(path) => path.as_ident().and_then(|id| self.lookup_decl_param(&id.name))
+                            .filter(|ty| matches!(ty, Type::Meta { .. })).cloned(),
                         _ => None,
                     };
-                    match projected.as_ref().unwrap_or(arg) {
-                        GenericArg::Type(ty) => {
-                            let arg_ty = match form {
-                                ApplicationForm::DeclaredSum => self.declared_type(ty)?,
-                                _ => self.ast_to_type(ty)?,
-                            };
-                            type_args.push(arg_ty);
-                        }
-                        GenericArg::Const(expr) => {
-                            self.check_record_index_expression(expr)?;
-                            // Const generic arguments are compile-time values.
-                            // Represent them as `Type::Meta` with the concrete `value` set
-                            // (see `eval_const_arg`) so dimension mismatches like
-                            // `Matrix<Float, 7, 7>` vs `Matrix<Float, 5, 5>` are caught
-                            // during unification instead of being collapsed to the same
-                            // `Int`-typed argument list.
-                            let symbolic = match &expr.kind {
-                                ExprKind::Path(path) => path.as_ident().and_then(|id| self.lookup_decl_param(&id.name))
-                                    .filter(|ty| matches!(ty, Type::Meta { .. })).cloned(),
-                                _ => None,
-                            };
-                            type_args.push(match symbolic.or_else(|| self.eval_const_arg(expr)) {
-                                Some(ty) => ty,
-                                None => return Err(TypeError::OtherWithCodeSpanned {
-                                    code: "E405".into(),
-                                    msg: "generic value expression has no represented compile-time identity; its runtime type cannot replace the value".into(),
-                                    span: expr.span,
-                                }),
-                            });
-                        }
-                        // Lifetime annotations are erased by the language contract.
-                        // They never occupy a retained type/value argument slot.
-                        GenericArg::Lifetime(_) => {},
-                        GenericArg::Binding(binding) => {
-                            // Type bindings like Iterator<Item = T>
-                            let arg_ty = self.ast_to_type(&binding.ty)?;
-                            type_args.push(arg_ty);
-                        }
-                    }
+                    type_args.push(match symbolic.or_else(|| self.eval_const_arg(expr)) {
+                        Some(ty) => ty,
+                        None => return Err(TypeError::OtherWithCodeSpanned {
+                            code: "E405".into(),
+                            msg: "generic value expression has no represented compile-time identity; its runtime type cannot replace the value".into(),
+                            span: expr.span,
+                        }),
+                    });
                 }
-
+                // Lifetime annotations are erased by the language contract.
+                // They never occupy a retained type/value argument slot.
+                GenericArg::Lifetime(_) => {},
+                GenericArg::Binding(binding) => {
+                    // Type bindings like Iterator<Item = T>
+                    let arg_ty = self.ast_to_type(&binding.ty)?;
+                    type_args.push(arg_ty);
                 }
+            }
+        }
+        Ok(type_args)
+    }
 
-                // Keep the owned substitution for an alias body as well as
-                // each later parameter's carrier; both use the same telescope.
-                let mut argument_scope = crate::ty::Substitution::new();
-                // Validate and default arguments using the registration selected
-                // with this exact template, including phantom parameter slots.
-                if let Some(type_name) = parameter_key.as_ref() {
-                        let params_key = format!("__type_params_{}", type_name);
-                        let order_key = format!("__type_var_order_{}", type_name);
-                        let expected: Option<usize> = match self.ctx.lookup_type(&params_key) {
-                            Some(Type::Record(params_map)) => Some(params_map.len()),
-                            _ => match self.ctx.lookup_type(&order_key) {
-                                // Count *all* parameter slots, not just `Type::Var`.
-                                // `type Matrix<T, Rows: meta Int, Cols: meta Int>`
-                                // stores T as a Var and `Rows`/`Cols` as meta-Int
-                                // placeholders that aren't `Type::Var`. Filtering
-                                // down to vars made the arity checker reject
-                                // legitimate three-arg uses like
-                                // `Matrix<Float, 2, 3>` with
-                                // "expects 1 type argument(s), but 3 were provided".
-                                Some(Type::Tuple(type_vars)) => Some(type_vars.len()),
-                                _ => None,
-                            },
-                        };
-                        // FILL THE OMITTED TRAILING SLOTS FROM THEIR
-                        // DEFAULTS, before anything counts them.
-                        //
-                        // `type Pair<A, B = Text>` applied as `Pair<Int>`
-                        // is a two-argument application whose second
-                        // argument the declaration supplied. Without this
-                        // the parameter survives as the bare name `B` and
-                        // a mismatch reports `expected 'Int', found 'B'`
-                        // — a type the program never wrote.
-                        //
-                        // Only a TRAILING run may be omitted, and only
-                        // while every omitted slot has a default: a hole
-                        // in the middle has no positional reading.
-                        if let Some(expected_count) = expected {
-                            let supplied = type_args
-                                .iter()
-                                .filter(|t| !matches!(t, Type::Lifetime { .. }))
-                                .count();
-                            if supplied < expected_count
-                                && let Some(Type::Tuple(defaults)) = self
-                                    .ctx
-                                    .lookup_type(&format!("__type_param_defaults_{}", type_name))
-                                && defaults.len() == expected_count
-                                && defaults
-                                    .iter()
-                                    .skip(supplied)
-                                    .all(|d| !matches!(d, Type::Unknown))
-                            {
-                                for d in defaults.iter().skip(supplied) {
-                                    type_args.push(d.clone());
-                                }
-                            }
-                        }
-                        if let Some(expected_count) = expected {
-                            let provided = type_args
-                                .iter()
-                                .filter(|t| !matches!(t, Type::Lifetime { .. }))
-                                .count();
-                            // Brackets apply a constructor. Omitted trailing
-                            // parameters have already received their defaults;
-                            // every remaining declaration slot needs an argument.
-                            if expected_count > 0 && provided != expected_count {
-                                return Err(TypeError::OtherWithCodeSpanned {
-                                    code: verum_common::Text::from("E407"),
-                                    msg: verum_common::Text::from(format!(
-                                        "type `{}` takes {} type argument(s), but {} {} supplied\n  \
-                                         help: write `{}` on its own to name the unapplied type constructor",
-                                        type_name,
-                                        expected_count,
-                                        provided,
-                                        if provided == 1 { "was" } else { "were" },
-                                        type_name,
-                                    )),
-                                    span: ast_ty.span,
-                                });
-                            }
-                        }
-                        // Instantiate the declaration-owned telescope in prefix
-                        // order. A later value carrier may depend on an earlier
-                        // type/value binder; its source spelling is not identity.
-                        let mut value_parameters = List::new();
-                        if let Some(Type::Record(parameters)) = self.ctx.lookup_type(&params_key) {
-                            let mixed = parameters.values().any(|role| matches!(role, Type::Meta { .. }));
-                            let mut named_types = indexmap::IndexMap::new();
-                            for (index, ((name, declared), argument)) in parameters.iter().zip(
-                                type_args.iter_mut().filter(|ty| !matches!(ty, Type::Lifetime { .. }))).enumerate()
-                            {
-                                // Records and aliases retain declaration-local named
-                                // type slots. Only this exact roster authorizes their
-                                // substitution, and only inside the declared carrier.
-                                // Actual argument ranges are never rewritten by name.
-                                let role = if matches!(declared, Type::Meta { .. }) {
-                                    self.substitute_declared_named_slots(declared, &named_types)
-                                        .and_then(|role| role.try_apply_subst(&argument_scope))
-                                } else { Ok(declared.clone()) }.map_err(|msg|
-                                    TypeError::OtherWithCodeSpanned { code: "E407".into(), msg, span: ast_ty.span })?;
-                                if source_arguments
-                                    && let Type::Meta { ty: carrier, .. } = &role
-                                    && let Some(verum_ast::ty::GenericArg::Const(expression)) = args.iter()
-                                        .filter(|argument| !matches!(argument, verum_ast::ty::GenericArg::Lifetime(_)))
-                                        .nth(index)
-                                    && let ExprKind::Literal(literal) = &expression.kind
-                                    && let verum_ast::literal::LiteralKind::Int(integer) = &literal.kind
-                                    && integer.suffix.is_none()
-                                    && let Some(value) = crate::value_parameter_domain::integer_literal_in_carrier(
-                                        integer.value, &self.normalize_type(carrier))
-                                {
-                                    *argument = value;
-                                }
-                                let valid = match (&role, &*argument) {
-                                    (Type::Meta { ty: expected, .. }, Type::Meta { ty: actual, .. }) =>
-                                        self.normalize_type(actual).base() == self.normalize_type(expected).base(),
-                                    (Type::Meta { .. }, _) | (_, Type::Meta { .. }) => false,
-                                    _ => true,
-                                };
-                                if !valid {
-                                    return Err(TypeError::OtherWithCodeSpanned {
-                                        code: "E407".into(),
-                                        msg: format!("argument for `{type_name}.{name}` has the wrong kind: expected {role}, found {argument}").into(),
-                                        span: ast_ty.span,
-                                    });
-                                }
-                                if matches!(role, Type::Meta { .. }) {
-                                    value_parameters.push((name.clone(), role, argument.clone()));
-                                }
-                                // Quantify only identities owned by this exact
-                                // declaration, never free variables in its body.
-                                match crate::context::GenericBinder::declared(declared) {
-                                    Ok(crate::context::GenericBinder::Type(variable)) => {
-                                        argument_scope.insert(variable, argument.clone());
-                                    }
-                                    Ok(crate::context::GenericBinder::Value(Type::Meta {
-                                        value: crate::ty::ValueTerm::Parameter(id), ..
-                                    })) => {
-                                        argument_scope.value_bindings.insert(id, argument.clone());
-                                    }
-                                    _ if matches!(declared, Type::Named { path, args }
-                                        if args.is_empty() && path.as_ident().is_some_and(|ident| ident.name == *name)) => {
-                                        named_types.insert(name.clone(), argument.clone());
-                                    }
-                                    _ if matches!(declared, Type::Generic { name: declared_name, args }
-                                        if args.is_empty() && declared_name == name) => {
-                                        named_types.insert(name.clone(), argument.clone());
-                                    }
-                                    _ if mixed => {
-                                        return Err(TypeError::OtherWithCodeSpanned {
-                                            code: "E407".into(),
-                                            msg: "mixed nominal telescope requires declaration-owned type and value binders".into(),
-                                            span: ast_ty.span,
-                                        });
-                                    }
-                                    // Existing higher-kinded/legacy type-only
-                                    // roles have no type/value identity to bind.
-                                    _ => {}
-                                }
-                            }
-                        }
-                        self.check_nominal_application_bounds(type_name, &type_args, ast_ty.span)?;
-                        // A refinement on a META parameter is checked
-                        // HERE, where the argument is supplied — the
-                        // point of a compile-time parameter being that
-                        // the check is compile-time. See T0909: the
-                        // predicate was parsed, stored, and read by
-                        // nobody.
-                        self.check_meta_param_refinements(
-                            type_name.as_str(),
-                            args,
-                            ast_ty.span,
-                        )?;
-                        for (name, role, argument) in value_parameters {
-                            if !self.meta_argument_satisfies_domain(&role, &argument) {
-                                return Err(TypeError::OtherWithCodeSpanned {
-                                    code: "E405".into(),
-                                    msg: format!("cannot establish the declared value domain for `{type_name}.{name}`: expected {role}, found {argument}").into(),
-                                    span: ast_ty.span,
-                                });
-                            }
-                        }
-                }
-
-                // APPLYING TYPE ARGUMENTS TO A TYPE ALIAS IS A SUBSTITUTION,
-                // NOT A REPLACEMENT.  This is the seam where the third
-                // implementation of that rule used to live.
+    fn finish_generic_application(
+        &mut self,
+        ast_ty: &verum_ast::Type,
+        base_ty: Type,
+        parameter_key: Option<Text>,
+        mut type_args: List<Type>,
+        source_arguments: bool,
+        form: ApplicationForm,
+    ) -> Result<Type> {
+        let verum_ast::ty::TypeKind::Generic { base, args } = &ast_ty.kind else { unreachable!() };
+        // Keep the owned substitution for an alias body as well as
+        // each later parameter's carrier; both use the same telescope.
+        let mut argument_scope = crate::ty::Substitution::new();
+        // Validate and default arguments using the registration selected
+        // with this exact template, including phantom parameter slots.
+        if let Some(type_name) = parameter_key.as_ref() {
+                let params_key = format!("__type_params_{}", type_name);
+                let order_key = format!("__type_var_order_{}", type_name);
+                let expected: Option<usize> = match self.ctx.lookup_type(&params_key) {
+                    Some(Type::Record(params_map)) => Some(params_map.len()),
+                    _ => match self.ctx.lookup_type(&order_key) {
+                        // Count *all* parameter slots, not just `Type::Var`.
+                        // `type Matrix<T, Rows: meta Int, Cols: meta Int>`
+                        // stores T as a Var and `Rows`/`Cols` as meta-Int
+                        // placeholders that aren't `Type::Var`. Filtering
+                        // down to vars made the arity checker reject
+                        // legitimate three-arg uses like
+                        // `Matrix<Float, 2, 3>` with
+                        // "expects 1 type argument(s), but 3 were provided".
+                        Some(Type::Tuple(type_vars)) => Some(type_vars.len()),
+                        _ => None,
+                    },
+                };
+                // FILL THE OMITTED TRAILING SLOTS FROM THEIR
+                // DEFAULTS, before anything counts them.
                 //
-                // `ast_to_type(base)` has ALREADY expanded an alias, so for
-                // `IoResult<()>` the base arrives as `Result<T, StreamError>`.
-                // The `Type::Named` arm below then replaced the base's own
-                // arguments with the surface ones and produced
-                // `Result<Unit>` — a `Result` with ONE argument, which the
-                // language has no such thing as.  Nothing rejected it; it
-                // travelled as a well-typed value until `?` asked
-                // `resolve_try_protocol` for a two-argument Result and was
-                // told the function "returns Result<Unit>" (6 core/ files,
-                // and every user alias of Result reproduces it — T0774).
+                // `type Pair<A, B = Text>` applied as `Pair<Int>`
+                // is a two-argument application whose second
+                // argument the declaration supplied. Without this
+                // the parameter survives as the bare name `B` and
+                // a mismatch reports `expected 'Int', found 'B'`
+                // — a type the program never wrote.
                 //
-                // The unifier already implements this rule correctly
-                // (`try_expand_alias` -> `substitute_alias_params`
-                // substitutes positionally into the alias's parameters).
-                // So the fix is to DELETE the duplicate rather than repair
-                // it: build the application on the UNEXPANDED name and let
-                // the one correct implementation do the work.  For anything
-                // that is not an alias `try_expand_alias` returns None and
-                // the arms below run unchanged.
-                if let Some(key) = parameter_key.as_ref() {
-                    if matches!(form, ApplicationForm::DeclaredSum)
-                        && let Some(owner) = self.declared_sum_key(key)
+                // Only a TRAILING run may be omitted, and only
+                // while every omitted slot has a default: a hole
+                // in the middle has no positional reading.
+                if let Some(expected_count) = expected {
+                    let supplied = type_args
+                        .iter()
+                        .filter(|t| !matches!(t, Type::Lifetime { .. }))
+                        .count();
+                    if supplied < expected_count
+                        && let Some(Type::Tuple(defaults)) = self
+                            .ctx
+                            .lookup_type(&format!("__type_param_defaults_{}", type_name))
+                        && defaults.len() == expected_count
+                        && defaults
+                            .iter()
+                            .skip(supplied)
+                            .all(|d| !matches!(d, Type::Unknown))
                     {
-                        return Ok(Type::Named { path: Self::text_to_path(&owner), args: type_args });
+                        for d in defaults.iter().skip(supplied) {
+                            type_args.push(d.clone());
+                        }
                     }
-                    if matches!(form, ApplicationForm::Nominal) {
-                        // Parameter slots may live under a short archive key. The
-                        // implementation belongs to the descriptor's declaring module.
-                        let owner = if key.as_str().contains('.') {
-                            None
-                        } else {
-                            self.core_metadata.as_ref()
-                                .and_then(|metadata| metadata.types.get(key))
-                                .map(Self::metadata_declaring_key)
-                        };
-                        return Ok(Type::Named {
-                            path: Self::text_to_path(owner.as_ref().unwrap_or(key)),
-                            args: type_args,
+                }
+                if let Some(expected_count) = expected {
+                    let provided = type_args
+                        .iter()
+                        .filter(|t| !matches!(t, Type::Lifetime { .. }))
+                        .count();
+                    // Brackets apply a constructor. Omitted trailing
+                    // parameters have already received their defaults;
+                    // every remaining declaration slot needs an argument.
+                    if expected_count > 0 && provided != expected_count {
+                        return Err(TypeError::OtherWithCodeSpanned {
+                            code: verum_common::Text::from("E407"),
+                            msg: verum_common::Text::from(format!(
+                                "type `{}` takes {} type argument(s), but {} {} supplied\n  \
+                                 help: write `{}` on its own to name the unapplied type constructor",
+                                type_name,
+                                expected_count,
+                                provided,
+                                if provided == 1 { "was" } else { "were" },
+                                type_name,
+                            )),
+                            span: ast_ty.span,
                         });
                     }
-                    let unexpanded = Type::Named {
-                        path: Self::text_to_path(key),
-                        args: type_args.clone(),
-                    };
-                    if let Some(expanded) = self.unifier.try_expand_alias(&unexpanded) {
-                        return expanded.try_apply_subst(&argument_scope).map_err(|msg|
-                            TypeError::OtherWithCodeSpanned { code: "E407".into(), msg, span: ast_ty.span });
-                    }
                 }
-
-                // Return the base type with arguments
-                // Retained arguments match the declaration-owned parameter roster.
-                let result_type = match &base_ty {
-                    Type::RecordField { .. } => return Err(TypeError::OtherWithCodeSpanned {
-                        code: "E407".into(),
-                        msg: format!("type-valued field `{}` takes no type arguments",
-                            verum_ast::pretty::format_type(base)).into(),
-                        span: ast_ty.span,
-                    }),
-                    Type::Named { path, .. } => Type::Named {
-                        path: path.clone(),
-                        args: type_args.clone(),
-                    },
-                    Type::Generic {
-                        name,
-                        args: _existing_args,
-                    } => {
-                        // Check if this is an associated type projection (e.g., Self.F)
-                        // Associated types are represented as Generic { name: "::F", args: [Self] }
-                        if name.starts_with("::") {
-                            // For HKT associated types like Self.F<T>, we need to create a TypeApp
-                            // The constructor is the projection itself, args are the type arguments
-                            Type::TypeApp {
-                                constructor: Box::new(base_ty.clone()),
-                                args: type_args.clone(),
+                // Instantiate the declaration-owned telescope in prefix
+                // order. A later value carrier may depend on an earlier
+                // type/value binder; its source spelling is not identity.
+                let mut value_parameters = List::new();
+                if let Some(Type::Record(parameters)) = self.ctx.lookup_type(&params_key) {
+                    let mixed = parameters.values().any(|role| matches!(role, Type::Meta { .. }));
+                    let mut named_types = indexmap::IndexMap::new();
+                    for (index, ((name, declared), argument)) in parameters.iter().zip(
+                        type_args.iter_mut().filter(|ty| !matches!(ty, Type::Lifetime { .. }))).enumerate()
+                    {
+                        // Records and aliases retain declaration-local named
+                        // type slots. Only this exact roster authorizes their
+                        // substitution, and only inside the declared carrier.
+                        // Actual argument ranges are never rewritten by name.
+                        let role = if matches!(declared, Type::Meta { .. }) {
+                            self.substitute_declared_named_slots(declared, &named_types)
+                                .and_then(|role| role.try_apply_subst(&argument_scope))
+                        } else { Ok(declared.clone()) }.map_err(|msg|
+                            TypeError::OtherWithCodeSpanned { code: "E407".into(), msg, span: ast_ty.span })?;
+                        if source_arguments
+                            && let Type::Meta { ty: carrier, .. } = &role
+                            && let Some(verum_ast::ty::GenericArg::Const(expression)) = args.iter()
+                                .filter(|argument| !matches!(argument, verum_ast::ty::GenericArg::Lifetime(_)))
+                                .nth(index)
+                            && let ExprKind::Literal(literal) = &expression.kind
+                            && let verum_ast::literal::LiteralKind::Int(integer) = &literal.kind
+                            && integer.suffix.is_none()
+                            && let Some(value) = crate::value_parameter_domain::integer_literal_in_carrier(
+                                integer.value, &self.normalize_type(carrier))
+                        {
+                            *argument = value;
+                        }
+                        let valid = match (&role, &*argument) {
+                            (Type::Meta { ty: expected, .. }, Type::Meta { ty: actual, .. }) =>
+                                self.normalize_type(actual).base() == self.normalize_type(expected).base(),
+                            (Type::Meta { .. }, _) | (_, Type::Meta { .. }) => false,
+                            _ => true,
+                        };
+                        if !valid {
+                            return Err(TypeError::OtherWithCodeSpanned {
+                                code: "E407".into(),
+                                msg: format!("argument for `{type_name}.{name}` has the wrong kind: expected {role}, found {argument}").into(),
+                                span: ast_ty.span,
+                            });
+                        }
+                        if matches!(role, Type::Meta { .. }) {
+                            value_parameters.push((name.clone(), role, argument.clone()));
+                        }
+                        // Quantify only identities owned by this exact
+                        // declaration, never free variables in its body.
+                        match crate::context::GenericBinder::declared(declared) {
+                            Ok(crate::context::GenericBinder::Type(variable)) => {
+                                argument_scope.insert(variable, argument.clone());
                             }
-                        } else {
-                            // Regular generic type - just update the args
-                            Type::Generic {
-                                name: name.clone(),
-                                args: type_args.clone(),
+                            Ok(crate::context::GenericBinder::Value(Type::Meta {
+                                value: crate::ty::ValueTerm::Parameter(id), ..
+                            })) => {
+                                argument_scope.value_bindings.insert(id, argument.clone());
                             }
+                            _ if matches!(declared, Type::Named { path, args }
+                                if args.is_empty() && path.as_ident().is_some_and(|ident| ident.name == *name)) => {
+                                named_types.insert(name.clone(), argument.clone());
+                            }
+                            _ if matches!(declared, Type::Generic { name: declared_name, args }
+                                if args.is_empty() && declared_name == name) => {
+                                named_types.insert(name.clone(), argument.clone());
+                            }
+                            _ if mixed => {
+                                return Err(TypeError::OtherWithCodeSpanned {
+                                    code: "E407".into(),
+                                    msg: "mixed nominal telescope requires declaration-owned type and value binders".into(),
+                                    span: ast_ty.span,
+                                });
+                            }
+                            // Existing higher-kinded/legacy type-only
+                            // roles have no type/value identity to bind.
+                            _ => {}
                         }
                     }
-                    // CRITICAL FIX: Handle HKT type parameter application
-                    // When base is a TypeVar (HKT param like F from `fn map<F<_>: Functor, A>(fa: F<A>)`),
-                    // we create a TypeApp to represent F<A> with the TypeVar as constructor.
-                    // This allows unification to bind the TypeVar to a concrete constructor.
-                    // Higher-kinded types (HKTs): type constructors as first-class entities, kind inference (Type -> Type), HKT instantiation — Higher-kinded types
-                    Type::Var(_) => Type::TypeApp {
-                        constructor: Box::new(base_ty.clone()),
-                        args: type_args.clone(),
-                    },
-                    // Handle TypeConstructor for backwards compatibility
-                    Type::TypeConstructor { .. } => Type::TypeApp {
-                        constructor: Box::new(base_ty.clone()),
-                        args: type_args.clone(),
-                    },
-                    // Sum payloads use the same exact declaration slots as
-                    // aliases and records. Declaration order includes unused
-                    // parameters; scanning payload variables cannot recover it.
-                    Type::Variant(_) => match parameter_key.as_ref() {
-                        Some(key) => self.instantiate_declared_type(
-                            key.as_str(), &base_ty, &type_args,
-                        )?,
-                        None if type_args.is_empty() => base_ty.clone(),
-                        None => return Err(TypeError::OtherWithCodeSpanned {
-                            code: "E407".into(),
-                            msg: format!(
-                                "cannot resolve generic parameters for type `{}`",
-                                verum_ast::pretty::format_type(base),
-                            ).into(),
+                }
+                self.check_nominal_application_bounds(type_name, &type_args, ast_ty.span)?;
+                // A refinement on a META parameter is checked
+                // HERE, where the argument is supplied — the
+                // point of a compile-time parameter being that
+                // the check is compile-time. See T0909: the
+                // predicate was parsed, stored, and read by
+                // nobody.
+                self.check_meta_param_refinements(
+                    type_name.as_str(),
+                    args,
+                    ast_ty.span,
+                )?;
+                for (name, role, argument) in value_parameters {
+                    if !self.meta_argument_satisfies_domain(&role, &argument) {
+                        return Err(TypeError::OtherWithCodeSpanned {
+                            code: "E405".into(),
+                            msg: format!("cannot establish the declared value domain for `{type_name}.{name}`: expected {role}, found {argument}").into(),
                             span: ast_ty.span,
-                        }),
-                    },
-                    // CRITICAL FIX: When base resolves to Placeholder (forward reference during
-                    // two-pass compilation), preserve type arguments by creating a Generic type.
-                    // This ensures Rev<Self> correctly preserves the Self argument rather than
-                    // losing it and becoming just Placeholder { name: "Rev" }.
-                    Type::Placeholder { name, .. } => Type::Generic {
+                        });
+                    }
+                }
+        }
+
+        // APPLYING TYPE ARGUMENTS TO A TYPE ALIAS IS A SUBSTITUTION,
+        // NOT A REPLACEMENT.  This is the seam where the third
+        // implementation of that rule used to live.
+        //
+        // `ast_to_type(base)` has ALREADY expanded an alias, so for
+        // `IoResult<()>` the base arrives as `Result<T, StreamError>`.
+        // The `Type::Named` arm below then replaced the base's own
+        // arguments with the surface ones and produced
+        // `Result<Unit>` — a `Result` with ONE argument, which the
+        // language has no such thing as.  Nothing rejected it; it
+        // travelled as a well-typed value until `?` asked
+        // `resolve_try_protocol` for a two-argument Result and was
+        // told the function "returns Result<Unit>" (6 core/ files,
+        // and every user alias of Result reproduces it — T0774).
+        //
+        // The unifier already implements this rule correctly
+        // (`try_expand_alias` -> `substitute_alias_params`
+        // substitutes positionally into the alias's parameters).
+        // So the fix is to DELETE the duplicate rather than repair
+        // it: build the application on the UNEXPANDED name and let
+        // the one correct implementation do the work.  For anything
+        // that is not an alias `try_expand_alias` returns None and
+        // the arms below run unchanged.
+        if let Some(key) = parameter_key.as_ref() {
+            if matches!(form, ApplicationForm::DeclaredSum)
+                && let Some(owner) = self.declared_sum_key(key)
+            {
+                return Ok(Type::Named { path: Self::text_to_path(&owner), args: type_args });
+            }
+            if matches!(form, ApplicationForm::Nominal) {
+                // Parameter slots may live under a short archive key. The
+                // implementation belongs to the descriptor's declaring module.
+                let owner = if key.as_str().contains('.') {
+                    None
+                } else {
+                    self.core_metadata.as_ref()
+                        .and_then(|metadata| metadata.types.get(key))
+                        .map(Self::metadata_declaring_key)
+                };
+                return Ok(Type::Named {
+                    path: Self::text_to_path(owner.as_ref().unwrap_or(key)),
+                    args: type_args,
+                });
+            }
+            let unexpanded = Type::Named {
+                path: Self::text_to_path(key),
+                args: type_args.clone(),
+            };
+            if let Some(expanded) = self.unifier.try_expand_alias(&unexpanded) {
+                return expanded.try_apply_subst(&argument_scope).map_err(|msg|
+                    TypeError::OtherWithCodeSpanned { code: "E407".into(), msg, span: ast_ty.span });
+            }
+        }
+
+        // Return the base type with arguments
+        // Retained arguments match the declaration-owned parameter roster.
+        let result_type = match &base_ty {
+            Type::RecordField { .. } => return Err(TypeError::OtherWithCodeSpanned {
+                code: "E407".into(),
+                msg: format!("type-valued field `{}` takes no type arguments",
+                    verum_ast::pretty::format_type(base)).into(),
+                span: ast_ty.span,
+            }),
+            Type::Named { path, .. } => Type::Named {
+                path: path.clone(),
+                args: type_args.clone(),
+            },
+            Type::Generic {
+                name,
+                args: _existing_args,
+            } => {
+                // Check if this is an associated type projection (e.g., Self.F)
+                // Associated types are represented as Generic { name: "::F", args: [Self] }
+                if name.starts_with("::") {
+                    // For HKT associated types like Self.F<T>, we need to create a TypeApp
+                    // The constructor is the projection itself, args are the type arguments
+                    Type::TypeApp {
+                        constructor: Box::new(base_ty.clone()),
+                        args: type_args.clone(),
+                    }
+                } else {
+                    // Regular generic type - just update the args
+                    Type::Generic {
                         name: name.clone(),
                         args: type_args.clone(),
-                    },
-                    _ => base_ty.clone(),
-                };
-
-                // Verify dependent type constraints for Eq and Fin types
-                // Equality types: propositional equality Eq<A, x, y> with reflexivity, symmetry, transitivity, substitution — (Equality Types) and Section 3.3 (Fin)
-                if self.has_dependent_types() {
-                    if let Type::Named { ref path, .. } = result_type {
-                        if let Some(verum_ast::ty::PathSegment::Name(ident)) = path.segments.last()
-                        {
-                            let type_name = ident.name.as_str();
-
-                            match type_name {
-                                "Eq" if args.len() >= 3 => {
-                                    // Eq<A, lhs, rhs> - Propositional equality type
-                                    // Verify that both sides are well-formed and have type A
-                                    use crate::dependent_helpers::convert_internal_to_ast;
-                                    use crate::dependent_integration::DependentTypeConstraint;
-
-                                    let value_type = convert_internal_to_ast(&type_args[0]);
-
-                                    // Extract lhs and rhs expressions from type args
-                                    let lhs = self.type_arg_to_expr(args.get(1), ast_ty.span);
-                                    let rhs = self.type_arg_to_expr(args.get(2), ast_ty.span);
-
-                                    let constraint = DependentTypeConstraint::Equality {
-                                        value_type,
-                                        lhs,
-                                        rhs,
-                                        span: ast_ty.span,
-                                    };
-
-                                    self.verify_dependent_type_constraint(
-                                        &constraint,
-                                        ast_ty.span,
-                                    )?;
-                                }
-                                "Fin" if !args.is_empty() => {
-                                    // Fin<n> - Finite natural numbers less than n
-                                    // Type-level computation: compile-time evaluation of type expressions, reduction rules, normalization — .3
-                                    //
-
-                                    // For well-formedness checking of Fin<n>:
-                                    // 1. Verify bound n is non-negative
-                                    // 2. Create a symbolic value constrained to [0, n)
-                                    //
-
-                                    // The symbolic value represents any valid inhabitant of Fin<n>
-                                    // and allows SMT verification that n is a valid bound.
-                                    use crate::dependent_integration::DependentTypeConstraint;
-
-                                    let bound = self.type_arg_to_expr(args.first(), ast_ty.span);
-
-                                    // Create symbolic bounded value expression for well-formedness check.
-                                    // This represents an arbitrary value in range [0, n) and is used
-                                    // to verify that n is a valid bound (n > 0 for non-empty Fin type).
-                                    // When concrete values are assigned to Fin<n> variables, separate
-                                    // verification ensures value < n.
-                                    let symbolic_value =
-                                        self.create_symbolic_fin_value(ast_ty.span);
-
-                                    let constraint = DependentTypeConstraint::FinType {
-                                        value: symbolic_value,
-                                        bound,
-                                        span: ast_ty.span,
-                                    };
-
-                                    // Verify bound is valid (well-formedness: n must be positive)
-                                    self.verify_dependent_type_constraint(
-                                        &constraint,
-                                        ast_ty.span,
-                                    )?;
-                                }
-                                _ => {}
-                            }
-                        }
                     }
                 }
+            }
+            // CRITICAL FIX: Handle HKT type parameter application
+            // When base is a TypeVar (HKT param like F from `fn map<F<_>: Functor, A>(fa: F<A>)`),
+            // we create a TypeApp to represent F<A> with the TypeVar as constructor.
+            // This allows unification to bind the TypeVar to a concrete constructor.
+            // Higher-kinded types (HKTs): type constructors as first-class entities, kind inference (Type -> Type), HKT instantiation — Higher-kinded types
+            Type::Var(_) => Type::TypeApp {
+                constructor: Box::new(base_ty.clone()),
+                args: type_args.clone(),
+            },
+            // Handle TypeConstructor for backwards compatibility
+            Type::TypeConstructor { .. } => Type::TypeApp {
+                constructor: Box::new(base_ty.clone()),
+                args: type_args.clone(),
+            },
+            // Sum payloads use the same exact declaration slots as
+            // aliases and records. Declaration order includes unused
+            // parameters; scanning payload variables cannot recover it.
+            Type::Variant(_) => match parameter_key.as_ref() {
+                Some(key) => self.instantiate_declared_type(
+                    key.as_str(), &base_ty, &type_args,
+                )?,
+                None if type_args.is_empty() => base_ty.clone(),
+                None => return Err(TypeError::OtherWithCodeSpanned {
+                    code: "E407".into(),
+                    msg: format!(
+                        "cannot resolve generic parameters for type `{}`",
+                        verum_ast::pretty::format_type(base),
+                    ).into(),
+                    span: ast_ty.span,
+                }),
+            },
+            // CRITICAL FIX: When base resolves to Placeholder (forward reference during
+            // two-pass compilation), preserve type arguments by creating a Generic type.
+            // This ensures Rev<Self> correctly preserves the Self argument rather than
+            // losing it and becoming just Placeholder { name: "Rev" }.
+            Type::Placeholder { name, .. } => Type::Generic {
+                name: name.clone(),
+                args: type_args.clone(),
+            },
+            _ => base_ty.clone(),
+        };
 
-                self.resolve_checked_family_application(&result_type, ast_ty.span)
+        // Verify dependent type constraints for Eq and Fin types
+        // Equality types: propositional equality Eq<A, x, y> with reflexivity, symmetry, transitivity, substitution — (Equality Types) and Section 3.3 (Fin)
+        if self.has_dependent_types() {
+            if let Type::Named { ref path, .. } = result_type {
+                if let Some(verum_ast::ty::PathSegment::Name(ident)) = path.segments.last()
+                {
+                    let type_name = ident.name.as_str();
+
+                    match type_name {
+                        "Eq" if args.len() >= 3 => {
+                            // Eq<A, lhs, rhs> - Propositional equality type
+                            // Verify that both sides are well-formed and have type A
+                            use crate::dependent_helpers::convert_internal_to_ast;
+                            use crate::dependent_integration::DependentTypeConstraint;
+
+                            let value_type = convert_internal_to_ast(&type_args[0]);
+
+                            // Extract lhs and rhs expressions from type args
+                            let lhs = self.type_arg_to_expr(args.get(1), ast_ty.span);
+                            let rhs = self.type_arg_to_expr(args.get(2), ast_ty.span);
+
+                            let constraint = DependentTypeConstraint::Equality {
+                                value_type,
+                                lhs,
+                                rhs,
+                                span: ast_ty.span,
+                            };
+
+                            self.verify_dependent_type_constraint(
+                                &constraint,
+                                ast_ty.span,
+                            )?;
+                        }
+                        "Fin" if !args.is_empty() => {
+                            // Fin<n> - Finite natural numbers less than n
+                            // Type-level computation: compile-time evaluation of type expressions, reduction rules, normalization — .3
+                            //
+
+                            // For well-formedness checking of Fin<n>:
+                            // 1. Verify bound n is non-negative
+                            // 2. Create a symbolic value constrained to [0, n)
+                            //
+
+                            // The symbolic value represents any valid inhabitant of Fin<n>
+                            // and allows SMT verification that n is a valid bound.
+                            use crate::dependent_integration::DependentTypeConstraint;
+
+                            let bound = self.type_arg_to_expr(args.first(), ast_ty.span);
+
+                            // Create symbolic bounded value expression for well-formedness check.
+                            // This represents an arbitrary value in range [0, n) and is used
+                            // to verify that n is a valid bound (n > 0 for non-empty Fin type).
+                            // When concrete values are assigned to Fin<n> variables, separate
+                            // verification ensures value < n.
+                            let symbolic_value =
+                                self.create_symbolic_fin_value(ast_ty.span);
+
+                            let constraint = DependentTypeConstraint::FinType {
+                                value: symbolic_value,
+                                bound,
+                                span: ast_ty.span,
+                            };
+
+                            // Verify bound is valid (well-formedness: n must be positive)
+                            self.verify_dependent_type_constraint(
+                                &constraint,
+                                ast_ty.span,
+                            )?;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        self.resolve_checked_family_application(&result_type, ast_ty.span)
     }
 
     /// Keep the selected variant declaration in value types. Opening a case

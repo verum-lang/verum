@@ -2795,16 +2795,7 @@ fn main() {
         &verum_llvm::targets::InitializationConfig::default(),
     );
 
- // Windows default stack is 1 MB — insufficient for deep recursive
- // compiler data structures. Spawn on a thread with 16 MB stack.
-    const STACK_SIZE: usize = 16 * 1024 * 1024;
-    let builder = std::thread::Builder::new().stack_size(STACK_SIZE);
-    let handler = builder
-        .spawn(main_inner)
-        .expect("failed to spawn main thread");
-    if let Err(e) = handler.join() {
-        std::panic::resume_unwind(e);
-    }
+    main_inner();
 }
 
 fn main_inner() {
@@ -2856,15 +2847,11 @@ fn main_inner() {
 
     let verbose = cli.verbose;
 
- // Run main command in a thread with large stack size (64MB) to prevent
- // stack overflow on deeply nested expressions during type checking.
- // Deep expression nesting in select/if/match and files with many nested
- // imports (e.g., 400+ intrinsics) require a larger stack than the default.
-    const STACK_SIZE: usize = 256 * 1024 * 1024; // 256MB - needed for deep type checking with full stdlib
-
+ // Keep command failure reporting isolated on an ordinary worker. Parsing
+ // and elaboration own their structural limits; stack inflation must not
+ // conceal a recursion defect in either path.
     let spawned = match std::thread::Builder::new()
         .name("verum-main".into())
-        .stack_size(STACK_SIZE)
         .spawn(move || run_command(cli))
     {
         Ok(handle) => handle,

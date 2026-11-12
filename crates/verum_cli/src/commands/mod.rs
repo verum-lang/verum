@@ -153,10 +153,10 @@ pub mod smt_check;
 pub mod tree;
 pub mod update;
 
-/// Parser and AST visitors recurse on each worker's stack. Size the actual
-/// workers, including user-selected single-worker runs, consistently on all hosts.
+/// Source tools share a bounded pool of ordinary workers. Parser and visitor
+/// limits are enforced by their traversals, independently of the worker count.
 pub(crate) fn source_worker_pool(threads: Option<usize>) -> crate::error::Result<rayon::ThreadPool> {
-    let mut pool = rayon::ThreadPoolBuilder::new().stack_size(16 * 1024 * 1024);
+    let mut pool = rayon::ThreadPoolBuilder::new();
     if let Some(count) = threads {
         pool = pool.num_threads(count.max(1));
     }
