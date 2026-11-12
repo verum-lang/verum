@@ -2661,14 +2661,15 @@ fn substitute_refinement_binder(
         }
     }
 
-    /// Capture declaration-owned slots before method generic scope is left.
+    /// Capture source identity and declaration-owned slots before the generic scope is left.
     /// Non-type parameters occupy a slot; implicit parameters occupy none.
-    pub(super) fn record_explicit_method_vars(
+    pub(super) fn record_callable_declaration(
         &self,
         scheme: &mut crate::context::TypeScheme,
         func: &verum_ast::decl::FunctionDecl,
     ) {
         use crate::context::GenericBinder;
+        scheme.callable_source = Some((self.current_module_path.clone(), Shared::new(func.clone())));
         // The exact receiver type carries implementation-owned value identities.
         // Explicit method slots contain only the method's own telescope.
         if scheme.impl_self_type.is_none() {

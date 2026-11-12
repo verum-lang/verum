@@ -131,6 +131,49 @@ impl Visitor for Calls<'_> {
 }
 
 impl TypeChecker {
+    pub(super) fn record_method_publication(
+        &mut self,
+        receiver: &Text,
+        name: &Text,
+        scheme: &crate::context::TypeScheme,
+    ) {
+        let Some((owner, declaration)) = &scheme.callable_source else { return; };
+        let locations = self.source_type_registration.method_publications
+            .entry((owner.clone(), declaration.span)).or_default();
+        let location = (receiver.clone(), name.clone());
+        if !locations.contains(&location) { locations.push(location); }
+    }
+
+    pub(super) fn publish_checked_method_contract(
+        &mut self,
+        implementation: &verum_ast::decl::ImplDecl,
+        declaration: &FunctionDecl,
+        checked: &Type,
+    ) -> Result<()> {
+        let owner = self.current_module_path.clone();
+        if let Some(locations) = self.source_type_registration.method_publications
+            .get(&(owner.clone(), declaration.span))
+        {
+            let mut methods = self.inherent_methods.write();
+            for (receiver, name) in locations {
+                if let Some(scheme) = methods.get_mut(receiver).and_then(|entries| entries.get_mut(name)) {
+                    scheme.refine_callable_contract(&owner, declaration, checked);
+                }
+                if let Some(method) = name.strip_prefix("$static$") {
+                    self.ctx.env.refine_callable_contract(
+                        &format!("{receiver}.{method}"), &owner, declaration, checked,
+                    );
+                }
+            }
+        }
+        if matches!(implementation.kind, verum_ast::decl::ImplKind::Protocol { .. }) {
+            self.protocol_checker.write().refine_source_method_contract(
+                &owner, implementation, declaration, checked,
+            )?;
+        }
+        Ok(())
+    }
+
     /// A selected structural operation contains no user callback. Its arguments
     /// are still traversed normally, so their properties cannot disappear.
     pub(super) fn record_structural_call(&mut self, span: Span, params: List<Type>, result: Type) {

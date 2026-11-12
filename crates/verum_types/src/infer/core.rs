@@ -121,6 +121,7 @@ impl TypeChecker {
         scheme: crate::context::TypeScheme,
         from_protocol_impl: bool,
     ) {
+        self.record_method_publication(&type_name, &method_name, &scheme);
         if from_protocol_impl && let Some(Type::Named { args, .. } | Type::Generic { args, .. }) = &scheme.impl_self_type
             && !args.is_empty()
         {

@@ -5235,7 +5235,7 @@ impl TypeChecker {
                                             .with_universe_parameters(checker.current_universe_parameters())
                                             .map_err(|message| TypeError::UniverseBinding { message, span: func.span })?;
                                     func_scheme.impl_self_type = Some(self_type.clone());
-                                    checker.record_explicit_method_vars(&mut func_scheme, func);
+                                    checker.record_callable_declaration(&mut func_scheme, func);
                                     // Record how many ordered vars are impl-level so method-level params
                                     // (e.g., method's own <U>) aren't bound from receiver type args at call time.
                                     func_scheme.impl_var_count = type_param_names.len();
@@ -5256,6 +5256,7 @@ impl TypeChecker {
                                     ));
                                     let type_name_text =
                                         verum_common::Text::from(type_name_str.as_str());
+                                    checker.record_method_publication(&type_name_text, &static_key, &func_scheme);
                                     {
                                         let mut methods = checker.inherent_methods.write();
                                         let type_methods =
@@ -5375,7 +5376,7 @@ impl TypeChecker {
                                         Some(crate::core_metadata::ReceiverKind::from_declaration(func));
                                     method_scheme.impl_var_count = impl_vars_in_for_type.len();
                                     method_scheme.impl_self_type = Some(self_type.clone());
-                                    checker.record_explicit_method_vars(&mut method_scheme, func);
+                                    checker.record_callable_declaration(&mut method_scheme, func);
                                     if std::env::var("VERUM_TRACE_METHOD_LOOKUP").is_ok() { eprintln!("[implvc-set] site=decls.rs:5370 count={}", impl_vars_in_for_type.len()); }
 
                                     // Register in inherent_methods map — guarded ONE
@@ -5731,7 +5732,7 @@ impl TypeChecker {
                                     Some(crate::core_metadata::ReceiverKind::from_declaration(func));
                                 method_scheme.impl_var_count = impl_vars_in_for_type.len();
                                 method_scheme.impl_self_type = self.current_self_type.clone();
-                                self.record_explicit_method_vars(&mut method_scheme, func);
+                                self.record_callable_declaration(&mut method_scheme, func);
                                 if let Some(declaration) = self.protocol_checker.read().get_protocol(&protocol_identity).and_then(|protocol| protocol.methods.get(&func.name.name)) {
                                     self.attach_protocol_method_requirements(&mut method_scheme, declaration, &resolved_protocol_args, self.current_self_type.as_ref().ok_or_else(|| TypeError::Other("protocol implementation receiver scope is missing".into()))?, func.span)?;
                                 }
@@ -5873,7 +5874,7 @@ impl TypeChecker {
                                     Some(crate::core_metadata::ReceiverKind::from_declaration(func));
                                 method_scheme.impl_var_count = impl_vars_in_for_type.len();
                                 method_scheme.impl_self_type = self.current_self_type.clone();
-                                self.record_explicit_method_vars(&mut method_scheme, func);
+                                self.record_callable_declaration(&mut method_scheme, func);
                                 if let Some(declaration) = self.protocol_checker.read().get_protocol(&protocol_identity).and_then(|protocol| protocol.methods.get(&func.name.name)) {
                                     self.attach_protocol_method_requirements(&mut method_scheme, declaration, &resolved_protocol_args, self.current_self_type.as_ref().ok_or_else(|| TypeError::Other("protocol implementation receiver scope is missing".into()))?, func.span)?;
                                 }
@@ -5897,6 +5898,7 @@ impl TypeChecker {
                                     "$static${}",
                                     func.name.name.as_str()
                                 ));
+                                self.record_method_publication(&type_name_text, &static_key, &method_scheme);
                                 {
                                     let mut methods_guard = self.inherent_methods.write();
                                     let type_methods =
@@ -6579,7 +6581,7 @@ impl TypeChecker {
             .map_err(|message| TypeError::UniverseBinding { message, span: func.span })?;
         scheme.where_clauses = structural_conditions;
         scheme.returned_parameter = super::reference_origin::forwarded_parameter(func);
-        self.record_explicit_method_vars(&mut scheme, func);
+        self.record_callable_declaration(&mut scheme, func);
         Ok(scheme)
         })();
 
@@ -6983,7 +6985,9 @@ impl TypeChecker {
                         continue;
                     }
                     if let ImplItemKind::Function(func) = &item.kind {
-                        self.check_function(func)?;
+                        if let Some(checked) = self.check_function(func)? {
+                            self.publish_checked_method_contract(impl_decl, func, &checked)?;
+                        }
                         self.trace_impl_param_pinning(&type_param_names, &func.name.name);
                         tracing::debug!("Type-checked method {}.{}", ty, func.name.name);
                     }
@@ -7053,7 +7057,9 @@ impl TypeChecker {
                         continue;
                     }
                     if let ImplItemKind::Function(func) = &item.kind {
-                        self.check_function(func)?;
+                        if let Some(checked) = self.check_function(func)? {
+                            self.publish_checked_method_contract(impl_decl, func, &checked)?;
+                        }
                         tracing::debug!(
                             "Type-checked protocol method {}.{} for {}",
                             protocol_name,

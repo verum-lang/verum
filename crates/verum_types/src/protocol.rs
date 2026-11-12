@@ -5338,6 +5338,24 @@ impl ProtocolChecker {
             .map(|implementation| implementation.is_some())
     }
 
+    pub(crate) fn refine_source_method_contract(
+        &mut self,
+        owner: &Text,
+        declaration: &verum_ast::decl::ImplDecl,
+        method: &verum_ast::FunctionDecl,
+        checked: &Type,
+    ) -> crate::Result<()> {
+        // Validate the complete source before using its indexed implementation;
+        // equal method names or equal receiver types do not establish ownership.
+        if self.source_impl(owner, declaration)?.is_none() { return Ok(()); }
+        let index = self.source_impls[&(owner.clone(), declaration.span)].1;
+        if let Some(target) = self.impls[index].methods.get_mut(&method.name.name) {
+            target.copy_callable_contract(checked);
+            self.invalidate_impl_cache();
+        }
+        Ok(())
+    }
+
     pub(crate) fn register_source_impl(
         &mut self,
         owner: &Text,

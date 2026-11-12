@@ -110,3 +110,51 @@ fn imported_foreign_callbacks_retain_the_declared_abi() {
     );
     assert!(errors.is_empty(), "{errors:?}");
 }
+
+#[test]
+fn checked_method_contracts_reach_static_and_instance_callers() {
+    for source in [
+        "type Event is Value(Int); type Device is ();
+         fn apply(f: fn(Int) -> Event) -> Event { f(7) }
+         implement Device { fn package(value: Int) -> Event { Event.Value(value) } }
+         fn result() -> Event { apply(|value| Device.package(value)) }",
+        "type Event is Value(Int); type Device is ();
+         implement Device { fn package(value: Int) -> Event { Event.Value(value) } }
+         static mut CALLBACK: fn(Int) -> Event = Device.package;",
+        "type Event is Value(Int); type Device is ();
+         fn apply(f: fn(Int) -> Event) -> Event { f(7) }
+         implement Device { fn package(&self, value: Int) -> Event { Event.Value(value) } }
+         fn result(device: &Device) -> Event { apply(|value| device.package(value)) }",
+        "type Event is Value(Int); type Device is ();
+         type Encode is protocol { fn package(&self, value: Int) -> Event; };
+         fn apply(f: fn(Int) -> Event) -> Event { f(7) }
+         implement Encode for Device { fn package(&self, value: Int) -> Event { Event.Value(value) } }
+         fn result(device: &Device) -> Event { apply(|value| device.package(value)) }",
+        "type Device<T> is (); type Event<T> is Value(T);
+         fn apply(f: fn(Int) -> Event<Int>) -> Event<Int> { f(7) }
+         implement<T> Device<T> { fn package(value: T) -> Event<T> { Event.Value(value) } }
+         fn result() -> Event<Int> { apply(|value| Device.package(value)) }",
+    ] {
+        let accepted = errors(source);
+        assert!(accepted.is_empty(), "{source}: {accepted:?}");
+    }
+}
+
+#[test]
+fn checked_method_contracts_do_not_leak_to_sibling_owners() {
+    for marker in ["async ", ""] {
+        let body = if marker.is_empty() {
+            "@intrinsic(\"syscall0\", value); Event.Value(value)"
+        } else { "Event.Value(value)" };
+        let source = format!(
+            "type Event is Value(Int); type First is (); type Second is ();
+             fn apply(f: fn(Int) -> Event) -> Event {{ f(7) }}
+             implement Second {{ {marker}fn package(value: Int) -> Event {{ {body} }} }}
+             implement First {{ fn package(value: Int) -> Event {{ Event.Value(value) }} }}
+             fn result() -> Event {{ apply(|value| Second.package(value)) }}"
+        );
+        let rejected = errors(&source);
+        assert!(rejected.iter().any(|e| e.contains("Mismatch") && e.contains("async")),
+            "a sibling method supplied false evidence: {source}: {rejected:?}");
+    }
+}

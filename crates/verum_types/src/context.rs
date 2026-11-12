@@ -113,6 +113,8 @@ pub(crate) fn instantiate_binders(
 /// Implicit arguments: compiler-inferred function arguments resolved by unification or type class search — Implicit arguments
 #[derive(Debug, Clone, PartialEq)]
 pub struct TypeScheme {
+    /// Source identity is retained independently of fresh generic variables.
+    pub(crate) callable_source: Option<(Text, Shared<verum_ast::FunctionDecl>)>,
     /// Universally quantified type variables
     pub vars: List<TypeVar>,
     /// Rigid value parameters, including their exact scalar sorts and domains.
@@ -183,6 +185,19 @@ impl InstantiatedScheme {
 }
 
 impl TypeScheme {
+    pub(crate) fn refine_callable_contract(
+        &mut self,
+        owner: &Text,
+        declaration: &verum_ast::FunctionDecl,
+        checked: &Type,
+    ) {
+        if self.callable_source.as_ref().is_some_and(|(source_owner, source)|
+            source_owner == owner && &**source == declaration)
+        {
+            self.ty.copy_callable_contract(checked);
+        }
+    }
+
     pub fn try_instantiate(&self) -> Result<InstantiatedScheme, Text> {
         let parameters: List<GenericBinder> = self
             .vars
@@ -306,6 +321,7 @@ impl TypeScheme {
             explicit_method_vars: None,
             value_parameters: List::new(),
             universe_params: List::new(),
+            callable_source: None,
         }
     }
 
@@ -325,6 +341,7 @@ impl TypeScheme {
             explicit_method_vars: None,
             value_parameters: List::new(),
             universe_params: List::new(),
+            callable_source: None,
         }
     }
 
@@ -345,6 +362,7 @@ impl TypeScheme {
             explicit_method_vars: None,
             value_parameters: List::new(),
             universe_params: List::new(),
+            callable_source: None,
         }
     }
 
@@ -370,6 +388,7 @@ impl TypeScheme {
             explicit_method_vars: None,
             value_parameters: List::new(),
             universe_params: List::new(),
+            callable_source: None,
         }
     }
 
@@ -1393,6 +1412,24 @@ impl TypeEnv {
     /// Insert a monomorphic type
     pub fn insert_mono(&mut self, name: impl Into<Text>, ty: Type) {
         self.insert(name, TypeScheme::mono(ty));
+    }
+
+    pub(crate) fn refine_callable_contract(
+        &mut self,
+        name: &str,
+        owner: &Text,
+        declaration: &verum_ast::FunctionDecl,
+        checked: &Type,
+    ) {
+        let mut scope = self;
+        loop {
+            if let Some(scheme) = scope.bindings.get_mut(name) {
+                scheme.refine_callable_contract(owner, declaration, checked);
+                return;
+            }
+            let Some(parent) = scope.parent.as_deref_mut() else { return; };
+            scope = parent;
+        }
     }
 
     /// Remove a binding from the current scope (only).

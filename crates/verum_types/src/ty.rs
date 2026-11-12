@@ -1702,6 +1702,18 @@ impl Type {
         self
     }
 
+    /// Transfer only the checked computational contract; declaration binders,
+    /// receiver substitution, contexts and return types stay with their scheme.
+    pub(crate) fn copy_callable_contract(&mut self, checked: &Self) {
+        if let (
+            Self::Function { property_requirement, properties, .. },
+            Self::Function { property_requirement: bound, properties: footprint, .. },
+        ) = (self, checked) {
+            *property_requirement = bound.clone();
+            *properties = footprint.clone();
+        }
+    }
+
     /// Construct a function with DI contexts and an unknown body footprint.
     pub fn function_with_contexts(
         params: List<Type>,

@@ -9830,7 +9830,7 @@ impl TypeChecker {
         let properties = crate::computational_properties::PropertyRequirement::declared_function(func.is_pure, func.is_meta);
 
         let mut declaration_slots = TypeScheme::mono(Type::unit());
-        self.record_explicit_method_vars(&mut declaration_slots, func);
+        self.record_callable_declaration(&mut declaration_slots, func);
         // Argument spellings belong to the caller, outside the declaration's
         // generic scope. Captured IDs still refer to this selected signature.
         Ok((param_types?, final_return_type, properties, declaration_slots))

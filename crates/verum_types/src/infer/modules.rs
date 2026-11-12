@@ -243,7 +243,7 @@ impl TypeChecker {
         }
 
         match &item.kind {
-            ItemKind::Function(func) => self.check_function(func),
+            ItemKind::Function(func) => self.check_function(func).map(|_| ()),
             ItemKind::Type(type_decl) => {
                 // Handle local type declarations inside functions
                 // Grammar: statement = ... | item | ... ; item = type_def | ...
@@ -6070,7 +6070,7 @@ impl TypeChecker {
                             Some(crate::core_metadata::ReceiverKind::from_declaration(func));
                         method_scheme.impl_var_count = impl_type_vars.len();
                         method_scheme.impl_self_type = self.current_self_type.clone();
-                        self.record_explicit_method_vars(&mut method_scheme, func);
+                        self.record_callable_declaration(&mut method_scheme, func);
                         method_scheme.impl_self_type = self.current_self_type.clone();
                         if !method_type_bounds.is_empty() {
                             method_scheme = method_scheme.with_type_bounds(method_type_bounds);
@@ -6084,12 +6084,14 @@ impl TypeChecker {
                         }
                         // Generic static syntax resolves through the same
                         // owner bucket as ordinary source impl registration.
+                        let static_key = format!("$static${}", func.name.name).into();
+                        self.record_method_publication(&method_owner, &static_key, &method_scheme);
                         self.inherent_methods
                             .write()
                             .entry(method_owner.clone())
                             .or_default()
                             .insert(
-                                format!("$static${}", func.name.name).into(),
+                                static_key,
                                 method_scheme.clone(),
                             );
                         static_method_registrations.push((qualified_name.clone(), method_scheme));
@@ -6192,7 +6194,7 @@ impl TypeChecker {
                             Some(crate::core_metadata::ReceiverKind::from_declaration(func));
                         method_scheme.impl_var_count = impl_type_vars.len();
                         method_scheme.impl_self_type = self.current_self_type.clone();
-                        self.record_explicit_method_vars(&mut method_scheme, func);
+                        self.record_callable_declaration(&mut method_scheme, func);
                         if std::env::var("VERUM_TRACE_METHOD_LOOKUP").is_ok() { eprintln!("[implvc-set] site=modules.rs:4465 count={}", impl_type_vars.len()); }
 
                         // CRITICAL: Add type bounds for closure type inference
@@ -10582,10 +10584,10 @@ impl TypeChecker {
         self.ctx.env.insert(name, TypeScheme::mono(func_type));
     }
 
-    pub(super) fn check_function(&mut self, func: &verum_ast::FunctionDecl) -> Result<()> {
+    pub(super) fn check_function(&mut self, func: &verum_ast::FunctionDecl) -> Result<Option<Type>> {
         // Skip functions gated by @cfg predicates that don't match the current platform.
         if !self.cfg_evaluator.should_include(&func.attributes) {
-            return Ok(());
+            return Ok(None);
         }
         // The rigid set belongs to ONE body. Restoring it here rather than
         // at the end of `check_function_inner` is what makes that true on
@@ -10608,7 +10610,7 @@ impl TypeChecker {
         self.source_type_registration.projection_assumptions.truncate(assumption_depth);
         self.source_type_registration.callable_assumptions.truncate(callable_depth);
         self.unifier.exit_rigid_scope(saved_rigid);
-        result
+        result.map(Some)
     }
 
     /// Inner implementation of check_function
@@ -10669,7 +10671,7 @@ impl TypeChecker {
             .find_map(|member| self.positive_leaf_context(member.name.as_str(), depth + 1))
     }
 
-    fn check_function_inner(&mut self, func: &verum_ast::FunctionDecl) -> Result<()> {
+    fn check_function_inner(&mut self, func: &verum_ast::FunctionDecl) -> Result<Type> {
         let _global_guard = GlobalDepthGuard::enter()?;
 
 
@@ -11064,7 +11066,7 @@ impl TypeChecker {
         let mut scheme = scheme.with_universe_parameters(self.current_universe_parameters())
             .map_err(|message| TypeError::UniverseBinding { message, span: func.span })?;
         scheme.where_clauses = structural_conditions.clone();
-        self.record_explicit_method_vars(&mut scheme, func);
+        self.record_callable_declaration(&mut scheme, func);
         scheme.returned_parameter = super::reference_origin::forwarded_parameter(func);
         let source_returned_parameter = scheme.returned_parameter;
         let source_explicit_slots = scheme.explicit_method_vars.clone();
@@ -13112,7 +13114,7 @@ impl TypeChecker {
         // NOTE: E321 unbounded recursion check was moved to BEFORE body inference
         // to prevent stack overflow during type checking of infinitely-recursive functions.
 
-        Ok(())
+        Ok(final_func_type)
     }
 
     /// Extract all call sites from a function body for corecursion analysis.
