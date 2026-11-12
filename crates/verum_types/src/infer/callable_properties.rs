@@ -3,7 +3,7 @@ use super::*;
 use crate::computational_properties::{ComputationalProperty, PropertyRequirement, PropertySet};
 use verum_ast::visitor::{Visitor, walk_expr, walk_pattern, walk_stmt};
 use verum_ast::{FunctionDecl, ItemKind, Pattern, PatternKind};
-use verum_vbc::intrinsics::{lookup_intrinsic, registry::CodegenStrategy};
+use verum_vbc::intrinsics::{lookup_intrinsic, registry::IntrinsicCallBound};
 
 use super::atomic_access::AtomicAccess;
 
@@ -18,22 +18,10 @@ pub(super) fn intrinsic_operation_name(surface: &str, args: &[Expr]) -> Option<T
 }
 
 fn intrinsic_requirement(name: &str) -> Option<PropertyRequirement> {
-    // Read the selected operation, not a library wrapper's spelling or an
-    // optimizer hint. A constant has no runtime operations. Other lowering
-    // classes need their own evidence; registration alone proves no bound.
-    if let Some(info) = lookup_intrinsic(name)
-        && matches!(info.intrinsic.strategy, CodegenStrategy::CompileTimeConstant
-            | CodegenStrategy::TargetHasAtomic | CodegenStrategy::TargetHasFeature
-            | CodegenStrategy::TypeLayout(_) | CodegenStrategy::TypeIdentity
-            | CodegenStrategy::TypeInspect(_))
-    {
-        return Some(PropertyRequirement::AtMost(PropertySet::pure()));
-    }
-    match name {
-        // The panic instruction raises synchronously. Catching it does not
-        // require a suspension-capable callback.
-        "panic" => Some(PropertyRequirement::source_callable(false)),
-        name => AtomicAccess::from_intrinsic(name).map(AtomicAccess::properties),
+    match lookup_intrinsic(name).map(|info| info.intrinsic.call_bound()) {
+        Some(IntrinsicCallBound::Pure) => Some(PropertyRequirement::AtMost(PropertySet::pure())),
+        Some(IntrinsicCallBound::Synchronous) => Some(PropertyRequirement::source_callable(false)),
+        _ => AtomicAccess::from_intrinsic(name).map(AtomicAccess::properties),
     }
 }
 
@@ -248,7 +236,11 @@ impl TypeChecker {
             return true;
         }
         let Some(body) = &function.body else {
-            return false;
+            // Bodyless declarations execute the registered operation. An
+            // annotation on a source body cannot replace that body's evidence.
+            return crate::core_pipeline::extract_intrinsic_name(function)
+                .and_then(|name| intrinsic_requirement(name.as_str()))
+                .is_some_and(|bound| !bound.may_be_async());
         };
         let key = (owner.clone(), function.span);
         if active.len() >= 32 || active.contains(&key) {
@@ -321,38 +313,37 @@ impl TypeChecker {
         name: &Text,
     ) -> Option<(Text, FunctionDecl)> {
         use super::source_declarations::{MountTargetKind, source_mount_targets};
-        if let Some((_, module)) = self.source_type_registration.local_declarations.iter().rev()
-            .find(|(path, _)| path == owner)
-        {
-            if let Some(declaration) = module.items.iter().find_map(|item| self.imported_function(item, name)) {
-                return Some((owner.clone(), declaration.clone()));
-            }
-            if module.items.iter().any(|item| match &item.kind {
-                ItemKind::Const(value) => &value.name.name == name,
-                ItemKind::Static(value) => &value.name.name == name,
-                _ => false,
-            }) { return None; }
-        }
         let registry = self.module_registry.read();
-        let module = self.get_module_with_path_aliases(owner, &registry)?;
-        let local = |module: &verum_modules::ModuleInfo, name: &Text| {
-            module.ast.items.iter().find_map(|item| self.imported_function(item, name)).cloned()
+        let registered = self.get_module_with_path_aliases(owner, &registry);
+        // A currently checked source need not yet be a registry entry. Its
+        // complete lexical inventory (including mounts) still owns resolution.
+        let module = self.source_type_registration.local_declarations.iter().rev()
+            .find(|(path, _)| path == owner).map(|(_, module)| module.as_ref())
+            .or_else(|| registered.as_ref().map(|module| &module.ast))?;
+        let path = registered.as_ref().map_or_else(
+            || verum_modules::ModulePath::from_str(owner), |module| module.path.clone(),
+        );
+        let included = |item: &&verum_ast::Item| self.cfg_evaluator.should_include(&item.attributes);
+        let local = |module: &verum_ast::Module, name: &Text| {
+            module.items.iter().filter(included)
+                .filter_map(|item| self.imported_function(item, name))
+                .find(|function| self.cfg_evaluator.should_include(&function.attributes)).cloned()
         };
-        if let Some(function) = local(&module, name) {
-            return Some((module.path.to_string().into(), function));
+        if let Some(function) = local(module, name) {
+            return Some((path.to_string().into(), function));
         }
-        if module.ast.items.iter().any(|item| match &item.kind {
+        if module.items.iter().filter(included).any(|item| match &item.kind {
             ItemKind::Const(value) => &value.name.name == name,
             ItemKind::Static(value) => &value.name.name == name,
             _ => false,
         }) {
             return None;
         }
-        let mut named = Vec::new();
-        let mut glob = Vec::new();
-        for item in &module.ast.items {
+        let mut named = List::new();
+        let mut glob = List::new();
+        for item in module.items.iter().filter(included) {
             if let ItemKind::Mount(mount) = &item.kind {
-                source_mount_targets(mount, &module.path, name, |target, kind| match kind {
+                source_mount_targets(mount, &path, name, |target, kind| match kind {
                     MountTargetKind::Named => {
                         if let (Some(parent), Some(leaf)) = (target.parent(), target.name()) {
                             named.push((parent, leaf.clone()));
@@ -379,7 +370,7 @@ impl TypeChecker {
             }
             let origin = registry.get(export.source_module)?;
             let original = export.original_name.as_ref().unwrap_or(&leaf);
-            let declaration = local(&origin, original)?;
+            let declaration = local(&origin.ast, original)?;
             let key = (Text::from(origin.path.to_string()), declaration);
             if selected.as_ref().is_some_and(|previous| previous != &key) {
                 return None;

@@ -72,6 +72,65 @@ fn a_diverging_source_handler_remains_synchronous() {
 }
 
 #[test]
+fn intrinsic_declarations_propagate_the_selected_lowering_bound() {
+    for provider in [
+        "@intrinsic(\"text_byte_len\") public fn inspect(value: &Text) -> Int;",
+        "public fn inspect(value: &Text) -> Int { @intrinsic(\"text_byte_len\", value) }",
+        "@intrinsic(\"text_as_bytes\") fn bytes(value: &Text) -> &[Byte];
+         public fn inspect(value: &Text) -> Int { let data = bytes(value); 7 }",
+    ] {
+        for source in [
+            "mount platform.inspect; fn handler(value: &Text) { inspect(value); }
+             static mut HANDLER: fn(&Text) = handler;",
+            "mount platform.inspect as measure; static mut HANDLER: fn(&Text) = handler;
+             fn handler(value: &Text) { measure(value); }",
+        ] {
+            let accepted = errors_with_provider(source, Some(provider));
+            assert!(accepted.is_empty(), "{provider}: {source}: {accepted:?}");
+        }
+    }
+}
+
+#[test]
+fn forward_import_contracts_obey_source_cfg_selection() {
+    let provider = "@intrinsic(\"text_byte_len\") public fn inspect(value: &Text) -> Int;
+                    public async fn pending(value: &Text) -> Int { 7 }";
+    let accepted = errors_with_provider(
+        "mount platform.inspect as measure;
+         @cfg(target_os = \"unselected\") mount platform.pending as measure;
+         static mut HANDLER: fn(&Text) = handler;
+         fn handler(value: &Text) { measure(value); }", Some(provider));
+    assert!(accepted.is_empty(), "{accepted:?}");
+    let rejected = errors_with_provider(
+        "@cfg(target_os = \"unselected\") mount platform.inspect as measure;
+         mount platform.pending as measure;
+         static mut HANDLER: fn(&Text) = handler;
+         fn handler(value: &Text) { measure(value); }", Some(provider));
+    assert!(!rejected.is_empty(), "excluded synchronous alias supplied evidence");
+}
+
+#[test]
+fn intrinsic_hints_and_annotations_cannot_fabricate_callable_evidence() {
+    for provider in [
+        // Registration and a Pure optimizer hint alone do not certify a bound.
+        "@intrinsic(\"text_parse_int\") public fn inspect(value: &Text) -> Int;",
+        "@intrinsic(\"missing_operation\") public fn inspect(value: &Text) -> Int;",
+        "public fn inspect(value: &Text) -> Int;",
+        "fn text_byte_len(value: &Text) -> Int;
+         public fn inspect(value: &Text) -> Int { text_byte_len(value) }",
+        "@intrinsic(\"text_byte_len\") public fn inspect(value: &Text) -> Int { pending() }
+         async fn pending() -> Int { 7 }",
+    ] {
+        let source = "mount platform.inspect; fn handler(value: &Text) { inspect(value); }
+                      static mut HANDLER: fn(&Text) = handler;";
+        assert!(!errors_with_provider(source, Some(provider)).is_empty(), "{provider}");
+    }
+    let source = "@intrinsic(\"text_as_bytes\") fn bytes(value: &Text) -> &[Byte];
+                  pure fn inspect(value: &Text) -> Int { let data = bytes(value); 7 }";
+    assert!(!errors(source).is_empty(), "synchronous must not imply pure");
+}
+
+#[test]
 fn an_async_handler_cannot_be_installed_as_a_synchronous_callback() {
     for source in [
         "async fn handler(value: Int) {} static mut HANDLER: fn(Int) = handler;",

@@ -1230,7 +1230,36 @@ pub struct Intrinsic {
     pub doc: &'static str,
 }
 
+/// Conservative callable bound established by the selected VBC lowering.
+/// Optimizer hints do not establish a callable contract.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IntrinsicCallBound {
+    /// No runtime computational properties.
+    Pure,
+    /// Executes on the calling stack; may still allocate, mutate, fail or diverge.
+    Synchronous,
+    /// The lowering has not established a narrower bound.
+    Unknown,
+}
+
 impl Intrinsic {
+    /// The operation, not its surface spelling or `Pure` hint, owns this bound.
+    pub fn call_bound(&self) -> IntrinsicCallBound {
+        match self.strategy {
+            CodegenStrategy::CompileTimeConstant
+            | CodegenStrategy::TargetHasAtomic | CodegenStrategy::TargetHasFeature
+            | CodegenStrategy::TypeLayout(_) | CodegenStrategy::TypeIdentity
+            | CodegenStrategy::TypeInspect(_) => IntrinsicCallBound::Pure,
+            // These lowerings cannot invoke a user callable or suspend a task.
+            // This establishes only absence of suspension, not a complete
+            // computational footprint or a proof of purity.
+            CodegenStrategy::DirectOpcode(Opcode::Panic)
+            | CodegenStrategy::InlineSequence(InlineSequenceId::TextAsBytes
+                | InlineSequenceId::TextByteLen) => IntrinsicCallBound::Synchronous,
+            _ => IntrinsicCallBound::Unknown,
+        }
+    }
+
     /// Returns the primary VBC opcode if this intrinsic maps directly.
     pub fn primary_opcode(&self) -> Option<Opcode> {
         match &self.strategy {
