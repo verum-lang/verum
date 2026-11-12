@@ -2506,10 +2506,12 @@ impl TypeChecker {
         }
     }
 
-    fn check_expr_assignment_target(
+    // Resolve storage independently of the incoming value. Assignment then
+    // checks that value against this declared type, in the same direction as
+    // initialization; it must not narrow the storage to its current contents.
+    fn assignment_target_type(
         &mut self,
         expr: &Expr,
-        expected: &Type,
     ) -> Result<InferResult> {
         use verum_ast::expr::ExprKind;
 
@@ -2520,13 +2522,10 @@ impl TypeChecker {
                     let name = id.name.as_str();
                     if let Some(scheme) = self.ctx.env.lookup(name) {
                         let ty = scheme.instantiate();
-                        self.check_value_conversion_obligations(expected, &ty, expr.span)?;
-                        self.unifier.unify(&ty, expected, expr.span)?;
                         return Ok(InferResult::new(ty));
                     }
                 }
-                // Fall through to normal check
-                self.check_expr(expr, expected)
+                self.synth_expr(expr)
             }
 
             // For field access (struct.field = value), skip init checking for the field
@@ -2535,10 +2534,6 @@ impl TypeChecker {
                 let obj_result = self.synth_expr_for_field_access(obj)?;
                 self.check_record_field_visibility(&obj_result.ty, field.name.as_str(), expr.span)?;
                 if let Some(ty) = self.dependent_field_type(obj, &obj_result.ty, &field.name, true, expr.span)? {
-                    self.unifier.unify(&ty, expected, expr.span)?;
-                    if ty.contains_record_field() {
-                        self.check_record_family_agreement(expected, &ty, expr.span)?;
-                    }
                     return Ok(InferResult::new(ty));
                 }
                 let mut normalized_ty = self.normalize_field_receiver(&obj_result.ty);
@@ -2581,8 +2576,6 @@ impl TypeChecker {
                         if let Some(field_ty) =
                             fields.get(&verum_common::Text::from(field.name.as_str()))
                         {
-                            self.check_value_conversion_obligations(expected, field_ty, expr.span)?;
-                            self.unifier.unify(field_ty, expected, expr.span)?;
                             Ok(InferResult::new(field_ty.clone()))
                         } else {
                             Err(TypeError::Other(verum_common::Text::from(format!(
@@ -2660,12 +2653,6 @@ impl TypeChecker {
                                 // Apply type parameter substitution to get concrete field type
                                 let resolved_ty =
                                     self.substitute_type_params(field_ty, &param_subst);
-                                self.check_value_conversion_obligations(
-                                    expected,
-                                    &resolved_ty,
-                                    expr.span,
-                                )?;
-                                self.unifier.unify(&resolved_ty, expected, expr.span)?;
                                 return Ok(InferResult::new(resolved_ty));
                             }
                         }
@@ -2684,12 +2671,6 @@ impl TypeChecker {
                         if let Some(Type::Record(fields)) = self.ctx.lookup_type(&struct_key) {
                             let field_name_key = verum_common::Text::from(field.name.as_str());
                             if let Some(field_ty) = fields.get(&field_name_key).cloned() {
-                                self.check_value_conversion_obligations(
-                                    expected,
-                                    &field_ty,
-                                    expr.span,
-                                )?;
-                                self.unifier.unify(&field_ty, expected, expr.span)?;
                                 return Ok(InferResult::new(field_ty));
                             }
                         }
@@ -2724,12 +2705,6 @@ impl TypeChecker {
                     Type::Tuple(types) => {
                         let idx = *index as usize;
                         if idx < types.len() {
-                            self.check_value_conversion_obligations(
-                                expected,
-                                &types[idx],
-                                expr.span,
-                            )?;
-                            self.unifier.unify(&types[idx], expected, expr.span)?;
                             Ok(InferResult::new(types[idx].clone()))
                         } else {
                             Err(TypeError::Other(verum_common::Text::from(format!(
@@ -2756,12 +2731,6 @@ impl TypeChecker {
 
                         if let Option::Some(Type::Tuple(types)) = found_tuple {
                             if idx < types.len() {
-                                self.check_value_conversion_obligations(
-                                    expected,
-                                    &types[idx],
-                                    expr.span,
-                                )?;
-                                self.unifier.unify(&types[idx], expected, expr.span)?;
                                 Ok(InferResult::new(types[idx].clone()))
                             } else {
                                 Err(TypeError::Other(verum_common::Text::from(format!(
@@ -2824,12 +2793,6 @@ impl TypeChecker {
 
                             if let Some(inner_ty) = found_inner {
                                 if idx == 0 {
-                                    self.check_value_conversion_obligations(
-                                        expected,
-                                        &inner_ty,
-                                        expr.span,
-                                    )?;
-                                    self.unifier.unify(&inner_ty, expected, expr.span)?;
                                     Ok(InferResult::new(inner_ty))
                                 } else {
                                     Err(TypeError::Other(verum_common::Text::from(format!(
@@ -2860,12 +2823,6 @@ impl TypeChecker {
                                 self.ctx.lookup_type(tuple_fields_key.as_str())
                             {
                                 if idx < types.len() {
-                                    self.check_value_conversion_obligations(
-                                        expected,
-                                        &types[idx],
-                                        expr.span,
-                                    )?;
-                                    self.unifier.unify(&types[idx], expected, expr.span)?;
                                     Ok(InferResult::new(types[idx].clone()))
                                 } else {
                                     Err(TypeError::Other(verum_common::Text::from(format!(
@@ -2889,12 +2846,6 @@ impl TypeChecker {
 
                                 if let Option::Some(inner_ty) = found_inner {
                                     if idx == 0 {
-                                        self.check_value_conversion_obligations(
-                                            expected,
-                                            inner_ty,
-                                            expr.span,
-                                        )?;
-                                        self.unifier.unify(inner_ty, expected, expr.span)?;
                                         Ok(InferResult::new(inner_ty.clone()))
                                     } else {
                                         Err(TypeError::Other(verum_common::Text::from(format!(
@@ -2913,12 +2864,6 @@ impl TypeChecker {
                             // Also handle reference to bare tuple
                             let idx = *index as usize;
                             if idx < types.len() {
-                                self.check_value_conversion_obligations(
-                                    expected,
-                                    &types[idx],
-                                    expr.span,
-                                )?;
-                                self.unifier.unify(&types[idx], expected, expr.span)?;
                                 Ok(InferResult::new(types[idx].clone()))
                             } else {
                                 Err(TypeError::Other(verum_common::Text::from(format!(
@@ -2963,14 +2908,6 @@ impl TypeChecker {
                     Some(resolution) => {
                         // Check the index has the appropriate type
                         self.check_expr(index, &resolution.key)?;
-                        // Unify output with expected and return
-                        self.check_value_conversion_obligations(
-                            expected,
-                            &resolution.output,
-                            expr.span,
-                        )?;
-                        self.unifier
-                            .unify(&resolution.output, expected, expr.span)?;
                         Ok(InferResult::new(resolution.output))
                     }
                     // Carries the span: this was a bare `TypeError::Other`,
@@ -2988,8 +2925,7 @@ impl TypeChecker {
                 }
             }
 
-            // For other expressions, use normal check_expr
-            _ => self.check_expr(expr, expected),
+            _ => self.synth_expr(expr),
         }
     }
 
@@ -12324,7 +12260,14 @@ with .to_float() or .to_int() (at {:?})",
                         if !origins.contains(&source) { origins.push(source); }
                     }
                 }
-                self.with_checked_write(left, |tc| tc.check_expr_assignment_target(left, &right_result.ty))?;
+                self.with_checked_write(left, |tc| {
+                    let target = tc.assignment_target_type(left)?;
+                    tc.check_synthesized_value(right, &target.ty, right_result.clone())?;
+                    if target.ty.contains_record_field() {
+                        tc.check_record_family_agreement(&right_result.ty, &target.ty, right.span)?;
+                    }
+                    Ok(())
+                })?;
                 self.retain_assignment_origins(left, &origins)?;
 
                 Ok(InferResult::new(Type::unit()))

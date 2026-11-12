@@ -2409,23 +2409,14 @@ impl TypeChecker {
     }
 
     fn synth_and_check(&mut self, expr: &Expr, expected: &Type) -> Result<InferResult> {
-        // A LITERAL MUST FIT THE SIZED TYPE IT IS CHECKED AGAINST, and this
-        // has to be asked BEFORE synthesis.
-        //
-        // The literal's own type is `Int`, and `Int` UNIFIES with `Int8`
-        // through integer subtyping — so `let x: Int8 = 300` type-checks
-        // and returns long before the coercion block further down, which
-        // exists only for the case where unification would have failed.
-        // That is why the range comparison a few hundred lines below,
-        // which computes exactly this answer, never saw an out-of-range
-        // literal: by then the program had already been accepted.
-        self.check_integer_literal_fits(expr, expected)?;
-
         let result = self.synth_expr(expr)?;
         self.check_synthesized_value(expr, expected, result)
     }
 
-    fn check_synthesized_value(&mut self, expr: &Expr, expected: &Type, result: InferResult) -> Result<InferResult> {
+    pub(super) fn check_synthesized_value(&mut self, expr: &Expr, expected: &Type, result: InferResult) -> Result<InferResult> {
+        // Initialization and subsequent writes share the same value boundary.
+        // Check literal range before equality can accept an integer coercion.
+        self.check_integer_literal_fits(expr, expected)?;
         self.check_value_conversion_obligations(&result.ty, expected, expr.span)?;
         if std::env::var("VERUM_TRACE_QUALPATH").is_ok()
             && matches!(&expr.kind, ExprKind::MethodCall { .. })

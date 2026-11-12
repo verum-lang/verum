@@ -72,6 +72,57 @@ fn a_diverging_source_handler_remains_synchronous() {
 }
 
 #[test]
+fn assigning_a_diverging_handler_preserves_the_storage_contract() {
+    for source in [
+        "static mut HANDLER: fn(Int) = stop; fn stop(value: Int) -> ! { loop {} }
+         fn reset() { unsafe { HANDLER = stop; } }
+         fn replace(handler: fn(Int)) { unsafe { HANDLER = handler; } }",
+        "fn stop(value: Int) -> ! { loop {} } static mut HANDLER: fn(Int) = stop;
+         fn replace(handler: fn(Int)) { unsafe { HANDLER = handler; } }",
+    ] {
+        let errors = errors(source);
+        assert!(errors.is_empty(), "{source}: {errors:?}");
+    }
+}
+
+#[test]
+fn callable_assignment_uses_the_declared_type_of_every_place() {
+    for (declarations, body) in [
+        ("", "let mut value: fn(Int) = normal; value = stop; value = normal;"),
+        ("type Holder is { handler: fn(Int) };",
+         "let mut value = Holder { handler: normal }; value.handler = stop; value.handler = normal;"),
+        ("type Holder is (fn(Int));",
+         "let mut value = Holder(normal); value.0 = stop; value.0 = normal;"),
+        ("", "let mut value: (fn(Int), Int) = (normal, 7); value.0 = stop; value.0 = normal;"),
+        ("", "let mut value: [fn(Int); 1] = [normal]; value[0] = stop; value[0] = normal;"),
+        ("", "let mut value: fn(Int) = normal; let reference = &mut value; *reference = stop; *reference = normal;"),
+    ] {
+        let source = format!("{declarations} fn normal(value: Int) {{}}
+            fn stop(value: Int) -> ! {{ loop {{}} }} fn probe() {{ {body} }}");
+        let errors = errors(&source);
+        assert!(errors.is_empty(), "{source}: {errors:?}");
+    }
+}
+
+#[test]
+fn assignment_preserves_callables_reference_permissions_and_literal_bounds() {
+    for source in [
+        "fn stop(value: Int) -> ! { loop {} } fn normal(value: Int) {}
+         fn bad() { let mut callback: fn(Int) -> ! = stop; callback = normal; }",
+        "fn normal(value: Int) {} async fn pending(value: Int) {}
+         fn bad() { let mut callback: fn(Int) = normal; callback = pending; }",
+        "fn normal(value: Int) {} fn wrong(value: Bool) {}
+         fn bad() { let mut callback: fn(Int) = normal; callback = wrong; }",
+        "fn normal(value: Int) {} fn stop(value: Int) -> ! { loop {} }
+         fn bad() { let mut callback: fn(Int) = normal; let reference = &callback; *reference = stop; }",
+        "fn bad() { let mut byte: Byte = 0; byte = 300; }",
+        "type Holder is { byte: Byte }; fn bad() { let mut value = Holder { byte: 0 }; value.byte = 300; }",
+    ] {
+        assert!(!errors(source).is_empty(), "invalid assignment accepted: {source}");
+    }
+}
+
+#[test]
 fn imported_factories_and_qualified_helpers_preserve_synchronous_bounds() {
     let source = "mount platform.inspect;
         static mut HANDLER: fn() = handler;
