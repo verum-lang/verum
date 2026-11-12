@@ -39,3 +39,49 @@ fn probe() -> Int {
         assert_eq!(result.try_as_i64(), Some(73));
     }
 }
+
+#[test]
+fn imported_source_factories_execute_through_a_static_callback() {
+    use verum_compiler::{CompilationPipeline, CompilerOptions, CoreConfig, Session};
+    let root = tempfile::tempdir().unwrap();
+    let core = root.path().join("core");
+    std::fs::create_dir(&core).unwrap();
+    for (path, source) in [
+        ("mod.vr", "module core; public module model; public module device; public module bridge;"),
+        ("model.vr", "module core.model;
+            public type Failure is { public code: Int };
+            implement Failure { public fn create(code: Int) -> Failure { Failure { code: code } } }
+            public type Outcome is Value(Int) | Failed(Failure);"),
+        ("device.vr", "module core.device;
+            mount core.model.{Failure, Outcome};
+            public fn error_code(value: Int) -> Int { value }
+            public fn inspect(value: Int) -> Outcome {
+                if value < 0 { Outcome.Failed(Failure.create(core.device.error_code(value))) }
+                else { Outcome.Value(value) }
+            }"),
+        ("bridge.vr", "module core.bridge;
+            mount core.model.Outcome; mount core.device.inspect;
+            static HANDLER: fn(Int) -> Outcome = handler;
+            fn handler(value: Int) -> Outcome { inspect(value) }
+            public fn probe() -> Int {
+                let error = match HANDLER(-9) { Outcome.Failed(error) => error.code, _ => 0 };
+                let value = match HANDLER(82) { Outcome.Value(value) => value, _ => 0 };
+                error + value
+            }"),
+    ] { std::fs::write(core.join(path), source).unwrap(); }
+    let output = root.path().join("runtime.vbca");
+    let mut session = Session::new(CompilerOptions { input: core.join("mod.vr"), ..Default::default() });
+    let result = CompilationPipeline::new_core(&mut session, CoreConfig::new(&core).with_output(&output))
+        .compile_core().unwrap_or_else(|error| panic!("{error}\n{}", session.format_diagnostics()));
+    assert!(result.errors.is_empty(), "{:?}", result.errors);
+    let archive = verum_vbc::archive::read_archive_from_file(&output).unwrap();
+    let module = archive.load_module("core").unwrap();
+    let restored = deserialize_module(&serialize_module(&module).unwrap()).unwrap();
+    for module in [module, restored] {
+        let entry = module.find_function_by_name("core.bridge.probe").unwrap();
+        let mut interpreter = Interpreter::new(Arc::new(module));
+        interpreter.run_global_ctors().unwrap();
+        let result = interpreter.execute_function(entry).unwrap();
+        assert_eq!(result.try_as_i64(), Some(73));
+    }
+}

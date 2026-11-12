@@ -6334,11 +6334,15 @@ impl VbcCodegen {
                     match &path.segments[0] {
                         PathSegment::Name(ident) => {
                             let name = ident.name.to_string();
-                            // Check if this is a variable (parameter or local) holding a function.
-                            // Variables take precedence over registered functions (shadowing).
-                            // This handles cases like: `fn map<F: fn(T) -> U>(self, f: F) { f(x) }`
-                            // where `f` is a parameter of function type.
-                            if self.ctx.registers.contains(&name) {
+                            // Value bindings own their spelling: load the value
+                            // and invoke it, including constants and static cells.
+                            // Their initializer function is not the callee.
+                            let constant = self.lexical_constant(&name)
+                                .or_else(|| self.ctx.lookup_function_in_scope(&name));
+                            if self.ctx.registers.contains(&name)
+                                || self.ctx.is_thread_local(&name).is_some()
+                                || constant.is_some_and(|info| info.is_const)
+                            {
                                 return self.compile_indirect_call(func, args);
                             }
                             // SELF-NEWTYPE-CTOR-1 (codegen leg):
@@ -7605,14 +7609,9 @@ impl VbcCodegen {
                 if let Some(result) = fallback_result {
                     result
                 } else {
-                    // If not found and name starts with uppercase, treat as variant constructor
-                    // This handles cross-module variant constructors like Ok, Err, Some, None
-                    if func_name
-                        .chars()
-                        .next()
-                        .map(|c| c.is_uppercase())
-                        .unwrap_or(false)
-                    {
+                    // A constructor requires a registered declaration. Letter
+                    // case supplies no evidence that a callable is a variant.
+                    if self.ctx.find_variant_by_suffix_and_args(&func_name, args.len()).is_some() {
                         return self.compile_variant_constructor(&func_name, args);
                     }
 
@@ -11092,9 +11091,6 @@ impl VbcCodegen {
 
     /// Compiles a variant constructor call (e.g., Some(v), Ok(v), None, Err(e)).
     ///
-    /// This is called when a function is not found but the name looks like
-    /// a variant constructor (starts with uppercase). We emit a MakeVariant
-    /// instruction that creates the variant value.
     /// Compile a variant constructor with a known tag (from prior FunctionInfo lookup).
     fn compile_variant_constructor_with_tag(
         &mut self,
@@ -12045,16 +12041,7 @@ impl VbcCodegen {
                     .lookup_function_in_scope(name)
                     .and_then(|info| info.variant_tag)
             })
-            .unwrap_or_else(|| {
-                // Final fallback for variants we still cannot resolve — most
-                // commonly forward references mid-pass-1. Hash the name so two
-                // call sites at least agree on the same wrong tag rather than
-                // diverging silently.
-                name.as_bytes()
-                    .iter()
-                    .fold(0u32, |acc, &b| acc.wrapping_add(b as u32))
-                    % 256
-            });
+            .ok_or_else(|| CodegenError::new(CodegenErrorKind::UndefinedFunction(name.into())))?;
 
         let result = self.ctx.alloc_temp();
 
@@ -17252,15 +17239,9 @@ impl VbcCodegen {
 
             // For generic type parameters (like T.default()), emit a virtual
             // dispatch call that monomorphisation resolves later.  This path
-            // is REJECTED for concrete known types (Duration, Uuid, ...): a
-            // concrete type whose method is missing from the registry is a
-            // legitimate compile error, not a silent fallthrough that emits
-            // `dyn:Type.method` CallM with the wrong receiver kind and
-            // produces Unit at runtime.  Surface the failure here so the
-            // user sees `unresolved static method 'X.Y'` instead of a
-            // confusing `method not found on receiver of runtime kind ...`
-            // panic three layers down.
-            if known_type {
+            // requires an actual binder. Neither a missing concrete method
+            // nor an undeclared namespace can invent a generic receiver.
+            if known_type || !self.ctx.generic_type_params.contains(&type_name) {
                 // [diag] see VERUM_TRACE_UNDEF_FN in compile_call.
                 if let Ok(filter) = std::env::var("VERUM_TRACE_UNDEF_FN")
                     && (type_name.contains(&filter) || method.name.contains(&filter))
