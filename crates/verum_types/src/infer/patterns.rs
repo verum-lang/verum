@@ -746,11 +746,13 @@ impl TypeChecker {
                 if self.is_dependent_record(&scheme.ty) {
                     return Err(TypeError::Other("dependent record patterns require a stable receiver; use named projections".into()));
                 }
-                for field in field_patterns {
-                    self.check_record_field_visibility(&scheme.ty, field.name.name.as_str(), field.span)?;
-                }
                 // First, try to resolve as a record type (the original behavior)
                 if let Some(field_types) = self.resolve_to_record_type(&scheme.ty) {
+                    // A named case payload is not a field of the enclosing sum.
+                    // Authorize record fields only after resolving an actual record.
+                    for field in field_patterns {
+                        self.check_record_field_visibility(&scheme.ty, field.name.name.as_str(), field.span)?;
+                    }
                     for field_pat in field_patterns {
                         match field_types.get(field_pat.name.name.as_str()) {
                             Some(field_ty) => {
