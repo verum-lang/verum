@@ -11,6 +11,13 @@ it (that chapter COMPILES AND RUNS for the first time; it was
 written against the never-implemented lazy model and its mount of
 `from_millis` never resolved).
 
+An `async { ... }` expression follows the same eager rule: the block runs
+inline, its type is the body's result, and its verification conditions and
+reference origins remain attached to that result. Its async context ends at
+the block boundary. It does not construct a Future or spawn a task. The
+checker and serialized interpreter path are covered by `async_callable_types`
+and `eager_async_callable`; native executor scheduling is a separate contract.
+
 ## Explicit Future operands — T1497, 2026-10-03
 
 The eager function-call law also permits explicit values implementing
@@ -93,7 +100,7 @@ ONLY as the type of `spawn { … }` handles.
 * docs: rewrite by-example/12 around spawn/join as the concurrency
   entry point (its examples already only await inside `spawn`!);
 * cost: ~zero implementation, honest immediately; "async" reads as
-  an effect marker (which is what the properties system says anyway:
+  a computational-property marker (which is what the properties system says anyway:
   ASYNC is a PropertySet bit, not a type constructor).
 
 **(B) Implement the lazy-future model the docs promise.**

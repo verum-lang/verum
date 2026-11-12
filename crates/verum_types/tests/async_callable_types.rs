@@ -123,6 +123,33 @@ fn source_arguments_preserve_the_same_directional_contract() {
 }
 
 #[test]
+fn async_blocks_have_the_type_of_their_eager_result() {
+    for source in [
+        "fn value() -> Int { async { 17 } }",
+        "type Packet is { value: Int }; fn value() -> Int { let p = async { Packet { value: 17 } }; p.value }",
+        "async fn ready() -> Int { 17 } fn value() -> Int { async { ready().await } }",
+        "async fn value() -> Int { let task = spawn { async { 17 } }; task.await }",
+        "fn retain(value: &Int) -> &Int { async { value } }",
+    ] {
+        let errors = check(source);
+        assert!(errors.is_empty(), "{source}: {errors:?}");
+    }
+}
+
+#[test]
+fn async_block_scope_does_not_escape_or_release_its_result_loan() {
+    for source in [
+        "fn bad() -> &Int { async { let local = 17; &local } }",
+        "fn bad() -> &Int { let local = 17; async { &local } }",
+        "fn bad() -> Int { let mut local = 17; let held = async { &local }; local = 18; *held }",
+        "async fn ready() -> Int { 17 } fn bad() -> Int { let first = async { ready().await }; ready().await + first }",
+    ] {
+        let errors = check(source);
+        assert!(!errors.is_empty(), "accepted invalid source: {source}");
+    }
+}
+
+#[test]
 fn mutable_callbacks_do_not_need_an_invented_purity_promise() {
     for prefix in ["", "async "] {
         let source = format!(

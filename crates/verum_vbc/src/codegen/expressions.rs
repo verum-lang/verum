@@ -26455,10 +26455,10 @@ impl VbcCodegen {
 
     // ==================== Async ====================
 
-    /// Compiles an async block.
+    /// Async blocks execute eagerly and yield their body's value.
     fn compile_async_block(&mut self, block: &Block) -> CodegenResult<Option<Reg>> {
-        // For now, compile as a regular block wrapped in a future
-        // Full implementation requires async state machine transformation
+        // Spec: async-semantics-law — this is an async context, not a
+        // suspended computation. Task creation belongs to `spawn`.
         let result = self.ctx.alloc_temp();
 
         // Compile the block

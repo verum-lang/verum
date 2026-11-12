@@ -11771,12 +11771,10 @@ impl TypeChecker {
     fn infer_expr_async_expr(&mut self, expr: &Expr) -> Result<InferResult> {
         use ExprKind::*;
         let ExprKind::Async(block) = &expr.kind else { unreachable!() };
-        // Set async context for the block body
-        let block_result = self.with_async_context(true, |checker| checker.infer_block(block))?;
-
-        Ok(InferResult::new(Type::Future {
-            output: Box::new(block_result.ty),
-        }))
+        // Spec: async-semantics-law — an async block, like an async call,
+        // executes eagerly. Only an explicit future or task has a completion
+        // carrier; preserve the block's actual type and verification conditions.
+        self.with_async_context(true, |checker| checker.infer_block(block))
     }
 
     fn infer_expr_unsafe_expr(&mut self, expr: &Expr) -> Result<InferResult> {

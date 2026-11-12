@@ -425,7 +425,9 @@ impl TypeChecker {
                     }
                 }
             }
-            ExprKind::Block(block) => self.collect_block_candidates(block, found),
+            ExprKind::Block(block) | ExprKind::Async(block) => {
+                self.collect_block_candidates(block, found)
+            }
             ExprKind::If {
                 then_branch,
                 else_branch,

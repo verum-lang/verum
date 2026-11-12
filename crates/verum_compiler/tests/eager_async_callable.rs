@@ -93,6 +93,23 @@ fn a_sync_callback_can_satisfy_the_async_callable_contract() {
 }
 
 #[test]
+fn async_blocks_run_inline_and_preserve_the_declared_result() {
+    assert_eager_execution(
+        r#"module eager;
+async fn answer() -> Int { 41 }
+fn probe() -> Int {
+    let mut counter = 0;
+    let returned: Int = async {
+        counter = counter + 1;
+        answer().await
+    };
+    counter * 100 + returned
+}
+"#,
+    );
+}
+
+#[test]
 fn an_async_closure_preserves_the_same_eager_mutation_contract() {
     assert_eager_execution(
         r#"module eager;
@@ -302,10 +319,14 @@ fn callable_and_rank_two_metadata_preserve_async_and_exact_output() {
 fn ordinary_archive_metadata_does_not_invent_a_pure_body() {
     use verum_types::computational_properties::{PropertyRequirement, PropertySet};
 
-    let module = checked_module(
-        "module core.eager; public async fn pulse() -> Int { 41 }",
-        "core.eager",
-    );
+    // Source compilation now always carries its declaration signature. Build
+    // the ABI-only input explicitly so this separate replay boundary remains
+    // covered without stripping evidence from a source-produced archive.
+    let mut module = VbcModule::new("core.eager".into());
+    let mut function = verum_vbc::module::FunctionDescriptor::new(module.intern_string("pulse"));
+    function.return_type = TypeRef::Concrete(TypeId::INT);
+    function.properties = verum_vbc::types::PropertySet::ASYNC;
+    module.add_function(function);
     let wire = serialize_module(&module).unwrap();
     let restored = deserialize_module(&wire).unwrap();
     let mut builder = ArchiveBuilder::new();
