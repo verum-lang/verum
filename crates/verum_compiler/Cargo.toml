@@ -81,6 +81,8 @@ name = "compilation_regression"
 harness = false
 
 [build-dependencies]
+verum_common = { workspace = true }
+toml = { workspace = true }
 zstd = "0.13"
 blake3 = { workspace = true }
 

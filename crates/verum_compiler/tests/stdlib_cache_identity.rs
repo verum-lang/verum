@@ -30,6 +30,37 @@ fn write(root: &Path, relative: &str, bytes: impl AsRef<[u8]>) {
     fs::write(path, bytes).unwrap();
 }
 
+/// A real manifest/lock topology. These files describe the controlled producer;
+/// no missing manifest is treated as an empty or successful dependency graph.
+fn producer_fixture() -> tempfile::TempDir {
+    let root = tempfile::tempdir().unwrap();
+    let packages = ["verum_stdlib_precompiler", "verum_compiler", "verum_fast_parser",
+        "verum_ast", "verum_vbc", "verum_types", "verum_modules"];
+    let mut workspace = Text::from("[workspace]\nresolver = \"3\"\nmembers = [\"crates/*\"]\n[workspace.dependencies]\n");
+    let mut lock = Text::from("version = 4\n");
+    for name in packages {
+        workspace.push_str(&format!("{name} = {{ path = \"crates/{name}\" }}\n"));
+        let mut manifest = Text::from(format!("[package]\nname = \"{name}\"\nversion = \"0.0.0\"\nedition = \"2024\"\n"));
+        lock.push_str(&format!("\n[[package]]\nname = \"{name}\"\nversion = \"0.0.0\"\n"));
+        if name == "verum_stdlib_precompiler" {
+            manifest.push_str("[dependencies]\n");
+            lock.push_str("dependencies = [\n");
+            for dependency in &packages[1..] {
+                manifest.push_str(&format!("{dependency}.workspace = true\n"));
+                lock.push_str(&format!("\"{dependency}\",\n"));
+            }
+            lock.push_str("]\n");
+        }
+        write(root.path(), &format!("crates/{name}/Cargo.toml"), manifest);
+        write(root.path(), &format!("crates/{name}/src/lib.rs"), "// controlled producer source\n");
+    }
+    write(root.path(), "Cargo.toml", workspace);
+    write(root.path(), "Cargo.lock", lock);
+    write(root.path(), "rust-toolchain.toml", include_str!("../../../rust-toolchain.toml"));
+    write(root.path(), ".cargo/config.toml", "");
+    root
+}
+
 fn key(root: &Path, schema: &str, core: &[(&str, &[u8])]) -> (blake3::Hash, List<PathBuf>) {
     let mut dependencies = List::new();
     let key = stdlib_cache::compute_archive_key(root, schema, core.iter().copied(), |path| {
@@ -40,8 +71,8 @@ fn key(root: &Path, schema: &str, core: &[(&str, &[u8])]) -> (blake3::Hash, List
 
 #[test]
 fn unchanged_inputs_keep_the_key_across_runs_and_checkout_roots() {
-    let first = tempfile::tempdir().unwrap();
-    let second = tempfile::tempdir().unwrap();
+    let first = producer_fixture();
+    let second = producer_fixture();
     for root in [first.path(), second.path()] {
         write(root, PARSER_DECLARATIONS, PARSER_SOURCE);
     }
@@ -52,7 +83,7 @@ fn unchanged_inputs_keep_the_key_across_runs_and_checkout_roots() {
 
 #[test]
 fn declaration_parameter_classification_changes_the_key_without_core_or_schema_changes() {
-    let root = tempfile::tempdir().unwrap();
+    let root = producer_fixture();
     let fixed = "let body = if is_alias_syntax || is_parameter_alias {";
     let previous = "let body = if is_alias_syntax {";
     assert_eq!(PARSER_SOURCE.matches(fixed).count(), 1);
@@ -77,7 +108,7 @@ fn declaration_parameter_classification_changes_the_key_without_core_or_schema_c
 fn dereference_copy_semantics_invalidate_the_archive_without_schema_changes() {
     const PATH: &str = "crates/verum_vbc/src/codegen/place_copies.rs";
     const SOURCE: &str = include_str!("../../verum_vbc/src/codegen/place_copies.rs");
-    let root = tempfile::tempdir().unwrap();
+    let root = producer_fixture();
     let with_copy = "TypeRef::Reference { inner, .. } => Some(*inner)";
     let without_copy = "TypeRef::Reference { .. } => None";
     assert_eq!(SOURCE.matches(with_copy).count(), 1);
@@ -94,7 +125,7 @@ fn dereference_copy_semantics_invalidate_the_archive_without_schema_changes() {
 fn forward_declaration_witnesses_invalidate_the_archive_without_schema_changes() {
     const PATH: &str = "crates/verum_vbc/src/codegen/declaration_interface.rs";
     const SOURCE: &str = include_str!("../../verum_vbc/src/codegen/declaration_interface.rs");
-    let root = tempfile::tempdir().unwrap();
+    let root = producer_fixture();
     let preserved = "descriptor.semantic_params = Some(semantic.clone());";
     assert_eq!(SOURCE.matches(preserved).count(), 1);
     write(root.path(), PATH, SOURCE.replace(preserved, "descriptor.semantic_params = None;"));
@@ -113,9 +144,10 @@ fn ast_and_lowering_source_trees_invalidate_on_edits_additions_and_removals() {
         ("crates/verum_vbc/src/codegen", "registers.rs"),
         ("crates/verum_vbc/src/codegen", "nested/new_lowering.rs"),
     ] {
-        let root = tempfile::tempdir().unwrap();
+        let root = producer_fixture();
         let (missing, watched) = key(root.path(), SCHEMA, CORE);
-        assert!(watched.contains(&root.path().join(tree)), "Cargo must detect future files in {tree}");
+        assert!(watched.iter().any(|path| path.is_dir() && root.path().join(tree).starts_with(path)),
+            "Cargo must detect future files in {tree}");
         let source = &format!("{tree}/{file}");
         write(root.path(), source, b"original");
         let (original, dependencies) = key(root.path(), SCHEMA, CORE);
@@ -130,7 +162,7 @@ fn ast_and_lowering_source_trees_invalidate_on_edits_additions_and_removals() {
 
 #[test]
 fn producer_content_cannot_impersonate_a_second_source_file() {
-    let root = tempfile::tempdir().unwrap();
+    let root = producer_fixture();
     let first = "crates/verum_ast/src/a.rs";
     let second = "crates/verum_ast/src/b.rs";
     write(root.path(), first, format!("first\0{second}\0last"));
@@ -144,7 +176,7 @@ fn producer_content_cannot_impersonate_a_second_source_file() {
 fn selection_ownership_semantics_invalidate_the_archive_without_schema_changes() {
     const PATH: &str = "crates/verum_vbc/src/codegen/select.rs";
     const SOURCE: &str = include_str!("../../verum_vbc/src/codegen/select.rs");
-    let root = tempfile::tempdir().unwrap();
+    let root = producer_fixture();
     let owned = "let owned = Self::future_is_owned(inner);";
     assert_eq!(SOURCE.matches(owned).count(), 1);
     write(root.path(), PATH, SOURCE.replace(owned, "let owned = false;"));
@@ -157,9 +189,10 @@ fn selection_ownership_semantics_invalidate_the_archive_without_schema_changes()
 
 #[test]
 fn missing_parser_input_is_tracked_and_differs_from_an_empty_file() {
-    let root = tempfile::tempdir().unwrap();
+    let root = producer_fixture();
     let (missing, dependencies) = key(root.path(), SCHEMA, CORE);
-    assert!(dependencies.contains(&root.path().join(PARSER_DECLARATIONS)));
+    assert!(dependencies.contains(&root.path().join("crates/verum_fast_parser/src")));
+    assert!(dependencies.iter().all(|path| path.exists()));
     write(root.path(), PARSER_DECLARATIONS, b"");
     assert_ne!(missing, key(root.path(), SCHEMA, CORE).0);
     fs::remove_file(root.path().join(PARSER_DECLARATIONS)).unwrap();
@@ -168,24 +201,25 @@ fn missing_parser_input_is_tracked_and_differs_from_an_empty_file() {
 
 #[test]
 fn parser_manifest_changes_invalidate_the_archive() {
-    let root = tempfile::tempdir().unwrap();
+    let root = producer_fixture();
+    let package = fs::read_to_string(root.path().join(PARSER_MANIFEST)).unwrap();
     write(
         root.path(),
         PARSER_MANIFEST,
-        "[features]\nparser-policy = []\n",
+        format!("{package}[features]\nparser-policy = []\n"),
     );
     let before = key(root.path(), SCHEMA, CORE).0;
     write(
         root.path(),
         PARSER_MANIFEST,
-        "[features]\nparser-policy = [\"checked\"]\n",
+        format!("{package}[features]\nparser-policy = [\"checked\"]\n"),
     );
     assert_ne!(before, key(root.path(), SCHEMA, CORE).0);
 }
 
 #[test]
 fn wire_schema_and_core_contents_remain_independent_inputs() {
-    let root = tempfile::tempdir().unwrap();
+    let root = producer_fixture();
     let before = key(root.path(), SCHEMA, CORE).0;
     assert_ne!(before, key(root.path(), "next-wire-schema", CORE).0);
     assert_ne!(
@@ -204,7 +238,7 @@ fn wire_schema_and_core_contents_remain_independent_inputs() {
 }
 
 #[test]
-fn producer_roster_covers_every_fast_parser_source_and_reports_each_once() {
+fn producer_closure_covers_every_fast_parser_source_and_reports_each_once() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
@@ -241,10 +275,8 @@ fn producer_roster_covers_every_fast_parser_source_and_reports_each_once() {
         .into_iter()
         .filter(|path| path.starts_with(root.join("crates/verum_fast_parser")))
         .collect();
-    assert_eq!(
-        parser_paths, expected,
-        "new parser files must join the producer roster"
-    );
+    assert!(expected.iter().all(|path| parser_paths.contains(path)),
+        "new parser files must join the producer closure");
 }
 
 struct OwnedChild(Child);
@@ -271,7 +303,7 @@ fn no_auto_still_reports_parser_dependencies_without_refreshing() {
         ("VERUM_NO_AUTO_PRECOMPILE", "0"),
         ("DOCS_RS", "1"),
     ] {
-        let root = tempfile::tempdir().unwrap();
+        let root = producer_fixture();
         let output = root.path().join("out");
         let target = root.path().join("target");
         let manifest = root.path().join("crates/verum_compiler");
@@ -372,58 +404,18 @@ fn cargo_rechecks_auto_precompile_policy_on_environment_changes() {
         build_script::main();
         return;
     }
-    let root = tempfile::tempdir().unwrap();
+    let root = producer_fixture();
     let manifest = root.path().join("crates/verum_compiler/Cargo.toml");
     let target = root.path().join("target");
     write(root.path(), "core/mod.vr", CORE[0].1);
     write(root.path(), PARSER_DECLARATIONS, PARSER_SOURCE);
     write(root.path(), "crates/verum_ast/src/visitor.rs", b"// fixture AST traversal");
     write(root.path(), "crates/verum_vbc/src/codegen/mod.rs", b"// fixture lowering");
-    // An absent rerun-if-changed input makes every Cargo invocation dirty and
-    // would hide the missing environment dependency. Materialize the complete
-    // reported roster before computing the fixture's stable cache key.
-    for path in key(root.path(), build_script::PRECOMPILE_SCHEMA_VERSION, CORE).1 {
-        if !path.exists() {
-            fs::create_dir_all(path.parent().unwrap()).unwrap();
-            fs::write(path, b"").unwrap();
-        }
-    }
-    let expected_key = key(root.path(), build_script::PRECOMPILE_SCHEMA_VERSION, CORE).0;
-    let cache = target.join("precompiled-stdlib");
-    fs::create_dir_all(&cache).unwrap();
-    for artifact in [
-        "runtime.vbca",
-        "runtime.core_metadata",
-        "runtime.symbol_graph",
-    ] {
-        fs::write(
-            cache.join(artifact),
-            b"policy-control sentinel; not an archive",
-        )
-        .unwrap();
-    }
-    let producer = stdlib_cache::producer_hasher(root.path(), build_script::PRECOMPILE_SCHEMA_VERSION, |_| {}).finalize().to_hex();
-    let inputs = bake_receipt::Inputs {
-        producer: producer.as_str(),
-        target: env!("VERUM_BAKE_TARGET"),
-        source: bake_receipt::source_digests(CORE.iter().copied()),
-    };
-    inputs.record(&cache.join("runtime.vbca"), blake3::hash(b"policy-control sentinel; not an archive")).unwrap();
-    fs::write(
-        cache.join("runtime.vbca.checksum"),
-        expected_key.to_hex().as_str(),
-    )
-    .unwrap();
-    fs::write(
-        cache.join("runtime.vbca.schema"),
-        build_script::PRECOMPILE_SCHEMA_VERSION,
-    )
-    .unwrap();
-    write(root.path(), "crates/verum_compiler/Cargo.toml", b"[package]\nname = \"stdlib-policy-probe\"\nversion = \"0.0.0\"\nedition = \"2024\"\n[workspace]\n");
+    write(root.path(), "crates/verum_compiler/Cargo.toml", b"[package]\nname = \"verum_compiler\"\nversion = \"0.0.0\"\nedition = \"2024\"\n[workspace]\n");
     write(
         root.path(),
         "crates/verum_compiler/Cargo.lock",
-        b"version = 4\n\n[[package]]\nname = \"stdlib-policy-probe\"\nversion = \"0.0.0\"\n",
+        b"version = 4\n\n[[package]]\nname = \"verum_compiler\"\nversion = \"0.0.0\"\n",
     );
     write(
         root.path(),
@@ -456,6 +448,37 @@ fn main() {{
         empty_path = root.path().join("no-executables")
     );
     write(root.path(), "crates/verum_compiler/build.rs", wrapper);
+    let expected_key = key(root.path(), build_script::PRECOMPILE_SCHEMA_VERSION, CORE).0;
+    let cache = target.join("precompiled-stdlib");
+    fs::create_dir_all(&cache).unwrap();
+    for artifact in [
+        "runtime.vbca",
+        "runtime.core_metadata",
+        "runtime.symbol_graph",
+    ] {
+        fs::write(
+            cache.join(artifact),
+            b"policy-control sentinel; not an archive",
+        )
+        .unwrap();
+    }
+    let producer = stdlib_cache::producer_hasher(root.path(), build_script::PRECOMPILE_SCHEMA_VERSION, |_| {}).finalize().to_hex();
+    let inputs = bake_receipt::Inputs {
+        producer: producer.as_str(),
+        target: env!("VERUM_BAKE_TARGET"),
+        source: bake_receipt::source_digests(CORE.iter().copied()),
+    };
+    inputs.record(&cache.join("runtime.vbca"), blake3::hash(b"policy-control sentinel; not an archive")).unwrap();
+    fs::write(
+        cache.join("runtime.vbca.checksum"),
+        expected_key.to_hex().as_str(),
+    )
+    .unwrap();
+    fs::write(
+        cache.join("runtime.vbca.schema"),
+        build_script::PRECOMPILE_SCHEMA_VERSION,
+    )
+    .unwrap();
     let evidence = std::env::var_os("VERUM_CACHE_POLICY_EVIDENCE_DIR").map(PathBuf::from);
     if let Some(directory) = &evidence {
         fs::create_dir(directory).expect("policy evidence directory must be new");
@@ -719,4 +742,208 @@ fn sidecar_replacement_cannot_pass_cache_or_embedding_verification() {
     let v1 = v2.split("metadata=").next().unwrap().replace("bake-v2", "bake-v1");
     fs::write(&receipt_path, v1).unwrap();
     assert!(inputs.verify_file(&source).is_err(), "unbound legacy sidecars");
+}
+
+#[test]
+fn inference_and_admission_source_changes_invalidate_the_producer() {
+    let root = producer_fixture();
+    for (path, source) in [
+        ("crates/verum_types/src/infer/expr.rs", include_str!("../../verum_types/src/infer/expr.rs")),
+        ("crates/verum_types/src/unify.rs", include_str!("../../verum_types/src/unify.rs")),
+        ("crates/verum_types/src/infer/source_declarations.rs", include_str!("../../verum_types/src/infer/source_declarations.rs")),
+    ] {
+        write(root.path(), path, source);
+        let original = key(root.path(), SCHEMA, CORE).0;
+        write(root.path(), path, format!("{source}\nconst PRODUCER_IDENTITY_CONTROL: bool = true;\n"));
+        assert_ne!(original, key(root.path(), SCHEMA, CORE).0, "actual source not tracked: {path}");
+    }
+}
+
+fn edit_document(root: &Path, path: &str, edit: impl FnOnce(&mut toml::Value)) {
+    let mut document = toml::from_str(&fs::read_to_string(root.join(path)).unwrap()).unwrap();
+    edit(&mut document);
+    write(root, path, toml::to_string(&document).unwrap());
+}
+
+fn fixture_package(root: &Path, name: &str, directory: &str) {
+    let package = format!("[package]\nname = \"{name}\"\nversion = \"0.0.0\"\nedition = \"2024\"\n");
+    write(root, &format!("{directory}/Cargo.toml"), &package);
+    write(root, &format!("{directory}/src/lib.rs"), "pub fn original() {}\n");
+    let document: toml::Value = toml::from_str(&package).unwrap();
+    edit_document(root, "Cargo.lock", |lock| {
+        lock["package"].as_array_mut().unwrap().push(document["package"].clone());
+    });
+}
+
+fn fixture_lock_edge(root: &Path, source: &str, dependency: &str) {
+    edit_document(root, "Cargo.lock", |lock| {
+        let package = lock["package"].as_array_mut().unwrap().iter_mut()
+            .find(|package| package["name"].as_str() == Some(source)).unwrap();
+        package.as_table_mut().unwrap().entry("dependencies")
+            .or_insert_with(|| toml::Value::Array(Default::default()))
+            .as_array_mut().unwrap().push(dependency.into());
+    });
+}
+
+#[test]
+fn local_dependency_branches_track_additions_resources_and_removal() {
+    for kind in ["dependencies", "build-dependencies", "target.'cfg(unix)'.dependencies", "workspace"] {
+        let root = producer_fixture();
+        fixture_package(root.path(), "helper", "crates/helper");
+        fixture_lock_edge(root.path(), "verum_types", "helper");
+        let manifest_path = "crates/verum_types/Cargo.toml";
+        let manifest = fs::read_to_string(root.path().join(manifest_path)).unwrap();
+        let before = key(root.path(), SCHEMA, CORE).0;
+        if kind == "workspace" {
+            let workspace = fs::read_to_string(root.path().join("Cargo.toml")).unwrap();
+            write(root.path(), "Cargo.toml", format!("{workspace}\nfixture_alias = {{ path = \"crates/helper\", package = \"helper\" }}\n"));
+            write(root.path(), manifest_path, format!("{manifest}\n[dependencies]\nfixture_alias.workspace = true\n"));
+        } else {
+            write(root.path(), manifest_path,
+                format!("{manifest}\n[{kind}]\nfixture_alias = {{ path = \"../helper\", package = \"helper\", optional = true }}\n"));
+        }
+        let linked = key(root.path(), SCHEMA, CORE).0;
+        assert_ne!(before, linked, "dependency addition: {kind}");
+        let resource = "crates/helper/data/dispatch.bin";
+        write(root.path(), resource, b"first resource");
+        let (first, watched) = key(root.path(), SCHEMA, CORE);
+        assert_ne!(linked, first, "non-Rust resource addition: {kind}");
+        assert!(watched.contains(&root.path().join(resource)));
+        assert!(watched.contains(&root.path().join("crates/helper/data")));
+        write(root.path(), resource, b"changed resource");
+        assert_ne!(first, key(root.path(), SCHEMA, CORE).0);
+        fs::remove_file(root.path().join(resource)).unwrap();
+        assert_eq!(linked, key(root.path(), SCHEMA, CORE).0);
+        // A dev-only edge may remain locked without belonging to the producer.
+        write(root.path(), manifest_path,
+            format!("{manifest}\n[dev-dependencies]\nhelper = {{ path = \"../helper\" }}\n"));
+        let removed = key(root.path(), SCHEMA, CORE).0;
+        assert_ne!(linked, removed, "dependency removal: {kind}");
+        write(root.path(), "crates/helper/src/lib.rs", "pub fn changed() {}\n");
+        assert_eq!(removed, key(root.path(), SCHEMA, CORE).0,
+            "dev-only package content cannot rejoin the producer: {kind}");
+    }
+}
+
+#[test]
+fn external_transitive_path_patch_joins_the_local_input_closure() {
+    let root = producer_fixture();
+    fixture_package(root.path(), "patched", "vendor/patched");
+    fixture_package(root.path(), "unused_patch", "vendor/unused");
+    let workspace = fs::read_to_string(root.path().join("Cargo.toml")).unwrap();
+    write(root.path(), "Cargo.toml", format!("{workspace}\n[patch.crates-io]\nrenamed_patch = {{ path = \"vendor/patched\", package = \"patched\" }}\nunused_patch = {{ path = \"vendor/unused\" }}\n"));
+    let package: toml::Value = toml::from_str(&format!(
+        "name = \"external\"\nversion = \"1.0.0\"\nsource = \"registry+https://example.invalid/index\"\nchecksum = \"{}\"\ndependencies = [\"patched\"]\n", "0".repeat(64))).unwrap();
+    edit_document(root.path(), "Cargo.lock", |lock| {
+        lock["package"].as_array_mut().unwrap().push(package);
+    });
+    fixture_lock_edge(root.path(), "verum_types", "external");
+    let manifest = fs::read_to_string(root.path().join("crates/verum_types/Cargo.toml")).unwrap();
+    write(root.path(), "crates/verum_types/Cargo.toml", format!("{manifest}\n[dependencies]\nexternal = \"1\"\n"));
+    let original = key(root.path(), SCHEMA, CORE).0;
+    write(root.path(), "vendor/unused/src/lib.rs", "pub fn unrelated() {}\n");
+    assert_eq!(original, key(root.path(), SCHEMA, CORE).0);
+    write(root.path(), "vendor/patched/src/lib.rs", "pub fn changed() {}\n");
+    assert_ne!(original, key(root.path(), SCHEMA, CORE).0,
+        "a patch reached only through an external crate must be tracked");
+}
+
+#[test]
+fn build_scripts_declared_resources_toolchain_and_configuration_are_inputs() {
+    let root = producer_fixture();
+    let initial = key(root.path(), SCHEMA, CORE).0;
+    write(root.path(), "crates/verum_types/build.rs", "fn main() {}\n");
+    let with_build_script = key(root.path(), SCHEMA, CORE).0;
+    assert_ne!(initial, with_build_script);
+    let path = "crates/verum_types/Cargo.toml";
+    let manifest = fs::read_to_string(root.path().join(path)).unwrap();
+    write(root.path(), path, format!("{manifest}\n[package.metadata.verum]\nproducer-inputs = [\"../../shared/grammar.bin\"]\n"));
+    write(root.path(), "shared/grammar.bin", b"declared shared resource");
+    let with_resource = key(root.path(), SCHEMA, CORE).0;
+    write(root.path(), "shared/grammar.bin", b"changed shared resource");
+    assert_ne!(with_resource, key(root.path(), SCHEMA, CORE).0);
+    let original = key(root.path(), SCHEMA, CORE).0;
+    write(root.path(), "rust-toolchain.toml", "[toolchain]\nchannel = \"stable\"\n");
+    let toolchain = key(root.path(), SCHEMA, CORE).0;
+    assert_ne!(original, toolchain);
+    write(root.path(), ".cargo/config.toml", "[build]\nrustflags = [\"-Copt-level=2\"]\n");
+    assert_ne!(toolchain, key(root.path(), SCHEMA, CORE).0);
+}
+
+#[test]
+fn unrelated_workspace_ui_and_documentation_do_not_invalidate_the_producer() {
+    let root = producer_fixture();
+    fixture_package(root.path(), "verum_workbench", "crates/verum_workbench");
+    let original = key(root.path(), SCHEMA, CORE).0;
+    for path in ["README.md", "docs/guide.md", "crates/verum_workbench/ui/editor.js",
+        "crates/verum_workbench/src/lib.rs"] {
+        write(root.path(), path, b"unrelated source edit");
+        assert_eq!(original, key(root.path(), SCHEMA, CORE).0, "{path}");
+    }
+}
+
+#[test]
+fn incomplete_or_unsupported_inputs_cannot_supply_a_producer_key() {
+    for mutation in 0..7 {
+        let root = producer_fixture();
+        match mutation {
+            0 => write(root.path(), "Cargo.toml", "[broken"),
+            1 => { fs::remove_file(root.path().join(PARSER_MANIFEST)).unwrap(); },
+            2 => write(root.path(), "Cargo.lock", "version = 999\n"),
+            3 => write(root.path(), ".cargo/config.toml", "paths = [\"../unchecked\"]\n"),
+            4 => {
+                let manifest = fs::read_to_string(root.path().join(PARSER_MANIFEST)).unwrap();
+                write(root.path(), PARSER_MANIFEST, format!("{manifest}\n[package.metadata.verum]\nproducer-inputs = [\"absent.bin\"]\n"));
+            },
+            5 => {
+                let manifest = fs::read_to_string(root.path().join(PARSER_MANIFEST)).unwrap();
+                write(root.path(), PARSER_MANIFEST, format!("{manifest}\n[dependencies]\nunknown_dependency = \"1\"\n"));
+            },
+            6 => {
+                let manifest = fs::read_to_string(root.path().join(PARSER_MANIFEST)).unwrap();
+                write(root.path(), PARSER_MANIFEST, format!("{manifest}\n[package.metadata.verum]\nproducer-inputs = [\"../../../outside\"]\n"));
+            },
+            _ => unreachable!(),
+        }
+        assert!(std::panic::catch_unwind(|| key(root.path(), SCHEMA, CORE)).is_err(),
+            "invalid input case {mutation} produced a cache identity");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn symlinked_local_inputs_are_refused_instead_of_becoming_unobserved_sources() {
+    let root = producer_fixture();
+    std::os::unix::fs::symlink(root.path().join("Cargo.lock"),
+        root.path().join("crates/verum_types/src/indirect.rs")).unwrap();
+    assert!(std::panic::catch_unwind(|| key(root.path(), SCHEMA, CORE)).is_err());
+}
+
+#[test]
+fn inherited_paths_and_versions_use_the_declaring_workspace() {
+    let root = producer_fixture();
+    fixture_package(root.path(), "nested_member", "vendor/nested/member");
+    fixture_package(root.path(), "nested_leaf", "vendor/nested/leaf");
+    fixture_lock_edge(root.path(), "verum_types", "nested_member");
+    fixture_lock_edge(root.path(), "nested_member", "nested_leaf");
+    write(root.path(), "vendor/nested/Cargo.toml", "[workspace]\nmembers = [\"member\", \"leaf\"]\n[workspace.package]\nversion = \"0.0.0\"\n[workspace.dependencies]\nnested_leaf = { path = \"leaf\" }\n");
+    write(root.path(), "vendor/nested/member/Cargo.toml", "[package]\nname = \"nested_member\"\nversion.workspace = true\n[dependencies]\nnested_leaf.workspace = true\n");
+    let path = "crates/verum_types/Cargo.toml";
+    let manifest = fs::read_to_string(root.path().join(path)).unwrap();
+    write(root.path(), path, format!("{manifest}\n[dependencies]\nnested_member = {{ path = \"../../vendor/nested/member\" }}\n"));
+    let original = key(root.path(), SCHEMA, CORE).0;
+    write(root.path(), "vendor/nested/leaf/src/lib.rs", "pub fn changed() {}\n");
+    assert_ne!(original, key(root.path(), SCHEMA, CORE).0);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_literal_backslash_in_a_resource_name_is_not_a_directory_separator() {
+    let root = producer_fixture();
+    let literal = "crates/verum_types/data/shape\\item.bin";
+    write(root.path(), literal, b"same resource bytes");
+    let one_component = key(root.path(), SCHEMA, CORE).0;
+    fs::remove_file(root.path().join(literal)).unwrap();
+    write(root.path(), "crates/verum_types/data/shape/item.bin", b"same resource bytes");
+    assert_ne!(one_component, key(root.path(), SCHEMA, CORE).0);
 }

@@ -377,8 +377,7 @@ pub(crate) fn main() {
     // COMPUTED UNCONDITIONALLY, and it must stay that way.
     //
     // `stdlib_cache::producer_hasher` does two things: it derives the cache key, and it
-    // emits the `cargo:rerun-if-changed` line for every path in the curated
-    // list. The second is not part of the work the flag skips — it is the
+    // emits `cargo:rerun-if-changed` for the producer dependency closure. The second is not part of the work the flag skips — it is the
     // CONTRACT stating when this script must run again.
     //
     // While this call sat inside the `if` below, a build with
