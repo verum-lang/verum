@@ -17572,28 +17572,9 @@ impl TypeChecker {
         // Now current_receiver is the base expression (e.g., 'a' in a.b().c().d())
         // and chain contains all method calls in reverse order
 
-        // A rooted namespace is syntax, never a receiver value. Resolve the
-        // first complete callable path through ordinary Call inference; later
-        // methods operate only on the value that call actually returns.
-        if let Some(mut path) = self.rooted_field_path(current_receiver)
-            && self.declared_constructor_path(&path, current_receiver.span)?.is_none()
-        {
-            let mut steps = chain.into_iter().rev();
-            let (_, method, type_args, args, span) = steps.next().expect("method chain is nonempty");
-            path.segments.push(verum_ast::ty::PathSegment::Name(method.clone()));
-            path.span = span;
-            let mut call = Expr::new(ExprKind::Call {
-                func: Box::new(Expr::new(ExprKind::Path(path), span)),
-                type_args: type_args.clone(), args: args.iter().cloned().collect(),
-            }, span);
-            for (_, method, type_args, args, span) in steps {
-                call = Expr::new(ExprKind::MethodCall {
-                    receiver: Box::new(call), method: method.clone(),
-                    type_args: type_args.clone(), args: args.iter().cloned().collect(),
-                }, span);
-            }
-            return self.synth_expr(&call);
-        }
+        // Rooted qualifiers enter the same declaration-owned namespace path
+        // as imported aliases; only an actual constructor produces a receiver.
+        let base_is_rooted_path = self.rooted_field_path(current_receiver).is_some();
 
         // Step 1: Synthesize type of the base expression (NOT a method call, so no recursion issue)
         // Set in_call_arg_context so that path expressions use borrow_value instead of use_value.
@@ -17633,7 +17614,7 @@ impl TypeChecker {
             }
         };
         self.with_place_types(current_receiver, |tc| {
-            let mut namespace_first = if base_is_module_alias || base_is_module_path || base_is_inline_namespace {
+            let mut namespace_first = if base_is_rooted_path || base_is_module_alias || base_is_module_path || base_is_inline_namespace {
                 let (_, first_method, first_type_args, first_args, first_span) =
                     chain.last().expect("method chain is nonempty");
                 // A dotted qualifier can denote a value (a variant or an
@@ -23940,6 +23921,13 @@ bake to have this verified.",
     ) -> Result<Option<InferResult>> {
         use verum_ast::ty::PathSegment;
         if skip_static_lookup { return Ok(None); }
+        if let Some(path) = self.rooted_field_path(receiver)
+            && self.declared_constructor_path(&path, receiver.span)?.is_some()
+        {
+            // A selected constructor is a value receiver. Its following member
+            // belongs to ordinary method lookup, not to a longer namespace.
+            return Ok(None);
+        }
         let mut root = receiver;
         let mut suffix = List::new();
         while let ExprKind::Field { expr, field } = &root.kind {
@@ -23948,12 +23936,24 @@ bake to have this verified.",
         }
         let ExprKind::Path(path) = &root.kind else { return Ok(None); };
         let mut segments: List<PathSegment> = match path.segments.first() {
+            Some(PathSegment::Cog) => {
+                // The canonical source owner carries its unit root. Never
+                // derive that owner from the requested member's short name.
+                let Some(root) = self.current_module_path.as_str().split('.').next()
+                    .filter(|root| !root.is_empty()) else { return Ok(None); };
+                let mut segments = List::from_single(PathSegment::Name(Ident::new(root, span)));
+                segments.extend(path.segments.iter().skip(1).cloned());
+                segments
+            }
+
             Some(PathSegment::Super) => {
                 let Some(parent) = self.compute_parent_module_path(
                     &self.current_module_path, &path.segments,
                 ) else { return Ok(None); };
-                parent.split('.').filter(|name| !name.is_empty())
-                    .map(|name| PathSegment::Name(Ident::new(name, span))).collect()
+                let mut segments: List<_> = parent.split('.').filter(|name| !name.is_empty())
+                    .map(|name| PathSegment::Name(Ident::new(name, span))).collect();
+                segments.extend(path.segments.iter().skip_while(|segment| matches!(segment, PathSegment::Super)).cloned());
+                segments
             }
             Some(PathSegment::Name(ident))
                 if !self.ctx.env.is_locally_bound(ident.name.as_str()) => {
@@ -23969,6 +23969,10 @@ bake to have this verified.",
             }
             _ => return Ok(None),
         };
+        let mut written_segments: List<_> = path.segments.iter().cloned().collect();
+        written_segments.extend(suffix.iter().rev().cloned().map(PathSegment::Name));
+        written_segments.push(PathSegment::Name(method.clone()));
+        let written_path = self.path_to_string(&verum_ast::Path::new(written_segments, span));
         segments.extend(suffix.into_iter().rev().map(PathSegment::Name));
         segments.push(PathSegment::Name(method.clone()));
         let path = verum_ast::Path::new(segments, span);
@@ -23983,7 +23987,7 @@ bake to have this verified.",
         });
         if let Some((module, member)) = source {
             let scheme = self.source_qualified_function(module, member)
-                .ok_or_else(|| TypeError::UnboundVariable { name: qualified.clone(), span })?;
+                .ok_or_else(|| TypeError::UnboundVariable { name: written_path.clone(), span })?;
             // Publish only this qualified callable, never the namespace's bare
             // items. Ordinary call inference then retains its generic bounds.
             self.ctx.env.insert(qualified, scheme);
@@ -23991,7 +23995,16 @@ bake to have this verified.",
             let _ = self.lookup_static_or_load_from_metadata(qualified.as_str());
         }
 
-        self.infer_namespace_callable(path, type_args, args, span).map(Some)
+        self.infer_namespace_callable(path, type_args, args, span)
+            .map(Some)
+            .map_err(|error| match error {
+                // Canonical owners guide resolution; diagnostics identify the
+                // callee the user wrote. Preserve errors in argument subspans.
+                TypeError::UnboundVariable { span: failed_span, .. } if failed_span == span => {
+                    TypeError::UnboundVariable { name: written_path, span }
+                }
+                other => other,
+            })
     }
 
     /// Namespace selection publishes the exact scheme; ordinary calls own

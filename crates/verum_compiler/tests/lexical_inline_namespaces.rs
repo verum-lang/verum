@@ -190,3 +190,26 @@ fn declared_value_binder_survives_fresh_archive_publication() {
         );
     }
 }
+
+#[test]
+fn cog_rooted_calls_use_the_compiling_unit_owner() {
+    for call in ["cog.decoy.generic<Int>(73)", "cog.facade.renamed<Int>(73)"] {
+        let source = format!(
+            "public pure fn generic<T>(value: Bool) -> Bool {{ value }} public pure fn probe() -> Int {{ {call} }}"
+        );
+        contract(&source).unwrap();
+    }
+    for (call, expected) in [
+        ("cog.absent.generic<Int>(73)", "cog.absent.generic"),
+        ("cog.decoy.secret(73)", "cog.decoy.secret"),
+        ("cog.decoy.generic<Bool>(73)", "Bool"),
+        ("cog.decoy.generic<Int>(unavailable)", "unavailable"),
+    ] {
+        let source = format!(
+            "public pure fn generic<T>(value: Int) -> Int {{ value }} public pure fn secret(value: Int) -> Int {{ value }} public pure fn probe() -> Int {{ {call} }}"
+        );
+        let error = contract(&source)
+            .expect_err("a caller homonym cannot authorize a rooted call");
+        assert!(error.contains(expected), "{source}: {error}");
+    }
+}
