@@ -213,3 +213,24 @@ fn cog_rooted_calls_use_the_compiling_unit_owner() {
         assert!(error.contains(expected), "{source}: {error}");
     }
 }
+
+#[test]
+fn renamed_inline_record_owners_survive_source_admission_and_archive_execution() {
+    let declarations = "public module alpha { public type Item is { public value: Int }; } public module beta { public type Item is { public value: Bool }; }";
+    for mount in [
+        "mount core.consumer.alpha.Item as A; mount core.consumer.beta.Item as B;",
+        "mount core.consumer.{alpha.Item as A, beta.Item as B};",
+        "mount core.consumer.{alpha.{Item as A}, beta.{Item as B}};",
+    ] {
+        let source = format!("{declarations} {mount} public fn probe()->Int {{ let a = A {{value:72}}; let b = B {{value:true}}; if b.value {{a.value+1}} else {{0}} }}");
+        contract(&source).unwrap_or_else(|error| panic!("{source}: {error}"));
+    }
+    let private = "public module alpha {public type Item is { secret:Int };} mount core.consumer.alpha.Item as A; fn read(item:A)->Int {item.secret} public fn probe()->Int {73}";
+    let error = contract(private).expect_err("a rename exposed a private field");
+    assert!(error.contains("E202") && error.contains("Private")
+        && error.contains("secret") && error.contains("core.consumer.alpha"), "{error}");
+    let distinct = "public module alpha {public type Item is {public value:Int};} public module beta {public type Item is {public value:Int};} mount core.consumer.{alpha.Item as A,beta.Item as B}; fn wrong(item:A)->B {item} public fn probe()->Int {73}";
+    let error = contract(distinct).expect_err("a rename merged distinct record owners");
+    assert!(error.contains("mismatch") && error.contains("alpha.Item")
+        && error.contains("beta.Item"), "{error}");
+}
