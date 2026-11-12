@@ -65,26 +65,33 @@ impl ModuleObservations {
     pub fn unchanged(&self, current: &ModuleRegistry) -> bool {
         let reads = self.reads.lock();
         let before = &self.before;
-        if reads.mutated
-            || before.cog_name != current.cog_name
-            || before.external_cogs != current.external_cogs
-            || before.path_aliases != current.path_aliases
+        if reads.mutated {
+            return false;
+        }
+        // Shared immutable identity is stronger than comparing individual reads.
+        // Any declaration or namespace write detaches before it can become visible.
+        if std::ptr::eq(&*before.data, &*current.data) {
+            return true;
+        }
+        if before.data.cog_name != current.data.cog_name
+            || before.data.external_cogs != current.data.external_cogs
+            || before.data.path_aliases != current.data.path_aliases
         {
             return false;
         }
-        if reads.all && before.modules != current.modules {
+        if reads.all && before.data.modules != current.data.modules {
             return false;
         }
-        if reads.length && before.modules.len() != current.modules.len() {
+        if reads.length && before.data.modules.len() != current.data.modules.len() {
             return false;
         }
-        if reads.empty && before.modules.is_empty() != current.modules.is_empty() {
+        if reads.empty && before.data.modules.is_empty() != current.data.modules.is_empty() {
             return false;
         }
         reads
             .ids
             .iter()
-            .all(|id| before.modules.get(id) == current.modules.get(id))
+            .all(|id| before.data.modules.get(id) == current.data.modules.get(id))
             && reads
                 .paths
                 .iter()

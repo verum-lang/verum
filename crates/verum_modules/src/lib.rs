@@ -296,45 +296,48 @@ impl ModuleInfo {
     }
 }
 
-/// The module registry - central storage for all loaded modules.
+/// Declaration data owned by one immutable registry generation.
 ///
-/// This is the single source of truth for module information during compilation.
+/// A snapshot shares this generation. Every write first obtains a unique copy,
+/// so lazy imports cannot change another consumer's names or exports.
+#[derive(Debug, Clone, Default)]
+struct RegistryData {
+    modules: Map<ModuleId, Shared<ModuleInfo>>,
+    /// Exact declared owners; lookup aliases never rewrite declaration identity.
+    path_to_id: Map<Text, ModuleId>,
+    path_aliases: Map<Text, Text>,
+    cog_name: Option<Text>,
+    external_cogs: Set<Text>,
+}
+
+/// Central storage for loaded modules, with constant-time immutable snapshots.
+///
+/// Clones share declarations until a write; their monotone ID allocator remains
+/// shared. Use [`Self::deep_clone`] for an independent allocator as well.
 #[derive(Debug, Clone)]
 pub struct ModuleRegistry {
-    /// All loaded modules by ID
-    modules: Map<ModuleId, Shared<ModuleInfo>>,
-    /// Exact declared module owner → ID mapping. Lookup aliases never rewrite it.
-    path_to_id: Map<Text, ModuleId>,
-    /// Path-alias map: when a user writes `mount X.Y.Z` and the
-    /// registry has no module under that exact path, the alias map
-    /// is consulted to translate the path to its canonical form.
-    /// Populated by the loader / pipeline at load time so the
-    /// type-resolver doesn't have to re-derive aliases on every
-    /// lookup. MOD-CRIT-1 — closes the loader/resolver path-dedup
-    /// incoherence by funnelling every path-alias decision through
-    /// one map.
-    path_aliases: Map<Text, Text>,
-    /// Next module ID to allocate
+    data: Shared<RegistryData>,
     next_id: Shared<std::sync::atomic::AtomicU32>,
-    /// Namespace used to interpret cog-relative requests. Changing it does
-    /// not change the ownership of any already registered declaration.
-    cog_name: Option<String>,
-    /// Explicit external namespace roots from the project/dependency model.
-    external_cogs: Set<Text>,
     observations: Option<std::sync::Arc<parking_lot::Mutex<observations::Reads>>>,
 }
 
 impl ModuleRegistry {
     pub fn new() -> Self {
         Self {
-            modules: Map::new(),
-            path_to_id: Map::new(),
-            path_aliases: Map::new(),
+            data: Shared::new(RegistryData::default()),
             next_id: Shared::new(std::sync::atomic::AtomicU32::new(0)),
-            cog_name: None,
-            external_cogs: Set::new(),
             observations: None,
         }
+    }
+
+    /// The only mutable access to a declaration generation. Invalidation belongs
+    /// here so export resolution cannot bypass the same rule as lazy loading.
+    fn data_mut(&mut self) -> &mut RegistryData {
+        self.observe_mutation();
+        if Shared::get_mut(&mut self.data).is_none() {
+            self.data = Shared::new((*self.data).clone());
+        }
+        Shared::get_mut(&mut self.data).expect("detached registry generation is uniquely owned")
     }
 
     /// Register a path-alias: when callers do `get_by_path_aliased(alias)`
@@ -352,33 +355,30 @@ impl ModuleRegistry {
     /// (loader for resolution, type-resolver for import lookup, CLI
     /// audits for path normalisation).
     pub fn register_path_alias(&mut self, alias: impl Into<Text>, canonical: impl Into<Text>) {
-        self.observe_mutation();
-        self.path_aliases.insert(alias.into(), canonical.into());
+        self.data_mut().path_aliases.insert(alias.into(), canonical.into());
     }
 
     /// Read-only access to the alias table. Useful for diagnostics
     /// (e.g. `verum audit --module-aliases`) and for downstream
     /// tooling that needs to render the alias chain.
     pub fn path_aliases(&self) -> &Map<Text, Text> {
-        &self.path_aliases
+        &self.data.path_aliases
     }
 
     /// Set the primary cog for relative lookup. Declared owners stay exact,
     /// including metadata registered before this context was configured.
     pub fn set_cog_name(&mut self, cog_name: impl Into<String>) {
-        self.observe_mutation();
-        self.cog_name = Some(cog_name.into());
+        self.data_mut().cog_name = Some(Text::from(cog_name.into()));
     }
 
     /// Current cog name, if set.
     pub fn cog_name(&self) -> Option<&str> {
-        self.cog_name.as_deref()
+        self.data.cog_name.as_deref()
     }
 
     /// Mark a dependency namespace as absolute, rather than cog-relative.
     pub fn register_external_cog(&mut self, name: impl Into<Text>) {
-        self.observe_mutation();
-        self.external_cogs.insert(name.into());
+        self.data_mut().external_cogs.insert(name.into());
     }
 
     /// Allocate a new module ID
@@ -416,40 +416,34 @@ impl ModuleRegistry {
     /// Existing populated entries retain their ID and exports; empty forward
     /// declarations can be completed without changing that identity.
     pub fn register(&mut self, module: ModuleInfo) -> ModuleId {
-        self.observe_mutation();
         self.reserve_id(module.id);
         let path_key = Text::from(module.path.to_string());
-        if let Some(&existing_id) = self.path_to_id.get(&path_key) {
-            // Merge exports from the incoming registration into the
-            // already-stored entry. Keep the original ModuleId so that
-            // downstream source_module comparisons stay stable.
-            if let Some(existing_shared) = self.modules.get(&existing_id) {
-                // If the existing entry is empty (e.g. a placeholder
-                // from the first lazy-load call), replace it with
-                // the fuller incoming one but keep the ID.
-                let existing_empty = existing_shared.exports.all_exports().count() == 0
-                    && existing_shared.imports.is_empty();
-                if existing_empty {
-                    let mut replaced = module;
-                    replaced.id = existing_id;
-                    self.modules.insert(existing_id, Shared::new(replaced));
-                }
-                // Otherwise, drop the duplicate silently — the first
-                // registration wins. Callers that want to refresh
-                // must go through `clear` + re-register.
+        if let Some(&existing_id) = self.data.path_to_id.get(&path_key) {
+            let placeholder = self.data.modules.get(&existing_id).is_some_and(|existing| {
+                existing.exports.all_exports().count() == 0 && existing.imports.is_empty()
+            });
+            if placeholder {
+                let mut completed = module;
+                completed.id = existing_id;
+                self.data_mut().modules.insert(existing_id, Shared::new(completed));
+            } else {
+                // Preserve first-registration-wins and the observation of an
+                // attempted write without copying an unchanged generation.
+                self.observe_mutation();
             }
             return existing_id;
         }
         let id = module.id;
-        self.modules.insert(id, Shared::new(module));
-        self.path_to_id.insert(path_key, id);
+        let data = self.data_mut();
+        data.modules.insert(id, Shared::new(module));
+        data.path_to_id.insert(path_key, id);
         id
     }
 
     /// Get a module by ID
     pub fn get(&self, id: ModuleId) -> Maybe<Shared<ModuleInfo>> {
         self.observe(|reads| { reads.ids.insert(id); });
-        self.modules.get(&id).cloned()
+        self.data.modules.get(&id).cloned()
     }
 
     /// Resolve an exact or cog-relative request without changing ownership.
@@ -463,11 +457,11 @@ impl ModuleRegistry {
     /// Missing and ambiguous are distinct: an alias must never conceal an
     /// ambiguous direct request by selecting an unrelated third declaration.
     fn resolve_path_id(&self, path: &str) -> Result<Option<ModuleId>, ()> {
-        let qualified = path::qualified_module_key(path, self.cog_name.as_deref(), |first| {
-            self.external_cogs.contains(&Text::from(first))
+        let qualified = path::qualified_module_key(path, self.data.cog_name.as_deref(), |first| {
+            self.data.external_cogs.contains(&Text::from(first))
         });
-        let exact = self.path_to_id.get(&Text::from(path)).copied();
-        let relative = self.path_to_id.get(&Text::from(qualified)).copied();
+        let exact = self.data.path_to_id.get(&Text::from(path)).copied();
+        let relative = self.data.path_to_id.get(&Text::from(qualified)).copied();
         match (exact, relative) {
             (Some(left), Some(right)) if left != right => Err(()),
             (Some(id), _) | (_, Some(id)) => Ok(Some(id)),
@@ -477,7 +471,7 @@ impl ModuleRegistry {
 
     fn lookup_by_path(&self, path: &str) -> Maybe<Shared<ModuleInfo>> {
         self.resolve_path_id(path).ok().flatten()
-            .and_then(|id| self.modules.get(&id).cloned())
+            .and_then(|id| self.data.modules.get(&id).cloned())
     }
 
     /// Alias-aware variant of [`Self::get_by_path`]. Probes the direct
@@ -497,8 +491,8 @@ impl ModuleRegistry {
 
     fn lookup_by_path_aliased(&self, path: &str) -> Maybe<Shared<ModuleInfo>> {
         match self.resolve_path_id(path) {
-            Ok(Some(id)) => self.modules.get(&id).cloned(),
-            Ok(None) => self.path_aliases.get(&Text::from(path))
+            Ok(Some(id)) => self.data.modules.get(&id).cloned(),
+            Ok(None) => self.data.path_aliases.get(&Text::from(path))
                 .and_then(|canonical| self.lookup_by_path(canonical.as_str())),
             Err(()) => Maybe::None,
         }
@@ -507,7 +501,7 @@ impl ModuleRegistry {
     /// Get all modules
     pub fn all_modules(&self) -> impl Iterator<Item = (&ModuleId, &Shared<ModuleInfo>)> {
         self.observe(|reads| reads.all = true);
-        self.modules.iter()
+        self.data.modules.iter()
     }
 
     /// Update a module's exports by adding items from another export table.
@@ -524,9 +518,8 @@ impl ModuleRegistry {
         target_id: ModuleId,
         source_exports: &exports::ExportTable,
     ) -> usize {
-        self.observe_mutation();
         let mut newly_added = 0usize;
-        if let Some(existing) = self.modules.get(&target_id) {
+        if let Some(existing) = self.data.modules.get(&target_id) {
             // Clone the existing ModuleInfo
             let mut updated = (**existing).clone();
             let pre_len = updated.exports.len();
@@ -548,9 +541,11 @@ impl ModuleRegistry {
 
             // Replace the module in the registry
             let path_str = updated.path.to_string();
-            self.modules.insert(target_id, Shared::new(updated));
-            self.path_to_id
-                .insert(Text::from(path_str.as_str()), target_id);
+            let data = self.data_mut();
+            data.modules.insert(target_id, Shared::new(updated));
+            data.path_to_id.insert(Text::from(path_str.as_str()), target_id);
+        } else {
+            self.observe_mutation();
         }
         newly_added
     }
@@ -562,9 +557,9 @@ impl ModuleRegistry {
 
     /// Clear all modules
     pub fn clear(&mut self) {
-        self.observe_mutation();
-        self.modules.clear();
-        self.path_to_id.clear();
+        let data = self.data_mut();
+        data.modules.clear();
+        data.path_to_id.clear();
     }
 
     /// Drop every module whose canonical path is NOT in `keep`.
@@ -584,40 +579,27 @@ impl ModuleRegistry {
     /// passes (which see fewer exports → fewer name candidates →
     /// faster resolution).
     pub fn retain_paths(&mut self, keep: &std::collections::HashSet<String>) -> (usize, usize) {
-        self.observe_mutation();
-        let pre_len = self.modules.len();
-        // Build the surviving id-set in one pass over the small
-        // `path_to_id` index (cheaper than walking every ModuleInfo).
-        let surviving_ids: std::collections::HashSet<ModuleId> = self
-            .path_to_id
-            .iter()
-            .filter_map(|(path, id)| {
-                if keep.contains(path.as_str()) {
-                    Some(*id)
-                } else {
-                    None
-                }
-            })
+        let data = self.data_mut();
+        let pre_len = data.modules.len();
+        let surviving_ids: Set<ModuleId> = data.path_to_id.iter()
+            .filter_map(|(path, id)| keep.contains(path.as_str()).then_some(*id))
             .collect();
-
-        self.modules.retain(|id, _| surviving_ids.contains(id));
-        self.path_to_id
-            .retain(|path, _| keep.contains(path.as_str()));
-
-        let post_len = self.modules.len();
+        data.modules.retain(|id, _| surviving_ids.contains(id));
+        data.path_to_id.retain(|path, _| keep.contains(path.as_str()));
+        let post_len = data.modules.len();
         (post_len, pre_len.saturating_sub(post_len))
     }
 
     /// Get the number of registered modules
     pub fn len(&self) -> usize {
         self.observe(|reads| reads.length = true);
-        self.modules.len()
+        self.data.modules.len()
     }
 
     /// Check if the registry is empty
     pub fn is_empty(&self) -> bool {
         self.observe(|reads| reads.empty = true);
-        self.modules.is_empty()
+        self.data.modules.is_empty()
     }
 }
 
@@ -734,25 +716,16 @@ impl From<ModuleRegistry> for SharedModuleRegistry {
 }
 
 impl ModuleRegistry {
-    /// Create a deep clone of the registry with a fresh ID counter.
+    /// Snapshot the declarations with an independent ID allocator.
     ///
-    /// This is used for test performance optimization: the stdlib modules are
-    /// registered once, then each test gets a deep clone of the registry with
-    /// its own ID counter for user modules.
-    ///
-    /// The `Shared<ModuleInfo>` entries are shared (reference count incremented)
-    /// but the ID counter is fresh, starting at max_existing_id + 1.
+    /// The allocator starts after the maximum registered ID, preserving the
+    /// independent-analysis contract. Declaration indexes remain shared until
+    /// either registry is mutated; allocation alone never changes a declaration.
     pub fn deep_clone(&self) -> Self {
-        // Find the max existing module ID to set the counter properly
-        let max_id = self.modules.keys().map(|id| id.as_u32()).max().unwrap_or(0);
-
+        let max_id = self.data.modules.keys().map(|id| id.as_u32()).max().unwrap_or(0);
         Self {
-            modules: self.modules.clone(),
-            path_to_id: self.path_to_id.clone(),
-            path_aliases: self.path_aliases.clone(),
+            data: self.data.clone(),
             next_id: Shared::new(std::sync::atomic::AtomicU32::new(max_id + 1)),
-            cog_name: self.cog_name.clone(),
-            external_cogs: self.external_cogs.clone(),
             observations: self.observations.clone(),
         }
     }

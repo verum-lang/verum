@@ -34,3 +34,7 @@ parking_lot = { workspace = true }  # For SharedModuleRegistry RwLock
 tempfile = "3.14"
 criterion = { workspace = true }
 
+
+[[bench]]
+name = "registry_snapshots"
+harness = false

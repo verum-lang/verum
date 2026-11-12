@@ -1482,7 +1482,7 @@ pub fn resolve_specific_reexport_kinds(
 
     // Second pass: apply the updates
     for (target_id, item_name, correct_kind, source_module) in updates {
-        if let Some(existing) = module_registry.modules.get(&target_id) {
+        if let Some(existing) = module_registry.data.modules.get(&target_id) {
             let mut updated = (**existing).clone();
 
             // Update the export kind if we have the item
@@ -1505,12 +1505,9 @@ pub fn resolve_specific_reexport_kinds(
 
             // Update the module in registry
             let path_str = updated.path.to_string();
-            module_registry
-                .modules
-                .insert(target_id, verum_common::Shared::new(updated));
-            module_registry
-                .path_to_id
-                .insert(Text::from(path_str.as_str()), target_id);
+            let data = module_registry.data_mut();
+            data.modules.insert(target_id, verum_common::Shared::new(updated));
+            data.path_to_id.insert(Text::from(path_str.as_str()), target_id);
         }
     }
 
