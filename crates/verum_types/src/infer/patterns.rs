@@ -2344,9 +2344,12 @@ impl TypeChecker {
                     }
                 }
 
-                // Now actually bind the variables from first pattern
-                for (name, ty) in first_bindings {
-                    self.ctx.env.insert(name, TypeScheme::mono(ty));
+                // Matching binding sets is not proof that the alternatives
+                // are valid patterns. Check every alternative through the
+                // ordinary binder, preserving reference and ownership state.
+                // The first alternative supplies the final common bindings.
+                for pattern in patterns.iter().rev() {
+                    self.bind_pattern_scheme(pattern, scheme.clone())?;
                 }
 
                 Ok(())
@@ -2900,6 +2903,12 @@ impl TypeChecker {
             }
 
             PatternKind::Variant { path, data } => {
+                // A named constant or nullary constructor introduces no
+                // bindings. bind_pattern validates its declaration and type;
+                // this pass only needs payload types for actual binders.
+                if data.is_none() {
+                    return Ok(List::new());
+                }
                 // Variant pattern
                 // Extract only the variant tag (last segment) from the path
                 let tag = if path.segments.len() == 1 {

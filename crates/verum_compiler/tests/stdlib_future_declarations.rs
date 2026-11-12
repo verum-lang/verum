@@ -44,6 +44,24 @@ fn imported_fixed_width_arithmetic_executes_after_archive_bootstrap() {
 }
 
 #[test]
+fn named_constant_patterns_execute_the_declared_values() {
+    let root = tempfile::tempdir().unwrap();
+    let core = root.path().join("core");
+    fs::create_dir_all(&core).unwrap();
+    fs::write(core.join("mod.vr"), "module core;
+        const FIRST: Int = 3; const SECOND: Int = 5;
+        public fn classify(value: Int) -> Int {
+            match value { FIRST => 17, SECOND => 23, _ => 0 }
+        }
+        public fn either(value: Int) -> Int {
+            match value { FIRST | SECOND => 11, _ => 0 }
+        }").unwrap();
+    let archive = bootstrap(&core);
+    assert_eq!(execute(&archive, "module app; mount core.{classify, either};
+        fn main() -> Int { classify(3) + classify(5) + classify(7) + either(3) + either(5) + either(7) }"), 62);
+}
+
+#[test]
 fn relative_record_constructors_execute_with_the_declaring_layout() {
     let root = tempfile::tempdir().unwrap();
     let core = root.path().join("core");
