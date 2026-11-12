@@ -86,6 +86,7 @@ mod callable_generic_rosters;
 mod const_arguments;
 mod callable_owner_rosters;
 mod field_visibility;
+mod ffi_aggregates;
 
 #[cfg(test)]
 mod tests_comprehensive;
@@ -8649,7 +8650,7 @@ impl VbcCodegen {
         }
         for (parent, module) in files {
             self.with_owned_source_scope(parent, module, |codegen|
-                codegen.pregenerate_ffi_struct_layouts(module));
+                codegen.pregenerate_ffi_struct_layouts(module))?;
         }
         Ok(())
     }
@@ -14728,9 +14729,9 @@ impl VbcCodegen {
         &mut self,
         type_name: &str,
         fields: &verum_common::List<verum_ast::decl::RecordField>,
-    ) -> u16 {
-        let no_siblings = std::collections::HashMap::new();
-        let mut in_progress: Vec<String> = Vec::new();
+    ) -> CodegenResult<u16> {
+        let no_siblings = Map::new();
+        let mut in_progress = verum_common::List::new();
         self.generate_ffi_struct_layout_inner(type_name, fields, &no_siblings, &mut in_progress)
     }
 
@@ -14746,51 +14747,24 @@ impl VbcCodegen {
         &mut self,
         type_name: &str,
         fields: &verum_common::List<verum_ast::decl::RecordField>,
-        siblings: &std::collections::HashMap<
-            String,
-            verum_common::List<verum_ast::decl::RecordField>,
-        >,
-        in_progress: &mut Vec<String>,
-    ) -> u16 {
-        in_progress.push(type_name.to_string());
+        siblings: &Map<Text, verum_common::List<verum_ast::decl::RecordField>>,
+        in_progress: &mut verum_common::List<Text>,
+    ) -> CodegenResult<u16> {
+        if in_progress.len() >= 8 {
+            return Err(CodegenError::unsupported_expr("native aggregate nesting exceeds 8 levels"));
+        }
+        in_progress.push(type_name.into());
 
         // Calculate C-compatible layout
-        let mut layout_fields = Vec::new();
+        let mut layout_fields = verum_common::List::new();
         let mut current_offset: u32 = 0;
         let mut max_align: u16 = 1;
 
         for field in fields.iter() {
             let field_name = field.name.name.to_string();
 
-            // A field whose type is a RECORD must have that record's layout
-            // in hand before this one can be sized — otherwise
-            // `verum_type_to_ctype` misses `repr_c_types` and answers
-            // `CType::Ptr` for it. Pre-fix `pregenerate_ffi_struct_layouts`
-            // iterated a `HashSet`, so whether the nested layout happened to
-            // exist yet was decided by hash order: the same source produced
-            // a 64-byte or a 96-byte `DarwinStat` on different runs of the
-            // same binary. Build it here instead of hoping (T1359).
-            if let Some(nested_name) = Self::ffi_referenced_struct_name(&field.ty)
-                && !self.repr_c_types.contains_key(&nested_name)
-                && !in_progress.iter().any(|n| n == &nested_name)
-                && let Some(nested_fields) = siblings.get(&nested_name).cloned()
-            {
-                self.generate_ffi_struct_layout_inner(
-                    &nested_name,
-                    &nested_fields,
-                    siblings,
-                    in_progress,
-                );
-            }
-
-            let c_type = self.verum_type_to_ctype(&verum_common::Maybe::Some(field.ty.clone()));
-
-            // Get size and alignment for this C type
-            let (field_size, field_align) = self.ffi_field_size_align(c_type, &field.ty);
-            // …and, for a nested record, WHICH record: `CType` says
-            // "struct by value" and cannot say whose, so the marshaller
-            // needs the layout index carried on the field itself.
-            let nested_layout_idx = self.ffi_nested_layout_index(c_type, &field.ty);
+            let (c_type, field_size, field_align, nested_layout_idx) =
+                self.ffi_field_layout(&field.ty, siblings, in_progress, 0)?;
 
             // Align current offset
             let alignment = field_align as u32;
@@ -14811,6 +14785,9 @@ impl VbcCodegen {
             });
 
             current_offset += field_size as u32;
+            if current_offset > u32::from(u16::MAX) {
+                return Err(CodegenError::unsupported_expr("native record exceeds the layout size limit"));
+            }
             max_align = max_align.max(field_align);
         }
 
@@ -14821,53 +14798,26 @@ impl VbcCodegen {
         }
 
         // Create the layout
-        let layout_idx = self.ffi_layouts.len() as u16;
+        let layout_idx = u16::try_from(self.ffi_layouts.len()).map_err(|_|
+            CodegenError::unsupported_expr("too many native aggregate layouts"))?;
         let struct_name_id = crate::types::StringId(self.intern_string(type_name));
 
         let mut layout = FfiStructLayout::new(struct_name_id, current_offset, max_align);
-        layout.fields = layout_fields;
+        layout.fields = layout_fields.into();
 
         // Store type name to layout index mapping
         self.repr_c_types.insert(type_name.to_string(), layout_idx);
         self.ffi_layouts.push(layout);
+        self.validate_ffi_layout_depth(layout_idx)?;
 
         in_progress.pop();
-        layout_idx
-    }
-
-    /// Size and alignment of one FFI struct FIELD.
-    ///
-    /// [`Self::ctype_size_align`] answers per C-TYPE, and for
-    /// `CType::StructValue` it cannot: the C type carries no layout
-    /// identity, so it returned `(0, 1)` under a comment saying the work
-    /// was still to do. A nested record therefore occupied ZERO bytes,
-    /// which put every field after it at the wrong offset and left the
-    /// struct short by the whole nested payload. Measured on
-    /// `DarwinStat` (four `DarwinTimespec` fields, 64 bytes of C
-    /// timespecs): `st_size` landed at offset 32 where the platform puts
-    /// it at 96, so a read of it returned `st_atimespec.tv_sec` — a Unix
-    /// timestamp presented as a file size, with no diagnostic (T1359).
-    ///
-    /// The field's own AST type does carry the identity, so ask it here.
-    /// A `StructValue` whose layout is still missing keeps the old
-    /// answer rather than inventing one; the recursion in
-    /// `generate_ffi_struct_layout_inner` is what makes that case rare,
-    /// and `check_ffi_struct_layouts` is what makes it visible.
-    fn ffi_field_size_align(&self, c_type: CType, ty: &verum_ast::ty::Type) -> (u16, u16) {
-        if c_type == CType::StructValue
-            && let Some(name) = Self::ffi_referenced_struct_name(ty)
-            && let Some(&idx) = self.repr_c_types.get(&name)
-            && let Some(nested) = self.ffi_layouts.get(idx as usize)
-        {
-            return (nested.size as u16, nested.align);
-        }
-        self.ctype_size_align(c_type)
+        Ok(layout_idx)
     }
 
     /// The `ffi_layouts` index of a field's nested record layout, or
     /// `None` for every field that is not a struct by value.
     ///
-    /// Same question as [`Self::ffi_field_size_align`] asks, answered for
+    /// Uses the same declaration authority as field sizing, retained for
     /// the marshaller instead of the layout arithmetic: it needs to reach
     /// the nested layout's FIELDS to copy them, not just its size.
     fn ffi_nested_layout_index(&self, c_type: CType, ty: &verum_ast::ty::Type) -> Option<u16> {
@@ -14958,15 +14908,12 @@ impl VbcCodegen {
     /// extern signature get a layout (non-FFI records are untouched), and the
     /// generation is idempotent against `@repr(C)` records that Pass 2 also
     /// handles (guarded by `repr_c_types` membership on both sides).
-    fn pregenerate_ffi_struct_layouts(&mut self, module: &Module) {
+    fn pregenerate_ffi_struct_layouts(&mut self, module: &Module) -> CodegenResult<()> {
         use verum_ast::decl::{FunctionParamKind, TypeDeclBody};
 
         // 1. Index this module's record type declarations by name (respecting
         //    @cfg gating so we don't materialise a cross-platform record).
-        let mut record_fields: std::collections::HashMap<
-            String,
-            verum_common::List<verum_ast::decl::RecordField>,
-        > = std::collections::HashMap::new();
+        let mut record_fields: Map<Text, verum_common::List<verum_ast::decl::RecordField>> = Map::new();
         for item in module.items.iter() {
             if !self.should_compile_item(item) {
                 continue;
@@ -14975,12 +14922,12 @@ impl VbcCodegen {
                 && let TypeDeclBody::Record(fields) = &type_decl.body
             {
                 record_fields
-                    .entry(type_decl.name.name.to_string())
+                    .entry(type_decl.name.name.clone())
                     .or_insert_with(|| fields.clone());
             }
         }
         if record_fields.is_empty() {
-            return;
+            return Ok(());
         }
 
         // 2. Collect the record type names referenced by any FFI extern
@@ -14988,7 +14935,7 @@ impl VbcCodegen {
         let mut needed: std::collections::HashSet<String> = std::collections::HashSet::new();
         let mut note = |ty: &verum_ast::ty::Type| {
             if let Some(name) = Self::ffi_referenced_struct_name(ty)
-                && record_fields.contains_key(&name)
+                && record_fields.contains_key(&Text::from(name.as_str()))
             {
                 needed.insert(name);
             }
@@ -15044,17 +14991,18 @@ impl VbcCodegen {
             if self.repr_c_types.contains_key(&name) {
                 continue;
             }
-            if let Some(fields) = record_fields.get(&name) {
+            if let Some(fields) = record_fields.get(&Text::from(name.as_str())) {
                 let fields = fields.clone();
-                let mut in_progress: Vec<String> = Vec::new();
+                let mut in_progress = verum_common::List::new();
                 self.generate_ffi_struct_layout_inner(
                     &name,
                     &fields,
                     &record_fields,
                     &mut in_progress,
-                );
+                )?;
             }
         }
+        Ok(())
     }
 
     /// Returns the size and alignment for a C type.
@@ -16335,7 +16283,7 @@ impl VbcCodegen {
                     // slot representation.
                     self.declared_repr_c.insert(type_name.clone());
                     if !self.repr_c_types.contains_key(&type_name) {
-                        self.generate_ffi_struct_layout(&type_name, fields);
+                        self.generate_ffi_struct_layout(&type_name, fields)?;
                     }
                 }
 

@@ -67,6 +67,7 @@ pub mod lenient;
 /// heap variant's discriminant: there is no public `Value` API for the sum-type
 /// tag (`Value::tag()` is the NaN-box tag, not the variant tag).
 pub use heap::variant_tag;
+pub(crate) use heap::typed_array_element_spec;
 pub mod io_engine;
 pub mod kernel;
 #[cfg(all(target_os = "linux", target_pointer_width = "64", any(target_arch = "x86_64", target_arch = "aarch64")))]

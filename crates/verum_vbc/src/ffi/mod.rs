@@ -55,6 +55,9 @@ pub mod marshal;
 #[cfg(feature = "ffi")]
 pub mod runtime;
 
+#[cfg(feature = "ffi")]
+mod aggregate_storage;
+
 /// Decode a scalar without assuming that a foreign field is naturally aligned.
 pub(crate) fn read_native_scalar(ty: crate::module::CType, bytes: &[u8]) -> Option<crate::value::Value> {
     use crate::value::Value;

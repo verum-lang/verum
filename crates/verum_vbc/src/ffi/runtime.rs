@@ -985,7 +985,7 @@ impl FfiRuntime {
                             &module.ffi_layouts,
                             obj_ptr,
                             &mut struct_buffer,
-                        )
+                        )?
                     };
 
                     // Track this as a struct argument (we'll set arg_ptrs[i] to point directly to the buffer later)
@@ -1014,7 +1014,7 @@ impl FfiRuntime {
                             &module.ffi_layouts,
                             obj_ptr,
                             &mut struct_buffer,
-                        )
+                        )?
                     };
 
                     // Track for write-back: (layout_idx, obj_ptr, buffer_idx)
@@ -1408,18 +1408,23 @@ fn write_native_scalar(ty: crate::module::CType, value: Value, bytes: &mut [u8])
 ///
 /// - obj_ptr must point to a valid Verum heap object
 /// - struct_buffer must be large enough to hold the marshalled struct
-unsafe fn marshal_verum_struct_to_c(
+pub unsafe fn marshal_verum_struct_to_c(
     layout: &crate::module::FfiStructLayout,
     layouts: &[crate::module::FfiStructLayout],
     obj_ptr: *const u8,
     struct_buffer: &mut [u8],
-) {
+) -> Result<(), FfiError> {
+    if struct_buffer.len() < layout.size as usize {
+        return Err(FfiError::CallFailed("native aggregate buffer is too small".into()));
+    }
     // SAFETY: Caller guarantees obj_ptr points to a valid Verum heap object
     // and struct_buffer is large enough to hold the marshalled struct.
     unsafe {
+        super::aggregate_storage::validate(layout, layouts, obj_ptr)?;
         let base = struct_buffer.as_mut_ptr();
         marshal_verum_struct_to_c_at(layout, layouts, obj_ptr, base, struct_buffer.len(), 0, 0);
     }
+    Ok(())
 }
 
 /// How deep a chain of by-value structs may nest before marshalling gives
@@ -1455,30 +1460,6 @@ fn trace_nested_skip(which: &str, slot: usize, depth: u32, reason: &str) {
     }
 }
 
-/// How many DATA bytes the receiver actually has, or `None` when the
-/// pointer is not a readable object header.
-///
-/// The two sides of the marshalling walk come from different places:
-/// `layout.fields.len()` is compiled into the module, the object is
-/// whatever the caller's register holds. Codegen builds both from one
-/// declaration, so they agree in practice — but a `.vbc` module is
-/// untrusted input (`tests/red_team_bytecode_trust_boundary.rs`), and a
-/// layout with more fields than the receiver has slots is an
-/// out-of-bounds READ on the to-C leg and an out-of-bounds WRITE coming
-/// back. The object's own header says how big it is and was sitting at
-/// `obj_ptr` unread until T1361.
-///
-/// `try_from_ptr` rather than a raw deref: it rejects null, misaligned,
-/// and NaN-box special-value markers (a `FatRef` payload is 8-aligned
-/// and points at unmapped memory), so a mis-dispatched value yields
-/// `None` here instead of a fault.
-fn receiver_data_bytes(obj_ptr: *const u8) -> Option<usize> {
-    // SAFETY: `try_from_ptr` is the alignment- and marker-checked
-    // accessor; it returns None rather than dereferencing anything it
-    // cannot prove is a header.
-    unsafe { crate::interpreter::ObjectHeader::try_from_ptr(obj_ptr).map(|h| h.size as usize) }
-}
-
 /// Copies one Verum record into the C buffer at `base_off`, recursing into
 /// record-typed fields.
 ///
@@ -1505,7 +1486,10 @@ pub unsafe fn marshal_verum_struct_to_c_at(
 ) {
     // SAFETY: see the function contract.
     unsafe {
-        let data_bytes = receiver_data_bytes(obj_ptr);
+        let Some(slots) = super::aggregate_storage::Slots::new(layout, obj_ptr) else {
+            trace_nested_skip("storage", 0, depth, "aggregate carrier does not match its layout");
+            return;
+        };
         // The Verum-side slot index is the field's DECLARED POSITION (heap
         // objects store fields contiguously at HEADER + pos*sizeof(Value), the
         // same order `resolve_field_index` / GetF use). `field.name` is a
@@ -1526,23 +1510,10 @@ pub unsafe fn marshal_verum_struct_to_c_at(
             // The RECEIVER's bound, which is a different question from the
             // buffer's above: that one asks whether the C side has room,
             // this one whether the Verum object has the slot at all.
-            let slot_end = (slot + 1) * std::mem::size_of::<Value>();
-            match data_bytes {
-                None => {
-                    trace_nested_skip("to_c", slot, depth, "receiver has no readable header");
-                    continue;
-                }
-                Some(have) if slot_end > have => {
-                    trace_nested_skip("to_c", slot, depth, "slot past the receiver's data area");
-                    continue;
-                }
-                Some(_) => {}
-            }
-
-            let value_ptr = obj_ptr
-                .add(crate::interpreter::OBJECT_HEADER_SIZE)
-                .add(slot * std::mem::size_of::<Value>());
-            let field_value = *(value_ptr as *const Value);
+            let Some(field_value) = slots.read(slot, field.c_type) else {
+                trace_nested_skip("storage", slot, depth, "invalid native element width");
+                continue;
+            };
 
             // A record-typed field is a heap object of its own: the slot
             // holds a POINTER to it, not its bytes. C wants the bytes
@@ -1636,7 +1607,10 @@ pub unsafe fn marshal_c_to_verum_struct_at(
 ) {
     // SAFETY: see the function contract.
     unsafe {
-        let data_bytes = receiver_data_bytes(obj_ptr);
+        let Some(slots) = super::aggregate_storage::Slots::new(layout, obj_ptr) else {
+            trace_nested_skip("storage", 0, depth, "aggregate carrier does not match its layout");
+            return;
+        };
         // See `marshal_verum_struct_to_c`: the Verum-side slot is the field's
         // declared position (enumeration index), NOT the global interned
         // `field.name` id. `field.offset` is the packed C-struct byte offset
@@ -1651,22 +1625,10 @@ pub unsafe fn marshal_c_to_verum_struct_at(
 
             // The receiver's bound. This leg WRITES, so an unbounded walk
             // here is not a stray read but heap corruption.
-            let slot_end = (slot + 1) * std::mem::size_of::<Value>();
-            match data_bytes {
-                None => {
-                    trace_nested_skip("from_c", slot, depth, "receiver has no readable header");
-                    continue;
-                }
-                Some(have) if slot_end > have => {
-                    trace_nested_skip("from_c", slot, depth, "slot past the receiver's data area");
-                    continue;
-                }
-                Some(_) => {}
-            }
-
-            let value_ptr = obj_ptr
-                .add(crate::interpreter::OBJECT_HEADER_SIZE)
-                .add(slot * std::mem::size_of::<Value>()) as *mut Value;
+            let Some(field_value) = slots.read(slot, field.c_type) else {
+                trace_nested_skip("storage", slot, depth, "invalid native element width");
+                continue;
+            };
 
             // The nested record already exists as a heap object — the
             // caller built it before the call — so write THROUGH the slot's
@@ -1679,7 +1641,7 @@ pub unsafe fn marshal_c_to_verum_struct_at(
                     trace_nested_skip("from_c", slot, depth, "nesting depth cap");
                     continue;
                 }
-                let existing = *value_ptr;
+                let existing = field_value;
                 match field.nested_layout.and_then(|i| layouts.get(i as usize)) {
                     None => {
                         trace_nested_skip("from_c", slot, depth, "no nested layout on the field")
@@ -1709,9 +1671,7 @@ pub unsafe fn marshal_c_to_verum_struct_at(
             }
 
             let bytes = std::slice::from_raw_parts(buf.add(off), field.size as usize);
-            if let Some(field_value) = super::read_native_scalar(field.c_type, bytes) {
-                *value_ptr = field_value;
-            }
+            slots.write(slot, field.c_type, bytes);
         }
     }
 }

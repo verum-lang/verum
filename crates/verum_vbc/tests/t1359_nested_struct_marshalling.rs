@@ -419,9 +419,9 @@ fn a_layout_with_more_fields_than_the_receiver_has_slots_is_bounded() {
         outer.guards_intact(),
         "the to-C leg read past the receiver's data area"
     );
-    // The real fields still travelled.
-    assert_eq!(read_i64(&buf, OFF_HEAD), 7);
-    assert_eq!(read_i64(&buf, OFF_TAIL), 9);
+    // Incompatible storage refuses the complete record. A valid prefix
+    // must not be presented as a successfully marshalled aggregate.
+    assert!(buf.iter().all(|byte| *byte == 0));
 
     // And the write-back leg, where an unbounded walk is corruption
     // rather than a stray read.
@@ -443,5 +443,5 @@ fn a_layout_with_more_fields_than_the_receiver_has_slots_is_bounded() {
         outer.guards_intact(),
         "the from-C leg WROTE past the receiver's data area — this is heap corruption"
     );
-    assert_eq!(outer.get(0).as_i64(), 7, "in-range slots still travel");
+    assert_eq!(outer.get(0).as_i64(), 7, "refusal preserves the object");
 }

@@ -35443,6 +35443,18 @@ fn lower_ffi_extended<'ctx>(
                     .copied()
                     .flatten()
                     .is_some();
+                if let Some(layout_index) = ffi_symbol.signature.param_layout_indices.get(i).copied().flatten() {
+                    let layout = vbc_module.ffi_layouts.get(layout_index as usize)
+                        .ok_or_else(|| LlvmLoweringError::unsupported("FFI aggregate has no native layout"))?;
+                    let slot_compatible = !layout.fields.is_empty()
+                        && layout.fields.iter().enumerate().all(|(index, field)|
+                            field.offset as usize == index * 8 && field.size == 8
+                                && field.c_type != CType::StructValue);
+                    if ffi_symbol.signature.param_types.get(i) == Some(&CType::StructValue) || !slot_compatible {
+                        return Err(LlvmLoweringError::unsupported(
+                            "native FFI aggregate requires field adaptation; this layout is supported by the interpreter only"));
+                    }
+                }
                 // THE TRAILER IS WIDER THAN THIS FIX, and confusing the two
                 // would break the case that already works. The VBC emitter
                 // records `&mut <simple variable>` for ANY variable
