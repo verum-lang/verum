@@ -128,8 +128,7 @@ impl SemanticAnalysisPhase {
         let graph = verum_common::Shared::new(parking_lot::RwLock::new(session.module_registry().read().clone()));
         crate::owned_source_semantics::register_sources(&graph,
             selected.iter().map(|(owner, path, module)| (owner.as_str(), path.as_str(), module)))?;
-        let mut failures: List<Text> = List::new();
-        for (owner, path, module) in &selected {
+        let check = |(owner, path, module): &(Text, Text, verum_ast::Module)| {
             let mut checker = self.configured_checker();
             if let Err(errors) = crate::owned_source_semantics::check_source_types(
                 &mut checker, owner, module, &graph,
@@ -153,9 +152,33 @@ impl SemanticAnalysisPhase {
                 }).collect::<List<_>>().join("\n");
                 tracing::warn!(module = owner.as_str(), source = path.as_str(), errors = errors.len(), diagnostics = %details,
                     "source admission failed; checking remaining independent modules");
-                failures.push(format!("{owner} ({path}): {details}").into());
-                session.emit_diagnostics(errors);
+                Some((Text::from(format!("{owner} ({path}): {details}")), errors))
+            } else {
+                None
             }
+        };
+        let workers = session.options().num_threads.max(1).min(selected.len());
+        let outcomes = if workers > 1 {
+            use rayon::prelude::*;
+            // The declaration graph is complete before workers start. Each
+            // checker (including its solver) is created and dropped on its
+            // own ordinary worker stack; no inference state crosses owners.
+            let pool = rayon::ThreadPoolBuilder::new().num_threads(workers).build()?;
+            let mut outcomes: List<_> = selected.iter().map(|_| None).collect();
+            pool.install(|| {
+                selected.par_iter().zip(outcomes.par_iter_mut())
+                    .for_each(|(source, outcome)| *outcome = check(source));
+            });
+            outcomes
+        } else {
+            selected.iter().map(check).collect()
+        };
+        let mut failures: List<Text> = List::new();
+        // Indexed result slots retain source order, regardless of completion
+        // order. Only progress tracing is emitted by the workers themselves.
+        for (failure, errors) in outcomes.into_iter().flatten() {
+            failures.push(failure);
+            session.emit_diagnostics(errors);
         }
         // Each owner uses its own checker. A failed module cannot poison a
         // sibling's local inference state, and none may proceed to lowering
