@@ -205,7 +205,7 @@ impl TypeChecker {
 
     /// Exact declaring-module suggestions, indexed once per immutable snapshot.
     /// This diagnostic index never participates in import resolution or visibility.
-    fn modules_declaring(&self, name: &str) -> List<Text> {
+    pub(super) fn modules_declaring(&self, name: &str) -> List<Text> {
         let Maybe::Some(metadata) = &self.core_metadata else {
             return List::new();
         };
@@ -812,8 +812,8 @@ impl TypeChecker {
         let current_path = self.current_module_path.clone();
         let registry = self.module_registry.read().clone();
 
-        // Only process if registry has modules
-        if !registry.is_empty() {
+        // Archive metadata owns imports even without source registry entries.
+        if !registry.is_empty() || self.core_metadata.is_some() {
             // Ignore errors for now - in single-file mode, modules may not be registered
             let result = self.process_import(import, current_path.as_str(), &registry);
             if let Err(ref e) = result {
@@ -3499,54 +3499,27 @@ impl TypeChecker {
                         }
                     }
                     ExportKind::Const | ExportKind::Static => {
-                        if std::env::var("VERUM_TRACE_IMPORT").is_ok() {
-                            eprintln!(
-                                "[trace-import] Const arm: module='{}' item='{}' register='{}'",
-                                resolved_module_path.as_str(),
-                                item_name,
-                                register_name
-                            );
-                        }
-                        // For constants, look up the type from the module's AST
-                        if let Some(const_type) =
-                            self.extract_const_type_from_module(&module_info.ast, item_name)
-                        {
-                            if std::env::var("VERUM_TRACE_IMPORT").is_ok() {
-                                eprintln!(
-                                    "[trace-import] Const found in module AST, inserting '{}'",
-                                    register_name
-                                );
-                            }
-                            self.ctx
-                                .env
-                                .insert_value(register_name, TypeScheme::mono(const_type));
+                        // Follow the selected export edge, including renames,
+                        // instead of searching unrelated child modules.
+                        let declaration = self.source_export_declaration(
+                            module_info.clone(), item_name.into(), registry,
+                        );
+                        let source_type = if let Some((source, original)) = declaration {
+                            let owner = source.path.to_string();
+                            self.with_source_signature_scope(&owner, |checker| {
+                                checker.extract_const_type_from_module(&source.ast, &original)
+                            })?.map(|ty| (ty, Text::from(format!("{owner}.{original}"))))
+                        } else {
+                            None
+                        };
+                        if let Some((ty, key)) = source_type {
+                            self.ctx.env.insert_value(register_name, TypeScheme::mono(ty));
+                            self.record_mount_binding(register_name, &key);
                         } else if let Some((scheme, key)) = self.resolve_value_via_metadata_reexports(
                             resolved_module_path.as_str(), item_name,
                         ) {
                             self.ctx.env.insert_value(register_name, scheme);
                             self.record_mount_binding(register_name, &key);
-                        } else {
-                            // Not found directly — follow re-export chain through submodules.
-                            // This handles glob re-exports like `public mount atomic.*` in mod.vr
-                            // where the const is defined in a submodule (e.g., atomic.vr).
-                            let found = self.find_const_in_submodules(
-                                &resolved_module_path,
-                                item_name,
-                                registry,
-                            );
-                            if let Some(const_type) = found {
-                                if std::env::var("VERUM_TRACE_IMPORT").is_ok() {
-                                    eprintln!(
-                                        "[trace-import] Const found in submodule, inserting '{}'",
-                                        register_name
-                                    );
-                                }
-                                self.ctx
-                                    .env
-                                    .insert_value(register_name, TypeScheme::mono(const_type));
-                            } else if std::env::var("VERUM_TRACE_IMPORT").is_ok() {
-                                eprintln!("[trace-import] Const NOT FOUND for '{}'", item_name);
-                            }
                         }
                     }
                     ExportKind::Context => self.import_context_export(&*module_info, item_name, register_name, &resolved_module_path, registry)?,
@@ -4017,7 +3990,8 @@ impl TypeChecker {
                     occupant_is_ambient_builtin
                 );
             }
-            if self.ctx.env.lookup(&Text::from(bind_name)).is_none()
+            if import_span.is_some()
+                || self.ctx.env.lookup(&Text::from(bind_name)).is_none()
                 || occupant_is_ambient_builtin
             {
                 if let Some((scheme, resolved_key)) = self
@@ -4229,7 +4203,8 @@ impl TypeChecker {
             }
             let lo = Text::from(format!("{}.", m).as_str());
             let hi = Text::from(format!("{}/", m).as_str());
-            md.functions.range(lo.clone()..hi.clone()).next().is_some()
+            md.module_reexports.contains_key(&Text::from(m))
+                || md.functions.range(lo.clone()..hi.clone()).next().is_some()
                 || md.types.range(lo..hi).next().is_some()
         };
         // MOUNT-GROUP-ITEM-IS-NOT-A-MODULE (T1077).  `probe` asks "does
@@ -4271,7 +4246,7 @@ impl TypeChecker {
         None
     }
 
-    fn metadata_known_module_items(&self, module_path: &str) -> Option<List<Text>> {
+    pub(super) fn metadata_known_module_items(&self, module_path: &str) -> Option<List<Text>> {
         if matches!(self.core_metadata, Maybe::None) {
             return None;
         }
@@ -10497,70 +10472,22 @@ impl TypeChecker {
         None
     }
 
-    /// Extract the type of a constant from a module's AST.
+    /// Extract a constant/static annotation in its already selected source scope.
     fn extract_const_type_from_module(
         &mut self,
         ast: &verum_ast::Module,
         const_name: &str,
-    ) -> Option<Type> {
-        use verum_ast::ItemKind;
-
-        for item in &ast.items {
-            if let ItemKind::Const(const_decl) = &item.kind {
-                if const_decl.name.name.as_str() == const_name {
-                    return self.ast_to_type(&const_decl.ty).ok();
-                }
-            } else if let ItemKind::Static(static_decl) = &item.kind
-                && static_decl.name.name.as_str() == const_name
-            {
-                return self.ast_to_type(&static_decl.ty).ok();
+    ) -> Result<Option<Type>> {
+        let annotation = ast.items.iter().find_map(|item| match &item.kind {
+            verum_ast::ItemKind::Const(declaration) if declaration.name.name == const_name => {
+                Some(&declaration.ty)
             }
-        }
-
-        None
-    }
-
-    /// Search submodules for a const/static definition.
-    /// Used when a glob re-export (e.g., `public mount atomic.*;`) propagates
-    /// a const from a submodule to the parent, but the const is not in the parent's AST.
-    fn find_const_in_submodules(
-        &mut self,
-        parent_module_path: &str,
-        const_name: &str,
-        registry: &ModuleRegistry,
-    ) -> Option<Type> {
-        // UMBRELLA-REEXPORT-RESOLVE-1: `all_modules()` iterates a
-        // HashMap — per-process random order.  A first-match walk here
-        // rolled dice whenever two children export a same-named const;
-        // collect the candidate children and visit them in canonical
-        // path order (the METADATA-DETERMINISM-1 sorted-walk policy),
-        // so resolution is stable run-to-run.
-        let name_text: Text = const_name.to_string().into();
-        let mut candidates: Vec<Text> = Vec::new();
-        for (_id, module_info_shared) in registry.all_modules() {
-            let module_info: &verum_modules::ModuleInfo = module_info_shared;
-            let module_path_str = module_info.path.to_string();
-
-            // Check if this is a direct child of the parent module
-            if module_path_str.starts_with(parent_module_path)
-                && module_path_str.len() > parent_module_path.len()
-                && module_path_str.as_bytes().get(parent_module_path.len()) == Some(&b'.')
-                && module_info.exports.get(&name_text).is_some()
-            {
-                candidates.push(Text::from(module_path_str.as_str()));
+            verum_ast::ItemKind::Static(declaration) if declaration.name.name == const_name => {
+                Some(&declaration.ty)
             }
-        }
-        candidates.sort();
-        for path in candidates {
-            if let Some(info) = registry.get_by_path(path.as_str()) {
-                if let Some(const_type) =
-                    self.extract_const_type_from_module(&info.ast, const_name)
-                {
-                    return Some(const_type);
-                }
-            }
-        }
-        None
+            _ => None,
+        });
+        annotation.map(|ty| self.ast_to_type(ty)).transpose()
     }
 
     /// Register a stdlib math function
@@ -16454,9 +16381,7 @@ impl TypeChecker {
         // Re-export surface: `(local_name, true_name, source_module)`.
         if let Some(leaves) =
             metadata.module_reexports.get(&verum_common::Text::from(canonical))
-            && leaves.iter().any(|(local, true_name, _src)| {
-                local.as_str() == type_name || true_name.as_str() == type_name
-            })
+            && leaves.iter().any(|(local, _original, _src)| local.as_str() == type_name)
         {
             return true;
         }
@@ -16522,9 +16447,7 @@ impl TypeChecker {
         }
         if let Some(leaves) =
             metadata.module_reexports.get(&verum_common::Text::from(canonical))
-            && leaves.iter().any(|(local, true_name, _src)| {
-                local.as_str() == fn_name || true_name.as_str() == fn_name
-            })
+            && leaves.iter().any(|(local, _original, _src)| local.as_str() == fn_name)
         {
             return true;
         }
@@ -24915,13 +24838,15 @@ bake to have this verified.",
     }
 
     /// Follow source export edges under each declaring namespace's visibility.
-    pub(super) fn source_qualified_function(
-        &mut self,
+    /// A cycle or missing edge cannot borrow a same-spelled sibling declaration.
+    fn source_export_declaration(
+        &self,
         mut module: Shared<verum_modules::ModuleInfo>,
         mut name: Text,
-    ) -> Option<TypeScheme> {
+        registry: &ModuleRegistry,
+    ) -> Option<(Shared<verum_modules::ModuleInfo>, Text)> {
         let mut caller = verum_modules::ModulePath::from_str(&self.current_module_path);
-        let mut visited = std::collections::HashSet::new();
+        let mut visited = Set::new();
         loop {
             if !visited.insert((module.id, name.clone()))
                 || !module.exports.is_visible_from_path(&name, &caller)
@@ -24931,15 +24856,25 @@ bake to have this verified.",
             let export = module.exports.get(&name)?;
             let original = export.original_name.clone().unwrap_or_else(|| name.clone());
             if export.source_module == module.id {
-                return self.extract_function_type_from_module(
-                    &module.ast, &original, &module.path.to_string(),
-                );
+                return Some((module, original));
             }
-            let source = self.module_registry.read().get(export.source_module)?;
+            let source = registry.get(export.source_module)?;
             caller = module.path.clone();
             module = source;
             name = original;
         }
+    }
+
+    pub(super) fn source_qualified_function(
+        &mut self,
+        module: Shared<verum_modules::ModuleInfo>,
+        name: Text,
+    ) -> Option<TypeScheme> {
+        let (source, original) = {
+            let registry = self.module_registry.read();
+            self.source_export_declaration(module, name, &registry)?
+        };
+        self.extract_function_type_from_module(&source.ast, &original, &source.path.to_string())
     }
 
     /// Resolve `<dotted.module.path>.fn(args)` against the global

@@ -749,6 +749,7 @@ jobs:
           --test checked_source_arithmetic
           --test os_error_contract
           --test imported_callable_properties
+          --test scalar_constant_patterns
           --test source_admission_diagnostics
           --test shadowed_type_metadata_owner
           --test structural_generic_archive

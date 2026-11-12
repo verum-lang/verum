@@ -12536,8 +12536,8 @@ impl VbcCodegen {
                 // The files of this unit can arrive in any order. Resolve a
                 // source callable only after all declarations and export edges
                 // exist. No bare or shortened spelling establishes its owner.
-                if let Some(target) = self.source_callable_mount(&qualified_verum, &alias_name) {
-                    match self.resolve_source_callable_export(&target, &source_owner) {
+                if let Some(target) = self.source_value_mount(&qualified_verum, &alias_name) {
+                    match self.resolve_source_value_export(&target, &source_owner) {
                         Ok(Some((key, info))) => self.bind_mounted_function(&alias_name, &func_name, &key, info),
                         Ok(None) => {}
                         Err(_) => self.defer_named_mount(full_path, alias_name),
@@ -13190,8 +13190,8 @@ impl VbcCodegen {
                 );
             }
 
-            if let Some(target) = self.source_callable_mount(&qualified_verum, &alias_name) {
-                match self.resolve_source_callable_export(&target, owning_module.as_deref().unwrap_or(&self.config.module_name)) {
+            if let Some(target) = self.source_value_mount(&qualified_verum, &alias_name) {
+                match self.resolve_source_value_export(&target, owning_module.as_deref().unwrap_or(&self.config.module_name)) {
                     Ok(Some((key, info))) => self.bind_deferred_mounted_function(
                         &alias_name, &func_name, &key, info, owning_module.as_deref(),
                     ),

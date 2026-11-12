@@ -14207,7 +14207,7 @@ impl VbcCodegen {
                 {
                     self.registered_receiver_method(&declaration, method.name.as_str())
                 } else {
-                    self.resolve_source_callable_export(&format!("{owner}.{}", method.name), scope)
+                    self.resolve_source_value_export(&format!("{owner}.{}", method.name), scope)
                         .map_err(|message| CodegenError::with_span(CodegenErrorKind::TypeInference(message), receiver.span))?
                         .map(|(key, _)| key)
                 }.ok_or_else(|| CodegenError::undefined_function(format!("{owner}.{}", method.name)))?;
@@ -19852,12 +19852,11 @@ impl VbcCodegen {
                     // emit IsVar on the non-pointer inner value.
                     self.ctx.emit(Instruction::LoadTrue { dst: result });
                 } else {
-                    // Check if this "variant" is actually a constant (e.g., EPERM in a match
-                    // arm). Constants from imported modules are parsed as Variant patterns
-                    // because they start with uppercase letters. We detect them by checking
-                    // if the function info has a __const_val_ intrinsic name.
-                    let const_value = self.pattern_declaration(&dot_name)
-                        .and_then(Self::inline_scalar).transpose()?;
+                    // Scalar patterns and scalar expressions consume the same
+                    // declaration-owned initializer, including module aliases
+                    // and checked dependencies. No missing name acquires a value.
+                    let constant = Expr::new(ExprKind::Path(path.clone()), pattern.span);
+                    let const_value = self.const_eval_scalar(&constant)?;
                     let scrutinee_is_int =
                         self.ctx.match_scrutinee_type.as_deref().is_some_and(|t| {
                             let base = t.split('<').next().unwrap_or(t);
@@ -19893,30 +19892,10 @@ impl VbcCodegen {
                         self.ctx.free_temp(const_reg);
                     } else {
                         if scrutinee_is_int {
-                            if dot_name.contains('.') {
-                                return Err(CodegenError::with_span(
-                                    CodegenErrorKind::UnsupportedPattern(format!("unresolved scalar constant '{dot_name}'")),
-                                    pattern.span,
-                                ));
-                            }
-                            // #109 guard: Int scrutinee + unresolved-constant arm.
-                            // Compare against zero (which won't match any non-zero
-                            // errno-style code) so dispatch falls through to the
-                            // next arm instead of dereferencing a primitive value
-                            // as a sum-type pointer.
-                            let zero_reg = self.ctx.alloc_temp();
-                            self.ctx.emit(Instruction::LoadI {
-                                dst: zero_reg,
-                                value: 0,
-                            });
-                            self.ctx.emit(Instruction::CmpI {
-                                op: CompareOp::Eq,
-                                dst: result,
-                                a: scrutinee,
-                                b: zero_reg,
-                            });
-                            self.ctx.free_temp(zero_reg);
-                            return Ok(());
+                            return Err(CodegenError::with_span(
+                                CodegenErrorKind::UnsupportedPattern(format!("unresolved scalar constant '{dot_name}'")),
+                                pattern.span,
+                            ));
                         }
                         let tag = self.pattern_variant_tag(&dot_name).ok_or_else(|| CodegenError::internal(format!(
                             "no declared tag for variant pattern '{}' on {:?}",
@@ -23812,6 +23791,17 @@ impl VbcCodegen {
                 return self.compile_variant_constructor_hinted(field, &verum_common::List::new(), Some(&owner));
             }
             parts.push(field.to_string());
+
+            // A declared module owns its member, including re-exports. Select
+            // the exact source declaration before consulting emitted names.
+            let scope = self.current_count_module_scope().unwrap_or_default();
+            if self.source_module_owners.is_module(&owner, scope, self.source_module_root()) {
+                if let Some((canonical, _)) = self.resolve_source_value_export(&parts.join("."), scope)
+                    .map_err(|message| CodegenError::with_span(CodegenErrorKind::InvalidSourceMount(vec![message]), base.span))?
+                {
+                    parts = canonical.split('.').map(str::to_owned).collect();
+                }
+            }
 
             // #122 progressive-suffix: rewrite `core.`-rooted absolute
             // paths (`core.async.cancellation.CancelReason.Cancelled`)
@@ -44430,6 +44420,17 @@ impl VbcCodegen {
                 return exact(key.as_str());
             }
             let (head, tail) = name.split_once('.')?;
+            let mut anchor = Some(scope.unwrap_or_default());
+            while let Some(owner) = anchor {
+                if let Some(binding) = self.source_type_mounts.get(&verum_common::Text::from(owner))
+                    .and_then(|bindings| bindings.get(&verum_common::Text::from(head)))
+                {
+                    let target = self.select_type_mount(binding, owner)??;
+                    return exact(&format!("{target}.{tail}"));
+                }
+                anchor = if owner.is_empty() { None }
+                    else { Some(owner.rsplit_once('.').map_or("", |(parent, _)| parent)) };
+            }
             if let Some(owner) = self.ctx.module_aliases.get(head) {
                 return exact(&format!("{}.{tail}", owner.join(".")));
             }
@@ -44478,11 +44479,45 @@ impl VbcCodegen {
         info.filter(|info| info.is_const && info.param_count == 0)
     }
 
-    pub(super) fn const_eval_i64(&self, expr: &verum_ast::expr::Expr) -> CodegenResult<Option<i64>> {
-        self.const_eval_i64_in_scope(
+    /// Publish constants from the collected declaration graph. Names retain
+    /// their source owner; scalar values use the same checked evaluator as
+    /// patterns and array counts. Unsupported initializers retain a declaration
+    /// without claiming an available compile-time value.
+    pub fn export_constant_declarations(&self) -> CodegenResult<verum_common::List<(verum_common::Text, FunctionInfo)>> {
+        use crate::types::{TypeId, TypeRef};
+        use verum_ast::checked_const::Scalar;
+        let mut declarations: verum_common::List<(verum_common::Text, FunctionInfo)> = verum_common::List::new();
+        let mut cached = verum_common::Map::new();
+        for ((owner, name), declaration) in &self.module_constant_bindings {
+            let mut info = declaration.clone();
+            if info.intrinsic_name.is_none()
+                && matches!(info.return_type, Some(TypeRef::Concrete(TypeId::I64 | TypeId::BOOL)))
+                && let Some((initializer, scope, bindings)) = self.constant_initializers.get(&info.id)
+                && let Some(value) = self.const_eval_scalar_in_scope(
+                    initializer, scope.as_ref().map(|scope| scope.as_str()), Some(bindings), false,
+                    &mut verum_common::Set::new(), &mut cached, 0,
+                )?
+            {
+                cached.insert(info.id, value);
+                let value = match value { Scalar::Int(value) => value, Scalar::Bool(value) => i64::from(value) };
+                info.intrinsic_name = Some(format!("__const_val_{value}"));
+            }
+            let canonical = crate::module::qualify_module_name(owner, name);
+            declarations.push((canonical.into(), info));
+        }
+        declarations.sort_by(|(left, _), (right, _)| left.cmp(right));
+        Ok(declarations)
+    }
+
+    fn const_eval_scalar(&self, expr: &Expr) -> CodegenResult<Option<verum_ast::checked_const::Scalar>> {
+        self.const_eval_scalar_in_scope(
             expr, self.current_count_module_scope(), None, true,
             &mut verum_common::Set::new(), &mut verum_common::Map::new(), 0,
         )
+    }
+
+    pub(super) fn const_eval_i64(&self, expr: &Expr) -> CodegenResult<Option<i64>> {
+        Ok(self.const_eval_scalar(expr)?.and_then(verum_ast::checked_const::Scalar::as_i64))
     }
 
     pub(super) fn const_eval_i64_in_scope(
@@ -44627,11 +44662,11 @@ impl VbcCodegen {
                         return Ok(Some(value));
                     }
                 }
-                Err(CodegenError::with_span(
-                    super::error::CodegenErrorKind::InvalidLiteral(format!(
-                        "cannot evaluate constant integer `{name}`"
-                    )), expr.span,
-                ))
+                // A declared initializer can require ordinary execution. Its
+                // absence from scalar folding is not a fabricated scalar value
+                // and does not invalidate the executable declaration. Consumers
+                // that require a scalar (such as patterns) must refuse None.
+                Ok(None)
             }
             ExprKind::Call { func, args, .. } => {
                 // offset_of(Type, field) arguments are names, never executed.

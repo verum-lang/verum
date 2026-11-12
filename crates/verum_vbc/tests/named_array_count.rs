@@ -2,7 +2,7 @@
 
 use verum_fast_parser::Parser;
 use verum_vbc::bytecode::decode_instructions;
-use verum_vbc::codegen::{CodegenConfig, VbcCodegen};
+use verum_vbc::codegen::{CodegenConfig, CodegenErrorKind, VbcCodegen};
 use verum_vbc::instruction::{Instruction, MemSubOpcode};
 
 fn assert_packed(declaration: &str, prefix: &str, local: &str) {
@@ -414,7 +414,7 @@ fn reusing_codegen_does_not_reuse_previous_constant_bindings() {
     let error = codegen
         .compile_module(&second)
         .expect_err("BASE from the previous module must not survive reset or FunctionId reuse");
-    assert!(error.to_string().contains("constant integer"), "{error}");
+    assert!(matches!(&error.kind, CodegenErrorKind::UndefinedVariable(name) if name == "BASE"), "{error}");
 }
 
 #[test]

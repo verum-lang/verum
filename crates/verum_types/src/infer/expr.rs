@@ -8371,8 +8371,13 @@ impl TypeChecker {
         if self.ctx.env.lookup(root).is_some() {
             return Ok(None);
         }
+        self.resolve_qualified_value_path(&segments, field.span)
+    }
+
+    /// A selected namespace retains its owner for values as well as calls.
+    /// Source re-exports and archive declarations use the same scoped import.
+    fn resolve_qualified_value_path(&mut self, segments: &[&str], span: Span) -> Result<Option<Type>> {
         let item_name = verum_common::Text::from(*segments.last().expect("nonempty qualified path"));
-        let span = field.span;
         // Value access and calls use the same declaration-owned metadata. An
         // exact descriptor hit must not lose its obligations through a textual
         // signature or a failed synthetic mount.
@@ -8383,8 +8388,13 @@ impl TypeChecker {
         {
             if !descriptor.is_public && descriptor.module_path != self.current_module_path {
                 return Err(TypeError::OtherWithCodeSpanned {
-                    code: "E405".into(), msg: format!("function `{qualified}` is private").into(), span,
+                    code: "E405".into(), msg: format!("value `{qualified}` is private").into(), span,
                 });
+            }
+            if descriptor.is_const {
+                return Ok(Some(crate::infer::helpers::parse_function_descriptor_type(
+                    descriptor.return_type.as_str(), descriptor, &metadata,
+                )));
             }
             let scheme = self.scheme_from_function_descriptor(descriptor, &metadata)
                 .ok_or_else(|| TypeError::OtherWithCodeSpanned {
@@ -8411,10 +8421,19 @@ impl TypeChecker {
                 verum_ast::ItemKind::ExternBlock(block) => block.functions.iter().any(|f| f.name.name.as_str() == name),
                 _ => false,
             }));
-        if !registered && !inline
+        let archived_items = self.metadata_known_module_items(&owner);
+        let archived = archived_items.as_ref().is_some_and(|items| items.contains(&item_name));
+        if !registered && !inline && !archived
             && !self.module_publishes_fn(&owner, item_name.as_str())
             && !self.module_publishes_type(&owner, item_name.as_str())
         {
+            if let Some(available_items) = archived_items {
+                return Err(TypeError::ImportItemNotFound {
+                    declared_in: self.modules_declaring(&item_name),
+                    item_name, module_path: owner.into(),
+                    available_items: Shared::new(available_items), span,
+                });
+            }
             return Ok(None);
         }
         let path = verum_ast::ty::Path::new(
@@ -8438,16 +8457,12 @@ impl TypeChecker {
         };
 
         self.ctx.env.push_scope();
-        let imported = self.check_import(&decl).is_ok();
-        let found = if imported {
-            self.ctx
-                .env
-                .lookup(item_name.as_str())
-                .cloned()
-        } else {
-            None
-        };
+        let caller = self.current_module_path.clone();
+        let registry = self.module_registry.read().clone();
+        let imported = self.process_import(&decl, &caller, &registry);
+        let found = imported.as_ref().ok().and_then(|_| self.ctx.env.lookup(item_name.as_str()).cloned());
         self.ctx.env.pop_scope();
+        imported?;
         found.map(|scheme| self.instantiate_value_scheme(&scheme, span)).transpose()
     }
 
@@ -8747,110 +8762,22 @@ impl TypeChecker {
                 return self.resolve_inline_module_path(&module_path, expr.span);
             }
 
-            // Mount-aliased module: `mount X.Y.Z;` (or `mount X.Y as Z;`)
-            // makes `Z` a module-namespace receiver, so `Z.field`
-            // resolves through qualified-name lookup
-            // `<full-path>.field` rather than synth_expr'ing `Z` as
-            // a value (which fails with `UnboundVariable: Z`).
-            //
-            // Mirrors the equivalent method-call dispatch path
-            // (`modules.rs` ~line 17914) — the two paths together
-            // cover both `Z.field` (here) and `Z.method(args)` (there)
-            // forms of bare-mount module-qualified access.  Closes
-            // the typechecker-side half of task #121.
-            if let Some(module_path) = self
-                .module_aliases
-                .get(&verum_common::Text::from(obj_name))
-                .cloned()
-            {
-                let field_name = field.name.as_str();
-                let qualified: verum_common::Text =
-                    format!("{}.{}", module_path, field_name).into();
-                // The qualified function/const may already be in env
-                // via the cross-module import pass that ran for the
-                // archive-side load; otherwise pull the static-method
-                // scheme lazily from the baked metadata.
-                if let Some(scheme) = self.lookup_static_or_load_from_metadata(&qualified) {
-                    let ty = self.instantiate_value_scheme(&scheme, expr.span)?;
-                    return Ok(InferResult::new(self.unifier.apply(&ty)));
+            // A module alias selects its canonical namespace. Resolve the
+            // member through the ordinary path/import machinery, including
+            // source re-exports and visibility, without trying bare siblings.
+            if let Some(owner) = self.module_aliases.get(&ident.name).cloned() {
+                let qualified = format!("{owner}.{}", field.name);
+                let segments: List<_> = qualified.split('.').collect();
+                if let Some(ty) = self.resolve_qualified_value_path(&segments, expr.span)? {
+                    return Ok(InferResult::new(ty));
                 }
-                if let Maybe::Some(scheme) = self.lookup_function_in_module(qualified.as_str()) {
-                    let ty = self.instantiate_value_scheme(&scheme, expr.span)?;
-                    return Ok(InferResult::new(self.unifier.apply(&ty)));
-                }
-                // **Type.method canonical-form fallback**: when `mount
-                // core.X.Y.Z.T;` registers `T` as a module-alias
-                // mapping to the path `core.X.Y.Z.T`, but `T` is
-                // actually a TYPE (not a submodule), the qualified
-                // form `core.X.Y.Z.T.method` misses both env and
-                // module-fn lookups. The function is actually
-                // registered under the bare `T.method` canonical form
-                // by `register_coercion_markers_from_metadata` +
-                // archive_ctx_loader's Type.method-form-registration
-                // path (commit 74312ed4e). Probe that form here so
-                // `Map.new()` / `Reservoir.new()` / etc. resolve when
-                // the user has multi-mounted sibling collection types
-                // that pushed this site into the module-alias arm.
-                //
-                // Pre-fix 10 tests failed with:
-                //   `unbound variable: core.collections.map.Map.new`
-                // when `mount core.collections.map.Map` appeared
-                // alongside any sibling collection mount (List/Set).
-                let type_method_form: verum_common::Text = {
-                    let last_seg = module_path
-                        .as_str()
-                        .rsplit('.')
-                        .next()
-                        .unwrap_or(module_path.as_str());
-                    format!("{}.{}", last_seg, field_name).into()
-                };
-                if type_method_form != qualified {
-                    if let Some(scheme) = self.ctx.env.lookup(&type_method_form).cloned() {
-                        let ty = self.instantiate_value_scheme(&scheme, expr.span)?;
-                        return Ok(InferResult::new(self.unifier.apply(&ty)));
-                    }
-                    if let Maybe::Some(scheme) =
-                        self.lookup_function_in_module(type_method_form.as_str())
-                    {
-                        let ty = self.instantiate_value_scheme(&scheme, expr.span)?;
-                        return Ok(InferResult::new(self.unifier.apply(&ty)));
-                    }
-                }
-                // TYPE-QUALIFIED VARIANT CTOR (T0701 ctor leg): `mount
-                // core.base.log.{LogLevel}` records `LogLevel` as a
-                // module ALIAS, so `LogLevel.Trace` lands in THIS arm —
-                // which probed env / module fns / Type.method forms but
-                // never variant constructors, and the binding degraded
-                // to a fresh var (`let trace = LogLevel.Trace` → E404).
-                // Path-expr resolution already handles Type.Variant
-                // (path_resolution.rs Strategy 2a); mirror it here via
-                // the ONE scoped resolver, with the alias leaf as the
-                // expected parent so ambient same-named ctors of other
-                // types cannot hijack the qualified spelling.
-                {
-                    let leaf: verum_common::Text = module_path
-                        .as_str()
-                        .rsplit('.')
-                        .next()
-                        .unwrap_or(module_path.as_str())
-                        .into();
-                    self.ensure_stdlib_type_loaded_transitive(&leaf);
-                    if let Some(ctor_ty) = self.try_resolve_variant_constructor_with_arity_for(
-                        field_name,
-                        None,
-                        Some(leaf.as_str()),
-                    ) {
-                        return Ok(InferResult::new(ctor_ty));
-                    }
-                }
-
-                // Field-access fallback: lookup the simple field
-                // name in env as a last-ditch effort.  Same shape
-                // as the inline-module bail-out below.
-                if let Some(scheme) = self.ctx.env.lookup(field_name).cloned() {
-                    let ty = self.instantiate_value_scheme(&scheme, expr.span)?;
-                    return Ok(InferResult::new(self.unifier.apply(&ty)));
-                }
+                let _ = self.lookup_static_or_load_from_metadata(&qualified);
+                let path = verum_ast::Path::new(
+                    qualified.split('.').map(|name| verum_ast::ty::PathSegment::Name(
+                        verum_ast::Ident::new(name, expr.span),
+                    )).collect(), expr.span,
+                );
+                return self.synth_expr(&Expr::new(ExprKind::Path(path), expr.span));
             }
         }
 

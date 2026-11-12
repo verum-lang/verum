@@ -1,4 +1,4 @@
-//! Bind qualified callable mounts to declared functions, constructors and public re-exports.
+//! Bind qualified value mounts to declared functions, constants, constructors and public re-exports.
 use super::{FunctionInfo, VbcCodegen};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use verum_ast::{Item, ItemKind, MountTree, MountTreeKind};
@@ -552,7 +552,7 @@ impl VbcCodegen {
         Ok(id)
     }
 
-    pub(super) fn source_callable_mount(
+    pub(super) fn source_value_mount(
         &self,
         path: &str,
         alias: &str,
@@ -781,7 +781,7 @@ impl VbcCodegen {
         }
     }
 
-    pub(super) fn resolve_source_callable_export(
+    pub(super) fn resolve_source_value_export(
         &self, path: &str, consumer: &str,
     ) -> Result<Option<(String, FunctionInfo)>, String> {
         let mut scope = consumer;
@@ -801,11 +801,13 @@ impl VbcCodegen {
                 candidates.declarations.keys().cloned().collect::<Vec<_>>().join(", ")));
         }
         if let Some((key, kinds)) = candidates.declarations.first_key_value() {
-            if kinds.contains(&DeclarationCategory::Callable) {
-                if let Some(info) = self.ctx.lookup_function(key) {
-                    return Ok(Some((key.clone(), info.clone())));
-                }
-            } else { return Ok(None); }
+            if let Some(info) = self.ctx.lookup_function(key)
+                && (kinds.contains(&DeclarationCategory::Callable)
+                    || kinds.contains(&DeclarationCategory::Value) && info.is_const)
+            {
+                return Ok(Some((key.clone(), info.clone())));
+            }
+            if !kinds.contains(&DeclarationCategory::Callable) { return Ok(None); }
         } else {
             // A nominal constructor is available only when no source value
             // declaration occupies this name. A private function cannot borrow
