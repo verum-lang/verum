@@ -140,16 +140,19 @@ fn normalize(
                 TypeRef::Instantiated { args, .. } => args.as_slice(),
                 _ => &[],
             };
-            if id.well_known_name().is_some() || *id == TypeId::PTR {
+            let scalar = id.well_known_name().and_then(|name| {
+                TypeId::from_well_known_scalar_name(
+                    verum_common::well_known_types::type_names::canonical_identity_name(name),
+                )
+            });
+            if *id == TypeId::PTR {
+                return Err("type identity requires semantic pointer or integer witnesses, not an ABI carrier".into());
+            }
+            if let Some(scalar) = scalar {
                 if !args.is_empty() {
                     return Err("builtin type application lacks declaration metadata".into());
                 }
-                let canonical = id.well_known_name().and_then(|name| {
-                    TypeId::from_well_known_scalar_name(
-                        verum_common::well_known_types::type_names::canonical_identity_name(name),
-                    )
-                });
-                TypeRef::Concrete(canonical.unwrap_or(*id))
+                TypeRef::Concrete(scalar)
             } else {
                 let declaration = module
                     .get_type(*id)

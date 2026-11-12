@@ -16,6 +16,7 @@ fn complete_generic_identity_agrees_with_properties_and_survives_archive() {
         type Other<T> is { value: T };
         fn probe() -> Int {
             assert(type_id<Int>() == property<Int64>());
+            assert(type_id<USize>() == type_id<UInt64>());
             assert(type_id<Tag<Int>>() == opcode<Tag<Int>>());
             assert(type_id<Float>() == type_id<Float64>());
             assert(outer<Word>() == property<UInt16>());
@@ -82,6 +83,19 @@ fn compact_identity_collision_is_refused_without_replacing_evidence() {
 }
 
 #[test]
+fn well_known_generic_records_require_their_declaration_and_arguments() {
+    use verum_vbc::{VbcModule, types::{TypeDescriptor, TypeId, TypeKind, TypeParamDescriptor, TypeRef}};
+    let mut module = VbcModule::new("program".into());
+    let applied = |element| TypeRef::Instantiated { base: TypeId::LIST, args: vec![TypeRef::Concrete(element)] };
+    assert!(module.type_identity(&applied(TypeId::INT)).is_err());
+    assert!(module.type_identity(&TypeRef::Concrete(TypeId::LIST)).is_err());
+    module.types.push(TypeDescriptor { id: TypeId::LIST, kind: TypeKind::Record,
+        type_params: smallvec::smallvec![TypeParamDescriptor::default()], ..Default::default() });
+    assert_ne!(module.type_identity(&applied(TypeId::INT)).unwrap(), module.type_identity(&applied(TypeId::BOOL)).unwrap());
+    assert!(module.type_identity(&TypeRef::Concrete(TypeId::LIST)).is_err());
+}
+
+#[test]
 fn incomplete_and_excessively_nested_identity_never_becomes_a_number() {
     use verum_vbc::{
         VbcModule,
@@ -92,6 +106,7 @@ fn incomplete_and_excessively_nested_identity_never_becomes_a_number() {
     for ty in [
         TypeRef::Generic(TypeParamId(0)),
         TypeRef::Concrete(TypeId(99)),
+        TypeRef::Concrete(TypeId::PTR),
         TypeRef::Concrete(TypeId(10000)),
         TypeRef::ConstValue(42),
     ] {

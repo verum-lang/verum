@@ -65,13 +65,18 @@ fn actual_identity_query_survives_archive_bootstrap_and_generic_calls() {
     fs::write(core.join("mod.vr"), "module core; public module intrinsics { public module type_info; }").unwrap();
     let declaration = include_str!("../../../core/intrinsics/type_info.vr").lines()
         .find(|line| line.starts_with("public meta fn type_id<")).unwrap();
-    fs::write(core.join("intrinsics/type_info.vr"), format!("module core.intrinsics.type_info;\n{declaration}\n")).unwrap();
+    fs::write(core.join("intrinsics/type_info.vr"), format!("module core.intrinsics.type_info;\n{declaration}\n
+        public type Mark<T> is {{ value: T }};
+        public fn mark_identity<T>() -> UInt64 {{ type_id<Mark<T>>() }}")).unwrap();
     let archive = bootstrap(&core);
     assert_eq!(execute(&archive,
-        "module app; mount core.intrinsics.type_info.type_id;
+        "module app; mount core.intrinsics.type_info.{type_id, Mark as ArchivedMark, mark_identity};
          type Tag<T> is {value:T}; type Alias<T> is Tag<T>;
+         type Mark<T> is {value:T};
          fn property<T>() -> UInt64 { T.id }
          fn main() -> Int {
+            assert(mark_identity<Int>() == property<ArchivedMark<Int>>());
+            assert(mark_identity<Int>() != property<Mark<Int>>());
             if type_id<Tag<Int>>() == property<Alias<Int>>() && type_id<Tag<Int>>() != type_id<Tag<Bool>>() {73} else {19}
          }"), 73);
 }

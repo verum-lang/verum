@@ -9174,9 +9174,10 @@ impl VbcCodegen {
         match &ty.kind {
             TypeKind::Inferred => expected.cloned(),
             TypeKind::Generic { base, args } => {
-                let base_name = Self::extract_type_name_from_ast(base);
-                let base_id = self.type_name_to_id.get(&base_name).copied()
-                    .or_else(|| self.get_well_known_type_id(&base_name))?;
+                // The constructor is a declaration in the caller's lexical
+                // scope, including mounted aliases; its display name is not
+                // an alternate type-resolution authority.
+                let TypeRef::Concrete(base_id) = self.resolve_query_type(base).ok()? else { return None; };
                 let expected_args = match expected {
                     Some(TypeRef::Instantiated { base, args }) if *base == base_id => Some(args),
                     _ => None,
@@ -9238,7 +9239,8 @@ impl VbcCodegen {
                 let expected_inner = match expected { Some(TypeRef::Slice(inner)) => Some(inner.as_ref()), _ => None };
                 self.explicit_type_witness(inner, expected_inner).map(|inner| TypeRef::Slice(Box::new(inner)))
             }
-            _ => {
+            TypeKind::Path(_) | TypeKind::Int | TypeKind::Float | TypeKind::Bool
+            | TypeKind::Char | TypeKind::Text | TypeKind::Unit | TypeKind::Never => {
                 let name = Self::extract_type_name_from_ast(ty);
                 if self.current_source_substitution.get_value(&name).is_some() { return None; }
                 if let Some(witness) = self.current_source_substitution.get(&name) {
@@ -9248,9 +9250,10 @@ impl VbcCodegen {
                     self.ctx.current_generic_param_ids.get(&name)
                         .map(|id| TypeRef::Generic(TypeParamId(*id)))
                 } else {
-                    self.type_name_to_type_ref_mono(&name)
+                    self.resolve_query_type(ty).ok()
                 }
             }
+            _ => None,
         }
     }
 
