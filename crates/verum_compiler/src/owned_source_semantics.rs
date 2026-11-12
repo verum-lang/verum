@@ -184,6 +184,13 @@ pub(crate) fn check_source_types(
     registry: &SourceRegistry,
     render: impl Fn(&verum_types::TypeError) -> verum_diagnostics::Diagnostic,
 ) -> Result<(), List<verum_diagnostics::Diagnostic>> {
+    let render = |error: &verum_types::TypeError| {
+        let diagnostic = render(error);
+        match enclosing_function(module, error.span()) {
+            Some(name) => diagnostic.add_note(format!("while checking function `{name}`")),
+            None => diagnostic,
+        }
+    };
     checker.set_current_module_path(owner);
     checker.set_module_registry(registry.clone());
     checker.register_stdlib_types_for_module(module);
@@ -220,6 +227,58 @@ pub(crate) fn check_source_types(
     } else {
         Err(errors)
     }
+}
+
+/// Recover declaration context from the original source spans, before a
+/// consumer converts them into editor or command-line locations. Do not infer
+/// the enclosing function from diagnostic text or flattened declaration names.
+fn enclosing_function(module: &Module, span: verum_ast::span::Span) -> Option<&str> {
+    use verum_ast::decl::{ImplItemKind, ProtocolItemKind, TypeDeclBody};
+
+    if span.is_empty() {
+        return None;
+    }
+    let mut pending: List<_> = module.items.iter().collect();
+    while let Some(item) = pending.pop() {
+        if !item.span.contains(span) {
+            continue;
+        }
+        let protocol_items = match &item.kind {
+            ItemKind::Function(function) => return Some(function.name.as_str()),
+            ItemKind::Module(module) => {
+                if let Some(items) = &module.items {
+                    pending.extend(items.iter());
+                }
+                None
+            }
+            ItemKind::Impl(implementation) => {
+                for item in &implementation.items {
+                    if item.span.contains(span)
+                        && let ImplItemKind::Function(function) = &item.kind
+                    {
+                        return Some(function.name.as_str());
+                    }
+                }
+                None
+            }
+            ItemKind::Protocol(protocol) => Some(&protocol.items),
+            ItemKind::Type(declaration) => match &declaration.body {
+                TypeDeclBody::Protocol(protocol) => Some(&protocol.items),
+                _ => None,
+            },
+            _ => None,
+        };
+        if let Some(items) = protocol_items {
+            for item in items {
+                if item.span.contains(span)
+                    && let ProtocolItemKind::Function { decl, .. } = &item.kind
+                {
+                    return Some(decl.name.as_str());
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Select the same source declarations for registration and body checking.

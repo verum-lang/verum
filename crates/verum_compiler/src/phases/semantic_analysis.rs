@@ -144,6 +144,10 @@ impl SemanticAnalysisPhase {
                         line.push(' ');
                     }
                     line.push_str(diagnostic.message());
+                    for note in diagnostic.notes() {
+                        line.push_str("\n  note: ");
+                        line.push_str(&note.message);
+                    }
                     line
                 }).collect::<Vec<_>>().join("\n");
                 anyhow::bail!("semantic checking failed in {owner} ({path}): {details}");

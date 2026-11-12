@@ -341,6 +341,13 @@ impl Diagnostic {
         &self.notes
     }
 
+    /// Attach context discovered after rendering the original diagnostic,
+    /// preserving its locations, fixes and provenance.
+    pub fn add_note(mut self, message: impl Into<Text>) -> Self {
+        self.notes.push(Label::new(message));
+        self
+    }
+
     /// Get all help messages
     pub fn helps(&self) -> &[Label] {
         &self.helps

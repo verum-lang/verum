@@ -6,6 +6,7 @@ use verum_compiler::{CompilationPipeline, CompilerOptions, CoreConfig, Session};
 fn failed_source_body_prevents_archive_publication() {
     for declaration in [
         "public fn broken() -> Int { undefined_value }",
+        "fn neighbor() -> Int { 7 }\npublic fn broken() -> Int {\n    undefined_value\n}\nfn other() -> Int { 9 }",
         "type A is { n: Int }; implement A { fn broken(&self) -> Int { undefined_value } }",
         "public module inner { public fn broken() -> Int { undefined_value } }",
         "type P is protocol { fn broken(&self) -> Int { undefined_value } }; type A is { n: Int }; implement P for A {}",
@@ -26,7 +27,8 @@ fn failed_source_body_prevents_archive_publication() {
             .expect_err(declaration);
         let error = format!("{error:#}");
         assert!(
-            error.contains("broken") && error.contains("undefined_value"),
+            error.contains("while checking function `broken`")
+                && error.contains("undefined_value"),
             "{declaration}: {error}"
         );
         assert!(!output.exists(), "{declaration} published {output:?}");
