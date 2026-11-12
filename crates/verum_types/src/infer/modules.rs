@@ -7352,7 +7352,7 @@ impl TypeChecker {
                 Work::Body(scope) => {
                     let ast = scope.source.ast();
                     let declaration = if scope.allow_local_mounts {
-                        self.local_source_type_declaration(ast, &scope.name)
+                        self.local_source_type_declaration(ast, &scope.name).cloned()
                     } else {
                         self.find_type_declaration_in_module(ast, &scope.name)
                     };

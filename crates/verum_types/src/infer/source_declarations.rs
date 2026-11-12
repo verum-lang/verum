@@ -145,16 +145,16 @@ impl TypeChecker {
 
     /// Local declaration authority is independent of whether an importer may
     /// name the type. A public function may return a privately declared type.
-    pub(super) fn local_source_type_declaration(
+    pub(super) fn local_source_type_declaration<'a>(
         &self,
-        ast: &verum_ast::Module,
+        ast: &'a verum_ast::Module,
         name: &str,
-    ) -> Option<verum_ast::TypeDecl> {
+    ) -> Option<&'a verum_ast::TypeDecl> {
         ast.items.iter()
-            .filter(|item| self.cfg_evaluator.should_include(&item.attributes))
+            .filter(|item| self.cfg_evaluator.should_include_item(item))
             .find_map(|item| match &item.kind {
             verum_ast::ItemKind::Type(declaration) if declaration.name.name.as_str() == name => {
-                Some(declaration.clone())
+                Some(declaration)
             }
             _ => None,
         })
@@ -305,7 +305,7 @@ impl TypeChecker {
                 self.get_module_with_path_aliases(self.current_module_path.as_str(), &registry);
             if let Some(items) = inline.or_else(|| file.as_ref().map(|module| &module.ast.items)) {
                 for item in items {
-                    if !self.cfg_evaluator.should_include(&item.attributes) {
+                    if !self.cfg_evaluator.should_include_item(item) {
                         continue;
                     }
                     if let verum_ast::ItemKind::Mount(mount) = &item.kind {
@@ -429,7 +429,7 @@ impl TypeChecker {
         if let Some(module) = self.inline_modules.get(&self.current_module_path)
             && let Some(items) = &module.items
             && let Some(declaration) = items.iter()
-                .filter(|item| self.cfg_evaluator.should_include(&item.attributes))
+                .filter(|item| self.cfg_evaluator.should_include_item(item))
                 .find_map(|item| match &item.kind {
                 verum_ast::ItemKind::Type(declaration) if declaration.name.name == name => Some(declaration),
                 _ => None,
@@ -454,7 +454,7 @@ impl TypeChecker {
         // Written bindings remain authoritative even when their target is
         // missing or inaccessible; the prelude cannot repair an invalid mount.
         let explicitly_bound = module.ast.items.iter()
-            .filter(|item| self.cfg_evaluator.should_include(&item.attributes))
+            .filter(|item| self.cfg_evaluator.should_include_item(item))
             .any(|item| matches!(
             &item.kind, verum_ast::ItemKind::Mount(mount)
                 if mount.alias.as_ref().is_some_and(|alias| alias.name.as_str() == name)
@@ -507,7 +507,7 @@ impl TypeChecker {
                         module_path: owner, span,
                     });
                 }
-                Some((declaration, owner.clone()))
+                Some((declaration.clone(), owner.clone()))
             } else {
                 // Reuse the exact re-export walker, with no parent-module
                 // fallback. Only the declaring file may follow private mounts.
@@ -517,7 +517,7 @@ impl TypeChecker {
                 )
             };
             if declaration.is_none() && module.ast.items.iter()
-                .filter(|item| self.cfg_evaluator.should_include(&item.attributes))
+                .filter(|item| self.cfg_evaluator.should_include_item(item))
                 .any(|item| {
                 matches!(&item.kind, verum_ast::ItemKind::Mount(mount)
                     if source_mount_binds_name(&mount.tree, type_name))
@@ -620,7 +620,7 @@ impl TypeChecker {
         if module.path.to_string() != owner {
             return None;
         }
-        let declaration = self.local_source_type_declaration(&module.ast, name)?;
+        let declaration = self.local_source_type_declaration(&module.ast, name)?.clone();
         Some((module, declaration))
     }
 
@@ -827,3 +827,7 @@ impl TypeChecker {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/unit/source_declarations.rs"]
+mod tests;
