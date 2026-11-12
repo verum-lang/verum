@@ -14,6 +14,48 @@ fn glob_imported_future_output_keeps_declaration_authority() {
 }
 
 #[test]
+fn imported_associated_sum_survives_nested_async_signature_and_execution() {
+    let root = tempfile::tempdir().unwrap();
+    let core = root.path().join("core");
+    for (file, source) in [
+        ("mod.vr", "module core; public module values; public module feed; public module consumer;"),
+        ("values/mod.vr", "module core.values;
+            public type Choice<T> is Empty | Present(T);
+            public type Outcome<T, E> is Success(T) | Failure(E);"),
+        ("feed/mod.vr", "module core.feed; mount core.values.Choice;
+            public type Feed is protocol { type Item; async fn next(&mut self) -> Choice<Self.Item>; };"),
+        ("consumer/mod.vr", "module core.consumer;
+            mount core.values.{Choice, Outcome}; mount core.feed.Feed;
+            public type Source is { value: Int };
+            implement Feed for Source {
+                type Item = Outcome<Int, Bool>;
+                async fn next(&mut self) -> Choice<Outcome<Int, Bool>> {
+                    Choice.Present(Outcome.Success(self.value))
+                }
+            }
+            public async fn read() -> Int {
+                let mut source = Source { value: 73 };
+                match source.next().await {
+                    Choice.Present(Outcome.Success(value)) => value,
+                    _ => 0,
+                }
+            }"),
+    ] {
+        let file = core.join(file);
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(file, source).unwrap();
+    }
+    let archive = bootstrap(&core);
+    assert_eq!(execute(&archive,
+        "module app; mount core.consumer.read; async fn main() -> Int { read().await }"), 73);
+    let file = core.join("consumer/mod.vr");
+    let source = fs::read_to_string(&file).unwrap();
+    fs::write(file, source.replace("type Item = Outcome<Int, Bool>", "type Item = Outcome<Bool, Int>")).unwrap();
+    let error = format!("{:#}", try_bootstrap(&core).err().expect("wrong associated carrier accepted"));
+    assert!(error.contains("E427") && error.contains("next"), "{error}");
+}
+
+#[test]
 fn inline_reexport_matches_the_declaring_generic_sum_after_bootstrap() {
     let root = tempfile::tempdir().unwrap();
     let core = root.path().join("core");

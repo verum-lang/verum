@@ -1025,22 +1025,6 @@ fn substitute_refinement_binder(
             |ty| self.normalize_type(ty))
     }
 
-    /// Publication needs the nominal constructor after its complete argument
-    /// telescope has been checked, including when the protocol has no members.
-    /// Keep a declared sum application available to protocol resolution even
-    /// when checking the body also needs its expanded variant payloads.
-    pub(super) fn declared_sum_carrier(
-        &mut self, declaration: Option<&verum_ast::Type>, result: &Type,
-    ) -> Result<Type> {
-        if let Some(declaration) = declaration
-            && matches!(declaration.kind, verum_ast::TypeKind::Generic { .. })
-            && matches!(result, Type::Variant(_))
-        {
-            return self.elaborate_generic_application(declaration, None, ApplicationForm::Nominal);
-        }
-        Ok(result.clone())
-    }
-
     pub(super) fn resolve_try_carrier(
         &mut self, ty: Type, span: Span,
     ) -> Result<(Type, Option<crate::protocol::TryProtocolResolution>)> {

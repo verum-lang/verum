@@ -204,20 +204,16 @@ impl TypeChecker {
                 .params
                 .iter()
                 .filter_map(|param| match &param.kind {
-                    FunctionParamKind::Regular { ty, .. } => Some(
-                        self.ast_to_type(ty)
-                            .and_then(|expanded| self.declared_sum_carrier(Some(ty), &expanded)),
-                    ),
+                    FunctionParamKind::Regular { ty, .. } => Some(self.declared_type(ty)),
                     _ => None,
                 })
                 .collect::<Result<List<_>>>()?;
             let output = method
                 .return_type
                 .as_ref()
-                .map(|ty| self.ast_to_type(ty))
+                .map(|ty| self.declared_type(ty))
                 .transpose()?
                 .unwrap_or(Type::Unit);
-            let output = self.declared_sum_carrier(method.return_type.as_ref(), &output)?;
             let output = self.wrap_return_type_for_sig_full(
                 output,
                 &method.throws_clause,

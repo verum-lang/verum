@@ -10929,7 +10929,7 @@ impl TypeChecker {
             .or_else(|| return_type_var.clone())
             .unwrap_or_else(Type::unit);
 
-        let return_carrier = self.declared_sum_carrier(func.return_type.as_ref(), &initial_return_type)?;
+        let return_carrier = initial_return_type.clone();
         if crate::core_pipeline::extract_intrinsic_name(func).as_deref() == Some("catch_unwind") {
             self.source_type_registration.catch_unwind_body = Some((
                 self.borrow_tracker.current_closure_id(), return_carrier.clone(),
@@ -11536,8 +11536,7 @@ impl TypeChecker {
         for (i, param) in func.params.iter().enumerate() {
             match &param.kind {
                 FunctionParamKind::Regular { pattern, ty, .. } => {
-                    let expanded = self.ast_to_type(ty)?;
-                    let param_ty = self.declared_sum_carrier(Some(ty), &expanded)?;
+                    let param_ty = self.declared_type(ty)?;
 
                     // A parameter pattern is matched against whatever the
                     // caller passes, so it must ALWAYS match. Measured

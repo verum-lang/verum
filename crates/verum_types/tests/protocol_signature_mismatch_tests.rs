@@ -9,19 +9,8 @@
 //! an Int and is handed a Bool where an Int was promised. The mismatch is
 //! invisible at the call site and wrong at run time.
 //!
-//! WHY THE CHECK IS NARROW, and why that is the point. A lenient
-//! comparison already existed as a measurement instrument; a 2560-file
-//! sweep with it produced 267 messages and every class examined was a
-//! comparison ARTEFACT — an alias pair, a variant expanded on one side
-//! only, a protocol parameter instantiated by the implementation, a
-//! reference lost in a round-trip. Turning that on as a diagnostic would
-//! report the checker's own gaps as the author's mistakes.
-//!
-//! So the judge speaks only where both sides of a differing position are
-//! built-in scalars. The controls below are the artefact classes, and
-//! they must stay silent.
-//!
-//! Task: T1029.
+//! Conformance compares declaration-owned carriers after instantiation.
+//! Equal representations do not make distinct nominal declarations equal.
 
 use verum_parser::Parser;
 use verum_types::infer::TypeChecker;
@@ -123,13 +112,9 @@ implement Container for Box2 {
     );
 }
 
-/// Artefact class 2: a NAMED type on both sides. Whether two named types
-/// are the same is exactly the question a normalisation round-trip gets
-/// wrong, so the judge must not answer it at all.
 #[test]
-fn a_named_type_difference_stays_silent() {
-    let text = complaints(
-        "\
+fn distinct_nominal_types_cannot_replace_the_declared_carrier() {
+    let source = "\
 type Id is (Int);
 type Other is (Int);
 type Keyed is protocol {
@@ -139,13 +124,13 @@ type R is { v: Int };
 implement Keyed for R {
     fn key(&self, k: Other) -> Other { k }
 }
-",
-    )
-    .join("\n");
+";
+    let text = complaints(source).join("\n");
 
     assert!(
-        !text.contains("E427"),
-        "named types are outside what this judge can decide, and it must \
-         stay silent rather than report its own gap; got:\n{text}"
+        text.contains("E427"),
+        "distinct nominal types with identical representations were accepted:\n{text}"
     );
+    let text = complaints(&source.replace("k: Other) -> Other", "k: Id) -> Id")).join("\n");
+    assert!(!text.contains("E427"), "matching nominal carrier refused:\n{text}");
 }

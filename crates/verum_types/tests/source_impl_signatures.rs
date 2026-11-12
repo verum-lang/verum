@@ -87,6 +87,43 @@ fn nested_wrong_result_carrier() {
         "module core.owned; type F is protocol {type C; fn get()->(Self.C,Int);}; type Model is {x:()}; implement F for Model {type C=Bool;fn get()->(Int,Int){(7,7)}}",
     );
 }
+
+#[test]
+fn associated_sum_inside_another_sum_keeps_its_declared_carrier() {
+    let source = "module core.owned;
+        type Choice<T> is Empty | Present(T);
+        type Outcome<T, E> is Success(T) | Failure(E);
+        type Feed is protocol { type Item; async fn next(&mut self) -> Choice<Self.Item>; };
+        type Model is { value: Int };
+        implement Feed for Model {
+            type Item = Outcome<Int, Bool>;
+            async fn next(&mut self) -> Choice<Outcome<Int, Bool>> {
+                Choice.Present(Outcome.Success(self.value))
+            }
+        }";
+    accepts(source);
+    rejects(&source.replace("type Item = Outcome<Int, Bool>", "type Item = Outcome<Bool, Int>"));
+}
+
+#[test]
+fn nested_sum_parameter_does_not_erase_nominal_identity() {
+    for carrier in ["Choice<Self.Item>", "(Int, Choice<Self.Item>)", "&Choice<Self.Item>"] {
+        let source = format!("module core.owned;
+            type Choice<T> is Empty | Present(T);
+            type Outcome<T, E> is Success(T) | Failure(E);
+            type Other<T, E> is Success(T) | Failure(E);
+            type Feed is protocol {{ type Item; fn accept(value: {carrier}); }};
+            type Model is {{ value: Int }};
+            implement Feed for Model {{
+                type Item = Outcome<Int, Bool>;
+                fn accept(value: {}) {{}}
+            }}", carrier.replace("Self.Item", "Outcome<Int, Bool>"));
+        accepts(&source);
+        rejects(&source.replace("fn accept(value: Choice<Outcome", "fn accept(value: Choice<Other")
+            .replace("fn accept(value: (Int, Choice<Outcome", "fn accept(value: (Int, Choice<Other")
+            .replace("fn accept(value: &Choice<Outcome", "fn accept(value: &Choice<Other"));
+    }
+}
 #[test]
 fn argument_carrier() {
     accepts(
