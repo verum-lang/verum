@@ -1742,7 +1742,7 @@ mod tests {
             let mut predicate = TypesRefinementPredicate::inline(path_expr(name), span());
             predicate.binding = verum_types::refinement::RefinementBinding::ValueParameter("n".into());
             assert!(KernelRecheck::refine_omega_from_types(&TypesType::Int, &predicate).is_ok());
-            predicate.predicate = method_call_expr(predicate.predicate, "box");
+            predicate.predicate = method_call_expr((*predicate.predicate).clone(), "box").into();
             assert!(matches!(KernelRecheck::refine_omega_from_types(&TypesType::Int, &predicate),
                 Err(KernelRecheckError::RefineOmega {binder, ..}) if binder.as_str() == "n"));
         }
