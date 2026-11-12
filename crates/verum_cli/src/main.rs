@@ -2602,12 +2602,14 @@ enum StdlibSub {
         #[clap(long, short = 'o', value_name = "FILE")]
         out: Option<std::path::PathBuf>,
 
-        /// Target triple to compile for. `None` = host triple.
-        /// Phase 4b will read this and emit per-target variants for
-        /// cfg-conditional functions; today the value is recorded
-        /// but selection is host-only.
+        /// Target triple. Must match the archive producer's build target.
         #[clap(long, value_name = "TRIPLE")]
         target: Option<String>,
+
+        /// Maximum source-admission workers; 1 selects sequential checking.
+        /// Defaults to the compiler's available-parallelism setting.
+        #[clap(long, value_name = "N")]
+        threads: Option<std::num::NonZeroUsize>,
 
         /// Verbose progress output.
         #[clap(long)]
@@ -4426,8 +4428,9 @@ fn run_command(cli: Cli) -> Result<()> {
                 stdlib_path,
                 out,
                 target,
+                threads,
                 verbose,
-            } => commands::stdlib_precompile::run(stdlib_path, out, target, verbose),
+            } => commands::stdlib_precompile::run(stdlib_path, out, target, threads, verbose),
             StdlibSub::Install { from, force, verbose } => {
                 commands::stdlib_install::run_install(from, force, verbose)
                     .map_err(|e| crate::error::CliError::Custom(format!("{:?}", e)))

@@ -15,6 +15,7 @@ fn complete_production_reports_publication_and_non_overlapping_intervals() {
         stdlib_path: core,
         output_path: output.clone(),
         target_triple: None,
+        threads: None,
         verbose: false,
     })
     .unwrap();

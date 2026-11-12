@@ -98,6 +98,7 @@ fn source_attested_sidecars_require_the_exact_full_bake() {
         stdlib_path: root.clone(),
         output_path: archive.clone(),
         target_triple: None,
+        threads: None,
         verbose: false,
     })
     .unwrap();

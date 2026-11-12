@@ -76,6 +76,11 @@ fn run() -> Result<()> {
     }
 
     let mut cfg = verum_compiler::precompile::PrecompileConfig::for_workspace(&workspace_root)?;
+    cfg.threads = match std::env::var("VERUM_PRECOMPILE_THREADS") {
+        Ok(value) => Some(value.parse().context("VERUM_PRECOMPILE_THREADS must be a positive integer")?),
+        Err(std::env::VarError::NotPresent) => None,
+        Err(error) => return Err(error).context("invalid VERUM_PRECOMPILE_THREADS"),
+    };
     // Per-target-dir isolation: when build.rs sets VERUM_PRECOMPILE_OUT_DIR
     // (to `<target_root>/precompiled-stdlib`), write the archive there
     // instead of the workspace's default `target/precompiled-stdlib`. This

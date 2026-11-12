@@ -41,6 +41,7 @@ fn produce(source: &str) -> Result<VbcModule, String> {
         stdlib_path: core,
         output_path: temp.path().join("runtime.vbca"),
         target_triple: None,
+        threads: None,
         verbose: false,
     };
     let result = precompile_stdlib(&cfg).map_err(|e| format!("{e:#}"));

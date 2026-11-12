@@ -11,6 +11,7 @@
 //! reuse-don't-fork principle intact.
 
 use std::path::{Path, PathBuf};
+use std::num::NonZeroUsize;
 
 use verum_compiler::precompile::{PrecompileConfig, precompile_stdlib};
 
@@ -22,9 +23,10 @@ pub fn run(
     stdlib_path: Option<PathBuf>,
     out: Option<PathBuf>,
     target: Option<String>,
+    threads: Option<NonZeroUsize>,
     verbose: bool,
 ) -> Result<(), CliError> {
-    let cfg = resolve_config(stdlib_path, out, target, verbose)?;
+    let cfg = resolve_config(stdlib_path, out, target, threads, verbose)?;
 
     ui::step("Precompiling stdlib to VBC archive");
     ui::detail("Source", &cfg.stdlib_path.display().to_string());
@@ -62,6 +64,7 @@ fn resolve_config(
     stdlib_path: Option<PathBuf>,
     out: Option<PathBuf>,
     target: Option<String>,
+    threads: Option<NonZeroUsize>,
     verbose: bool,
 ) -> Result<PrecompileConfig, CliError> {
     let mut cfg = match stdlib_path {
@@ -81,6 +84,7 @@ fn resolve_config(
         cfg.output_path = output;
     }
     cfg.target_triple = target;
+    cfg.threads = threads;
     cfg.verbose = verbose;
     Ok(cfg)
 }

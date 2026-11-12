@@ -13,6 +13,7 @@ fn explicit_paths_and_options_are_preserved() {
         Some(source.clone()),
         Some(output.clone()),
         Some("target-contract".into()),
+        std::num::NonZeroUsize::new(3),
         true,
     )
     .unwrap();
@@ -20,17 +21,19 @@ fn explicit_paths_and_options_are_preserved() {
     assert_eq!(cfg.output_path, output);
     assert_eq!(cfg.target_triple.as_deref(), Some("target-contract"));
     assert!(cfg.verbose);
+    assert_eq!(cfg.threads.map(|n| n.get()), Some(3));
 }
 
 #[test]
 fn explicit_source_default_uses_the_shared_constructor() {
     let source = PathBuf::from("external-sdk/core");
-    let cfg = resolve_config(Some(source.clone()), None, None, false).unwrap();
+    let cfg = resolve_config(Some(source.clone()), None, None, None, false).unwrap();
     let common = PrecompileConfig::for_source(source.clone(), Path::new("."));
     assert_eq!(cfg.stdlib_path, source);
     assert_eq!(cfg.output_path, common.output_path);
     assert!(cfg.target_triple.is_none());
     assert!(!cfg.verbose);
+    assert!(cfg.threads.is_none());
 }
 
 #[test]
@@ -102,11 +105,11 @@ fn isolated_paths_child() {
             let source = cwd.join("not-yet-created-sdk/core");
             let output = cwd.join("archive/result.vbca");
             let cfg =
-                resolve_config(Some(source.clone()), Some(output.clone()), None, false).unwrap();
+                resolve_config(Some(source.clone()), Some(output.clone()), None, None, false).unwrap();
             assert_eq!(cfg.stdlib_path, source);
             assert_eq!(cfg.output_path, output);
             // Source existence is validated by the real producer, not workspace discovery.
-            let default = resolve_config(Some(source.clone()), None, None, false).unwrap();
+            let default = resolve_config(Some(source.clone()), None, None, None, false).unwrap();
             assert_eq!(default.stdlib_path, source);
             assert_eq!(
                 default.output_path,
@@ -115,7 +118,7 @@ fn isolated_paths_child() {
         }
         "missing" | "output_only" => {
             let out = (case == "output_only").then(|| cwd.join("output.vbca"));
-            let error = resolve_config(None, out, None, false)
+            let error = resolve_config(None, out, None, None, false)
                 .unwrap_err()
                 .to_string();
             assert!(
@@ -128,14 +131,14 @@ fn isolated_paths_child() {
             std::fs::create_dir(cwd.join("core")).unwrap();
             std::fs::write(cwd.join("core/mod.vr"), "module core;\n").unwrap();
             let canonical = cwd.canonicalize().unwrap();
-            let default = resolve_config(None, None, None, false).unwrap();
+            let default = resolve_config(None, None, None, None, false).unwrap();
             assert_eq!(default.stdlib_path, canonical.join("core"));
             assert_eq!(
                 default.output_path,
                 canonical.join("target/precompiled-stdlib/runtime.vbca")
             );
             let output = cwd.join("chosen.vbca");
-            let overridden = resolve_config(None, Some(output.clone()), None, false).unwrap();
+            let overridden = resolve_config(None, Some(output.clone()), None, None, false).unwrap();
             assert_eq!(overridden.stdlib_path, canonical.join("core"));
             assert_eq!(overridden.output_path, output);
         }

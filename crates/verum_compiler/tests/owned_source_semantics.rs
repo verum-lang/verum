@@ -52,6 +52,7 @@ fn archive_with_linkage(files: &[(&str, String)], owner: &str, expected_external
         stdlib_path: core,
         output_path: directory.path().join("core.vbca"),
         target_triple: None,
+        threads: None,
         verbose: false,
     };
     let result = match precompile_stdlib(&config) {

@@ -764,6 +764,12 @@ jobs:
           cargo test --locked --release -p verum_compiler
           --test stdlib_future_declarations actual_
 
+      - name: Ordinary source workers and stdlib worker budgets
+        timeout-minutes: 10
+        run: |
+          cargo test --locked --release -p verum_cli --test ordinary_source_workers --test stdlib_precompile_paths
+          cargo test --locked --release -p verum_stdlib_precompiler --test worker_budget
+
       # Reuses the release CLI; includes an actual interpreter positive control.
       - name: Project run tier selection
         timeout-minutes: 5

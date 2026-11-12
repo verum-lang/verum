@@ -39,6 +39,7 @@ fn config(root: &std::path::Path) -> PrecompileConfig {
         stdlib_path: core,
         output_path: root.join("runtime.vbca"),
         target_triple: None,
+        threads: None,
         verbose: false,
     }
 }

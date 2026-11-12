@@ -18,6 +18,7 @@
 //! instead of re-running stdlib codegen on every invocation.
 
 use std::path::{Path, PathBuf};
+use std::num::NonZeroUsize;
 
 use anyhow::{Context, Result};
 
@@ -40,6 +41,9 @@ pub struct PrecompileConfig {
     pub output_path: PathBuf,
     /// Optional requested target. The current producer emits its own target only.
     pub target_triple: Option<String>,
+    /// Maximum workers for independent source admission. Omitted uses the
+    /// compiler's available-parallelism default; one selects serial admission.
+    pub threads: Option<NonZeroUsize>,
     /// Verbose progress reporting.
     pub verbose: bool,
 }
@@ -65,6 +69,7 @@ impl PrecompileConfig {
             stdlib_path,
             output_path,
             target_triple: None,
+            threads: None,
             verbose: false,
         }
     }
@@ -132,7 +137,11 @@ pub fn precompile_stdlib(cfg: &PrecompileConfig) -> Result<StdlibCompilationResu
         .unwrap_or(Path::new("."));
     let stage = tempfile::tempdir_in(parent)?;
     let source = stage.path().join("core");
-    let mut session = Session::new(CompilerOptions::default());
+    let mut options = CompilerOptions::default();
+    if let Some(threads) = cfg.threads {
+        options.num_threads = threads.get();
+    }
+    let mut session = Session::new(options);
     let phase = session.measure_phase("Stdlib source snapshot");
     let inputs = snapshot_bake_inputs(&cfg.stdlib_path, &source)?;
     let staged_archive = stage.path().join("runtime.vbca");
@@ -3652,6 +3661,7 @@ version = "0.1.0"
             stdlib_path: tmp.clone(),
             output_path: tmp.join("out.vbca"),
             target_triple: None,
+            threads: None,
             verbose: false,
         };
         let err = precompile_stdlib(&cfg).err();

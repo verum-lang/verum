@@ -51,6 +51,7 @@ fn producer_negative_const_defaults_execute() {
             stdlib_path: root,
             output_path: temp.path().join("runtime.vbca"),
             target_triple: None,
+            threads: None,
             verbose: false,
         };
         let result = precompile_stdlib(&config).unwrap();
