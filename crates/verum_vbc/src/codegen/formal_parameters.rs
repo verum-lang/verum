@@ -11,13 +11,17 @@ impl VbcCodegen {
     /// method changes lexical scope. Method-local binders cannot define Self.
     pub(super) fn resolve_impl_receiver(
         &mut self,
-        target: &verum_ast::Type,
+        declaration: &verum_ast::decl::ImplDecl,
         dense: &std::collections::HashMap<String, u16>,
         impl_names: &[String],
     ) -> super::CodegenResult<super::ImplReceiverWitness> {
         let receiver_scope = dense.iter().filter(|(name, _)| impl_names.contains(name))
             .map(|(name, id)| (name.clone(), *id)).collect();
-        let value_scope = self.implementation_value_scope(target, &receiver_scope)?;
+        let target = match &declaration.kind {
+            verum_ast::decl::ImplKind::Inherent(target) => target,
+            verum_ast::decl::ImplKind::Protocol { for_type, .. } => for_type,
+        };
+        let value_scope = self.implementation_value_scope(declaration, &receiver_scope)?;
         let previous = std::mem::replace(&mut self.current_source_substitution, value_scope);
         let result = (|| {
             let ty = self.resolve_signature_type_ref(target, &receiver_scope)?;
@@ -49,16 +53,12 @@ impl VbcCodegen {
     pub(super) fn compile_declared_impl_function(
         &mut self,
         function: &FunctionDecl,
-        implementation: &verum_ast::decl::ImplKind,
+        implementation: &verum_ast::decl::ImplDecl,
         name: Option<&String>,
     ) -> super::CodegenResult<()> {
-        let target = match implementation {
-            verum_ast::decl::ImplKind::Inherent(target) => target,
-            verum_ast::decl::ImplKind::Protocol { for_type, .. } => for_type,
-        };
         let names = self.ctx.generic_type_params_ordered.clone();
-        let (dense, _) = self.declared_impl_generic_param_maps(function, implementation, &names);
-        let receiver = self.resolve_impl_receiver(target, &dense, &names)?;
+        let (dense, _) = self.declared_impl_generic_param_maps(function, &implementation.kind, &names);
+        let receiver = self.resolve_impl_receiver(implementation, &dense, &names)?;
         let saved = self.current_impl_receiver.replace(receiver);
         let result = self.compile_function(function, name);
         self.current_impl_receiver = saved;

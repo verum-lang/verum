@@ -3560,13 +3560,13 @@ impl VbcCodegen {
         });
         // Collect all protocols to check (this protocol + all superprotocols
         // + any blanket-impl derived protocol whose base is in the chain).
-        let verum_ast::decl::ImplKind::Protocol { protocol, protocol_args, for_type } = &implementation.kind else {
+        let verum_ast::decl::ImplKind::Protocol { protocol, protocol_args, .. } = &implementation.kind else {
             return Err(CodegenError::internal("protocol method generation requires an implementation application"));
         };
         u16::try_from(declaration.ordered_generics.len()).map_err(|_| CodegenError::with_span(
                 CodegenErrorKind::InvalidSourceSignature("implementation binder roster exceeds VBC index space".into()), implementation.span))?;
         let scope = self.declared_impl_generic_scope(&implementation.kind, &declaration.ordered_generics);
-        let receiver = self.resolve_impl_receiver(for_type, &scope, &declaration.ordered_generics)?;
+        let receiver = self.resolve_impl_receiver(implementation, &scope, &declaration.ordered_generics)?;
         let declared_ids = Self::ordered_generic_param_ids(&scope, &Default::default());
         let application = self.with_protocol_source_scope(
             declaration.owner.clone(), self.current_source_substitution.clone(), Some(receiver.clone()),
@@ -6012,7 +6012,7 @@ impl VbcCodegen {
                         }
 
                         if let Err(error) = self.compile_declared_impl_function(
-                            func, &impl_decl.kind, type_name.as_ref(),
+                            func, impl_decl, type_name.as_ref(),
                         ) {
                             if let Err(error) = self.handle_body_failure(
                                 func, type_name.as_deref(), error, policy, &mut first_strict_err,
@@ -10117,12 +10117,8 @@ impl VbcCodegen {
                                 // method-local binders. Reuse its exact witness for
                                 // all selected methods in this declaration.
                                 if registered_receiver.is_none() {
-                                    let target = match &impl_decl.kind {
-                                        verum_ast::decl::ImplKind::Inherent(target) => target,
-                                        verum_ast::decl::ImplKind::Protocol { for_type, .. } => for_type,
-                                    };
                                     let scope = self.declared_impl_generic_scope(&impl_decl.kind, &impl_generics);
-                                    registered_receiver = Some(self.resolve_impl_receiver(target, &scope, &impl_generics)?);
+                                    registered_receiver = Some(self.resolve_impl_receiver(impl_decl, &scope, &impl_generics)?);
                                 }
                                 function_id = self.register_declared_impl_function(
                                     func, registered_receiver.as_ref().expect("receiver resolved above"),

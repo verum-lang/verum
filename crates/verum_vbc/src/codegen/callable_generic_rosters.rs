@@ -617,32 +617,16 @@ impl VbcCodegen {
         )
     }
 
+    /// The implementation declaration owns binder roles independently of the
+    /// caller currently asking about it (for example, an entailment candidate).
     pub(super) fn implementation_value_scope(
         &self,
-        target: &verum_ast::Type,
+        declaration: &verum_ast::decl::ImplDecl,
         scope: &std::collections::HashMap<String, u16>,
     ) -> CodegenResult<SourceTypeSubstitution> {
-        let mut substitution = self.current_source_substitution.clone();
-        if let Some(parameters) = self.current_impl_ast_generics.as_deref() {
-            substitution = substitution.for_parameters(parameters);
-            self.bind_source_value_parameters(parameters, scope, &mut substitution)?;
-        } else if let Some(roster) = self
-            .implementation_type_nominal_id(target)
-            .and_then(|id| self.declaration_generic_roster(id))
-        {
-            for parameter in roster
-                .iter()
-                .filter(|parameter| scope.contains_key(&parameter.name))
-            {
-                if let Some(source) = &parameter.source {
-                    self.bind_source_value_parameters(
-                        std::slice::from_ref(source),
-                        scope,
-                        &mut substitution,
-                    )?;
-                }
-            }
-        }
+        let parameters = self.implementation_source_parameters(declaration)?;
+        let mut substitution = self.current_source_substitution.for_parameters(&parameters);
+        self.bind_source_value_parameters(&parameters, scope, &mut substitution)?;
         Ok(substitution)
     }
 

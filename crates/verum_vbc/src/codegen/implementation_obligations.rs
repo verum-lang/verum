@@ -402,12 +402,16 @@ impl VbcCodegen {
             None,
             |cg| {
                 let declaration = &header.declaration;
-                let ImplKind::Protocol { for_type, .. } = &declaration.kind else {
+                if !matches!(declaration.kind, ImplKind::Protocol { .. }) {
                     return Ok(None);
-                };
+                }
                 let (_, _, names) = cg.resolve_impl_generics(declaration);
                 let scope = cg.declared_impl_generic_scope(&declaration.kind, &names);
-                let receiver = cg.resolve_impl_receiver(for_type, &scope, &names)?;
+                // An alternative belongs to its own declaration. The querying
+                // implementation cannot supply or erase its value binders.
+                let source_bindings = cg.implementation_value_scope(declaration, &scope)?;
+                cg.current_source_substitution = source_bindings.clone();
+                let receiver = cg.resolve_impl_receiver(declaration, &scope, &names)?;
                 let mut bindings = TypeSubstitution::empty();
                 if !receiver.semantic
                     || !match_declared_types(&receiver.ty, &goal.subject, &mut bindings)
@@ -442,13 +446,14 @@ impl VbcCodegen {
                             ..Default::default()
                         }));
                     };
-                    substitution.insert(
-                        name.clone(),
-                        ImplReceiverWitness {
-                            ty: actual.clone(),
-                            semantic: true,
-                        },
-                    );
+                    let witness = ImplReceiverWitness { ty: actual.clone(), semantic: true };
+                    if let Some((_, domain)) = source_bindings.get_value(name) {
+                        let domain = bindings.apply(domain)
+                            .map_err(|error| invalid(error.to_string(), declaration.span))?;
+                        substitution.insert_value(name.clone(), witness, domain);
+                    } else {
+                        substitution.insert(name.clone(), witness);
+                    }
                 }
                 cg.with_protocol_source_scope(
                     Some(header.source.origin_module().into()),
