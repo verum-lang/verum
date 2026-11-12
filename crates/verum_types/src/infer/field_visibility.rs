@@ -190,7 +190,7 @@ impl TypeChecker {
         Err(self.unknown_record_visibility(&last_key, member, span))
     }
 
-    fn check_declared_field_visibility(
+    pub(super) fn check_declared_member_visibility(
         &self,
         owner: &Text,
         field: &Text,
@@ -546,7 +546,7 @@ impl TypeChecker {
                 .iter()
                 .find(|(name, _)| name.as_str() == field)
         {
-            self.check_declared_field_visibility(&record.owner, name, visibility, span)?;
+            self.check_declared_member_visibility(&record.owner, name, visibility, span)?;
         }
         Ok(())
     }
@@ -560,7 +560,7 @@ impl TypeChecker {
     ) -> Result<()> {
         if let Some(record) = self.record_visibility(receiver, "record construction", span)? {
             for (name, visibility) in &record.fields {
-                self.check_declared_field_visibility(&record.owner, name, visibility, span)?;
+                self.check_declared_member_visibility(&record.owner, name, visibility, span)?;
             }
         }
         Ok(())

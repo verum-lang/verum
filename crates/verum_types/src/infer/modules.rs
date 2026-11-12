@@ -5923,20 +5923,27 @@ impl TypeChecker {
             let mut const_registrations: Vec<(String, TypeScheme)> = Vec::new();
 
             for item in &impl_decl.items {
-                // Handle associated constants
-                // Note: Impl block items without explicit `public` default to Private,
-                // but for cross-file imports the type itself was already exported via `mount`,
-                // so we import all associated constants regardless of visibility.
-                // This follows the principle that exporting a type exports its API.
+                // Keep declaration policy with the scheme. Importing a type
+                // does not make its private associated values public.
                 if let ImplItemKind::Const { name, ty, .. } = &item.kind {
                     // Build the constant type
-                    let const_type = self.ast_to_type(ty).unwrap_or(Type::Int);
+                    let const_type = match self.ast_to_type(ty) {
+                        Ok(ty) => ty,
+                        Err(error) => {
+                            registration_error.get_or_insert(error);
+                            continue;
+                        }
+                    };
                     let qualified_name = format!("{}.{}", method_owner, name.name);
-                    let const_scheme = if impl_type_vars.is_empty() {
+                    let mut const_scheme = if impl_type_vars.is_empty() {
                         TypeScheme::mono(const_type)
                     } else {
                         TypeScheme::poly(impl_type_vars.clone(), const_type)
                     };
+                    const_scheme.value_declaration = Some(verum_common::Shared::new(crate::context::ValueDeclaration {
+                        name: name.name.clone(), owner: self.current_module_path.clone(),
+                        visibility: item.visibility.clone(),
+                    }));
 
                     // Collect for registration after scope exit
                     const_registrations.push((qualified_name.clone(), const_scheme));

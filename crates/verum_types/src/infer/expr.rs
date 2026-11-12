@@ -8678,6 +8678,19 @@ impl TypeChecker {
             return self.resolve_multi_segment_path(&path, expr.span);
         }
 
+        // An associated value belongs to the declared type, not to its
+        // expression-level constructor function. Use the same owner key as
+        // annotations and impl registration; lexical values still shadow it.
+        if let Some(operand) = self.declaration_property_operand(obj)
+            && let verum_ast::ty::TypeKind::Path(path) = &operand.kind
+            && let Ok((_, Some(owner))) =
+                self.resolve_qualified_type_with_parameter_key(path, operand.span)
+            && let Some(scheme) = self.ctx.env.lookup(&format!("{owner}.{}", field.name)).cloned()
+        {
+            let ty = self.instantiate_value_scheme(&scheme, expr.span)?;
+            return Ok(InferResult::new(ty));
+        }
+
         if let Some(property) = verum_ast::TypeProperty::from_str(field.name.as_str())
             && let Some(ty) = self.declaration_property_operand(obj)
         {

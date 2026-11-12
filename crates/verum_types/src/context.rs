@@ -105,6 +105,14 @@ pub(crate) fn instantiate_binders(
     Ok(substitution)
 }
 
+/// Declaration policy travels with a value scheme through imports and aliases.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ValueDeclaration {
+    pub name: Text,
+    pub owner: Text,
+    pub visibility: verum_ast::Visibility,
+}
+
 /// A type scheme represents a polymorphic type: ∀α β. T
 ///
 /// This enables let-polymorphism where bound variables can
@@ -115,6 +123,7 @@ pub(crate) fn instantiate_binders(
 pub struct TypeScheme {
     /// Source identity is retained independently of fresh generic variables.
     pub(crate) callable_source: Option<(Text, Shared<verum_ast::FunctionDecl>)>,
+    pub(crate) value_declaration: Option<Shared<ValueDeclaration>>,
     /// Universally quantified type variables
     pub vars: List<TypeVar>,
     /// Rigid value parameters, including their exact scalar sorts and domains.
@@ -322,6 +331,7 @@ impl TypeScheme {
             value_parameters: List::new(),
             universe_params: List::new(),
             callable_source: None,
+            value_declaration: None,
         }
     }
 
@@ -342,6 +352,7 @@ impl TypeScheme {
             value_parameters: List::new(),
             universe_params: List::new(),
             callable_source: None,
+            value_declaration: None,
         }
     }
 
@@ -363,6 +374,7 @@ impl TypeScheme {
             value_parameters: List::new(),
             universe_params: List::new(),
             callable_source: None,
+            value_declaration: None,
         }
     }
 
@@ -389,6 +401,7 @@ impl TypeScheme {
             value_parameters: List::new(),
             universe_params: List::new(),
             callable_source: None,
+            value_declaration: None,
         }
     }
 

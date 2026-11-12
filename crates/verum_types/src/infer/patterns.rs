@@ -3518,6 +3518,7 @@ impl TypeChecker {
                     explicit_method_vars: None,
                     universe_params: List::new(),
                     callable_source: None,
+                    value_declaration: None,
                 },
             );
         }

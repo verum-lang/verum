@@ -5457,15 +5457,26 @@ impl TypeChecker {
                         // This matches how methods work: you can always access your own impl items.
                         if let ImplItemKind::Const { name, ty, .. } = &item.kind {
                             // Build the constant type
-                            let const_type = self.ast_to_type(ty).unwrap_or(Type::Int);
+                            let const_type = match self.ast_to_type(ty) {
+                                Ok(ty) => ty,
+                                Err(error) => {
+                                    self.deferred_soundness_errors.push(error);
+                                    continue;
+                                }
+                            };
                             let qualified_name = format!("{}.{}", type_name_str, name.name);
 
                             // Generalize with impl type parameters if any
-                            let const_scheme = if type_param_names.is_empty() {
+                            let mut const_scheme = if type_param_names.is_empty() {
                                 TypeScheme::mono(const_type)
                             } else {
                                 self.ctx.generalize_ordered(const_type, &type_param_names)
                             };
+                            inherit_domain(&mut const_scheme);
+                            const_scheme.value_declaration = Some(verum_common::Shared::new(crate::context::ValueDeclaration {
+                                name: name.name.clone(), owner: self.current_module_path.clone(),
+                                visibility: item.visibility.clone(),
+                            }));
 
                             // Register in environment with qualified name
                             self.ctx.env.insert_value(qualified_name.as_str(), const_scheme);

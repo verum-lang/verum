@@ -122,6 +122,12 @@ impl TypeChecker {
         scheme: &TypeScheme,
         span: Span,
     ) -> Result<InstantiatedScheme> {
+        if let Some(declaration) = &scheme.value_declaration {
+            self.check_declared_member_visibility(
+                &declaration.owner, &declaration.name,
+                &Some(declaration.visibility.clone()), span,
+            )?;
+        }
         let instance = scheme
             .try_instantiate()
             .map_err(|message| TypeError::UniverseBinding { message, span })?;
