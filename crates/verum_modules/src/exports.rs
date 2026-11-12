@@ -1398,7 +1398,7 @@ fn propagate_inline_submodule_reexports(
             };
             let child_id = child_info.id;
             let mut to_add = ExportTable::new();
-            for (name, exported) in child_info.exports.all_exports() {
+            for (_, exported) in child_info.exports.all_exports() {
                 // Genuine-re-export test (the flattening guard).
                 if exported.kind == ExportKind::Module {
                     continue;
@@ -1406,13 +1406,10 @@ fn propagate_inline_submodule_reexports(
                 if exported.source_module == child_id {
                     continue;
                 }
-                let _ = to_add.add_export(ExportedItem::new(
-                    name.as_str(),
-                    exported.kind,
-                    Visibility::Public,
-                    exported.source_module,
-                    exported.span,
-                ));
+                // The inline surface changes neither declaration identity nor
+                // visibility. Retain original names, predicates and contracts;
+                // a public module must not promote a restricted export.
+                let _ = to_add.add_export(exported.clone());
             }
             if !to_add.is_empty() {
                 plans.push((*parent_id, to_add));

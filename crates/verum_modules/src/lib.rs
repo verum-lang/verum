@@ -524,17 +524,10 @@ impl ModuleRegistry {
             let mut updated = (**existing).clone();
             let pre_len = updated.exports.len();
 
-            // Add each export from source to target
-            for (name, item) in source_exports.all_exports() {
-                // Re-export with the source's info but from the target module
-                let reexport = exports::ExportedItem::new(
-                    name.as_str(),
-                    item.kind,
-                    item.visibility.clone(),
-                    item.source_module,
-                    item.span,
-                );
-                let _ = updated.exports.add_export(reexport);
+            // Re-export the complete declaration payload. Reconstructing a
+            // descriptor from its name/kind loses aliases and proof obligations.
+            for (_, item) in source_exports.all_exports() {
+                let _ = updated.exports.add_export(item.clone());
             }
 
             newly_added = updated.exports.len().saturating_sub(pre_len);
