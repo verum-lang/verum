@@ -72,6 +72,62 @@ fn a_diverging_source_handler_remains_synchronous() {
 }
 
 #[test]
+fn imported_factories_and_qualified_helpers_preserve_synchronous_bounds() {
+    let source = "mount platform.inspect;
+        static mut HANDLER: fn() = handler;
+        fn handler() { inspect(); }";
+    for provider in [
+        "public type Outcome<T> is Value(T); public fn inspect() -> Outcome<Int> { Outcome.Value(7) }",
+        "public type Error is { public code: Int }; implement Error { public fn create(code: Int) -> Error { Error { code: code } } } public fn inspect() -> Error { Error.create(7) }",
+        "public fn message(code: Int) -> Int { code + 1 } public fn inspect() -> Int { platform.message(7) }",
+    ] {
+        let accepted = errors_with_provider(source, Some(provider));
+        assert!(accepted.is_empty(), "{provider}: {accepted:?}");
+    }
+    let provider = "public type Outcome<T> is Value(T) | Failed(Int);
+        public type Error is { public code: Int };
+        implement Error { public fn create(code: Int) -> Error { Error { code: code } } }
+        extern \"C\" { fn read_value() -> Int; }
+        public fn message(code: Int) -> Int { code + 1 }
+        public fn inspect() -> Outcome<Error> {
+            let code = unsafe { read_value() };
+            if code < 0 { Outcome.Failed(platform.message(code)) }
+            else { Outcome.Value(Error.create(code)) }
+        }";
+    let accepted = errors_with_provider(source, Some(provider));
+    assert!(accepted.is_empty(), "{accepted:?}");
+    for changed in [provider.replace("public fn message", "public async fn message"),
+                    provider.replace("public fn create", "public async fn create")] {
+        let rejected = errors_with_provider(source, Some(&changed));
+        assert!(!rejected.is_empty(), "suspending factory/helper supplied false evidence");
+    }
+}
+
+#[test]
+fn source_contracts_cannot_bypass_shadowing_or_opaque_factories() {
+    let source = "mount platform.inspect; static mut HANDLER: fn() = handler;
+                  fn handler() { inspect(); }";
+    for provider in [
+        "public type Error is {}; implement Error { public fn create() -> Error; }
+         public fn inspect() -> Error { Error.create() }",
+        "public type Error is {}; implement Error { public async fn create() -> Error { Error {} } }
+         public fn inspect() -> Error { Error.create() }",
+        "type Receiver is {}; implement Receiver { async fn message(&self) -> Int { 7 } }
+         static platform: Receiver = Receiver {}; public fn message() -> Int { 7 }
+         public fn inspect() -> Int { platform.message() }",
+        "type Receiver is {}; implement Receiver { async fn message(&self) -> Int { 7 } }
+         public fn message() -> Int { 7 }
+         public fn inspect() -> Int { let platform = Receiver {}; platform.message() }",
+        "public type Error is {}; implement Error { public fn create() -> Error { Error {} } }
+         public fn inspect() -> Error { let Error = async || Error {}; Error() }",
+        "public type Event is Value(Int);
+         public fn inspect() -> Event { Event.Value(pending()) } async fn pending() -> Int { 7 }",
+    ] {
+        assert!(!errors_with_provider(source, Some(provider)).is_empty(), "{provider}");
+    }
+}
+
+#[test]
 fn intrinsic_declarations_propagate_the_selected_lowering_bound() {
     for provider in [
         "@intrinsic(\"text_byte_len\") public fn inspect(value: &Text) -> Int;",
