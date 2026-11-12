@@ -60,6 +60,9 @@ fn task_equality_observes_identity_and_join_error_variant() {
             if !cancelled.eq(&cancelled) { return 4; }
             if !panicked.eq(&panicked) { return 5; }
             if cancelled.eq(&panicked) { return 6; }
+            if !JoinError.Cancelled.eq(&JoinError.Cancelled) { return 7; }
+            if JoinError.Cancelled.eq(&JoinError.Panicked) { return 8; }
+            if !JoinError.Panicked.eq(&JoinError.Panicked) { return 9; }
             73
         }
     "#,

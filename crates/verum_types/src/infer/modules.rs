@@ -18043,20 +18043,13 @@ impl TypeChecker {
             let mut namespace_first = if base_is_module_alias || base_is_module_path || base_is_inline_namespace {
                 let (_, first_method, first_type_args, first_args, first_span) =
                     chain.last().expect("method chain is nonempty");
-                let resolved = tc.try_resolve_pre_receiver_method(
+                // A dotted qualifier can denote a value (a variant or an
+                // associated constant), not only a namespace. A static lookup
+                // miss leaves ordinary receiver synthesis responsible for its
+                // declaration and type; it cannot invent a namespace failure.
+                tc.try_resolve_pre_receiver_method(
                     current_receiver, first_method, first_type_args, first_args, *first_span, false,
-                )?;
-                Some(resolved.ok_or_else(|| {
-                    let receiver_name = match &current_receiver.kind {
-                        ExprKind::Path(path) => tc.path_to_string(path),
-                        ExprKind::Field { expr, field } => tc.extract_module_path_from_field(expr, field)
-                            .map(|segments| Text::from(segments.join("."))).unwrap_or_default(),
-                        _ => Text::new(),
-                    };
-                    TypeError::UnboundVariable {
-                        name: format!("{}.{}", receiver_name, first_method.name).into(), span: *first_span,
-                    }
-                })?)
+                )?
             } else { None };
             let mut current_ty = if let Some(resolved) = &namespace_first {
                 resolved.ty.clone()

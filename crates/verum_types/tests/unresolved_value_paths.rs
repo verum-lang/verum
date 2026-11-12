@@ -118,3 +118,49 @@ fn actual_source_reexports_externs_and_intrinsics_remain_declared_values() {
     ]);
     accepts("module native {@intrinsic(\"exit_process\") public fn exit_process(code:Int)->!;} fn probe()->! {native.exit_process(0)}", &[]);
 }
+const QUALIFIED_VALUE_DECLARATIONS: &str = r#"
+public type State is | Cold | Warm;
+public type Marker is protocol { fn marker(&self) -> Int; };
+implement State {
+    public fn degree(&self) -> Int {
+        match self { State.Cold => 0, State.Warm => 1 }
+    }
+}
+implement Marker for State {
+    fn marker(&self) -> Int { self.degree() }
+}
+"#;
+
+#[test]
+fn qualified_variant_values_are_instance_method_receivers() {
+    for expression in ["State.Cold.degree()", "State.Warm.marker()"] {
+        accepts(
+            &format!("{QUALIFIED_VALUE_DECLARATIONS}\nfn probe()->Int {{{expression}}}"),
+            &[],
+        );
+        accepts(
+            &format!("mount source.{{State, Marker}}; fn probe()->Int {{{expression}}}"),
+            &[("source", QUALIFIED_VALUE_DECLARATIONS)],
+        );
+    }
+    accepts(
+        "mount source.{State as Phase, Marker}; fn probe()->Int {Phase.Warm.marker()}",
+        &[("source", QUALIFIED_VALUE_DECLARATIONS)],
+    );
+}
+
+#[test]
+fn qualified_value_method_misses_and_bad_arguments_are_refused() {
+    for (expression, expected) in [
+        ("State.Cold.absent()", "MethodNotFound"),
+        ("State.Cold.degree(7)", "WrongArgCount"),
+        ("State.Warm.marker(false)", "WrongArgCount"),
+    ] {
+        let source = format!("{QUALIFIED_VALUE_DECLARATIONS}\nfn probe()->Int {{{expression}}}");
+        let errors = check(&source, &[]);
+        assert!(
+            errors.iter().any(|error| error.contains(expected)),
+            "expected {expected} for {source}: {errors:?}"
+        );
+    }
+}
