@@ -65,6 +65,39 @@ fn standalone_server_analyzes_without_cargos_stack_environment() {
         "Logger"
     );
 
+    // Exercise the actual hover protocol that the browser renders. The DOM
+    // tests also cover the diagnostic-bearing Markdown reported by the user.
+    let hover_source = "type Source is { value: Int };";
+    let (status, hover) = post(host, Some(token), &json!({
+        "method": "language.request",
+        "params": {
+            "path": "hover.vr", "source": hover_source,
+            "method": "textDocument/hover",
+            "position": {"line": 0, "character": hover_source.find("Source").unwrap()}
+        }
+    }));
+    assert_eq!(status, 200);
+    let contents = &hover["result"]["result"]["contents"];
+    assert_eq!(contents["kind"], "markdown", "{hover}");
+    let markdown = contents["value"].as_str().unwrap();
+    assert!(markdown.contains("```verum"), "{markdown}");
+    assert!(markdown.contains("Source") && markdown.contains("value"), "{markdown}");
+
+    // Verify the executable serves the rebuilt UI, rather than an older bundle.
+    for (path, expected) in [
+        ("/app.js", include_str!("../ui/dist/app.js")),
+        ("/app.css", include_str!("../ui/dist/app.css")),
+    ] {
+        let mut stream = TcpStream::connect(host).unwrap();
+        stream.set_read_timeout(Some(Duration::from_secs(30))).unwrap();
+        write!(stream, "GET {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n").unwrap();
+        let mut response = String::new();
+        stream.read_to_string(&mut response).unwrap();
+        let (header, content) = response.split_once("\r\n\r\n").unwrap();
+        assert_eq!(header.split_whitespace().nth(1), Some("200"));
+        assert_eq!(content, expected, "packaged asset {path}");
+    }
+
     let mut previous_revision = body["result"]["result"]["project_revision"].clone();
     for (source, expected_codes) in [
         (
