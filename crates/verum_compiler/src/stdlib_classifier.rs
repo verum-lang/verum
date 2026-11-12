@@ -275,8 +275,7 @@ fn classify_sdk(
             _ => ClassifierError::SdkNotInstalled,
         })?;
 
-    // Read each file's source then classify in parallel.  Same rayon
-    // 16 MB stack pool as `classify_archive` for the recursive parser.
+    // Read each file's source, then classify on ordinary rayon workers.
     let mut sources: Vec<(String, String, String)> = Vec::with_capacity(modules.len());
     for (dotted, file_path) in modules {
         let src = std::fs::read_to_string(&file_path).map_err(ClassifierError::Io)?;
@@ -287,14 +286,7 @@ fn classify_sdk(
         sources.push((dotted, rel_path, src));
     }
 
-    let classifications = match rayon::ThreadPoolBuilder::new()
-        .stack_size(16 * 1024 * 1024)
-        .build()
-    {
-        Ok(pool) => pool.install(|| classify_owned_sources_in_parallel(&sources)),
-        Err(_) => classify_owned_sources_in_parallel(&sources),
-    };
-    let mut classifications = classifications;
+    let mut classifications = classify_owned_sources_in_parallel(&sources);
     classifications.sort_by(|a, b| a.module_path.cmp(&b.module_path));
 
     let mut stats = ClassificationStats::default();
@@ -336,20 +328,7 @@ pub fn classify_archive(
     // Sorted module list for deterministic output.
     let modules: Vec<&str> = index.all_modules().iter().map(|s| s.as_str()).collect();
 
-    // The fast parser is heavily recursive — at default rayon worker
-    // stack (~2 MB) some stdlib modules trip a stack overflow on
-    // debug builds. Build a dedicated thread pool with a 16 MB stack
-    // so per-module parses always fit. Falling back to the global
-    // pool when a custom pool can't be built keeps the classifier
-    // available even if rayon initialisation fails.
-    let classifications = match rayon::ThreadPoolBuilder::new()
-        .stack_size(16 * 1024 * 1024)
-        .build()
-    {
-        Ok(pool) => pool.install(|| classify_modules_in_parallel(&modules, archive, index)),
-        Err(_) => classify_modules_in_parallel(&modules, archive, index),
-    };
-    let mut classifications = classifications;
+    let mut classifications = classify_modules_in_parallel(&modules, archive, index);
 
     // Re-sort after parallel collect to keep deterministic order
     // (par_iter preserves source order for `collect` into `Vec`, but be

@@ -40,14 +40,10 @@ fn main() -> ExitCode {
         .with_writer(std::io::stderr)
         .try_init();
 
-    // Compiler entry points and integration-test workers use a bounded 16 MiB
-    // stack. RUST_MIN_STACK does not configure the platform's main thread;
-    // running bootstrap there overflows on stdlib re-export traversal in debug
-    // builds. Match the CLI's worker contract without dynamic stack growth.
-    const COMPILER_STACK_BYTES: usize = 16 * 1024 * 1024;
+    // Bootstrap uses the same ordinary worker stack as the compiler. Source
+    // nesting is bounded at parsing/elaboration, not by growing this stack.
     let result = std::thread::Builder::new()
         .name("verum-stdlib-precompiler".into())
-        .stack_size(COMPILER_STACK_BYTES)
         .spawn(run)
         .context("could not start stdlib compiler worker")
         .and_then(|worker| match worker.join() {
