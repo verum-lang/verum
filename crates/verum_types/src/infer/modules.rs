@@ -8746,7 +8746,8 @@ impl TypeChecker {
             if let ItemKind::Function(func) = &item.kind {
                 // Ignore errors - we just want the signatures registered
                 // The actual type checking will happen later if needed
-                let _ = self.register_function_signature(func);
+                let qualified = format!("{module_path}.{}", func.name.name).into();
+                let _ = self.register_function_signature_as(func, &qualified);
             }
             // A NAME DECLARED IN `@ffi(...) extern { }` IS A FUNCTION
             // SIGNATURE TOO (T1085). Two sibling walks in this file
@@ -8768,7 +8769,8 @@ impl TypeChecker {
             // the surface said yes and nothing defined the name.
             if let ItemKind::ExternBlock(extern_block) = &item.kind {
                 for func in &extern_block.functions {
-                    let _ = self.register_function_signature(func);
+                    let qualified = format!("{module_path}.{}", func.name.name).into();
+                    let _ = self.register_function_signature_as(func, &qualified);
                 }
             }
         }
@@ -9690,12 +9692,14 @@ impl TypeChecker {
             // within the imported module itself
             self.preregister_module_function_signatures(&module_info, registry);
 
-            // Import all public exports.
+            // A glob imports the same visible surface as named imports, which
+            // includes cog/path-restricted declarations for eligible callers.
             // Sort names for deterministic import order — ExportTable uses HashMap
             // internally, so iteration order varies between runs.
+            let caller = verum_modules::ModulePath::from_str(&self.current_module_path);
             let mut names: Vec<String> = module_info
                 .exports
-                .public_exports()
+                .visible_exports(&caller)
                 .map(|e| e.name.to_string())
                 .collect();
             names.sort();

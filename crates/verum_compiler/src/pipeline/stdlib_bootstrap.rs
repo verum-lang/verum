@@ -407,7 +407,7 @@ impl<'s> CompilationPipeline<'s> {
         if config.verbose {
             eprintln!("Phase 2.7: Pre-registering public free functions...");
         }
-        self.pre_register_public_free_functions(&all_parsed_modules)?;
+        self.pre_register_source_free_functions(&all_parsed_modules)?;
 
         // Phase 2.8 (stage-4): same architectural rule for public
         // module-level CONSTS — uniquely-named consts must resolve
@@ -1322,8 +1322,10 @@ one module and therefore never seeded",
         Ok(())
     }
 
-    /// Register every public free function under its declaring source path.
-    /// Only globally unique leaf names also receive a convenience alias.
+    /// Register every source free function under its declaring source path.
+    /// Visibility is enforced by source export resolution, not by removing
+    /// declarations needed by eligible consumers. Only globally unique public
+    /// leaf names also receive a convenience alias.
     /// Declaration interfaces and later bodies update the same function ID.
     ///
     /// Paired with `emit_missing_stub_descriptors_with_callm(false)`
@@ -1337,7 +1339,7 @@ one module and therefore never seeded",
     /// archive-wide `archive_func_by_name` index (populated for every
     /// loaded archive function regardless of mount set).
     ///
-    fn pre_register_public_free_functions(
+    fn pre_register_source_free_functions(
         &mut self,
         all_modules: &[(String, Vec<OwnedSourceFile>)],
     ) -> Result<()> {
@@ -1373,9 +1375,6 @@ one module and therefore never seeded",
                         ItemKind::Function(f) => f,
                         _ => continue,
                     };
-                    if !matches!(func.visibility, Visibility::Public) {
-                        continue;
-                    }
                     let name = func.name.name.to_string();
                     let qualified = verum_vbc::module::qualify_module_name(&owner, &name);
                     if self.global_function_registry.contains_key(&qualified) {
@@ -1415,7 +1414,7 @@ one module and therefore never seeded",
                         param_closure_return_type_names: Vec::new(),
                     };
                     self.global_function_registry.insert(qualified, info.clone());
-                    if name_counts.get(&name) == Some(&1) {
+                    if func.visibility.is_public() && name_counts.get(&name) == Some(&1) {
                         self.global_function_registry.entry(name).or_insert(info);
                     }
                     stubs_registered += 1;
@@ -1424,7 +1423,7 @@ one module and therefore never seeded",
         }
         if std::env::var("VERUM_TRACE_STUB").is_ok() {
             eprintln!(
-                "[stage-3] pre-registered {} source-qualified public free-fn stubs",
+                "[stage-3] pre-registered {} source-qualified free-fn declarations",
                 stubs_registered
             );
         }

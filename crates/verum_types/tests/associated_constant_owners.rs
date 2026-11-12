@@ -80,3 +80,24 @@ fn imported_associated_values_keep_visibility_and_renamed_owners() {
     assert!(found.iter().any(|error| error.contains("SECRET") && error.contains("visibility")), "{found:?}");
     assert!(!check("fn wrong() -> Bool { Imported.LIMIT }").is_empty());
 }
+
+#[test]
+fn named_and_glob_imports_obey_restricted_declaration_visibility() {
+    for owner in ["measures.vault", "foreign.vault"] {
+        let declaration = format!("module {owner};
+            public(cog) fn inspect() -> Int {{ 7 }}
+            public(cog) const LIMIT: Int = 7;
+            fn hidden() -> Int {{ 9 }}");
+        for mount in [format!("mount {owner}.{{inspect, LIMIT}};"), format!("mount {owner}.*;")] {
+            let found = errors_with_module(
+                &format!("{mount} fn read() -> Int {{ inspect() + LIMIT }}"),
+                Some((owner, &declaration)),
+            );
+            assert_eq!(found.is_empty(), owner == "measures.vault", "{mount}: {found:?}");
+            assert!(!errors_with_module(
+                &format!("{mount} fn leak() -> Int {{ hidden() }}"),
+                Some((owner, &declaration)),
+            ).is_empty());
+        }
+    }
+}

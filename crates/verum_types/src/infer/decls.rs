@@ -6191,6 +6191,14 @@ impl TypeChecker {
     }
 
     pub fn register_function_signature(&mut self, func: &verum_ast::FunctionDecl) -> Result<()> {
+        self.register_function_signature_as(func, &func.name.name)
+    }
+
+    /// Register a declaration under a chosen lexical binding without changing
+    /// its source owner or universe/generic parameter identities.
+    pub(super) fn register_function_signature_as(
+        &mut self, func: &verum_ast::FunctionDecl, binding: &Text,
+    ) -> Result<()> {
         use verum_ast::decl::FunctionParamKind;
         let scheme = self.source_function_scheme(func)?;
         // ================================================================
@@ -6235,7 +6243,7 @@ impl TypeChecker {
         self.function_param_names
             .insert(qualified_function, collected_param_names.clone());
         self.function_param_names
-            .insert(func.name.name.clone(), collected_param_names);
+            .insert(binding.clone(), collected_param_names);
 
         // Phase 2b-Integration (#291) — seed the MLS classification
         // sidecar from per-parameter `@classification(<level>)`
@@ -6279,7 +6287,7 @@ impl TypeChecker {
         // all-Public list when none classified) so call-site
         // lookups by function name produce a consistent shape.
         self.function_param_classifications
-            .insert(func.name.name.clone(), param_classifications);
+            .insert(binding.clone(), param_classifications);
 
         // Protect builtin generic/meta functions from being DOWNGRADED by stdlib.
         // When a generic builtin (e.g., fn<T>(T) -> T for abs) already exists,
@@ -6291,7 +6299,7 @@ impl TypeChecker {
         // `register_intrinsics`) and the protection site stay in sync —
         // drift is pinned by the `meta_reflection_builtins_all_registered`
         // and `io_and_numeric_builtins_pinned` tests.
-        let func_name = func.name.name.as_str();
+        let func_name = binding.as_str();
         // T0231: the predicate lives in ONE place now —
         // `TypeChecker::insert_fn_scheme_guarded` (env.rs, next to the
         // canonical name lists) — because this registration path was
@@ -6322,7 +6330,7 @@ impl TypeChecker {
         }
         if !should_skip_registration {
             self.function_required_params
-                .insert(func.name.name.clone(), required_params);
+                .insert(binding.clone(), required_params);
         }
 
         tracing::debug!(

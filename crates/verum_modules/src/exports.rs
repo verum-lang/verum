@@ -478,6 +478,17 @@ impl ExportTable {
             .filter(|item| item.visibility == Visibility::Public)
     }
 
+    /// Declarations accessible to this consumer, including restricted exports
+    /// inside their declared scope. Public API enumeration remains separate.
+    pub fn visible_exports<'a>(
+        &'a self,
+        from_module: &'a crate::path::ModulePath,
+    ) -> impl Iterator<Item = &'a ExportedItem> {
+        self.exports.values().filter(move |item| {
+            self.is_visible_from_path(&item.name, from_module)
+        })
+    }
+
     /// Public binding names for diagnostics. Repeated errors share the same
     /// immutable surface; a later mutation leaves existing errors unchanged.
     pub fn public_export_names(&self) -> Shared<List<Text>> {
@@ -687,8 +698,10 @@ pub fn extract_exports_with_policy(
     // Under `WholeSurface` every declaration is exported, and exported
     // AS public — a unit-mate mounting a name must find it visible, not
     // merely present.
+    // A restricted declaration still crosses a module boundary. Retain its
+    // policy in the table; the importing module decides whether it can see it.
     let exports_it = |vis: &AstVisibility| -> bool {
-        policy == ExportVisibilityPolicy::WholeSurface || *vis == AstVisibility::Public
+        policy == ExportVisibilityPolicy::WholeSurface || *vis != AstVisibility::Private
     };
     let effective = |vis: &AstVisibility| -> Visibility {
         match policy {
