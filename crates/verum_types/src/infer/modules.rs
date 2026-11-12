@@ -7253,8 +7253,8 @@ impl TypeChecker {
     ///
     /// Name resolution: deterministic lookup through module hierarchy, import resolution, re-exports — .4 - Re-exports
     ///
-    /// Relies on RUST_MIN_STACK=16MB for stack safety when following
-    /// deep re-export chains.
+    /// The graph walk uses explicit continuations and does not consume stack
+    /// proportional to the number of re-exporting modules.
     pub(crate) fn find_type_declaration_with_source_module(
         &self,
         ast: &verum_ast::Module,
@@ -7262,11 +7262,11 @@ impl TypeChecker {
         current_module_path: &Text,
         registry: &verum_modules::ModuleRegistry,
     ) -> Option<(verum_ast::decl::TypeDecl, Text)> {
-        // Thread a fresh visited-set through the recursion so that ring-shaped
+        // A fresh visited set bounds ring-shaped
         // `public mount` re-exports (e.g., `core.pkg` re-exports `core.pkg.sub`
         // whose last segment matches a type `sub` being searched for — the
         // source path strips the last segment back to `core.pkg`, re-entering
-        // the same AST) terminate with None instead of blowing the stack.
+        // the same AST) to one visit per canonical module/name pair.
         // See also: `resolve_export_kind_with_reexports` (343fc3a8) which uses
         // the same pattern for the sibling kind-resolution walk.
         let mut visited = Set::new();
@@ -7295,141 +7295,152 @@ impl TypeChecker {
         use verum_ast::ItemKind;
         use verum_ast::decl::Visibility as AstVisibility;
 
-        // A mount spelling may be an alias. Declaration identity, relative
-        // mounts and cycle detection belong to the resolved registry module.
-        let canonical_owner = self
-            .get_module_with_path_aliases(current_module_path, registry)
-            .map(|module| Text::from(module.path.to_string()));
-        let current_module_path = canonical_owner.as_ref().unwrap_or(current_module_path);
-
-        // Cycle guard: if we are already walking the re-export chain for this
-        // (module, type) pair, return None to break the recursion. Returning
-        // None is safe — callers fall through to their next strategy (e.g.,
-        // checking the module's own export table or searching parent modules).
-        // Without this guard, a module that re-exports a submodule whose name
-        // collides with the target type (`public mount a.b.sub;` + lookup of
-        // `sub` in `a.b`) recurses indefinitely and SIGBUSes.
-        let key = (current_module_path.clone(), Text::from(type_name));
-        if !visited.insert(key) {
-            return None;
+        // The entry AST can be a lexical source scope rather than the registry
+        // module's AST. Later scopes retain immutable owners, never AST copies.
+        enum Source<'a> {
+            Borrowed(&'a verum_ast::Module),
+            Registered(Shared<verum_modules::ModuleInfo>),
         }
-
-        if require_exported_source && !allow_local_mounts {
-            let module = self.get_module_with_path_aliases(current_module_path, registry)?;
-            let export = module.exports.get(&Text::from(type_name))?;
-            if export.kind != verum_modules::ExportKind::Type
-                || export.visibility != verum_ast::Visibility::Public
-            {
-                return None;
-            }
-            // Resolved glob reexports may reach a parent from a public inline
-            // module. The parent has no corresponding mount in its own AST.
-            if export.source_module != module.id
-                && let Some(origin) = registry.get(export.source_module)
-                && let Some(resolved) = self.find_type_declaration_with_source_module_inner(
-                    &origin.ast,
-                    export.original_name.as_deref().unwrap_or(type_name),
-                    &Text::from(origin.path.to_string()),
-                    registry,
-                    visited,
-                    true,
-                    false,
-                )
-            {
-                return Some(resolved);
-            }
-        }
-
-        // First, try to find the type declaration directly in this module
-        let local_declaration = if allow_local_mounts {
-            self.local_source_type_declaration(ast, type_name)
-        } else {
-            self.find_type_declaration_in_module(ast, type_name)
-        };
-        if let Some(decl) = local_declaration {
-            return Some((decl, current_module_path.clone()));
-        }
-
-        // If not found directly, check if it's re-exported via `pub import`
-        for item in &ast.items {
-            if !self.cfg_evaluator.should_include(&item.attributes) {
-                continue;
-            }
-            if let ItemKind::Mount(import_decl) = &item.kind {
-                if !allow_local_mounts && import_decl.visibility != AstVisibility::Public {
-                    continue;
+        impl Source<'_> {
+            fn ast(&self) -> &verum_ast::Module {
+                match self {
+                    Self::Borrowed(ast) => ast,
+                    Self::Registered(module) => &module.ast,
                 }
+            }
+        }
+        struct Scope<'a> {
+            source: Source<'a>,
+            owner: Text,
+            name: Text,
+            allow_local_mounts: bool,
+        }
+        enum Work<'a> {
+            Enter(Scope<'a>),
+            Body(Scope<'a>),
+            Mount { path: Text, name: Text },
+        }
 
-                let mut targets = Vec::new();
-                super::source_declarations::source_mount_targets(
-                    import_decl, &verum_modules::ModulePath::from_str(current_module_path), type_name,
-                    |path, kind| {
-                        use super::source_declarations::MountTargetKind;
-                        let full = path.to_string();
-                        match kind {
-                            MountTargetKind::Named => {
-                                if let Some((owner, name)) = full.rsplit_once('.') {
-                                    targets.push((owner.to_owned(), name.to_owned()));
-                                }
-                            }
-                            MountTargetKind::Glob => targets.push((full, type_name.to_owned())),
-                        }
-                    },
-                );
-                for (source_path, true_name) in targets {
+        let mut work = List::new();
+        work.push(Work::Enter(Scope {
+            source: Source::Borrowed(ast),
+            owner: current_module_path.clone(),
+            name: type_name.into(),
+            allow_local_mounts,
+        }));
+        while let Some(next) = work.pop() {
+            match next {
+                Work::Enter(mut scope) => {
+                    // Relative mounts, declaration identity and cycle detection
+                    // belong to the canonical owner, not an alias spelling.
+                    if let Some(module) = self.get_module_with_path_aliases(&scope.owner, registry) {
+                        scope.owner = Text::from(module.path.to_string());
+                    }
+                    if !visited.insert((scope.owner.clone(), scope.name.clone())) {
+                        continue;
+                    }
 
-                    // Look up the source module and find the type there
-                    // Use path aliases since "core.io.path" may be stored as "std.io.path"
-                    if let Some(source_module) =
-                        self.get_module_with_path_aliases(&source_path, registry)
-                    {
-                        // Recursively search (handles chains of re-exports).
-                        // Thread the visited-set so ring-shaped re-exports
-                        // terminate with None rather than blowing the stack.
-                        // Search for `true_name` (T0244), not `type_name`
-                        // — the source module never declared anything
-                        // under the alias spelling.
-                        if let Some((decl, final_path)) = self
-                            .find_type_declaration_with_source_module_inner(
-                                &source_module.ast,
-                                &true_name,
-                                &verum_common::Text::from(source_path.as_str()),
-                                registry,
-                                visited,
-                                require_exported_source,
-                                false,
-                            )
+                    let mut origin = None;
+                    if require_exported_source && !scope.allow_local_mounts {
+                        let Some(module) = self.get_module_with_path_aliases(&scope.owner, registry)
+                        else {
+                            continue;
+                        };
+                        let Some(export) = module.exports.get(&scope.name) else {
+                            continue;
+                        };
+                        if export.kind != verum_modules::ExportKind::Type
+                            || export.visibility != verum_ast::Visibility::Public
                         {
-                            return Some((decl, final_path));
+                            continue;
                         }
-                    } else if !require_exported_source {
-                        // FALLBACK: Module not found in registry. This can happen when:
-                        // 1. A re-export points to a submodule (e.g., .ops) that exists as a file
-                        //  (ops.vr) within the parent module directory, but isn't registered as
-                        //  a separate module in the registry.
-                        // 2. The parent module (e.g., core.base) contains all .vr files including
-                        //  the submodule file, so we should search the parent module's AST.
-                        //
+                        // Resolved exports can originate in a public inline
+                        // module without a corresponding mount in the parent AST.
+                        if export.source_module != module.id
+                            && let Some(module) = registry.get(export.source_module)
+                        {
+                            origin = Some(Scope {
+                                owner: Text::from(module.path.to_string()),
+                                name: export.original_name.as_ref().unwrap_or(&scope.name).clone(),
+                                source: Source::Registered(module),
+                                allow_local_mounts: false,
+                            });
+                        }
+                    }
+                    // Search a resolved origin first; only a failed search may
+                    // continue with local declarations and source-order mounts.
+                    work.push(Work::Body(scope));
+                    if let Some(origin) = origin {
+                        work.push(Work::Enter(origin));
+                    }
+                }
+                Work::Body(scope) => {
+                    let ast = scope.source.ast();
+                    let declaration = if scope.allow_local_mounts {
+                        self.local_source_type_declaration(ast, &scope.name)
+                    } else {
+                        self.find_type_declaration_in_module(ast, &scope.name)
+                    };
+                    if let Some(declaration) = declaration {
+                        return Some((declaration, scope.owner));
+                    }
 
-                        // Try to extract parent module path and search there.
-                        // e.g., "core.base.ops" -> parent "core.base", submodule "ops"
-                        if let Some(dot_pos) = source_path.rfind('.') {
-                            let parent_path = &source_path[..dot_pos];
-                            let _submodule_name = &source_path[dot_pos + 1..];
-
-                            if let Some(parent_module) =
-                                self.get_module_with_path_aliases(parent_path, registry)
-                            {
-                                // Search for the type in the parent module's AST.
-                                // The type might be declared in one of the sibling files
-                                // (like ops.vr within core/base/). Uses `true_name`
-                                // (T0244) for the same reason as the recursive call above.
-                                if let Some(decl) = self
-                                    .find_type_declaration_in_module(&parent_module.ast, &true_name)
-                                {
-                                    return Some((decl, Text::from(parent_module.path.to_string())));
+                    let owner = verum_modules::ModulePath::from_str(&scope.owner);
+                    let mut targets = List::new();
+                    for item in &ast.items {
+                        if !self.cfg_evaluator.should_include(&item.attributes) {
+                            continue;
+                        }
+                        let ItemKind::Mount(mount) = &item.kind else {
+                            continue;
+                        };
+                        if !scope.allow_local_mounts && mount.visibility != AstVisibility::Public {
+                            continue;
+                        }
+                        super::source_declarations::source_mount_targets(
+                            mount, &owner, &scope.name,
+                            |path, kind| {
+                                use super::source_declarations::MountTargetKind;
+                                let full = path.to_string();
+                                match kind {
+                                    MountTargetKind::Named => {
+                                        if let Some((owner, name)) = full.rsplit_once('.') {
+                                            targets.push((Text::from(owner), Text::from(name)));
+                                        }
+                                    }
+                                    MountTargetKind::Glob => {
+                                        targets.push((Text::from(full), scope.name.clone()));
+                                    }
                                 }
-                            }
+                            },
+                        );
+                    }
+                    // Reverse insertion preserves depth-first source order. A
+                    // target is resolved only when reached, so an unvisited
+                    // alternative contributes no speculative registry reads.
+                    for (path, name) in targets.into_iter().rev() {
+                        work.push(Work::Mount { path, name });
+                    }
+                }
+                Work::Mount { path, name } => {
+                    if let Some(module) = self.get_module_with_path_aliases(&path, registry) {
+                        work.push(Work::Enter(Scope {
+                            source: Source::Registered(module),
+                            owner: path,
+                            name,
+                            allow_local_mounts: false,
+                        }));
+                    } else if !require_exported_source {
+                        // A combined source owner may contain a sibling file's
+                        // declaration without registering it as a separate module.
+                        // Keep this direct-parent lookup confined to the ordinary
+                        // source checker; public archive lookup requires each hop.
+                        if let Some((parent, _)) = path.rsplit_once('.')
+                            && let Some(module) = self.get_module_with_path_aliases(parent, registry)
+                            && let Some(declaration) =
+                                self.find_type_declaration_in_module(&module.ast, &name)
+                        {
+                            return Some((declaration, Text::from(module.path.to_string())));
                         }
                     }
                 }
