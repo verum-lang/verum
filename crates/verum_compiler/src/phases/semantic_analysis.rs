@@ -151,7 +151,7 @@ impl SemanticAnalysisPhase {
                     }
                     line
                 }).collect::<List<_>>().join("\n");
-                tracing::warn!(module = owner.as_str(), source = path.as_str(), errors = errors.len(),
+                tracing::warn!(module = owner.as_str(), source = path.as_str(), errors = errors.len(), diagnostics = %details,
                     "source admission failed; checking remaining independent modules");
                 failures.push(format!("{owner} ({path}): {details}").into());
                 session.emit_diagnostics(errors);
