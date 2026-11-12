@@ -312,6 +312,7 @@ fn failed_recursive_group_removes_its_protocol_without_erasing_other_shared_defi
         // The protocol registry really is shared across independent checkers.
         // Rollback must touch only the failed group's declared identities.
         let mut other = TypeChecker::new();
+        other.set_current_module_path("independent");
         other.protocol_checker = checker.protocol_checker.clone();
         let ast = FastParser::new()
             .parse_module_str(
@@ -320,6 +321,14 @@ fn failed_recursive_group_removes_its_protocol_without_erasing_other_shared_defi
             )
             .unwrap();
         other.check_item(&ast.items[0]).unwrap();
+        let assert_untouched = || {
+            let protocols = other.protocol_checker.read();
+            let untouched = protocols
+                .get_protocol(&Text::from("independent.Untouched"))
+                .expect("the independently declared protocol must remain registered");
+            assert!(untouched.methods.contains_key(&Text::from("unrelated")));
+        };
+        assert_untouched();
         for attempt in 0..2 {
             let errors = read_field(&mut checker, "Outer", "value", attempt);
             assert!(
@@ -333,13 +342,7 @@ fn failed_recursive_group_removes_its_protocol_without_erasing_other_shared_defi
                     .get_protocol(&Text::from("owner.Observer"))
                     .is_none()
             );
-            assert!(
-                other
-                    .protocol_checker
-                    .read()
-                    .get_protocol(&Text::from("Untouched"))
-                    .is_some()
-            );
+            assert_untouched();
             assert!(checker.resolved_type("owner.Observer").is_none());
         }
     }
