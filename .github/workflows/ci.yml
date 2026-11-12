@@ -555,6 +555,13 @@ jobs:
         # the artifact is the only surviving diagnostic channel.
         run: cargo test --locked --tests -p verum_vbc 2>&1 | tee vbc-tests.log; exit ${PIPESTATUS[0]}
 
+      # These source-to-bytecode tests require the optional codegen feature.
+      - name: Declaration and target query execution
+        timeout-minutes: 10
+        run: |
+          cargo test --locked -p verum_vbc --features codegen --test target_capabilities --test target_platform_constants
+          cargo test --locked -p verum_vbc --features codegen --test generic_layout_witness layout_intrinsics
+
       - name: Upload vbc test log
         if: failure()
         uses: actions/upload-artifact@v4
@@ -752,6 +759,12 @@ jobs:
         run: >-
           cargo test --locked --release -p verum_compiler
           --test stdlib_future_declarations actual_platform_queries
+
+      - name: Layout queries through actual standard-library declarations
+        timeout-minutes: 5
+        run: >-
+          cargo test --locked --release -p verum_compiler
+          --test stdlib_future_declarations actual_layout_queries
 
       # Reuses the release CLI; includes an actual interpreter positive control.
       - name: Project run tier selection

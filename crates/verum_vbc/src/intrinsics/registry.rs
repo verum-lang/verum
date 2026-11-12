@@ -195,6 +195,8 @@ pub enum CodegenStrategy {
 
     /// Compile-time constant.
     CompileTimeConstant,
+    /// Declaration-owned layout query, retaining its exact type operand.
+    TypeLayout(crate::instruction::LayoutProperty),
     /// Type-witness query against explicit backend target capabilities.
     TargetHasAtomic,
     /// Text query against the configured backend CPU feature catalog.
@@ -994,10 +996,6 @@ pub enum InlineSequenceId {
     // =========================================================================
     // Type Introspection Operations
     // =========================================================================
-    /// size_of: get size of type in bytes
-    SizeOf,
-    /// align_of: get alignment of type in bytes
-    AlignOf,
     /// type_id: get unique type identifier
     TypeId,
     /// type_name: get human-readable type name
@@ -12868,9 +12866,9 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
             IntrinsicHint::ConstEval,
             IntrinsicHint::Generic,
         ],
-        param_count: 0,  // type parameter only
+        param_count: 1, // declaration-owned type operand
         return_count: 1, // size in bytes
-        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SizeOf),
+        strategy: CodegenStrategy::TypeLayout(crate::instruction::LayoutProperty::Size),
         mlir_op: Some("verum.size_of"),
         doc: "Get size of type in bytes (compile-time evaluated)",
     },
@@ -12882,11 +12880,23 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
             IntrinsicHint::ConstEval,
             IntrinsicHint::Generic,
         ],
-        param_count: 0,  // type parameter only
+        param_count: 1, // declaration-owned type operand
         return_count: 1, // alignment in bytes
-        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::AlignOf),
+        strategy: CodegenStrategy::TypeLayout(crate::instruction::LayoutProperty::Alignment),
         mlir_op: Some("verum.align_of"),
         doc: "Get alignment of type in bytes (compile-time evaluated)",
+    },
+    Intrinsic {
+        name: "STRIDE_OF", category: IntrinsicCategory::Platform,
+        hints: &[IntrinsicHint::Pure, IntrinsicHint::Generic], param_count: 1, return_count: 1,
+        strategy: CodegenStrategy::TypeLayout(crate::instruction::LayoutProperty::Stride),
+        mlir_op: None, doc: "Declared aligned element stride",
+    },
+    Intrinsic {
+        name: "BITS_OF", category: IntrinsicCategory::Platform,
+        hints: &[IntrinsicHint::Pure, IntrinsicHint::Generic], param_count: 1, return_count: 1,
+        strategy: CodegenStrategy::TypeLayout(crate::instruction::LayoutProperty::Bits),
+        mlir_op: None, doc: "Declared storage size in bits",
     },
     Intrinsic {
         name: "TYPE_ID",

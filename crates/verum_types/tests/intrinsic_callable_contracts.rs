@@ -99,6 +99,15 @@ fn registered_target_queries_satisfy_meta_purity() {
 }
 
 #[test]
+fn registered_layout_queries_satisfy_meta_purity() {
+    for name in ["size_of", "align_of", "stride_of", "bits_of"] {
+        let source = format!("meta fn probe<T>() -> USize {{ @intrinsic(\"{name}\", T) }}");
+        let accepted = errors(&source);
+        assert!(accepted.is_empty(), "{source}: {accepted:?}");
+    }
+}
+
+#[test]
 fn runtime_and_unknown_operations_do_not_acquire_constant_contracts() {
     for source in [
         "meta fn probe(number: Int) -> Int { @intrinsic(\"syscall0\", number) }",

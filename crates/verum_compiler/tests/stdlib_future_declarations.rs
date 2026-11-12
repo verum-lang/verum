@@ -32,6 +32,32 @@ fn actual_platform_queries_survive_archive_bootstrap_and_target_rebinding() {
 }
 
 #[test]
+fn actual_layout_queries_survive_archive_bootstrap_and_generic_calls() {
+    let root = tempfile::tempdir().unwrap();
+    let core = root.path().join("core");
+    fs::create_dir_all(core.join("intrinsics")).unwrap();
+    fs::write(core.join("mod.vr"), "module core; public module intrinsics { public module type_info; }").unwrap();
+    let mut source = "module core.intrinsics.type_info;\n".to_owned();
+    let mut count = 0;
+    for line in include_str!("../../../core/intrinsics/type_info.vr").lines() {
+        if ["size_of", "align_of", "stride_of", "bits_of"].iter()
+            .any(|name| line.starts_with(&format!("public meta fn {name}<"))) {
+            source.push_str(line);
+            source.push('\n');
+            count += 1;
+        }
+    }
+    assert_eq!(count, 4);
+    fs::write(core.join("intrinsics/type_info.vr"), source).unwrap();
+    let archive = bootstrap(&core);
+    assert_eq!(execute(&archive,
+        "module app; mount core.intrinsics.type_info.{size_of, align_of, stride_of, bits_of};
+         type Word is UInt16;
+         fn inspect<T>() -> USize { size_of<T>() + align_of<T>() + stride_of<T>() + bits_of<T>() }
+         fn main() -> Int { inspect<Word>() as Int }"), 22);
+}
+
+#[test]
 fn imported_future_outputs_and_contextual_owner_arguments_survive_bootstrap() {
     check_bootstrap(false);
 }

@@ -23147,7 +23147,7 @@ impl VbcCodegen {
         )
     }
 
-    fn declaration_property_operand_in_scope(
+    pub(super) fn declaration_property_operand_in_scope(
         &self,
         expression: &Expr,
         scope: Option<&str>,
@@ -35093,18 +35093,7 @@ impl VbcCodegen {
             }
         };
 
-        // A target type query must retain its lexical type witness. Compiling
-        // T as an ordinary value would erase generic and nominal identity.
-        if matches!(intrinsic_info.intrinsic.strategy, crate::intrinsics::registry::CodegenStrategy::TargetHasAtomic) {
-            let [_, operand] = args.as_slice() else {
-                return Err(CodegenError::internal("target_has_atomic requires one type operand"));
-            };
-            let ty = self.declaration_property_operand_in_scope(operand, self.ctx.current_source_module.as_deref(), true)
-                .ok_or_else(|| CodegenError::internal("target_has_atomic requires a type, not a runtime value"))?;
-            let type_ref = self.resolve_type_ref_scoped_with_count(&ty, &self.ctx.current_generic_param_ids, true,
-                self.ctx.current_source_module.as_deref(), &mut |count| self.const_eval_i64(count).ok().flatten().and_then(|value| u64::try_from(value).ok()))?;
-            let type_ref = self.resolve_declared_associated_types(&type_ref).unwrap_or(type_ref);
-            self.ctx.emit(Instruction::TargetHasAtomic { dst: dest, type_ref });
+        if self.emit_type_operand_intrinsic(&intrinsic_info.intrinsic.strategy, args, dest)? {
             return Ok(Some(dest));
         }
 
@@ -35234,6 +35223,10 @@ impl VbcCodegen {
                 return Ok(Some(dest));
             }
         };
+
+        if self.emit_type_operand_intrinsic(&intrinsic_info.intrinsic.strategy, args, dest)? {
+            return Ok(Some(dest));
+        }
 
         // Compile remaining arguments (skip the intrinsic name)
         let mut arg_regs = Vec::with_capacity(args.len().saturating_sub(1));
@@ -35820,7 +35813,7 @@ impl VbcCodegen {
             CodegenStrategy::CompileTimeConstant => {
                 self.emit_intrinsic_compile_time_constant(intrinsic.name, dest)?;
             }
-            CodegenStrategy::TargetHasAtomic => return Err(CodegenError::internal("atomic capability query requires its declaration-owned type operand")),
+            CodegenStrategy::TypeLayout(_) | CodegenStrategy::TargetHasAtomic => return Err(CodegenError::internal("atomic capability query requires its declaration-owned type operand")),
             CodegenStrategy::TargetHasFeature => {
                 let [feature] = args else { return Err(CodegenError::internal("target_has_feature requires one Text operand")); };
                 self.ctx.emit(Instruction::TargetHasFeature { dst: dest, feature: *feature });
@@ -38525,14 +38518,6 @@ impl VbcCodegen {
             // =================================================================
             // These are typically compile-time evaluated, but for interpreter
             // we emit runtime calls or constant loads
-            InlineSequenceId::SizeOf => {
-                // In interpreter mode, we need the type info at runtime
-                // For compile-time evaluated cases, the compiler injects a constant
-                self.emit_intrinsic_library_call("verum_size_of", args, dest)?;
-            }
-            InlineSequenceId::AlignOf => {
-                self.emit_intrinsic_library_call("verum_align_of", args, dest)?;
-            }
             InlineSequenceId::TypeId => {
                 self.emit_intrinsic_library_call("verum_type_id", args, dest)?;
             }
@@ -44139,6 +44124,7 @@ impl VbcCodegen {
             TypeProperty::Size => Some(crate::instruction::LayoutProperty::Size),
             TypeProperty::Alignment => Some(crate::instruction::LayoutProperty::Alignment),
             TypeProperty::Stride => Some(crate::instruction::LayoutProperty::Stride),
+            TypeProperty::Bits => Some(crate::instruction::LayoutProperty::Bits),
             TypeProperty::IsSigned => Some(crate::instruction::LayoutProperty::IsSigned),
             _ => None,
         };
@@ -44223,25 +44209,6 @@ impl VbcCodegen {
         );
 
         match property {
-            TypeProperty::Size => {
-                self.ctx.emit(Instruction::LoadI {
-                    dst: dest,
-                    value: bits / 8,
-                });
-            }
-            TypeProperty::Alignment => {
-                let size = bits / 8;
-                self.ctx.emit(Instruction::LoadI {
-                    dst: dest,
-                    value: size.min(16),
-                });
-            }
-            TypeProperty::Stride => {
-                self.ctx.emit(Instruction::LoadI {
-                    dst: dest,
-                    value: bits / 8,
-                });
-            }
             TypeProperty::Min => {
                 if is_float {
                     let f = if bits == 32 {
@@ -44303,12 +44270,6 @@ impl VbcCodegen {
                     });
                 }
             }
-            TypeProperty::Bits => {
-                self.ctx.emit(Instruction::LoadI {
-                    dst: dest,
-                    value: bits,
-                });
-            }
             TypeProperty::Name => {
                 let const_id = self.ctx.add_const_string(&type_name);
                 self.ctx.emit(Instruction::LoadK {
@@ -44340,7 +44301,8 @@ impl VbcCodegen {
                     value: type_id,
                 });
             }
-            TypeProperty::IsSigned => unreachable!("resolved by the declaration query"),
+            TypeProperty::Size | TypeProperty::Alignment | TypeProperty::Stride
+            | TypeProperty::Bits | TypeProperty::IsSigned => unreachable!("resolved by the declaration query"),
         }
 
         Ok(Some(dest))
@@ -44699,6 +44661,7 @@ impl VbcCodegen {
                 verum_ast::TypeProperty::Size => crate::instruction::LayoutProperty::Size,
                 verum_ast::TypeProperty::Alignment => crate::instruction::LayoutProperty::Alignment,
                 verum_ast::TypeProperty::Stride => crate::instruction::LayoutProperty::Stride,
+                verum_ast::TypeProperty::Bits => crate::instruction::LayoutProperty::Bits,
                 verum_ast::TypeProperty::IsSigned => crate::instruction::LayoutProperty::IsSigned,
                 _ => return Ok(None),
             };

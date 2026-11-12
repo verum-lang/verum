@@ -55,6 +55,7 @@ pub mod error;
 pub mod registers;
 
 mod bootstrap_types;
+mod type_queries;
 mod source_mounts;
 mod mount_filesystem;
 pub use source_mounts::SourceExports;

@@ -36,6 +36,30 @@ fn run(module: VbcModule, name: &str) -> i64 {
 }
 
 #[test]
+fn layout_intrinsics_and_properties_share_exact_generic_witnesses() {
+    let source = r#"
+        meta fn size_of<T>() -> USize { @intrinsic("size_of", T) }
+        meta fn align_of<T>() -> USize { @intrinsic("align_of", T) }
+        meta fn stride_of<T>() -> USize { @intrinsic("stride_of", T) }
+        meta fn bits_of<T>() -> USize { @intrinsic("bits_of", T) }
+        type Word is UInt16;
+        fn layout<T>() -> USize { size_of<T>() + align_of<T>() + stride_of<T>() + bits_of<T>() }
+        fn intrinsic_probe() -> Int { layout<Word>() as Int }
+        fn bits<T>() -> Int { T.bits }
+        fn property_probe() -> Int { bits<Word>() }
+        fn direct_probe() -> Int { Word.bits }
+        fn vbc_probe() -> Int { @vbc(BITS_OF, Word) }
+    "#;
+    let module = compile(source);
+    for module in [module.clone(), roundtrip(&module)] {
+        assert_eq!(run(module.clone(), "intrinsic_probe"), 22);
+        assert_eq!(run(module.clone(), "property_probe"), 16);
+        assert_eq!(run(module.clone(), "direct_probe"), 16);
+        assert_eq!(run(module, "vbc_probe"), 16);
+    }
+}
+
+#[test]
 fn generic_byte_size_matches_direct_declaration() {
     let source = "fn size<T>() -> Int { T.size } fn probe() -> Int { size<Byte>() }";
     assert_eq!(run(compile(source), "probe"), 1);

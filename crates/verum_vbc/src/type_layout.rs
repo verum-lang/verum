@@ -28,6 +28,7 @@ pub fn query_with<'a>(
     }
     let result = match property {
         LayoutProperty::Size => Some(size),
+        LayoutProperty::Bits => size.checked_mul(8),
         LayoutProperty::Alignment => Some(alignment),
         LayoutProperty::Stride => size
             .checked_add(alignment - 1)

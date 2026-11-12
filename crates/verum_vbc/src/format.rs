@@ -144,7 +144,8 @@ pub const VERSION_MAJOR: u16 = 2;
 // v2.49: SysExtended.LinuxSignalWatch (operation, dst, operand).
 // v2.50: native aggregate layouts retain ARRAY carriers for inline fixed arrays.
 // v2.51: typed, target-bound atomic and CPU-feature queries.
-pub const VERSION_MINOR: u16 = 51;
+/// Minor 52 adds the declared storage-bit-count layout query.
+pub const VERSION_MINOR: u16 = 52;
 
 /// Minor-version floors for sections whose presence readers gate on.  The
 /// register-type-hints section has been written unconditionally since minor 2,

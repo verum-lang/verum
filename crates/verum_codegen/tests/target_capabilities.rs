@@ -47,8 +47,12 @@ fn source_queries_agree_in_vm_and_native_after_real_specialization() {
     let source = r#"
         meta fn has_atomic<T>() -> Bool { @intrinsic("target_has_atomic", T) }
         fn outer<T>() -> Bool { has_atomic<T>() }
+        fn layout<T>() -> Int {
+            (@intrinsic("size_of", T) + @intrinsic("align_of", T)
+                + @intrinsic("stride_of", T) + @intrinsic("bits_of", T)) as Int
+        }
         type Word is UInt32;
-        fn atomic_probe() -> Int { if outer<Word>() { 73 } else { 19 } }
+        fn atomic_probe() -> Int { if outer<Word>() && layout<Word>() == 44 { 73 } else { 19 } }
         fn feature_probe(name: Text) -> Bool { @intrinsic("target_has_feature", name) }
     "#;
     let ast = Parser::new(source).parse_module().unwrap();

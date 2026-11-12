@@ -13,7 +13,8 @@ fn intrinsic_requirement(name: &str) -> Option<PropertyRequirement> {
     // classes need their own evidence; registration alone proves no bound.
     if let Some(info) = lookup_intrinsic(name)
         && matches!(info.intrinsic.strategy, CodegenStrategy::CompileTimeConstant
-            | CodegenStrategy::TargetHasAtomic | CodegenStrategy::TargetHasFeature)
+            | CodegenStrategy::TargetHasAtomic | CodegenStrategy::TargetHasFeature
+            | CodegenStrategy::TypeLayout(_))
     {
         return Some(PropertyRequirement::AtMost(PropertySet::pure()));
     }

@@ -311,7 +311,8 @@ impl IntrinsicLowering {
             // executable ABI. This inline MLIR interface has neither, so it
             // cannot fabricate an operation or a result for the caller.
             CodegenStrategy::RuntimeCall | CodegenStrategy::LinuxSignal(_)
-            | CodegenStrategy::TargetHasAtomic | CodegenStrategy::TargetHasFeature => None,
+            | CodegenStrategy::TargetHasAtomic | CodegenStrategy::TargetHasFeature
+            | CodegenStrategy::TypeLayout(_) => None,
             CodegenStrategy::ArithExtendedOpcode(sub_op) => {
                 self.lower_arith_extended_opcode(intrinsic, *sub_op, operands)
             }
@@ -3302,25 +3303,6 @@ impl IntrinsicLowering {
             // =====================================================================
             // Type Introspection Operations
             // =====================================================================
-            InlineSequenceId::SizeOf => {
-                // Compile-time evaluated - operands[0] contains type ID
-                self.emit(MlirOp {
-                    name: "verum.size_of".to_string(),
-                    attrs: vec![],
-                    result_types: vec![MlirType::I64],
-                    operands: operands.to_vec(),
-                    region: None,
-                })
-            }
-
-            InlineSequenceId::AlignOf => self.emit(MlirOp {
-                name: "verum.align_of".to_string(),
-                attrs: vec![],
-                result_types: vec![MlirType::I64],
-                operands: operands.to_vec(),
-                region: None,
-            }),
-
             InlineSequenceId::TypeId => self.emit(MlirOp {
                 name: "verum.type_id".to_string(),
                 attrs: vec![],
