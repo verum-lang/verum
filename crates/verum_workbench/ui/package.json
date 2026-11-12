@@ -16,10 +16,12 @@
     "@codemirror/search": "^6.5.11",
     "@codemirror/state": "^6.5.2",
     "@codemirror/view": "^6.38.6",
-    "@lezer/highlight": "^1.2.1"
+    "@lezer/highlight": "^1.2.1",
+    "markdown-it": "15.0.3"
   },
   "devDependencies": {
     "esbuild": "^0.25.11",
+    "linkedom": "0.18.15",
     "typescript": "^5.9.3"
   }
 }

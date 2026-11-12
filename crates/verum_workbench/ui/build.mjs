@@ -28,7 +28,7 @@ for (const input of Object.keys(result.metafile.inputs)) {
 const notices = ['Verum Workbench — bundled third-party notices\n', await readFile('HUGEICONS-LICENSE.txt', 'utf8')];
 for (const name of ['Inter', 'JetBrainsMono']) notices.push(await readFile(`fonts/${name}-LICENSE.txt`, 'utf8'));
 for (const [, { directory, pkg }] of [...packages].sort()) {
-  const licenseFiles = (await readdir(directory)).filter(name => /^(license|copying)(\.|$)/i.test(name));
+  const licenseFiles = (await readdir(directory)).filter(name => /^(license|copying)([._-]|$)/i.test(name));
   if (!licenseFiles.length) throw new Error(`Missing license file for ${pkg.name}`);
   notices.push(`${pkg.name} ${pkg.version} (${pkg.license ?? 'see license'})\n${'='.repeat(72)}`);
   for (const file of licenseFiles) notices.push(await readFile(join(directory, file), 'utf8'));

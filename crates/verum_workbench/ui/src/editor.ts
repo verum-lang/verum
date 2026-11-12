@@ -10,6 +10,7 @@ import { translations } from './translations';
 import { currentLocale, m, t } from './i18n';
 import { languageRequest, sameRevision, positionAt, rangeOffsets, textEditChanges, type DocumentRevision, type Diagnostic, type Range } from './language';
 import { editFileText } from './source';
+import { renderHoverContent } from './hover-content';
 
 type Location = { uri: string; range: Range };
 type LanguageHooks = { revision: () => DocumentRevision; navigate: (location: Location) => Promise<void>; failure: (error: unknown) => void };
@@ -141,13 +142,10 @@ export function makeEditor(parent: HTMLElement, source: string, onChange: (sourc
         try {
           const reply = await languageRequest<{ contents: unknown; range?: Range } | null>(revision, 'textDocument/hover', positionAt(revision.source, position));
           if (!reply.result || !sameRevision(revision, hooks.revision())) return null;
-          const content = (value: unknown): string => typeof value === 'string' ? value : Array.isArray(value) ? value.map(content).join('\n\n') : value && typeof value === 'object' && 'value' in value ? String(value.value) : '';
-          const text = content(reply.result.contents);
-          if (!text) return null;
+          const dom = renderHoverContent(reply.result.contents, view.dom.ownerDocument);
+          if (!dom) return null;
           const range = reply.result.range ? rangeOffsets(revision.source, reply.result.range) : null;
-          return { pos: range?.from ?? position, end: range?.to, above: true, create: () => {
-            const dom = document.createElement('pre'); dom.className = 'language-hover'; dom.textContent = text; return { dom };
-          } };
+          return { pos: range?.from ?? position, end: range?.to, above: true, create: () => ({ dom }) };
         } catch { return null; }
       }),
       EditorState.tabSize.of(4),

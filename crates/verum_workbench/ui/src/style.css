@@ -776,7 +776,18 @@ dialog:has(.change-review) h2 { font-size: 15px; overflow-wrap: anywhere; }
 .architecture-annotation details { margin-top: 8px; }
 .architecture-annotation pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
 .architecture-invalid { color: var(--danger); }
-.language-hover { max-width: min(440px, 80vw); max-height: 280px; overflow: auto; padding: 12px; }
+.language-hover { max-width: min(520px, 80vw); max-height: min(360px, 60vh); overflow: auto; padding: var(--space-3); font: var(--font-size-body)/1.5 var(--font-ui); overflow-wrap: anywhere; }
+.language-hover > * + * { margin-block-start: var(--space-2); }
+.language-hover pre, .language-hover code { font: inherit; font-family: var(--font-code); }
+.language-hover pre { padding: var(--space-2); border-radius: 4px; background: var(--input); white-space: pre-wrap; }
+.language-hover :not(pre) > code { color: var(--accent-text); }
+.language-hover ul, .language-hover ol { padding-inline-start: 1.5em; }
+.language-hover h1, .language-hover h2, .language-hover h3, .language-hover h4, .language-hover h5, .language-hover h6 { font: inherit; font-weight: 600; }
+.language-hover blockquote { border-inline-start: 2px solid var(--border); padding-inline-start: var(--space-2); color: var(--muted); }
+.language-hover a { color: var(--accent-text); text-decoration: underline; text-underline-offset: 2px; }
+.language-hover table { border-collapse: collapse; }
+.language-hover th, .language-hover td { padding: var(--space-1) var(--space-2); border: 1px solid var(--border); text-align: start; }
+.hover-plaintext { white-space: pre-wrap; }
 #source-status {
   overflow: hidden;
   text-overflow: ellipsis;
