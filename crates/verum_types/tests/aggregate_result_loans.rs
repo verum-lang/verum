@@ -1,8 +1,9 @@
 use verum_ast::FileId;
+use verum_common::{List, Text};
 use verum_fast_parser::FastParser;
 use verum_types::TypeChecker;
 
-fn errors(source: &str) -> Vec<String> {
+fn errors(source: &str) -> List<Text> {
     let declarations = "
         type Node is { public n: Int };
         type Batch<T> is Empty | Full(T);
@@ -28,13 +29,16 @@ fn errors(source: &str) -> Vec<String> {
         }
     }
     errors.extend(checker.take_deferred_errors());
-    let mut messages: Vec<_> = errors.iter().map(ToString::to_string).collect();
+    let mut messages: List<_> = errors
+        .iter()
+        .map(|error| error.to_string().into())
+        .collect();
     messages.extend(
         checker
             .diagnostics()
             .iter()
             .filter(|d| d.is_error())
-            .map(|d| d.message().to_string()),
+            .map(|d| Text::from(d.message())),
     );
     messages
 }
@@ -99,6 +103,107 @@ fn forwarding_shared_inputs_and_mutating_outside_the_borrow_are_valid() {
             Batch.Full(pair) => { let _last = *pair.0; }, Batch.Empty => x.change()
         } x.change(); }",
     ] {
-        assert_eq!(errors(source), Vec::<String>::new(), "{source}");
+        assert_eq!(errors(source), List::<Text>::new(), "{source}");
     }
+}
+
+#[test]
+fn concrete_owned_generic_results_do_not_retain_transient_input_loans() {
+    for source in [
+        "fn copy_count(x: &Int) -> Batch<Int> { Batch.Full(*x) }
+         fn owned() -> Batch<Int> { let x = 7; copy_count(&x) }",
+        "type Parcel<T> is { public value: T };
+         fn copy_count(x: &Int) -> Parcel<Int> { Parcel { value: *x } }
+         fn owned() -> Parcel<Int> { let x = 7; copy_count(&x) }",
+        "type Parcel<T> is { public value: T };
+         fn copy_count(x: &Int) -> Batch<Parcel<Int>> { Batch.Full(Parcel { value: *x }) }
+         fn owned() -> Batch<Parcel<Int>> { let x = 7; copy_count(&x) }",
+        "type Marker<T> is { public count: Int };
+         fn copy_count(x: &Int) -> Marker<&Int> { Marker { count: *x } }
+         fn owned() -> Marker<&Int> { let x = 7; copy_count(&x) }",
+        "type Parcel<T> is { public value: T };
+         type Selected<A, B> is Parcel<B>;
+         fn copy_count(x: &Int) -> Selected<&Int, Int> { Parcel { value: *x } }
+         fn owned() -> Selected<&Int, Int> { let x = 7; copy_count(&x) }",
+        "type Chain<T> is End | Link(T, Chain<T>);
+         fn copy_count(x: &Int) -> Chain<Int> { Chain.Link(*x, Chain.End) }
+         fn owned() -> Chain<Int> { let x = 7; copy_count(&x) }",
+    ] {
+        assert_eq!(errors(source), List::<Text>::new(), "{source}");
+    }
+}
+
+#[test]
+fn instantiated_fields_still_reject_local_reference_escape() {
+    for source in [
+        "type Parcel<T> is { public value: T };
+         fn hold(x: &Int) -> Parcel<&Int> { Parcel { value: x } }
+         fn leak() -> Parcel<&Int> { let x = 7; hold(&x) }",
+        "type Parcel<T> is { public value: T };
+         type Selected<A, B> is Parcel<B>;
+         fn hold(x: &Int) -> Selected<Int, &Int> { Parcel { value: x } }
+         fn leak() -> Selected<Int, &Int> { let x = 7; hold(&x) }",
+        "type Fixed<T> is { public count: T, public ptr: &Int };
+         fn hold(x: &Int) -> Fixed<Int> { Fixed { count: 3, ptr: x } }
+         fn leak() -> Fixed<Int> { let x = 7; hold(&x) }",
+        "type Chain<T> is End | Link(T, Chain<T>);
+         fn hold(x: &Int) -> Chain<&Int> { Chain.Link(x, Chain.End) }
+         fn leak() -> Chain<&Int> { let x = 7; hold(&x) }",
+        "type Parcel<T> is { public value: T };
+         fn hold(x: &Int) -> Parcel<fn() -> Int> { Parcel { value: || *x } }
+         fn leak() -> Parcel<fn() -> Int> { let x = 7; hold(&x) }",
+    ] {
+        let diagnostics = errors(source);
+        assert!(
+            diagnostics
+                .iter()
+                .any(|message| message.contains("does not live long enough")),
+            "{source}: {diagnostics:?}"
+        );
+    }
+}
+
+#[test]
+fn distinct_nested_parameter_scopes_keep_the_selected_payload() {
+    let declarations = "type Inner<T> is { public value: T };
+        type Outer<T, U> is { public second: Inner<U>, public first: T };";
+    let owned = format!(
+        "{declarations}
+        fn copy_count(x: &Int) -> Outer<Bool, Int> {{
+            Outer {{ first: true, second: Inner {{ value: *x }} }}
+        }}
+        fn owned() -> Outer<Bool, Int> {{ let x = 7; copy_count(&x) }}"
+    );
+    assert_eq!(errors(&owned), List::<Text>::new());
+    let borrowed = format!(
+        "{declarations}
+        fn hold(x: &Int) -> Outer<Int, &Int> {{
+            Outer {{ first: 3, second: Inner {{ value: x }} }}
+        }}
+        fn leak() -> Outer<Int, &Int> {{ let x = 7; hold(&x) }}"
+    );
+    let diagnostics = errors(&borrowed);
+    assert!(
+        diagnostics
+            .iter()
+            .any(|message| message.contains("does not live long enough")),
+        "{diagnostics:?}"
+    );
+}
+
+#[test]
+fn unbounded_instantiation_cannot_establish_reference_free_storage() {
+    let diagnostics = errors(
+        "type Expanding<T> is End | Next(Expanding<(T, T)>);
+        fn make(x: &Int) -> Expanding<Int> { Expanding.End }
+        fn probe() -> Expanding<Int> { let x = 7; make(&x) }",
+    );
+    // The shape analysis has a finite work budget. An unresolved recursive
+    // instance keeps its input origins; exhaustion cannot prove them absent.
+    assert!(
+        diagnostics
+            .iter()
+            .any(|message| message.contains("does not live long enough")),
+        "{diagnostics:?}"
+    );
 }

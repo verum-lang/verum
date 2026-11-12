@@ -37,6 +37,7 @@ mod projection_carrier;
 mod preparation;
 mod dependent_records;
 mod reference_origin;
+mod stored_loans;
 mod write_places;
 mod structural_clone;
 mod loan_ends;
