@@ -509,6 +509,15 @@ impl ProjectContext {
             .map(|(id, info)| (*id, info.path.clone()))
             .collect();
         let base = std::sync::Arc::new(registry);
+        let diagnostic_sources: crate::diagnostics::DiagnosticSources = verum_common::Shared::new(
+            sources.values().map(|source| {
+                Ok((source.file_id, crate::diagnostics::DiagnosticSource {
+                    uri: Url::from_file_path(&source.path).map_err(|_| anyhow::anyhow!("Source URI"))?,
+                    text: source.text.clone(),
+                    source_hash: hex::encode(Sha256::digest(source.text.as_bytes())).into(),
+                }))
+            }).collect::<Result<Map<_, _>>>()?
+        );
         for (path, _, _, document_file_id, _, _) in &open {
             control.check()?;
             let Some(source) = sources.get(path) else {
@@ -600,6 +609,7 @@ impl ProjectContext {
             checker.set_current_module_path(info.path.to_string());
             control.check()?;
             documents.with_document_mut(&uri, |doc| -> verum_types::Result<()> {
+                doc.diagnostic_sources = diagnostic_sources.clone();
                 doc.check_project(&mut checker, &info.ast, revision.clone())?;
                 doc.library_metadata = self.library_identity().cloned();
                 let mut imports = ImportResolver::new();

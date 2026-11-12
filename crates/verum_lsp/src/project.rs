@@ -2,7 +2,7 @@
 //! Architecture consumers share AST identities with diagnostics/navigation;
 //! a declaration graph is not a proof of runtime implementation correspondence.
 use crate::{
-    Backend, DocumentState, diagnostics::convert_diagnostics, position_utils::ast_span_to_range,
+    Backend, DocumentState, diagnostics::project_diagnostics, position_utils::ast_span_to_range,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -90,6 +90,7 @@ pub struct DocumentSnapshot {
     pub bindings: List<crate::project_context::ProjectBinding>,
     pub analysis_scope: &'static str,
     pub diagnostics: List<Diagnostic>,
+    pub dependency_diagnostics: List<crate::diagnostics::DependencyDiagnostic>,
     pub declarations: List<Declaration>,
     pub mounts: List<MountSnapshot>,
     /// None means parsing is unavailable; an empty list means no root attribute.
@@ -288,6 +289,9 @@ impl DocumentSnapshot {
                 }
             }
         }
+        let (diagnostics, dependency_diagnostics) = project_diagnostics(
+            &doc.diagnostics, &doc.text, uri, &doc.diagnostic_sources,
+        );
         Self {
             schema: "verum-document-analysis/1",
             uri: uri.clone(),
@@ -299,7 +303,8 @@ impl DocumentSnapshot {
             library_metadata: doc.library_metadata.clone(),
             bindings: doc.project_bindings.clone(),
             analysis_scope: analysis_scope(doc),
-            diagnostics: convert_diagnostics(doc.diagnostics.clone(), &doc.text, uri).into(),
+            diagnostics,
+            dependency_diagnostics,
             declarations,
             mounts,
             architecture: doc.module.as_ref().map(|module| architecture_annotations(doc, &module.attributes)),

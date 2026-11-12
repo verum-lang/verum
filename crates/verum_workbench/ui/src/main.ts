@@ -332,7 +332,7 @@ function navigateEditor(action: () => unknown) {
 function showRange(range: Range, origin = sourceBookmark()) {
   navigationRequests.invalidate(); sourceView(); setPane('editor'); editor.select(range); rememberNavigation(origin);
 }
-async function navigateDefinition(location: { uri: string; range: Range }, expectedProject?: string) {
+async function navigateDefinition(location: { uri: string; range: Range }, expectedProject?: string, expectedSourceHash?: string) {
   const relative = workspaceFilePath(location.uri, $('workspace-root').dataset.root || '');
   if (relative === null) throw new Error(t(m('Definition is outside this workspace.')));
   const generation = navigationRequests.begin(switching || navigatingHistory);
@@ -342,12 +342,13 @@ async function navigateDefinition(location: { uri: string; range: Range }, expec
   if (!navigationRequests.current(generation) || relative !== currentPath) return;
   const arrival = sourceBookmark();
   if (crossedFile) rememberNavigation(origin);
-  if (expectedProject) {
+  if (expectedProject || expectedSourceHash) {
     const revision = languageRevision();
     const reply = await languageRequest<Analysis>(revision);
     if (!navigationRequests.current(generation) || !sameRevision(revision, languageRevision())
       || arrival.anchor !== editor.selection().anchor || arrival.head !== editor.selection().head) return;
-    if (reply.result.project_revision !== expectedProject) {
+    if ((expectedProject && reply.result.project_revision !== expectedProject)
+      || (expectedSourceHash && reply.result.source_hash !== expectedSourceHash)) {
       throw new Error(t(m('The project changed. Refresh the topology before navigating.')));
     }
   }
@@ -738,7 +739,8 @@ function renderAnalysis(snapshot: Analysis) {
   };
   proofTargets.accept(revision, snapshot); renderProofTargets();
   editor.diagnostics(editor.source(), snapshot.diagnostics);
-  const count = snapshot.diagnostics.length;
+  const dependencyDiagnostics = snapshot.dependency_diagnostics ?? [];
+  const count = snapshot.diagnostics.length + dependencyDiagnostics.length;
   setText($('language-status'), count ? m('{count} diagnostics', { count }) : m('No module diagnostics'));
   updateFindingCount(String(count));
   const scope = $('analysis-scope'), label = analysisScopeLabel(snapshot.analysis_scope);
@@ -751,16 +753,23 @@ function renderAnalysis(snapshot: Analysis) {
     scope.replaceChildren(node('span', '', label));
   }
   const diagnostics = $('diagnostics-list'); diagnostics.replaceChildren();
-  for (const diagnostic of snapshot.diagnostics) {
-    const entry = button('', () => reveal(diagnostic.range), 'diagnostic-item');
-    entry.append(node('span', `diagnostic-marker severity-${diagnostic.severity}`, diagnostic.severity === 1 ? '●' : '◇'), node('span', 'diagnostic-message', diagnostic.message), node('span', 'muted', `${diagnostic.range.start.line + 1}:${diagnostic.range.start.character + 1}`));
+  const appendDiagnostic = (diagnostic: Analysis['diagnostics'][number], navigate: () => unknown, path = '') => {
+    const entry = button('', navigate, 'diagnostic-item');
+    entry.append(node('span', `diagnostic-marker severity-${diagnostic.severity}`, diagnostic.severity === 1 ? '●' : '◇'), node('span', 'diagnostic-message', diagnostic.message), node('span', 'muted', `${path ? path + ':' : ''}${diagnostic.range.start.line + 1}:${diagnostic.range.start.character + 1}`));
     diagnostics.append(entry);
     for (const related of diagnostic.relatedInformation ?? []) {
-      const link = button(related.message, () => navigateDefinition(related.location), 'diagnostic-related');
+      const link = button(related.message, () => navigateDefinition(related.location, snapshot.project_revision ?? undefined), 'diagnostic-related');
       const position = related.location.range.start;
       link.append(node('span', 'muted', `${position.line + 1}:${position.character + 1}`));
       diagnostics.append(link);
     }
+  };
+  for (const diagnostic of snapshot.diagnostics) appendDiagnostic(diagnostic, () => reveal(diagnostic.range));
+  for (const finding of dependencyDiagnostics) {
+    const location = { uri: finding.uri, range: finding.diagnostic.range };
+    const path = workspaceFilePath(finding.uri, $('workspace-root').dataset.root || '') ?? finding.uri;
+    appendDiagnostic(finding.diagnostic,
+      () => navigateDefinition(location, snapshot.project_revision ?? undefined, finding.source_hash), path);
   }
   if (!count) diagnostics.append(node('p', 'muted', m('No module diagnostics')));
   const structure = $('architecture-content'); structure.replaceChildren();

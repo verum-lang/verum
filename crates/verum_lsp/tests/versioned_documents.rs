@@ -237,3 +237,64 @@ async fn actual_lsp_notifications_have_exact_versions_and_ignore_stale_changes()
     .await
     .expect("LSP request loop completed");
 }
+
+#[tokio::test]
+async fn imported_errors_publish_to_the_dependency_and_clear_after_repair() {
+    let root = tempfile::tempdir().unwrap();
+    let dependency = root.path().join("dependency.vr");
+    std::fs::write(&dependency, "public type Broken is { public value: MissingType };").unwrap();
+    let main = root.path().join("main.vr");
+    let source = "mount dependency.Broken;\n// Never decorate this unrelated comment.\nfn main(value: Broken) -> Int { value.value }";
+    std::fs::write(&main, source).unwrap();
+    let main_uri = Url::from_file_path(main).unwrap();
+    let dependency_uri = Url::from_file_path(&dependency).unwrap();
+    let (service, socket) = tower_lsp::LspService::new(verum_lsp::Backend::new);
+    let (client, server) = tokio::io::duplex(65536);
+    let (server_read, server_write) = tokio::io::split(server);
+    let server = tower_lsp::Server::new(server_read, server_write, socket).serve(service);
+    let (read, mut write) = tokio::io::split(client);
+    let mut read = BufReader::new(read);
+    let client = async {
+        send(&mut write, json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
+            "rootUri":Url::from_directory_path(root.path()).unwrap(),
+            "capabilities":{},"initializationOptions":{"lintEnabled":false}
+        }})).await;
+        assert_eq!(receive(&mut read).await["id"], 1);
+        send(&mut write, json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
+            "textDocument":{"uri":main_uri,"languageId":"verum","version":1,"text":source}
+        }})).await;
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..2 {
+            let report = receive(&mut read).await;
+            assert_eq!(report["method"], "textDocument/publishDiagnostics", "{report}");
+            let params = &report["params"];
+            seen.insert(params["uri"].as_str().unwrap().to_owned());
+            let diagnostics = params["diagnostics"].as_array().unwrap();
+            if params["uri"] == dependency_uri.as_str() {
+                assert!(diagnostics.iter().any(|d| d["message"].as_str().unwrap().contains("MissingType")), "{report}");
+                assert!(params["version"].is_null(), "closed dependency has no client version");
+                assert!(diagnostics.iter().all(|d| d["range"]["start"]["line"] == 0));
+            } else {
+                assert_eq!(params["uri"], main_uri.as_str());
+                assert_eq!(params["version"], 1);
+                assert!(diagnostics.iter().all(|d| !d["message"].as_str().unwrap().contains("MissingType")), "{report}");
+            }
+        }
+        assert_eq!(seen.len(), 2);
+        std::fs::write(&dependency, "public type Broken is { public value: Int };").unwrap();
+        send(&mut write, json!({"jsonrpc":"2.0","method":"workspace/didChangeWatchedFiles","params":{
+            "changes":[{"uri":dependency_uri,"type":2}]
+        }})).await;
+        let mut cleared = std::collections::HashSet::new();
+        for _ in 0..2 {
+            let report = receive(&mut read).await;
+            assert_eq!(report["method"], "textDocument/publishDiagnostics", "{report}");
+            assert_eq!(report["params"]["diagnostics"], json!([]), "{report}");
+            cleared.insert(report["params"]["uri"].as_str().unwrap().to_owned());
+        }
+        assert_eq!(cleared, seen);
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(20), async {
+        tokio::select! { _ = server => panic!("server exited early"), _ = client => {} }
+    }).await.expect("dependency diagnostic publication completed");
+}

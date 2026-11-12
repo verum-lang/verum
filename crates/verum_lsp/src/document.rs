@@ -39,6 +39,7 @@ pub struct DiagnosticSnapshot {
     pub analysis_revision: Option<Text>,
     pub text: String,
     pub diagnostics: List<Diagnostic>,
+    pub sources: crate::diagnostics::DiagnosticSources,
     pub version: i32,
     /// Distinguishes a reopened document even when its version starts over.
     pub file_id: FileId,
@@ -286,6 +287,7 @@ pub struct DocumentState {
     pub module: Option<Module>,
     /// Parsed diagnostics (syntax and type errors)
     pub diagnostics: List<Diagnostic>,
+    pub diagnostic_sources: crate::diagnostics::DiagnosticSources,
     /// Version number (incremented on each edit)
     pub version: i32,
     /// The file ID assigned to this document
@@ -341,6 +343,7 @@ impl DocumentState {
             text,
             module: None,
             diagnostics: List::new(),
+            diagnostic_sources: verum_common::Shared::new(verum_common::Map::new()),
             version,
             file_id,
             symbols: HashMap::new(),
@@ -432,6 +435,7 @@ impl DocumentState {
         self.project_bindings.clear();
         self.mount_resolutions.clear();
         self.diagnostics.clear();
+        self.diagnostic_sources = verum_common::Shared::new(verum_common::Map::new());
         self.symbols.clear();
         self.type_info.clear();
 
@@ -735,11 +739,21 @@ impl DocumentState {
     }
 
     fn check_module_types(&mut self, module: &Module, type_checker: &mut TypeChecker) {
+        let sources = self.diagnostic_sources.clone();
+        let current_text = self.text.clone();
+        let current_id = self.file_id;
+        let convert = |span: verum_ast::Span| {
+            if let Some(source) = sources.get(&span.file_id) {
+                verum_common::span_utils::span_to_line_col_span(span, &source.text, source.uri.as_str())
+            } else if span.file_id == current_id {
+                verum_common::span_utils::span_to_line_col_span(span, &current_text, "")
+            } else {
+                verum_common::span::LineColSpan::new("<generated>", 0, 0, 0)
+            }
+        };
         for error in type_checker.prepare_module_declarations(module) {
             self.diagnostics
-                .push(error.to_diagnostic_with_span(Some(|span| {
-                    verum_common::span_utils::span_to_line_col_span(span, &self.text, "")
-                })));
+                .push(error.to_diagnostic_with_span(Some(convert)));
         }
         // Type check each item in the module
         for item in module.items.iter() {
@@ -752,9 +766,7 @@ impl DocumentState {
                 }
                 Err(type_error) => {
                     // Convert to diagnostic and store
-                    let diagnostic = type_error.to_diagnostic_with_span(Some(|span| {
-                        verum_common::span_utils::span_to_line_col_span(span, &self.text, "")
-                    }));
+                    let diagnostic = type_error.to_diagnostic_with_span(Some(convert));
                     self.diagnostics.push(diagnostic);
                 }
             }
@@ -765,9 +777,7 @@ impl DocumentState {
         // Render its source errors with this revision, as the compiler does.
         for error in type_checker.take_deferred_errors() {
             self.diagnostics
-                .push(error.to_diagnostic_with_span(Some(|span| {
-                    verum_common::span_utils::span_to_line_col_span(span, &self.text, "")
-                })));
+                .push(error.to_diagnostic_with_span(Some(convert)));
         }
         for (name, symbol) in &mut self.symbols {
             if matches!(symbol.kind, SymbolKind::Field) {
@@ -786,13 +796,11 @@ impl DocumentState {
                     .map(|scheme| scheme.ty.clone())
             });
         }
-        let sources = type_checker.diagnostic_sources();
-        if sources.len() == type_checker.diagnostics().len() {
-            for error in sources {
+        let errors = type_checker.diagnostic_sources();
+        if errors.len() == type_checker.diagnostics().len() {
+            for error in errors {
                 self.diagnostics
-                    .push(error.to_diagnostic_with_span(Some(|span| {
-                        verum_common::span_utils::span_to_line_col_span(span, &self.text, "")
-                    })));
+                    .push(error.to_diagnostic_with_span(Some(convert)));
             }
         } else {
             self.diagnostics
@@ -946,6 +954,7 @@ impl DocumentStore {
             analysis_revision: doc.analysis_revision.clone(),
             text: doc.text.clone(),
             diagnostics: doc.diagnostics.clone(),
+            sources: doc.diagnostic_sources.clone(),
             version: doc.version,
             file_id: doc.file_id,
         })

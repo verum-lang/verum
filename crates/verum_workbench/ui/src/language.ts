@@ -16,7 +16,8 @@ export type Binding = { name: string; type_display: string; source_module?: stri
 export type Mount = { source: string; range: Range; resolution?:
   | { state: 'resolved'; bindings: { start: number; end: number } }
   | { state: 'unresolved'; reason: string } | null };
-export type Analysis = { library_metadata?: { sha256: string; format_version: number } | null; project_revision?: string | null; bindings?: Binding[]; source_hash: string; version: number; parsed: boolean; analysis_scope: string; diagnostics: Diagnostic[]; declarations: Declaration[]; mounts: Mount[]; architecture?: ArchitectureAnnotation[] | null };
+export type DependencyDiagnostic = { uri: string; source_hash: string; diagnostic: Diagnostic };
+export type Analysis = { library_metadata?: { sha256: string; format_version: number } | null; project_revision?: string | null; bindings?: Binding[]; source_hash: string; version: number; parsed: boolean; analysis_scope: string; diagnostics: Diagnostic[]; dependency_diagnostics?: DependencyDiagnostic[]; declarations: Declaration[]; mounts: Mount[]; architecture?: ArchitectureAnnotation[] | null };
 export function analysisScopeLabel(scope: Analysis['analysis_scope']) {
   switch (scope) {
     case 'project-sources-with-library-metadata': return m('Project sources and compiled standard library');

@@ -7,6 +7,8 @@ use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
 
 use std::sync::Arc;
+use sha2::{Digest, Sha256};
+use verum_common::{List, Map, Set, Text};
 
 use crate::cbgr_hints::CbgrHintProvider;
 use crate::code_actions;
@@ -36,6 +38,9 @@ pub struct Backend {
     /// Orders mutation/close and diagnostic publication for each URI. Entries
     /// survive close so a late analysis cannot race a reopened document.
     document_gates: dashmap::DashMap<Url, Arc<tokio::sync::Mutex<()>>>,
+    /// Dependency findings owned by the current project generation, including
+    /// closed files. Replacing the generation also clears retired findings.
+    dependency_diagnostics: parking_lot::Mutex<(Text, Map<Url, List<diagnostics::DependencyDiagnostic>>)>,
     /// Refinement validator
     refinement_validator: RefinementValidator,
     /// CBGR hints provider
@@ -71,6 +76,7 @@ impl Backend {
             client,
             documents: DocumentStore::new(),
             document_gates: dashmap::DashMap::new(),
+            dependency_diagnostics: Default::default(),
             refinement_validator: RefinementValidator::new(),
             cbgr_hints: CbgrHintProvider::new(),
             semantic_provider: SemanticTokenProvider::new(),
@@ -119,13 +125,67 @@ impl Backend {
         }
     }
 
-    async fn publish_project_diagnostics(&self) {
-        let uris = self
-            .documents
-            .flat_collect_from_documents(|uri, _| vec![uri.clone()]);
-        for uri in uris {
-            self.publish_diagnostics(uri).await;
+    /// Rebuild the dependency projection under the project gate. Return old
+    /// owners as well, so repairing/removing an import clears its diagnostics.
+    fn refresh_dependency_diagnostics(&self) -> Set<Url> {
+        let revision: Text = self.project.lock().revision().into();
+        let foreign = self.documents.flat_collect_from_documents(|uri, doc| {
+            if doc.analysis_revision.as_deref() != Some(revision.as_str()) { return Vec::new(); }
+            diagnostics::project_diagnostics(&doc.diagnostics, &doc.text, uri, &doc.diagnostic_sources).1.into()
+        });
+        let mut next: Map<Url, List<diagnostics::DependencyDiagnostic>> = Map::new();
+        for diagnostic in foreign {
+            next.entry(diagnostic.uri.clone()).or_default().push(diagnostic);
         }
+        let mut uris: Set<_> = self
+            .documents
+            .flat_collect_from_documents(|uri, _| vec![uri.clone()]).into_iter().collect();
+        {
+            let mut published = self.dependency_diagnostics.lock();
+            uris.extend(published.1.keys().cloned());
+            uris.extend(next.keys().cloned());
+            *published = (revision, next);
+        }
+        uris
+    }
+
+    async fn publish_project_diagnostics(&self) {
+        for uri in self.refresh_dependency_diagnostics() {
+            if self.documents.diagnostic_snapshot(&uri).is_some() {
+                self.publish_diagnostics(uri).await;
+            } else {
+                let text = match uri.to_file_path() {
+                    Ok(path) => tokio::fs::read_to_string(path).await.ok(),
+                    Err(_) => None,
+                };
+                let diagnostics = text.as_deref().map(|text| self.dependency_findings(&uri, text))
+                    .unwrap_or_default();
+                self.client.publish_diagnostics(uri, diagnostics, None).await;
+            }
+        }
+    }
+
+    fn dependency_findings(&self, uri: &Url, text: &str) -> Vec<Diagnostic> {
+        let published = self.dependency_diagnostics.lock();
+        if published.0.as_str() != self.project.lock().revision() { return Vec::new(); }
+        let hash = hex::encode(Sha256::digest(text.as_bytes()));
+        let mut findings: Vec<_> = published.1.get(uri).into_iter().flatten()
+            .filter(|finding| finding.source_hash.as_str() == hash)
+            .map(|finding| finding.diagnostic.clone()).collect();
+        findings.sort_by(|a, b| a.range.start.cmp(&b.range.start)
+            .then_with(|| a.range.end.cmp(&b.range.end)).then_with(|| a.message.cmp(&b.message)));
+        findings.dedup();
+        findings
+    }
+
+    fn compiler_findings(&self, uri: &Url, snapshot: &DiagnosticSnapshot) -> Vec<Diagnostic> {
+        let mut findings: Vec<_> = diagnostics::project_diagnostics(
+            &snapshot.diagnostics, &snapshot.text, uri, &snapshot.sources,
+        ).0.into();
+        for diagnostic in self.dependency_findings(uri, &snapshot.text) {
+            if !findings.contains(&diagnostic) { findings.push(diagnostic); }
+        }
+        findings
     }
 
     fn document_gate(&self, uri: &Url) -> Arc<tokio::sync::Mutex<()>> {
@@ -229,8 +289,7 @@ impl Backend {
         let Some(snapshot) = self.documents.diagnostic_snapshot(&uri) else {
             return;
         };
-        let mut lsp_diagnostics =
-            diagnostics::convert_diagnostics(snapshot.diagnostics.clone(), &snapshot.text, &uri);
+        let mut lsp_diagnostics = self.compiler_findings(&uri, &snapshot);
         // Compiler diagnostics must not wait for the optional disk-based linter.
         if !self
             .publish_snapshot(&uri, &snapshot, lsp_diagnostics.clone())
@@ -1944,16 +2003,29 @@ impl LanguageServer for Backend {
         let _guard = self.project_gate.lock().await;
         self.refresh_project();
 
-        let diagnostics = if let Some(text) = self.documents.get_text(&uri) {
-            let verum_diags = self.documents.get_diagnostics(&uri);
-            crate::diagnostics::convert_diagnostics(verum_diags, &text, &uri)
-        } else {
-            Vec::new()
-        };
+        let mut related = List::new();
+        let mut diagnostics = Vec::new();
+        for owner in self.refresh_dependency_diagnostics() {
+            // A full related report replaces the client's previous report.
+            // Include that document's own errors, not just imported errors.
+            let items = if let Some(snapshot) = self.documents.diagnostic_snapshot(&owner) {
+                self.compiler_findings(&owner, &snapshot)
+            } else if let Ok(path) = owner.to_file_path()
+                && let Ok(text) = tokio::fs::read_to_string(path).await {
+                self.dependency_findings(&owner, &text)
+            } else { Vec::new() };
+            if owner == uri {
+                diagnostics = items;
+            } else {
+                related.push((owner, DocumentDiagnosticReportKind::Full(
+                    FullDocumentDiagnosticReport { result_id: None, items },
+                )));
+            }
+        }
 
         Ok(DocumentDiagnosticReportResult::Report(
             DocumentDiagnosticReport::Full(RelatedFullDocumentDiagnosticReport {
-                related_documents: None,
+                related_documents: (!related.is_empty()).then(|| related.into_iter().collect()),
                 full_document_diagnostic_report: FullDocumentDiagnosticReport {
                     result_id: None,
                     items: diagnostics,

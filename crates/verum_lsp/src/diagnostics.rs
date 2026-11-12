@@ -12,10 +12,70 @@
 use crate::position_utils::verum_span_to_range;
 use tower_lsp::lsp_types::*;
 use verum_ast::FileId;
-use verum_common::List;
+use verum_common::{List, Map, Shared, Text};
 use verum_diagnostics::{Diagnostic as VerumDiagnostic, Severity};
 use verum_parser::syntax_bridge::LosslessParser;
 use verum_syntax::{SyntaxElement, SyntaxKind, SyntaxNode};
+
+/// Source revisions captured together with a project analysis. File IDs are
+/// meaningful only inside that generation; never interpret a dependency span
+/// against the importing document's text.
+pub type DiagnosticSources = Shared<Map<FileId, DiagnosticSource>>;
+
+#[derive(Clone, Debug)]
+pub struct DiagnosticSource {
+    pub uri: Url,
+    pub text: Text,
+    pub source_hash: Text,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct DependencyDiagnostic {
+    pub uri: Url,
+    pub source_hash: Text,
+    pub diagnostic: LspDiagnostic,
+}
+
+/// Keep foreign diagnostics visible without decorating unrelated local text.
+pub fn project_diagnostics(
+    diagnostics: &[VerumDiagnostic],
+    text: &str,
+    uri: &Url,
+    sources: &DiagnosticSources,
+) -> (List<LspDiagnostic>, List<DependencyDiagnostic>) {
+    let by_uri: Map<&str, &DiagnosticSource> = sources.values()
+        .map(|source| (source.uri.as_str(), source)).collect();
+    let mut local = List::new();
+    let mut dependencies = List::new();
+    for diagnostic in diagnostics {
+        let source = diagnostic.primary_span()
+            .and_then(|span| by_uri.get(&span.file.as_str()).copied());
+        let (owner, source_text) = source
+            .map(|source| (&source.uri, source.text.as_str())).unwrap_or((uri, text));
+        let mut converted = to_lsp_diagnostic(diagnostic, source_text, owner);
+        let related: Vec<_> = diagnostic.secondary_labels().iter().filter_map(|label| {
+            let (owner, text) = if label.span.file.is_empty() {
+                (uri, text)
+            } else {
+                let source = by_uri.get(&label.span.file.as_str())?;
+                (&source.uri, source.text.as_str())
+            };
+            Some(DiagnosticRelatedInformation {
+                location: Location::new(owner.clone(), verum_span_to_range(&label.span, text)),
+                message: label.message.to_string(),
+            })
+        }).collect();
+        converted.related_information = (!related.is_empty()).then_some(related);
+        if let Some(source) = source.filter(|source| source.uri != *uri) {
+            dependencies.push(DependencyDiagnostic {
+                uri: source.uri.clone(), source_hash: source.source_hash.clone(), diagnostic: converted,
+            });
+        } else {
+            local.push(converted);
+        }
+    }
+    (local, dependencies)
+}
 
 // ==================== Core Diagnostic Conversion ====================
 

@@ -69,6 +69,75 @@ const MAIN: &str =
     "mount dependency.{Token, answer};\nfn read(value: Token) -> Int { value.id + answer() }";
 
 #[tokio::test]
+async fn dependency_diagnostics_keep_their_own_file_and_unicode_range() {
+    let project = Project::new();
+    let dependency_source = "// distinct dependency revision\npublic type Broken is { public value: /* Ω🙂 */ MissingType };";
+    let dependency = project.file("dependency.vr", dependency_source);
+    let source = "mount dependency.Broken;\n// This comment must never receive a foreign type error.\nfn main(value: Broken) -> Int { value.value }";
+    let main = project.open("main.vr", source);
+    let snapshot = project.snapshot(&main).await;
+    assert!(errors(&snapshot).iter().all(|d| !d["message"].as_str().unwrap().contains("MissingType")), "{snapshot:#}");
+    let foreign = snapshot["dependency_diagnostics"].as_array().unwrap();
+    let error = foreign.iter().find(|d| d["diagnostic"]["message"].as_str().unwrap().contains("MissingType"))
+        .unwrap_or_else(|| panic!("dependency failure must remain visible: {snapshot:#}"));
+    assert_eq!(error["uri"], dependency.as_str());
+    let line = dependency_source.lines().nth(1).unwrap();
+    let start = line[..line.find("MissingType").unwrap()].encode_utf16().count();
+    assert_eq!(error["diagnostic"]["range"], json!({
+        "start":{"line":1,"character":start}, "end":{"line":1,"character":start+11},
+    }));
+    use sha2::{Digest, Sha256};
+    assert_eq!(error["source_hash"], hex::encode(Sha256::digest(dependency_source.as_bytes())));
+    let pulled = project.service.inner().diagnostic(DocumentDiagnosticParams {
+        text_document: TextDocumentIdentifier { uri: main.clone() },
+        identifier: None, previous_result_id: None,
+        work_done_progress_params: Default::default(), partial_result_params: Default::default(),
+    }).await.unwrap();
+    let pulled = serde_json::to_value(pulled).unwrap();
+    assert!(pulled["items"].as_array().unwrap().iter().all(|d|
+        !d["message"].as_str().unwrap().contains("MissingType")), "{pulled:#}");
+    assert!(pulled["relatedDocuments"][dependency.as_str()]["items"].as_array().unwrap().iter().any(|d|
+        d["message"].as_str().unwrap().contains("MissingType")), "{pulled:#}");
+    std::fs::write(dependency.to_file_path().unwrap(), dependency_source.replace("MissingType", "Int")).unwrap();
+    let repaired = project.snapshot(&main).await;
+    assert!(repaired["dependency_diagnostics"].as_array().unwrap().is_empty(), "{repaired:#}");
+    assert!(errors(&repaired).is_empty(), "{repaired:#}");
+}
+
+#[tokio::test]
+async fn related_pull_report_preserves_an_open_dependency_body_errors() {
+    let project = Project::new();
+    let dependency = project.open("dependency.vr",
+        "public type Broken is { public value: MissingType }; fn local() { unresolved_value; }");
+    let main = project.open("main.vr",
+        "mount dependency.Broken; fn read(value: Broken) -> Int { value.value }");
+    let pulled = project.service.inner().diagnostic(DocumentDiagnosticParams {
+        text_document: TextDocumentIdentifier { uri: main },
+        identifier: None, previous_result_id: None,
+        work_done_progress_params: Default::default(), partial_result_params: Default::default(),
+    }).await.unwrap();
+    let pulled = serde_json::to_value(pulled).unwrap();
+    let items = pulled["relatedDocuments"][dependency.as_str()]["items"].as_array().unwrap();
+    for name in ["MissingType", "unresolved_value"] {
+        assert!(items.iter().any(|item| item["message"].as_str().unwrap().contains(name)), "{pulled:#}");
+    }
+}
+
+#[tokio::test]
+async fn local_diagnostics_cover_the_complete_identifier_after_unicode() {
+    let project = Project::new();
+    let source = "fn main() { /* Ω🙂 */ let result = missing_identifier; }";
+    let main = project.open("main.vr", source);
+    let snapshot = project.snapshot(&main).await;
+    let error = errors(&snapshot).into_iter().find(|d| d["message"].as_str().unwrap().contains("missing_identifier")).unwrap();
+    let start = source[..source.find("missing_identifier").unwrap()].encode_utf16().count();
+    assert_eq!(error["range"], json!({
+        "start":{"line":0,"character":start}, "end":{"line":0,"character":start+18},
+    }));
+    assert!(snapshot["dependency_diagnostics"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn architecture_projection_preserves_explicit_arguments_owner_and_evidence_revision() {
     let project = Project::new();
     let source = "// 😀 source identity\n@arch_module(\n    foundation: Foundation.ZfcTwoInacc,\n    stratum: MsfsStratum.LFnd,\n    lifecycle: Lifecycle.Definition\n)\nmodule example.main;\nfn main() -> Int { 42 }";
