@@ -67,7 +67,6 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
 
@@ -152,7 +151,7 @@ impl std::fmt::Display for CacheKey {
 /// lockstep with the stdlib bake schema (see T0219 BAKE-CACHE-COMPILER-IDENTITY).
 ///
 /// As of T0387 this is belt-and-suspenders: `key_for` also mixes in a
-/// content-based compiler identity ([`compiler_identity`]), so changed compiler
+/// content-based compiler identity ([`verum_compiler::cache_identity::executable`]), so changed compiler
 /// bytes invalidate the cache even without a manual schema bump.
 /// Still bump this on a deliberate wire-format change — it is the portable,
 /// cross-machine format signal, independent of executable identity.
@@ -160,13 +159,13 @@ pub const WIRE_SCHEMA_VERSION: u32 = 4; // 2: GPU GpuExtended [dst][args...] rea
 
 pub fn key_for(source: &[u8], compiler_version: &str, flags: &[&str]) -> io::Result<CacheKey> {
     Ok(key_with_identity(
-        source, compiler_version, flags, compiler_identity()?,
+        source, compiler_version, flags, verum_compiler::cache_identity::executable()?.as_bytes(),
     ))
 }
 
 /// The single hashing authority behind [`key_for`]. `compiler_identity` is
 /// the build-unique fingerprint of the running compiler binary (see
-/// [`compiler_identity`]); it is an explicit parameter so tests can prove a
+/// [`verum_compiler::cache_identity::executable`]); it is an explicit parameter so tests can prove a
 /// changed compiler identity yields a different key without rebuilding the
 /// binary. `key_for` supplies the real process identity — no other caller
 /// should invent one.
@@ -195,38 +194,6 @@ fn key_with_identity(
     let mut bytes = [0u8; 32];
     bytes.copy_from_slice(hash.as_bytes());
     CacheKey(bytes)
-}
-
-/// Content identity of the executable, read once per process. Errors remain
-/// errors: a package-version-only key could reuse incompatible bytecode.
-fn compiler_identity() -> io::Result<&'static [u8]> {
-    static IDENTITY: OnceLock<io::Result<blake3::Hash>> = OnceLock::new();
-    IDENTITY
-        .get_or_init(|| compiler_file_identity(&std::env::current_exe()?))
-        .as_ref()
-        .map(|hash| hash.as_bytes().as_slice())
-        .map_err(|error| io::Error::new(error.kind(), error.to_string()))
-}
-
-fn compiler_file_identity(path: &Path) -> io::Result<blake3::Hash> {
-    let mut file = fs::File::open(path)?;
-    let before = file.metadata()?;
-    if !before.is_file() || before.len() == 0 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "compiler is not a nonempty regular file",
-        ));
-    }
-    let mut hash = blake3::Hasher::new();
-    hash.update_reader(&mut file)?;
-    let after = file.metadata()?;
-    if before.len() != after.len() || before.modified()? != after.modified()? {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "compiler changed while computing its identity",
-        ));
-    }
-    Ok(hash.finalize())
 }
 
 #[cfg(test)]
@@ -789,9 +756,9 @@ mod tests {
         // The process identity must be discoverable (current_exe present
         // under the test harness) and constant across calls within a run —
         // otherwise the cache would never hit.
-        let a = compiler_identity().unwrap();
-        let b = compiler_identity().unwrap();
-        assert!(!a.is_empty(), "compiler identity must never be empty");
+        let a = verum_compiler::cache_identity::executable().unwrap();
+        let b = verum_compiler::cache_identity::executable().unwrap();
+        assert!(!a.as_bytes().is_empty(), "compiler identity must never be empty");
         assert_eq!(a, b, "compiler identity is process-constant");
     }
 
@@ -801,7 +768,7 @@ mod tests {
         // form fed the real process identity, and differs from one built
         // with a deliberately different identity.
         let via_public = key_for(b"src", "0.6.0", &["tier=0"]).unwrap();
-        let via_same = key_with_identity(b"src", "0.6.0", &["tier=0"], compiler_identity().unwrap());
+        let via_same = key_with_identity(b"src", "0.6.0", &["tier=0"], verum_compiler::cache_identity::executable().unwrap().as_bytes());
         assert_eq!(
             via_public, via_same,
             "key_for must fold in compiler_identity()"

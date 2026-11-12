@@ -353,8 +353,7 @@ impl<'s> CompilationPipeline<'s> {
         );
 
         // Fingerprint of every out-of-module input the LLVM leg
-        // reads: compiler binary stamp (also covers the EMBEDDED
-        // stdlib archive + metadata), lowering-config knobs (the
+        // reads: lowering-config knobs (the
         // same session fields `lower_optimize_and_emit_object`
         // resolves), monomorphization-cache flag (can reorder the
         // emitted module), permission policy (Debug over BTreeSets —
@@ -363,11 +362,10 @@ impl<'s> CompilationPipeline<'s> {
         let object_cache = {
             let lf = &self.session.options().language_features;
             let fingerprint = format!(
-                "exe={exe}|module={module}|opt={opt}|dbg={dbg}|cov={cov}|panic={panic}|\
+                "module={module}|opt={opt}|dbg={dbg}|cov={cov}|panic={panic}|\
                  tco={tco}|vect={vect}|inline={inline}|futures={fut}|nurseries={nur}|\
                  awt={awt}|tss={tss}|mono_cache={mc}|perm={perm:?}|triple={triple}|\
                  cpu={cpu}|features={features}|passes={passes}|orphan_sweep={osweep}",
-                exe = super::aot_object_cache::compiler_stamp(),
                 module = module_name,
                 opt = opt_level,
                 dbg = self.session.options().debug_info,

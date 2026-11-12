@@ -1,4 +1,5 @@
-use super::{compiler_file_identity, key_with_identity};
+use super::key_with_identity;
+use verum_compiler::cache_identity::file as compiler_file_identity;
 use std::{
     fs,
     time::{Duration, UNIX_EPOCH},

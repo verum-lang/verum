@@ -283,6 +283,7 @@ pub mod embedded_stdlib {
 pub mod embedded_stdlib_vbc; // Embedded precompiled stdlib VBC archive (Phase 5 of #precompile-stdlib epic)
 pub mod graceful_fallback;
 pub mod hash; // Unified Blake3-based hashing infrastructure
+pub mod cache_identity;
 pub mod incremental_compiler;
 pub mod module_utils; // Shared module utilities (cfg handling, path conversion)
 pub mod passes;

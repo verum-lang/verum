@@ -33,7 +33,7 @@
 //!  * the on-disk stdlib source tree (`CoreSource::auto_detect()`,
 //!  path+content of every `.vr`, sorted) — disk `core/` edits
 //!  feed mount resolution / typecheck without a compiler rebuild;
-//!  * a compiler-binary stamp (version+len+mtime) — this also
+//!  * the content digest of the compiler executable — this also
 //!  covers the EMBEDDED precompiled-stdlib archive + metadata
 //!  (`include_bytes!` in `embedded_stdlib_vbc` / metadata), which
 //!  change only with the binary;
@@ -79,6 +79,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use tracing::{debug, info};
+use verum_common::Text;
 
 /// Bump when the cached artifact contract changes (object contents,
 /// meta format, key composition).  Old entries then miss and age out
@@ -87,7 +88,8 @@ use tracing::{debug, info};
 /// v3 (T1157): the sidecar also carries `unresolved=` /
 /// `unresolved_reachable=`, so a cache HIT can replay the
 /// degraded-call warning instead of serving a wrong binary in silence.
-const CACHE_FORMAT_VERSION: u32 = 3;
+// v4: native and script caches share content-based compiler identity.
+const CACHE_FORMAT_VERSION: u32 = 4;
 
 /// LRU caps — enforced on insert, oldest-mtime first.
 const MAX_ENTRIES: usize = 50;
@@ -112,30 +114,10 @@ pub(super) fn bypassed(lto: bool, emit_ir: bool) -> bool {
         || std::env::var_os("VERUM_DUMP_PRE_PASS").is_some()
 }
 
-/// Identity of the compiler binary producing objects.  Any rebuild
-/// of `verum` (new LLVM, new lowering code) changes the stamp and
-/// therefore every key; stale entries age out via LRU.
-pub(super) fn compiler_stamp() -> String {
-    let (len, mtime_nanos) = std::env::current_exe()
-        .ok()
-        .and_then(|p| std::fs::metadata(&p).ok())
-        .map(|md| {
-            let mtime = md
-                .modified()
-                .ok()
-                .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|d| d.as_nanos())
-                .unwrap_or(0);
-            (md.len(), mtime)
-        })
-        .unwrap_or((0, 0));
-    format!("{}|{}|{}", env!("CARGO_PKG_VERSION"), len, mtime_nanos)
-}
-
 /// A prepared cache handle: directory + fully-computed content key.
 pub(super) struct AotObjectCache {
     dir: PathBuf,
-    key: String,
+    key: Text,
 }
 
 /// Payload recovered on a cache hit — the lowering-derived facts the
@@ -187,6 +169,13 @@ impl AotObjectCache {
         fingerprint: &str,
     ) -> Option<Self> {
         let t0 = Instant::now();
+        let identity = match crate::cache_identity::executable() {
+            Ok(identity) => identity,
+            Err(error) => {
+                debug!(%error, "aot-object-cache: executable identity unavailable; reuse disabled");
+                return None;
+            }
+        };
         let input_bytes = match std::fs::read(input_path) {
             Ok(b) => b,
             Err(e) => {
@@ -219,13 +208,7 @@ impl AotObjectCache {
         let stdlib_hash = stdlib_hasher.finalize();
 
         let input_hash = blake3::hash(&input_bytes);
-        let mut hasher = blake3::Hasher::new();
-        hasher.update(&CACHE_FORMAT_VERSION.to_le_bytes());
-        hasher.update(fingerprint.as_bytes());
-        hasher.update(&(input_bytes.len() as u64).to_le_bytes());
-        hasher.update(input_hash.as_bytes());
-        hasher.update(stdlib_hash.as_bytes());
-        let key = hasher.finalize().to_hex().to_string();
+        let key = object_key(identity, fingerprint, input_bytes.len(), &input_hash, &stdlib_hash);
         if trace_enabled() {
             eprintln!(
                 "[aot-object-cache] key={} input_bytes={} input_hash={} stdlib_files={} stdlib_hash={} fp_bytes={} prepare={:?}",
@@ -435,7 +418,7 @@ impl AotObjectCache {
             if count <= MAX_ENTRIES && total <= MAX_TOTAL_BYTES {
                 break;
             }
-            if o.key == self.key {
+            if o.key.as_str() == self.key.as_str() {
                 continue;
             }
             // Meta first so concurrent readers miss cleanly, then
@@ -450,6 +433,30 @@ impl AotObjectCache {
         }
     }
 }
+
+/// Each component has a distinct role; metadata such as executable timestamps
+/// is never substituted for content identity.
+fn object_key(
+    compiler: &blake3::Hash,
+    configuration: &str,
+    source_len: usize,
+    source: &blake3::Hash,
+    stdlib: &blake3::Hash,
+) -> Text {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(&CACHE_FORMAT_VERSION.to_le_bytes());
+    hasher.update(compiler.as_bytes());
+    hasher.update(&(configuration.len() as u64).to_le_bytes());
+    hasher.update(configuration.as_bytes());
+    hasher.update(&(source_len as u64).to_le_bytes());
+    hasher.update(source.as_bytes());
+    hasher.update(stdlib.as_bytes());
+    hasher.finalize().to_hex().to_string().into()
+}
+
+#[cfg(test)]
+#[path = "../../tests/unit/aot_object_cache_identity.rs"]
+mod identity_tests;
 
 /// Parse the sidecar meta.  `None` on version mismatch or missing
 /// fields (treated as a miss by the caller).
