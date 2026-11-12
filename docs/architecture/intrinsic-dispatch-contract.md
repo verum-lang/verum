@@ -18,6 +18,27 @@ calls a C shim. The public API and its concurrency contract live in
 
 ## 1. Body `@intrinsic` macro authority
 
+### Declaration queries
+
+`T.id`, `@intrinsic("type_id", T)` and `@vbc(TYPE_ID, T)` carry the
+same resolved `TypeRef` into `TypeIdentity`. Linking remaps nominal IDs and
+specialization substitutes the complete argument list before either execution
+tier answers. Aliases normalize to their targets; nominal identity never comes
+from display spelling. Reference capability, array extent and argument order
+remain part of the key.
+
+The compact identifier is local to one linked program. Every observation is
+checked against its complete canonical key in a program-owned collision scope;
+a conflicting key fails. Archives retain the query, not a pre-link number.
+Cloning or deserializing a module creates a fresh scope. Unresolved projections,
+missing declarations, excessive nesting, and callable metadata lacking a full
+computational contract cannot yield an identifier.
+
+Gates: `verum_vbc/tests/type_identity.rs`,
+`verum_compiler/tests/stdlib_future_declarations.rs::actual_identity_query_survives_archive_bootstrap_and_generic_calls`
+and `verum_codegen/tests/target_capabilities.rs` exercise both intrinsic surfaces,
+archive replay, actual standard-library declarations and VM/native agreement.
+
 > **Every public stdlib function whose body is a single `@intrinsic("...",
 > args)` macro call MUST NOT also appear in `register_stdlib_intrinsics`'s
 > table at `crates/verum_vbc/src/codegen/mod.rs:2422`.**

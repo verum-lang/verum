@@ -58,6 +58,40 @@ fn actual_layout_queries_survive_archive_bootstrap_and_generic_calls() {
 }
 
 #[test]
+fn actual_identity_query_survives_archive_bootstrap_and_generic_calls() {
+    let root = tempfile::tempdir().unwrap();
+    let core = root.path().join("core");
+    fs::create_dir_all(core.join("intrinsics")).unwrap();
+    fs::write(core.join("mod.vr"), "module core; public module intrinsics { public module type_info; }").unwrap();
+    let declaration = include_str!("../../../core/intrinsics/type_info.vr").lines()
+        .find(|line| line.starts_with("public meta fn type_id<")).unwrap();
+    fs::write(core.join("intrinsics/type_info.vr"), format!("module core.intrinsics.type_info;\n{declaration}\n")).unwrap();
+    let archive = bootstrap(&core);
+    assert_eq!(execute(&archive,
+        "module app; mount core.intrinsics.type_info.type_id;
+         type Tag<T> is {value:T}; type Alias<T> is Tag<T>;
+         fn property<T>() -> UInt64 { T.id }
+         fn main() -> Int {
+            if type_id<Tag<Int>>() == property<Alias<Int>>() && type_id<Tag<Int>>() != type_id<Tag<Bool>>() {73} else {19}
+         }"), 73);
+}
+
+#[test]
+fn actual_identity_documentation_example_checks_and_executes() {
+    let source = include_str!("fixtures/type_identity.vr");
+    let module = verum_fast_parser::Parser::new(source).parse_module().unwrap();
+    let mut checker = verum_types::TypeChecker::new();
+    checker.register_builtins();
+    assert!(checker.prepare_module_declarations(&module).is_empty());
+    for item in &module.items { checker.check_item(item).unwrap(); }
+    assert!(checker.take_deferred_errors().is_empty());
+    assert!(!checker.diagnostics().iter().any(|diagnostic| diagnostic.is_error()));
+    let module = verum_vbc::codegen::VbcCodegen::new().compile_module(&module).unwrap();
+    let main = module.find_function_by_name("main").unwrap();
+    verum_vbc::interpreter::Interpreter::new(std::sync::Arc::new(module)).execute_function(main).unwrap();
+}
+
+#[test]
 fn imported_future_outputs_and_contextual_owner_arguments_survive_bootstrap() {
     check_bootstrap(false);
 }

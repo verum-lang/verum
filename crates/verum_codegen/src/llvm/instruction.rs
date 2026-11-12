@@ -2510,6 +2510,23 @@ fn lower_instruction_impl<'ctx>(
         Instruction::TargetHasAtomic { dst, type_ref } => target_query::atomic(ctx, *dst, type_ref),
         Instruction::TargetHasFeature { dst, feature } => target_query::feature(ctx, *dst, *feature),
 
+        Instruction::TypeIdentity { dst, type_ref } => {
+            let module = ctx.vbc_module().or_internal("type identity requires declaration metadata")?;
+            let id = module.type_identity(type_ref);
+            match id {
+                Ok(id) => ctx.set_register(dst.0, ctx.types().i64_type().const_int(id, false).into()),
+                Err(reason) if type_ref.is_generic() => {
+                    emit_runtime_abort(ctx, &reason, "identity_unresolved")?;
+                    ctx.builder().build_unreachable().or_llvm_err()?;
+                    let dead = ctx.llvm_context().append_basic_block(ctx.function(), "identity_dead");
+                    ctx.builder().position_at_end(dead);
+                    ctx.set_register(dst.0, ctx.types().i64_type().get_undef().into());
+                }
+                Err(reason) => return Err(LlvmLoweringError::type_lowering(reason)),
+            }
+            Ok(())
+        }
+
         Instruction::TypeLayout { dst, type_ref, property } => {
             let module = ctx.vbc_module().or_internal("TypeLayout requires declaration metadata")?;
             if let Some(value) = verum_vbc::type_layout::query(module, type_ref, *property) {
@@ -31656,6 +31673,9 @@ fn lower_extended<'ctx>(
         )),
         Some(ExtendedSubOpcode::TypeLayout) => Err(LlvmLoweringError::unsupported(
             "TypeLayout requires the canonical decoded instruction",
+        )),
+        Some(ExtendedSubOpcode::TypeIdentity) => Err(LlvmLoweringError::unsupported(
+            "TypeIdentity requires the canonical decoded instruction",
         )),
         Some(ExtendedSubOpcode::SetCallWitness) => {
             // #44-B Tier-0 sidecar (see the typed-variant arm in

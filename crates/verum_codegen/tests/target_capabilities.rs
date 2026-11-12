@@ -52,7 +52,13 @@ fn source_queries_agree_in_vm_and_native_after_real_specialization() {
                 + @intrinsic("stride_of", T) + @intrinsic("bits_of", T)) as Int
         }
         type Word is UInt32;
-        fn atomic_probe() -> Int { if outer<Word>() && layout<Word>() == 44 { 73 } else { 19 } }
+        meta fn type_id<T>() -> UInt64 { @intrinsic("type_id", T) }
+        type Tag<T> is { value:T };
+        type Alias<T> is Tag<T>;
+        fn identity_probe() -> UInt64 { type_id<Tag<Word>>() }
+        fn atomic_probe() -> Int { if outer<Word>() && layout<Word>() == 44
+            && type_id<Tag<Word>>() == type_id<Alias<UInt32>>()
+            && type_id<Tag<Word>>() != type_id<Tag<UInt64>>() { 73 } else { 19 } }
         fn feature_probe(name: Text) -> Bool { @intrinsic("target_has_feature", name) }
     "#;
     let ast = Parser::new(source).parse_module().unwrap();
@@ -90,6 +96,8 @@ fn source_queries_agree_in_vm_and_native_after_real_specialization() {
     let mut vm = Interpreter::new(Arc::new(vbc.clone()));
     vm.state.config.target_capabilities = Some(facts.clone());
     assert_eq!(vm.execute_function(entry).unwrap().try_as_i64(), Some(73));
+    let identity_entry = vbc.find_function_by_name("identity_probe").unwrap();
+    let expected_identity = vm.execute_function(identity_entry).unwrap().as_i64() as u64;
     let context = Context::create();
     let mut config = LoweringConfig::debug("target_queries")
         .with_debug_info(false)
@@ -100,7 +108,7 @@ fn source_queries_agree_in_vm_and_native_after_real_specialization() {
     lowering.lower_module(&vbc).unwrap();
     let module = lowering.into_module();
     module.verify().unwrap();
-    for name in ["atomic_probe", "feature_probe"] {
+    for name in ["atomic_probe", "feature_probe", "identity_probe"] {
         assert!(
             module
                 .get_function(name)
@@ -115,7 +123,7 @@ fn source_queries_agree_in_vm_and_native_after_real_specialization() {
             function.set_linkage(
                 if matches!(
                     function.get_name().to_str().unwrap(),
-                    "atomic_probe" | "feature_probe"
+                    "atomic_probe" | "feature_probe" | "identity_probe"
                 ) {
                     Linkage::External
                 } else {
@@ -132,7 +140,7 @@ fn source_queries_agree_in_vm_and_native_after_real_specialization() {
         )
         .unwrap();
     module.verify().unwrap();
-    for name in ["atomic_probe", "feature_probe"] {
+    for name in ["atomic_probe", "feature_probe", "identity_probe"] {
         assert!(
             module.get_function(name).is_some(),
             "missing {name} after DCE"
@@ -148,6 +156,10 @@ fn source_queries_agree_in_vm_and_native_after_real_specialization() {
             .get_function::<unsafe extern "C" fn() -> i64>("atomic_probe")
             .unwrap();
         assert_eq!(atomic.call(), 73);
+        let identity = engine
+            .get_function::<unsafe extern "C" fn() -> u64>("identity_probe")
+            .unwrap();
+        assert_eq!(identity.call(), expected_identity);
         let feature = engine
             .get_function::<unsafe extern "C" fn(u64) -> bool>("feature_probe")
             .unwrap();

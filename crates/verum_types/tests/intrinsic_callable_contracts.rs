@@ -100,11 +100,24 @@ fn registered_target_queries_satisfy_meta_purity() {
 
 #[test]
 fn registered_layout_queries_satisfy_meta_purity() {
-    for name in ["size_of", "align_of", "stride_of", "bits_of"] {
+    for name in ["size_of", "align_of", "stride_of", "bits_of", "type_id"] {
         let source = format!("meta fn probe<T>() -> USize {{ @intrinsic(\"{name}\", T) }}");
         let accepted = errors(&source);
         assert!(accepted.is_empty(), "{source}: {accepted:?}");
     }
+}
+
+#[test]
+fn identity_surfaces_infer_the_same_unsigned_carrier() {
+    for source in ["Int.id", "@intrinsic(\"type_id\", Int)", "@vbc(TYPE_ID, Int)"] {
+        let expression = Parser::new(source).parse_expr().unwrap();
+        let mut checker = TypeChecker::new();
+        checker.register_builtins();
+        assert_eq!(checker.synth_expr(&expression).unwrap().ty, verum_types::Type::uint64(), "{source}");
+    }
+    assert!(errors("meta fn identity<T>() -> UInt64 { @vbc(TYPE_ID, T) }").is_empty());
+    assert!(errors("meta fn unsound<T>() -> UInt64 { @vbc(NO_SUCH_TYPE_QUERY, T) }")
+        .iter().any(|error| error.contains("ImpureMetaFunction")));
 }
 
 #[test]

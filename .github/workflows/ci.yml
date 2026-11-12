@@ -559,7 +559,7 @@ jobs:
       - name: Declaration and target query execution
         timeout-minutes: 10
         run: |
-          cargo test --locked -p verum_vbc --features codegen --test target_capabilities --test target_platform_constants
+          cargo test --locked -p verum_vbc --features codegen --test target_capabilities --test target_platform_constants --test type_identity
           cargo test --locked -p verum_vbc --features codegen --test generic_layout_witness layout_intrinsics
 
       - name: Upload vbc test log
@@ -765,6 +765,12 @@ jobs:
         run: >-
           cargo test --locked --release -p verum_compiler
           --test stdlib_future_declarations actual_layout_queries
+
+      - name: Type identity through actual standard-library declarations
+        timeout-minutes: 5
+        run: >-
+          cargo test --locked --release -p verum_compiler
+          --test stdlib_future_declarations actual_identity_
 
       # Reuses the release CLI; includes an actual interpreter positive control.
       - name: Project run tier selection

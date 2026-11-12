@@ -483,6 +483,10 @@ pub struct VbcModule {
     #[serde(skip)]
     pub(crate) receiver_method_families: std::sync::OnceLock<crate::receiver_methods::MethodFamilies>,
 
+    /// Collision evidence for this program's complete, linked type keys.
+    #[serde(skip)]
+    pub(crate) type_identities: crate::type_identity::TypeIdentityScope,
+
     /// Mount-rename alias table — Phase 1 of task #11 fundamental fix
     /// (see `task11-mount-alias-aot-fix spec`).
     ///
@@ -678,6 +682,7 @@ impl VbcModule {
             resolved_band_map: std::collections::HashMap::new(),
             resolved_protocol_dispatch: std::collections::HashMap::new(),
             receiver_method_families: std::sync::OnceLock::new(),
+            type_identities: Default::default(),
             mount_aliases: Vec::new(),
             fn_idx_by_name: std::sync::OnceLock::new(),
             fn_idx_by_last_segment: std::sync::OnceLock::new(),

@@ -9823,6 +9823,8 @@ pub enum ExtendedSubOpcode {    /// Reserved no-op — forward-compat anchor. Al
     TargetHasAtomic = 0x0b,
     /// Target CPU feature: destination and Text operand registers.
     TargetHasFeature = 0x0c,
+    /// Checked program-local type identity: destination and complete TypeRef.
+    TypeIdentity = 0x0d,
 
     /// Process termination — reads one `Int` register and terminates
     /// the process with that exit code. Format: `[0x1F][0x10][reg:u16]`.
@@ -10085,6 +10087,7 @@ impl ExtendedSubOpcode {
             0x0a => Some(Self::BindMethodReceiver),
             0x0b => Some(Self::TargetHasAtomic),
             0x0c => Some(Self::TargetHasFeature),
+            0x0d => Some(Self::TypeIdentity),
             0x10 => Some(Self::ProcessExit),
             0x11 => Some(Self::PanicValue),
             0x20 => Some(Self::ScriptEngineNew),
@@ -10177,6 +10180,7 @@ impl ExtendedSubOpcode {
             Self::BindMethodReceiver => "EXT_BIND_METHOD_RECEIVER",
             Self::TargetHasAtomic => "EXT_TARGET_HAS_ATOMIC",
             Self::TargetHasFeature => "EXT_TARGET_HAS_FEATURE",
+            Self::TypeIdentity => "EXT_TYPE_IDENTITY",
             Self::GetFieldNamed => "EXT_GET_FIELD_NAMED",
             Self::SetFieldNamed => "EXT_SET_FIELD_NAMED",
             Self::ProcessExit => "EXT_PROCESS_EXIT",
@@ -10672,6 +10676,13 @@ pub enum Instruction {    // ===================================================
         /// Destination register.
         dst: Reg,
         /// Type reference to load.
+        type_ref: TypeRef,
+    },
+    /// Checked compact identity of the complete declaration-owned type.
+    TypeIdentity {
+        /// Destination UInt64 register.
+        dst: Reg,
+        /// Full type, substituted by the current frame or monomorphizer.
         type_ref: TypeRef,
     },
     /// Query a declared type layout without erasing generic parameter identity.

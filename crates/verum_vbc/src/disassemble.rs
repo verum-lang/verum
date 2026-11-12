@@ -352,6 +352,7 @@ fn write_instruction(
         TypeResource { dst, type_ref } => write!(out, "TYPE_RESOURCE {}, {}", r(dst), format_type_ref(module, type_ref)),
         TargetHasAtomic { dst, type_ref } => write!(out, "TARGET_HAS_ATOMIC {}, {}", r(dst), format_type_ref(module, type_ref)),
         TargetHasFeature { dst, feature } => write!(out, "TARGET_HAS_FEATURE {}, {}", r(dst), r(feature)),
+        TypeIdentity { dst, type_ref } => write!(out, "TYPE_IDENTITY {}, {}", r(dst), format_type_ref(module, type_ref)),
         TypeLayout { dst, type_ref, property } => write!(out, "TYPE_LAYOUT {}, {:?}, {}", r(dst), property, format_type_ref(module, type_ref)),
         LoadSmallI { dst, value } => write!(out, "LOAD_SI   {}, {}", r(dst), value),
         LoadNil { dst } => write!(out, "LOAD_NIL  {}", r(dst)),

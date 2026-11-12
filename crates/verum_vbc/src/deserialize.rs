@@ -439,6 +439,7 @@ impl<'a> Deserializer<'a> {
  };
 
  Ok(VbcModule {
+     type_identities: Default::default(),
  header,
  name,
  strings,

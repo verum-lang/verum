@@ -197,6 +197,8 @@ pub enum CodegenStrategy {
     CompileTimeConstant,
     /// Declaration-owned layout query, retaining its exact type operand.
     TypeLayout(crate::instruction::LayoutProperty),
+    /// Complete declaration-owned identity, with collision refusal.
+    TypeIdentity,
     /// Type-witness query against explicit backend target capabilities.
     TargetHasAtomic,
     /// Text query against the configured backend CPU feature catalog.
@@ -996,8 +998,6 @@ pub enum InlineSequenceId {
     // =========================================================================
     // Type Introspection Operations
     // =========================================================================
-    /// type_id: get unique type identifier
-    TypeId,
     /// type_name: get human-readable type name
     TypeName,
     /// needs_drop: check if type needs drop glue
@@ -12906,11 +12906,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
             IntrinsicHint::ConstEval,
             IntrinsicHint::Generic,
         ],
-        param_count: 0,  // type parameter only
-        return_count: 1, // unique type id
-        strategy: CodegenStrategy::InlineSequence(InlineSequenceId::TypeId),
+        param_count: 1, // declaration-owned type operand
+        return_count: 1, // checked program-local type id
+        strategy: CodegenStrategy::TypeIdentity,
         mlir_op: Some("verum.type_id"),
-        doc: "Get unique type identifier (compile-time evaluated)",
+        doc: "Checked identity of a complete type within one linked program",
     },
     Intrinsic {
         name: "TYPE_NAME",

@@ -1314,6 +1314,16 @@ impl Type {
         Type::Int
     }
 
+    /// Canonical full-width unsigned scalar, including opaque type identities.
+    pub fn uint64() -> Self {
+        Self::Named {
+            path: Path::single(verum_ast::Ident::new(
+                verum_common::well_known_types::type_names::UINT64, Span::default(),
+            )),
+            args: List::new(),
+        }
+    }
+
     /// Create a float type
     pub fn float() -> Self {
         Type::Float

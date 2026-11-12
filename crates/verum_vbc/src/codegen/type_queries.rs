@@ -13,7 +13,9 @@ impl VbcCodegen {
     ) -> CodegenResult<bool> {
         if !matches!(
             strategy,
-            CodegenStrategy::TypeLayout(_) | CodegenStrategy::TargetHasAtomic
+            CodegenStrategy::TypeLayout(_)
+                | CodegenStrategy::TargetHasAtomic
+                | CodegenStrategy::TypeIdentity
         ) {
             return Ok(false);
         }
@@ -31,9 +33,28 @@ impl VbcCodegen {
             .ok_or_else(|| {
                 CodegenError::internal("declaration query requires a type, not a runtime value")
             })?;
+        let type_ref = self.resolve_query_type(&ty)?;
+        let instruction = match strategy {
+            CodegenStrategy::TypeLayout(property) => Instruction::TypeLayout {
+                dst,
+                type_ref,
+                property: *property,
+            },
+            CodegenStrategy::TargetHasAtomic => Instruction::TargetHasAtomic { dst, type_ref },
+            CodegenStrategy::TypeIdentity => Instruction::TypeIdentity { dst, type_ref },
+            _ => unreachable!("selected above"),
+        };
+        self.ctx.emit(instruction);
+        Ok(true)
+    }
+
+    pub(super) fn resolve_query_type(
+        &self,
+        ty: &verum_ast::Type,
+    ) -> CodegenResult<crate::types::TypeRef> {
         let mut count_error = None;
         let type_ref = self.resolve_type_ref_scoped_with_count(
-            &ty,
+            ty,
             &self.ctx.current_generic_param_ids,
             true,
             self.ctx.current_source_module.as_deref(),
@@ -52,16 +73,6 @@ impl VbcCodegen {
         let type_ref = self
             .resolve_declared_associated_types(&type_ref)
             .unwrap_or(type_ref);
-        let instruction = match strategy {
-            CodegenStrategy::TypeLayout(property) => Instruction::TypeLayout {
-                dst,
-                type_ref,
-                property: *property,
-            },
-            CodegenStrategy::TargetHasAtomic => Instruction::TargetHasAtomic { dst, type_ref },
-            _ => unreachable!("selected above"),
-        };
-        self.ctx.emit(instruction);
-        Ok(true)
+        Ok(type_ref)
     }
 }

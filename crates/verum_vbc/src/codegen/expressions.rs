@@ -35168,20 +35168,15 @@ impl VbcCodegen {
                     if let LiteralKind::Text(text) = &lit.kind {
                         text.to_string()
                     } else {
-                        self.ctx.emit(Instruction::LoadNil { dst: dest });
-                        return Ok(Some(dest));
+                        return Err(CodegenError::unsupported_expr("@vbc requires an operation name"));
                     }
                 }
                 _ => {
-                    // First argument must be identifier or string literal
-                    self.ctx.emit(Instruction::LoadNil { dst: dest });
-                    return Ok(Some(dest));
+                    return Err(CodegenError::unsupported_expr("@vbc requires an operation name"));
                 }
             }
         } else {
-            // No arguments provided
-            self.ctx.emit(Instruction::LoadNil { dst: dest });
-            return Ok(Some(dest));
+            return Err(CodegenError::unsupported_expr("@vbc requires an operation name"));
         };
 
         // **Cell-family interior-mutability intrinsics.**
@@ -35216,11 +35211,9 @@ impl VbcCodegen {
         let intrinsic_info = match lookup_intrinsic(&intrinsic_name) {
             Some(info) => info,
             None => {
-                // Intrinsic not found - emit warning-level diagnostic
-                // This is not necessarily an error during early development
-                // as intrinsics may be defined in math-spec but not yet registered
-                self.ctx.emit(Instruction::LoadNil { dst: dest });
-                return Ok(Some(dest));
+                return Err(CodegenError::unsupported_expr(format!(
+                    "@vbc operation `{intrinsic_name}` has no registry entry",
+                )));
             }
         };
 
@@ -35813,7 +35806,7 @@ impl VbcCodegen {
             CodegenStrategy::CompileTimeConstant => {
                 self.emit_intrinsic_compile_time_constant(intrinsic.name, dest)?;
             }
-            CodegenStrategy::TypeLayout(_) | CodegenStrategy::TargetHasAtomic => return Err(CodegenError::internal("atomic capability query requires its declaration-owned type operand")),
+            CodegenStrategy::TypeLayout(_) | CodegenStrategy::TypeIdentity | CodegenStrategy::TargetHasAtomic => return Err(CodegenError::internal("type query requires its declaration-owned type operand")),
             CodegenStrategy::TargetHasFeature => {
                 let [feature] = args else { return Err(CodegenError::internal("target_has_feature requires one Text operand")); };
                 self.ctx.emit(Instruction::TargetHasFeature { dst: dest, feature: *feature });
@@ -38518,9 +38511,6 @@ impl VbcCodegen {
             // =================================================================
             // These are typically compile-time evaluated, but for interpreter
             // we emit runtime calls or constant loads
-            InlineSequenceId::TypeId => {
-                self.emit_intrinsic_library_call("verum_type_id", args, dest)?;
-            }
             InlineSequenceId::TypeName => {
                 // TypeName is a compile-time operation that returns the name of a type.
                 // Try to resolve from: (1) generic type params, (2) current function's
@@ -40116,7 +40106,7 @@ impl VbcCodegen {
                     value: 8,
                 });
             }
-            "type_name" | "type_id" => {
+            "type_name" => {
                 // Type information - resolve from context if possible
                 let type_name = if let Some(param) = self
                     .ctx
@@ -44117,6 +44107,12 @@ impl VbcCodegen {
 
         let dest = self.ctx.alloc_temp();
 
+        if *property == TypeProperty::Id {
+            let type_ref = self.resolve_query_type(ty)?;
+            self.ctx.emit(Instruction::TypeIdentity { dst: dest, type_ref });
+            return Ok(Some(dest));
+        }
+
         // Layout properties carry the exact signature-owned TypeRef. A
         // concrete declaration may fold immediately; otherwise the same query
         // executes after frame/monomorphization substitution.
@@ -44277,32 +44273,8 @@ impl VbcCodegen {
                     const_id: const_id.0,
                 });
             }
-            TypeProperty::Id => {
-                use std::hash::{Hash, Hasher};
-                use verum_common::well_known_types::type_names;
-                // TYPEINFO-ID-CANON-1 (task #2): hash the CANONICAL identity
-                // name so aliases of the same underlying type agree —
-                // `Int.id == Int64.id`, `Byte.id == UInt8.id`,
-                // `Float.id == Float64.id`, `USize.id == UInt64.id` — while
-                // distinct widths (Int8 vs Int64) and user types stay
-                // distinct.  Pre-fix this hashed the SPELLED name, so every
-                // alias diverged.
-                let canon = type_names::canonical_identity_name(&type_name);
-                let key: &str = if canon == type_names::NON_PRIMITIVE_IDENTITY {
-                    type_name.as_str()
-                } else {
-                    canon
-                };
-                let mut hasher = std::collections::hash_map::DefaultHasher::new();
-                key.hash(&mut hasher);
-                let type_id = hasher.finish() as i64;
-                self.ctx.emit(Instruction::LoadI {
-                    dst: dest,
-                    value: type_id,
-                });
-            }
             TypeProperty::Size | TypeProperty::Alignment | TypeProperty::Stride
-            | TypeProperty::Bits | TypeProperty::IsSigned => unreachable!("resolved by the declaration query"),
+            | TypeProperty::Bits | TypeProperty::IsSigned | TypeProperty::Id => unreachable!("resolved by the declaration query"),
         }
 
         Ok(Some(dest))

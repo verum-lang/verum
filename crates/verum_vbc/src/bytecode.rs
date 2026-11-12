@@ -166,6 +166,13 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             encode_type_ref(type_ref, output);
         }
 
+        Instruction::TypeIdentity { dst, type_ref } => {
+            output.push(Opcode::Extended.to_byte());
+            output.push(ExtendedSubOpcode::TypeIdentity.to_byte());
+            encode_reg(*dst, output);
+            encode_type_ref(type_ref, output);
+        }
+
         Instruction::TypeLayout { dst, type_ref, property } => {
             output.push(Opcode::Extended.to_byte());
             output.push(ExtendedSubOpcode::TypeLayout.to_byte());
@@ -5289,6 +5296,11 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                 Some(ExtendedSubOpcode::PanicValue) => Ok(Instruction::PanicValue {
                     message: decode_reg(data, offset)?,
                 }),
+                Some(ExtendedSubOpcode::TypeIdentity) => {
+                    let dst = decode_reg(data, offset)?;
+                    let type_ref = decode_type_ref(data, offset)?;
+                    Ok(Instruction::TypeIdentity { dst, type_ref })
+                }
                 Some(ExtendedSubOpcode::TypeLayout) => {
                     let dst = decode_reg(data, offset)?;
                     let raw_property = decode_u8(data, offset)?;

@@ -2628,7 +2628,7 @@ type_property_expr = type_expr , '.' , type_property_name ;
        const max: Self;        // Maximum value (for numeric types)
        const bits: Int;        // Bit width (for numeric types)
        const name: Text;       // Type name as string
-       const id: u64;          // Unique type identifier (hash of canonical name)
+       const id: UInt64;       // Checked identity of a complete type within one linked program
    }
 *)
 

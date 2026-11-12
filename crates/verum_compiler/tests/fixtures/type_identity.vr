@@ -1,0 +1,9 @@
+type Tag<T> is { value: T };
+type Alias<T> is Tag<T>;
+
+fn identity<T>() -> UInt64 { T.id }
+
+fn main() {
+    assert(identity<Tag<Int>>() == identity<Alias<Int>>());
+    assert(identity<Tag<Int>>() != identity<Tag<UInt64>>());
+}

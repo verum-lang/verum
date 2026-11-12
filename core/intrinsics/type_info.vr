@@ -21,7 +21,7 @@
 // | `T.min` | Minimum value (numeric) | `Int.min` |
 // | `T.max` | Maximum value (numeric) | `Int.max` |
 // | `T.name` | Type name as Text | `Int.name` |
-// | `T.id` | Unique type identifier (u64) | `Int.id` |
+// | `T.id` | Checked identity within the linked program | `Int.id` |
 //
 
 // # Legacy Functions
@@ -70,7 +70,8 @@ public meta fn bits_of<T>() -> USize { @intrinsic("bits_of", T) }
 // SECTION 2: Type Identification (prefer T.id, T.name)
 // =============================================================================
 
-/// Type ID for runtime type identification. Prefer: `T.id`
+/// Checked program-local identity, including generic arguments. Prefer: `T.id`.
+/// Not a persistent schema identifier; incomplete witnesses and collisions fail.
 @deprecated("Use T.id type property instead")
 public meta fn type_id<T>() -> UInt64 { @intrinsic("type_id", T) }
 

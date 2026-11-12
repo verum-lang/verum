@@ -185,6 +185,15 @@ pub(in super::super) fn handle_extended(
             state.set_reg(dst, crate::value::Value::from_bool(supported));
             Ok(DispatchResult::Continue)
         }
+        Some(ExtendedSubOpcode::TypeIdentity) => {
+            let dst = read_reg(state)?;
+            let ty = super::bytecode_io::read_type_ref(state)?;
+            let ty = state.resolve_generic_witness(&ty)?;
+            let id = state.module.type_identity(&ty)
+                .map_err(|message| InterpreterError::Panic { message: message.into() })?;
+            state.set_reg(dst, crate::value::Value::from_i64(id as i64));
+            Ok(DispatchResult::Continue)
+        }
         Some(ExtendedSubOpcode::TypeResource) => {
             let dst = read_reg(state)?;
             let ty = super::bytecode_io::read_type_ref(state)?;

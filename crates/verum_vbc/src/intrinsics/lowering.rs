@@ -312,7 +312,7 @@ impl IntrinsicLowering {
             // cannot fabricate an operation or a result for the caller.
             CodegenStrategy::RuntimeCall | CodegenStrategy::LinuxSignal(_)
             | CodegenStrategy::TargetHasAtomic | CodegenStrategy::TargetHasFeature
-            | CodegenStrategy::TypeLayout(_) => None,
+            | CodegenStrategy::TypeLayout(_) | CodegenStrategy::TypeIdentity => None,
             CodegenStrategy::ArithExtendedOpcode(sub_op) => {
                 self.lower_arith_extended_opcode(intrinsic, *sub_op, operands)
             }
@@ -3303,13 +3303,6 @@ impl IntrinsicLowering {
             // =====================================================================
             // Type Introspection Operations
             // =====================================================================
-            InlineSequenceId::TypeId => self.emit(MlirOp {
-                name: "verum.type_id".to_string(),
-                attrs: vec![],
-                result_types: vec![MlirType::I64],
-                operands: operands.to_vec(),
-                region: None,
-            }),
 
             InlineSequenceId::TypeName => {
                 self.emit(MlirOp {

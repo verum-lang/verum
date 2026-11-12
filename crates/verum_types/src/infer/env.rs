@@ -12939,8 +12939,9 @@ with .to_float() or .to_int() (at {:?})",
                 // Name is valid for any type
                 TypeProperty::Name => Ok(InferResult::new(Type::text())),
 
-                // Id returns u64 hash of type name, valid for any type
-                TypeProperty::Id => Ok(InferResult::new(Type::int())),
+                // Complete checked identity; availability is decided by the
+                // declaration query, independently of its unsigned carrier.
+                TypeProperty::Id => Ok(InferResult::new(Type::uint64())),
 
                 // T0216: is_signed is valid for any type — signed integers
                 // and floats answer true, everything else false. It is NOT

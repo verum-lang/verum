@@ -12648,6 +12648,13 @@ impl TypeChecker {
         expr: &Expr,
     ) -> Result<Type> {
         use ExprKind::*;
+        if super::callable_properties::intrinsic_operation_name(name.name.as_str(), args)
+            .and_then(|operation| verum_vbc::intrinsics::lookup_intrinsic(&operation))
+            .is_some_and(|operation| matches!(operation.intrinsic.strategy,
+                verum_vbc::intrinsics::registry::CodegenStrategy::TypeIdentity))
+        {
+            return Ok(Type::uint64());
+        }
         // Infer type based on the meta-function name
         let result_type = match name.name.as_str() {
             // Source location functions return Text or Int
@@ -12737,7 +12744,7 @@ impl TypeChecker {
                                     mutable: false,
                                 },
                                 // Type intrinsics
-                                "size_of" | "align_of" | "min_align_of" | "type_id" => {
+                                "size_of" | "align_of" | "min_align_of" => {
                                     Type::int()
                                 }
                                 "type_name" => Type::text(),

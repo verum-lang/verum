@@ -7,6 +7,16 @@ use verum_vbc::intrinsics::{lookup_intrinsic, registry::CodegenStrategy};
 
 use super::atomic_access::AtomicAccess;
 
+pub(super) fn intrinsic_operation_name(surface: &str, args: &[Expr]) -> Option<Text> {
+    match (surface, &args.first()?.kind) {
+        ("intrinsic", ExprKind::Literal(verum_ast::Literal {
+            kind: verum_ast::LiteralKind::Text(name), ..
+        })) => Some(name.as_str().into()),
+        ("vbc", ExprKind::Path(path)) => path.as_ident().map(|name| name.name.clone()),
+        _ => None,
+    }
+}
+
 fn intrinsic_requirement(name: &str) -> Option<PropertyRequirement> {
     // Read the selected operation, not a library wrapper's spelling or an
     // optimizer hint. A constant has no runtime operations. Other lowering
@@ -14,7 +24,7 @@ fn intrinsic_requirement(name: &str) -> Option<PropertyRequirement> {
     if let Some(info) = lookup_intrinsic(name)
         && matches!(info.intrinsic.strategy, CodegenStrategy::CompileTimeConstant
             | CodegenStrategy::TargetHasAtomic | CodegenStrategy::TargetHasFeature
-            | CodegenStrategy::TypeLayout(_))
+            | CodegenStrategy::TypeLayout(_) | CodegenStrategy::TypeIdentity)
     {
         return Some(PropertyRequirement::AtMost(PropertySet::pure()));
     }
@@ -48,14 +58,10 @@ impl Visitor for Calls<'_> {
     fn visit_expr(&mut self, expression: &Expr) {
         match &expression.kind {
             ExprKind::Closure { .. } => return,
-            ExprKind::MetaFunction { name, args, .. } if name.name == "intrinsic" => {
-                let requirement = args.first().and_then(|arg| match &arg.kind {
-                    ExprKind::Literal(verum_ast::Literal {
-                        kind: verum_ast::LiteralKind::Text(name),
-                        ..
-                    }) => intrinsic_requirement(name.as_str()),
-                    _ => None,
-                });
+            ExprKind::MetaFunction { name, args, .. }
+                if matches!(name.name.as_str(), "intrinsic" | "vbc") => {
+                let requirement = intrinsic_operation_name(name.name.as_str(), args)
+                    .and_then(|name| intrinsic_requirement(name.as_str()));
                 if let Some(requirement) = requirement {
                     self.bound = self.bound.join(&requirement);
                 } else {
