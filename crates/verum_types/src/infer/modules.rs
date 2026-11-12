@@ -14356,7 +14356,7 @@ impl TypeChecker {
     ///
     /// This method resolves a path to a record type definition.
     /// If the path is a single identifier, it looks up the type in the context.
-    /// Otherwise, it constructs a Named type for the path.
+    /// Qualified paths use the same declaration resolver as type annotations.
     pub(super) fn lookup_record_type(&mut self, path: &verum_ast::ty::Path, span: Span) -> Result<Type> {
         // Simple case: single identifier
         if path.segments.len() == 1 {
@@ -14555,11 +14555,7 @@ impl TypeChecker {
             }
         }
 
-        // Multi-segment path or generics - construct Named type
-        Ok(Type::Named {
-            path: path.clone(),
-            args: List::new(),
-        })
+        self.resolve_value_annotation(path, span)
     }
 
     /// Unwrap reference and heap types to get the inner type.

@@ -44,6 +44,33 @@ fn imported_fixed_width_arithmetic_executes_after_archive_bootstrap() {
 }
 
 #[test]
+fn relative_record_constructors_execute_with_the_declaring_layout() {
+    let root = tempfile::tempdir().unwrap();
+    let core = root.path().join("core");
+    for (file, source) in [
+        ("mod.vr", "module core; public module values; public module other; public module reader;"),
+        ("values/mod.vr", "module core.values; public type Packet is { public body: Int };"),
+        ("other/mod.vr", "module core.other; public type Packet is { body: Bool };"),
+        ("reader/mod.vr", "module core.reader; public fn read() -> Int {
+            let first = super.values.Packet { body: 36 };
+            let second: super.values.Packet = super.values.Packet { body: 37 };
+            first.body + second.body
+        }"),
+    ] {
+        let path = core.join(file);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, source).unwrap();
+    }
+    let archive = bootstrap(&core);
+    assert_eq!(execute(&archive, "module app; mount core.reader.read; fn main() -> Int { read() }"), 73);
+    fs::write(core.join("reader/mod.vr"), "module core.reader; public fn read() -> Bool {
+        let value = super.other.Packet { body: true }; value.body
+    }").unwrap();
+    let error = format!("{:#}", try_bootstrap(&core).err().expect("private record constructed"));
+    assert!(error.contains("E202") && error.contains("body") && error.contains("Private"), "{error}");
+}
+
+#[test]
 fn iteration_loans_end_or_escape_with_their_actual_values() {
     let root = tempfile::tempdir().unwrap();
     let core = root.path().join("core");
@@ -57,10 +84,17 @@ fn iteration_loans_end_or_escape_with_their_actual_values() {
         let spare = 0; let mut held = &spare;
         for item in &values { held = item; }
         values[0] + *held
+    }
+    public fn update_after_iteration() -> Int {
+        let mut values = [1, 2];
+        for item in &values { let _read = *item; }
+        values[0] = 7;
+        values[0]
     }";
     fs::write(&reader, source).unwrap();
     let archive = bootstrap(&core);
     assert_eq!(execute(&archive, "module app; mount core.reader.read; fn main() -> Int { read() }"), 73);
+    assert_eq!(execute(&archive, "module app; mount core.reader.update_after_iteration; fn main() -> Int { update_after_iteration() }"), 7);
     fs::write(&reader, source.replace("values[0] + *held", "values[0] = 90; *held")).unwrap();
     let error = format!("{:#}", try_bootstrap(&core).err().expect("escaped loan released"));
     assert!(error.contains("E310") && error.contains("values"), "{error}");

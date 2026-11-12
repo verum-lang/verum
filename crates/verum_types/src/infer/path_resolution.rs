@@ -534,6 +534,18 @@ impl TypeChecker {
             }
         }
 
+        // Resolve relative syntax once, before selecting declaration authority.
+        // Type annotations and record constructors use the same module-path
+        // rules as mounts, including repeated parent segments.
+        let absolute_path = matches!(path.segments.first(),
+            Some(PathSegment::Super | PathSegment::Relative)).then(|| {
+            let owner = verum_modules::ModulePath::from_str(self.current_module_path.as_str());
+            let resolved = verum_modules::imports::path_to_module_path_resolved(path, &owner);
+            Path::new(resolved.into_segments().into_iter().map(|name|
+                PathSegment::Name(verum_ast::Ident::new(name, span))).collect(), span)
+        });
+        let path = absolute_path.as_ref().unwrap_or(path);
+
         // Resolve source authority before cached templates so an earlier
         // owner-local load cannot make a private declaration visible elsewhere.
         let qualified = self.path_to_string(path);
@@ -575,34 +587,7 @@ impl TypeChecker {
         // Also handles super.Type and crate.module.Type paths by resolving the prefix first
         {
             let has_crate_prefix = matches!(path.segments.first(), Some(PathSegment::Cog));
-            let has_super_prefix = matches!(path.segments.first(), Some(PathSegment::Super));
-
-            let path_str: String = if has_super_prefix {
-                // Resolve `super` to the parent module path
-                // e.g., if current_module_path is "cog.database.connection.tls",
-                // super resolves to "cog.database.connection"
-                let current = self.current_module_path.as_str();
-                let parent = if let Some(dot_pos) = current.rfind('.') {
-                    &current[..dot_pos]
-                } else {
-                    "cog"
-                };
-                // Build path: parent + remaining segments (skip Super)
-                let remaining: Vec<String> = path
-                    .segments
-                    .iter()
-                    .skip(1)
-                    .filter_map(|seg| match seg {
-                        PathSegment::Name(ident) => Some(ident.name.as_str().to_string()),
-                        _ => None,
-                    })
-                    .collect();
-                if remaining.is_empty() {
-                    parent.to_string()
-                } else {
-                    format!("{}.{}", parent, remaining.join("."))
-                }
-            } else if has_crate_prefix {
+            let path_str: Text = if has_crate_prefix {
                 // For crate.X.Y.Z, resolve to cog.X.Y.Z (skip the Cog segment, use cog prefix)
                 let remaining: Vec<String> = path
                     .segments
@@ -614,7 +599,7 @@ impl TypeChecker {
                     })
                     .collect();
                 // Return with cog prefix since inline modules are registered as "cog.X.Y"
-                format!("cog.{}", remaining.join("."))
+                Text::from(format!("cog.{}", remaining.join(".")))
             } else {
                 path.segments
                     .iter()
@@ -625,7 +610,7 @@ impl TypeChecker {
                         _ => None,
                     })
                     .collect::<Vec<_>>()
-                    .join(".")
+                    .join(".").into()
             };
 
             if let Some((module_key, type_name)) =
@@ -673,7 +658,7 @@ impl TypeChecker {
             // For super/crate paths, also try resolving functions in inline modules
             // This handles cases like `crate.database.connection.Pool.new(...)` where Pool is found
             // above but the path includes a function call
-            if has_super_prefix || has_crate_prefix {
+            if has_crate_prefix {
                 // Preserve unresolved type paths for the later loading pass;
                 // an unrelated leaf entry is not evidence of this owner.
                 if let Some(last_seg) = path.segments.last() {

@@ -83,6 +83,10 @@ fn metadata(reverse: bool) -> CoreMetadata {
 }
 
 fn check(consumer: &str, input: Input, reverse: bool, local: bool) -> (TypeChecker, List<Text>) {
+    check_in_module("consumer", consumer, input, reverse, local)
+}
+
+fn check_in_module(owner: &str, consumer: &str, input: Input, reverse: bool, local: bool) -> (TypeChecker, List<Text>) {
     let mut checker = match input {
         Input::Source => TypeChecker::new(),
         Input::Metadata { eager } => {
@@ -109,7 +113,7 @@ fn check(consumer: &str, input: Input, reverse: bool, local: bool) -> (TypeCheck
             }
         }
     }
-    checker.set_current_module_path("consumer");
+    checker.set_current_module_path(owner);
     let mut registry = ModuleRegistry::new();
     let mut declarations = [(OWNERS[0], ALPHA), (OWNERS[1], BETA)];
     if reverse {
@@ -135,7 +139,7 @@ fn check(consumer: &str, input: Input, reverse: bool, local: bool) -> (TypeCheck
         .parse_module_str(consumer, FileId::new(2))
         .expect("consumer grammar");
     let id = ModuleId::new(2);
-    let path = ModulePath::from_str("consumer");
+    let path = ModulePath::from_str(owner);
     let mut info = ModuleInfo::new(
         id,
         path.clone(),
@@ -150,7 +154,7 @@ fn check(consumer: &str, input: Input, reverse: bool, local: bool) -> (TypeCheck
     let mut errors = List::new();
     for item in &ast.items {
         if let ItemKind::Mount(import) = &item.kind {
-            if let Err(error) = checker.process_import(import, "consumer", &registry) {
+            if let Err(error) = checker.process_import(import, owner, &registry) {
                 errors.push(format!("{error:?}").into());
             }
         }
@@ -183,7 +187,49 @@ fn check(consumer: &str, input: Input, reverse: bool, local: bool) -> (TypeCheck
             .iter()
             .map(|error| Text::from(format!("{error:?}"))),
     );
+    errors.extend(checker.diagnostics().iter().filter(|diagnostic| diagnostic.is_error())
+        .map(|diagnostic| Text::from(diagnostic.message())));
     (checker, errors)
+}
+
+#[test]
+fn relative_record_constructors_use_the_declaring_owner() {
+    for input in [Input::Source, Input::Metadata { eager: false }, Input::Metadata { eager: true }] {
+        for reverse in [false, true] {
+            for (owner, prefix) in [("core.client", "super"), ("core.nested.client", "super.super")] {
+                for annotation in [Text::new(), Text::from(format!(": {prefix}.field_beta.Packet"))] {
+                    let source = format!("fn probe() -> Bool {{ let value{annotation} = {prefix}.field_beta.Packet {{ body: true, beta_only: 5 }}; value.body }}");
+                    let (_, errors) = check_in_module(owner, &source, input, reverse, false);
+                    assert!(errors.is_empty(), "{input:?}, {owner}, reverse={reverse}: {errors:?}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn relative_record_constructors_preserve_private_fields() {
+    for input in [Input::Source, Input::Metadata { eager: false }, Input::Metadata { eager: true }] {
+        for reverse in [false, true] {
+            let source = "fn probe() { let value = super.field_alpha.Packet { body: 1, alpha_only: 3 }; }";
+            let (_, errors) = check_in_module("core.client", source, input, reverse, false);
+            assert!(errors.iter().any(|error| error.contains("VisibilityError")
+                && error.contains("body") && error.contains("Private")
+                && error.contains("core.field_alpha")), "{input:?}: {errors:?}");
+        }
+    }
+}
+
+#[test]
+fn relative_record_constructors_do_not_borrow_a_sibling_layout() {
+    for input in [Input::Source, Input::Metadata { eager: false }, Input::Metadata { eager: true }] {
+        for reverse in [false, true] {
+            let source = "fn probe() { let value = super.field_beta.Packet { body: 1, beta_only: 5 }; }";
+            let (_, errors) = check_in_module("core.client", source, input, reverse, false);
+            assert!(errors.iter().any(|error| error.contains("Type mismatch in field 'body'")
+                && error.contains("Bool") && error.contains("Int")), "{input:?}: {errors:?}");
+        }
+    }
 }
 
 fn assert_private(input: Input, body: &str) {
