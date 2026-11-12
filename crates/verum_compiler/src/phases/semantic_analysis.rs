@@ -129,6 +129,11 @@ impl SemanticAnalysisPhase {
         crate::owned_source_semantics::register_sources(&graph,
             selected.iter().map(|(owner, path, module)| (owner.as_str(), path.as_str(), module)))?;
         let check = |(owner, path, module): &(Text, Text, verum_ast::Module)| {
+            let _scope = tracing::debug_span!("source_admission",
+                module = owner.as_str(), source = path.as_str(),
+                worker = std::thread::current().name().unwrap_or("caller"),
+            ).entered();
+            tracing::debug!("checking original source declarations");
             let mut checker = self.configured_checker();
             if let Err(errors) = crate::owned_source_semantics::check_source_types(
                 &mut checker, owner, module, &graph,
@@ -158,12 +163,15 @@ impl SemanticAnalysisPhase {
             }
         };
         let workers = session.options().num_threads.max(1).min(selected.len());
+        tracing::info!(workers, sources = selected.len(), "admitting original source roster");
         let outcomes = if workers > 1 {
             use rayon::prelude::*;
             // The declaration graph is complete before workers start. Each
             // checker (including its solver) is created and dropped on its
             // own ordinary worker stack; no inference state crosses owners.
-            let pool = rayon::ThreadPoolBuilder::new().num_threads(workers).build()?;
+            let pool = rayon::ThreadPoolBuilder::new().num_threads(workers)
+                .thread_name(|index| format!("verum-source-{index}"))
+                .build()?;
             let mut outcomes: List<_> = selected.iter().map(|_| None).collect();
             pool.install(|| {
                 selected.par_iter().zip(outcomes.par_iter_mut())
