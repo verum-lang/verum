@@ -22,7 +22,7 @@ fn colliding_free_function_stubs_keep_both_source_owners() {
     let mut session = Session::new(Default::default());
     let mut pipeline = CompilationPipeline::new_core(&mut session, CoreConfig::new("."));
     pipeline
-        .pre_register_public_free_functions(&parsed())
+        .pre_register_source_free_functions(&parsed())
         .unwrap();
     let alpha = pipeline
         .global_function_registry
@@ -70,7 +70,7 @@ fn forward_result_case(serialized: bool, relative: bool) {
         .pre_register_canonical_static_methods(&parsed)
         .unwrap();
     pipeline
-        .pre_register_public_free_functions(&parsed)
+        .pre_register_source_free_functions(&parsed)
         .unwrap();
     // The declaring interfaces now publish constructor identities. Follow the
     // production bootstrap path instead of the removed spelling-based pass.
