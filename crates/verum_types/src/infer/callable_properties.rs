@@ -43,7 +43,9 @@ impl Visitor for Calls<'_> {
                 });
                 if let Some(requirement) = requirement {
                     self.bound = self.bound.join(&requirement);
-                } else if self.source.is_some() {
+                } else {
+                    // Type checking the operands does not establish what the
+                    // operation can do. Preserve unknown in checked bodies too.
                     self.bound = PropertyRequirement::Unrestricted;
                 }
             }
