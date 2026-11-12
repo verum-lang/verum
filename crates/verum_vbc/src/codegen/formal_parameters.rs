@@ -23,14 +23,23 @@ impl VbcCodegen {
         };
         let value_scope = self.implementation_value_scope(declaration, &receiver_scope)?;
         let previous = std::mem::replace(&mut self.current_source_substitution, value_scope);
-        let result = (|| {
-            let ty = self.resolve_signature_type_ref(target, &receiver_scope)?;
-            let semantic = self.semantic_formal_type(target, &receiver_scope,
-                &Self::ordered_generic_param_ids(&receiver_scope, &Default::default())).as_ref() == Some(&ty);
-            Ok(super::ImplReceiverWitness { ty, semantic })
-        })();
+        let result = self.resolve_source_type_witness(target, &receiver_scope,
+            &Self::ordered_generic_param_ids(&receiver_scope, &Default::default()));
         self.current_source_substitution = previous;
         result
+    }
+
+    /// Retain the semantic authority produced by this exact source annotation.
+    /// A resolved runtime carrier alone does not authorize protocol evidence.
+    pub(super) fn resolve_source_type_witness(
+        &self,
+        ty: &verum_ast::Type,
+        scope: &std::collections::HashMap<String, u16>,
+        declared_ids: &[TypeParamId],
+    ) -> super::CodegenResult<super::ImplReceiverWitness> {
+        let resolved = self.resolve_signature_type_ref(ty, scope)?;
+        let semantic = self.semantic_formal_type(ty, scope, declared_ids).as_ref() == Some(&resolved);
+        Ok(super::ImplReceiverWitness { ty: resolved, semantic })
     }
 
     /// Registration must reject unresolved annotations even for declarations
@@ -286,32 +295,59 @@ impl VbcCodegen {
         values: &std::collections::HashSet<String>,
     ) -> Option<TypeRef> {
         use verum_ast::ty::{GenericArg, TypeKind};
-        fn generic_projection_base(
+        fn parameter_path<'a>(
+            ty: &verum_ast::Type,
+            scope: &std::collections::HashMap<String, u16>,
+            cg: &'a VbcCodegen,
+            declared_ids: &[TypeParamId],
+            binders: u32,
+            retained: &mut List<&'a TypeRef>,
+        ) -> Option<bool> {
+            let TypeKind::Path(path) = &ty.kind else { return None; };
+            if !path.is_single() { return None; }
+            let name = path.to_string();
+            if let Some(id) = scope.get(&name) {
+                let index = u32::from(*id);
+                return Some(index < binders
+                    || declared_ids.contains(&TypeParamId((index - binders) as u16)));
+            }
+            let witness = if VbcCodegen::ast_type_is_bare_self(ty) {
+                cg.current_impl_receiver.as_ref()
+            } else {
+                cg.current_source_substitution.get(&name)
+            }?;
+            if witness.semantic {
+                retained.push(&witness.ty);
+            }
+            Some(witness.semantic)
+        }
+        fn generic_projection_base<'a>(
             ty: &verum_ast::Type,
             scope: &std::collections::HashMap<String, u16>,
             depth: usize,
-            cg: &VbcCodegen,
+            cg: &'a VbcCodegen,
+            declared_ids: &[TypeParamId],
+            binders: u32,
+            retained: &mut List<&'a TypeRef>,
         ) -> bool {
             if depth > 64 { return false; }
             match &ty.kind {
-                TypeKind::Path(path) => path.is_single() && (
-                    scope.contains_key(&path.to_string())
-                    || cg.current_source_substitution.get(&path.to_string()).is_some_and(|witness| witness.semantic)
-                    || (VbcCodegen::ast_type_is_bare_self(ty)
-                        && cg.current_impl_receiver.as_ref().is_some_and(|owner| owner.semantic))
-                ),
-                TypeKind::AssociatedType { base, .. } => generic_projection_base(base, scope, depth + 1, cg),
+                TypeKind::Path(_) => parameter_path(ty, scope, cg, declared_ids, binders, retained) == Some(true),
+                TypeKind::AssociatedType { base, .. } => generic_projection_base(base, scope, depth + 1, cg, declared_ids, binders, retained),
                 TypeKind::Qualified { self_ty, trait_ref, .. } => trait_ref.segments.is_empty()
-                    && generic_projection_base(self_ty, scope, depth + 1, cg),
+                    && generic_projection_base(self_ty, scope, depth + 1, cg, declared_ids, binders, retained),
                 _ => false,
             }
         }
-        fn supported(
+        fn supported<'a>(
             ty: &verum_ast::Type,
             depth: usize,
             budget: &mut usize,
-            cg: &VbcCodegen,
+            cg: &'a VbcCodegen,
             scope: &std::collections::HashMap<String, u16>,
+            declared_ids: &[TypeParamId],
+            binders: u32,
+            retained: &mut List<&'a TypeRef>,
         ) -> bool {
             if depth > 64 || *budget == 0 {
                 return false;
@@ -325,27 +361,28 @@ impl VbcCodegen {
                 | TypeKind::Char
                 | TypeKind::Unit
                 | TypeKind::Never => true,
-                TypeKind::Path(_) => cg.semantic_formal_path_is_declared(ty, scope),
-                TypeKind::AssociatedType { base, .. } => generic_projection_base(base, scope, depth + 1, cg),
+                TypeKind::Path(_) => parameter_path(ty, scope, cg, declared_ids, binders, retained)
+                    .unwrap_or_else(|| cg.semantic_formal_path_is_declared(ty, scope)),
+                TypeKind::AssociatedType { base, .. } => generic_projection_base(base, scope, depth + 1, cg, declared_ids, binders, retained),
                 TypeKind::Qualified { self_ty, trait_ref, .. } => trait_ref.segments.is_empty()
-                    && generic_projection_base(self_ty, scope, depth + 1, cg),
+                    && generic_projection_base(self_ty, scope, depth + 1, cg, declared_ids, binders, retained),
                 TypeKind::Reference { inner, .. }
                 | TypeKind::CheckedReference { inner, .. }
                 | TypeKind::UnsafeReference { inner, .. }
-                | TypeKind::Slice(inner) => supported(inner, depth + 1, budget, cg, scope),
+                | TypeKind::Slice(inner) => supported(inner, depth + 1, budget, cg, scope, declared_ids, binders, retained),
                 TypeKind::Array { element, size } => {
-                    size.is_some() && supported(element, depth + 1, budget, cg, scope)
+                    size.is_some() && supported(element, depth + 1, budget, cg, scope, declared_ids, binders, retained)
                 }
                 TypeKind::Tuple(parts) => parts
                     .iter()
-                    .all(|p| supported(p, depth + 1, budget, cg, scope)),
+                    .all(|p| supported(p, depth + 1, budget, cg, scope, declared_ids, binders, retained)),
                 TypeKind::Generic { base, args } => {
-                    supported(base, depth + 1, budget, cg, scope)
+                    supported(base, depth + 1, budget, cg, scope, declared_ids, binders, retained)
                         && matches!(cg.resolve_signature_type_ref(base, scope), Ok(TypeRef::Concrete(id))
                         if id != TypeId::PTR && id != TypeId::RESERVED)
                         && args.iter().all(|arg| {
                             match arg {
-                                GenericArg::Type(ty) => supported(ty, depth + 1, budget, cg, scope),
+                                GenericArg::Type(ty) => supported(ty, depth + 1, budget, cg, scope, declared_ids, binders, retained),
                                 // The scoped mapper below checks the exact value or
                                 // declaration binder, including source substitutions.
                                 GenericArg::Const(_) => true,
@@ -365,29 +402,42 @@ impl VbcCodegen {
                         && contexts.requirements.is_empty()
                         && params
                             .iter()
-                            .all(|p| supported(p, depth + 1, budget, cg, scope))
-                        && supported(return_type, depth + 1, budget, cg, scope)
+                            .all(|p| supported(p, depth + 1, budget, cg, scope, declared_ids, binders, retained))
+                        && supported(return_type, depth + 1, budget, cg, scope, declared_ids, binders, retained)
                 }
                 TypeKind::Rank2Function {
                     type_params, params, return_type, contexts, calling_convention, where_clause,
                     ..
                 } => {
-                    let Ok((_, inner)) = VbcCodegen::rank2_type_scope(type_params, scope, ty.span) else {
+                    let Ok((count, inner)) = VbcCodegen::rank2_type_scope(type_params, scope, ty.span) else {
                         return false;
                     };
+                    let Some(binders) = binders.checked_add(u32::from(count)) else { return false; };
                     calling_convention.is_none()
                         && contexts.requirements.is_empty()
                         && where_clause.as_ref().is_none_or(|clause| clause.predicates.is_empty())
-                        && params.iter().all(|p| supported(p, depth + 1, budget, cg, &inner))
-                        && supported(return_type, depth + 1, budget, cg, &inner)
+                        && params.iter().all(|p| supported(p, depth + 1, budget, cg, &inner, declared_ids, binders, retained))
+                        && supported(return_type, depth + 1, budget, cg, &inner, declared_ids, binders, retained)
                 }
                 // Raw pointers and unsupported forms do not establish an
                 // exact declaration-owned semantic type.
                 _ => false,
             }
         }
-        if !supported(ast, 0, &mut 4096, self, scope) {
+        let mut retained = List::new();
+        if !supported(ast, 0, &mut 4096, self, scope, declared_ids, 0, &mut retained) {
             return None;
+        }
+        // Substitution transports an already checked type, including its free
+        // binders. The lexical scope above validates source variables before
+        // these witnesses are transported; coincident numeric IDs alone cannot
+        // authorize an undeclared source variable.
+        let mut admitted_ids = List::from_iter(declared_ids.iter().copied());
+        for witness in &retained {
+            if !resolved_in_scope(witness, &mut |id| {
+                if !admitted_ids.contains(&id) { admitted_ids.push(id); }
+                true
+            }, 0, 0) { return None; }
         }
         let owner = self.lexical_type_scope();
         // A fixed extent requires its exact declaring scope. The wildcard
@@ -408,7 +458,7 @@ impl VbcCodegen {
             extent
         };
         let ty = self.resolve_type_ref_scoped_with_count(ast, scope, true, Some(owner), &mut array_count).ok()?;
-        (complete && resolved(&ty, declared_ids, 0)).then_some(ty)
+        (complete && resolved(&ty, &admitted_ids, 0)).then_some(ty)
     }
 }
 
@@ -486,10 +536,10 @@ fn remapped_declaration_type(
 }
 
 pub(super) fn resolved(ty: &TypeRef, declared_ids: &[TypeParamId], depth: usize) -> bool {
-    resolved_in_scope(ty, declared_ids, depth, 0)
+    resolved_in_scope(ty, &mut |id| declared_ids.contains(&id), depth, 0)
 }
 
-fn resolved_in_scope(ty: &TypeRef, declared_ids: &[TypeParamId], depth: usize, binders: u32) -> bool {
+fn resolved_in_scope(ty: &TypeRef, parameter: &mut impl FnMut(TypeParamId) -> bool, depth: usize, binders: u32) -> bool {
     if depth > 64 {
         return false;
     }
@@ -498,22 +548,22 @@ fn resolved_in_scope(ty: &TypeRef, declared_ids: &[TypeParamId], depth: usize, b
         TypeRef::Concrete(id) => concrete(*id),
         TypeRef::Generic(id) => {
             let index = u32::from(id.0);
-            index < binders || declared_ids.contains(&TypeParamId((index - binders) as u16))
+            index < binders || parameter(TypeParamId((index - binders) as u16))
         }
         TypeRef::ConstValue(_) | TypeRef::ConstSequence(_) => true,
         // The record telescope supplies this binder, not the callable's scope.
         TypeRef::RecordFieldProjection { .. } => false,
         TypeRef::AssociatedProjection { base, qualifier, assoc, args } => !assoc.is_empty()
-            && resolved_in_scope(base, declared_ids, depth + 1, binders)
-            && args.iter().all(|argument| resolved_in_scope(argument, declared_ids, depth + 1, binders))
+            && resolved_in_scope(base, parameter, depth + 1, binders)
+            && args.iter().all(|argument| resolved_in_scope(argument, parameter, depth + 1, binders))
             && qualifier.as_ref().is_none_or(|application|
                 concrete(TypeId(application.protocol.0)) && application.args.iter().all(|argument|
-                    resolved_in_scope(argument, declared_ids, depth + 1, binders))),
+                    resolved_in_scope(argument, parameter, depth + 1, binders))),
         TypeRef::Reference { inner, .. } | TypeRef::Slice(inner)
-        | TypeRef::Array { element: inner, .. } => resolved_in_scope(inner, declared_ids, depth + 1, binders),
-        TypeRef::Tuple(parts) => parts.iter().all(|p| resolved_in_scope(p, declared_ids, depth + 1, binders)),
+        | TypeRef::Array { element: inner, .. } => resolved_in_scope(inner, parameter, depth + 1, binders),
+        TypeRef::Tuple(parts) => parts.iter().all(|p| resolved_in_scope(p, parameter, depth + 1, binders)),
         TypeRef::Instantiated { base, args } => {
-            concrete(*base) && args.iter().all(|p| resolved_in_scope(p, declared_ids, depth + 1, binders))
+            concrete(*base) && args.iter().all(|p| resolved_in_scope(p, parameter, depth + 1, binders))
         }
         TypeRef::Function {
             is_async: _,
@@ -522,14 +572,14 @@ fn resolved_in_scope(ty: &TypeRef, declared_ids: &[TypeParamId], depth: usize, b
             contexts,
         } => {
             contexts.is_empty()
-                && params.iter().all(|p| resolved_in_scope(p, declared_ids, depth + 1, binders))
-                && resolved_in_scope(return_type, declared_ids, depth + 1, binders)
+                && params.iter().all(|p| resolved_in_scope(p, parameter, depth + 1, binders))
+                && resolved_in_scope(return_type, parameter, depth + 1, binders)
         }
         TypeRef::Rank2Function { is_async: _, type_param_count, params, return_type, contexts } => {
             let Some(binders) = binders.checked_add(u32::from(*type_param_count)) else { return false; };
             contexts.is_empty()
-                && params.iter().all(|p| resolved_in_scope(p, declared_ids, depth + 1, binders))
-                && resolved_in_scope(return_type, declared_ids, depth + 1, binders)
+                && params.iter().all(|p| resolved_in_scope(p, parameter, depth + 1, binders))
+                && resolved_in_scope(return_type, parameter, depth + 1, binders)
         }
     }
 }

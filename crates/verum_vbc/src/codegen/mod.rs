@@ -3570,7 +3570,7 @@ impl VbcCodegen {
         let declared_ids = Self::ordered_generic_param_ids(&scope, &Default::default());
         let application = self.with_protocol_source_scope(
             declaration.owner.clone(), self.current_source_substitution.clone(), Some(receiver.clone()),
-            |cg| cg.resolve_protocol_application(protocol, protocol_args, &scope, &declared_ids, &implementation.generics),
+            |cg| cg.resolve_protocol_application(protocol, protocol_args, &scope, &declared_ids, &implementation.generics, &receiver),
         )?;
         let root_application = application.key.clone();
         let mut protocols_to_check = vec![application];
@@ -3638,7 +3638,7 @@ impl VbcCodegen {
                             TypeBoundKind::GenericProtocol(ty) => Self::protocol_application_parts(ty)?,
                             _ => return Err(CodegenError::internal("blanket trigger is not a positive protocol bound")),
                         };
-                        cg.resolve_protocol_application(path, args, &HashMap::new(), &declared_ids, &blanket.declaration.generics)
+                        cg.resolve_protocol_application(path, args, &HashMap::new(), &declared_ids, &blanket.declaration.generics, &receiver)
                     },
                 )?;
                 if prerequisite.protocol.is_none()
@@ -3653,7 +3653,7 @@ impl VbcCodegen {
                 }
                 let derived = self.with_protocol_source_scope(
                     blanket.source_module.clone(), blanket_substitution.clone(), Some(receiver.clone()),
-                    |cg| cg.resolve_protocol_application(protocol, protocol_args, &HashMap::new(), &declared_ids, &blanket.declaration.generics),
+                    |cg| cg.resolve_protocol_application(protocol, protocol_args, &HashMap::new(), &declared_ids, &blanket.declaration.generics, &receiver),
                 )?;
                 // T0623: monomorphise the blanket impl's OWN BODY onto this
                 // concrete implementor.  The loop further down replays only
@@ -3715,7 +3715,7 @@ impl VbcCodegen {
                     let (path, args) = Self::protocol_application_parts(super_proto)?;
                     let parent = self.with_protocol_source_scope(
                         Some(protocol_info.source_module.clone()), application.substitution.clone(), Some(receiver.clone()),
-                        |cg| cg.resolve_protocol_application(path, args, &HashMap::new(), &declared_ids, &protocol_info.generics),
+                        |cg| cg.resolve_protocol_application(path, args, &HashMap::new(), &declared_ids, &protocol_info.generics, &receiver),
                     )?;
                     protocols_to_check.push(parent);
                 }

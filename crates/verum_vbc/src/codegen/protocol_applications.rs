@@ -40,7 +40,8 @@ impl VbcCodegen {
 
     /// Resolve the selected source identity, including mounts, before reading
     /// generic binders. A same-spelled protocol from another owner cannot supply
-    /// a parameter roster or a default body.
+    /// a parameter roster or a default body. Explicit arguments retain the
+    /// caller's lexical Self; declaration-owned defaults use `receiver`.
     pub(super) fn resolve_protocol_application(
         &mut self,
         path: &Path,
@@ -48,6 +49,7 @@ impl VbcCodegen {
         scope: &HashMap<String, u16>,
         declared_ids: &[crate::types::TypeParamId],
         caller_parameters: &[GenericParam],
+        receiver: &ImplReceiverWitness,
     ) -> CodegenResult<ProtocolApplication> {
         let written = Self::format_type_path(path);
         let selected = self.nominal_type_id(&written);
@@ -88,6 +90,7 @@ impl VbcCodegen {
                     scope,
                     declared_ids,
                     caller_parameters,
+                    receiver,
                     path.span,
                 )?
             }
@@ -137,6 +140,7 @@ impl VbcCodegen {
         scope: &HashMap<String, u16>,
         declared_ids: &[crate::types::TypeParamId],
         caller_parameters: &[GenericParam],
+        receiver: &ImplReceiverWitness,
         span: verum_ast::Span,
     ) -> CodegenResult<SourceTypeSubstitution> {
         // Associated equalities are not positional type parameters. Lifetimes
@@ -162,19 +166,19 @@ impl VbcCodegen {
                                 )
                             })?;
                             self.reject_protocol_value_as_type(&ty, caller_parameters, scope)?;
-                            self.resolve_protocol_argument(&ty, scope, declared_ids)?
+                            self.resolve_source_type_witness(&ty, scope, declared_ids)?
                         } else if let Some(default) = default {
                             self.with_protocol_source_scope(
                                 Some(protocol.source_module.clone()),
                                 result.clone(),
-                                None,
+                                Some(receiver.clone()),
                                 |cg| {
                                     cg.reject_protocol_value_as_type(
                                         default,
                                         &protocol.generics,
                                         &HashMap::new(),
                                     )?;
-                                    cg.resolve_protocol_argument(
+                                    cg.resolve_source_type_witness(
                                         default,
                                         &HashMap::new(),
                                         declared_ids,
@@ -194,7 +198,7 @@ impl VbcCodegen {
                         let value_type = self.with_protocol_source_scope(
                             Some(protocol.source_module.clone()),
                             result.clone(),
-                            None,
+                            Some(receiver.clone()),
                             |cg| {
                                 cg.protocol_value_carrier(
                                     parameter,
@@ -474,7 +478,7 @@ impl VbcCodegen {
                 parameter.span,
             ));
         }
-        let witness = self.resolve_protocol_argument(ty, scope, declared_ids)?;
+        let witness = self.resolve_source_type_witness(ty, scope, declared_ids)?;
         if !witness.semantic || witness.ty != TypeRef::Concrete(TypeId::INT) {
             return Err(invalid(
                 "protocol value parameter carrier has no exact VBC scalar representation",
@@ -609,21 +613,6 @@ impl VbcCodegen {
         Ok(ImplReceiverWitness {
             ty: TypeRef::ConstValue(value),
             semantic: true,
-        })
-    }
-
-    fn resolve_protocol_argument(
-        &self,
-        ty: &Type,
-        scope: &HashMap<String, u16>,
-        declared_ids: &[crate::types::TypeParamId],
-    ) -> CodegenResult<ImplReceiverWitness> {
-        let resolved = self.resolve_signature_type_ref(ty, scope)?;
-        let semantic =
-            self.semantic_formal_type(ty, scope, declared_ids).as_ref() == Some(&resolved);
-        Ok(ImplReceiverWitness {
-            ty: resolved,
-            semantic,
         })
     }
 

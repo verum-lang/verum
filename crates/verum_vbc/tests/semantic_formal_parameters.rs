@@ -95,6 +95,7 @@ fn unsupported_positions_remain_unknown_without_shifting_following_formals() {
     );
     let expected = [
         Some(T::Rank2Function {
+            is_async: false,
             type_param_count: 1,
             params: vec![T::Generic(TypeParamId(0))],
             return_type: Box::new(T::Generic(TypeParamId(0))),

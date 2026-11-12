@@ -145,15 +145,20 @@ impl VbcCodegen {
 
     fn obligation_goal(
         &mut self,
-        subject: TypeRef,
+        subject: &ImplReceiverWitness,
         path: &verum_ast::Path,
         args: &[GenericArg],
         scope: &std::collections::HashMap<String, u16>,
         parameters: &[verum_ast::ty::GenericParam],
     ) -> CodegenResult<Goal> {
         let ids: List<_> = scope.values().copied().map(TypeParamId).collect();
-        let application = self.resolve_protocol_application(path, args, scope, &ids, parameters)?;
-        self.application_goal(subject, &application, args, scope, path.span)
+        // The subject is the checked source type of this bound, which may
+        // differ from the lexical implementation's Self in explicit arguments.
+        if !subject.semantic {
+            return Err(invalid("protocol obligation lacks its semantic subject", path.span));
+        }
+        let application = self.resolve_protocol_application(path, args, scope, &ids, parameters, subject)?;
+        self.application_goal(subject.ty.clone(), &application, args, scope, path.span)
     }
 
     fn application_goal(
@@ -220,7 +225,7 @@ impl VbcCodegen {
     fn implementation_heads(
         &mut self,
         declaration: &ImplDecl,
-        receiver: &TypeRef,
+        receiver: &ImplReceiverWitness,
         scope: &std::collections::HashMap<String, u16>,
     ) -> CodegenResult<List<Goal>> {
         let ImplKind::Protocol {
@@ -232,19 +237,20 @@ impl VbcCodegen {
             return Ok(List::new());
         };
         let ids: List<_> = scope.values().copied().map(TypeParamId).collect();
-        let application = self.resolve_protocol_application(
-            protocol,
-            protocol_args,
-            scope,
-            &ids,
-            &declaration.generics,
+        let application = self.with_protocol_source_scope(
+            self.ctx.current_source_module.clone(),
+            self.current_source_substitution.clone(),
+            Some(receiver.clone()),
+            |cg| cg.resolve_protocol_application(
+                protocol, protocol_args, scope, &ids, &declaration.generics, receiver,
+            ),
         )?;
         let mut pending = List::from_iter([application]);
         let mut heads = List::new();
         while let Some(application) = pending.pop() {
             // Associated bindings are proved from the implementation, below.
             let head = self.application_goal(
-                receiver.clone(),
+                receiver.ty.clone(),
                 &application,
                 &[],
                 scope,
@@ -264,10 +270,7 @@ impl VbcCodegen {
                 self.with_protocol_source_scope(
                     Some(info.source_module.clone()),
                     application.substitution,
-                    Some(ImplReceiverWitness {
-                        ty: receiver.clone(),
-                        semantic: true,
-                    }),
+                    Some(receiver.clone()),
                     |cg| {
                         for parent in info.super_protocols.iter() {
                             let (path, args) = Self::protocol_application_parts(parent)?;
@@ -277,6 +280,7 @@ impl VbcCodegen {
                                 &Default::default(),
                                 &ids,
                                 &info.generics,
+                                receiver,
                             )?);
                         }
                         Ok(())
@@ -289,7 +293,7 @@ impl VbcCodegen {
 
     fn obligation_bounds(
         &mut self,
-        subject: TypeRef,
+        subject: &ImplReceiverWitness,
         bounds: &[TypeBound],
         declaration: &ImplDecl,
         scope: &std::collections::HashMap<String, u16>,
@@ -298,7 +302,7 @@ impl VbcCodegen {
         for bound in bounds {
             match &bound.kind {
                 TypeBoundKind::Protocol(path) => premises.goals.push(self.obligation_goal(
-                    subject.clone(),
+                    subject,
                     path,
                     &[],
                     scope,
@@ -309,14 +313,14 @@ impl VbcCodegen {
                 {
                     // A callable bound is a structural contract, not a nominal protocol.
                     let expected = self.resolve_signature_type_ref(ty, scope)?;
-                    if subject != expected {
+                    if !subject.semantic || subject.ty != expected {
                         premises.unknown = Some("unproved callable bound".into());
                     }
                 }
                 TypeBoundKind::GenericProtocol(ty) => {
                     let (path, args) = Self::protocol_application_parts(ty)?;
                     premises.goals.push(self.obligation_goal(
-                        subject.clone(),
+                        subject,
                         path,
                         args,
                         scope,
@@ -325,7 +329,7 @@ impl VbcCodegen {
                 }
                 TypeBoundKind::Equality(ty) => {
                     let expected = self.resolve_signature_type_ref(ty, scope)?;
-                    if subject != expected {
+                    if !subject.semantic || subject.ty != expected {
                         premises.impossible = true;
                     }
                 }
@@ -344,17 +348,19 @@ impl VbcCodegen {
         scope: &std::collections::HashMap<String, u16>,
     ) -> CodegenResult<Premises> {
         let mut premises = Premises::default();
+        let ids: List<_> = scope.values().copied().map(TypeParamId).collect();
         for parameter in &declaration.generics {
             match &parameter.kind {
                 GenericParamKind::Type { name, bounds, .. } => {
-                    let subject = self.resolve_signature_type_ref(
+                    let subject = self.resolve_source_type_witness(
                         &Type::new(
                             TypeKind::Path(verum_ast::Path::from_ident(name.clone())),
                             name.span,
                         ),
                         scope,
+                        &ids,
                     )?;
-                    self.obligation_bounds(subject, bounds, declaration, scope, &mut premises)?;
+                    self.obligation_bounds(&subject, bounds, declaration, scope, &mut premises)?;
                 }
                 GenericParamKind::Lifetime { .. } => {}
                 _ => {
@@ -372,8 +378,8 @@ impl VbcCodegen {
             for predicate in &clause.predicates {
                 match &predicate.kind {
                     WherePredicateKind::Type { ty, bounds } => {
-                        let subject = self.resolve_signature_type_ref(ty, scope)?;
-                        self.obligation_bounds(subject, bounds, declaration, scope, &mut premises)?;
+                        let subject = self.resolve_source_type_witness(ty, scope, &ids)?;
+                        self.obligation_bounds(&subject, bounds, declaration, scope, &mut premises)?;
                     }
                     _ => {
                         premises.unknown =
@@ -419,7 +425,7 @@ impl VbcCodegen {
                     return Ok(None);
                 }
                 let mut matched = None;
-                for head in cg.implementation_heads(declaration, &receiver.ty, &scope)? {
+                for head in cg.implementation_heads(declaration, &receiver, &scope)? {
                     let mut candidate = bindings.clone();
                     if head.protocol == goal.protocol
                         && head.arguments.len() == goal.arguments.len()
@@ -503,7 +509,11 @@ impl VbcCodegen {
         implementation: &ImplDecl,
         scope: &std::collections::HashMap<String, u16>,
     ) -> CodegenResult<bool> {
-        let assumptions = self.implementation_premises(implementation, scope)?.goals;
+        let source_bindings = self.implementation_value_scope(implementation, scope)?;
+        let assumptions = self.with_protocol_source_scope(
+            self.ctx.current_source_module.clone(), source_bindings, Some(receiver.clone()),
+            |cg| cg.implementation_premises(implementation, scope),
+        )?.goals;
         let requirements = self.with_protocol_source_scope(
             blanket.source_module.clone(),
             SourceTypeSubstitution::receiver(blanket.receiver_parameter.clone(), receiver.clone()),
