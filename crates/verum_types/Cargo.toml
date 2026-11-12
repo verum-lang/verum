@@ -25,6 +25,9 @@ verum_error = { workspace = true }
 verum_fast_parser = { workspace = true }
 verum_lexer = { workspace = true }
 verum_protocol_types = { workspace = true }
+# Read operation contracts from the same registry that selects VBC lowering.
+# This does not enable interpreter JIT/compression features for type checking.
+verum_vbc = { path = "../verum_vbc", default-features = false }
 # verum_smt removed 2026-04-24 — edge flipped to break circular dependency.
 # Concrete SMT-backed implementations now live in verum_smt and plug into
 # verum_types via the traits in `refinement::SmtBackend`,

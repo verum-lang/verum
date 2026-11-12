@@ -4912,6 +4912,7 @@ dependencies = [
  "verum_protocol_types",
  "verum_smt",
  "verum_test_support",
+ "verum_vbc",
  "z3",
 ]
 

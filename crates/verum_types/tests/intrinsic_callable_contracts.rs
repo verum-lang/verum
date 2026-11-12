@@ -70,3 +70,38 @@ fn unknown_intrinsic_properties_do_not_satisfy_a_callback_bound() {
         "callback lost its missing-property obligation: {rejected:?}"
     );
 }
+
+#[test]
+fn registered_constants_satisfy_meta_purity() {
+    for source in [
+        "meta fn mode() -> Bool { @intrinsic(\"is_debug\") }",
+        "meta fn width() -> UInt32 { @intrinsic(\"target_pointer_width\") }",
+        "meta fn infinity() -> Float { @intrinsic(\"f64_infinity\") }",
+        "fn mode() -> Bool { @intrinsic(\"is_debug\") }
+         pure fn probe() -> Bool { mode() }",
+        "fn mode() -> Bool { @intrinsic(\"is_debug\") }
+         static mut CALLBACK: fn() -> Bool = mode;",
+    ] {
+        let accepted = errors(source);
+        assert!(accepted.is_empty(), "{source}: {accepted:?}");
+    }
+}
+
+#[test]
+fn runtime_and_unknown_operations_do_not_acquire_constant_contracts() {
+    for source in [
+        "meta fn probe(number: Int) -> Int { @intrinsic(\"syscall0\", number) }",
+        "meta fn probe() -> Int { @intrinsic(\"num_cpus\") }",
+        "meta fn probe() -> Bool { @intrinsic(\"unregistered_constant\") }",
+        // Even a registered constant must retain evaluation of its operands.
+        "fn work() -> Int { @intrinsic(\"syscall0\", 1) }
+         pure fn probe() -> Bool { @intrinsic(\"is_debug\", work()) }",
+    ] {
+        let rejected = errors(source);
+        assert!(
+            rejected.iter().any(|error| error.contains("ImpureMetaFunction")
+                || error.contains("ImpurePureFunction")),
+            "operation acquired an unproved constant contract: {source}: {rejected:?}"
+        );
+    }
+}

@@ -3,8 +3,26 @@ use super::*;
 use crate::computational_properties::{ComputationalProperty, PropertyRequirement, PropertySet};
 use verum_ast::visitor::{Visitor, walk_expr, walk_pattern, walk_stmt};
 use verum_ast::{FunctionDecl, ItemKind, Pattern, PatternKind};
+use verum_vbc::intrinsics::{lookup_intrinsic, registry::CodegenStrategy};
 
 use super::atomic_access::AtomicAccess;
+
+fn intrinsic_requirement(name: &str) -> Option<PropertyRequirement> {
+    // Read the selected operation, not a library wrapper's spelling or an
+    // optimizer hint. A constant has no runtime operations. Other lowering
+    // classes need their own evidence; registration alone proves no bound.
+    if let Some(info) = lookup_intrinsic(name)
+        && matches!(info.intrinsic.strategy, CodegenStrategy::CompileTimeConstant)
+    {
+        return Some(PropertyRequirement::AtMost(PropertySet::pure()));
+    }
+    match name {
+        // The panic instruction raises synchronously. Catching it does not
+        // require a suspension-capable callback.
+        "panic" => Some(PropertyRequirement::source_callable(false)),
+        name => AtomicAccess::from_intrinsic(name).map(AtomicAccess::properties),
+    }
+}
 
 #[derive(Default)]
 struct SourceCalls {
@@ -33,12 +51,7 @@ impl Visitor for Calls<'_> {
                     ExprKind::Literal(verum_ast::Literal {
                         kind: verum_ast::LiteralKind::Text(name),
                         ..
-                    }) => match name.as_str() {
-                        // The panic instruction raises synchronously. Catching it
-                        // does not require a suspension-capable callback.
-                        "panic" => Some(PropertyRequirement::source_callable(false)),
-                        name => AtomicAccess::from_intrinsic(name).map(AtomicAccess::properties),
-                    },
+                    }) => intrinsic_requirement(name.as_str()),
                     _ => None,
                 });
                 if let Some(requirement) = requirement {
