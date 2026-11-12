@@ -11167,7 +11167,12 @@ impl TypeChecker {
         // Apply unifier to fully resolve type variables.
         // This is critical for closure parameters where the type may be
         // unified after binding but before body synthesis.
-        let resolved_tup_ty = self.unifier.apply(&tup_result.ty);
+        let carrier = self.projection_carrier(&tup_result.ty, expr.span)?;
+        // Preserve the borrowed/value distinction for affine extraction. This
+        // is only a shape view; the receiver keeps its refinement and reference
+        // permissions in the environment and the ordinary write checker.
+        let borrowed = carrier.borrowed;
+        let resolved_tup_ty = carrier.ty;
         match &resolved_tup_ty {
             Type::Tuple(types) => {
                 if idx < types.len() {
@@ -11179,7 +11184,7 @@ impl TypeChecker {
                     // mark it as moved to prevent whole-tuple use.
                     // Memory model: three-tier references (&T managed, &checked T verified, &unsafe T raw) with CBGR runtime checking — #affine-partial-move
                     // =====================================================================
-                    if let Some((var_name, var_name_str)) = var_name_opt {
+                    if !borrowed && let Some((var_name, var_name_str)) = var_name_opt {
                         // Check if this index was already moved
                         if !self.affine_tracker.can_access_index(&var_name_str, idx) {
                             return Err(TypeError::MovedValueUsed {
@@ -11229,7 +11234,7 @@ impl TypeChecker {
                         let element_ty = types[idx].clone();
 
                         // Track affine element access for tuple structs
-                        if let Some((var_name, var_name_str)) = var_name_opt {
+                        if !borrowed && let Some((var_name, var_name_str)) = var_name_opt {
                             if !self.affine_tracker.can_access_index(&var_name_str, idx)
                             {
                                 return Err(TypeError::MovedValueUsed {
@@ -11305,89 +11310,6 @@ impl TypeChecker {
                             resolved_tup_ty
                         ))))
                     }
-                }
-            }
-            // Handle references to named tuple structs: &UserId where UserId is (Int)
-            // Auto-dereference and index the underlying type
-            Type::Reference { inner, .. }
-            | Type::CheckedReference { inner, .. }
-            | Type::UnsafeReference { inner, .. } => {
-                if let Type::Named { path, .. } = inner.as_ref() {
-                    let type_name = self.path_to_string(path);
-                    let simple_name = Self::path_type_name(path).unwrap_or(&type_name);
-
-                    // Try tuple struct first (__tuple_fields_)
-                    let tuple_fields_key = format!("__tuple_fields_{}", type_name);
-                    let tuple_fields_simple_key =
-                        format!("__tuple_fields_{}", simple_name);
-
-                    let found_tuple =
-                        self.ctx.lookup_type(tuple_fields_key.as_str()).or_else(|| {
-                            self.ctx.lookup_type(tuple_fields_simple_key.as_str())
-                        });
-
-                    if let Option::Some(Type::Tuple(types)) = found_tuple {
-                        if idx < types.len() {
-                            let element_ty = types[idx].clone();
-                            Ok(InferResult::new(element_ty))
-                        } else {
-                            Err(TypeError::Other(verum_common::Text::from(format!(
-                                "Tuple struct index {} out of bounds (has {} fields)",
-                                index,
-                                types.len()
-                            ))))
-                        }
-                    }
-                    // Try newtype (__newtype_inner_) - newtypes support .0 for inner value
-                    else {
-                        let newtype_inner_key =
-                            format!("__newtype_inner_{}", type_name);
-                        let newtype_simple_key =
-                            format!("__newtype_inner_{}", simple_name);
-
-                        let found_inner =
-                            self.ctx.lookup_type(newtype_inner_key.as_str()).or_else(
-                                || self.ctx.lookup_type(newtype_simple_key.as_str()),
-                            );
-
-                        if let Option::Some(inner_ty) = found_inner {
-                            if idx == 0 {
-                                Ok(InferResult::new(inner_ty.clone()))
-                            } else {
-                                Err(TypeError::Other(verum_common::Text::from(
-                                    format!(
-                                        "Newtype {} only has index 0, not {}",
-                                        type_name, index
-                                    ),
-                                )))
-                            }
-                        } else {
-                            Err(TypeError::Other(verum_common::Text::from(format!(
-                                "cannot index type '{}' — only tuple types support .0, .1, etc.",
-                                tup_result.ty
-                            ))))
-                        }
-                    }
-                } else if let Type::Tuple(types) = inner.as_ref() {
-                    // Also handle reference to bare tuple
-                    if idx < types.len() {
-                        let element_ty = types[idx].clone();
-                        Ok(InferResult::new(element_ty))
-                    } else {
-                        Err(TypeError::Other(verum_common::Text::from(format!(
-                            "Tuple index {} out of bounds",
-                            index
-                        ))))
-                    }
-                } else if matches!(inner.as_ref(), Type::Var(_)) {
-                    // Reference to unresolved type variable - create fresh var
-                    let elem_var = TypeVar::fresh();
-                    Ok(InferResult::new(Type::Var(elem_var)))
-                } else {
-                    Err(TypeError::Other(verum_common::Text::from(format!(
-                        "cannot index type '{}' — only tuple types support .0, .1, etc.",
-                        resolved_tup_ty
-                    ))))
                 }
             }
             // Handle unresolved type variables (common in closure parameters).

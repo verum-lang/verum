@@ -121,6 +121,13 @@ impl TypeChecker {
         while let Some((operand, auto_deref)) = place_operand(step) {
             let ty = self.place_operand_type(operand)?;
             self.check_write_through_reference(&ty, auto_deref, operand.span)?;
+            if auto_deref && self.projection_carrier(&ty, operand.span)?.refined {
+                return Err(TypeError::OtherWithCodeSpanned {
+                    code: "E405".into(),
+                    msg: "projected write requires preserving the enclosing refinement; replace the whole refined value".into(),
+                    span: write_site,
+                });
+            }
             if !auto_deref {
                 self.check_explicit_mutable_deref(&ty, operand.span)?;
             }

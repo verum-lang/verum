@@ -33,6 +33,7 @@ mod call_obligations;
 mod context_methods;
 mod callable_properties;
 mod constructor_calls;
+mod projection_carrier;
 mod preparation;
 mod dependent_records;
 mod reference_origin;

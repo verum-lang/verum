@@ -2701,6 +2701,7 @@ impl TypeChecker {
                 // shape match, exactly like the field-access arm above
                 // normalizes before ITS match.
                 let reduced_tup_ty = self.reduce_projection_shape(&tup_result.ty);
+                let reduced_tup_ty = self.projection_carrier(&reduced_tup_ty, expr.span)?.ty;
                 match &reduced_tup_ty {
                     Type::Tuple(types) => {
                         let idx = *index as usize;
@@ -2806,76 +2807,6 @@ impl TypeChecker {
                                     tup_result.ty
                                 ))))
                             }
-                        }
-                    }
-                    // Handle references to named tuple structs: &UserId where UserId is (Int)
-                    // Auto-dereference and index the underlying type
-                    Type::Reference { inner, .. }
-                    | Type::CheckedReference { inner, .. }
-                    | Type::UnsafeReference { inner, .. } => {
-                        if let Type::Named { path, .. } = inner.as_ref() {
-                            let type_name = self.path_to_string(path);
-                            let idx = *index as usize;
-
-                            // Try tuple struct first (__tuple_fields_)
-                            let tuple_fields_key = format!("__tuple_fields_{}", type_name);
-                            if let Option::Some(Type::Tuple(types)) =
-                                self.ctx.lookup_type(tuple_fields_key.as_str())
-                            {
-                                if idx < types.len() {
-                                    Ok(InferResult::new(types[idx].clone()))
-                                } else {
-                                    Err(TypeError::Other(verum_common::Text::from(format!(
-                                        "Tuple struct index {} out of bounds (has {} fields)",
-                                        index,
-                                        types.len()
-                                    ))))
-                                }
-                            }
-                            // Try newtype (__newtype_inner_) - newtypes support .0 for inner value
-                            else {
-                                let newtype_inner_key = format!("__newtype_inner_{}", type_name);
-                                // Also try with just the last segment of the path (for local types)
-                                let simple_name = Self::path_type_name(path).unwrap_or(&type_name);
-                                let newtype_simple_key = format!("__newtype_inner_{}", simple_name);
-
-                                let found_inner = self
-                                    .ctx
-                                    .lookup_type(newtype_inner_key.as_str())
-                                    .or_else(|| self.ctx.lookup_type(newtype_simple_key.as_str()));
-
-                                if let Option::Some(inner_ty) = found_inner {
-                                    if idx == 0 {
-                                        Ok(InferResult::new(inner_ty.clone()))
-                                    } else {
-                                        Err(TypeError::Other(verum_common::Text::from(format!(
-                                            "Newtype {} only has index 0, not {}",
-                                            type_name, index
-                                        ))))
-                                    }
-                                } else {
-                                    Err(TypeError::Other(verum_common::Text::from(format!(
-                                        "cannot index type '{}' — only tuple types support .0, .1, etc.",
-                                        tup_result.ty
-                                    ))))
-                                }
-                            }
-                        } else if let Type::Tuple(types) = inner.as_ref() {
-                            // Also handle reference to bare tuple
-                            let idx = *index as usize;
-                            if idx < types.len() {
-                                Ok(InferResult::new(types[idx].clone()))
-                            } else {
-                                Err(TypeError::Other(verum_common::Text::from(format!(
-                                    "Tuple index {} out of bounds",
-                                    index
-                                ))))
-                            }
-                        } else {
-                            Err(TypeError::Other(verum_common::Text::from(format!(
-                                "cannot index type '{}' — only tuple types support .0, .1, etc.",
-                                tup_result.ty
-                            ))))
                         }
                     }
                     _ => Err(TypeError::Other(verum_common::Text::from(format!(
