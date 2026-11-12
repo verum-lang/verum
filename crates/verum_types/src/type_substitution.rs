@@ -5,7 +5,7 @@
 //! nodes; neither ordinary nesting nor reduction consumes the Rust call stack.
 use super::{Substitution, Type, TypeVar};
 use std::rc::Rc;
-use verum_common::{List, Text};
+use verum_common::{List, Map, Text};
 
 enum Node<'a> {
     Borrowed(&'a Type),
@@ -25,13 +25,66 @@ impl Node<'_> {
 enum Scope<'a> {
     Borrowed(&'a Substitution),
     Owned(Rc<Substitution>),
+    Names(&'a Map<Text, Type>),
+    ScopedNames(Rc<Map<Text, Type>>),
 }
 
 impl Scope<'_> {
-    fn substitution(&self) -> &Substitution {
+    fn substitution(&self) -> Option<&Substitution> {
         match self {
-            Self::Borrowed(substitution) => substitution,
-            Self::Owned(substitution) => substitution,
+            Self::Borrowed(substitution) => Some(substitution),
+            Self::Owned(substitution) => Some(substitution),
+            Self::Names(_) | Self::ScopedNames(_) => None,
+        }
+    }
+
+    fn names(&self) -> Option<&Map<Text, Type>> {
+        match self {
+            Self::Names(names) => Some(names),
+            Self::ScopedNames(names) => Some(names),
+            _ => None,
+        }
+    }
+
+    fn replacement(&self, ty: &Type) -> Option<&Type> {
+        if let Some(names) = self.names() {
+            return match ty {
+                Type::Var(variable) => names.get(&Text::from(format!("{variable}"))),
+                Type::Generic { name, args } if args.is_empty() => names.get(name),
+                Type::Named { path, args } if args.is_empty() => {
+                    path.as_ident().and_then(|name| names.get(&name.name))
+                }
+                // A value binder's diagnostic name is never its identity.
+                _ => None,
+            };
+        }
+        let substitution = self.substitution()?;
+        match ty {
+            Type::Var(variable) => substitution.get(variable),
+            Type::Meta { value, .. } => value
+                .id()
+                .and_then(|id| substitution.value_bindings.get(&id)),
+            _ => None,
+        }
+    }
+
+    fn under_binders(
+        &self,
+        binders: &[TypeVar],
+        body: &Type,
+        depth: usize,
+    ) -> Result<(List<TypeVar>, Self), Text> {
+        if let Some(names) = self.names() {
+            let (renamed, scoped) =
+                Type::named_substitution_under_binders(binders, body, names, depth)?;
+            Ok((renamed, Self::ScopedNames(Rc::new(scoped))))
+        } else {
+            let (renamed, scoped) = body.substitution_under_binders(
+                binders,
+                self.substitution().expect("variable substitution"),
+                depth,
+            )?;
+            Ok((renamed, Self::Owned(Rc::new(scoped))))
         }
     }
 }
@@ -46,6 +99,7 @@ enum Work<'a> {
         shape: Box<Type>,
         children: usize,
         depth: usize,
+        reduce: bool,
     },
 }
 
@@ -54,12 +108,24 @@ pub(super) fn apply(
     substitution: &Substitution,
     max_depth: usize,
 ) -> Result<Type, Text> {
-    let mut work = vec![Work::Visit {
+    apply_scoped(ty, Scope::Borrowed(substitution), max_depth)
+}
+
+pub(super) fn apply_named(
+    ty: &Type,
+    names: &Map<Text, Type>,
+    max_depth: usize,
+) -> Result<Type, Text> {
+    apply_scoped(ty, Scope::Names(names), max_depth)
+}
+
+fn apply_scoped<'a>(ty: &'a Type, scope: Scope<'a>, max_depth: usize) -> Result<Type, Text> {
+    let mut work = List::from_iter([Work::Visit {
         node: Node::Borrowed(ty),
-        scope: Scope::Borrowed(substitution),
+        scope,
         depth: 0,
-    }];
-    let mut results = Vec::new();
+    }]);
+    let mut results = List::new();
     while let Some(task) = work.pop() {
         match task {
             Work::Visit {
@@ -72,14 +138,7 @@ pub(super) fn apply(
                 }
                 // Replacement ranges remain untouched: this is simultaneous
                 // substitution, including value-indexed type replacements.
-                let replacement = match node.ty() {
-                    Type::Var(variable) => scope.substitution().get(variable),
-                    Type::Meta { value, .. } => value
-                        .id()
-                        .and_then(|id| scope.substitution().value_bindings.get(&id)),
-                    _ => None,
-                };
-                if let Some(replacement) = replacement {
+                if let Some(replacement) = scope.replacement(node.ty()) {
                     results.push(replacement.clone());
                     continue;
                 }
@@ -90,18 +149,15 @@ pub(super) fn apply(
                     _ => None,
                 };
                 let renamed = if let Some((binders, body)) = binders {
-                    let (renamed, scoped) = body.substitution_under_binders(
-                        binders,
-                        scope.substitution(),
-                        max_depth - depth - 1,
-                    )?;
-                    scope = Scope::Owned(Rc::new(scoped));
+                    let (renamed, scoped) =
+                        scope.under_binders(binders, body, max_depth - depth - 1)?;
+                    scope = scoped;
                     Some(renamed)
                 } else {
                     None
                 };
 
-                let mut children = Vec::new();
+                let mut children = List::new();
                 let mut shape = match node {
                     Node::Borrowed(ty) => Box::new(ty.map_children(|child| {
                         children.push(Node::Borrowed(child));
@@ -124,6 +180,7 @@ pub(super) fn apply(
                     shape,
                     children: children.len(),
                     depth,
+                    reduce: scope.substitution().is_some(),
                 });
                 for node in children.into_iter().rev() {
                     work.push(Work::Visit {
@@ -137,6 +194,7 @@ pub(super) fn apply(
                 mut shape,
                 children,
                 depth,
+                reduce,
             } => {
                 let mut values = results.drain(results.len() - children..);
                 shape.for_each_child_mut(|child| {
@@ -146,7 +204,11 @@ pub(super) fn apply(
                 });
                 debug_assert!(values.next().is_none());
                 drop(values);
-                match reduce_application(*shape) {
+                match if reduce {
+                    reduce_application(*shape)
+                } else {
+                    Application::Ready(*shape)
+                } {
                     Application::Ready(ty) => results.push(ty),
                     Application::Substitute(ty, substitution) => work.push(Work::Visit {
                         node: Node::Owned(Box::new(ty)),
@@ -163,7 +225,7 @@ pub(super) fn apply(
 
 fn apply_node_metadata(
     ty: &mut Type,
-    substitution: &Substitution,
+    substitution: Option<&Substitution>,
     renamed: Option<List<TypeVar>>,
 ) -> Result<(), Text> {
     match ty {
@@ -174,10 +236,12 @@ fn apply_node_metadata(
         | Type::Inductive {
             universe: level, ..
         } => {
-            *level = substitution.universes.apply(level)?;
+            if let Some(substitution) = substitution {
+                *level = substitution.universes.apply(level)?;
+            }
         }
         Type::ExtensibleRecord { row_var, .. } => {
-            if let Some(Type::Var(replacement)) = row_var.and_then(|v| substitution.get(&v)) {
+            if let Some(Type::Var(replacement)) = row_var.and_then(|v| substitution?.get(&v)) {
                 *row_var = Some(*replacement);
             }
         }

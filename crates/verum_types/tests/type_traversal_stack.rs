@@ -17,14 +17,125 @@ fn nominal(inner: Type) -> Type {
 }
 
 fn ordinary_stack(check: impl FnOnce() + Send + 'static) {
-    // The repository test runner sets RUST_MIN_STACK. Exercise an ordinary
-    // 2 MiB worker explicitly, so that setting cannot mask this regression.
+    // Fix the worker to an ordinary 2 MiB even if the caller's environment
+    // requests a larger stack, so it cannot mask this regression.
     std::thread::Builder::new()
         .stack_size(2 * 1024 * 1024)
         .spawn(check)
         .unwrap()
         .join()
         .unwrap();
+}
+
+#[test]
+fn named_substitution_shares_the_bounded_work_queue() {
+    ordinary_stack(|| {
+        let mut substitution = verum_common::Map::new();
+        substitution.insert("Element".into(), Type::Bool);
+        let parameter = Type::Generic {
+            name: "Element".into(),
+            args: List::new(),
+        };
+        for wrapper in [
+            nominal as fn(Type) -> Type,
+            |ty| Type::Tuple(List::from_iter([ty])),
+            |ty| Type::UnsafeReference {
+                mutable: false,
+                inner: Box::new(ty),
+            },
+        ] {
+            let ty = nested(parameter.clone(), 90, wrapper);
+            let actual = ty.try_substitute_params(&substitution).unwrap();
+            assert_eq!(actual, nested(Type::Bool, 90, wrapper));
+            let excessive = nested(parameter.clone(), 105, wrapper);
+            assert!(
+                excessive
+                    .try_substitute_params(&substitution)
+                    .unwrap_err()
+                    .contains("depth budget")
+            );
+        }
+        assert_eq!(
+            parameter.try_substitute_params(&substitution).unwrap(),
+            Type::Bool
+        );
+    });
+}
+
+#[test]
+fn named_substitution_preserves_value_identity_and_dynamic_field_keys() {
+    let parameter = Type::Generic {
+        name: "Element".into(),
+        args: List::new(),
+    };
+    let mut substitution = verum_common::Map::new();
+    substitution.insert("Element".into(), Type::Bool);
+    let indexed = Type::meta("Element".into(), parameter.clone(), None);
+    let Type::Meta { value: before, .. } = &indexed else {
+        unreachable!()
+    };
+    let Type::Meta {
+        value: after,
+        ty: carrier,
+        ..
+    } = indexed.try_substitute_params(&substitution).unwrap()
+    else {
+        panic!("a value binder was replaced through its diagnostic name");
+    };
+    assert_eq!(before.id(), after.id());
+    assert_eq!(*carrier, Type::Bool);
+    let mut bindings = verum_common::Map::new();
+    bindings.insert("Payload".into(), parameter);
+    let ty = Type::DynProtocol {
+        bounds: List::new(),
+        bindings,
+    };
+    let Type::DynProtocol { bindings, .. } = ty.try_substitute_params(&substitution).unwrap()
+    else {
+        panic!("dynamic protocol identity lost");
+    };
+    assert_eq!(
+        bindings.get(&verum_common::Text::from("Payload")),
+        Some(&Type::Bool)
+    );
+}
+
+#[test]
+fn named_substitution_avoids_capture_inside_deep_quantified_carriers() {
+    ordinary_stack(|| {
+        let bound = TypeVar::fresh();
+        let mut substitution = verum_common::Map::new();
+        substitution.insert("Element".into(), Type::Var(bound));
+        let ty = Type::Forall {
+            vars: List::from_iter([bound]),
+            body: Box::new(nested(
+                Type::Tuple(List::from_iter([
+                    Type::Var(bound),
+                    Type::Generic {
+                        name: "Element".into(),
+                        args: List::new(),
+                    },
+                ])),
+                85,
+                nominal,
+            )),
+        };
+        let Type::Forall { vars, body } = ty.try_substitute_params(&substitution).unwrap() else {
+            unreachable!()
+        };
+        assert_ne!(vars[0], bound);
+        let mut inner = body.as_ref();
+        for _ in 0..85 {
+            let Type::Named { args, .. } = inner else {
+                panic!("nominal carrier lost")
+            };
+            inner = &args[0];
+        }
+        assert_eq!(
+            *inner,
+            Type::Tuple(List::from_iter([Type::Var(vars[0]), Type::Var(bound)]))
+        );
+    });
 }
 
 #[test]
