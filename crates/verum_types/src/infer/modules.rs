@@ -678,15 +678,9 @@ impl TypeChecker {
                 if let Some((module_key, item_name)) =
                     self.find_inline_module_for_import(path_str.as_str(), has_crate)
                 {
-                    self.import_item_from_inline_module(&module_key, &item_name)?;
-                    // T0441: a single-item Path mount carrying an alias
-                    // (`mount cog.mod.Maybe as LocalMaybe`) imported the item
-                    // but never bound the alias, so `LocalMaybe` surfaced as
-                    // E101 type-not-found at use. Mirror the Nested branch's
-                    // Task#13 alias binding (below) for the Path case.
-                    if let Maybe::Some(alias) = &import.tree.alias {
-                        self.register_mount_item_alias(item_name.as_str(), alias);
-                    }
+                    let local_name = import.tree.alias.as_ref().or(import.alias.as_ref())
+                        .map(|alias| alias.name.as_str());
+                    self.import_item_from_inline_module(&module_key, &item_name, local_name)?;
                     return Ok(());
                 }
             }
@@ -1105,7 +1099,7 @@ impl TypeChecker {
                 self.record_import_source(name_text, source);
 
                 // Register the item type in the environment
-                self.register_imported_item_from_inline_module(&module, module_name, item_name)?;
+                self.register_imported_item_from_inline_module(&module, module_name, item_name, item_name)?;
             }
         }
 
@@ -1205,39 +1199,39 @@ impl TypeChecker {
         Ok(count > 1)
     }
 
-    fn register_mount_item_alias(&mut self, item_name: &str, alias: &verum_ast::Ident) {
-        let alias_text: Text = alias.name.clone();
-        if alias_text.as_str() == item_name {
-            return;
-        }
-        // TYPE alias — mirror the TypeDeclBody::Alias registration.
-        if self.ctx.lookup_type(item_name).is_some() {
-            let aliased = Type::Named {
-                path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
-                    Text::from(item_name),
-                    alias.span,
-                )),
+    /// A mount publishes a spelling for an existing declaration. It never
+    /// creates a nominal declaration in the consumer, including for renames.
+    fn bind_source_type_import(
+        &mut self,
+        declared_name: &str,
+        registered_type: Type,
+        declaration_key: &Text,
+        register_name: &str,
+    ) {
+        let binding = if register_name == declared_name {
+            registered_type
+        } else {
+            Type::Named {
+                path: Self::text_to_path(declaration_key),
                 args: List::new(),
-            };
-            self.ctx.define_alias(alias_text.clone(), aliased.clone());
-            self.unifier
-                .register_type_alias(alias_text.clone(), aliased);
-            let named = Type::Named {
-                path: verum_ast::ty::Path::single(alias.clone()),
-                args: List::new(),
-            };
-            self.define_type_in_current_module(alias_text.clone(), named);
+            }
+        };
+        self.ctx.define_type(register_name, binding);
+        if let Some(constructor) = self.source_type_registration
+            .constructor_values.get(declaration_key)
+            .or_else(|| self.ctx.env.lookup(declaration_key)).cloned()
+        {
+            self.ctx.env.insert(register_name, constructor);
         }
-        // VALUE / function alias — re-bind the original's scheme.
-        self.ctx.env.insert_binding_alias(alias_text, item_name);
-
     }
-
 
     /// Import a single item from an inline module.
     ///
     /// Name resolution across modules: qualified paths, import disambiguation, re-exports, path resolution in imports — Named Imports
-    fn import_item_from_inline_module(&mut self, module_name: &str, item_name: &str) -> Result<()> {
+    fn import_item_from_inline_module(
+        &mut self, module_name: &str, item_name: &str, local_name: Option<&str>,
+    ) -> Result<()> {
+        let register_name = local_name.unwrap_or(item_name);
         let module = self
             .inline_modules
             .get(&verum_common::Text::from(module_name))
@@ -1250,7 +1244,7 @@ impl TypeChecker {
             })?;
 
         // Track the import source for ambiguity detection
-        let name_text = verum_common::Text::from(item_name);
+        let name_text = verum_common::Text::from(register_name);
         // Avoid double "cog." prefix when module_name already starts with "cog."
         let source = if module_name.starts_with("cog.") {
             verum_common::Text::from(module_name)
@@ -1267,7 +1261,7 @@ impl TypeChecker {
 
         // Register the item type in the environment
         let reg_result =
-            self.register_imported_item_from_inline_module(&module, module_name, item_name);
+            self.register_imported_item_from_inline_module(&module, module_name, item_name, register_name);
 
         // Re-export following (umbrella resolution).
         //
@@ -1333,7 +1327,7 @@ impl TypeChecker {
                     }
                 };
                 if let Some(target_key) = target_key {
-                    let _ = self.import_item_from_inline_module(target_key.as_str(), item_name);
+                    let _ = self.import_item_from_inline_module(target_key.as_str(), item_name, Some(register_name));
                     if self.ctx.env.lookup(&name_text).is_some()
                         || self.ctx.type_defs.contains_key(&name_text)
                     {
@@ -1352,10 +1346,11 @@ impl TypeChecker {
         module: &verum_ast::decl::ModuleDecl,
         module_name: &str,
         item_name: &str,
+        register_name: &str,
     ) -> Result<()> {
         use verum_ast::ItemKind;
 
-        let owner = self.inline_module_declaration_path(module_name);
+        let owner: Text = self.inline_module_declaration_path(module_name).into();
         if let Some(items) = &module.items {
             // First pass: if the imported name is a variant constructor of a
             // sum type declared in this module (e.g. `Ok` / `Err` from
@@ -1369,22 +1364,17 @@ impl TypeChecker {
                 if let ItemKind::Type(type_decl) = &item.kind {
                     if let verum_ast::decl::TypeDeclBody::Variant(ref variants) = type_decl.body {
                         if variants.iter().any(|v| v.name.name.as_str() == item_name) {
-                            // Register the parent type first (idempotent); this
-                            // populates the variant-constructor entries in the
-                            // env keyed by the unqualified variant name.
-                            if let Err(e) =
-                                self.register_type_declaration_in_module(type_decl, &owner)
-                            {
-                                if e.is_soundness_critical() {
-                                    return Err(e);
-                                }
-                                tracing::debug!(
-                                    "Failed to register parent type '{}' for variant '{}': {}",
-                                    type_decl.name.name.as_str(),
-                                    item_name,
-                                    e
-                                );
-                            }
+                            let (_, key) = self.load_source_type_declaration_with_parameter_key(
+                                type_decl, &owner, type_decl.span,
+                            )?;
+                            let constructor_key: Text = format!("{key}.{item_name}").into();
+                            let constructor = self.source_type_registration.constructor_values
+                                .get(&constructor_key)
+                                .or_else(|| self.ctx.env.lookup(&constructor_key)).cloned()
+                                .ok_or_else(|| TypeError::UnboundVariable {
+                                    name: constructor_key, span: type_decl.span,
+                                })?;
+                            self.ctx.env.insert(register_name, constructor);
                             return Ok(());
                         }
                     }
@@ -1398,21 +1388,16 @@ impl TypeChecker {
                         let func_ty = self.infer_function_type(func)?;
                         self.ctx
                             .env
-                            .insert(item_name, crate::context::TypeScheme::mono(func_ty));
+                            .insert(register_name, crate::context::TypeScheme::mono(func_ty));
                         return Ok(());
                     }
                     ItemKind::Type(type_decl) if type_decl.name.name.as_str() == item_name => {
-                        // Register type
-                        if let Err(e) = self.register_type_declaration_in_module(type_decl, &owner) {
-                            if e.is_soundness_critical() {
-                                return Err(e);
-                            }
-                            tracing::debug!(
-                                "Failed to register imported type '{}': {}",
-                                item_name,
-                                e
-                            );
-                        }
+                        let (registered_type, key) = self.load_source_type_declaration_with_parameter_key(
+                            type_decl, &owner, type_decl.span,
+                        )?;
+                        self.bind_source_type_import(
+                            type_decl.name.name.as_str(), registered_type, &key, register_name,
+                        );
                         // Also import the type's `implement` blocks so that
                         // inherent methods (especially static constructors
                         // like `Validated.valid`) are reachable from the
@@ -1446,7 +1431,7 @@ impl TypeChecker {
                         let const_ty = self.ast_to_type(&const_decl.ty)?;
                         self.ctx
                             .env
-                            .insert_value(item_name, crate::context::TypeScheme::mono(const_ty));
+                            .insert_value(register_name, crate::context::TypeScheme::mono(const_ty));
 
                         // Record the full path of the imported constant for dependency tracking
                         // When we later reference this constant, we can look up its full path
@@ -1493,7 +1478,7 @@ impl TypeChecker {
                             enclosing, module_name, item_name
                         ));
                         self.imported_constant_paths
-                            .insert(verum_common::Text::from(item_name), const_full_path);
+                            .insert(verum_common::Text::from(register_name), const_full_path);
 
                         return Ok(());
                     }
@@ -1507,6 +1492,9 @@ impl TypeChecker {
                                 item_name,
                                 e
                             );
+                        }
+                        if register_name != item_name {
+                            self.ctx.env.insert_binding_alias(register_name, item_name);
                         }
                         return Ok(());
                     }
@@ -1531,6 +1519,9 @@ impl TypeChecker {
         // `<generated>` span. The error is both wrong (`Ok` IS bound) and
         // unactionable (span points nowhere).
         if self.ctx.env.lookup(item_name).is_some() {
+            if register_name != item_name {
+                self.ctx.env.insert_binding_alias(register_name, item_name);
+            }
             return Ok(());
         }
 
@@ -2010,12 +2001,10 @@ impl TypeChecker {
                         simple_path.as_str(),
                         path_starts_with_crate(path),
                     ) {
-                        if let Ok(()) = self.import_item_from_inline_module(&module_key, &item_name) {
-                            if let Some(alias) = import.tree.alias.as_ref().or(import.alias.as_ref()) {
-                                self.register_mount_item_alias(&item_name, alias);
-                            }
-                            return Ok(());
-                        }
+                        let local_name = import.tree.alias.as_ref().or(import.alias.as_ref())
+                            .map(|alias| alias.name.as_str());
+                        self.import_item_from_inline_module(&module_key, &item_name, local_name)?;
+                        return Ok(());
                     }
                 }
 
@@ -2433,48 +2422,9 @@ impl TypeChecker {
             }
         }
 
-        // A163, AND IT BELONGS HERE FOR THE SAME REASON THE STATIC BINDING
-        // ABOVE DOES: this wrapper is the first point after the inner import
-        // that ALWAYS runs.
-        //
-        // Two earlier placements were inert, and `VERUM_TRACE_TASK21` said
-        // why: `core.term.layout`'s `Constraint` reaches the gate with
-        // `export_hit=true`, so it never enters the absent-from-exports
-        // branch where the first attempt sat, and the consumer's mount has
-        // no `as`, so `register_mount_item_alias` — the second attempt —
-        // is never called either. The rename lives in `core/`, and the
-        // consumer mounts the short name plainly.
-        // A163 IS NOT FIXED HERE, AND THREE PLACEMENTS SAY WHY.
-        //
-        // A variant reached through a RENAMED re-export is not a variant:
-        // `core/term/layout/mod.vr:31` publishes
-        // `LayoutConstraint as Constraint`, and `Constraint.Length(40)`
-        // panics with `method 'Length' not found on receiver of runtime
-        // kind 'Int'` while `LayoutConstraint.Length(40)` constructs.
-        //
-        //   1. Copying the `Type.Variant` env keys onto the alias inside
-        //      `register_mount_item_alias` — INERT. That registrar only runs
-        //      for a rename the CONSUMER writes, and the consumer here
-        //      mounts the short name plainly; the rename lives in `core/`.
-        //   2. The same copy at the re-export-follow site — INERT.
-        //      `VERUM_TRACE_TASK21` shows `Constraint` reaching the gate with
-        //      `export_hit=true`, so it never enters that branch.
-        //   3. Calling `register_mount_item_alias` itself from this wrapper,
-        //      which BOTH forms pass through — HARMFUL. It made the real
-        //      name fail too: `no method named 'Length' found for type
-        //      'LayoutConstraint'`. `define_type_in_current_module` evicts
-        //      env bindings whose type is a function returning a different
-        //      Named type — which is precisely the shape of a variant
-        //      constructor — so registering the alias as a type took the
-        //      SOURCE type's constructors with it.
-        //
-        // What (3) establishes and (1) and (2) did not: the alias machinery
-        // and the variant-constructor table interact, and a fix has to
-        // answer for both. The CONSUMER-written `as` works — through the
-        // umbrella and through the declaring module — so the two paths can
-        // be compared directly; that is where the next attempt should start.
-        // Pinned by `core-tests/term/layout/constraint/regression_test.vr`,
-        // which asserts BOTH spellings for exactly this reason.
+        // Re-exported type spellings retain their declaring owner. Constructor
+        // values are published by that declaration's transaction, not by
+        // registering the consumer's alias as another nominal type.
 
         if std::env::var("VERUM_TRACE_IMPORT").is_ok() {
             let in_env = self
@@ -4453,27 +4403,10 @@ impl TypeChecker {
                                 // Fall through to fallback registration
                             } else if let Ok((registered_type, declaration_key)) = reg_result {
                                 registered_successfully = true;
-                                // A rename is a binding to the selected declaration,
-                                // not a new type in the consumer's module.
                                 let true_name = type_decl.name.name.as_str();
-                                let binding = if register_name == true_name {
-                                    registered_type
-                                } else {
-                                    Type::Named {
-                                        path: Self::text_to_path(&declaration_key),
-                                        args: List::new(),
-                                    }
-                                };
-                                self.ctx.define_type(register_name, binding);
-
-                                // The selected type may also export a value constructor.
-                                // Bind the exact source value under this mount's spelling.
-                                if let Some(constructor) = self.source_type_registration
-                                    .constructor_values.get(&declaration_key)
-                                    .or_else(|| self.ctx.env.lookup(&declaration_key)).cloned()
-                                {
-                                    self.ctx.env.insert(register_name, constructor);
-                                }
+                                self.bind_source_type_import(
+                                    true_name, registered_type, &declaration_key, register_name,
+                                );
 
                                 // CRITICAL FIX: Also import implement block methods for the type.
                                 // This enables cross-file method resolution for calls like

@@ -204,3 +204,69 @@ fn an_outline_module_declaration_does_not_supply_an_inline_body() {
         "an unloaded file module is not a known inline namespace"
     );
 }
+
+#[test]
+fn renamed_inline_types_keep_fields_and_owners_before_and_after_module_checks() {
+    for mount in [
+        "mount cog.wide.Item as W; mount cog.narrow.Item as N;",
+        "mount cog.{wide.Item as W, narrow.Item as N};",
+        "mount cog.{wide.{Item as W}, narrow.{Item as N}};",
+    ] {
+        for reverse in [false, true] {
+            let wide = "module wide { public type Item is { public value: Int }; }";
+            let narrow = "module narrow { public type Item is { public value: Bool }; }";
+            let declarations = if reverse { format!("{narrow} {wide}") } else { format!("{wide} {narrow}") };
+            let functions = "fn first(item:W)->Int {item.value} fn second(item:N)->Bool {item.value}";
+            for source in [format!("{mount} {functions} {declarations}"), format!("{declarations} {mount} {functions}")] {
+                let errors = check(&source, "cog");
+                assert!(errors.is_empty(), "{source}: {errors:?}");
+            }
+        }
+    }
+}
+
+#[test]
+fn renamed_inline_type_retains_private_field_visibility() {
+    for mount in [
+        "mount cog.wide.Item as W; mount cog.narrow.Item as N;",
+        "mount cog.{wide.{Item as W}, narrow.{Item as N}};",
+    ] {
+        let source = format!("{mount} module wide {{ public type Item is {{ left:Int }}; }} module narrow {{ public type Item is {{ public left:Int }}; }} fn public_value(item:N)->Int {{item.left}} fn private_value(item:W)->Int {{item.left}}");
+        assert_private_left(&check(&source, "cog"), "cog.wide");
+    }
+}
+
+#[test]
+fn same_shaped_inline_aliases_do_not_identify_distinct_owners() {
+    let source = "mount cog.wide.Item as W; mount cog.narrow.Item as N; module wide {public type Item is {public value:Int};} module narrow {public type Item is {public value:Int};} fn wrong(item:W)->N {item}";
+    let errors = check(source, "cog");
+    assert!(errors.iter().any(|error| error.contains("Mismatch")), "{errors:?}");
+}
+
+#[test]
+fn renamed_inline_generic_types_keep_their_parameter_slots() {
+    let source = "mount cog.wide.Item as W; mount cog.narrow.Item as N; module wide {public type Item<A,B> is {public first:A,public second:B};} module narrow {public type Item<A> is {public first:A};} fn first(item:W<Int,Bool>)->Bool {item.second} fn second(item:N<Int>)->Int {item.first}";
+    let errors = check(source, "cog");
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn renamed_inline_type_does_not_replace_another_mounts_local_binding() {
+    for mounts in [
+        "mount cog.wide.*; mount cog.narrow.Item as N;",
+        "mount cog.narrow.Item as N; mount cog.wide.*;",
+        "mount cog.{wide.*, narrow.Item as N};",
+        "mount cog.{narrow.Item as N, wide.*};",
+    ] {
+        let source = format!("{mounts} fn wide(item:Item)->Int {{item.value}} fn narrow(item:N)->Bool {{item.value}} module wide {{public type Item is {{public value:Int}};}} module narrow {{public type Item is {{public value:Bool}};}}");
+        let errors = check(&source, "cog");
+        assert!(errors.is_empty(), "{source}: {errors:?}");
+    }
+}
+
+#[test]
+fn renamed_inline_type_does_not_authorize_the_original_spelling() {
+    let source = "mount cog.other.Item as Selected; fn wrong(item:Item)->Int {item.value} module other {public type Item is {public value:Int};}";
+    let errors = check(source, "cog");
+    assert!(errors.iter().any(|error| error.contains("TypeNotFound") && error.contains("Item")), "{errors:?}");
+}

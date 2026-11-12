@@ -532,6 +532,21 @@ impl TypeChecker {
                 PathSegment::Name(verum_ast::Ident::new(name, span))).collect(), span)
         });
         let path = absolute_path.as_ref().unwrap_or(path);
+        // A namespace alias changes a path's spelling, never its nominal owner.
+        // Resolve consumer aliases before retaining a type in a signature. A
+        // declaring-source scope has its own lexical mounts and resolves those
+        // below; it must not inherit the consumer's namespace bindings.
+        let namespace_path = if !self.resolving_source_signature {
+            path.segments.first().and_then(|head| {
+                let PathSegment::Name(head) = head else { return None; };
+                let owner = self.module_aliases.get(&head.name)?;
+                let segments = owner.as_str().split('.')
+                    .map(|name| PathSegment::Name(verum_ast::Ident::new(name, span)))
+                    .chain(path.segments.iter().skip(1).cloned()).collect();
+                Some(Path::new(segments, span))
+            })
+        } else { None };
+        let path = namespace_path.as_ref().unwrap_or(path);
 
         // Resolve source authority before cached templates so an earlier
         // owner-local load cannot make a private declaration visible elsewhere.
@@ -611,30 +626,12 @@ impl TypeChecker {
                     if let Some(items) = &module.items {
                         for item in items.iter() {
                             if let verum_ast::ItemKind::Type(type_decl) = &item.kind {
-                                if type_decl.name.name.as_str() == type_name {
-                                    // ALIAS-VS-MARKER scope (#41)
-                                    let prev_alias_scope = self.alias_scope.take();
-                                    self.alias_scope =
-                                        Some(Self::compute_alias_scope(items));
-                                    let reg_result = self.register_type_declaration_in_module(
-                                        type_decl,
-                                        &module_key,
-                                    );
-                                    self.alias_scope = prev_alias_scope;
-                                    if let Err(e) = reg_result {
-                                        tracing::debug!(
-                                            "Failed to register type '{}' from inline module: {}",
-                                            type_name,
-                                            e
-                                        );
-                                    }
-                                    let key: Text = format!("{module_key}.{type_name}").into();
-                                    if let Some(ty) = self.ctx.lookup_type(key.as_str()) {
-                                        return Ok((ty.clone(), Some(key)));
-                                    }
-                                    if let Maybe::Some(ty) = self.ctx.lookup_type(&type_name) {
-                                        return Ok((ty.clone(), Some(type_name.into())));
-                                    }
+                                if type_decl.name.name.as_str() == type_name
+                                    && self.cfg_evaluator.should_include_item(item)
+                                {
+                                    return self.load_source_type_declaration_with_parameter_key(
+                                        type_decl, &module_key.into(), span,
+                                    ).map(|(ty, key)| (ty, Some(key)));
                                 }
                             }
                         }
