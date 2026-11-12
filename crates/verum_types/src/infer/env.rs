@@ -2342,7 +2342,7 @@ impl TypeChecker {
     /// since field/index access checks the specific field/index instead.
     pub(super) fn synth_expr_for_field_access(&mut self, expr: &Expr) -> Result<InferResult> {
         let result = self.infer_field_operand(expr)?;
-        self.observe_place_operand(expr, &result.ty);
+        self.observe_expression_type(expr, &result.ty);
         Ok(result)
     }
 
@@ -12540,7 +12540,7 @@ with .to_float() or .to_int() (at {:?})",
             }
             Deref => {
                 let operand = self.synth_expr(expr)?;
-                self.observe_place_operand(expr, &operand.ty);
+                self.observe_expression_type(expr, &operand.ty);
                 self.unary_deref_target(&operand.ty, expr.span).map(InferResult::new)
             }
             // Three-tier reference system: &checked T (Tier 1 - compiler-verified, 0ns overhead)

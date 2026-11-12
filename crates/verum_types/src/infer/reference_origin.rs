@@ -23,6 +23,19 @@ fn reference_mutability(ty: &Type) -> Option<bool> {
     }
 }
 
+fn immediate_loan_presence(ty: &Type) -> Option<bool> {
+    match ty {
+        Type::Reference { .. } | Type::CheckedReference { .. }
+        | Type::UnsafeReference { .. } | Type::GenRef { .. } => Some(true),
+        Type::Unit | Type::Never | Type::Bool | Type::Int | Type::Float
+        | Type::Char | Type::Text | Type::Function { .. }
+        | Type::Pointer { .. } | Type::VolatilePointer { .. }
+        | Type::Meta { .. } | Type::Universe { .. } | Type::Prop
+        | Type::Interval | Type::Lifetime { .. } => Some(false),
+        _ => None,
+    }
+}
+
 /// A body which returns a parameter unchanged preserves that operand's origin.
 /// Signatures, dynamic calls and bodies with other control flow carry no such rule.
 pub(super) fn forwarded_parameter(decl: &FunctionDecl) -> Option<usize> {
@@ -194,49 +207,59 @@ impl TypeChecker {
     /// Only value-bearing positions can keep a loan alive. A function's
     /// parameter and result types, for example, do not borrow their referents.
     pub(super) fn carries_stored_loan(&self, ty: &Type) -> bool {
-        fn visit(
-            checker: &TypeChecker,
-            ty: &Type,
-            owners: &mut std::collections::HashSet<verum_common::Text>,
-        ) -> bool {
+        if let Some(present) = immediate_loan_presence(ty) { return present; }
+        let mut pending = verum_common::List::new();
+        pending.push(ty);
+        let mut visited = verum_common::Set::new();
+        while let Some(ty) = pending.pop() {
+            // The work list borrows an immutable semantic graph. Identity
+            // avoids cycles without expanding recursive nominal declarations.
+            if !visited.insert(std::ptr::from_ref(ty).addr()) { continue; }
+            if let Some(present) = immediate_loan_presence(ty) {
+                if present { return true; }
+                continue;
+            }
             match ty {
-                Type::Reference { .. }
-                | Type::CheckedReference { .. }
-                | Type::UnsafeReference { .. } => true,
-                Type::Tuple(parts) => parts.iter().any(|part| visit(checker, part, owners)),
+                Type::Tuple(parts) => pending.extend(parts.iter()),
                 Type::Record(fields)
-                | Type::Variant(fields)
-                | Type::ExtensibleRecord { fields, .. } => {
-                    fields.values().any(|field| visit(checker, field, owners))
+                | Type::Variant(fields) => pending.extend(fields.values()),
+                Type::ExtensibleRecord { fields, row_var } => {
+                    if row_var.is_some() { return true; }
+                    pending.extend(fields.values());
                 }
                 Type::Array { element, .. }
                 | Type::Slice { element }
-                | Type::Tensor { element, .. } => visit(checker, element, owners),
+                | Type::Tensor { element, .. } => pending.push(element),
                 Type::Refined { base, .. } | Type::CapabilityRestricted { base, .. } => {
-                    visit(checker, base, owners)
+                    pending.push(base);
                 }
-                Type::Ownership { inner, .. } | Type::Quantified { inner, .. } => {
-                    visit(checker, inner, owners)
+                Type::Ownership { inner, .. } | Type::Quantified { inner, .. }
+                | Type::Exists { body: inner, .. } | Type::Forall { body: inner, .. } => {
+                    pending.push(inner);
                 }
                 Type::Named { .. } | Type::Generic { .. } => {
-                    let Some((name, args)) = checker.conversion_nominal_head(ty) else {
-                        return false;
-                    };
-                    if args.iter().any(|arg| visit(checker, arg, owners)) {
+                    let Some((name, args)) = self.conversion_nominal_head(ty) else {
                         return true;
-                    }
-                    if !owners.insert(name.clone()) {
-                        return false;
-                    }
-                    let Some(body) = checker.ctx.lookup_type(&name) else {
-                        return false;
                     };
-                    visit(checker, body, owners)
+                    pending.extend(args.iter());
+                    // Nominal records keep their layout separately from their
+                    // public identity. Looking only at the name misses fields.
+                    let Some(body) = self.ctx.lookup_type(&format!("__struct_fields_{name}"))
+                        .or_else(|| self.ctx.lookup_type(&name)) else {
+                        return true;
+                    };
+                    pending.push(body);
                 }
-                _ => false,
+                Type::Var(variable) => match self.unifier.get_substitution().get(variable) {
+                    Some(bound) => pending.push(bound),
+                    None => return true,
+                },
+                // An unresolved carrier is not evidence that storage is free
+                // of references. Preserve candidates until its shape is known.
+                _ => return true,
             }
         }
-        visit(self, ty, &mut std::collections::HashSet::new())
+        false
     }
 
     pub(super) fn aggregate_origins(&mut self, value: &Expr, ty: &Type) -> Vec<RecordReceiver> {
@@ -386,6 +409,15 @@ impl TypeChecker {
             if !found.contains(&source) {
                 found.push(source);
             }
+        }
+        // Use the result established by ordinary inference. Re-inferring here
+        // would consume affine operands twice; descending into a loan-free
+        // result confuses its evaluation inputs with its stored value.
+        if !value.span.is_empty()
+            && self.type_registry.lookup_expr(value.span)
+                .is_some_and(|ty| !self.carries_stored_loan(ty))
+        {
+            return;
         }
         if let Some(source) = self.reference_result_origin(value) {
             add(found, source);

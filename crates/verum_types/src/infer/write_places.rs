@@ -71,7 +71,10 @@ impl TypeChecker {
         result
     }
 
-    pub(super) fn observe_place_operand(&mut self, expr: &Expr, ty: &Type) {
+    pub(super) fn observe_expression_type(&mut self, expr: &Expr, ty: &Type) {
+        if !expr.span.is_empty() {
+            self.type_registry.register_expr(expr.span, ty.clone());
+        }
         if self.place_operands.is_empty() {
             return;
         }

@@ -12139,23 +12139,13 @@ impl TypeChecker {
                             //
                             // Keep the leniency where it was earned and
                             // surface the local verdict.
-                            if let Err(e) = self.check_block(block, check_ty)
+                            if let Err(e) = self.check_function_block(block, check_ty, !func.is_generator)
                                 && Self::is_local_body_verdict(&e)
                             {
                                 return Err(e);
                             }
                         } else {
-                            self.check_block(block, check_ty)?;
-                        }
-                        // ============================================================
-                        // Return Lifetime Validation for Block Bodies
-                        // Spec: L0-critical/reference_system/access_rules/ref_escaping_fail
-                        // ============================================================
-                        // Check if we're returning a reference to a local variable.
-                        // This would create a dangling reference when the function returns.
-                        // Skip lifetime check for generators - they yield, not return references
-                        if !func.is_generator && let Some(ref tail) = block.expr {
-                            self.check_return_value_loans(tail, &expected_return, span)?;
+                            self.check_function_block(block, check_ty, !func.is_generator)?;
                         }
                     }
                     FunctionBody::Expr(expr) => {
@@ -12188,16 +12178,7 @@ impl TypeChecker {
                 // No explicit return type - use synthesis mode
                 let body_result = match body {
                     FunctionBody::Block(block) => {
-                        let result = self.infer_block(block)?;
-                        // ============================================================
-                        // Return Lifetime Validation for Block Bodies
-                        // Spec: L0-critical/reference_system/access_rules/ref_escaping_fail
-                        // ============================================================
-                        // Check if we're returning a reference to a local variable.
-                        if let Some(ref tail) = block.expr {
-                            self.check_return_value_loans(tail, &result.ty, span)?;
-                        }
-                        result
+                        self.infer_function_block(block, !func.is_generator)?
                     }
                     FunctionBody::Expr(expr) => {
                         let result = self.synth_expr(expr)?;

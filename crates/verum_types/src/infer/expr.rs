@@ -138,7 +138,7 @@ impl TypeChecker {
                 self.track_affine_field_access(&root, &projection, &result.ty, field.span)?;
             }
         }
-        self.observe_place_operand(expr, &result.ty);
+        self.observe_expression_type(expr, &result.ty);
         Ok(result)
     }
 
@@ -232,7 +232,7 @@ impl TypeChecker {
                 checker.infer_expr(expr, InferMode::Synth)
             }
         })?;
-        self.observe_place_operand(expr, &result.ty);
+        self.observe_expression_type(expr, &result.ty);
         Ok(result)
     }
 
@@ -299,7 +299,7 @@ impl TypeChecker {
         let expected = &self.resolve_assoc_projections_deep(expected);
 
         let result = self.check_expr_inner(expr, expected)?;
-        self.observe_place_operand(expr, &result.ty);
+        self.observe_expression_type(expr, &result.ty);
         Ok(result)
     }
 
@@ -4288,7 +4288,7 @@ impl TypeChecker {
                     })?;
 
                     if matches!(op, UnOp::Deref) {
-                        self.observe_place_operand(inner_expr, &inner_ty);
+                        self.observe_expression_type(inner_expr, &inner_ty);
                     }
 
                     let result_ty = self.compute_unop_result(op, &inner_ty, span)?;
@@ -14082,11 +14082,31 @@ impl TypeChecker {
     /// Infer type for a block.
     ///
     pub(super) fn infer_block(&mut self, block: &Block) -> Result<InferResult> {
-        let _depth_guard = self.inc_inference_depth("infer_block")?;
+        self.with_block_scope(block, false, Self::infer_block_inner)
+    }
+
+    pub(super) fn infer_function_block(&mut self, block: &Block, returning: bool) -> Result<InferResult> {
+        self.with_block_scope(block, returning, Self::infer_block_inner)
+    }
+
+    /// Resolve outgoing loans before dropping the bindings which establish
+    /// their provenance. A function boundary also ends owned parameter storage.
+    fn with_block_scope(
+        &mut self,
+        block: &Block,
+        returning: bool,
+        infer: impl FnOnce(&mut Self, &Block) -> Result<InferResult>,
+    ) -> Result<InferResult> {
+        let _depth_guard = self.inc_inference_depth("block")?;
         let constant_scope = self.const_eval.enter_source_scope(self.current_module_path.as_str());
-        let result = self.with_lexical_result_scope(|checker| match checker.cfg_filtered_block(block) {
-            Some(filtered) => checker.infer_block_inner(&filtered),
-            None => checker.infer_block_inner(block),
+        let result = self.with_lexical_result_scope(|checker| {
+            let filtered = checker.cfg_filtered_block(block);
+            let block = filtered.as_ref().unwrap_or(block);
+            let result = infer(checker, block)?;
+            if returning && let Some(tail) = &block.expr {
+                checker.check_return_value_loans(tail, &result.ty, tail.span)?;
+            }
+            Ok(result)
         });
         self.const_eval.leave_scope(constant_scope);
         result
@@ -14281,14 +14301,11 @@ impl TypeChecker {
 
     /// Check a block against expected type.
     pub(super) fn check_block(&mut self, block: &Block, expected: &Type) -> Result<InferResult> {
-        let _depth_guard = self.inc_inference_depth("check_block")?;
-        let constant_scope = self.const_eval.enter_source_scope(self.current_module_path.as_str());
-        let result = self.with_lexical_result_scope(|checker| match checker.cfg_filtered_block(block) {
-            Some(filtered) => checker.check_block_inner(&filtered, expected),
-            None => checker.check_block_inner(block, expected),
-        });
-        self.const_eval.leave_scope(constant_scope);
-        result
+        self.check_function_block(block, expected, false)
+    }
+
+    pub(super) fn check_function_block(&mut self, block: &Block, expected: &Type, returning: bool) -> Result<InferResult> {
+        self.with_block_scope(block, returning, |checker, block| checker.check_block_inner(block, expected))
     }
 
     fn check_block_inner(&mut self, block: &Block, expected: &Type) -> Result<InferResult> {
