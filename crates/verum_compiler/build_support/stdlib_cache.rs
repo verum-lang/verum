@@ -52,7 +52,6 @@ pub(crate) fn producer_hasher(
         // Opcode identities and synthesized wrapper bodies also shape baked calls.
         "crates/verum_vbc/src/instruction.rs",
         "crates/verum_vbc/src/intrinsics/expand.rs",
-        "crates/verum_vbc/src/intrinsics/codegen.rs",
         "crates/verum_vbc/src/intrinsics/lowering.rs",
         // Actual array storage evidence, callable conversions, and declared
         // element semantics all shape the bytecode emitted into the archive.

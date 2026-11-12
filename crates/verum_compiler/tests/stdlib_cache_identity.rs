@@ -211,6 +211,9 @@ fn producer_roster_covers_every_fast_parser_source_and_reports_each_once() {
         .parent()
         .unwrap();
     let (_, dependencies) = key(root, SCHEMA, CORE);
+    for dependency in &dependencies {
+        assert!(dependency.exists(), "obsolete producer input keeps Cargo dirty: {}", dependency.display());
+    }
     let reported: Set<_> = dependencies.iter().collect();
     assert_eq!(
         reported.len(),
@@ -328,29 +331,26 @@ fn no_auto_still_reports_parser_dependencies_without_refreshing() {
                 .any(|line| line.as_str() == dependency.as_str()),
             "{flag}={value}: {stdout}"
         );
-        for policy in ["VERUM_NO_AUTO_PRECOMPILE", "DOCS_RS"] {
+        for policy in ["VERUM_NO_AUTO_PRECOMPILE", "DOCS_RS", "VERUM_PRECOMPILE_THREADS"] {
             let dependency = format!("cargo:rerun-if-env-changed={policy}");
             assert!(stdout.lines().iter().any(|line| line.as_str() == dependency),
                 "{flag}={value}: {stdout}");
         }
-        let checksum = format!(
+        let publication = format!(
             "cargo:rerun-if-changed={}",
-            target
-                .join("precompiled-stdlib/runtime.vbca.checksum")
-                .display()
+            target.join("precompiled-stdlib").display()
         );
         assert!(
             stdout
                 .lines()
                 .iter()
-                .any(|line| line.as_str() == checksum.as_str())
+                .any(|line| line.as_str() == publication.as_str())
         );
         assert!(!stdout.contains("Refreshing stdlib precompile"));
         assert!(!stdout.contains("Stdlib precompile cache HIT"));
-        assert!(
-            !target.exists(),
-            "disabled precompile must not initialize a target or cache"
-        );
+        assert_eq!(fs::read_dir(&target).unwrap().count(), 1);
+        assert_eq!(fs::read_dir(target.join("precompiled-stdlib")).unwrap().count(), 0,
+            "disabled precompile may establish the watched directory, but must not bake or publish artifacts");
         assert!(output.join("stdlib_runtime.vbca").is_file());
         assert_eq!(
             fs::metadata(output.join("stdlib_runtime.vbca"))
@@ -460,21 +460,53 @@ fn main() {{
     if let Some(directory) = &evidence {
         fs::create_dir(directory).expect("policy evidence directory must be new");
     }
-    let mut states: List<(Option<&str>, Option<&str>)> = List::from_iter([(None, None)]);
+    #[derive(Clone, Copy, PartialEq)]
+    enum CacheState { Present, Absent, WithoutChecksum, WithoutReceipt }
+    let cache_files: List<_> = fs::read_dir(&cache).unwrap().map(|entry| {
+        let entry = entry.unwrap();
+        (entry.file_name(), fs::read(entry.path()).unwrap())
+    }).collect();
+    let mut states = List::from_iter([(None, None, CacheState::Present)]);
     for flag in ["VERUM_NO_AUTO_PRECOMPILE", "DOCS_RS"] {
         states.extend([
-            (Some(flag), Some("1")),
-            (Some(flag), Some("0")),
-            (None, None),
+            (Some(flag), Some("1"), CacheState::Present),
+            (Some(flag), Some("0"), CacheState::Present),
+            (None, None, CacheState::Present),
         ]);
+    }
+    // Keep the environment fixed while cache membership changes. A disabled
+    // bake must stay fresh with no cache, yet notice publication and removal.
+    for state in [CacheState::Absent, CacheState::Present,
+        CacheState::WithoutChecksum, CacheState::Present,
+        CacheState::WithoutReceipt, CacheState::Present] {
+        states.push((Some("VERUM_NO_AUTO_PRECOMPILE"), Some("1"), state));
     }
     let mut expected_runs = 0usize;
     let mut last_out = None;
-    for (step, (flag, value)) in states.into_iter().enumerate() {
+    let mut previous_cache = CacheState::Present;
+    for (step, (flag, value, cache_state)) in states.into_iter().enumerate() {
+        if cache_state != previous_cache {
+            if cache.exists() { fs::remove_dir_all(&cache).unwrap(); }
+            if cache_state != CacheState::Absent {
+                fs::create_dir_all(&cache).unwrap();
+                for (name, bytes) in &cache_files { fs::write(cache.join(name), bytes).unwrap(); }
+                match cache_state {
+                    CacheState::WithoutChecksum => fs::remove_file(cache.join("runtime.vbca.checksum")).unwrap(),
+                    CacheState::WithoutReceipt => fs::remove_file(bake_receipt::path(&cache.join("runtime.vbca"))).unwrap(),
+                    _ => {},
+                }
+            }
+            previous_cache = cache_state;
+        }
         // Repeat every state without changing source, output paths or flags.
-        // The first call must rerun; the second must reuse the same fingerprint.
+        // Creating the missing publication directory happens after Cargo's
+        // build-start timestamp, so Cargo conservatively rechecks it once.
+        // That initialization must settle; a missing-file dependency would
+        // instead rerun forever. Existing directories settle on the first run.
         expected_runs += 1;
-        for repeat in 0..2 {
+        let repeats = if cache_state == CacheState::Absent { 3 } else { 2 };
+        for repeat in 0..repeats {
+            if cache_state == CacheState::Absent && repeat == 1 { expected_runs += 1; }
             let label = format!("{step:02}-{repeat}-{}", flag.unwrap_or("automatic"));
             let stdout_path = root.path().join(format!("{label}.stdout"));
             let stderr_path = root.path().join(format!("{label}.stderr"));
@@ -550,7 +582,7 @@ fn main() {{
             }
             assert_eq!(
                 runs, expected_runs,
-                "{label}: expected flag change to rerun once and identical state to stay fresh; {stderr}"
+                "{label}: expected changed inputs to rerun once and identical state to stay fresh; {stderr}"
             );
             assert_eq!(
                 policy.contains("Stdlib precompile cache HIT"),
@@ -566,14 +598,11 @@ fn main() {{
                 key(root.path(), build_script::PRECOMPILE_SCHEMA_VERSION, CORE).0,
                 "the source/checksum inputs must stay unchanged across environment transitions"
             );
-            assert_eq!(
-                fs::read_to_string(cache.join("runtime.vbca.checksum")).unwrap(),
-                expected_key.to_hex().as_str()
-            );
-            assert_eq!(
-                fs::read(cache.join("runtime.vbca")).unwrap(),
-                b"policy-control sentinel; not an archive"
-            );
+            if cache_state == CacheState::Present {
+                assert_eq!(fs::read_to_string(cache.join("runtime.vbca.checksum")).unwrap(), expected_key.to_hex().as_str());
+                assert_eq!(fs::read(cache.join("runtime.vbca")).unwrap(), b"policy-control sentinel; not an archive");
+            }
+            assert_eq!(policy.contains("Source-only stdlib bootstrap"), cache_state != CacheState::Present, "{label}: {policy}");
             assert!(
                 !target.join("precompile-bootstrap").exists(),
                 "no nested baker target may be created"
@@ -583,7 +612,11 @@ fn main() {{
                 ("stdlib_runtime.core_metadata", "runtime.core_metadata"),
                 ("stdlib_runtime.symbol_graph", "runtime.symbol_graph"),
             ] {
-                assert_eq!(fs::read(output.join(private)).unwrap(), fs::read(cache.join(cached)).unwrap());
+                if cache_state == CacheState::Present {
+                    assert_eq!(fs::read(output.join(private)).unwrap(), fs::read(cache.join(cached)).unwrap());
+                } else {
+                    assert!(fs::read(output.join(private)).unwrap().is_empty(), "stale {private} survived");
+                }
             }
             eprintln!(
                 "policy control {label}: runs={runs}, automatic={}",

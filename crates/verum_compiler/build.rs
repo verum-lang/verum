@@ -403,21 +403,18 @@ pub(crate) fn main() {
     let current_hash = stdlib_cache::finish_archive_key(producer_hasher, source_files)
         .to_hex().to_string();
 
-    // Same reasoning as above, for the same reason: a build that skipped the
-    // refresh must still be re-run when a PEER build publishes a new archive,
-    // and that is signalled by the checksum changing. This sat at the foot of
-    // the block below, so the skip dropped it too.
-    println!("cargo:rerun-if-changed={}", checksum_path.display());
+    // Watch the publication boundary, including absent artifacts. Watching a
+    // nonexistent checksum keeps every Cargo invocation dirty; watching only
+    // present files misses first publication and repair of an invalid cache.
+    fs::create_dir_all(&precompile_dir)
+        .unwrap_or_else(|error| panic!("create stdlib publication directory {}: {error}", precompile_dir.display()));
+    println!("cargo:rerun-if-changed={}", precompile_dir.display());
 
     let inputs = bake_receipt::Inputs {
         producer: &producer,
         target: &target,
         source: source_digest,
     };
-    let receipt_path = bake_receipt::path(&precompile_archive);
-    if !auto_precompile_disabled || receipt_path.is_file() {
-        println!("cargo:rerun-if-changed={}", receipt_path.display());
-    }
     let cache_matches = || {
         fs::read_to_string(&checksum_path).is_ok_and(|hash| hash.trim() == current_hash)
             && inputs.verify_file(&precompile_archive).is_ok()
@@ -628,7 +625,6 @@ pub(crate) fn main() {
         // A concurrent cache replacement cannot substitute an index after this check.
         for (source, destination, variable) in artifacts {
             fs::copy(source, destination).unwrap_or_else(|e| panic!("copy {}: {e}", source.display()));
-            println!("cargo:rerun-if-changed={}", source.display());
             println!("cargo:rustc-env={variable}={}", destination.display());
         }
         inputs.verify_copy(&precompile_archive, &runtime_vbc_path)
@@ -648,7 +644,6 @@ pub(crate) fn main() {
                     bytes.len() as f64 / 1024.0,
                     precompile_archive.display()
                 );
-                println!("cargo:rerun-if-changed={}", precompile_archive.display());
             }
             Err(e) => {
                 let _ = fs::write(&runtime_vbc_path, &[] as &[u8]);
@@ -698,7 +693,6 @@ pub(crate) fn main() {
                     bytes.len() as f64 / 1024.0,
                     precompile_metadata.display()
                 );
-                println!("cargo:rerun-if-changed={}", precompile_metadata.display());
             }
             Err(e) => {
                 let _ = fs::write(&runtime_metadata_path, &[] as &[u8]);
@@ -741,10 +735,6 @@ pub(crate) fn main() {
             println!(
                 "cargo:warning=Embedded stdlib symbol graph: {:.1}KB ({})",
                 bytes.len() as f64 / 1024.0,
-                precompile_symbol_graph.display()
-            );
-            println!(
-                "cargo:rerun-if-changed={}",
                 precompile_symbol_graph.display()
             );
         }
