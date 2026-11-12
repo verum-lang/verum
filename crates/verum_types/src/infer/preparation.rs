@@ -8,6 +8,7 @@ use verum_common::{List, Set, Text};
 impl TypeChecker {
     /// Use the compilation target for item, implementation and body selection.
     pub fn set_cfg_target(&mut self, target: verum_ast::cfg::TargetConfig) {
+        self.property_inferrer.set_cfg_target(target.clone());
         self.cfg_evaluator = verum_ast::cfg::CfgEvaluator::with_config(target);
     }
 

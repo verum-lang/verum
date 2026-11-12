@@ -1,7 +1,7 @@
 //! Computational bounds come from the callable actually selected by inference.
 use super::*;
 use crate::computational_properties::{ComputationalProperty, PropertyRequirement, PropertySet};
-use verum_ast::visitor::{Visitor, walk_expr, walk_pattern};
+use verum_ast::visitor::{Visitor, walk_expr, walk_pattern, walk_stmt};
 use verum_ast::{FunctionDecl, ItemKind, Pattern, PatternKind};
 
 use super::atomic_access::AtomicAccess;
@@ -19,6 +19,12 @@ struct Calls<'a> {
     source: Option<&'a mut SourceCalls>,
 }
 impl Visitor for Calls<'_> {
+    fn visit_stmt(&mut self, statement: &verum_ast::Stmt) {
+        if self.checker.cfg_evaluator.should_include(&statement.attributes) {
+            walk_stmt(self, statement);
+        }
+    }
+
     fn visit_expr(&mut self, expression: &Expr) {
         match &expression.kind {
             ExprKind::Closure { .. } => return,
@@ -66,6 +72,10 @@ impl Visitor for Calls<'_> {
                     }
                     _ => PropertyRequirement::Unrestricted,
                 };
+                if self.source.is_none() && requirement.may_be_async() {
+                    tracing::debug!(target: "verum_types::callable_contract", owner = %self.checker.current_module_path,
+                        span = ?expression.span, callable = ?target, "call has no synchronous contract");
+                }
                 self.bound = self.bound.join(&requirement);
             }
             _ => (),
@@ -106,6 +116,14 @@ impl Visitor for Calls<'_> {
 }
 
 impl TypeChecker {
+    /// A selected structural operation contains no user callback. Its arguments
+    /// are still traversed normally, so their properties cannot disappear.
+    pub(super) fn record_structural_call(&mut self, span: Span, params: List<Type>, result: Type) {
+        self.type_registry.register_call_target(span, Type::function_with_requirement(
+            params, result, PropertyRequirement::source_callable(false),
+        ));
+    }
+
     pub(super) fn callable_body_bound(&mut self, body: &Expr) -> PropertyRequirement {
         let local = self.property_inferrer.infer_local_operations(body);
         let mut calls = Calls {

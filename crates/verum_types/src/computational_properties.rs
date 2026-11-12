@@ -1073,6 +1073,8 @@ impl Default for PropertyInferenceContext {
 pub struct PropertyInferrer {
     /// Context for tracking properties
     context: PropertyInferenceContext,
+    /// Select the same source statements as type checking and lowering.
+    cfg_evaluator: verum_ast::cfg::CfgEvaluator,
     typed_calls: bool,
 }
 
@@ -1115,8 +1117,13 @@ impl PropertyInferrer {
     pub fn new() -> Self {
         Self {
             context: PropertyInferenceContext::new(),
+            cfg_evaluator: verum_ast::cfg::CfgEvaluator::new(),
             typed_calls: false,
         }
+    }
+
+    pub fn set_cfg_target(&mut self, target: verum_ast::cfg::TargetConfig) {
+        self.cfg_evaluator = verum_ast::cfg::CfgEvaluator::with_config(target);
     }
 
     pub fn infer_function_body(&mut self, body: &verum_ast::FunctionBody) -> PropertySet {
@@ -1575,6 +1582,10 @@ impl PropertyInferrer {
     fn infer_stmt(&mut self, stmt: &verum_ast::stmt::Stmt) -> PropertySet {
         use verum_ast::stmt::StmtKind;
 
+        if !self.cfg_evaluator.should_include(&stmt.attributes) {
+            return PropertySet::pure();
+        }
+
         match &stmt.kind {
             StmtKind::Expr { expr, .. } => self.infer_expr(expr),
 
@@ -1685,6 +1696,7 @@ impl PropertyInferrer {
     /// The round cap is a belt on that argument, not the argument.
     pub fn seed_from_items(&mut self, items: &[verum_ast::Item]) {
         for item in items {
+            if !self.cfg_evaluator.should_include(&item.attributes) { continue; }
             if let verum_ast::ItemKind::Static(static_decl) = &item.kind
                 && static_decl.is_mut
             {
@@ -1695,6 +1707,7 @@ impl PropertyInferrer {
         for _round in 0..16 {
             let mut grew = false;
             for item in items {
+                if !self.cfg_evaluator.should_include(&item.attributes) { continue; }
                 if let verum_ast::ItemKind::Function(func) = &item.kind {
                     let props = self.infer_function_decl(func);
                     let name = func.name.name.clone();

@@ -20365,30 +20365,15 @@ impl TypeChecker {
         // not on the pointed-to value. Auto-deref would strip the reference
         // and lose the ability to find these methods.
         // ============================================================
+        let shifts_pointer = matches!((&recv_ty_raw, method_name_str),
+            (Type::Reference { .. } | Type::CheckedReference { .. }, "offset")
+            | (Type::UnsafeReference { .. } | Type::Pointer { .. }, "offset" | "byte_offset" | "add" | "sub"));
+        if shifts_pointer && args.len() == 1 {
+            self.check_expr(&args[0], &Type::Int)?;
+            self.record_structural_call(span, List::from_single(Type::Int), recv_ty_raw.clone());
+            return Ok(Some(InferResult::new(recv_ty_raw.clone())));
+        }
         match (&recv_ty_raw, method_name_str) {
-            // offset(n: Int) -> same reference type (preserves inner type)
-            (Type::UnsafeReference { inner, mutable }, "offset") if args.len() == 1 => {
-                // Infer the argument (should be Int)
-                let _arg_result = self.infer_expr(&args[0], InferMode::Synth)?;
-                return Ok(Some(InferResult::new(Type::UnsafeReference {
-                    inner: inner.clone(),
-                    mutable: *mutable,
-                })));
-            }
-            (Type::Reference { inner, mutable }, "offset") if args.len() == 1 => {
-                let _arg_result = self.infer_expr(&args[0], InferMode::Synth)?;
-                return Ok(Some(InferResult::new(Type::Reference {
-                    inner: inner.clone(),
-                    mutable: *mutable,
-                })));
-            }
-            (Type::CheckedReference { inner, mutable }, "offset") if args.len() == 1 => {
-                let _arg_result = self.infer_expr(&args[0], InferMode::Synth)?;
-                return Ok(Some(InferResult::new(Type::CheckedReference {
-                    inner: inner.clone(),
-                    mutable: *mutable,
-                })));
-            }
             // is_null() -> Bool
             (
                 Type::UnsafeReference { .. }
@@ -20397,39 +20382,14 @@ impl TypeChecker {
                 | Type::Pointer { .. },
                 "is_null",
             ) if args.is_empty() => {
+                self.record_structural_call(span, List::new(), Type::bool());
                 return Ok(Some(InferResult::new(Type::bool())));
-            }
-            // byte_offset(n: Int) -> same reference type
-            (Type::UnsafeReference { inner, mutable }, "byte_offset") if args.len() == 1 => {
-                let _arg_result = self.infer_expr(&args[0], InferMode::Synth)?;
-                return Ok(Some(InferResult::new(Type::UnsafeReference {
-                    inner: inner.clone(),
-                    mutable: *mutable,
-                })));
-            }
-            // add(n: Int) / sub(n: Int) -> same reference type (pointer arithmetic)
-            (Type::UnsafeReference { inner, mutable }, "add" | "sub") if args.len() == 1 => {
-                let _arg_result = self.infer_expr(&args[0], InferMode::Synth)?;
-                return Ok(Some(InferResult::new(Type::UnsafeReference {
-                    inner: inner.clone(),
-                    mutable: *mutable,
-                })));
             }
             // cast<U>() -> &unsafe U (pointer cast)
             (Type::UnsafeReference { .. }, "cast") if args.is_empty() => {
                 return Ok(Some(InferResult::new(Type::UnsafeReference {
                     inner: Box::new(Type::Var(TypeVar::fresh())),
                     mutable: false,
-                })));
-            }
-            // Pointer methods: offset, byte_offset, add, sub -> same pointer type
-            (Type::Pointer { inner, mutable }, "offset" | "byte_offset" | "add" | "sub")
-                if args.len() == 1 =>
-            {
-                let _arg_result = self.infer_expr(&args[0], InferMode::Synth)?;
-                return Ok(Some(InferResult::new(Type::Pointer {
-                    inner: inner.clone(),
-                    mutable: *mutable,
                 })));
             }
             // Pointer offset_from -> Int
@@ -23997,14 +23957,17 @@ impl TypeChecker {
                         use crate::core_metadata::ReceiverKind::{SelfMut, SelfRef};
                         let mutable = method_name_str == "as_mut_ptr";
                         let pointer = Type::Pointer { inner: Box::new(elem), mutable };
+                        self.record_structural_call(span, List::new(), pointer.clone());
                         return Ok(Some(InferResult::method(pointer, Some(if mutable { SelfMut } else { SelfRef }))));
                     }
                     "len" if args.is_empty() => {
+                        self.record_structural_call(span, List::new(), Type::int());
                         return Ok(Some(InferResult::method(Type::int(), Some(crate::core_metadata::ReceiverKind::SelfRef))));
                     }
                     "offset" if args.len() == 1 => {
-                        let _ = self.synth_expr(&args[0])?;
+                        self.check_expr(&args[0], &Type::Int)?;
                         let pointer = Type::Pointer { inner: Box::new(elem), mutable: false };
+                        self.record_structural_call(span, List::from_single(Type::Int), pointer.clone());
                         return Ok(Some(InferResult::method(pointer, Some(crate::core_metadata::ReceiverKind::SelfRef))));
                     }
                     "from_bytes" if args.len() <= 1 => {
