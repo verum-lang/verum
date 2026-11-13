@@ -50,20 +50,20 @@ mount base.{Result, Ok, Err, Text, Maybe};
 /// Open-time flags. Combinations are validated at open(); not every backend
 /// supports every combination (e.g., MemDbVfs ignores `create`).
 public type OpenFlags is {
-    read_only: Bool,
-    read_write: Bool,
-    create: Bool,
-    exclusive: Bool,
-    main_db: Bool,
-    temp_db: Bool,
-    main_journal: Bool,
-    wal: Bool,
-    memory: Bool,
-    delete_on_close: Bool,
-    no_mutex: Bool,
-    full_mutex: Bool,
-    uri: Bool,
-    no_follow: Bool,
+    public read_only: Bool,
+    public read_write: Bool,
+    public create: Bool,
+    public exclusive: Bool,
+    public main_db: Bool,
+    public temp_db: Bool,
+    public main_journal: Bool,
+    public wal: Bool,
+    public memory: Bool,
+    public delete_on_close: Bool,
+    public no_mutex: Bool,
+    public full_mutex: Bool,
+    public uri: Bool,
+    public no_follow: Bool,
 };
 
 /// Construct a zero-initialised `OpenFlags`.
@@ -98,8 +98,8 @@ public fn flags_ro() -> OpenFlags {
 /// `fdatasync` on Linux/Windows. `data_only` skips metadata sync where the
 /// platform lets us (faster, SQLite's default for WAL frame appends).
 public type SyncFlags is {
-    full: Bool,
-    data_only: Bool,
+    public full: Bool,
+    public data_only: Bool,
 };
 
 /// Default sync — data only, no metadata flush.
@@ -125,8 +125,8 @@ public type LockKind is
 // =============================================================================
 
 public type VfsError is {
-    kind: VfsErrorKind,
-    message: Text,
+    public kind: VfsErrorKind,
+    public message: Text,
 };
 
 public type VfsErrorKind is
@@ -224,21 +224,21 @@ public type AccessKind is
 /// to let the pager skip redundant fsyncs / exploit atomic page writes.
 /// Flags track SQLite's `SQLITE_IOCAP_*` constants.
 public type DeviceFlags is {
-    atomic: Bool,                // any write ≤ sector_size is atomic
-    atomic_512: Bool,
-    atomic_1k:  Bool,
-    atomic_2k:  Bool,
-    atomic_4k:  Bool,
-    atomic_8k:  Bool,
-    atomic_16k: Bool,
-    atomic_32k: Bool,
-    atomic_64k: Bool,
-    safe_append: Bool,           // appending beyond EOF never shrinks
-    sequential:  Bool,           // kernel reads ahead in order
-    undeletable_when_open: Bool, // Windows semantic
-    powersafe_overwrite: Bool,
-    immutable:   Bool,
-    batch_atomic: Bool,
+    public atomic: Bool,                // any write ≤ sector_size is atomic
+    public atomic_512: Bool,
+    public atomic_1k:  Bool,
+    public atomic_2k:  Bool,
+    public atomic_4k:  Bool,
+    public atomic_8k:  Bool,
+    public atomic_16k: Bool,
+    public atomic_32k: Bool,
+    public atomic_64k: Bool,
+    public safe_append: Bool,           // appending beyond EOF never shrinks
+    public sequential:  Bool,           // kernel reads ahead in order
+    public undeletable_when_open: Bool, // Windows semantic
+    public powersafe_overwrite: Bool,
+    public immutable:   Bool,
+    public batch_atomic: Bool,
 };
 
 public fn device_flags_default() -> DeviceFlags {
@@ -258,15 +258,15 @@ public fn device_flags_default() -> DeviceFlags {
 /// The VFS selects between monotonic and wall-clock; WAL metadata uses wall,
 /// rate-limit / backoff uses monotonic.
 public type Timestamp is {
-    nanos: Int64,
-    is_monotonic: Bool,
+    public nanos: Int64,
+    public is_monotonic: Bool,
 };
 
 /// Flags for `File.shm_lock`. SHARED/EXCLUSIVE for the kind of lock;
 /// LOCK/UNLOCK for the direction. Matches SQLite's `SQLITE_SHM_*` bits.
 public type ShmLockFlags is {
-    lock: Bool,          // true = acquire, false = release
-    exclusive: Bool,     // true = exclusive, false = shared
+    public lock: Bool,          // true = acquire, false = release
+    public exclusive: Bool,     // true = exclusive, false = shared
 };
 
 // =============================================================================
