@@ -135,6 +135,26 @@ impl TypeChecker {
         errors
     }
 
+    /// Preload implementations in declaration scope using the same target as lazy imports.
+    /// Each defining module checks its complete set of bodies during source admission.
+    pub fn prepare_source_library_implementations(
+        &mut self,
+        modules: &[(Text, std::sync::Arc<Module>)],
+    ) {
+        for (owner, module) in modules {
+            self.with_source_signature_scope(owner, |checker| {
+                for item in &module.items {
+                    if let ItemKind::Impl(declaration) = &item.kind
+                        && checker.cfg_evaluator.should_include_item(item)
+                        && let Err(error) = checker.register_impl_block(declaration)
+                    {
+                        tracing::debug!(%owner, %error, "Could not preload implementation");
+                    }
+                }
+            });
+        }
+    }
+
     /// Register function, extern and constant signatures before checking bodies.
     #[must_use]
     pub fn prepare_module_values(&mut self, module: &Module) -> List<TypeError> {

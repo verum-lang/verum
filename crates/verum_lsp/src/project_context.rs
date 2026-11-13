@@ -592,6 +592,7 @@ impl ProjectContext {
             } else {
                 TypeChecker::with_shared_registry(registry.clone())
             };
+            checker.set_cfg_target(loader.cfg_evaluator().config().clone());
             checker.set_analysis_control(control.clone());
             checker.seed_module_properties(&info.ast.items);
             checker.register_builtins();

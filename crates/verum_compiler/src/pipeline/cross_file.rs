@@ -907,6 +907,8 @@ impl<'s> CompilationPipeline<'s> {
             }
         };
 
+        checker.set_cfg_target(self.session.cfg_evaluator().config().clone());
+
         // Register built-in types (List, Text, Int, Result, Maybe, etc.)
         // NOTE: In NormalBuild mode, these may already be loaded from stdlib metadata,
         // but register_builtins() is idempotent and ensures core intrinsics are available.
@@ -1083,17 +1085,7 @@ impl<'s> CompilationPipeline<'s> {
                     "analyze_module: Registering stdlib impl blocks ({} modules)",
                     stdlib_entries.len()
                 );
-                for (module_path, stdlib_mod) in &stdlib_entries {
-                    checker.with_source_signature_scope(module_path.as_str(), |checker| {
-                        for item in &stdlib_mod.items {
-                            if let ItemKind::Impl(impl_decl) = &item.kind {
-                                if let Err(e) = checker.register_impl_block(impl_decl) {
-                                    debug!("Stdlib impl registration error: {:?}", e);
-                                }
-                            }
-                        }
-                    });
-                }
+                checker.prepare_source_library_implementations(&stdlib_entries);
 
                 debug!("analyze_module: Stdlib registration complete");
             }

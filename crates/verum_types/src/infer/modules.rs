@@ -5095,6 +5095,7 @@ impl TypeChecker {
         let mut impl_blocks = List::new();
 
         for item in &ast.items {
+            if !self.cfg_evaluator.should_include_item(item) { continue; }
             if let ItemKind::Impl(impl_decl) = &item.kind {
                 let for_type = match &impl_decl.kind {
                     // Inherent impl: `implement Type { ... }`
@@ -7988,6 +7989,7 @@ impl TypeChecker {
         let owner: Text = module_path.into();
         let mut complete = true;
         for item in &ast.items {
+            if !self.cfg_evaluator.should_include_item(item) { continue; }
             if let verum_ast::ItemKind::Type(declaration) = &item.kind
                 && matches!(declaration.body, verum_ast::TypeDeclBody::Protocol(_))
             {
@@ -8119,6 +8121,7 @@ impl TypeChecker {
 
         let mut source_targets = Set::new();
         for item in &ast.items {
+            if !self.cfg_evaluator.should_include_item(item) { continue; }
             if let ItemKind::Impl(impl_decl) = &item.kind {
                 if let ImplKind::Protocol {
                     protocol, for_type, ..

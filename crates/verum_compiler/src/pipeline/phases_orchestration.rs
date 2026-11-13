@@ -206,6 +206,8 @@ impl<'s> CompilationPipeline<'s> {
             }
         });
 
+        checker.set_cfg_target(self.session.cfg_evaluator().config().clone());
+
         // Computational properties for the whole module, seeded BEFORE
         // passes 0-4 — those register function signatures, and
         // registering a signature infers its body's properties. A fact
@@ -679,15 +681,7 @@ impl<'s> CompilationPipeline<'s> {
                 "Registering stdlib impl blocks ({} modules)",
                 stdlib_entries.len()
             );
-            for (module_path, stdlib_mod) in &stdlib_entries {
-                checker.with_source_signature_scope(module_path.as_str(), |checker| {
-                    for item in &stdlib_mod.items {
-                        if let verum_ast::ItemKind::Impl(impl_decl) = &item.kind {
-                            let _ = checker.register_impl_block(impl_decl);
-                        }
-                    }
-                });
-            }
+            checker.prepare_source_library_implementations(&stdlib_entries);
 
             // Collect any unresolved placeholder names from stdlib so we can
             // exclude them from user-module placeholder verification

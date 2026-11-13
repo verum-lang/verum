@@ -1094,6 +1094,8 @@ impl<'s> CompilationPipeline<'s> {
                 // Create type checker with shared inherent_methods for cross-module visibility
                 let mut checker = TypeChecker::with_shared_methods(shared_inherent_methods.clone());
 
+                checker.set_cfg_target(self.session.cfg_evaluator().config().clone());
+
                 // Register built-in types and functions
                 checker.register_builtins();
 
@@ -1340,15 +1342,7 @@ impl<'s> CompilationPipeline<'s> {
                     // S3: ALWAYS register stdlib impl blocks (module-scoped so
                     // method signatures reference the *declaring* module's
                     // same-named types).
-                    for (module_path, stdlib_mod) in &stdlib_entries {
-                        checker.with_source_signature_scope(module_path.as_str(), |checker| {
-                            for item in &stdlib_mod.items {
-                                if let verum_ast::ItemKind::Impl(impl_decl) = &item.kind {
-                                    let _ = checker.register_impl_block(impl_decl);
-                                }
-                            }
-                        });
-                    }
+                    checker.prepare_source_library_implementations(&stdlib_entries);
                 }
 
                 // Restore the user-file module path so subsequent passes

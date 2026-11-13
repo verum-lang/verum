@@ -143,3 +143,87 @@ fn statement_selection_uses_the_installed_compilation_target() {
         }
     }
 }
+
+fn imported_implementation_errors(
+    target: &str,
+    provider: &str,
+    consumer: &str,
+    preload: bool,
+) -> verum_common::List<verum_common::Text> {
+    use verum_ast::FileId;
+    use verum_fast_parser::FastParser;
+    use verum_modules::{
+        ModuleId, ModuleInfo, ModulePath, ModuleRegistry, extract_exports_from_module,
+    };
+
+    let parser = FastParser::new();
+    let source = parser.parse_module_str(provider, FileId::new(1)).unwrap();
+    let owner = ModulePath::from_str("demo.backend");
+    let id = ModuleId::new(0);
+    let exports = extract_exports_from_module(&source, id, &owner).unwrap();
+    let mut info = ModuleInfo::new(id, owner, source.clone(), FileId::new(1), provider.into());
+    info.exports = exports;
+    let mut registry = ModuleRegistry::new();
+    registry.register(info);
+    let consumer = parser.parse_module_str(consumer, FileId::new(2)).unwrap();
+    let mut checker = TypeChecker::new();
+    checker.register_primitives();
+    checker.set_cfg_target(TargetConfig::for_target(target));
+    checker.set_current_module_path("demo.app");
+    checker.set_module_registry_direct(registry);
+    if preload {
+        let library = [("demo.backend".into(), std::sync::Arc::new(source))];
+        checker.prepare_source_library_types(&library);
+        checker.prepare_source_library_implementations(&library);
+    }
+    let mut errors = checker.prepare_module_declarations(&consumer);
+    for item in &consumer.items {
+        if let Err(error) = checker.check_item(item) {
+            errors.push(error);
+        }
+    }
+    errors.extend(checker.take_deferred_errors());
+    errors
+        .iter()
+        .chain(checker.diagnostic_sources().iter())
+        .map(|error| format!("{error:?}").into())
+        .collect()
+}
+
+#[test]
+fn imported_implementations_participate_only_on_their_declared_targets() {
+    let provider = r#"
+        public type Read is protocol { fn read(&self) -> Int; };
+        public type Device is { public value: Int };
+        @cfg(target_os = "linux")
+        implement Read for Device { fn read(&self) -> Int { 1 } }
+        @cfg(target_os = "macos")
+        implement Read for Device { fn read(&self) -> Int { 2 } }
+        @cfg(target_os = "linux")
+        implement Device { public fn linux_only(&self) -> Int { 3 } }
+    "#;
+    let consumer =
+        "mount demo.backend.{Read, Device}; fn use_device(d: Device) -> Int { d.read() }";
+    for target in ["aarch64-apple-darwin", "x86_64-unknown-linux-gnu"] {
+        for preload in [false, true] {
+            let errors = imported_implementation_errors(target, provider, consumer, preload);
+            assert!(errors.is_empty(), "{target}, preload={preload}: {errors:?}");
+        }
+    }
+    let missing = consumer.replace("d.read()", "d.linux_only()");
+    let duplicate = provider.replace(r#"target_os = "linux""#, r#"target_os = "macos""#);
+    for preload in [false, true] {
+        let errors =
+            imported_implementation_errors("aarch64-apple-darwin", provider, &missing, preload);
+        assert!(
+            errors.iter().any(|e| e.contains("linux_only")),
+            "{errors:?}"
+        );
+        let errors =
+            imported_implementation_errors("aarch64-apple-darwin", &duplicate, consumer, preload);
+        assert!(
+            errors.iter().any(|e| e.contains("Overlapping")),
+            "{errors:?}"
+        );
+    }
+}
