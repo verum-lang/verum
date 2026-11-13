@@ -6966,14 +6966,9 @@ impl TypeChecker {
             Mount { path: Text, name: Text },
         }
 
-        // Retain a registry owner only when this is its actual AST, never an
-        // unrelated lexical AST that happens to use the same module spelling.
-        let source = self.get_module_with_path_aliases(current_module_path, registry)
-            .filter(|module| std::ptr::eq(&module.ast, ast))
-            .map(Source::Registered).unwrap_or(Source::Borrowed(ast));
         let mut work = List::new();
         work.push(Work::Enter(Scope {
-            source,
+            source: Source::Borrowed(ast),
             owner: current_module_path.clone(),
             name: type_name.into(),
             allow_local_mounts,
@@ -6985,6 +6980,12 @@ impl TypeChecker {
                     // belong to the canonical owner, not an alias spelling.
                     if let Some(module) = self.get_module_with_path_aliases(&scope.owner, registry) {
                         scope.owner = Text::from(module.path.to_string());
+                        // Reuse this canonical-owner read to retain its exact
+                        // AST. A different lexical AST with the same spelling
+                        // still requires its own ownership boundary.
+                        if matches!(&scope.source, Source::Borrowed(ast) if std::ptr::eq(&module.ast, *ast)) {
+                            scope.source = Source::Registered(module);
+                        }
                     }
                     if !visited.insert((scope.owner.clone(), scope.name.clone())) {
                         continue;
