@@ -87,3 +87,23 @@ fn borrowed_variant_payloads_update_successive_fields() {
         75,
     );
 }
+
+#[test]
+fn copied_reference_payload_survives_its_intermediate_owner() {
+    execute(
+        r#"
+        module core;
+        type Sample is { ptr: &Int, total: Int };
+        fn forward(value: Sample) -> Sample {
+            let alias = &value;
+            Sample { ptr: alias.ptr, total: alias.total }
+        }
+        public fn probe() -> Int {
+            let n = 71;
+            let copied = forward(Sample { ptr: &n, total: 2 });
+            *copied.ptr + copied.total
+        }
+        "#,
+        73,
+    );
+}

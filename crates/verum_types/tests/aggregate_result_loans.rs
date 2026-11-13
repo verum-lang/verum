@@ -324,3 +324,75 @@ fn static_call_results_can_only_receive_caller_loans_through_the_declared_bounda
         );
     }
 }
+
+
+#[test]
+fn copied_fields_preserve_payload_origins_independently_of_owner_storage() {
+    for source in [
+        "fn forward(value: Sample) -> Sample { let alias = &value; Sample { ptr: alias.ptr, total: alias.total } }",
+        "fn forward(value: Sample) -> Sample { let alias = &checked value; Sample { ptr: alias.ptr, total: alias.total } }",
+        "type Source is &Sample; fn forward(value: Source) -> Sample { Sample { ptr: value.ptr, total: value.total } }",
+        "fn relay(value: &Sample) -> &Sample { value } fn forward(value: Sample) -> Sample { Sample { ptr: relay(&value).ptr, total: value.total } }",
+        "type Wrapper is { public value: Sample }; fn forward(value: Wrapper, condition: Bool) -> Sample { let alias = &value; match condition { true => alias.value, false => alias.value } }",
+        "fn forward(value: &Sample) -> Sample { Sample { ptr: value.ptr, total: value.total } }",
+        "fn forward(value: Sample) -> Sample { let first = &value; let second = &first; Sample { ptr: second.ptr, total: second.total } }",
+        "type Wrapper is { public value: Sample }; fn forward(value: Wrapper) -> Sample { let alias = &value; Sample { ptr: alias.value.ptr, total: alias.value.total } }",
+        "fn forward(value: (&Int, Int)) -> (&Int, Int) { let alias = &value; (alias.0, alias.1) }",
+        "fn forward(ptr: &Int) -> Sample { let value = Sample { ptr: ptr, total: 1 }; let alias = &value; Sample { ptr: alias.ptr, total: alias.total } }",
+        "fn forward(ptr: &Int) -> Sample { let value = Sample { ptr: ptr, total: 1 }; let alias = &value; { let n = 2; let value = Sample { ptr: &n, total: 3 }; Sample { ptr: alias.ptr, total: alias.total } } }",
+    ] {
+        let diagnostics = errors(source);
+        assert!(diagnostics.is_empty(), "{source}: {diagnostics:?}");
+    }
+}
+
+#[test]
+fn copied_fields_keep_real_local_payload_loans_and_explicit_storage_borrows() {
+    for source in [
+        "fn leak() -> Sample { let n = 1; let value = Sample { ptr: &n, total: 2 }; let alias = &value; Sample { ptr: alias.ptr, total: alias.total } }",
+        "fn relay(value: &Sample) -> &Sample { value } fn leak() -> Sample { let n = 1; let value = Sample { ptr: &n, total: 2 }; Sample { ptr: relay(&value).ptr, total: value.total } }",
+        "type Wrapper is { public value: Sample }; fn leak(condition: Bool) -> Sample { let n = 1; let value = Wrapper { value: Sample { ptr: &n, total: 2 } }; let alias = &value; match condition { true => alias.value, false => alias.value } }",
+        "type Wrapper is { public value: Sample }; fn leak() -> Sample { let n = 1; let value = Wrapper { value: Sample { ptr: &n, total: 2 } }; let alias = &value; Sample { ptr: alias.value.ptr, total: alias.value.total } }",
+        "fn leak() -> (&Int, Int) { let n = 1; let value = (&n, 2); let alias = &value; (alias.0, alias.1) }",
+        "fn leak(value: Node) -> &Int { let alias = &value; &alias.n }",
+        "fn leak() -> Sample { let n = 1; let value = Sample { ptr: &n, total: 2 }; let first = &value; let second = &first; Sample { ptr: second.ptr, total: second.total } }",
+        "fn leak(ptr: &Int) -> Sample { let n = 1; let value = Sample { ptr: &n, total: 2 }; let alias = &value; { let value = Sample { ptr: ptr, total: 3 }; Sample { ptr: alias.ptr, total: alias.total } } }",
+    ] {
+        let diagnostics = errors(source);
+        assert!(diagnostics.iter().any(|message| message.contains("does not live long enough")), "{source}: {diagnostics:?}");
+    }
+}
+
+
+#[test]
+fn copied_reference_fields_keep_the_external_referent_borrowed() {
+    let source = "fn change() -> Int {
+        let mut n = 1;
+        let value = Sample { ptr: &n, total: 2 };
+        let alias = &value;
+        let copied = Sample { ptr: alias.ptr, total: alias.total };
+        n = 3;
+        *copied.ptr
+    }";
+    let diagnostics = errors(source);
+    assert!(diagnostics.iter().any(|message| message.contains("borrow")), "{diagnostics:?}");
+}
+
+
+#[test]
+fn copied_payloads_cross_supported_source_reference_chains() {
+    std::thread::spawn(|| {
+        for depth in [4, 8, 16] {
+            let mut source = Text::from("fn forward(value: Sample) -> Sample {");
+            let mut previous = Text::from("value");
+            for index in 0..depth {
+                let current: Text = format!("alias{index}").into();
+                source.push_str(&format!("let {current} = &{previous};"));
+                previous = current;
+            }
+            source.push_str(&format!("Sample {{ ptr: {previous}.ptr, total: {previous}.total }} }}"));
+            let diagnostics = errors(&source);
+            assert!(diagnostics.is_empty(), "depth {depth}: {diagnostics:?}");
+        }
+    }).join().expect("ordinary worker stack");
+}

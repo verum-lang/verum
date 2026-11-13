@@ -1620,14 +1620,40 @@ impl TypeEnv {
         })
     }
 
-    pub(crate) fn reference_candidates(&mut self, name: &str) -> Vec<crate::ty::RecordReceiver> {
+    pub(crate) fn reference_candidates(&mut self, name: &str) -> List<crate::ty::RecordReceiver> {
         if let Some(ReferenceOrigin::Candidates(inputs)) = self
             .local_record_place(name)
             .and_then(|place| place.reference.as_ref())
         {
-            return inputs.to_vec();
+            return List::from(inputs.as_ref());
         }
         self.record_source(name, true).into_iter().collect()
+    }
+
+    /// Reading a referent copies its stored loans, independently of the loan
+    /// of the slot containing it. Resolve the exact live identity so a shadowed
+    /// binding cannot supply a different value's origins.
+    pub(crate) fn referent_value_origins(
+        &self,
+        source: &crate::ty::RecordReceiver,
+    ) -> Option<List<crate::ty::RecordReceiver>> {
+        let mut scope = Some(self);
+        while let Some(env) = scope {
+            if let Some(place) = env
+                .record_places
+                .values()
+                .find(|place| place.id == Some(source.binding))
+            {
+                return Some(match &place.reference {
+                    Some(ReferenceOrigin::Exact(origin)) => List::from_iter([origin.clone()]),
+                    Some(ReferenceOrigin::Candidates(origins)) => List::from(origins.as_ref()),
+                    Some(ReferenceOrigin::Parameter) => List::from_iter([source.clone()]),
+                    None => List::new(),
+                });
+            }
+            scope = env.parent.as_deref();
+        }
+        None
     }
 
     /// A stored loan can cross a block if its owner is outside that

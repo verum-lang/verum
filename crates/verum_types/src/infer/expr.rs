@@ -6425,7 +6425,7 @@ impl TypeChecker {
                 for (name, ty) in &bindings {
                     if checker.carries_stored_loan(ty) && !sources.is_empty() {
                         checker.ctx.env.set_reference_origin(name,
-                            crate::context::ReferenceOrigin::Candidates(sources.clone().into()));
+                            crate::context::ReferenceOrigin::Candidates(sources.clone().into_boxed_slice()));
                     }
                 }
                 if let Some(name) = checker.extract_simple_var_name(iter) {

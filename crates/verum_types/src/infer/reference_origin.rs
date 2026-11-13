@@ -192,8 +192,8 @@ impl TypeChecker {
         }
     }
 
-    pub(super) fn aggregate_origins(&mut self, value: &Expr, ty: &Type) -> Vec<RecordReceiver> {
-        let mut found = Vec::new();
+    pub(super) fn aggregate_origins(&mut self, value: &Expr, ty: &Type) -> List<RecordReceiver> {
+        let mut found = List::new();
         if !self.carries_stored_loan(ty) {
             return found;
         }
@@ -266,7 +266,7 @@ impl TypeChecker {
         for source in &sources {
             self.retain_origin(source, None, value.span)?;
         }
-        Ok((!sources.is_empty()).then(|| ReferenceOrigin::Candidates(sources.into())))
+        Ok((!sources.is_empty()).then(|| ReferenceOrigin::Candidates(sources.into_boxed_slice())))
     }
 
     pub(super) fn check_aggregate_escape(
@@ -323,7 +323,7 @@ impl TypeChecker {
             }
             return Ok(Some(ReferenceOrigin::Exact(origin)));
         }
-        let mut candidates = Vec::new();
+        let mut candidates = List::new();
         self.collect_reference_candidates(value, &mut candidates);
         if shared {
             for source in &candidates {
@@ -395,7 +395,15 @@ impl TypeChecker {
                     pending.extend(base.as_deref());
                 }
                 ExprKind::Field { expr, .. } | ExprKind::TupleIndex { expr, .. } => {
-                    pending.push(expr);
+                    if let Some(sources) = self.projected_value_origins(expr) {
+                        for source in sources {
+                            if !origins.contains(&source) {
+                                origins.push(source);
+                            }
+                        }
+                    } else {
+                        pending.push(expr);
+                    }
                 }
                 ExprKind::MethodCall { args, .. } => {
                     // The selected static declaration has no receiver, so a
@@ -417,8 +425,8 @@ impl TypeChecker {
         Some(origins)
     }
 
-    fn collect_reference_candidates(&mut self, value: &Expr, found: &mut Vec<RecordReceiver>) {
-        fn add(found: &mut Vec<RecordReceiver>, source: RecordReceiver) {
+    fn collect_reference_candidates(&mut self, value: &Expr, found: &mut List<RecordReceiver>) {
+        fn add(found: &mut List<RecordReceiver>, source: RecordReceiver) {
             if !found.contains(&source) {
                 found.push(source);
             }
@@ -467,7 +475,13 @@ impl TypeChecker {
                 }
             }
             ExprKind::Field { expr, .. } | ExprKind::TupleIndex { expr, .. } => {
-                self.collect_reference_candidates(expr, found)
+                if let Some(origins) = self.projected_value_origins(expr) {
+                    for origin in origins {
+                        add(found, origin);
+                    }
+                } else {
+                    self.collect_reference_candidates(expr, found);
+                }
             }
             ExprKind::Call { args, .. } => {
                 for arg in args {
@@ -548,10 +562,57 @@ impl TypeChecker {
         }
     }
 
+    /// Field selection implicitly dereferences its receiver. Its value keeps
+    /// the referent's payload loans, while an explicit `&receiver.field` still
+    /// borrows that field's storage through the reference-formation path.
+    fn projected_value_origins(&mut self, receiver: &Expr) -> Option<List<RecordReceiver>> {
+        let receiver = unparen(receiver);
+        let mut ty = self.observed_operand_type(receiver).or_else(|| {
+            self.type_registry.lookup_expr(receiver.span).cloned()
+        })?;
+        let mut origins = List::new();
+        self.collect_reference_candidates(receiver, &mut origins);
+        let mut expanded = List::new();
+        loop {
+            let inner = match ty {
+                Type::Reference { inner, .. }
+                | Type::CheckedReference { inner, .. }
+                | Type::UnsafeReference { inner, .. } => inner,
+                Type::Refined { base, .. } | Type::CapabilityRestricted { base, .. } => {
+                    ty = *base;
+                    continue;
+                }
+                _ => {
+                    if expanded.contains(&ty) {
+                        return None;
+                    }
+                    let head = self.place_reference_head(&ty, receiver.span).ok()?;
+                    if head == ty {
+                        return Some(origins);
+                    }
+                    expanded.push(ty);
+                    ty = head;
+                    continue;
+                }
+            };
+            let mut payloads = List::new();
+            for origin in origins {
+                let stored = self.ctx.env.referent_value_origins(&origin)?;
+                for source in stored {
+                    if !payloads.contains(&source) {
+                        payloads.push(source);
+                    }
+                }
+            }
+            origins = payloads;
+            ty = *inner;
+        }
+    }
+
     fn collect_block_candidates(
         &mut self,
         block: &verum_ast::Block,
-        found: &mut Vec<RecordReceiver>,
+        found: &mut List<RecordReceiver>,
     ) {
         // The block's local names have gone out of scope. Include inputs of
         // local initializers rather than treating a local tail name as evidence.
@@ -681,7 +742,7 @@ impl TypeChecker {
             else {
                 continue;
             };
-            let mut origins = Vec::new();
+            let mut origins = List::new();
             if receiver_mode.is_none() || mode.is_some() {
                 self.collect_reference_candidates(arg, &mut origins);
             }
@@ -831,3 +892,8 @@ impl TypeChecker {
         }
     }
 }
+
+
+#[cfg(test)]
+#[path = "../../tests/unit/reference_origin.rs"]
+mod tests;
