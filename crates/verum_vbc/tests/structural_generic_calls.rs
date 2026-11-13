@@ -124,6 +124,62 @@ fn instructions(
 }
 
 #[test]
+fn closure_tail_calls_supply_the_selected_result_witness() {
+    let left = Parser::new("module left; public fn produce<T>(_value: T) {}")
+        .parse_module().unwrap();
+    let right = Parser::new(r#"
+        module right;
+        public type Receipt is { public left: Int, public right: Int };
+        public fn produce<T>(_value: T) -> Receipt { Receipt { left: 37, right: 36 } }
+    "#).parse_module().unwrap();
+    let caller = Parser::new(r#"
+        module caller;
+        mount left.produce as sink;
+        mount right.produce as make;
+        fn inferred_number() { 19 }
+        fn invoke<T>(read: fn() -> T) -> T { read() }
+        fn unit_tail() {
+            let local = 7;
+            invoke(|| sink(local))
+        }
+        fn nominal_tail() -> Int {
+            let local = 8;
+            let receipt = invoke(|| make(local));
+            receipt.left + receipt.right
+        }
+    "#).parse_module().unwrap();
+    let units = [&left, &right, &caller];
+    let mut codegen = VbcCodegen::new();
+    codegen.collect_unit_declarations(&units).unwrap();
+    codegen.resolve_pending_imports();
+    codegen.compile_unit_items(&units, verum_vbc::codegen::ItemFailurePolicy::Strict).unwrap();
+    let mut module = codegen.finalize_module_from_state().unwrap();
+    assert!(module.resolve_external_bands().is_empty());
+    let wire = verum_vbc::serialize::serialize_module(&module).unwrap();
+    let module = Arc::new(verum_vbc::deserialize::deserialize_module(&wire).unwrap());
+    let inferred = module.find_function_by_name("caller.inferred_number").unwrap();
+    assert_ne!(module.get_function(inferred).unwrap().semantic_return, Some(TypeRef::Concrete(TypeId::UNIT)));
+    assert_eq!(Interpreter::new(module.clone()).execute_function(inferred).unwrap().try_as_i64(), Some(19));
+    let produce = module.find_function_by_name("right.produce").unwrap();
+    let Some(TypeRef::Concrete(receipt)) = module.get_function(produce).unwrap().semantic_return else {
+        panic!("right.produce lost its nominal result");
+    };
+    assert_eq!(module.get_type(receipt).unwrap().kind, verum_vbc::types::TypeKind::Record);
+    let invoke = module.find_function_by_name("caller.invoke").unwrap();
+    for (name, expected) in [("caller.unit_tail", TypeId::UNIT), ("caller.nominal_tail", receipt)] {
+        let entry = module.find_function_by_name(name).unwrap();
+        let body = instructions(&module, entry);
+        assert!(body.iter().any(|op| matches!(op,
+            Instruction::CallG { func_id, type_args, .. }
+            if *func_id == invoke.0 && type_args == &[TypeRef::Concrete(expected)]
+        )), "{name}: {body:?}");
+        let value = Interpreter::new(module.clone()).execute_function(entry).unwrap();
+        if expected == TypeId::UNIT { assert!(value.is_unit(), "{value:?}"); }
+        else { assert_eq!(value.try_as_i64(), Some(73)); }
+    }
+}
+
+#[test]
 fn signed_literal_arguments_carry_their_declared_or_default_witness() {
     let cases = [
         ("positive", "8", TypeId::INT, 8),

@@ -32416,6 +32416,7 @@ impl VbcCodegen {
 
         // The closure's begin_function installed its own return contract;
         // never use the enclosing expression hint as conversion authority.
+        let body_start = self.ctx.instructions.len();
         let result = self.compile_expr_with_demand(body, ResultDemand::CallableReturn)?;
         // Infer while closure parameters and compiled block results are still
         // in scope. The surrounding function's return context is not evidence.
@@ -32436,11 +32437,14 @@ impl VbcCodegen {
                 .and_then(|index| param_type_refs.get(index)).cloned().flatten(),
             _ => None,
         };
-        let inferred_return_type = parameter_result.or_else(||
-            self.declared_expression_result(tail, None, 0, 0)).or_else(|| self.extract_expr_type_name(body)
-            .or_else(|| self.infer_expr_type_name(body))
-            .or_else(|| Self::literal_default_type_name(body))
-            .and_then(|name| self.type_name_to_type_ref_mono(&name)));
+        let inferred_return_type = parameter_result
+            .or_else(|| self.declared_expression_result(body, result, body_start, self.ctx.instructions.len()))
+            .or_else(|| {
+                self.extract_expr_type_name(body)
+                    .or_else(|| self.infer_expr_type_name(body))
+                    .or_else(|| Self::literal_default_type_name(body))
+                    .and_then(|name| self.type_name_to_type_ref_mono(&name))
+            });
         let closure_return_type_ref = closure_return_type_ref.or(inferred_return_type);
         if let Some(saved) = saved_closure_rtn_wp {
             self.ctx.pop_disambig_context(saved);

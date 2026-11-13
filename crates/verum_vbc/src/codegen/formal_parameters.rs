@@ -103,8 +103,18 @@ impl VbcCodegen {
         if function.is_generator || !function.contexts.is_empty() {
             return None;
         }
-        self.semantic_formal_type_with_values(function.return_type.as_ref()?, scope, declared_ids,
-            &Self::source_value_binders(function))
+        if let Some(result) = &function.return_type {
+            return self.semantic_formal_type_with_values(
+                result, scope, declared_ids, &Self::source_value_binders(function),
+            );
+        }
+        // A written empty block has one possible result. An omitted type on
+        // a forward declaration or a body with a value still needs evidence.
+        let verum_ast::FunctionBody::Block(block) = function.body.as_ref()? else { return None };
+        (block.stmts.is_empty() && block.expr.is_none()
+            && !function.is_async && function.throws_clause.is_none()
+            && function.extern_abi.is_none() && self.extract_intrinsic_name(function).is_none())
+            .then_some(TypeRef::Concrete(TypeId::UNIT))
     }
 
     pub(super) fn register_declared_impl_function(
