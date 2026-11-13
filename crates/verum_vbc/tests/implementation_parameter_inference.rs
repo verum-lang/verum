@@ -105,3 +105,68 @@ fn generic_receiver_retains_the_callable_hypothesis_in_its_implementation_scope(
             || method.bytecode_length > 0
     );
 }
+
+#[test]
+fn associated_output_determines_a_parameter_only_from_the_same_subject_and_protocol() {
+    for (premise, proven) in [
+        ("F: Family<Int, Payload = (Result, State)>", true),
+        ("F: Other<Int, Payload = (Result, State)>", false),
+        ("State: Family<Int, Payload = (Result, State)>", false),
+        ("F: Family<Bool, Payload = (Result, State)>", false),
+        ("F: Family<Int, Alternate = (Result, State)>", false),
+    ] {
+        let source = format!(
+            r#"
+            module evidence;
+            type Family<K> is protocol {{ type Payload; type Alternate; }};
+            type Other<K> is protocol {{ type Payload; }};
+            type Carrier<State, F> is {{ state: State, value: F }};
+            type Trigger is protocol {{}};
+            type Produced is protocol {{ type Output; }};
+            type Granted is protocol {{ fn stamp(&self) -> Int; }};
+            implement<X: Trigger + Produced> Granted for X {{ fn stamp(&self) -> Int {{ 73 }} }}
+            implement<T, State, F: Family<Int, Payload = (T, State)>> Produced for Carrier<State, F> {{ type Output = T; }}
+            implement<Result, State, F> Trigger for Carrier<State, F> where {premise} {{}}
+        "#
+        );
+        let ast = Parser::new(&source).parse_module().unwrap();
+        let module = VbcCodegen::with_config(CodegenConfig::new("evidence")).compile_module(&ast);
+        if proven {
+            let module = module.expect(
+                "the selected family's associated output uniquely determines the hidden parameter",
+            );
+            let receiver = module
+                .types
+                .iter()
+                .find(|ty| module.get_string(ty.name) == Some("Carrier"))
+                .unwrap();
+            assert!(
+                module
+                    .functions
+                    .iter()
+                    .any(|method| method.parent_type == Some(receiver.id)
+                        && module.get_string(method.name) == Some("Carrier.stamp"))
+            );
+        } else {
+            match module {
+                Ok(module) => assert!(
+                    !module
+                        .functions
+                        .iter()
+                        .any(|method| module.get_string(method.name) == Some("Carrier.stamp"))
+                ),
+                Err(error) => {
+                    let diagnostic = error.to_string();
+                    assert!(
+                        ["T", "Result"]
+                            .iter()
+                            .any(|name| diagnostic.contains(&format!(
+                                "undetermined parameter '{name}' in 'evidence' for 'Carrier'"
+                            ))),
+                        "{diagnostic}"
+                    );
+                }
+            }
+        }
+    }
+}

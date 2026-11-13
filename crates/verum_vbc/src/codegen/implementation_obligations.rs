@@ -456,8 +456,7 @@ impl VbcCodegen {
                 // symbolic requirements before crossing into the caller space.
                 if scope.values().any(|id| bindings.get(TypeParamId(*id)).is_none()) {
                     let symbolic = cg.implementation_premises(declaration, &scope)?;
-                    infer_callable_bindings(&symbolic.callables, &assumptions.callables,
-                        &mut bindings, declaration.span)?;
+                    infer_implementation_bindings(&symbolic, assumptions, &mut bindings, declaration.span)?;
                 }
                 let mut substitution = SourceTypeSubstitution::default();
                 for (name, id) in &scope {
@@ -706,42 +705,99 @@ fn callable_is_proven(bound: &(TypeRef, TypeRef), assumptions: &[(TypeRef, TypeR
     bound.0 == bound.1 || assumptions.contains(bound)
 }
 
-/// A function type fixes all its input and result positions. Matching against
-/// concrete signatures or the caller's lexical hypotheses may therefore extend
-/// the header substitution. Matching always uses the original header pattern:
-/// actual generics belong to the caller and cannot become pattern variables.
-fn infer_callable_bindings(
-    requirements: &[(TypeRef, TypeRef)],
-    assumptions: &[(TypeRef, TypeRef)],
+/// Match the declaration's original pattern in its own binder space. Actual
+/// generics belong to the caller. Reconstructing the exact witness excludes
+/// representation-only coercions from the semantic proof.
+fn match_evidence(
+    pattern: &TypeRef,
+    actual: &TypeRef,
+    candidate: &mut TypeSubstitution,
+    span: Span,
+) -> CodegenResult<bool> {
+    if !match_declared_types(pattern, actual, candidate) {
+        return Ok(false);
+    }
+    let instantiated = candidate.apply(pattern).map_err(|error| invalid(error.to_string(), span))?;
+    Ok(instantiated == *actual)
+}
+
+fn determined_subject<'a>(subject: &'a TypeRef, bindings: &'a TypeSubstitution) -> Option<&'a TypeRef> {
+    match subject {
+        TypeRef::Generic(id) => bindings.get(*id),
+        _ if !subject.is_generic() => Some(subject),
+        _ => None,
+    }
+}
+
+fn retain_evidence(
+    selected: &mut Maybe<TypeSubstitution>,
+    candidate: TypeSubstitution,
+    span: Span,
+) -> CodegenResult<()> {
+    if selected.as_ref().is_some_and(|previous| previous != &candidate) {
+        return Err(invalid("conflicting implementation parameter witnesses", span));
+    }
+    *selected = Some(candidate);
+    Ok(())
+}
+
+/// Functions determine their signatures. A protocol application determines
+/// its associated outputs once its subject and every argument are known. Each
+/// pass either binds a new implementation parameter or reaches a fixed point.
+fn infer_implementation_bindings(
+    requirements: &Premises,
+    assumptions: &Premises,
     bindings: &mut TypeSubstitution,
     span: Span,
 ) -> CodegenResult<()> {
     loop {
         let before = bindings.len();
-        for (subject, signature) in requirements {
-            let subject = match subject {
-                TypeRef::Generic(id) => bindings.get(*id).cloned(),
-                _ if !subject.is_generic() => Some(subject.clone()),
-                _ => None,
-            };
-            let Some(subject) = subject else { continue };
-            let actuals = std::iter::once(&subject).filter(|ty| matches!(ty, TypeRef::Function { .. }))
-                .chain(assumptions.iter().filter(|(ty, _)| *ty == subject).map(|(_, actual)| actual));
-            let mut accepted = None;
+        for (subject, signature) in &requirements.callables {
+            let Some(subject) = determined_subject(subject, bindings) else { continue };
+            let actuals = std::iter::once(subject).filter(|ty| matches!(ty, TypeRef::Function { .. }))
+                .chain(assumptions.callables.iter().filter(|(ty, _)| ty == subject).map(|(_, actual)| actual));
+            let mut selected = None;
             for actual in actuals {
                 let mut candidate = bindings.clone();
-                if match_declared_types(signature, actual, &mut candidate)
-                    && candidate.apply(signature).map_err(|error| invalid(error.to_string(), span))? == *actual
-                {
-                    if accepted.as_ref().is_some_and(|previous| previous != &candidate) {
-                        return Err(invalid("conflicting implementation parameter witnesses", span));
-                    }
-                    accepted = Some(candidate);
+                if match_evidence(signature, actual, &mut candidate, span)? {
+                    retain_evidence(&mut selected, candidate, span)?;
                 }
             }
-            if let Some(candidate) = accepted { *bindings = candidate; }
+            if let Some(candidate) = selected { *bindings = candidate; }
         }
-        if before == bindings.len() { return Ok(()); }
+        for goal in &requirements.goals {
+            if goal.associated.is_empty() { continue; }
+            let Some(subject) = determined_subject(&goal.subject, bindings) else { continue };
+            let mut selected = None;
+            for fact in &assumptions.goals {
+                if fact.protocol != goal.protocol || fact.subject != *subject
+                    || fact.arguments.len() != goal.arguments.len() { continue; }
+                let mut candidate = bindings.clone();
+                // Protocol arguments select an application. An implementation
+                // may provide P<Int> and P<Bool> for the very same subject.
+                let mut same_application = true;
+                for (pattern, actual) in goal.arguments.iter().zip(&fact.arguments) {
+                    if !match_evidence(pattern, actual, &mut candidate, span)? || candidate != *bindings {
+                        same_application = false;
+                        break;
+                    }
+                }
+                if !same_application { continue; }
+                let mut matched = false;
+                for (member, pattern) in &goal.associated {
+                    if let Some((_, actual)) = fact.associated.iter().find(|(name, _)| name == member) {
+                        if !match_evidence(pattern, actual, &mut candidate, span)? {
+                            matched = false;
+                            break;
+                        }
+                        matched = true;
+                    }
+                }
+                if matched { retain_evidence(&mut selected, candidate, span)?; }
+            }
+            if let Some(candidate) = selected { *bindings = candidate; }
+        }
+        if bindings.len() == before { return Ok(()); }
     }
 }
 
