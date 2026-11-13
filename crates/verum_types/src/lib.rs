@@ -2238,6 +2238,9 @@ impl TypeError {
         let convert_span = |ast_span: verum_ast::span::Span| -> Option<verum_diagnostics::Span> {
             span_converter.as_ref().map(|f| f(ast_span))
         };
+        let related_span = |span: verum_ast::Span| {
+            if span.is_dummy() { None } else { convert_span(span) }
+        };
 
         match self {
             Mismatch {
@@ -3640,9 +3643,11 @@ impl TypeError {
                 if let Some(diag_span) = convert_span(*new_borrow_span) {
                     builder = builder.span(diag_span);
                 }
-                if let Some(_existing_span) = convert_span(*existing_borrow_span) {
-                    builder =
-                        builder.add_note(format!("previous {} borrow occurs here", existing_kind));
+                if let Some(origin) = related_span(*existing_borrow_span) {
+                    builder = builder.secondary_span(
+                        origin,
+                        format!("previous {existing_kind} borrow occurs here"),
+                    );
                 }
                 builder.build()
             }
@@ -3661,8 +3666,8 @@ impl TypeError {
                 if let Some(diag_span) = convert_span(*new_span) {
                     builder = builder.span(diag_span);
                 }
-                if let Some(_prev_span) = convert_span(*existing_span) {
-                    builder = builder.add_note("previous borrow of field occurs here");
+                if let Some(origin) = related_span(*existing_span) {
+                    builder = builder.secondary_span(origin, "previous borrow of field occurs here");
                 }
                 builder.build()
             }
@@ -3680,8 +3685,8 @@ impl TypeError {
                 if let Some(diag_span) = convert_span(*ref_span) {
                     builder = builder.span(diag_span);
                 }
-                if let Some(_d_span) = convert_span(*drop_span) {
-                    builder = builder.add_note("value goes out of scope here");
+                if let Some(drop) = related_span(*drop_span) {
+                    builder = builder.secondary_span(drop, "value goes out of scope here");
                 }
                 builder.build()
             }
@@ -3714,8 +3719,8 @@ impl TypeError {
                 if let Some(diag_span) = convert_span(*move_span) {
                     builder = builder.span(diag_span);
                 }
-                if let Some(_b_span) = convert_span(*borrow_span) {
-                    builder = builder.add_note("borrow occurs here");
+                if let Some(origin) = related_span(*borrow_span) {
+                    builder = builder.secondary_span(origin, "borrow occurs here");
                 }
                 builder.build()
             }
@@ -3733,8 +3738,8 @@ impl TypeError {
                 if let Some(diag_span) = convert_span(*assign_span) {
                     builder = builder.span(diag_span);
                 }
-                if let Some(_b_span) = convert_span(*borrow_span) {
-                    builder = builder.add_note("borrow occurs here");
+                if let Some(origin) = related_span(*borrow_span) {
+                    builder = builder.secondary_span(origin, "borrow occurs here");
                 }
                 builder.build()
             }
