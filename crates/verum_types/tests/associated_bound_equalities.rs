@@ -102,6 +102,28 @@ fn a_projected_return_can_borrow_its_receiver() {
 }
 
 #[test]
+fn forwarded_call_outputs_retain_the_callers_symbolic_member() {
+    let provider = r#"
+        type Engine is {};
+        implement Engine {
+            fn read<T: Channel>(&self, source: T) -> T.Item { source.get() }
+        }
+        fn read<T: Channel>(source: T) -> T.Item { source.get() }
+    "#;
+    for call in ["engine.read(source)", "read(source)"] {
+        check(provider, &format!(
+            "fn probe<F: Channel>(engine: &Engine, source: F) -> F.Item {{ {call} }}"
+        ), true);
+        check(provider, &format!(
+            "fn probe<F: Channel>(engine: &Engine, source: F) -> Bool {{ {call} }}"
+        ), false);
+        check(provider, &format!(
+            "fn probe<F: Channel<Item = Bool>>(engine: &Engine, source: F) -> Bool {{ {call} }}"
+        ), true);
+    }
+}
+
+#[test]
 fn a_transparent_alias_retains_the_loan_shape_of_its_target() {
     let source = "
         type Scalar is Int;

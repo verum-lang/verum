@@ -18755,7 +18755,7 @@ impl TypeChecker {
 
                                 // Apply substitution and unifier to get concrete return type
                                 let subst_return_type = self.resolve_call_output(
-                                    &return_type, &protocol_bounds, &where_clauses, &combined_subst,
+                                    &return_type, &protocol_bounds, &where_clauses, &combined_subst, span,
                                 )?;
                                 // T0707: reduce projections AT THE PRODUCER —
                                 // `peek() -> Maybe<&Item<Range<Int>>>` must hand
@@ -22518,7 +22518,7 @@ impl TypeChecker {
         self.enforce_call_where_clauses(&where_clauses, &protocol_bounds, span)?;
         self.enforce_call_protocol_bounds(&protocol_bounds, span)?;
         self.enforce_call_type_bounds(&type_bounds, span)?;
-        let output = self.resolve_call_output(return_type, &protocol_bounds, &where_clauses, &substitution)?;
+        let output = self.resolve_call_output(return_type, &protocol_bounds, &where_clauses, &substitution, span)?;
         self.type_registry.register_call_target(span, self.unifier.apply(&method_ty));
         Ok(Some(InferResult::method(self.unifier.apply(&output), receiver_kind)))
     }

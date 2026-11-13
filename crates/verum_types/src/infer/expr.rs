@@ -6723,6 +6723,12 @@ impl TypeChecker {
         &self, ty: &Type, call: &super::call_obligations::CallProjectionScope<'_>,
     ) -> Result<Type> {
         self.resolve_assoc_projections_in_scope(ty, None, Some(call), 0)
+            .map_err(|error| match error {
+                TypeError::Other(msg) => TypeError::OtherWithCodeSpanned {
+                    code: "E405".into(), msg, span: call.span,
+                },
+                other => other,
+            })
     }
 
     fn resolve_assoc_projections_in_scope(
@@ -6762,8 +6768,15 @@ impl TypeChecker {
                     .map_err(TypeError::Other)?;
                 if let Some(mut owner) = owner {
                     owner.args = owner.args.iter().map(instantiate).collect::<Result<_>>()?;
-                    if let Some(premises) = call.caller
-                        && checker.associated_projection_owner(&base, &assoc, premises).map_err(TypeError::Other)?
+                    let inferred;
+                    let premises = match call.caller {
+                        Some(premises) => premises,
+                        None => {
+                            inferred = self.caller_protocol_premises();
+                            inferred.as_slice()
+                        }
+                    };
+                    if checker.associated_projection_owner(&base, &assoc, premises).map_err(TypeError::Other)?
                             .as_ref().is_some_and(|actual| checker.same_associated_owner(&owner, actual))
                     {
                         let application = checker.resolve_associated_family(&base, &assoc, &arguments, premises)
@@ -6773,7 +6786,7 @@ impl TypeChecker {
                         }
                     }
                     let resolved = checker.resolve_owned_associated_family(
-                        &base, &owner, &assoc, &arguments, call.caller.unwrap_or_default(),
+                        &base, &owner, &assoc, &arguments, premises,
                     )
                         .map_err(TypeError::Other)?;
                     drop(checker);
@@ -7966,6 +7979,7 @@ impl TypeChecker {
             &pending_protocol_bounds,
             &[],
             &crate::ty::Substitution::new(),
+            expr.span,
         )?;
         // Normalize TypeApp in return type (GAT/HKT)
         let resolved_return = if Self::contains_type_app(&resolved_return) {

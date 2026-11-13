@@ -705,3 +705,36 @@ fn declared_tuple_construction_adds_no_effects_to_its_arguments() {
         }
     }
 }
+
+#[test]
+fn actual_runtime_config_source_admission() {
+    use crate::core_compiler::StdlibModuleResolver;
+    use crate::phases::semantic_analysis::SemanticAnalysisPhase;
+    use verum_fast_parser::FastParser;
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../core");
+    let session = crate::Session::new(crate::options::CompilerOptions::default());
+    let target = session.cfg_evaluator().config().clone();
+    let mut resolver = StdlibModuleResolver::with_target(&root, target.clone());
+    resolver.discover().unwrap();
+    let mut parsed = List::new();
+    for group in resolver.modules_in_order() {
+        for path in &group.source_files {
+            let source = std::fs::read_to_string(path).unwrap();
+            let file = session.load_source_string(&source, path.clone()).unwrap();
+            let module = FastParser::new().parse_module_str(&source, file).unwrap();
+            let owner = crate::module_utils::source_file_module_path(&group.name, path, &module);
+            parsed.push((Text::from(owner), Text::from(path.to_string_lossy().as_ref()), module));
+        }
+    }
+    let entries: List<_> = parsed.iter().map(|(owner, path, ast)|
+        (owner.as_str(), path.as_str(), ast)).collect();
+    let selected = select_source_roster(&entries, &target).unwrap();
+    let registry = source_registry(selected.iter().map(|(owner, path, ast)|
+        (owner.as_str(), path.as_str(), ast))).unwrap();
+    let phase = SemanticAnalysisPhase::new().with_language_features(session.language_features()).with_target(target);
+    let (owner, _, module) = selected.iter().find(|(name, _, _)| name == "core.runtime.config").unwrap();
+    let mut checker = phase.configured_checker();
+    let result = check_source_types(&mut checker, owner, module, &registry,
+        |error| error.to_diagnostic_with_span(Some(|span| session.convert_span(span))));
+    result.unwrap();
+}

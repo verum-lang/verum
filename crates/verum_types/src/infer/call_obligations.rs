@@ -23,6 +23,7 @@ pub(super) struct CallProjectionScope<'a> {
     /// declaring protocol after substitution into the caller.
     pub caller: Option<&'a [WhereClause]>,
     pub arguments: &'a Substitution,
+    pub span: Span,
 }
 
 fn declaration_premises(
@@ -44,6 +45,7 @@ impl TypeChecker {
         bounds: &Map<TypeVar, List<ProtocolBound>>,
         clauses: &[WhereClause],
         arguments: &Substitution,
+        span: Span,
     ) -> Result<Type> {
         let mut assumptions = declaration_premises(bounds, clauses);
         // Captured generic function values retain the same fresh declaration
@@ -61,7 +63,20 @@ impl TypeChecker {
                     .cloned());
             }
         }
-        self.resolve_call_output_projections(ty, &CallProjectionScope { declaration: &assumptions, arguments, caller: None })
+        self.resolve_call_output_projections(ty, &CallProjectionScope { declaration: &assumptions, arguments, caller: None, span })
+    }
+
+    /// Only declaration premises and rigid caller binders can witness a
+    /// universally quantified call. Callee inference variables add no evidence.
+    pub(super) fn caller_protocol_premises(&self) -> List<WhereClause> {
+        let mut caller = self.source_type_registration.projection_assumptions.clone();
+        for (variable, bounds) in &self.type_var_bounds {
+            if self.unifier.is_rigid(*variable) {
+                let premise = WhereClause { ty: Type::Var(*variable), bounds: bounds.clone() };
+                if !caller.contains(&premise) { caller.push(premise); }
+            }
+        }
+        caller.into()
     }
 
     pub(super) fn check_callable_contexts(
@@ -277,17 +292,12 @@ impl TypeChecker {
             return Ok(());
         }
         let substitution = self.unifier.save_substitution();
-        let mut caller = self.source_type_registration.projection_assumptions.clone();
-        for (variable, bounds) in &self.type_var_bounds {
-            if self.unifier.is_rigid(*variable) {
-                let premise = WhereClause { ty: Type::Var(*variable), bounds: bounds.clone() };
-                if !caller.contains(&premise) { caller.push(premise); }
-            }
-        }
+        let caller = self.caller_protocol_premises();
         let caller_scope = CallProjectionScope {
             declaration: &caller,
             caller: Some(&caller),
             arguments: &substitution,
+            span,
         };
         let assumptions: List<_> = caller.iter()
             .map(|premise| self.instantiate_call_clause(premise, &caller_scope))
@@ -297,6 +307,7 @@ impl TypeChecker {
             declaration: &declaration,
             caller: Some(&caller),
             arguments: &substitution,
+            span,
         };
         let callables = self.unifier.rigid_callable_bounds()
             .map(|(variable, contract)| Ok((variable, self.resolve_call_output_projections(contract, &caller_scope)?)))

@@ -140,6 +140,7 @@ impl TypeChecker {
             &Map::new(),
             &[],
             &crate::ty::Substitution::new(),
+            span,
         )?;
         Ok(Some(InferResult::new(result)))
     }

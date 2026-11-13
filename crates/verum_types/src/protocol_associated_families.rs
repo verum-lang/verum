@@ -327,10 +327,10 @@ impl ProtocolChecker {
                     implementation, receiver, owner.map(|(args, _)| args), true, &environment,
                 ) {
                     CandidateMatch::Disjoint => continue,
-                    CandidateMatch::Unknown => return Err(
-                        "cannot establish the receiver domain of a competing family implementation"
-                            .into(),
-                    ),
+                    CandidateMatch::Unknown => return Err(format!(
+                        "cannot establish the receiver domain of a competing family implementation of `{}` for `{}` while resolving `{}.{name}`",
+                        implementation.protocol, implementation.for_type, receiver,
+                    ).into()),
                     CandidateMatch::Matched(substitution) => substitution,
                 };
                 let inferred;
