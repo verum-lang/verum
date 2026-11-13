@@ -831,7 +831,7 @@ impl<'a> RecursiveParser<'a> {
                 }
                 _ => {}
             }
-            Maybe::Some(self.parse_return_type()?)
+            Maybe::Some(self.parse_signature_type()?)
         } else {
             Maybe::None
         };
@@ -4520,9 +4520,9 @@ impl<'a> RecursiveParser<'a> {
             let default_type = if self.stream.consume(&TokenKind::Eq).is_some()
                 || self.stream.consume(&TokenKind::Is).is_some()
             {
-                // Use no_refinement to avoid consuming `where` as a refinement predicate
-                // e.g., `type Ordering is StandardOrdering where Self.Ordering: Eq;`
-                Maybe::Some(self.parse_type_no_refinement()?)
+                // Inline refinements belong to the type; a following `where`
+                // belongs to the associated declaration, as in return signatures.
+                Maybe::Some(self.parse_signature_type()?)
             } else {
                 Maybe::None
             };
@@ -4670,7 +4670,7 @@ impl<'a> RecursiveParser<'a> {
 
             // Use parse_type_with_lookahead to support refinements but avoid consuming body {
             let return_type = if self.stream.consume(&TokenKind::RArrow).is_some() {
-                Maybe::Some(self.parse_return_type()?)
+                Maybe::Some(self.parse_signature_type()?)
             } else {
                 Maybe::None
             };
@@ -4872,14 +4872,24 @@ impl<'a> RecursiveParser<'a> {
 
         let span = self.stream.make_span(start_pos);
         Ok(Item::new(
-            ItemKind::Protocol(ProtocolDecl {
+            // Both protocol spellings elaborate to the same declaration. In
+            // particular, source-owned lookup must not depend on whether the
+            // user wrote `context protocol P` or `context type P is protocol`.
+            ItemKind::Type(TypeDecl {
                 visibility: vis,
-                is_context,
                 name: Ident::new(name, name_span),
                 generics,
-                bounds,
-                items: items.into_iter().collect(),
-                generic_where_clause: generic_where,
+                attributes: attrs.into_iter().collect(),
+                body: TypeDeclBody::Protocol(ProtocolBody {
+                    is_context,
+                    extends: bounds,
+                    generic_where_clause: generic_where,
+                    items: items.into_iter().collect(),
+                    declared_default_methods: List::new(),
+                }),
+                value_params: List::new(),
+                resource_modifier: Maybe::None,
+                generic_where_clause: Maybe::None,
                 meta_where_clause: meta_where,
                 span,
             }),
@@ -5335,7 +5345,7 @@ impl<'a> RecursiveParser<'a> {
 
             // Use parse_type_with_lookahead to support refinements but avoid consuming body {
             let return_type = if self.stream.consume(&TokenKind::RArrow).is_some() {
-                Maybe::Some(self.parse_return_type()?)
+                Maybe::Some(self.parse_signature_type()?)
             } else {
                 Maybe::None
             };
@@ -6253,7 +6263,7 @@ impl<'a> RecursiveParser<'a> {
 
         self.stream.expect(TokenKind::RArrow)?;
         // Use parse_type_with_lookahead to avoid consuming the body { as a refinement
-        let return_type = self.parse_return_type()?;
+        let return_type = self.parse_signature_type()?;
 
         // Parse predicate body as a block expression (supports let bindings + final expression)
         let body = self.parse_block_expr()?;
@@ -6627,7 +6637,7 @@ impl<'a> RecursiveParser<'a> {
         // Context methods don't have bodies, so no lookahead needed
         // But we use parse_type_with_lookahead for consistency
         let return_type = if self.stream.consume(&TokenKind::RArrow).is_some() {
-            Maybe::Some(self.parse_return_type()?)
+            Maybe::Some(self.parse_signature_type()?)
         } else {
             Maybe::None
         };

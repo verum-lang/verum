@@ -9,6 +9,9 @@ use verum_common::{List, Map, Text};
 pub(super) struct ContextMethodSignatures {
     source: Text,
     methods: Map<Text, TypeScheme>,
+    /// Context protocols dispatch through the checked protocol declaration.
+    /// The availability view below is not another signature authority.
+    protocol: Option<Text>,
 }
 
 impl TypeChecker {
@@ -18,8 +21,86 @@ impl TypeChecker {
             ContextMethodSignatures {
                 source: self.current_module_path.clone(),
                 methods: Map::new(),
+                protocol: None,
             },
         );
+    }
+
+    pub(super) fn publish_context_protocol_binding(
+        &mut self,
+        declaration: &verum_ast::TypeDecl,
+        identity: &Text,
+        binding: Text,
+    ) {
+        let verum_ast::TypeDeclBody::Protocol(body) = &declaration.body else {
+            return;
+        };
+        if !body.is_context {
+            return;
+        }
+        // This projection supplies lexical availability and method names only.
+        // Associated members, supers, kinds and all method constraints remain
+        // in the checked protocol selected by its canonical identity.
+        let availability = verum_ast::ContextDecl {
+            visibility: declaration.visibility.clone(),
+            is_async: false,
+            name: declaration.name.clone(),
+            generics: declaration.generics.clone(),
+            methods: body
+                .items
+                .iter()
+                .filter_map(|item| match &item.kind {
+                    verum_ast::decl::ProtocolItemKind::Function { decl, .. } => Some(decl.clone()),
+                    _ => None,
+                })
+                .collect(),
+            associated_types: List::new(),
+            associated_consts: List::new(),
+            sub_contexts: List::new(),
+            span: declaration.span,
+        };
+        self.context_checker
+            .register_context(binding.clone(), availability.clone());
+        self.context_declarations
+            .insert(binding.clone(), availability);
+        self.context_resolver
+            .register_protocol_as_context(binding.clone());
+        self.context_resolver.register_context_type(
+            binding.clone(),
+            Type::Named {
+                path: Self::text_to_path(identity),
+                args: List::new(),
+            },
+        );
+        self.context_method_signatures.insert(
+            binding,
+            ContextMethodSignatures {
+                source: identity
+                    .rsplit_once('.')
+                    .map_or("", |(owner, _)| owner)
+                    .into(),
+                methods: Map::new(),
+                protocol: Some(identity.clone()),
+            },
+        );
+    }
+
+    pub(super) fn context_protocol_binding(&self, name: &str) -> Option<&Text> {
+        let identity = self
+            .context_method_signatures
+            .get(&Text::from(name))?
+            .protocol
+            .as_ref()?;
+        // A later concrete type of the same spelling must still shadow the
+        // context. An imported protocol's qualified head is its own identity.
+        match self.ctx.lookup_type(name) {
+            Some(Type::Named { path, .. }) => {
+                let selected = self.path_to_string(path);
+                (selected == *identity || selected.as_str() == name).then_some(identity)
+            }
+            None => None,
+            _ => None,
+        }
     }
 
     pub(super) fn try_context_method_call(
@@ -55,7 +136,10 @@ impl TypeChecker {
             self.check_expr(argument, &expected)?;
         }
         let result = self.resolve_call_output(
-            &return_type, &Map::new(), &[], &crate::ty::Substitution::new(),
+            &return_type,
+            &Map::new(),
+            &[],
+            &crate::ty::Substitution::new(),
         )?;
         Ok(Some(InferResult::new(result)))
     }
@@ -106,6 +190,40 @@ impl TypeChecker {
                 context: context_name,
                 span,
             });
+        }
+        if let Some(identity) = self.context_protocol_binding(&context_name).cloned() {
+            let owner_arguments = requirement
+                .as_ref()
+                .map(|r| {
+                    r.args
+                        .iter()
+                        .cloned()
+                        .map(GenericArg::Type)
+                        .collect::<List<_>>()
+                })
+                .unwrap_or_default();
+            let path = Self::text_to_path(&identity);
+            let arguments = self.protocol_application_arguments(&path, &owner_arguments, None)?;
+            let receiver = Type::Named {
+                path,
+                args: arguments.clone(),
+            };
+            let selected = self
+                .applied_protocol_method_in_hierarchy(
+                    &identity,
+                    &arguments,
+                    &receiver,
+                    &method.name,
+                    span,
+                )?
+                .ok_or_else(|| TypeError::UndefinedContextMethod {
+                    context: context_name.clone(),
+                    method: method.name.clone(),
+                    span,
+                })?;
+            return self
+                .instantiate_applied_protocol_method(&selected, &receiver, type_args, span)
+                .map(Some);
         }
         self.context_checker
             .check_context_call(&context_name, &method.name, span)?;

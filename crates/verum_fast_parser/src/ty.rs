@@ -176,10 +176,11 @@ impl<'a> RecursiveParser<'a> {
         self.parse_type_impl_ctx(true, true, false, true, TypeBoundary::Ordinary)
     }
 
-    /// Return type of a DECLARATION: same as
+    /// Type in a declaration signature: return types and associated defaults
+    /// share explicit refinement syntax and a declaration-owned `where`. Same as
     /// [`Self::parse_type_with_lookahead`], but the refinement-vs-body
     /// question is answered deterministically instead of by name.
-    pub fn parse_return_type(&mut self) -> ParseResult<Type> {
+    pub fn parse_signature_type(&mut self) -> ParseResult<Type> {
         self.parse_type_impl_ctx(true, true, true, true, TypeBoundary::Ordinary)
     }
 

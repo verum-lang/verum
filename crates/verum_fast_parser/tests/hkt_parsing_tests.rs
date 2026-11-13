@@ -24,6 +24,13 @@ use verum_ast::{FileId, ItemKind, TypeKind};
 use verum_fast_parser::VerumParser;
 use verum_lexer::Lexer;
 
+fn protocol_body(declaration: &verum_ast::TypeDecl) -> &verum_ast::decl::ProtocolBody {
+    let verum_ast::TypeDeclBody::Protocol(body) = &declaration.body else {
+        panic!("expected canonical protocol declaration");
+    };
+    body
+}
+
 #[test]
 fn test_hkt_placeholder_in_generic_args() {
     let source = r#"
@@ -45,7 +52,7 @@ protocol Functor<F<_>> {
     let module = result.unwrap();
 
     match &module.items[0].kind {
-        ItemKind::Protocol(protocol_def) => {
+        ItemKind::Type(protocol_def) => {
             assert_eq!(protocol_def.name.as_str(), "Functor");
             assert_eq!(
                 protocol_def.generics.len(),
@@ -87,7 +94,7 @@ protocol Functor<F<_>> {
     let module = result.unwrap();
 
     match &module.items[0].kind {
-        ItemKind::Protocol(protocol_def) => {
+        ItemKind::Type(protocol_def) => {
             assert_eq!(protocol_def.name.as_str(), "Functor");
             assert_eq!(
                 protocol_def.generics.len(),
@@ -96,9 +103,9 @@ protocol Functor<F<_>> {
             );
 
             // Verify the protocol has a map method
-            assert_eq!(protocol_def.items.len(), 1, "Expected one protocol item");
+            assert_eq!(protocol_body(protocol_def).items.len(), 1, "Expected one protocol item");
 
-            match &protocol_def.items[0].kind {
+            match &protocol_body(protocol_def).items[0].kind {
                 ProtocolItemKind::Function { decl, .. } => {
                     assert_eq!(decl.name.as_str(), "map");
                     assert_eq!(
@@ -137,7 +144,7 @@ protocol Monad<M<_>> {
     let module = result.unwrap();
 
     match &module.items[0].kind {
-        ItemKind::Protocol(protocol_def) => {
+        ItemKind::Type(protocol_def) => {
             assert_eq!(protocol_def.name.as_str(), "Monad");
             assert_eq!(
                 protocol_def.generics.len(),
@@ -146,10 +153,10 @@ protocol Monad<M<_>> {
             );
 
             // Verify the protocol has wrap and flat_map methods
-            assert_eq!(protocol_def.items.len(), 2, "Expected two protocol items");
+            assert_eq!(protocol_body(protocol_def).items.len(), 2, "Expected two protocol items");
 
             // Check first method (wrap)
-            match &protocol_def.items[0].kind {
+            match &protocol_body(protocol_def).items[0].kind {
                 ProtocolItemKind::Function { decl, .. } => {
                     assert_eq!(decl.name.as_str(), "wrap");
                 }
@@ -157,7 +164,7 @@ protocol Monad<M<_>> {
             }
 
             // Check second method (flat_map)
-            match &protocol_def.items[1].kind {
+            match &protocol_body(protocol_def).items[1].kind {
                 ProtocolItemKind::Function { decl, .. } => {
                     assert_eq!(decl.name.as_str(), "flat_map");
                 }
@@ -191,11 +198,11 @@ protocol Applicative<F<_>> extends Functor {
     let module = result.unwrap();
 
     match &module.items[0].kind {
-        ItemKind::Protocol(protocol_def) => {
+        ItemKind::Type(protocol_def) => {
             assert_eq!(protocol_def.name.as_str(), "Applicative");
 
             // Verify protocol extends Functor
-            assert!(!protocol_def.bounds.is_empty(), "Expected extends clause");
+            assert!(!protocol_body(protocol_def).extends.is_empty(), "Expected extends clause");
         }
         other => panic!("Expected Protocol item, got {:?}", other),
     }
@@ -223,11 +230,11 @@ protocol Container {
     let module = result.unwrap();
 
     match &module.items[0].kind {
-        ItemKind::Protocol(protocol_def) => {
-            assert_eq!(protocol_def.items.len(), 2, "Expected two protocol items");
+        ItemKind::Type(protocol_def) => {
+            assert_eq!(protocol_body(protocol_def).items.len(), 2, "Expected two protocol items");
 
             // Check associated type with HKT
-            match &protocol_def.items[0].kind {
+            match &protocol_body(protocol_def).items[0].kind {
                 ProtocolItemKind::Type {
                     name, type_params, ..
                 } => {
@@ -266,12 +273,12 @@ protocol Bifunctor<F<_, _>> {
     let module = result.unwrap();
 
     match &module.items[0].kind {
-        ItemKind::Protocol(protocol_def) => {
+        ItemKind::Type(protocol_def) => {
             assert_eq!(protocol_def.name.as_str(), "Bifunctor");
 
-            assert_eq!(protocol_def.items.len(), 1, "Expected one protocol item");
+            assert_eq!(protocol_body(protocol_def).items.len(), 1, "Expected one protocol item");
 
-            match &protocol_def.items[0].kind {
+            match &protocol_body(protocol_def).items[0].kind {
                 ProtocolItemKind::Function { decl, .. } => {
                     assert_eq!(decl.name.as_str(), "bimap");
                     assert_eq!(
@@ -386,7 +393,7 @@ protocol Nested<F<_>, G<_>> {
     let module = result.unwrap();
 
     match &module.items[0].kind {
-        ItemKind::Protocol(protocol_def) => {
+        ItemKind::Type(protocol_def) => {
             assert_eq!(protocol_def.name.as_str(), "Nested");
             assert_eq!(
                 protocol_def.generics.len(),
@@ -394,7 +401,7 @@ protocol Nested<F<_>, G<_>> {
                 "Expected two generic parameters"
             );
 
-            assert_eq!(protocol_def.items.len(), 2, "Expected two protocol items");
+            assert_eq!(protocol_body(protocol_def).items.len(), 2, "Expected two protocol items");
         }
         other => panic!("Expected Protocol item, got {:?}", other),
     }
@@ -404,7 +411,7 @@ protocol Nested<F<_>, G<_>> {
 fn test_hkt_with_refinement() {
     let source = r#"
 protocol SafeContainer<F<_>> {
-    type Size: Int{> 0};
+    type Size = Int{> 0};
     fn create<A>(size: Size, default: A) -> F<A>;
 }
 "#;
@@ -422,17 +429,18 @@ protocol SafeContainer<F<_>> {
     let module = result.unwrap();
 
     match &module.items[0].kind {
-        ItemKind::Protocol(protocol_def) => {
+        ItemKind::Type(protocol_def) => {
             assert_eq!(protocol_def.name.as_str(), "SafeContainer");
 
-            assert_eq!(protocol_def.items.len(), 2, "Expected two protocol items");
+            assert_eq!(protocol_body(protocol_def).items.len(), 2, "Expected two protocol items");
 
             // Check Size associated type with refinement
-            match &protocol_def.items[0].kind {
-                ProtocolItemKind::Type { name, bounds, .. } => {
+            match &protocol_body(protocol_def).items[0].kind {
+                ProtocolItemKind::Type { name, bounds, default_type, .. } => {
                     assert_eq!(name.as_str(), "Size");
-                    // The bounds should contain the Int{> 0} type with refinement
-                    assert!(!bounds.is_empty(), "Expected type bounds");
+                    assert!(bounds.is_empty());
+                    assert!(matches!(&default_type.as_ref().expect("refined default").kind,
+                        TypeKind::Refined { .. }));
                 }
                 other => panic!("Expected Type protocol item, got {:?}", other),
             }
@@ -484,7 +492,7 @@ protocol Iterator<T> {
     let module = result.unwrap();
 
     match &module.items[0].kind {
-        ItemKind::Protocol(protocol_def) => {
+        ItemKind::Type(protocol_def) => {
             assert_eq!(protocol_def.name.as_str(), "Iterator");
             assert_eq!(
                 protocol_def.generics.len(),
@@ -494,4 +502,11 @@ protocol Iterator<T> {
         }
         other => panic!("Expected Protocol item, got {:?}", other),
     }
+}
+
+#[test]
+fn associated_protocol_bounds_do_not_accept_value_refinements() {
+    let source = "protocol SafeContainer<F<_>> { type Size: Int{> 0}; }";
+    let file = FileId::new(0);
+    assert!(VerumParser::new().parse_module(Lexer::new(source, file), file).is_err());
 }

@@ -974,7 +974,7 @@ fn test_parse_protocol() {
     assert!(result.is_ok());
     let module = result.unwrap();
     assert_eq!(module.items.len(), 1);
-    assert!(matches!(module.items[0].kind, ItemKind::Protocol(_)));
+    assert!(matches!(&module.items[0].kind, ItemKind::Type(declaration) if matches!(declaration.body, verum_ast::TypeDeclBody::Protocol(_))));
 }
 
 #[test]

@@ -23,6 +23,13 @@ use verum_common::List;
 use verum_fast_parser::VerumParser;
 use verum_lexer::Lexer;
 
+fn protocol_body(declaration: &verum_ast::TypeDecl) -> &verum_ast::decl::ProtocolBody {
+    let verum_ast::TypeDeclBody::Protocol(body) = &declaration.body else {
+        panic!("expected canonical protocol declaration");
+    };
+    body
+}
+
 fn parse(source: &str) -> Result<List<verum_ast::Item>, String> {
     let file_id = FileId::new(0);
     let lexer = Lexer::new(source, file_id);
@@ -50,12 +57,12 @@ fn test_default_associated_type_simple() {
     assert_eq!(items.len(), 1);
 
     match &items[0].kind {
-        ItemKind::Protocol(protocol_decl) => {
+        ItemKind::Type(protocol_decl) => {
             assert_eq!(protocol_decl.name.name.as_str(), "Container");
-            assert_eq!(protocol_decl.items.len(), 2); // Item type + get function
+            assert_eq!(protocol_body(protocol_decl).items.len(), 2); // Item type + get function
 
             // Check the first item is a Type with default
-            match &protocol_decl.items[0].kind {
+            match &protocol_body(protocol_decl).items[0].kind {
                 ProtocolItemKind::Type {
                     name,
                     type_params,
@@ -93,7 +100,7 @@ fn test_default_associated_type_simple() {
                 }
                 _ => panic!(
                     "Expected Type protocol item, got: {:?}",
-                    protocol_decl.items[0].kind
+                    protocol_body(protocol_decl).items[0].kind
                 ),
             }
         }
@@ -116,7 +123,7 @@ fn test_default_associated_type_without_keyword() {
 
     let items = result.unwrap();
     match &items[0].kind {
-        ItemKind::Protocol(protocol_decl) => match &protocol_decl.items[0].kind {
+        ItemKind::Type(protocol_decl) => match &protocol_body(protocol_decl).items[0].kind {
             ProtocolItemKind::Type { default_type, .. } => {
                 assert!(
                     default_type.is_some(),
@@ -144,7 +151,7 @@ fn test_associated_type_no_default() {
 
     let items = result.unwrap();
     match &items[0].kind {
-        ItemKind::Protocol(protocol_decl) => match &protocol_decl.items[0].kind {
+        ItemKind::Type(protocol_decl) => match &protocol_body(protocol_decl).items[0].kind {
             ProtocolItemKind::Type { default_type, .. } => {
                 assert!(default_type.is_none(), "Expected no default type");
             }
@@ -168,8 +175,8 @@ fn test_default_associated_type_with_bounds() {
 
     let items = result.unwrap();
     match &items[0].kind {
-        ItemKind::Protocol(protocol_decl) => {
-            match &protocol_decl.items[0].kind {
+        ItemKind::Type(protocol_decl) => {
+            match &protocol_body(protocol_decl).items[0].kind {
                 ProtocolItemKind::Type {
                     name,
                     bounds,
@@ -228,11 +235,11 @@ fn test_multiple_associated_types_with_defaults() {
 
     let items = result.unwrap();
     match &items[0].kind {
-        ItemKind::Protocol(protocol_decl) => {
-            assert_eq!(protocol_decl.items.len(), 3);
+        ItemKind::Type(protocol_decl) => {
+            assert_eq!(protocol_body(protocol_decl).items.len(), 3);
 
             // First: Key (no default)
-            match &protocol_decl.items[0].kind {
+            match &protocol_body(protocol_decl).items[0].kind {
                 ProtocolItemKind::Type {
                     name, default_type, ..
                 } => {
@@ -243,7 +250,7 @@ fn test_multiple_associated_types_with_defaults() {
             }
 
             // Second: Value (with default)
-            match &protocol_decl.items[1].kind {
+            match &protocol_body(protocol_decl).items[1].kind {
                 ProtocolItemKind::Type {
                     name, default_type, ..
                 } => {
@@ -254,7 +261,7 @@ fn test_multiple_associated_types_with_defaults() {
             }
 
             // Third: Error (with default)
-            match &protocol_decl.items[2].kind {
+            match &protocol_body(protocol_decl).items[2].kind {
                 ProtocolItemKind::Type {
                     name, default_type, ..
                 } => {

@@ -4,6 +4,9 @@ use verum_ast::FileId;
 use verum_diagnostics::Diagnostic;
 use verum_fast_parser::Parser;
 
+#[path = "source_protocol_registration.rs"]
+mod source_protocol_registration;
+
 fn check(
     owner: &str,
     visibility: &str,

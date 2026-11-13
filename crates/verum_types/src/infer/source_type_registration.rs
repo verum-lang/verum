@@ -200,6 +200,14 @@ impl super::TypeChecker {
                 self.protocol_checker.write().register_type_declaration_kind(
                     key.clone(), declaration.body.kind(), arity, alias,
                 );
+                self.publish_context_protocol_binding(declaration, key, key.clone());
+                // Loading a dependency does not mount its short name. Only a
+                // surviving lexical type binding publishes that context name.
+                if matches!(self.ctx.lookup_type(&declaration.name.name),
+                    Some(Type::Named { path, .. }) if self.path_to_string(path) == *key)
+                {
+                    self.publish_context_protocol_binding(declaration, key, declaration.name.name.clone());
+                }
             }
             // Lazy loads may finish inside a temporary value scope. Canonical
             // constructor identity survives it only after the entire load succeeds.

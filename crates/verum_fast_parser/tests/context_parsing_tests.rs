@@ -434,28 +434,6 @@ fn parse_protocol_decl(source: &str) -> Result<TypeDecl, String> {
     match parser.parse_item() {
         Ok(item) => match item.kind {
             ItemKind::Type(decl) => Ok(decl),
-            ItemKind::Protocol(decl) => {
-                // Convert ProtocolDecl to TypeDecl for unified testing
-                // This happens for `context protocol Name { }` form
-                Ok(TypeDecl {
-                    value_params: verum_common::List::new(),
-                    visibility: decl.visibility,
-                    name: decl.name,
-                    generics: decl.generics,
-                    attributes: verum_common::List::new(), // Attributes are on Item, not ProtocolDecl
-                    body: TypeDeclBody::Protocol(ProtocolBody {
-                        extends: decl.bounds.iter().cloned().collect(), // bounds -> extends
-                        items: decl.items,
-                        declared_default_methods: Default::default(),
-                        is_context: decl.is_context,
-                        generic_where_clause: decl.generic_where_clause,
-                    }),
-                    resource_modifier: verum_common::Maybe::None,
-                    generic_where_clause: verum_common::Maybe::None,
-                    meta_where_clause: verum_common::Maybe::None,
-                    span: decl.span,
-                })
-            }
             other => Err(format!(
                 "Expected type/protocol declaration, got {:?}",
                 other

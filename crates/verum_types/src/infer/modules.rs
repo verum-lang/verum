@@ -4287,95 +4287,9 @@ impl TypeChecker {
                             );
                         let has_source_declaration = source_declaration.is_some();
                         if let Some((type_decl, source_module_path)) = source_declaration {
-                            // CRITICAL: Import transitive type dependencies BEFORE registering the type.
-                            // This ensures types used in field types (like `SemVer` in
-                            // `Package.versions: List<SemVer>`) are available for resolution.
-                            //
-
-                            // The fix analyzes the type declaration to find all referenced types,
-                            // then imports each one from the module registry before proceeding.
-                            //
-
-                            // Example: When importing `Package` from domain/package.vr:
-                            // 1. Collect dependencies: ["List", "SemVer", "Text", "Int"]
-                            // 2. Import each dependency that's not already available
-                            // 3. Register `Package` type with all dependencies resolved
-                            //
-
-                            // Name resolution: deterministic lookup through module hierarchy, import resolution, re-exports — Imports
-                            let type_dependencies = self.collect_type_dependencies(&type_decl);
-                            // #[cfg(debug_assertions)]
-                            // eprintln!(
-                            // "[DEBUG] Type '{}' has dependencies: [{}]",
-                            // item_name,
-                            // type_dependencies
-                            // .iter()
-                            // .map(|d| d.as_str())
-                            // .collect::<Vec<_>>()
-                            // .join(", ")
-                            // );
-
-                            // Use path aliases since "core.io.path" may be stored as "std.io.path"
-                            if let Some(source_module) = self
-                                .get_module_with_path_aliases(source_module_path.as_str(), registry)
-                            {
-                                // Import each dependency transitively
-                                for dep_name in type_dependencies.iter() {
-                                    // Skip if already defined (including built-in types)
-                                    if self.ctx.lookup_type(dep_name.as_str()).is_some() {
-                                        continue;
-                                    }
-
-                                    // Try to import the dependency from the source module first
-                                    // (the module that actually declares the parent type — this is
-                                    // the canonical location for sibling types that the parent
-                                    // depends on directly).
-                                    let mut imported = match self.import_item_from_module(
-                                        &source_module_path,
-                                        dep_name.as_str(),
-                                        registry,
-                                    ) {
-                                        Ok(()) => self.ctx.lookup_type(dep_name.as_str()).is_some(),
-                                        Err(_) => false,
-                                    };
-
-                                    // Fallback 1: when the source module is a *submodule* of the
-                                    // requesting module (e.g. parent type in `core.base.iterator`,
-                                    // dep declared in `core.base.maybe`), the dep is reachable via
-                                    // the requesting module's re-export surface. Retry against the
-                                    // original `module_path` (e.g. `core.base`) which collects all
-                                    // submodule re-exports under one roof.
-                                    //
-                                    // This closes the silent-drop where `Iterator` (declared in
-                                    // `core.base.iterator`) depends on `Maybe` (declared in
-                                    // `core.base.maybe`) — the source module `core.base.iterator`
-                                    // doesn't export `Maybe`, but the requesting module
-                                    // `core.base` does (via `public mount .maybe.{Maybe, ...}`).
-                                    if !imported && *resolved_module_path != source_module_path {
-                                        if let Ok(()) = self.import_item_from_module(
-                                            resolved_module_path,
-                                            dep_name.as_str(),
-                                            registry,
-                                        ) {
-                                            imported =
-                                                self.ctx.lookup_type(dep_name.as_str()).is_some();
-                                        }
-                                    }
-
-                                    if !imported {
-                                        tracing::debug!(
-                                            "Could not import transitive dependency '{}' for type '{}' (tried source={}, root={})",
-                                            dep_name,
-                                            item_name,
-                                            source_module_path.as_str(),
-                                            resolved_module_path.as_str(),
-                                        );
-                                        // Don't fail - the dependency might be a built-in type
-                                        // or from a different module that's already imported
-                                    }
-                                }
-                            }
-
+                            // The declaration-owned loader resolves dependencies in the
+                            // source module. Loading a field must not implicitly mount
+                            // its type or context into this consumer's namespace.
                             // Register the type declaration - this handles variants, records, etc.
                             // Set flag so register_type_declaration_body knows this is an explicit import
                             // and allows overwriting any existing type (even from metadata/global passes).
@@ -4410,6 +4324,9 @@ impl TypeChecker {
                                 let true_name = type_decl.name.name.as_str();
                                 self.bind_source_type_import(
                                     true_name, registered_type, &declaration_key, register_name,
+                                );
+                                self.publish_context_protocol_binding(
+                                    &type_decl, &declaration_key, register_name.into(),
                                 );
 
                                 // CRITICAL FIX: Also import implement block methods for the type.
@@ -4768,6 +4685,25 @@ impl TypeChecker {
         resolved_module_path: &Text,
         registry: &verum_modules::ModuleRegistry,
     ) -> Result<()> {
+        if let Some((declaration, owner)) = self.find_type_declaration_with_source_module(
+            &module_info.ast, item_name, resolved_module_path, registry,
+        ) {
+            if !matches!(&declaration.body, TypeDeclBody::Protocol(body) if body.is_context) {
+                return Err(TypeError::OtherWithCodeSpanned {
+                    code: "E605".into(),
+                    msg: format!("context export '{item_name}' does not select an injectable protocol").into(),
+                    span: declaration.span,
+                });
+            }
+            let (_, identity) = self.load_source_type_declaration_with_parameter_key(
+                &declaration, &owner, declaration.span,
+            )?;
+            self.ctx.define_type(register_name, Type::Named {
+                path: Self::text_to_path(&identity), args: List::new(),
+            });
+            self.publish_context_protocol_binding(&declaration, &identity, register_name.into());
+            return Ok(());
+        }
                         // Context protocols need to be registered BOTH as a type AND as a context.
                         // The type registration allows the protocol to be used in type annotations,
                         // while the context registration allows it to be used in `using [...]` clauses.
@@ -17889,6 +17825,9 @@ impl TypeChecker {
     /// has a concrete shape for the name and expects `X.method(...)` to
     /// dispatch on it, not on a context record.
     pub(super) fn user_type_shadows_context(&self, context_name: &str) -> bool {
+        if self.context_protocol_binding(context_name).is_some() {
+            return false;
+        }
         let has_inherent = self
             .inherent_methods
             .read()

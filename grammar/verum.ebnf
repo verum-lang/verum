@@ -1333,7 +1333,10 @@ return_type_with_refinement = type_expr , [ type_refinement ] ;
 (* Generic Associated Types - allow type parameters on associated types *)
 (* Example: type Item<T> or type Wrapped<T> *)
 protocol_type   = 'type' , identifier , [ type_params ] , [ ':' , type_bounds ]
-                , [ where_clause ] , [ default_type ] , ';' ;
+                , [ protocol_type_tail ] , ';' ;
+(* An associated constraint may precede or follow its default, but not both. *)
+protocol_type_tail = where_clause , [ default_type ]
+                   | default_type , [ where_clause ] ;
 
 (* Type parameters for GATs *)
 type_params     = '<' , type_param , { ',' , type_param } , '>' ;

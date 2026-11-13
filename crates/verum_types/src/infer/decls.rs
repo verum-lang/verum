@@ -1854,6 +1854,7 @@ impl TypeChecker {
         use verum_common::Text;
         let TypeDeclBody::Protocol(protocol_body) = &type_decl.body
             else { unreachable!() };
+        self.validate_protocol_type_declaration(type_decl, protocol_body)?;
         self.register_declared_type_arity(type_name, &type_decl.generics)?;
         let type_name = type_name.clone();
                 // Protocol types (e.g., `type Database is protocol { ... }`)
@@ -1992,10 +1993,9 @@ impl TypeChecker {
                 //
 
                 // Context type system integration: context requirements tracked in function types, checked at call sites — Type System Integration
-                if protocol_body.is_context {
-                    self.context_resolver
-                        .register_protocol_as_context(type_name);
-                } else {
+                // Injectable bindings publish with the completed source
+                // transaction, never while dependency registration is partial.
+                if !protocol_body.is_context {
                     // Register as constraint protocol for better error messages
                     self.context_resolver
                         .register_constraint_protocol(type_name);
@@ -3201,6 +3201,7 @@ impl TypeChecker {
         use verum_common::Text;
         let verum_ast::decl::TypeDeclBody::Protocol(protocol_body) = &type_decl.body
             else { unreachable!() };
+        self.validate_protocol_type_declaration(type_decl, protocol_body)?;
         self.register_declared_type_arity(type_name, &type_decl.generics)?;
         let type_name = type_name.clone();
                 // Protocol types are registered as Named types
@@ -3309,10 +3310,7 @@ impl TypeChecker {
                 let _ = self.protocol_checker.write().register_protocol(protocol);
 
                 // Register as context or constraint protocol based on is_context flag
-                if protocol_body.is_context {
-                    self.context_resolver
-                        .register_protocol_as_context(type_name.clone());
-                } else {
+                if !protocol_body.is_context {
                     // Register as constraint protocol for better error messages
                     self.context_resolver
                         .register_constraint_protocol(type_name.clone());
@@ -4232,11 +4230,10 @@ impl TypeChecker {
         }
     }
 
-    /// Register a protocol declaration from ItemKind::Protocol (context protocol syntax).
-    /// Converts the ProtocolDecl into the same type system entities as TypeDeclBody::Protocol.
-    pub(super) fn register_protocol_decl_item(&mut self, proto_decl: &verum_ast::ProtocolDecl) -> Result<()> {
-        let type_name: verum_common::Text = proto_decl.name.name.as_str().into();
-
+    /// Canonical protocol admission is independent of the source spelling.
+    fn validate_protocol_type_declaration(&self, type_decl: &verum_ast::TypeDecl,
+        body: &verum_ast::decl::ProtocolBody) -> Result<()> {
+        let type_name = &type_decl.name.name;
         // Manifest-driven gate for HKT-bearing protocol declarations.
         // When `[protocols].higher_kinded_protocols = false` (the
         // default) a protocol that declares any `GenericParamKind::
@@ -4252,7 +4249,7 @@ impl TypeChecker {
         // user-set HKT protocol path always reaches a fully-enabled
         // HKT pipeline.
         if !self.higher_kinded_protocols_enabled {
-            for generic in proto_decl.generics.iter() {
+            for generic in type_decl.generics.iter() {
                 if let verum_ast::ty::GenericParamKind::HigherKinded { name, arity, .. } =
                     &generic.kind
                 {
@@ -4284,7 +4281,7 @@ impl TypeChecker {
         // Regular zero-parameter associated types
         // (`type Output;`) are unaffected by this gate.
         if !self.generic_associated_types_enabled {
-            for item in proto_decl.items.iter() {
+            for item in body.items.iter() {
                 if let verum_ast::decl::ProtocolItemKind::Type {
                     name, type_params, ..
                 } = &item.kind
@@ -4306,75 +4303,12 @@ impl TypeChecker {
             }
         }
 
-        // Register type name
-        self.ctx.define_type(
-            type_name.clone(),
-            Type::Named {
-                path: verum_ast::ty::Path::single(proto_decl.name.clone()),
-                args: verum_common::List::new(),
-            },
-        );
-
-        // Convert protocol methods to type system methods
-        let (constraint_scope, declared_supers) = self.protocol_constraint_scope(
-            &proto_decl.generics, &proto_decl.bounds, &[proto_decl.generic_where_clause.as_ref()],
-        );
-        let super_protocols = match declared_supers {
-            Some(supers) => supers,
-            None => self.convert_super_protocols(&proto_decl.bounds)?,
-        };
-        let (protocol_methods, associated_types, dyn_required) = self.elaborate_protocol_members(
-            self.declared_type_key(type_name.as_str()), &proto_decl.generics,
-            &constraint_scope, &super_protocols, &proto_decl.items, &[],
-        )?;
-
-        // Determine protocol kind from is_context flag
-        let kind = if proto_decl.is_context {
-            crate::protocol::ProtocolKind::ConstraintAndInjectable
-        } else {
-            crate::protocol::ProtocolKind::Constraint
-        };
-
-        // Register protocol
-        let protocol = crate::protocol::Protocol {
-            source_parameters: Some(std::sync::Arc::new(proto_decl.generics.clone())),
-            constraints: constraint_scope,
-            name: self.declared_type_key(type_name.as_str()),
-            kind,
-            type_params: self.convert_generic_params_to_type_params(&proto_decl.generics)?,
-            methods: protocol_methods,
-            associated_types,
-            associated_consts: verum_common::Map::new(),
-            super_protocols,
-            specialization_info: verum_common::Maybe::None,
-            defining_crate: verum_common::Maybe::None,
-            span: proto_decl.span,
-        };
-        self.check_pending_protocol_object_safety(&protocol, dyn_required)?;
-        self.check_protocol_family_applications(&protocol)?;
-        self.unifier.register_protocol_name(protocol.name.as_str());
-        // This run parsed the declaration, so its default-body flags are
-        // trustworthy — see `protocols_with_known_defaults`.
-        self.protocols_with_known_defaults.insert(
-                    protocol.name.clone(),
-                    (
-                        protocol
-                            .methods
-                            .iter()
-                            .filter(|(_, m)| !m.has_default)
-                            .map(|(n, _)| n.clone())
-                            .collect(),
-                        protocol.methods.keys().cloned().collect(),
-                    ),
-                );
-        let _ = self.protocol_checker.write().register_protocol(protocol);
-
         // Object safety enforcement for context protocols.
         // Context protocols must be object-safe because they're used via dynamic dispatch
         // in the DI system (vtable-based runtime resolution).
         // Check: methods must not return Self, must not have generic type params.
-        if proto_decl.is_context {
-            for item in proto_decl.items.iter() {
+        if body.is_context {
+            for item in body.items.iter() {
                 if let verum_ast::decl::ProtocolItemKind::Function { decl: func, .. } = &item.kind {
                     // Check for Self in return type (not object-safe for context protocols)
                     if let verum_common::Maybe::Some(ref ret_ty) = func.return_type {
@@ -4400,58 +4334,29 @@ impl TypeChecker {
             }
         }
 
-        // Auto-register context protocols as injectable
-        if proto_decl.is_context {
-            self.context_resolver
-                .register_protocol_as_context(type_name.clone());
-
-            // CRITICAL: Also register with context_checker by creating a synthetic ContextDecl.
-            // This ensures `using [Serializable]` can find the context when it checks
-            // context_checker.declarations.
-            let synthetic_methods: List<verum_ast::decl::FunctionDecl> = proto_decl
-                .items
-                .iter()
-                .filter_map(|item| {
-                    if let verum_ast::decl::ProtocolItemKind::Function { decl, .. } = &item.kind {
-                        Some(decl.clone())
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-            let synthetic_context = verum_ast::decl::ContextDecl {
-                visibility: proto_decl.visibility.clone(),
-                is_async: false,
-                name: proto_decl.name.clone(),
-                generics: proto_decl.generics.clone(),
-                methods: synthetic_methods,
-                associated_types: List::new(),
-                associated_consts: List::new(),
-                sub_contexts: List::new(),
-                span: proto_decl.span,
-            };
-            self.context_declarations
-                .insert(type_name.clone(), synthetic_context.clone());
-            self.context_checker
-                .register_context(type_name.clone(), synthetic_context);
-        } else {
-            self.context_resolver
-                .register_constraint_protocol(type_name.clone());
-        }
-
-        // Register Kind
-        {
-            use crate::kind_inference::KindInference;
-            let protocol_kind = if proto_decl.is_context {
-                crate::kind_inference::Kind::ConstraintAndInjectable
-            } else {
-                crate::kind_inference::Kind::Constraint
-            };
-            self.kind_inferer()
-                .register_type_constructor(type_name.as_str(), protocol_kind);
-        }
-
         Ok(())
+    }
+
+    /// Older AST producers use ProtocolDecl; admission still has one authority.
+    pub(super) fn register_protocol_decl_item(&mut self, declaration: &verum_ast::ProtocolDecl) -> Result<()> {
+        self.register_type_declaration(&verum_ast::TypeDecl {
+            visibility: declaration.visibility.clone(),
+            name: declaration.name.clone(),
+            generics: declaration.generics.clone(),
+            attributes: List::new(),
+            body: verum_ast::TypeDeclBody::Protocol(verum_ast::decl::ProtocolBody {
+                is_context: declaration.is_context,
+                extends: declaration.bounds.clone(),
+                generic_where_clause: declaration.generic_where_clause.clone(),
+                items: declaration.items.clone(),
+                declared_default_methods: List::new(),
+            }),
+            value_params: List::new(),
+            resource_modifier: None,
+            generic_where_clause: None,
+            meta_where_clause: declaration.meta_where_clause.clone(),
+            span: declaration.span,
+        })
     }
 
     /// Register method signatures from an implement block (Pass 1)
