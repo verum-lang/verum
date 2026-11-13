@@ -55,6 +55,8 @@ mount sys.{
     PageSize,
 };
 mount sys.common.init_runtime;
+mount core.net.addr.SocketAddr;
+public mount core.runtime.executor.{RuntimeExecutor, NoopExecutor};
 mount core.intrinsics.{
     future_poll_sync,
     executor_spawn,
@@ -187,8 +189,8 @@ public type RuntimeConfig is protocol {
     /// Allocator type for this configuration
     type Allocator: Alloc;
 
-    /// Executor type (use NoopExecutor for sync runtimes)
-    type Executor: AsyncExecutor;
+    /// Lifecycle of this profile's scheduler.
+    type Executor: RuntimeExecutor;
 
     /// I/O driver type (use NoopDriver for embedded)
     type IoDriver: RuntimeIoDriver;
@@ -232,12 +234,8 @@ public type RuntimeConfig is protocol {
 // Executor Protocol
 // =============================================================================
 
-/// Async executor protocol
-///
-
-/// Provides task scheduling for async runtimes.
-/// Implementations must support spawning, blocking, and shutdown.
-public type AsyncExecutor is protocol {
+/// Scheduling operations provided by asynchronous profiles.
+public type AsyncExecutor is protocol extends RuntimeExecutor {
     /// Spawn an async task
     @cfg(feature = "async")
     fn spawn<T: Send>(
@@ -248,35 +246,7 @@ public type AsyncExecutor is protocol {
     /// Block current thread on a future
     fn block_on<T>(&self, future: Future<T>) -> T;
 
-    /// Shutdown executor and wait for all tasks
-    fn shutdown(&self);
-
-    /// Get number of active tasks
-    fn active_tasks(&self) -> Int;
 };
-
-/// Noop executor for sync runtimes
-public type NoopExecutor is ();
-
-implement AsyncExecutor for NoopExecutor {
-    @cfg(feature = "async")
-    fn spawn<T: Send>(&self, future: Future<T>) -> RuntimeTaskHandle<T> {
-        panic("spawn() called on sync runtime - use @cfg(feature = async) to gate async code")
-    }
-
-    fn block_on<T>(&self, future: Future<T>) -> T {
-        // For sync runtime, we execute synchronously via busy polling
-        future_poll_sync(future)
-    }
-
-    fn shutdown(&self) {
-        // Nothing to shutdown
-    }
-
-    fn active_tasks(&self) -> Int {
-        0
-    }
-}
 
 // =============================================================================
 // I/O Engine Protocol
@@ -291,7 +261,7 @@ public type RuntimeIoDriver is protocol {
     fn submit(&self, op: IoOp) -> Result<IoHandle, RuntimeIoError>;
 
     /// Wait for I/O completion
-    fn wait(&self, handle: IoHandle) -> Result<IoResult, RuntimeIoError>;
+    fn wait(&self, handle: IoHandle) -> Result<Int, RuntimeIoError>;
 
     /// Poll for completions (non-blocking)
     fn poll(&self, completions: &mut [IoCompletion]) -> Int;
@@ -401,7 +371,7 @@ implement RuntimeIoDriver for NoopDriver {
         Result.Err(RuntimeIoError.Other(-1))
     }
 
-    fn wait(&self, handle: IoHandle) -> Result<IoResult, RuntimeIoError> {
+    fn wait(&self, handle: IoHandle) -> Result<Int, RuntimeIoError> {
         Result.Err(RuntimeIoError.Other(-1))
     }
 
@@ -747,7 +717,7 @@ implement RuntimeConfig for EmbeddedRuntime {
 ///  // Uses custom runtime via context injection
 /// }
 /// ```
-public type CustomRuntime<A: Alloc, E: AsyncExecutor, D: RuntimeIoDriver> is {
+public type CustomRuntime<A: Alloc, E: RuntimeExecutor, D: RuntimeIoDriver> is {
     allocator: A,
     executor: E,
     io_driver: D,
@@ -836,7 +806,10 @@ implement AsyncExecutor for WorkStealingExecutor {
     fn block_on<T>(&self, future: Future<T>) -> T {
         executor_block_on(self, future)
     }
+}
 
+@cfg(runtime = "full")
+implement RuntimeExecutor for WorkStealingExecutor {
     fn shutdown(&self) {
         self.shutdown_flag.store(true, MemoryOrdering.SeqCst);
 
@@ -876,7 +849,10 @@ implement AsyncExecutor for SingleThreadExecutor {
     fn block_on<T>(&self, future: Future<T>) -> T {
         single_thread_block_on(self, future)
     }
+}
 
+@cfg(runtime = "single_thread")
+implement RuntimeExecutor for SingleThreadExecutor {
     fn shutdown(&self) {
         self.running = false;
     }

@@ -1,0 +1,20 @@
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Definition
+)
+module core.runtime.executor;
+
+/// Lifecycle shared by synchronous and asynchronous runtime profiles.
+public type RuntimeExecutor is protocol {
+    fn shutdown(&self);
+    fn active_tasks(&self) -> Int;
+};
+
+/// Synchronous profiles have no scheduled tasks or workers to drain.
+public type NoopExecutor is ();
+
+implement RuntimeExecutor for NoopExecutor {
+    fn shutdown(&self) {}
+    fn active_tasks(&self) -> Int { 0 }
+}

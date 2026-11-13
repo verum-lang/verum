@@ -88,6 +88,7 @@ module core.runtime;
 
 /// Runtime configuration protocol and implementations
 public module config;
+public module executor;
 
 /// ExecutionEnv (θ+) unified execution environment
 public module env;
@@ -141,6 +142,7 @@ public mount .config.{
     // Noop implementations
     NoopExecutor,
     NoopDriver,
+    RuntimeExecutor,
     AsyncExecutor,
 };
 
@@ -254,12 +256,6 @@ mount mem.{
     Alloc,
     Layout,
     AllocError,
-};
-
-mount async.{
-    Future,
-    Task,
-    Executor as AsyncExecutor,
 };
 
 // PlatformIOEngine is defined in .config, imported below via re-exports
@@ -402,7 +398,9 @@ public fn shutdown() {
     // Shutdown in reverse initialization order
     @cfg(feature = "async")
     {
-        env.concurrency.executor.shutdown();
+        if let Maybe.Some(executor) = env.concurrency.executor {
+            executor.shutdown();
+        }
     }
 
     @cfg(feature = "io")
@@ -465,7 +463,7 @@ fn install_runtime<R: RuntimeConfig>(runtime: R) -> Result<(), RuntimeInitError>
         error_recovery: RecoveryContext.new(),
         concurrency: ConcurrencyContext {
             @cfg(feature = "async")
-            executor: runtime.executor_handle(),
+            executor: Maybe.Some(runtime.executor_handle() as &dyn RuntimeExecutor),
             @cfg(feature = "io")
             io_driver: runtime.io_driver_ref(),
             isolation: EnvIsolationLevel.Shared,

@@ -27,7 +27,7 @@ mount core.runtime.config.{
     // (A120). The alias is gone; the verbose name is the only one.
     RuntimeInitError, RuntimeIoError,
     IoHandle, IoCompletion,
-    NoopExecutor, NoopDriver,
+    RuntimeExecutor, NoopExecutor, NoopDriver,
 };
 
 // =============================================================================
@@ -242,14 +242,15 @@ fn test_io_completion_error_construction() {
 // Section 4: NoopExecutor + NoopDriver — unit-type sentinels
 // =============================================================================
 
-// Unit types (`type X is ();`) construct with the BARE name — the
-// call form `NoopExecutor()` is "not a function" by the grammar.  The
-// stdlib itself uses the bare form (`&NoopExecutor` at
-// core/runtime/config.vr:635).
+fn active_during_shutdown<E: RuntimeExecutor>(executor: &E) -> Int {
+    executor.shutdown();
+    executor.active_tasks()
+}
+
 @test
-fn test_noop_executor_construction() {
-    let _: NoopExecutor = NoopExecutor;
-    assert(true);
+fn synchronous_profile_has_no_scheduled_work() {
+    let executor = NoopExecutor;
+    assert_eq(active_during_shutdown(&executor), 0);
 }
 
 @test
