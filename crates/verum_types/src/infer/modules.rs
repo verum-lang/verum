@@ -39,7 +39,7 @@ use super::{
     WKT_HEAP, WKT_RESULT, WKT_SHARED,
     DEREF_COERCION_DEPTH, GLOBAL_CALL_DEPTH, NORMALIZE_DEPTH,
     TYPE_RESOLUTION_STACK, NORMALIZE_TYPE_STACK, AST_TO_TYPE_DEPTH,
-    span_to_line_col, levenshtein_distance,
+    span_to_line_col,
     collect_inline_mount_reexports_recursive,
     mount_tree_exports_name, extract_quantity_from_attrs, walk_stmt_for_qtt_usage,
     meta_value_to_literal,
@@ -18471,22 +18471,10 @@ impl TypeChecker {
                 // lookup paths (protocol methods, universal methods)
                 // continue to run normally, producing a proper E400
                 // when none of them match either.
-                let receiver_ty_args_for_gate: verum_common::List<Type> = match &recv_ty {
-                    Type::Named { args, .. } | Type::Generic { args, .. } => args.clone(),
-                        // ARRAY-ITER-CONCRETIZE-1: surface the element as
-                        // the receiver's single type arg so the impl-level
-                        // var of `implement<T> [T]` binds (SliceIter<T>).
-                        Type::Array { element, .. } | Type::Slice { element } => {
-                            let mut l: List<Type> = List::new();
-                            l.push((**element).clone());
-                            l
-                        }
-                    _ => verum_common::List::new(),
-                };
                 if !self.inherent_method_pattern_allows(
                     &type_name_text,
                     &method_name_text,
-                    &receiver_ty_args_for_gate,
+                    Self::inherent_receiver_arguments(&recv_ty),
                 ) {
                     // No registered impl pattern accepts this
                     // instantiation — produce the canonical
@@ -22373,6 +22361,47 @@ impl TypeChecker {
         Ok(None)
     }
 
+    /// The lookup order is the exact receiver, its referent, then its supported views.
+    fn inherent_method_owners(&self, receiver: &Type) -> List<Text> {
+        let mut owners = List::new();
+        if let Some(exact) = self.get_exact_type_name(receiver) {
+            owners.push(exact);
+        }
+        let alternatives = self.get_type_name(receiver)
+            .into_iter()
+            .chain(self.get_fallback_type_names(receiver));
+        for owner in alternatives {
+            if !owners.contains(&owner) {
+                owners.push(owner);
+            }
+        }
+        owners
+    }
+
+    fn inherent_receiver_arguments(receiver: &Type) -> &[Type] {
+        match receiver {
+            Type::Named { args, .. } | Type::Generic { args, .. } => args.as_slice(),
+            Type::Array { element, .. } | Type::Slice { element } => {
+                std::slice::from_ref(element.as_ref())
+            }
+            _ => &[],
+        }
+    }
+
+    fn matches_inherent_specialization(
+        patterns: Option<&List<List<Type>>>,
+        actual: &[Type],
+    ) -> bool {
+        actual.is_empty() || patterns.is_none_or(|patterns| {
+            patterns.is_empty() || patterns.iter().any(|pattern| {
+                pattern.len() == actual.len()
+                    && pattern.iter().zip(actual).all(|(slot, argument)| {
+                        matches!(slot, Type::Var(_)) || slot.to_text() == argument.to_text()
+                    })
+            })
+        })
+    }
+
     /// Look up methods in the inherent methods table (from parsed .vr implement blocks).
     /// Handles specialization filtering, type variable binding, and the overload guard
     /// for closures. Returns (Some(result), false) on success, (None, true) when a
@@ -22385,38 +22414,12 @@ impl TypeChecker {
         args: &[Expr],
         span: Span,
     ) -> Result<(Option<InferResult>, bool)> {
-        // CRITICAL FIX: Check inherent instance methods from implement blocks
-        // This enables obj.method() where method has self parameter
-        //
-
-        // ENHANCEMENT: First try exact type name (for Reference/Slice/Array methods),
-        // then fall back to unwrapped type name (for methods on inner types),
-        // and finally try fallback type names (e.g., Array -> Slice).
-        // This enables methods like as_checked(), as_unsafe() on reference types.
-        let exact_type_name = self.get_exact_type_name(&recv_ty);
-        let unwrapped_type_name = self.get_type_name(&recv_ty);
-        let fallback_type_names = self.get_fallback_type_names(&recv_ty);
-
-        // Build list of type names to try: exact, unwrapped, then fallbacks
-        let mut type_names_to_try: List<verum_common::Text> = List::new();
-        if let Some(name) = exact_type_name.clone() {
-            type_names_to_try.push(name);
-        }
-        if let Some(name) = unwrapped_type_name.clone() {
-            type_names_to_try.push(name);
-        }
-        type_names_to_try.extend(fallback_type_names);
-
-        // Track whether a method was found but rejected by specialization (for error reporting)
+        let type_names_to_try = self.inherent_method_owners(recv_ty);
+        let receiver_args = Self::inherent_receiver_arguments(recv_ty);
         let mut specialization_rejected = false;
-        // if method.name.as_str() == "next" {
-        //  eprintln!("[DEBUG method_call] Looking for 'next' method");
-        //  eprintln!(" recv_ty={:?}", recv_ty);
-        //  eprintln!(" type_names_to_try={:?}", type_names_to_try);
-        // }
         let method_info_opt = {
             let methods_guard = self.inherent_methods.read();
-            let method_name_text = verum_common::Text::from(method.name.as_str());
+            let method_name_text = &method.name;
             if crate::ctor_trace_enabled() {
                 let tried: Vec<(String, bool, bool)> = type_names_to_try
                     .iter()
@@ -22426,7 +22429,7 @@ impl TypeChecker {
                             tn.as_str().to_string(),
                             bucket.is_some(),
                             bucket
-                                .map(|b| b.contains_key(&method_name_text))
+                                .map(|b| b.contains_key(method_name_text))
                                 .unwrap_or(false),
                         )
                     })
@@ -22448,68 +22451,16 @@ impl TypeChecker {
                 );
             }
 
-            // Extract receiver type args for specialization checking
-            let recv_type_args_for_check: List<Type> = match &recv_ty {
-                Type::Named { args, .. } | Type::Generic { args, .. } => args.clone(),
-                        // ARRAY-ITER-CONCRETIZE-1: surface the element as
-                        // the receiver's single type arg so the impl-level
-                        // var of `implement<T> [T]` binds (SliceIter<T>).
-                        Type::Array { element, .. } | Type::Slice { element } => {
-                            let mut l: List<Type> = List::new();
-                            l.push((**element).clone());
-                            l
-                        }
-                _ => List::new(),
-            };
-
-            // Read method_impl_patterns for specialization filtering
-            let patterns_guard = self.method_impl_patterns.read();
-
-            // Try each type name in order
-            type_names_to_try.iter().find_map(|type_name_text| {
-                methods_guard.get(type_name_text).and_then(|methods| {
-                    // #[cfg(debug_assertions)]
-                    // eprintln!("[DEBUG method_lookup] Found type '{}' with methods: {:?}",
-                    // type_name_text, methods.keys().map(|k| k.as_str()).collect::<Vec<_>>());
-                    methods.get(&method_name_text).cloned().and_then(|scheme| {
-                        // SPECIALIZATION CHECK: If patterns exist for this method,
-                        // verify that the receiver type args match at least one pattern.
-                        if let Some(type_patterns) = patterns_guard.get(type_name_text) {
-                            if let Some(method_patterns) = type_patterns.get(&method_name_text)
-                            {
-                                if !method_patterns.is_empty()
-                                    && !recv_type_args_for_check.is_empty()
-                                {
-                                    let matches_any =
-                                        method_patterns.iter().any(|pattern_args| {
-                                            if pattern_args.len()
-                                                != recv_type_args_for_check.len()
-                                            {
-                                                return false;
-                                            }
-                                            pattern_args
-                                                .iter()
-                                                .zip(recv_type_args_for_check.iter())
-                                                .all(|(pat, recv)| {
-                                                    // Type variables in patterns are wildcards (match anything)
-                                                    matches!(pat, Type::Var(_))
-                                                        || pat.to_text() == recv.to_text()
-                                                })
-                                        });
-                                    if !matches_any {
-                                        specialization_rejected = true;
-                                        return None; // Method not available for this receiver specialization
-                                    }
-                                }
-                            }
-                        }
-
-                        // Use instantiate_with_type_bounds to preserve function type bounds
-                        // This enables proper closure type inference for methods like
-                        // `map<U, F: fn(T) -> U>` where F needs its fn type bound
-                        Some(scheme)
-                    })
-                })
+            let patterns = self.method_impl_patterns.read();
+            type_names_to_try.iter().find_map(|owner| {
+                let scheme = methods_guard.get(owner)?.get(method_name_text)?;
+                let declared = patterns.get(owner).and_then(|methods| methods.get(method_name_text));
+                if Self::matches_inherent_specialization(declared, receiver_args) {
+                    Some(scheme.clone())
+                } else {
+                    specialization_rejected = true;
+                    None
+                }
             })
         };
 
@@ -22933,64 +22884,7 @@ bake to have this verified.",
             }
         }
 
-        // "Did you mean ...?" — gather method names registered for
-        // any type that matches the receiver's name, then suggest
-        // the closest Levenshtein match. Tolerant matching handles
-        // generic instantiations ("List<Int>" matching "List").
         let method_str = method.name.as_str();
-        let recv_name = recv_ty.to_text();
-        let recv_str = recv_name.as_str();
-        // "Did you mean ...?" — search two sources:
-        //  1. protocol_checker.method_registry() — built-in/stdlib method signatures
-        //  2. self.inherent_methods — user-defined `implement` blocks
-        // Match by receiver type name, tolerating generic instantiations
-        // ("List<Int>" contains "List"). Then rank candidates by
-        // Levenshtein distance and return the closest (<=3 edits).
-        let did_you_mean: Option<verum_common::Text> = {
-            let mut best: Option<(usize, verum_common::Text)> = None;
-            let consider = |best: &mut Option<(usize, verum_common::Text)>,
-                            m: &verum_common::Text| {
-                let d = levenshtein_distance(method_str, m.as_str());
-                if d == 0 || d > 3 {
-                    return;
-                }
-                match best {
-                    Some((bd, _)) if *bd <= d => {}
-                    _ => *best = Some((d, m.clone())),
-                }
-            };
-            {
-                let checker = self.protocol_checker.read();
-                for ((ty_name, m_name), _sig) in checker.method_registry().iter() {
-                    if !recv_str.contains(ty_name.as_str())
-                        && !ty_name.as_str().contains(recv_str)
-                    {
-                        continue;
-                    }
-                    consider(&mut best, m_name);
-                }
-            }
-            {
-                let inherents = self.inherent_methods.read();
-                for (ty_name, methods) in inherents.iter() {
-                    if !recv_str.contains(ty_name.as_str())
-                        && !ty_name.as_str().contains(recv_str)
-                    {
-                        continue;
-                    }
-                    for (m_name, _scheme) in methods.iter() {
-                        // Strip static-method marker prefix used by the
-                        // inherent methods table.
-                        let bare = m_name
-                            .as_str()
-                            .strip_prefix("$static$")
-                            .unwrap_or(m_name.as_str());
-                        consider(&mut best, &verum_common::Text::from(bare));
-                    }
-                }
-            }
-            best.map(|(_, n)| n)
-        };
         // T1037: before reporting the name as absent, ask whether the
         // receiver HAS it — as a field holding a function.  `x.f(a)` is a
         // method call, so a function-typed field needs `(x.f)(a)`; the
@@ -23013,6 +22907,11 @@ bake to have this verified.",
                 }
                 _ => None,
             });
+        let did_you_mean = if field_fn.is_none() {
+            self.instance_method_suggestion(&recv_ty, method_str, span)
+        } else {
+            None
+        };
         return Err(TypeError::MethodNotFound {
             ty: recv_ty.to_text(),
             method: method.name.as_str().to_text(),
@@ -23020,6 +22919,57 @@ bake to have this verified.",
             did_you_mean,
             field_fn,
         });
+    }
+
+    fn instance_method_suggestion(
+        &self, receiver: &Type, spelling: &str, span: Span,
+    ) -> Option<Text> {
+        let owners = self.inherent_method_owners(receiver);
+        if owners.is_empty() {
+            return None;
+        }
+        let mut distance = verum_diagnostics::name_distance::EditDistance::new(spelling);
+        let mut candidates = List::new();
+        let mut consider = |name: &Text| {
+            if let Some(edits @ 1..=3) = distance.within(name.as_str(), 3) {
+                candidates.push((edits, name.clone()));
+            }
+        };
+        {
+            let methods = self.inherent_methods.read();
+            let patterns = self.method_impl_patterns.read();
+            let receiver_args = Self::inherent_receiver_arguments(receiver);
+            for owner in &owners {
+                if let Some(entries) = methods.get(owner) {
+                    for (name, scheme) in entries {
+                        if name.starts_with("$static$")
+                            || scheme.receiver_kind.is_some_and(|kind| !kind.meta().has_self)
+                        {
+                            continue;
+                        }
+                        let declared = patterns.get(owner).and_then(|methods| methods.get(name));
+                        if Self::matches_inherent_specialization(declared, receiver_args) {
+                            consider(name);
+                        }
+                    }
+                }
+            }
+        }
+        {
+            let checker = self.protocol_checker.read();
+            for ((owner, name), signature) in checker.method_registry() {
+                if signature.receiver.meta().has_self && owners.contains(owner) {
+                    consider(name);
+                }
+            }
+        }
+        // Hash-table insertion order cannot choose between equally close names.
+        candidates.sort_unstable();
+        candidates.dedup();
+        candidates.into_iter().map(|(_, name)| name).find(|name| {
+            self.check_source_method_visibility(receiver, name.as_str(), span).is_ok()
+                && self.check_structural_method_import(receiver, name, span).is_ok()
+        })
     }
 
     fn try_resolve_pre_receiver_method(

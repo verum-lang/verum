@@ -186,43 +186,7 @@ pub(crate) fn check_all_conditions(
     Ok(all_bindings)
 }
 
-/// Compute Levenshtein distance between two strings for suggestions
-///
-/// Used to provide "did you mean?" suggestions in error messages.
-pub(crate) fn levenshtein_distance(s1: &str, s2: &str) -> usize {
-    let len1 = s1.len();
-    let len2 = s2.len();
-
-    // Fast paths
-    if len1 == 0 {
-        return len2;
-    }
-    if len2 == 0 {
-        return len1;
-    }
-    if s1 == s2 {
-        return 0;
-    }
-
-    // Standard dynamic programming approach
-    let mut prev_row: List<usize> = (0..=len2).collect();
-    let mut curr_row: List<usize> = vec![0; len2 + 1].into();
-
-    for (i, c1) in s1.chars().enumerate() {
-        curr_row[0] = i + 1;
-
-        for (j, c2) in s2.chars().enumerate() {
-            let cost = if c1 == c2 { 0 } else { 1 };
-            curr_row[j + 1] = (prev_row[j + 1] + 1) // deletion
-                .min(curr_row[j] + 1) // insertion
-                .min(prev_row[j] + cost); // substitution
-        }
-
-        std::mem::swap(&mut prev_row, &mut curr_row);
-    }
-
-    prev_row[len2]
-}
+pub(crate) use verum_diagnostics::name_distance::levenshtein_distance;
 
 // ==================== Helper Functions ====================
 
