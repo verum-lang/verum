@@ -108,13 +108,38 @@ impl ProtocolChecker {
         let Some(declaration) = self.associated_declaration_application(
             &key, &owner.args, receiver, name, &mut Vec::new(),
         )? else { return Err("selected protocol does not declare this associated member".into()); };
-        let Some((implementation, substitution)) = self.find_impl_matching(
-            receiver, &owner.protocol, Some(&owner.args),
-        ) else { return Ok(None); };
-        self.instantiate_declared_family(
-            implementation, &declaration.declaration, receiver, name,
-            &declaration.arguments, arguments, &substitution, assumptions,
-        ).map(Some)
+        let Some(index) = self.impls_by_protocol.get(&key) else { return Ok(None) };
+        let callables = Default::default();
+        let environment = super::ConstraintEnvironment::new(assumptions, &callables);
+        let mut selected = None;
+        for index in index.candidates(receiver, self.requires_unfiltered_type_candidates(receiver)) {
+            let implementation = &self.impls[index];
+            let substitution = match self.match_implementation_candidate_in_environment(
+                implementation, receiver, Some(&owner.args), true, &environment,
+            ) {
+                CandidateMatch::Disjoint => continue,
+                CandidateMatch::Unknown => return Err("cannot establish the selected family's receiver domain".into()),
+                CandidateMatch::Matched(substitution) => substitution,
+            };
+            let application = self.instantiate_declared_family(
+                implementation, &declaration.declaration, receiver, name,
+                &declaration.arguments, arguments, &substitution, assumptions,
+            )?;
+            if let Some(prior) = &selected {
+                if !self.same_family_application(prior, &application) {
+                    return Err("selected family has competing implementation bindings".into());
+                }
+            } else {
+                selected = Some(application);
+            }
+        }
+        Ok(selected)
+    }
+
+    fn same_family_application(&self, left: &FamilyApplication, right: &FamilyApplication) -> bool {
+        left.arguments.len() == right.arguments.len()
+            && left.arguments.iter().zip(&right.arguments).all(|(a, b)| self.types_structurally_equal(a, b))
+            && self.types_structurally_equal(&left.result, &right.result)
     }
 
     /// Equations supplied by actual declaration premises for one selected
@@ -358,8 +383,7 @@ impl ProtocolChecker {
                 if let Some((prior_protocol, prior_owner, prior)) = &selected {
                     if prior_protocol != &selected_declaration.owner
                         || *prior_owner != owner_arguments
-                        || prior.arguments != application.arguments
-                        || !self.types_structurally_equal(&prior.result, &application.result)
+                        || !self.same_family_application(prior, &application)
                     {
                         return Err(
                             "associated family application has competing declaration bindings"

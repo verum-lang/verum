@@ -123,12 +123,10 @@ fn same_named_projections_from_distinct_protocols_do_not_forward_evidence() {
         type Fixed is {};
         implement<F: Other> Carrier for F { type Item = Fixed; }
     ";
-    check_with_protocol(
-        protocols,
-        "fn accept<F: Carrier>(x: F) -> Int where F.Item: Transfer { 1 }",
-        "fn probe<F: Other>(x: F) -> Int where F.Item: Transfer { accept(x) }",
-        false,
-    );
+    let accept = "fn accept<F: Carrier>(x: F) -> Int where F.Item: Transfer { 1 }";
+    let relay = "fn probe<F: Other>(x: F) -> Int where F.Item: Transfer { accept(x) }";
+    check_with_protocol(protocols, accept, relay, false);
+    check_with_protocol(&format!("{protocols} implement Transfer for Fixed {{}}"), accept, relay, true);
 }
 
 #[test]

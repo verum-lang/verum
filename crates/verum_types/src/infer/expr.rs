@@ -6772,7 +6772,9 @@ impl TypeChecker {
                             return Ok(application.result);
                         }
                     }
-                    let resolved = checker.resolve_owned_associated_family(&base, &owner, &assoc, &arguments, &[])
+                    let resolved = checker.resolve_owned_associated_family(
+                        &base, &owner, &assoc, &arguments, call.caller.unwrap_or_default(),
+                    )
                         .map_err(TypeError::Other)?;
                     drop(checker);
                     if let Some(resolved) = resolved {
