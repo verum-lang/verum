@@ -15636,7 +15636,7 @@ impl TypeChecker {
 
     /// Source registration owns a scope-qualified parameter-name row; an
     /// ambient constructor or a sibling module's bare row cannot supply it.
-    fn explicit_value_outranks_constructor(&self, name: &str) -> bool {
+    pub(super) fn explicit_value_outranks_constructor(&self, name: &str) -> bool {
         self.ctx.env.is_locally_bound(name)
             || (self.function_param_names.contains_key(&Text::from(format!(
                 "{}.{}",

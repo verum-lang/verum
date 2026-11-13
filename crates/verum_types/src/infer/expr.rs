@@ -624,6 +624,7 @@ impl TypeChecker {
             // This enables bidirectional type checking for bare variant names like `None`
             // in match arms, preventing collisions with other types (e.g., Command.None vs Maybe.None).
             Match { expr: scrutinee, arms } => self.check_match_expr(expr, expected, scrutinee, arms),
+            Select { .. } => self.infer_select_expr(expr, Some(expected)),
 
             // Variant constructor call with expected variant type:
             // When checking `Valid(42)` against `Validation<Text, Int>`, resolve the
@@ -1071,17 +1072,12 @@ impl TypeChecker {
         call_args: &List<Expr>,
     ) -> Result<Maybe<InferResult>> {
         use ExprKind::*;
-        let constructor_name = if let ExprKind::Path(path) = &func.kind {
-            path.segments
-                .last()
-                .map(|s| match s {
-                    verum_ast::ty::PathSegment::Name(id) => id.name.as_str(),
-                    _ => "",
-                })
-                .unwrap_or("")
-        } else {
-            ""
-        };
+        let ExprKind::Path(path) = &func.kind else { return Ok(None) };
+        let Some(name) = path.as_ident() else { return Ok(None) };
+        let constructor_name = name.name.as_str();
+        if self.explicit_value_outranks_constructor(constructor_name) {
+            return Ok(None);
+        }
 
         // Expand expected type to variant form
         let resolved_expected_call = self.unifier.apply(expected);
@@ -2689,7 +2685,7 @@ impl TypeChecker {
                                     _ => "",
                                 })
                                 .unwrap_or("");
-                            if !ctor_name.is_empty() {
+                            if !ctor_name.is_empty() && !self.explicit_value_outranks_constructor(ctor_name) {
                                 let ctor_key = Text::from(ctor_name);
                                 // Check if this constructor has multiple parent types
                                 let alt_parents =
@@ -4920,7 +4916,7 @@ impl TypeChecker {
                 // Select expressions require async context: "select { ... }" only valid in async functions — Select Expression Syntax
                 // Awaits multiple futures concurrently, executes first completed
                 // Grammar: grammar/verum.ebnf v2.9 - select_expr
-                Select { .. } => self.infer_select_expr(current_expr),
+                Select { .. } => self.infer_select_expr(current_expr, None),
 
                 // Nursery expression: nursery(options) { body } [on_cancel {...}] [recover {...}]
                 // Structured concurrency: nurseries for task scoping, cancellation propagation, error collection — Structured Concurrency
@@ -6419,172 +6415,52 @@ impl TypeChecker {
         })
     }
 
-    /// Type-infer a `select { ... }` expression.
-    /// Validates async context, checks each arm's future + pattern + guard,
-    /// unifies all arm body types, and warns on exhaustiveness issues.
-    fn infer_select_expr(&mut self, expr: &Expr) -> Result<InferResult> {
-        let ExprKind::Select { biased: _, arms, span: select_span } = &expr.kind
-            else { unreachable!() };
-                    // Validate that select is used in an async context
-                    // Select expressions require async context: "select { ... }" only valid in async functions — Select expressions can only be used in async context
-                    if !self.in_async_context {
-                        return Err(TypeError::OtherWithCodeSpanned {
-                            code: verum_common::Text::from("E406"),
-                            msg: verum_common::Text::from(
-                                "select expression can only be used in async context \
-                                 (async fn, async block, or async closure)",
-                            ),
-                            span: expr.span,
-                        });
-                    }
-
-                    if arms.is_empty() {
-                        return Err(TypeError::OtherWithCodeSpanned {
-                            code: verum_common::Text::from("E406"),
-                            msg: verum_common::Text::from(
-                                "select expression must have at least one arm",
-                            ),
-                            span: expr.span,
-                        });
-                    }
-
-                    // Type check each arm and collect body types
-                    let mut arm_types: List<Type> = List::new();
-                    // Track for exhaustiveness checking
-                    let mut has_else = false;
-                    let mut all_have_guards = true;
-
-                    for arm in arms.iter() {
-                        self.ctx.enter_scope();
-
-                        // Check if this is an else/default arm
-                        if arm.is_else() {
-                            has_else = true;
-                            // Else arm has no pattern or future to check
-                        } else {
-                            // Track if this arm has a guard for exhaustiveness check
-                            if arm.guard.is_none() {
-                                all_have_guards = false;
-                            }
-                            // Type check the future expression
-                            // Note: arm.future contains an await expression (e.g., `future.await`)
-                            // We need to extract the inner future and get its type
-                            if let Some(ref future_expr) = arm.future {
-                                // The parser stores the full await expression (e.g., `task.await`)
-                                // We need to extract the inner future expression and type it
-                                let awaited_ty = if let ExprKind::Await(inner_future) =
-                                    &future_expr.kind
-                                {
-                                    // Type the inner future expression (before .await)
-                                    let future_result = self.synth_expr(inner_future)?;
-
-                                    // Resolve type variables before matching
-                                    let resolved_ty = self.unifier.apply(&future_result.ty);
-
-                                    // Extract awaited type using protocol resolver for comprehensive
-                                    // Future type handling (Type::Future, Type::Generic, Type::Named, Type::Var)
-                                    match self.resolve_source_future(&resolved_ty, inner_future.span)? {
-                                        Some(resolution) => resolution.output,
-                                        None => {
-                                            if self.in_async_context {
-                                                resolved_ty.clone()
-                                            } else {
-                                                return Err(TypeError::Other(
-                                                    verum_common::Text::from(format!(
-                                                        "select arm future must be a Future type, got: {}",
-                                                        future_result.ty
-                                                    )),
-                                                ));
-                                            }
-                                        }
-                                    }
-                                } else {
-                                    // Fallback: if not an await expr, type the expression directly
-                                    // This shouldn't happen with correct parsing, but handle it gracefully
-                                    let future_result = self.synth_expr(future_expr)?;
-                                    let resolved_ty = self.unifier.apply(&future_result.ty);
-                                    match self.resolve_source_future(&resolved_ty, future_expr.span)? {
-                                        Some(resolution) => resolution.output,
-                                        None => {
-                                            // In async context, be lenient
-                                            if self.in_async_context {
-                                                resolved_ty
-                                            } else {
-                                                return Err(TypeError::Other(
-                                                    verum_common::Text::from(format!(
-                                                        "select arm must contain await expression, got: {:?}",
-                                                        future_expr.kind
-                                                    )),
-                                                ));
-                                            }
-                                        }
-                                    }
-                                };
-
-                                // Bind pattern variables using full pattern matching
-                                // Supports: Ok(data), Message.Command { cmd }, x, _, etc.
-                                // Select expressions require async context: "select { ... }" only valid in async functions — Section 4.3.4 - Pattern Matching in Branches
-                                if let Some(ref pattern) = arm.pattern {
-                                    self.bind_pattern(pattern, &awaited_ty)?;
-                                }
-                            }
-
-                            // Type check optional guard
-                            if let Some(ref guard) = arm.guard {
-                                let guard_result = self.synth_expr(guard)?;
-                                self.unifier
-                                    .unify(&guard_result.ty, &Type::bool(), guard.span)?;
-                            }
-                        }
-
-                        // Type check the arm body
-                        let body_result = self.synth_expr(&arm.body)?;
-                        arm_types.push(body_result.ty);
-
-                        self.ctx.exit_scope();
-                    }
-
-                    // Exhaustiveness check for select expression
-                    // Select expressions require async context: "select { ... }" only valid in async functions — Select exhaustiveness
-                    // A select is considered non-exhaustive if:
-                    // - All arms have guards AND there's no else/default arm
-                    // In this case, if all guards evaluate to false, the select will block forever
-                    if all_have_guards
-                        && !has_else
-                        && !arms.is_empty()
-                        && !arms.iter().all(|a| a.is_else())
-                    {
-                        // Check if there's at least one arm without a guard (excluding else arms)
-                        let non_else_arms: Vec<_> = arms.iter().filter(|a| !a.is_else()).collect();
-                        if !non_else_arms.is_empty()
-                            && non_else_arms.iter().all(|a| a.guard.is_some())
-                        {
-                            // All non-else arms have guards - this could block forever
-                            // Emit a warning (not error) since guards might be intentionally comprehensive
-                            let warning = Diagnostic::new_warning(
-                                "select expression may block forever: all arms have guards but no \
-                                 'else' branch. If all guards evaluate to false, execution will block. \
-                                 Consider adding an 'else => ...' branch for exhaustiveness.",
-                                span_to_line_col(*select_span),
-                                "W0501", // Warning code for select exhaustiveness
-                            );
-                            self.diagnostics.push(warning);
-                        }
-                    }
-
-                    // All arm bodies must unify to the same type
-                    if arm_types.is_empty() {
-                        return Err(TypeError::Other(verum_common::Text::from(
-                            "select expression has no arms",
-                        )));
-                    }
-
-                    let result_ty = arm_types[0].clone();
-                    for (i, arm_ty) in arm_types.iter().enumerate().skip(1) {
-                        self.unifier.unify(arm_ty, &result_ty, arms[i].span)?;
-                    }
-
-                    Ok(InferResult::new(result_ty))
+    /// Scheduling order has no bearing on arm result types. Each selected body
+    /// checks against the enclosing result, or the first arm supplies it.
+    fn infer_select_expr(&mut self, expr: &Expr, expected: Option<&Type>) -> Result<InferResult> {
+        let ExprKind::Select { arms, .. } = &expr.kind else { unreachable!() };
+        if !self.in_async_context {
+            return Err(TypeError::OtherWithCodeSpanned {
+                code: "E406".into(),
+                msg: "select expression can only be used in async context (async fn, async block, or async closure)".into(),
+                span: expr.span,
+            });
+        }
+        if arms.is_empty() {
+            return Err(TypeError::OtherWithCodeSpanned {
+                code: "E406".into(),
+                msg: "select expression must have at least one arm".into(),
+                span: expr.span,
+            });
+        }
+        let mut result = expected.cloned();
+        for arm in arms {
+            let body = self.with_lexical_result_scope(|checker| {
+                if let (Some(pattern), Some(future)) = (&arm.pattern, &arm.future) {
+                    let awaited = checker.synth_expr(future)?;
+                    checker.bind_pattern(pattern, &awaited.ty)?;
+                }
+                if let Some(guard) = &arm.guard {
+                    checker.check_expr(guard, &Type::bool())?;
+                }
+                match &result {
+                    Some(ty) => checker.check_expr(&arm.body, ty),
+                    None => checker.synth_expr(&arm.body),
+                }
+            })?;
+            if result.is_none() && !self.is_never_type(&body.ty) {
+                result = Some(body.ty);
+            }
+        }
+        if arms.iter().all(|arm| !arm.is_else() && arm.guard.is_some()) {
+            self.diagnostics.push(Diagnostic::new_warning(
+                "select expression may block forever: all arms have guards but no 'else' branch. \
+                 If all guards evaluate to false, execution will block. Consider adding an 'else' branch for exhaustiveness.",
+                span_to_line_col(expr.span),
+                "W0501",
+            ));
+        }
+        Ok(InferResult::new(self.unifier.apply(result.as_ref().unwrap_or(&Type::Never))))
     }
 
     fn infer_expr_path(&mut self, expr: &Expr) -> Result<InferResult> {

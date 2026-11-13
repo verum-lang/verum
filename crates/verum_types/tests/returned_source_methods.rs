@@ -723,6 +723,54 @@ fn a_source_index_projects_its_key_and_output_through_a_shared_field() {
 }
 
 #[test]
+fn select_arms_preserve_the_expected_sum_owner_and_payload() {
+    let modules = [
+        ("demo.left", "public type Outcome<T,E> is | Hit(T) | Miss(E);"),
+        ("demo.right", "public type Outcome<T,E> is | Hit(T) | Miss(E);"),
+    ];
+    let header = "mount demo.left.Outcome as Left; mount demo.right.Outcome as Right;";
+    for order in ["", "biased"] {
+        let check_arms = |arms: &str| {
+            let source = format!(
+                "{header} async fn choose(other: Right<Int,Bool>) -> Left<Left<Int,Bool>,Bool> {{
+                    select {order} {{ {arms} }}
+                }}"
+            );
+            check(&source, &modules)
+        };
+        let valid = check_arms("flag = true.await => Miss(flag), value = (7).await => Hit(Hit(value))");
+        assert!(valid.is_empty(), "{order}: {valid:?}");
+        let valid_else = check_arms("flag = true.await if flag => Miss(flag), else => Hit(Hit(7))");
+        assert!(valid_else.is_empty(), "{order}: {valid_else:?}");
+        for arms in [
+            "flag = true.await => Miss(flag), value = (7).await => Hit(Hit(false))",
+            "flag = true.await => Miss(flag), value = (7).await => Hit(other)",
+            "value = (7).await => Hit(Right.Hit(value))",
+            "flag = true.await => { let Miss = |value: Bool| value; Miss(flag) }",
+            "value = (7).await if value => Hit(Hit(value)), else => Miss(true)",
+        ] {
+            let errors = check_arms(arms);
+            assert!(
+                errors.iter().any(|error| error.contains("Mismatch")),
+                "{order} {arms}: {errors:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_diverging_select_arm_does_not_determine_the_inferred_result() {
+    for arms in [
+        "a = true.await => return 3, b = (42).await => b",
+        "b = (42).await => b, a = true.await => return 3",
+    ] {
+        let source = format!("async fn choose() -> Int {{ let value = select {{ {arms} }}; value }}");
+        let errors = check(&source, &[]);
+        assert!(errors.is_empty(), "{arms}: {errors:?}");
+    }
+}
+
+#[test]
 fn awaiting_a_returned_source_value_projects_the_declared_future_output() {
     let modules = [
         ("core.async.future", "public type Future is protocol { type Output; };"),
