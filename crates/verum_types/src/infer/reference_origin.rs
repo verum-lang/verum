@@ -5,7 +5,7 @@ use crate::context::ReferenceOrigin;
 use crate::ty::{RecordReceiver, Type};
 use verum_common::List;
 use verum_ast::{
-    Expr, ExprKind, FunctionBody, FunctionDecl, FunctionParamKind, PatternKind, StmtKind, UnOp,
+    Expr, ExprKind, StmtKind, UnOp,
 };
 
 fn unparen(mut expr: &Expr) -> &Expr {
@@ -24,81 +24,6 @@ fn reference_mutability(ty: &Type) -> Option<bool> {
     }
 }
 
-/// A body which returns a parameter unchanged preserves that operand's origin.
-/// Signatures, dynamic calls and bodies with other control flow carry no such rule.
-pub(super) fn forwarded_parameter(decl: &FunctionDecl) -> Option<usize> {
-    fn name(expr: &Expr) -> Option<&verum_common::Text> {
-        let ExprKind::Path(path) = &unparen(expr).kind else {
-            return None;
-        };
-        Some(&path.as_ident()?.name)
-    }
-    let (statements, value) = match decl.body.as_ref()? {
-        FunctionBody::Block(block) => match block.expr.as_deref() {
-            Some(value) => (block.stmts.as_slice(), value),
-            None => {
-                let (last, prefix) = block.stmts.split_last()?;
-                let StmtKind::Expr { expr, .. } = &last.kind else {
-                    return None;
-                };
-                let ExprKind::Return(Some(value)) = &expr.kind else {
-                    return None;
-                };
-                (prefix, value.as_ref())
-            }
-        },
-        FunctionBody::Expr(expr) => (&[][..], expr),
-    };
-    let mut result = name(value)?;
-    for stmt in statements.iter().rev() {
-        if !stmt.attributes.is_empty() {
-            return None;
-        }
-        let StmtKind::Let {
-            pattern,
-            ty: None,
-            value: Some(value),
-        } = &stmt.kind
-        else {
-            return None;
-        };
-        let PatternKind::Ident {
-            name: binding,
-            mutable: false,
-            by_ref: false,
-            subpattern: None,
-        } = &pattern.kind
-        else {
-            return None;
-        };
-        let source = name(value)?;
-        if result == &binding.name {
-            result = source;
-        }
-    }
-    let mut forwarded = None;
-    for (index, param) in decl.params.iter().enumerate() {
-        let FunctionParamKind::Regular { pattern, .. } = &param.kind else {
-            return None;
-        };
-        let PatternKind::Ident {
-            name,
-            by_ref: false,
-            subpattern: None,
-            ..
-        } = &pattern.kind
-        else {
-            return None;
-        };
-        if &name.name == result {
-            if forwarded.is_some() {
-                return None;
-            }
-            forwarded = Some(index);
-        }
-    }
-    forwarded
-}
 
 impl TypeChecker {
     pub(super) fn retain_iteration_origin(&mut self, origin: &RecordReceiver, span: verum_ast::Span) -> crate::Result<()> {
@@ -116,26 +41,45 @@ impl TypeChecker {
         destination: &Expr,
         origins: &[RecordReceiver],
     ) -> crate::Result<()> {
-        if origins.is_empty() { return Ok(()); }
+        let direct = match &unparen(destination).kind {
+            ExprKind::Path(path) => path.as_ident().map(|name| name.name.clone()),
+            _ => None,
+        };
+        if origins.is_empty() {
+            if let Some(name) = direct { self.ctx.env.replace_current_binding_origins(&name, origins); }
+            return Ok(());
+        }
         let (holder, _) = self.borrow_place(destination)
             .ok_or(crate::TypeError::UnknownRecordOrigin { span: destination.span })?;
         let region = self.ctx.env.binding_loan_region(&holder)
             .ok_or(crate::TypeError::UnknownRecordOrigin { span: destination.span })?;
+        self.retain_origins_in_region(origins, region, destination.span)?;
+        if !direct.is_some_and(|name| self.ctx.env.replace_current_binding_origins(&name, origins)) {
+            self.ctx.env.assign_reference_origins(&holder, origins);
+        }
+        Ok(())
+    }
+
+    fn retain_origins_in_region(
+        &mut self,
+        origins: &[RecordReceiver],
+        region: usize,
+        span: verum_ast::Span,
+    ) -> crate::Result<()> {
         for origin in origins {
             let root = self.ctx.env.record_storage_name(origin.binding)
-                .ok_or(crate::TypeError::UnknownRecordOrigin { span: destination.span })?;
+                .ok_or(crate::TypeError::UnknownRecordOrigin { span })?;
             if self.ctx.env.storage_loan_region(origin.binding).is_some_and(|source| source > region) {
                 return Err(crate::TypeError::DanglingReference {
-                    var: root, ref_span: destination.span, drop_span: destination.span,
+                    var: root, ref_span: span, drop_span: span,
                 });
             }
             let field = (!origin.fields.is_empty()).then(|| origin.fields.join("."));
             if !self.borrow_tracker.retain_place_loans(&root, field.as_deref(), region) {
-                self.retain_origin(origin, None, destination.span)?;
+                self.retain_origin(origin, None, span)?;
                 self.borrow_tracker.retain_place_loans(&root, field.as_deref(), region);
             }
         }
-        self.ctx.env.assign_reference_origins(&holder, origins);
         Ok(())
     }
 
@@ -425,7 +369,7 @@ impl TypeChecker {
         Some(origins)
     }
 
-    fn collect_reference_candidates(&mut self, value: &Expr, found: &mut List<RecordReceiver>) {
+    pub(super) fn collect_reference_candidates(&mut self, value: &Expr, found: &mut List<RecordReceiver>) {
         fn add(found: &mut List<RecordReceiver>, source: RecordReceiver) {
             if !found.contains(&source) {
                 found.push(source);
@@ -447,6 +391,9 @@ impl TypeChecker {
         match &unparen(value).kind {
             ExprKind::Path(path) => {
                 if let Some(name) = path.as_ident() {
+                    if let Some(place) = self.ctx.env.record_source(&name.name, false) {
+                        self.check_payload_origin_observation(&place);
+                    }
                     for origin in self.ctx.env.reference_candidates(&name.name) {
                         add(found, origin);
                     }
@@ -483,12 +430,32 @@ impl TypeChecker {
                     self.collect_reference_candidates(expr, found);
                 }
             }
+            ExprKind::Unary { op: UnOp::Deref, expr } => {
+                let ty = self.observed_operand_type(expr)
+                    .or_else(|| self.type_registry.lookup_expr(expr.span).cloned());
+                let mut origins = List::new();
+                self.collect_reference_candidates(expr, &mut origins);
+                if let Some(ty) = ty
+                    && let Some((_, payloads)) = self.read_value_origins(ty, origins.clone(), value.span, true)
+                {
+                    origins = payloads;
+                }
+                for origin in origins { add(found, origin); }
+            }
             ExprKind::Call { args, .. } => {
+                if let Some(origins) = self.returned_value_origins(value) {
+                    for origin in origins { add(found, origin); }
+                    return;
+                }
                 for arg in args {
                     self.collect_reference_candidates(arg, found);
                 }
             }
             ExprKind::MethodCall { receiver, args, .. } => {
+                if let Some(origins) = self.returned_value_origins(value) {
+                    for origin in origins { add(found, origin); }
+                    return;
+                }
                 // A consumed receiver passes on any loans in its value. Only
                 // a borrowed (or unresolved) receiver also lends its own slot.
                 if !self.type_registry.consumes_receiver(unparen(value).span)
@@ -567,11 +534,30 @@ impl TypeChecker {
     /// borrows that field's storage through the reference-formation path.
     fn projected_value_origins(&mut self, receiver: &Expr) -> Option<List<RecordReceiver>> {
         let receiver = unparen(receiver);
-        let mut ty = self.observed_operand_type(receiver).or_else(|| {
+        let ty = self.observed_operand_type(receiver).or_else(|| {
             self.type_registry.lookup_expr(receiver.span).cloned()
         })?;
         let mut origins = List::new();
         self.collect_reference_candidates(receiver, &mut origins);
+        self.projected_origins_for_type(ty, origins, receiver.span).map(|(_, origins)| origins)
+    }
+
+    pub(super) fn projected_origins_for_type(
+        &mut self,
+        ty: Type,
+        origins: List<RecordReceiver>,
+        span: verum_ast::Span,
+    ) -> Option<(Type, List<RecordReceiver>)> {
+        self.read_value_origins(ty, origins, span, false)
+    }
+
+    fn read_value_origins(
+        &mut self,
+        mut ty: Type,
+        mut origins: List<RecordReceiver>,
+        span: verum_ast::Span,
+        single_dereference: bool,
+    ) -> Option<(Type, List<RecordReceiver>)> {
         let mut expanded = List::new();
         loop {
             let inner = match ty {
@@ -586,9 +572,9 @@ impl TypeChecker {
                     if expanded.contains(&ty) {
                         return None;
                     }
-                    let head = self.place_reference_head(&ty, receiver.span).ok()?;
+                    let head = self.place_reference_head(&ty, span).ok()?;
                     if head == ty {
-                        return Some(origins);
+                        return Some((ty, origins));
                     }
                     expanded.push(ty);
                     ty = head;
@@ -597,6 +583,7 @@ impl TypeChecker {
             };
             let mut payloads = List::new();
             for origin in origins {
+                if !self.check_payload_origin_observation(&origin) { return None; }
                 let stored = self.ctx.env.referent_value_origins(&origin)?;
                 for source in stored {
                     if !payloads.contains(&source) {
@@ -606,6 +593,7 @@ impl TypeChecker {
             }
             origins = payloads;
             ty = *inner;
+            if single_dereference { return Some((ty, origins)); }
         }
     }
 
@@ -676,14 +664,8 @@ impl TypeChecker {
                     .is_none()
                     .then_some(origin)
             }
-            ExprKind::Call { func, args, .. } => {
-                let ExprKind::Path(path) = &unparen(func).kind else {
-                    return None;
-                };
-                let name = self.path_to_string(path);
-                let index = self
-                    .callee_scheme_with_mount_authority(&name)?
-                    .returned_parameter?;
+            ExprKind::Call { args, .. } | ExprKind::MethodCall { args, .. } => {
+                let index = self.type_registry.returned_value(expr.span)?.forwarded_parameter()?;
                 self.reference_result_origin(args.get(index)?)
             }
             _ => None,
@@ -698,10 +680,8 @@ impl TypeChecker {
         args: &[Expr],
         params: Option<&[Type]>,
         receiver: Option<(&Expr, bool, Option<&Type>)>,
+        may_write_inputs: bool,
     ) -> crate::Result<()> {
-        if args.len() + usize::from(receiver.is_some()) < 2 {
-            return Ok(());
-        }
         struct Loan {
             root: verum_common::Text,
             field: Option<String>,
@@ -804,6 +784,94 @@ impl TypeChecker {
                 });
             }
         }
+        if may_write_inputs {
+            self.retain_possible_call_writes(args, params, receiver)?;
+        }
+        Ok(())
+    }
+
+    fn check_payload_origin_observation(&mut self, source: &RecordReceiver) -> bool {
+        let Some(span) = self.ctx.env.unverified_payload_write(source.binding) else {
+            return true;
+        };
+        let name = self.ctx.env.record_storage_name(source.binding).unwrap_or_else(|| "value".into());
+        self.push_diagnostic_for(crate::TypeError::OtherWithCodeSpanned {
+            code: "E312".into(),
+            msg: format!("cannot establish the lifetime of references stored in `{name}` after this mutable call").into(),
+            span,
+        });
+        false
+    }
+
+    /// An unknown callee can store an incoming loan in each writable carrier.
+    /// Retain that loan in the carrier's region before allowing later reads to
+    /// reuse its payload facts. Scalar-only destinations cannot retain loans.
+    fn retain_possible_call_writes(
+        &mut self,
+        args: &[Expr],
+        params: Option<&[Type]>,
+        receiver: Option<(&Expr, bool, Option<&Type>)>,
+    ) -> crate::Result<()> {
+        let mut sources = List::new();
+        let mut destinations = List::new();
+        for (argument, receiver_mode, declared) in receiver.into_iter()
+            .map(|(value, mode, ty)| (value, Some(mode), ty))
+            .chain(args.iter().enumerate().map(|(index, value)|
+                (value, None, params.and_then(|params| params.get(index)))))
+        {
+            let observed = self.observed_operand_type(argument)
+                .or_else(|| self.type_registry.lookup_expr(argument.span).cloned());
+            let Some(actual) = observed.as_ref().or(declared) else {
+                if receiver_mode == Some(true) {
+                    return Err(crate::TypeError::UnknownRecordOrigin { span: argument.span });
+                }
+                continue;
+            };
+            let selected = declared.unwrap_or(actual);
+            let head = self.place_reference_head(selected, argument.span)?;
+            let (mode, payload) = match &head {
+                Type::Reference { mutable, inner }
+                | Type::CheckedReference { mutable, inner }
+                | Type::UnsafeReference { mutable, inner } => (Some(*mutable), inner.as_ref()),
+                _ => (receiver_mode, &head),
+            };
+            if mode.is_none() && !self.carries_stored_loan(&head) { continue; }
+            let mut origins = List::new();
+            if mode.is_some() && self.reference_mode(actual, argument.span)?.is_none() {
+                if let Some((source, _)) = self.borrowed_record_place(argument) {
+                    origins.push(source);
+                }
+            } else {
+                self.collect_reference_candidates(argument, &mut origins);
+                if mode.is_none() && self.reference_mode(actual, argument.span)?.is_some() {
+                    if let Some((_, payloads)) = self.projected_origins_for_type(
+                        actual.clone(), origins.clone(), argument.span,
+                    ) {
+                        origins = payloads;
+                    }
+                }
+            }
+            for origin in &origins {
+                if !sources.contains(origin) { sources.push(origin.clone()); }
+            }
+            if mode == Some(true) && self.carries_stored_loan(payload) {
+                if origins.is_empty() {
+                    return Err(crate::TypeError::UnknownRecordOrigin { span: argument.span });
+                }
+                for origin in origins {
+                    destinations.push((origin, argument.span));
+                }
+            }
+        }
+        for (destination, span) in destinations {
+            self.ctx.env.invalidate_payload_origins(&destination, span);
+            let incoming: List<_> = sources.iter()
+                .filter(|source| source.binding != destination.binding).cloned().collect();
+            if incoming.is_empty() { continue; }
+            let region = self.ctx.env.storage_loan_region(destination.binding)
+                .ok_or(crate::TypeError::UnknownRecordOrigin { span })?;
+            self.retain_origins_in_region(&incoming, region, span)?;
+        }
         Ok(())
     }
 
@@ -830,7 +898,7 @@ impl TypeChecker {
                     return None;
                 };
                 reference_mutability(return_type).or_else(|| {
-                    self.argument_reference_mutability(args.get(scheme.returned_parameter?)?)
+                    self.argument_reference_mutability(args.get(scheme.returned_value.as_ref()?.forwarded_parameter()?)?)
                 })
             }
             _ => None,

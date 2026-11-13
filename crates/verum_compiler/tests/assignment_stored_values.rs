@@ -297,3 +297,44 @@ fn assigned_callable_reference_keeps_its_declared_call_signature() {
         73,
     );
 }
+
+#[test]
+fn projected_call_payload_survives_its_temporary_container() {
+    execute(
+        r#"
+        module core;
+        type Payload is { ptr:&Int, marker:Int };
+        fn selected(source:&Payload,key:&Int)->Payload {
+            Payload{ptr:source.ptr,marker:source.marker}
+        }
+        public fn probe()->Int {
+            let value=73;
+            let result={
+                let container=Payload{ptr:&value,marker:2};
+                let key=3;
+                selected(&container,&key)
+            };
+            *result.ptr
+        }
+        "#,
+        73,
+    );
+}
+
+#[test]
+fn a_mutating_call_cannot_publish_a_dangling_payload_archive() {
+    let result = produce(
+        r#"
+        module core;
+        type Payload is { ptr:&Int, marker:Int };
+        fn replace(target:&mut Payload,source:&Int) {target.ptr=source;}
+        public fn probe(input:&Int)->Payload {
+            let mut container=Payload{ptr:input,marker:2};
+            {let local=3;replace(&mut container,&local);}
+            Payload{ptr:container.ptr,marker:container.marker}
+        }
+        "#,
+    );
+    let error = result.expect_err("a stored local loan must refuse archive publication");
+    assert!(error.contains("does not live long enough"), "{error}");
+}

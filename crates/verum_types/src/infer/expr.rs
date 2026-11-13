@@ -7448,7 +7448,13 @@ impl TypeChecker {
             _ => func_ty_raw,
         };
 
-        self.type_registry.register_call_target(expr.span, func_ty.clone());
+        if let Some(scheme) = callee_name.as_ref()
+            .and_then(|name| self.callee_scheme_with_mount_authority(name))
+        {
+            self.type_registry.register_declared_static_target(expr.span, func_ty.clone(), &scheme);
+        } else {
+            self.type_registry.register_call_target(expr.span, func_ty.clone());
+        }
 
         Ok(CallPreparation::Apply(PreparedCall {
             callable: func_ty,
@@ -7866,7 +7872,8 @@ impl TypeChecker {
         else {
             unreachable!()
         };
-        self.check_call_loans(args, Some(&params), None)?;
+        let no_input_writes = self.returned_value_origins(expr).is_some();
+        self.check_call_loans(args, Some(&params), None, !no_input_writes)?;
 
         // Consume affine values passed by value
         self.consume_affine_call_args(args, &params)?;

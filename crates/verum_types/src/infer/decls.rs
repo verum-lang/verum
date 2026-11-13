@@ -6447,7 +6447,7 @@ impl TypeChecker {
         let mut scheme = scheme.with_universe_parameters(self.current_universe_parameters())
             .map_err(|message| TypeError::UniverseBinding { message, span: func.span })?;
         scheme.where_clauses = structural_conditions;
-        scheme.returned_parameter = super::reference_origin::forwarded_parameter(func);
+        scheme.returned_value = super::returned_values::returned_value(func);
         self.record_callable_declaration(&mut scheme, func);
         Ok(scheme)
         })();

@@ -10024,8 +10024,9 @@ impl TypeChecker {
             .map_err(|message| TypeError::UniverseBinding { message, span: func.span })?;
         scheme.where_clauses = structural_conditions.clone();
         self.record_callable_declaration(&mut scheme, func);
-        scheme.returned_parameter = super::reference_origin::forwarded_parameter(func);
-        let source_returned_parameter = scheme.returned_parameter;
+        scheme.returned_value = super::returned_values::returned_value(func);
+        let source_returned_value = scheme.returned_value.clone();
+        let source_callable_declaration = scheme.callable_source.clone();
         let source_explicit_slots = scheme.explicit_method_vars.clone();
         let source_value_parameters = scheme.value_parameters.clone();
         // Protect builtin polymorphic functions from being overwritten by stdlib functions.
@@ -11919,7 +11920,8 @@ impl TypeChecker {
         final_scheme.where_clauses = structural_conditions;
         final_scheme.explicit_method_vars = source_explicit_slots;
         final_scheme.value_parameters = source_value_parameters;
-        final_scheme.returned_parameter = source_returned_parameter;
+        final_scheme.returned_value = source_returned_value;
+        final_scheme.callable_source = source_callable_declaration;
         if !self.in_impl_block {
             // T0231 guarded / T1120 declaration channel — see the
             // initial-scheme twin above.
@@ -17266,7 +17268,13 @@ impl TypeChecker {
             let kind = result.receiver_kind.take();
             let borrow = kind.filter(|kind| kind.meta().is_borrowed)
                 .map(|kind| (receiver, kind.meta().allows_mutation, receiver_type.as_ref()));
-            tc.check_call_loans(args, None, borrow)?;
+            let call_target = tc.type_registry.lookup_call_target(span).cloned();
+            let parameters = match &call_target {
+                Some(Type::Function { params, .. }) if params.len() == args.len() => Some(params.as_slice()),
+                _ => None,
+            };
+            let no_input_writes = tc.returned_call_value_origins(span, args).is_some();
+            tc.check_call_loans(args, parameters, borrow, !no_input_writes)?;
             match kind {
                 Some(kind) if !kind.meta().allows_mutation => {}
                 // Passing an immediate scalar by value copies it out of its place.

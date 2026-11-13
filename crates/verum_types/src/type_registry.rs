@@ -39,9 +39,16 @@
 //! ```
 
 use verum_ast::span::Span;
-use verum_common::{Map, Maybe, Text};
+use verum_common::{Map, Maybe, Shared, Text};
 
 use crate::ty::Type;
+
+#[derive(Debug, Clone)]
+struct CallTarget {
+    ty: Type,
+    explicit_inputs: bool,
+    returned_value: Option<Shared<crate::context::ReturnedValue>>,
+}
 
 /// Registry mapping AST nodes to inferred types
 ///
@@ -60,7 +67,7 @@ pub struct TypeRegistry {
     /// function calls, and compound expressions.
     expr_types: Map<Span, Type>,
     /// Callable selected for an executed call, distinct from its result type.
-    call_targets: Map<Span, (Type, bool)>,
+    call_targets: Map<Span, CallTarget>,
     /// A source site consumes its receiver only if every resolution at that
     /// span agrees. Expanded expressions can share a source location.
     consuming_receivers: Map<Span, bool>,
@@ -105,7 +112,7 @@ impl TypeRegistry {
     }
 
     pub fn register_call_target(&mut self, span: Span, ty: Type) {
-        self.record_call_target(span, ty, false);
+        self.record_call_target(span, ty, false, None);
     }
 
     pub(crate) fn register_declared_static_target(
@@ -125,24 +132,39 @@ impl TypeRegistry {
                 && !source.is_variadic
                 && source.body.is_some()
         });
-        self.record_call_target(span, ty, explicit_inputs);
+        self.record_call_target(span, ty, explicit_inputs, scheme.returned_value.clone());
     }
 
-    fn record_call_target(&mut self, span: Span, ty: Type, explicit_inputs: bool) {
+    fn record_call_target(
+        &mut self,
+        span: Span,
+        ty: Type,
+        explicit_inputs: bool,
+        returned_value: Option<Shared<crate::context::ReturnedValue>>,
+    ) {
         let previous = self.call_targets.get(&span);
-        let agreed = !span.is_empty()
-            && explicit_inputs
-            && previous.is_none_or(|(previous, known)| *known && previous == &ty);
-        self.call_targets.insert(span, (ty, agreed));
+        let agreed = !span.is_empty() && explicit_inputs
+            && previous.is_none_or(|previous| previous.explicit_inputs && previous.ty == ty);
+        let same_rule = agreed && previous.is_none_or(|previous|
+            previous.returned_value == returned_value);
+        self.call_targets.insert(span, CallTarget {
+            ty,
+            explicit_inputs: agreed,
+            returned_value: same_rule.then_some(returned_value).flatten(),
+        });
     }
 
     pub fn lookup_call_target(&self, span: Span) -> Maybe<&Type> {
-        self.call_targets.get(&span).map(|(ty, _)| ty)
+        self.call_targets.get(&span).map(|target| &target.ty)
     }
 
     pub(crate) fn explicit_input_target(&self, span: Span) -> Maybe<&Type> {
-        let (ty, agreed) = self.call_targets.get(&span)?;
-        agreed.then_some(ty)
+        let target = self.call_targets.get(&span)?;
+        target.explicit_inputs.then_some(&target.ty)
+    }
+
+    pub(crate) fn returned_value(&self, span: Span) -> Option<&Shared<crate::context::ReturnedValue>> {
+        self.call_targets.get(&span)?.returned_value.as_ref()
     }
 
     /// Register the type of an expression
@@ -307,7 +329,7 @@ impl TypeRegistry {
     ///
     /// * `unifier` - The unifier containing the accumulated substitutions
     pub fn apply_substitution(&mut self, unifier: &crate::unify::Unifier) {
-        for (ty, _) in self.call_targets.values_mut() { *ty = unifier.apply(ty); }
+        for target in self.call_targets.values_mut() { target.ty = unifier.apply(&target.ty); }
         // Apply substitution to all expression types
         for ty in self.expr_types.values_mut() {
             *ty = unifier.apply(ty);

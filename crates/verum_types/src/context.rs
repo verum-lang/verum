@@ -162,6 +162,31 @@ pub(crate) struct NominalApplication {
     pub arguments: List<Type>,
 }
 
+/// A flat, source-owned value derivation. Every edge selects an earlier node.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ReturnedValue {
+    pub nodes: List<ReturnedValueNode>,
+    pub result: usize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum ReturnedValueNode {
+    Parameter(usize),
+    Independent,
+    Field { source: usize, name: Text },
+    TupleIndex { source: usize, index: usize },
+    Aggregate(List<usize>),
+}
+
+impl ReturnedValue {
+    pub(crate) fn forwarded_parameter(&self) -> Option<usize> {
+        match self.nodes.get(self.result)? {
+            ReturnedValueNode::Parameter(index) => Some(*index),
+            _ => None,
+        }
+    }
+}
+
 /// A type scheme represents a polymorphic type: ∀α β. T
 ///
 /// This enables let-polymorphism where bound variables can
@@ -207,8 +232,8 @@ pub struct TypeScheme {
     /// Permission of the implicit receiver stripped from the callable arguments.
     /// Legacy descriptors without this information cannot establish a shared borrow.
     pub(crate) receiver_kind: Option<crate::core_metadata::ReceiverKind>,
-    /// Direct parameter forwarding established from the callable's own source body.
-    pub(crate) returned_parameter: Option<usize>,
+    /// Structural result derivation owned by this callable's exact source body.
+    pub(crate) returned_value: Option<Shared<ReturnedValue>>,
     /// Declared implementation receiver using this scheme's type variables.
     /// This preserves reordered, nested and fixed receiver arguments without
     /// inferring the implementation relationship from a method's return type.
@@ -387,7 +412,7 @@ impl TypeScheme {
             impl_var_count: 0,
             impl_self_type: None,
             receiver_kind: None,
-            returned_parameter: None,
+            returned_value: None,
             explicit_method_vars: None,
             value_parameters: List::new(),
             universe_params: List::new(),
@@ -409,7 +434,7 @@ impl TypeScheme {
             impl_var_count: 0,
             impl_self_type: None,
             receiver_kind: None,
-            returned_parameter: None,
+            returned_value: None,
             explicit_method_vars: None,
             value_parameters: List::new(),
             universe_params: List::new(),
@@ -432,7 +457,7 @@ impl TypeScheme {
             impl_var_count: 0,
             impl_self_type: None,
             receiver_kind: None,
-            returned_parameter: None,
+            returned_value: None,
             explicit_method_vars: None,
             value_parameters: List::new(),
             universe_params: List::new(),
@@ -460,7 +485,7 @@ impl TypeScheme {
             impl_var_count: 0,
             impl_self_type: None,
             receiver_kind: None,
-            returned_parameter: None,
+            returned_value: None,
             explicit_method_vars: None,
             value_parameters: List::new(),
             universe_params: List::new(),
@@ -1183,6 +1208,7 @@ struct RecordPlace {
     mutable: bool,
     projection: Option<Span>,
     reference: Option<ReferenceOrigin>,
+    unverified_write: Option<Span>,
 }
 
 impl RecordPlace {
@@ -1628,6 +1654,49 @@ impl TypeEnv {
             return List::from(inputs.as_ref());
         }
         self.record_source(name, true).into_iter().collect()
+    }
+
+    /// A complete assignment in the binding's own lexical block dominates
+    /// subsequent reads. A nested branch or loop retains the incoming state.
+    pub(crate) fn replace_current_binding_origins(
+        &mut self,
+        name: &str,
+        sources: &[crate::ty::RecordReceiver],
+    ) -> bool {
+        if !self.bindings.contains_key(name) { return false; }
+        let place = self.record_places.entry(name.into()).or_default();
+        place.reference = Some(ReferenceOrigin::Candidates(sources.into()));
+        place.unverified_write = None;
+        true
+    }
+
+    pub(crate) fn invalidate_payload_origins(
+        &mut self,
+        destination: &crate::ty::RecordReceiver,
+        span: Span,
+    ) {
+        let mut scope = self;
+        loop {
+            if let Some(place) = scope.record_places.values_mut()
+                .find(|place| place.id == Some(destination.binding))
+            {
+                place.unverified_write = Some(span);
+                return;
+            }
+            let Some(parent) = scope.parent.as_deref_mut() else { return; };
+            scope = parent;
+        }
+    }
+
+    pub(crate) fn unverified_payload_write(&self, binding: u64) -> Option<Span> {
+        let mut scope = Some(self);
+        while let Some(env) = scope {
+            if let Some(place) = env.record_places.values().find(|place| place.id == Some(binding)) {
+                return place.unverified_write;
+            }
+            scope = env.parent.as_deref();
+        }
+        None
     }
 
     /// Reading a referent copies its stored loans, independently of the loan

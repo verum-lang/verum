@@ -3521,7 +3521,7 @@ impl TypeChecker {
                     impl_var_count: 0,
                     impl_self_type: None,
                     receiver_kind: None,
-                    returned_parameter: None,
+                    returned_value: None,
                     explicit_method_vars: None,
                     universe_params: List::new(),
                     callable_source: None,
