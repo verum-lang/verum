@@ -1048,7 +1048,15 @@ fn test_executor_config_default() {
     let config = ExecutorConfig::default();
 
     assert_eq!(config.default_timeout_ms, 30_000);
-    assert!(config.env.is_empty());
+    let expected_cli = config
+        .verum_cli_path
+        .as_ref()
+        .map(|path| path.to_string_lossy());
+    assert_eq!(config.env.len(), usize::from(expected_cli.is_some()));
+    assert_eq!(
+        config.env.get(&Text::from("VERUM_CLI")).map(Text::as_str),
+        expected_cli.as_deref(),
+    );
 }
 
 /// Test command for tier
@@ -1095,4 +1103,99 @@ fn test_run_summary_default() {
     assert_eq!(summary.passed, 0);
     assert_eq!(summary.failed, 0);
     assert_eq!(summary.skipped, 0);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn typecheck_fail_process_checks_counts_and_each_diagnostics_location() {
+    use std::os::unix::fs::PermissionsExt;
+    use vtest::executor::Executor;
+    let dir = tempdir().unwrap();
+    let cli = dir.path().join("compiler");
+    std::fs::write(&cli, "#!/bin/sh\ncat \"$0.stderr\" >&2\nexit 1\n").unwrap();
+    std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let executor = Executor::new(ExecutorConfig {
+        verum_cli_path: Some(cli.clone()),
+        use_direct_integration: false,
+        ..Default::default()
+    });
+    let first = "error<E400>: first failure\n  --> source.vr:8:3\n";
+    let second = "error<proof-failed>: second failure\n  --> source.vr:9:12\n";
+    let warnings = "warning[W001]: first failure\n  --> source.vr:9:12\n";
+    let spec = dir.path().join("source.vr");
+    let check = |body: &str, count: usize, expected: &str| {
+        std::fs::write(cli.with_extension("stderr"), body).unwrap();
+        let source = format!(
+            "// @test: typecheck-fail\n// @tier: 0\n// @expected-error-count: {count}\n{expected}\nfn main() {{}}"
+        );
+        std::fs::write(&spec, &source).unwrap();
+        TestDirectives::parse(&source, spec.to_string_lossy().as_ref().into()).unwrap()
+    };
+    let located = "// @expected-error: E400 \"first failure\" at line 8, col 3";
+    let mixed = format!("{first}{second}{warnings}error: compilation failed with 2 errors\n");
+    for (source, count, expected, accepted) in [
+        (mixed.as_str(), 2, located, true),
+        (mixed.as_str(), 1, located, false),
+        (mixed.as_str(), 3, "", false),
+        (mixed.as_str(), 2, "", true),
+        (
+            mixed.as_str(),
+            2,
+            "// @expected-error: E400 \"first failure\" at line 9, col 12",
+            false,
+        ),
+        (warnings, 0, "", false),
+        ("error<E400>: first failure\n", 1, located, false),
+        ("error: compilation failed with 1 error", 1, "", false),
+        ("error[E400>: first failure", 1, "", false),
+        (
+            r"C:\project\test.vr:8:3: error[E400]: first failure",
+            1,
+            located,
+            true,
+        ),
+        (
+            "error: untagged issue\n  --> C:\\project\\test.vr:8:3\n",
+            1,
+            "// @expected-error: \"untagged issue\"",
+            true,
+        ),
+        ("unrelated compiler output", 1, "", false),
+    ] {
+        let result = executor
+            .execute(check(source, count, expected))
+            .await
+            .unwrap();
+        assert_eq!(result.outcomes.len(), 1);
+        assert_eq!(
+            result.all_pass(),
+            accepted,
+            "{count} {expected} {:?}",
+            result.outcomes
+        );
+    }
+}
+
+#[tokio::test]
+async fn typecheck_fail_direct_counts_errors_from_this_source_session() {
+    use vtest::executor::Executor;
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("checks.vr");
+    let executor = Executor::new(ExecutorConfig::default());
+    for (count, accepted) in [(1, true), (2, false)] {
+        let source = format!(
+            "// @test: typecheck-fail\n// @tier: 0\n// @expected-error: E400\n// @expected-error-count: {count}\n@no_implicit_prelude module checks;\nfn main() -> Int {{false}}"
+        );
+        std::fs::write(&input, &source).unwrap();
+        let directives =
+            TestDirectives::parse(&source, input.to_string_lossy().as_ref().into()).unwrap();
+        let result = executor.execute(directives).await.unwrap();
+        assert_eq!(result.outcomes.len(), 1);
+        assert_eq!(
+            result.all_pass(),
+            accepted,
+            "{count}: {:?}",
+            result.outcomes
+        );
+    }
 }

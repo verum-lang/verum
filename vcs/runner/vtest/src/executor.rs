@@ -111,6 +111,20 @@ pub struct ParsedError {
     pub severity: Text,
 }
 
+impl From<&verum_diagnostics::Diagnostic> for ParsedError {
+    fn from(diagnostic: &verum_diagnostics::Diagnostic) -> Self {
+        let span = diagnostic.primary_span();
+        Self {
+            code: diagnostic.code().unwrap_or("").into(),
+            message: diagnostic.message().into(),
+            severity: diagnostic.severity().as_str().into(),
+            file: span.map(|span| span.file.clone()),
+            line: span.map(|span| span.line),
+            column: span.map(|span| span.column),
+        }
+    }
+}
+
 impl ParsedError {
     /// Parse errors from compiler stderr output.
     ///
@@ -119,120 +133,54 @@ impl ParsedError {
     /// - GCC-style: `file:line:column: error: message`
     /// - Simple: `error[E302]: message`
     pub fn parse_stderr(stderr: &str) -> List<ParsedError> {
-        let mut errors = List::new();
-
-        // Rust-style error pattern: error[E302]: message or error<E302>: message
-        //   --> file:line:column
-        // Note: Supports both [Exxx] and <Exxx> formats for error codes
-        // Note: Also supports M codes for meta errors (M400-M999)
-        static RUST_ERROR_RE: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"(?m)^(error|warning|note)[\[<]([EWM][0-9][0-9A-Z]{2,3})[\]>]:\s*(.+)$")
-                .unwrap()
-        });
-
-        // Location pattern: --> file:line:column
-        static LOCATION_RE: Lazy<Regex> =
-            Lazy::new(|| Regex::new(r"^\s*-->\s*([^:]+):(\d+):(\d+)").unwrap());
-
-        // GCC-style pattern: file:line:column: error[E302]: message
-        // Note: Also supports M codes for meta errors (M400-M999)
-        static GCC_ERROR_RE: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(
-                r"^([^:]+):(\d+):(\d+):\s*(error|warning|note)(?:\[([EWM][0-9][0-9A-Z]{2,3})\])?:\s*(.+)$",
-            )
+        static HEADER: Lazy<Regex> = Lazy::new(|| {
+            Regex::new(concat!(
+                r"^(?:(?P<file>.+):(?P<line>[0-9]+):(?P<column>[0-9]+):\s*)?",
+                r"(?P<severity>error|warning|note)",
+                r"(?:\[(?P<bracket>[\w-]+)\]|<(?P<angle>[\w-]+)>)?:\s*(?P<message>.+)$",
+            ))
             .unwrap()
         });
+        static LOCATION: Lazy<Regex> =
+            Lazy::new(|| Regex::new(r"^(.+):([0-9]+):([0-9]+)\s*$").unwrap());
 
-        let lines: Vec<&str> = stderr.lines().collect();
-        let mut i = 0;
-
-        while i < lines.len() {
-            let line = lines[i];
-
-            // Try Rust-style first
-            if let Some(caps) = RUST_ERROR_RE.captures(line) {
-                let severity: Text = caps
-                    .get(1)
-                    .map(|m| m.as_str())
-                    .unwrap_or("error")
-                    .to_string()
-                    .into();
-                let code: Text = caps
-                    .get(2)
-                    .map(|m| m.as_str())
-                    .unwrap_or("")
-                    .to_string()
-                    .into();
-                let message: Text = caps
-                    .get(3)
-                    .map(|m| m.as_str())
-                    .unwrap_or("")
-                    .to_string()
-                    .into();
-
-                // Look for location on next line
-                let (file, line_num, column): (Option<Text>, Option<usize>, Option<usize>) =
-                    if i + 1 < lines.len() {
-                        if let Some(loc_caps) = LOCATION_RE.captures(lines[i + 1]) {
-                            let file: Option<Text> =
-                                loc_caps.get(1).map(|m| m.as_str().to_string().into());
-                            let line_num = loc_caps.get(2).and_then(|m| m.as_str().parse().ok());
-                            let column = loc_caps.get(3).and_then(|m| m.as_str().parse().ok());
-                            i += 1; // Skip the location line
-                            (file, line_num, column)
-                        } else {
-                            (None, None, None)
-                        }
-                    } else {
-                        (None, None, None)
-                    };
-
-                errors.push(ParsedError {
-                    code,
-                    message,
-                    file,
-                    line: line_num,
-                    column,
-                    severity,
-                });
+        let mut errors = List::new();
+        let mut lines = stderr.lines().peekable();
+        while let Some(line) = lines.next() {
+            let Some(header) = HEADER.captures(line) else {
+                continue;
+            };
+            let code = header.name("bracket").or_else(|| header.name("angle"));
+            let mut file = header.name("file").map(|m| Text::from(m.as_str()));
+            let mut line = header.name("line").and_then(|m| m.as_str().parse().ok());
+            let mut column = header.name("column").and_then(|m| m.as_str().parse().ok());
+            if file.is_none() {
+                if let Some(location) = lines
+                    .peek()
+                    .and_then(|s| s.trim_start().strip_prefix("--> "))
+                {
+                    if let Some(position) = LOCATION.captures(location) {
+                        file = Some(Text::from(&position[1]));
+                        line = position[2].parse().ok();
+                        column = position[3].parse().ok();
+                    }
+                    lines.next();
+                } else if code.is_none() {
+                    // The CLI also prints uncoded status lines such as its failure
+                    // summary. A rendered uncoded diagnostic has a source header,
+                    // including when the compiler explicitly reports no location.
+                    continue;
+                }
             }
-            // Try GCC-style
-            else if let Some(caps) = GCC_ERROR_RE.captures(line) {
-                let file: Option<Text> = caps.get(1).map(|m| m.as_str().to_string().into());
-                let line_num = caps.get(2).and_then(|m| m.as_str().parse().ok());
-                let column = caps.get(3).and_then(|m| m.as_str().parse().ok());
-                let severity: Text = caps
-                    .get(4)
-                    .map(|m| m.as_str())
-                    .unwrap_or("error")
-                    .to_string()
-                    .into();
-                let code: Text = caps
-                    .get(5)
-                    .map(|m| m.as_str())
-                    .unwrap_or("")
-                    .to_string()
-                    .into();
-                let message: Text = caps
-                    .get(6)
-                    .map(|m| m.as_str())
-                    .unwrap_or("")
-                    .to_string()
-                    .into();
-
-                errors.push(ParsedError {
-                    code,
-                    message,
-                    file,
-                    line: line_num,
-                    column,
-                    severity,
-                });
-            }
-
-            i += 1;
+            errors.push(ParsedError {
+                code: code.map(|m| m.as_str()).unwrap_or_default().into(),
+                message: (&header["message"]).into(),
+                severity: (&header["severity"]).into(),
+                file,
+                line,
+                column,
+            });
         }
-
         errors
     }
 
@@ -294,6 +242,8 @@ impl ParsedError {
 /// Result of error matching for detailed diagnostics.
 #[derive(Debug)]
 pub enum ErrorMatchResult {
+    /// The operation failed without a typechecking error.
+    NoTypeErrors,
     /// Error count mismatch
     CountMismatch { expected: usize, actual: usize },
     /// Missing expected errors
@@ -308,6 +258,7 @@ pub enum ErrorMatchResult {
 impl std::fmt::Display for ErrorMatchResult {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::NoTypeErrors => write!(f, "Typechecking produced no error diagnostics"),
             Self::CountMismatch { expected, actual } => {
                 write!(
                     f,
@@ -1477,48 +1428,34 @@ impl Executor {
     /// Execute a typecheck-fail test.
     async fn execute_typecheck_fail(&self, directives: &TestDirectives, tier: Tier) -> TestOutcome {
         let start = Instant::now();
-
-        // Use direct library integration if enabled (preferred)
         if self.config.use_direct_integration {
             return self.execute_typecheck_fail_direct(directives, tier, start);
         }
 
-        // Fallback to process-based execution
         match self.run_compiler_phase(directives, tier, "check").await {
-            Ok(output) => {
-                if output.exit_code != Some(0) {
-                    if self.check_expected_errors(&output.stderr, &directives.expected_errors) {
-                        TestOutcome::Pass {
-                            tier,
-                            duration: start.elapsed(),
-                        }
-                    } else {
-                        TestOutcome::Fail {
-                            tier,
-                            reason: "Typecheck failed but with wrong errors".to_string().into(),
-                            expected: Some(format!("{:?}", directives.expected_errors).into()),
-                            actual: Some(output.stderr.clone()),
-                            duration: start.elapsed(),
-                        }
-                    }
-                } else {
-                    TestOutcome::Fail {
-                        tier,
-                        reason: "Typecheck unexpectedly succeeded".to_string().into(),
-                        expected: Some("Typecheck failure".to_string().into()),
-                        actual: Some("Typecheck succeeded".to_string().into()),
-                        duration: start.elapsed(),
-                    }
-                }
+            Ok(output) if !output.timed_out && output.exit_code.is_some_and(|code| code != 0) => {
+                let observed = ParsedError::parse_stderr(&output.stderr);
+                Self::typecheck_failure_outcome(directives, tier, start, &observed, output.stderr)
             }
-            Err(e) => TestOutcome::Error {
+            Ok(output) => TestOutcome::Fail {
                 tier,
-                error: e.to_string().into(),
+                reason: if output.exit_code == Some(0) && !output.timed_out {
+                    "Typecheck unexpectedly succeeded".into()
+                } else {
+                    "Compiler did not finish typechecking".into()
+                },
+                expected: Some("Typecheck failure".into()),
+                actual: Some(output.stderr),
+                duration: start.elapsed(),
+            },
+            Err(error) => TestOutcome::Error {
+                tier,
+                error: error.to_string().into(),
             },
         }
     }
 
-    /// Execute typecheck-fail test using direct library integration.
+/// Execute typecheck-fail test using direct library integration.
     /// `compile-fail`: the whole compile must fail, at whatever phase.
     ///
     /// Deliberately NOT routed through the direct in-process integration the
@@ -1598,14 +1535,15 @@ impl Executor {
                     };
                     let mut pipeline = CompilationPipeline::new_check(&mut session);
                     let result = pipeline.run_check_only();
-                    let diag = pipeline.session().format_diagnostics();
-                    (result, diag)
+                    let observed = pipeline.session().diagnostics().iter()
+                        .map(ParsedError::from).collect::<List<_>>();
+                    (result, observed, pipeline.session().format_diagnostics())
                 }));
                 let _ = tx.send(r);
             })
             .expect("Failed to spawn typecheck-fail thread");
 
-        let (result, diagnostics_output) =
+        let (result, observed, diagnostics_output) =
             match rx.recv_timeout(std::time::Duration::from_millis(timeout_ms)) {
                 Ok(Ok(pair)) => pair,
                 Ok(Err(_)) | Err(_) => {
@@ -1630,35 +1568,39 @@ impl Executor {
                     duration: start.elapsed(),
                 }
             }
-            Err(_) => {
-                // Typecheck failed as expected - check if errors match
-                if directives.expected_errors.is_empty() {
-                    // No specific errors expected, just expect failure
-                    return TestOutcome::Pass {
-                        tier,
-                        duration: start.elapsed(),
-                    };
-                }
+            Err(_) => Self::typecheck_failure_outcome(
+                directives,
+                tier,
+                start,
+                &observed,
+                diagnostics_output.into(),
+            ),
+        }
+    }
 
-                // Check if expected errors match using the formatted diagnostics
-                if self.check_expected_errors_in_output(
-                    &diagnostics_output,
-                    &directives.expected_errors,
-                ) {
-                    TestOutcome::Pass {
-                        tier,
-                        duration: start.elapsed(),
-                    }
-                } else {
-                    TestOutcome::Fail {
-                        tier,
-                        reason: "Typecheck failed but with wrong errors".to_string().into(),
-                        expected: Some(format!("{:?}", directives.expected_errors).into()),
-                        actual: Some(diagnostics_output.into()),
-                        duration: start.elapsed(),
-                    }
-                }
-            }
+    fn typecheck_failure_outcome(
+        directives: &TestDirectives,
+        tier: Tier,
+        start: Instant,
+        observed: &[ParsedError],
+        rendered: Text,
+    ) -> TestOutcome {
+        match Self::check_expected_errors_detailed(
+            observed,
+            &directives.expected_errors,
+            directives.expected_error_count,
+        ) {
+            Ok(()) => TestOutcome::Pass {
+                tier,
+                duration: start.elapsed(),
+            },
+            Err(error) => TestOutcome::Fail {
+                tier,
+                reason: error.to_string().into(),
+                expected: Some(format!("{:?}", directives.expected_errors).into()),
+                actual: Some(rendered),
+                duration: start.elapsed(),
+            },
         }
     }
 
@@ -3333,49 +3275,45 @@ impl Executor {
         true
     }
 
-    /// Check expected errors with detailed mismatch reporting.
+    /// Match each expectation against one diagnostic from this run.
     fn check_expected_errors_detailed(
-        &self,
-        stderr: &str,
+        observed: &[ParsedError],
         expected: &[ExpectedError],
         expected_count: Option<usize>,
     ) -> Result<(), ErrorMatchResult> {
-        let actual_errors = ParsedError::parse_stderr(stderr);
-
-        // Check error count if specified
-        if let Some(count) = expected_count {
-            let actual_count = actual_errors
-                .iter()
-                .filter(|e| e.severity == "error")
-                .count();
-            if actual_count != count {
-                return Err(ErrorMatchResult::CountMismatch {
-                    expected: count,
-                    actual: actual_count,
-                });
-            }
-        }
-
-        // Check each expected error
-        let mut missing_errors = List::new();
-        for exp in expected {
-            let found = actual_errors.iter().any(|actual| actual.matches(exp));
-            if !found {
-                // Try string-based fallback
-                if !exp.matches_stderr(stderr) {
-                    missing_errors.push(exp.clone());
-                }
-            }
-        }
-
-        if !missing_errors.is_empty() {
-            return Err(ErrorMatchResult::MissingErrors {
-                missing: missing_errors,
-                actual: actual_errors,
+        let actual = observed
+            .iter()
+            .filter(|error| error.severity == "error")
+            .count();
+        if let Some(count) = expected_count
+            && actual != count
+        {
+            return Err(ErrorMatchResult::CountMismatch {
+                expected: count,
+                actual,
             });
         }
-
-        Ok(())
+        if actual == 0 {
+            return Err(ErrorMatchResult::NoTypeErrors);
+        }
+        let missing: List<_> = expected
+            .iter()
+            .filter(|expectation| {
+                !observed.iter().any(|error| {
+                    (expectation.severity.is_some() || error.severity == "error")
+                        && error.matches(expectation)
+                })
+            })
+            .cloned()
+            .collect();
+        if missing.is_empty() {
+            Ok(())
+        } else {
+            Err(ErrorMatchResult::MissingErrors {
+                missing,
+                actual: observed.iter().cloned().collect(),
+            })
+        }
     }
 
     /// Load expected stdout from file if specified.
