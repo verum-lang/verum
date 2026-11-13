@@ -241,3 +241,27 @@ fn unbounded_instantiation_cannot_establish_reference_free_storage() {
         "{diagnostics:?}"
     );
 }
+
+#[test]
+fn borrowing_a_projected_field_preserves_every_possible_referent() {
+    let declarations = "
+        fn select(a: &Node, b: &Node, c: Bool) -> &Node { if c { a } else { b } }
+        fn view_field(value: &Int) -> Sample { Sample { ptr: value, total: 1 } }
+    ";
+    let valid = format!("{declarations}
+        fn good(a: &Node, b: &Node, c: Bool) -> Sample {{
+            let handle = select(a, b, c); view_field(&handle.n) }}");
+    assert_eq!(errors(&valid), List::<Text>::new());
+    for body in [
+        "fn bad(a: &Node, c: Bool) -> Sample { let local = Node {n: 7};
+            let handle = select(a, &local, c); view_field(&handle.n) }",
+        "fn bad(a: &Node, c: Bool) -> Sample { let local = Node {n: 7};
+            let handle = select(&local, a, c); view_field(&handle.n) }",
+        "type Handle is &Node; type Cell is {public slot: &Handle};
+         fn bad(a: &Node,b: &Node,c: Bool) -> Cell { let handle = select(a,b,c); Cell {slot: &handle} }",
+    ] {
+        let diagnostics = errors(&format!("{declarations} {body}"));
+        assert!(diagnostics.iter().any(|error| error.contains("does not live long enough")),
+            "{body}: {diagnostics:?}");
+    }
+}
