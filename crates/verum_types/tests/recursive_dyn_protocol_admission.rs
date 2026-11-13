@@ -457,3 +457,58 @@ fn associated_default_cannot_prove_a_missing_or_conflicting_implementation() {
         implement<T: Marker> Reading for Sensor<T> {{ fn read(&self) -> Int {{ 21 }} }}
         fn unbounded<T>(source: Sensor<T>) {{ require(source); }}"));
 }
+
+#[test]
+fn writable_nominal_storage_cannot_erase_its_fixed_payload() {
+    let declarations = "type Tag is protocol {};
+        type Small is { value: Int };
+        type Large is { first: Int, second: Int };
+        implement Tag for Small {}
+        implement Tag for Large {}
+        type Carrier<T> is { value: T };";
+    for tier in ["", "checked ", "unsafe "] {
+        bad(&format!("{declarations}
+            fn overwrite(slot: &{tier}mut Carrier<dyn Tag>) {{
+                slot.value = Large {{ first: 1, second: 2 }};
+            }}
+            fn erase(slot: &{tier}mut Carrier<Small>) {{ overwrite(slot); }}"));
+        good(&format!("{declarations}
+            fn overwrite(slot: &{tier}mut Carrier<Small>) {{
+                slot.value = Small {{ value: 2 }};
+            }}
+            fn keep(slot: &{tier}mut Carrier<Small>) {{ overwrite(slot); }}"));
+    }
+}
+
+#[test]
+fn writable_erased_receivers_keep_their_implementations_storage() {
+    let declarations = "type Counter is protocol {
+            fn set(&mut self, value: Int); fn get(&self) -> Int;
+        };
+        type Small is { value: Int };
+        implement Counter for Small {
+            fn set(&mut self, value: Int) { self.value = value; }
+            fn get(&self) -> Int { self.value }
+        }";
+    good(&format!("{declarations}
+        fn edit(counter: &mut dyn Counter) -> Int {{ counter.set(41); counter.get() }}
+        fn use_erased(counter: &mut Small) -> Int {{ edit(counter) }}"));
+}
+
+#[test]
+fn writable_wrapper_erasure_is_refused_without_any_write_in_the_callee() {
+    let declarations = "type Tag is protocol {};
+        type Small is { value: Int }; implement Tag for Small {}
+        type Carrier<T> is { value: T };
+        type Alias<T> is Carrier<T>;
+        fn consume(slot: &mut Carrier<dyn Tag>) {}";
+    for body in [
+        "fn erase(slot: &mut Carrier<Small>) { consume(slot); }",
+        "fn erase(slot: &mut Alias<Small>) { consume(slot); }",
+        "fn erase(slot: &mut Carrier<Small>) -> &mut Carrier<dyn Tag> { slot as &mut Carrier<dyn Tag> }",
+        "fn erase(slot: &mut Carrier<Small>) { let call: fn(&mut Carrier<Small>) = consume; call(slot); }",
+    ] {
+        bad(&format!("{declarations} {body}"));
+    }
+    good(&format!("{declarations} fn keep(slot: &mut Carrier<dyn Tag>) {{ consume(slot); }}"));
+}

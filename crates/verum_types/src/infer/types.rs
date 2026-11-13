@@ -6435,13 +6435,21 @@ fn substitute_refinement_binder(
         };
         // A cast involving an erased protocol needs the same declaration
         // evidence as an assignment, while both nominal carriers are intact.
-        let is_protocol_object = |ty: &Type| match ty {
-            Reference { inner, .. } | CheckedReference { inner, .. } | UnsafeReference { inner, .. } =>
-                matches!(inner.as_ref(), DynProtocol { .. }),
-            other => matches!(other, DynProtocol { .. }),
+        let normalized_from = self.normalize_type(from_ty);
+        let normalized_to = self.normalize_type(to_ty);
+        let protocol_cast = {
+            let registry = self.protocol_checker.read();
+            let contains_object = |ty: &Type| ty.contains_type(|part| {
+                matches!(part, DynProtocol { .. })
+                    || self.conversion_nominal_head(part)
+                        .is_some_and(|(name, _)| registry.has_protocol(&name))
+            });
+            contains_object(&normalized_from) || contains_object(&normalized_to)
         };
-        if is_protocol_object(from_ty) || is_protocol_object(to_ty) {
-            if self.subtyping.is_subtype(from_ty, to_ty) || self.check_protocol_coercion(from_ty, to_ty) {
+        if protocol_cast {
+            if self.subtyping.is_subtype(&normalized_from, &normalized_to)
+                || self.check_protocol_coercion(&normalized_from, &normalized_to)
+            {
                 return Ok(());
             }
             return Err(TypeError::InvalidCast {
@@ -6451,7 +6459,7 @@ fn substitute_refinement_binder(
         }
 
         // Also normalize Named types that are refinement aliases
-        let from_ty = &self.normalize_type(from_ty);
+        let from_ty = &normalized_from;
         let from_ty = match from_ty {
             Refined { base, predicate } => {
                 if from_refinement.is_none() {
@@ -6461,7 +6469,7 @@ fn substitute_refinement_binder(
             }
             other => other,
         };
-        let to_ty = &self.normalize_type(to_ty);
+        let to_ty = &normalized_to;
         let to_ty = match to_ty {
             Refined { base, .. } => base.as_ref(),
             other => other,

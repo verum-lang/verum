@@ -681,3 +681,66 @@ fn main() -> Int {
         assert_eq!(actual.try_as_i64(), Some(42));
     }
 }
+
+#[test]
+fn writable_protocol_storage_remains_checked_after_archive_publication() {
+    let provider = r#"module core.family_archive;
+        public type Counter is protocol {
+            fn set(&mut self, value: Int);
+            fn get(&self) -> Int;
+        };
+        public type Cell is { public value: Int };
+        public type Larger is { first: Int, second: Int };
+        public type Carrier<T> is { value: T };
+        implement Counter for Cell {
+            fn set(&mut self, value: Int) { self.value = value; }
+            fn get(&self) -> Int { self.value }
+        }
+        implement Counter for Larger {
+            fn set(&mut self, value: Int) { self.first = value; }
+            fn get(&self) -> Int { self.first }
+        }
+        public fn replace<T>(slot: &mut T, value: T) { *slot = value; }
+    "#;
+    let metadata = publish(&source_module(provider)).unwrap();
+    for eager in [false, true] {
+        for (body, valid) in [
+            ("fn edit(slot: &mut dyn Counter) { slot.set(13); }
+              fn probe(slot: &mut Cell) { edit(slot); }", true),
+            ("fn probe(slot: &mut Cell) { replace(slot, Cell { value: 21 }); }", true),
+            ("fn edit(slot: &mut Carrier<dyn Counter>) { }
+              fn probe(slot: &mut Carrier<Cell>) { edit(slot); }", false),
+        ] {
+            let source = format!("mount core.family_archive.{{Counter, Cell, Larger, Carrier, replace}}; {body}");
+            let errors = consumer_errors(&metadata, &source, eager);
+            assert_eq!(errors.is_empty(), valid, "eager={eager}, {source}: {errors:?}");
+        }
+    }
+}
+
+#[test]
+fn writable_object_methods_keep_the_concrete_storage_after_wire_reload() {
+    let program = r#"type Counter is protocol {
+        fn set(&mut self, value: Int);
+        fn get(&self) -> Int;
+    };
+    type Cell is { value: Int };
+    implement Counter for Cell {
+        fn set(&mut self, value: Int) { self.value = value; }
+        fn get(&self) -> Int { self.value }
+    }
+    fn edit(counter: &mut dyn Counter) { counter.set(73); }
+    fn main() -> Int {
+        let mut cell = Cell { value: 1 };
+        edit(&mut cell);
+        cell.get()
+    }"#;
+    let module = source_module(program);
+    let wire = deserialize_module(&serialize_module(&module).unwrap()).unwrap();
+    for module in [module, wire] {
+        let main = module.find_function_by_name("core.family_archive.main").unwrap();
+        let actual = verum_vbc::interpreter::Interpreter::new(module.into())
+            .execute_function(main).expect("execute mutable object method");
+        assert_eq!(actual.try_as_i64(), Some(73));
+    }
+}

@@ -151,7 +151,13 @@ impl TypeChecker {
             return actual.reference_parts().is_some_and(|(source, writable, tier)| {
                 tier == kind
                     && (!mutable || writable)
-                    && self.check_protocol_coercion_with(source, inner, registry)
+                    && if mutable && self.protocol_object_bounds(inner, registry).is_none() {
+                        // Writing a nominal wrapper can replace its payload. Erasing
+                        // that payload would change the original owner's type.
+                        registry.types_structurally_equal(source, inner)
+                    } else {
+                        self.check_protocol_coercion_with(source, inner, registry)
+                    }
             });
         }
 
