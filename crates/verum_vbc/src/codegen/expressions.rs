@@ -11226,77 +11226,18 @@ impl VbcCodegen {
                 type_prefix_receiver,
                 resolver_pinned,
             } => {
-                // Raw-pointer arithmetic intercept (pre-resolved
-                // path): the typechecker stamps
-                // `self.entries.offset(idx)` on a `&unsafe Slot<K,V>`
-                // receiver as `StaticCall { qualified_name:
-                // "&unsafe Slot.offset" }`. No matching stdlib body
-                // is registered under that name — `lookup_function`
-                // misses, the fallback re-enters `compile_method_call`
-                // which emits CallM `&unsafe Slot.offset` against
-                // the Int runtime arm (raw pointers NaN-box as Int),
-                // and the dispatcher panics with
-                // `method '&unsafe Slot.offset' not found on
-                // receiver of runtime kind Int`. This abortion takes
-                // down `Map.insert` / every hash-table body the
-                // moment it touches a raw-pointer entry table.
-                //
-                // Detect via the `&unsafe ` prefix on the qualified
-                // name + `offset`/`add`/`sub` method + 1 arg + a
-                // syntactic receiver, and emit the inline ptr_offset
-                // arithmetic directly (mirrors
-                // `verum_vbc::intrinsics::codegen::emit_ptr_offset`:
-                // LoadI(8) + BinaryI{Mul} + BinaryI{Add}). VBC
-                // type-erases to 64-bit values so the element stride
-                // is always 8 bytes.
+                // Checked calls use the same declared pointer and pointee
+                // stride as ordinary method lowering.
                 if let Some(recv) = receiver
                     && args.len() == 1
+                    && type_args.is_empty()
                     && matches!(method.name.as_str(), "offset" | "add" | "sub")
-                    && qualified_name.as_str().starts_with("&unsafe ")
+                    && matches!(
+                        self.declared_expression_result(recv, None, 0, 0),
+                        Some(crate::types::TypeRef::Reference { tier: CbgrTier::Tier2, .. })
+                    )
                 {
-                    let receiver_reg = self
-                        .compile_expr(recv)?
-                        .or_internal("raw-pointer receiver has no value")?;
-                    let count_reg = self
-                        .compile_expr(&args[0])?
-                        .or_internal("ptr offset count has no value")?;
-                    let final_count_reg = if method.name.as_str() == "sub" {
-                        let neg_reg = self.ctx.alloc_temp();
-                        self.ctx.emit(Instruction::UnaryI {
-                            op: crate::instruction::UnaryIntOp::Neg,
-                            dst: neg_reg,
-                            src: count_reg,
-                        });
-                        self.ctx.free_temp(count_reg);
-                        neg_reg
-                    } else {
-                        count_reg
-                    };
-                    let stride_reg = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::LoadI {
-                        dst: stride_reg,
-                        value: 8,
-                    });
-                    let byte_offset_reg = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::BinaryI {
-                        op: crate::instruction::BinaryIntOp::Mul,
-                        dst: byte_offset_reg,
-                        a: final_count_reg,
-                        b: stride_reg,
-                    });
-                    let result = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::BinaryI {
-                        op: crate::instruction::BinaryIntOp::Add,
-                        dst: result,
-                        a: receiver_reg,
-                        b: byte_offset_reg,
-                    });
-                    self.ctx.free_temp(stride_reg);
-                    self.ctx.free_temp(byte_offset_reg);
-                    self.ctx.free_temp(final_count_reg);
-                    self.ctx.free_temp(receiver_reg);
-                    self.ctx.mark_raw_pointer(result);
-                    return Ok(Some(result));
+                    return self.compile_method_call(recv, method, args, None, type_args);
                 }
 
                 // Builtin-collection method override: the typechecker
@@ -14972,7 +14913,12 @@ impl VbcCodegen {
         // element-counts gets correct byte-scaled arithmetic at the
         // Tier-0 dispatcher.
         if args.len() == 1
-            && self.ctx.is_raw_pointer(receiver_reg)
+            && type_args.is_empty()
+            && (self.ctx.is_raw_pointer(receiver_reg)
+                || matches!(
+                    receiver_result_declaration,
+                    Some(crate::types::TypeRef::Reference { tier: CbgrTier::Tier2, .. })
+                ))
             && matches!(method.name.as_str(), "offset" | "add" | "sub")
         {
             // Compile the count argument.
@@ -15060,7 +15006,8 @@ impl VbcCodegen {
             // the AOT lowering turns into inline-struct + stride marks.
             if let Some(rt) = receiver_type.as_deref() {
                 let inner = rt
-                    .strip_prefix("&unsafe ")
+                    .strip_prefix("&unsafe mut ")
+                    .or_else(|| rt.strip_prefix("&unsafe "))
                     .or_else(|| rt.strip_prefix("*const "))
                     .or_else(|| rt.strip_prefix("*mut "))
                     .unwrap_or(rt);
@@ -28635,7 +28582,8 @@ impl VbcCodegen {
         let Some(name) = ptr_type_name else { return 8; };
         // Strip raw-pointer prefix.
         let inner = name
-            .strip_prefix("&unsafe ")
+            .strip_prefix("&unsafe mut ")
+            .or_else(|| name.strip_prefix("&unsafe "))
             .or_else(|| name.strip_prefix("*const "))
             .or_else(|| name.strip_prefix("*mut "))
             .unwrap_or(name);

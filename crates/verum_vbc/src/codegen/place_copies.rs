@@ -174,6 +174,12 @@ impl VbcCodegen {
                 },
             }),
             ExprKind::MethodCall { receiver, method, type_args, args } => {
+                if args.len() == 1 && type_args.is_empty()
+                    && matches!(method.name.as_str(), "offset" | "add" | "sub")
+                    && let Some(pointer @ TypeRef::Reference { tier: CbgrTier::Tier2, .. }) = nested(receiver, None)
+                {
+                    return Some(pointer);
+                }
                 if let Some(witness) = self.type_parameter_static_receiver(receiver).ok()? {
                     if let TypeRef::Generic(id) = witness {
                         return type_args.is_empty().then(|| self.bounded_static_output(id, method.name.as_str(), args.len())).flatten();
@@ -200,6 +206,9 @@ impl VbcCodegen {
                 }
                 if let Some(result) = self.lexical_call_result(expr) {
                     return result;
+                }
+                if emitted.is_none() {
+                    return self.source_call_declaration(expr, None, depth + 1);
                 }
                 let (reg, start, end) = emitted?;
                 self.copy_selected_call_result(reg, start, end, type_args, args, depth)
