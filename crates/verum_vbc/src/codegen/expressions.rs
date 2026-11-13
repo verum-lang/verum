@@ -9286,7 +9286,8 @@ impl VbcCodegen {
     /// Parse a (possibly generic) type NAME like `ReadyFuture<Text>` or
     /// `Map<Text, List<Int>>` into a `TypeRef`, preserving instantiation args so
     /// monomorphization can recover associated types (`F.Output`, `I.Item`).
-    /// Returns None when the base name is unknown or a bare type parameter.
+    /// Unknown names provide no witness. Generic IDs belong to the caller's
+    /// declared scope, independently of their position in a rendered argument list.
     fn type_name_to_type_ref_mono(&self, name: &str) -> Option<crate::types::TypeRef> {
         let name = name.trim();
         if let Some(witness) = self.current_source_substitution.get(name) {
@@ -9347,64 +9348,20 @@ impl VbcCodegen {
             }
             let base_id = self.nominal_type_id(base_name)?;
             let inner = &name[lt + 1..close];
-            // T1228 — ARITY HONESTY, the rule the tuple branch fifteen
-            // lines above already states and this branch did not keep.
-            //
-            // `filter_map` DROPPED every argument that failed to
-            // resolve, and a bare type parameter fails BY DESIGN (the
-            // `generic_type_params.contains(name)` arm below returns
-            // `None` deliberately). So `ListIter<T>` produced
-            // `args: []` for a ONE-parameter type, and
-            // `MappedIter<ListIter, F>` produced ONE argument for a
-            // TWO-parameter type — measured, under `VERUM_TRACE_MONO`:
-            //
-            //   recv_name="ListIter<T>"
-            //     recv_tr=Instantiated { base: 1273, args: [] }
-            //   recv_name="MappedIter<ListIter, F>"
-            //     recv_tr=Instantiated { base: 1033,
-            //                            args: [Concrete(1273)] }
-            //
-            // The consumer is POSITIONAL and already knows about
-            // placeholders — `rargs.iter().take(impl_k).enumerate()`
-            // skips `TypeRef::Generic(_)` and binds the rest by INDEX.
-            // It cannot work unless the positions survive, and dropping
-            // a leading unresolvable argument silently shifts every
-            // argument after it into the wrong slot.
-            //
-            // So an unresolvable argument becomes a Generic placeholder
-            // that HOLDS ITS POSITION. When the name is a type
-            // parameter of the enclosing function its ordered index is
-            // known and used; otherwise the argument's own position
-            // stands in, which keeps the slot occupied without
-            // claiming a binding — every consumer treats `Generic` as
-            // "not yet known".
+            // Every argument must resolve. An unknown argument cannot be
+            // replaced with a binder whose numeric ID happens to fit this slot.
             let parts = Self::split_top_level_commas(inner);
             let args: Vec<crate::types::TypeRef> = parts
                 .iter()
-                .enumerate()
-                .map(|(i, a)| {
-                    let a = a.trim();
-                    self.type_name_to_type_ref_mono(a).unwrap_or_else(|| {
-                        let idx = self
-                            .ctx
-                            .generic_type_params_ordered
-                            .iter()
-                            .position(|p| p == a)
-                            .unwrap_or(i);
-                        crate::types::TypeRef::Generic(crate::types::TypeParamId(idx as u16))
-                    })
-                })
-                .collect();
+                .map(|argument| self.type_name_to_type_ref_mono(argument.trim()))
+                .collect::<Option<_>>()?;
             Some(crate::types::TypeRef::Instantiated {
                 base: base_id,
                 args,
             })
         } else if self.ctx.generic_type_params.contains(name) {
-            // Bound type param of the current function — not a concrete
-            // type name (carried fact; the shape heuristic mis-filtered
-            // 2-char concrete types like `Pt`).  An UNBOUND unknown name
-            // simply misses `type_name_to_id` below and returns None.
-            None
+            self.ctx.current_generic_param_ids.get(name)
+                .map(|id| crate::types::TypeRef::Generic(crate::types::TypeParamId(*id)))
         } else if let Some(full) = self.alias_instantiation_targets.get(name) {
             // CONST-GENERIC-VALUE-CARRY-1: an alias of an INSTANTIATED
             // target (`TinyStackAllocator` -> `StackAllocator<1024>`)
@@ -46158,6 +46115,10 @@ fn bind_generic_free(
 #[cfg(test)]
 #[path = "../../tests/codegen/callable_marker_binding.rs"]
 mod callable_marker_binding_tests;
+
+#[cfg(test)]
+#[path = "../../tests/codegen/rendered_witness_scope.rs"]
+mod rendered_witness_scope_tests;
 
 /// `VERUM_TRACE_BARE_VARIANT` gate — the value is a SUBSTRING filter on
 /// the bare name, matching `VERUM_TRACE_CALLRES` and `VERUM_TRACE_FNREG`
