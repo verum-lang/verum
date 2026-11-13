@@ -483,10 +483,39 @@ impl TypeChecker {
         qualified: &Text,
         span: Span,
     ) -> Result<Option<(Type, Text)>> {
-        let Some((module_name, type_name)) = qualified.rsplit_once('.') else {
-            return Ok(None);
+        let Some((_, type_name)) = qualified.rsplit_once('.') else { return Ok(None) };
+        let Some((module_owner, source_declaration)) = self.qualified_source_declaration(qualified, span)? else {
+            return Ok(None)
         };
-        let (module_owner, source_declaration) = {
+        if let Some((declaration, owner)) = source_declaration {
+            return self.load_source_type_declaration_with_parameter_key(&declaration, &owner, span)
+                .map(Some);
+        }
+
+        // A source miss is not proof that the module has no archived type.
+        // Require the descriptor's declaring identity, not an index spelling
+        // or same-leaf entry, before loading its exact parameter registration.
+        let key: Text = format!("{module_owner}.{type_name}").into();
+        let is_public = self.core_metadata.as_ref().and_then(|metadata| {
+            Self::metadata_type_with_declaring_key(metadata, &key)
+                .map(|descriptor| descriptor.is_public)
+        }).ok_or_else(|| TypeError::TypeNotFound { name: qualified.clone(), span })?;
+        if !is_public && module_owner != self.current_module_path {
+            return Err(TypeError::VisibilityError {
+                name: type_name.into(), visibility: "Private".into(),
+                module_path: module_owner, span,
+            });
+        }
+        self.ensure_mounted_type_loaded_with_parameter_key(type_name, module_owner.as_str())
+            .map(Some)
+            .ok_or_else(|| TypeError::TypeNotFound { name: qualified.clone(), span })
+    }
+
+    pub(super) fn qualified_source_declaration(
+        &self, qualified: &Text, span: Span,
+    ) -> Result<Option<(Text, Option<(SourceTypeDeclaration, Text)>)>> {
+        let Some((module_name, type_name)) = qualified.rsplit_once('.') else { return Ok(None) };
+        {
             let registry = self.module_registry.read();
             let Some(module) = self.get_module_with_path_aliases(module_name, &registry) else {
                 return Ok(None);
@@ -533,30 +562,8 @@ impl TypeChecker {
                 // substituting an unrelated archived declaration of this name.
                 return Err(TypeError::TypeNotFound { name: qualified.clone(), span });
             }
-            (owner, declaration)
-        };
-        if let Some((declaration, owner)) = source_declaration {
-            return self.load_source_type_declaration_with_parameter_key(&declaration, &owner, span)
-                .map(Some);
+            Ok(Some((owner, declaration)))
         }
-
-        // A source miss is not proof that the module has no archived type.
-        // Require the descriptor's declaring identity, not an index spelling
-        // or same-leaf entry, before loading its exact parameter registration.
-        let key: Text = format!("{module_owner}.{type_name}").into();
-        let is_public = self.core_metadata.as_ref().and_then(|metadata| {
-            Self::metadata_type_with_declaring_key(metadata, &key)
-                .map(|descriptor| descriptor.is_public)
-        }).ok_or_else(|| TypeError::TypeNotFound { name: qualified.clone(), span })?;
-        if !is_public && module_owner != self.current_module_path {
-            return Err(TypeError::VisibilityError {
-                name: type_name.into(), visibility: "Private".into(),
-                module_path: module_owner, span,
-            });
-        }
-        self.ensure_mounted_type_loaded_with_parameter_key(type_name, module_owner.as_str())
-            .map(Some)
-            .ok_or_else(|| TypeError::TypeNotFound { name: qualified.clone(), span })
     }
 
     pub(super) fn load_source_type_declaration_with_parameter_key(
@@ -566,6 +573,13 @@ impl TypeChecker {
         span: Span,
     ) -> Result<(Type, Text)> {
         let key = Self::source_type_declaration_key(owner, &declaration.name.name);
+        if let Some(forward) = self.source_type_registration.forward_payloads.get(&key)
+            && &**forward == declaration
+            && !self.source_type_registration.staged_heads.contains_key(&key)
+            && !self.source_type_registration.is_completed(&key)
+        {
+            return Ok((Type::Named { path: Self::text_to_path(&key), args: Default::default() }, key));
+        }
         // A nominal entry may only be a placeholder left by failed source
         // elaboration. Completed loads, and recursive loads in this active
         // transaction, are the only authority for a cache hit.
@@ -590,29 +604,35 @@ impl TypeChecker {
             return result;
         }
         self.with_source_type_registration(declaration, key.clone(), |checker| {
-            // A return type load is not a mount of its local spelling. Retain
-            // declaration metadata, restoring the consumer binding on both exits.
-            let local_name = declaration.name.name.clone();
-            let previous_type = checker.ctx.type_defs.get(&local_name).cloned();
-            let previous_alias = checker.ctx.type_aliases.get(&local_name).cloned();
-            let previous_unifier_alias = checker.unifier.alias_binding(local_name.as_str());
-            checker.ctx.enter_scope();
-            let registration = checker.register_type_declaration_in_module(declaration, owner.as_str());
-            checker.ctx.exit_scope();
-            match previous_type {
-                Some(ty) => { checker.ctx.type_defs.insert(local_name.clone(), ty); }
-                None => { checker.ctx.type_defs.remove(&local_name); }
-            }
-            match previous_alias {
-                Some(ty) => { checker.ctx.type_aliases.insert(local_name.clone(), ty); }
-                None => { checker.ctx.type_aliases.remove(&local_name); }
-            }
-            checker.unifier.restore_alias_binding(local_name, previous_unifier_alias);
-            registration.and_then(|()| {
-                checker.ctx.lookup_type(key.as_str()).cloned()
-                    .map(|ty| (ty, key.clone()))
-                    .ok_or_else(|| TypeError::TypeNotFound { name: key.clone(), span })
-            })
+            checker.register_source_payloads(declaration, owner, &key, span)
+        })
+    }
+
+    pub(super) fn register_source_declaration_in_scope(
+        &mut self, declaration: &verum_ast::TypeDecl, owner: &Text, key: &Text, span: Span,
+    ) -> Result<(Type, Text)> {
+        // A return type load is not a mount of its local spelling. Retain
+        // declaration metadata, restoring the consumer binding on both exits.
+        let local_name = declaration.name.name.clone();
+        let previous_type = self.ctx.type_defs.get(&local_name).cloned();
+        let previous_alias = self.ctx.type_aliases.get(&local_name).cloned();
+        let previous_unifier_alias = self.unifier.alias_binding(local_name.as_str());
+        self.ctx.enter_scope();
+        let registration = self.register_type_declaration_in_module(declaration, owner.as_str());
+        self.ctx.exit_scope();
+        match previous_type {
+            Some(ty) => { self.ctx.type_defs.insert(local_name.clone(), ty); }
+            None => { self.ctx.type_defs.remove(&local_name); }
+        }
+        match previous_alias {
+            Some(ty) => { self.ctx.type_aliases.insert(local_name.clone(), ty); }
+            None => { self.ctx.type_aliases.remove(&local_name); }
+        }
+        self.unifier.restore_alias_binding(local_name, previous_unifier_alias);
+        registration.and_then(|()| {
+            self.ctx.lookup_type(key.as_str()).cloned()
+                .map(|ty| (ty, key.clone()))
+                .ok_or_else(|| TypeError::TypeNotFound { name: key.clone(), span })
         })
     }
 

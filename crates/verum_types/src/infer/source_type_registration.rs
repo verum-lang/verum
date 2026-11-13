@@ -25,6 +25,8 @@ pub(crate) struct SourceTypeRegistration {
     pub constructor_values: Map<Text, crate::context::TypeScheme>,
     completed: Map<Text, AcceptedSourceType>,
     pub pending: Map<Text, TypeDecl>,
+    /// Exact nominal back-edges permitted by the active payload traversal.
+    pub(super) forward_payloads: Map<Text, super::source_declarations::SourceTypeDeclaration>,
     /// Completed alias bodies usable by this transaction's own proof queries.
     /// Other checkers see them only after the entire registration commits.
     staged_aliases: Map<Text, crate::protocol::AssociatedTypeAssignment>,

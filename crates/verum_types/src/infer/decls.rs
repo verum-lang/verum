@@ -339,8 +339,7 @@ impl TypeChecker {
 
     /// Register a type declaration (type alias, ADT, etc.)
     /// This should be called before other passes to make types available.
-    ///
-    /// Relies on RUST_MIN_STACK=16MB for stack safety on deeply nested types.
+    /// Source payload dependencies are scheduled in declaration order on an explicit work list.
     pub fn register_type_declaration(&mut self, type_decl: &verum_ast::TypeDecl) -> Result<()> {
         let key = self.declared_type_key(type_decl.name.name.as_str());
         let result = self.with_source_type_registration(type_decl, key, |checker| {
@@ -999,7 +998,7 @@ impl TypeChecker {
     /// entry. Fresh marker names return `None` and keep sum semantics.
     ///
     /// Returns the synthetic AST alias target (`Path(Y)`) on a hit.
-    fn variant_decl_alias_target(
+    pub(super) fn variant_decl_alias_target(
         &self,
         type_decl: &verum_ast::TypeDecl,
     ) -> Option<verum_ast::ty::Type> {

@@ -382,3 +382,137 @@ fn grouped_self_alias_dispatches_the_namespace_without_importing_its_items() {
     register(&mut registry, "bare", "mount provider.{self as service}; fn check() -> Int { make() }");
     assert!(!check(&registry, "bare").is_empty());
 }
+
+fn check_payload_chain(depth: usize, last_field: &str) -> List<Text> {
+    let mut registry = ModuleRegistry::new();
+    let mut declarations = String::new();
+    for i in 0..depth {
+        let next = i + 1;
+        if i % 2 == 0 {
+            declarations.push_str(&format!("public type Node{i} is {{ public next: &Node{next} }};\n"));
+        } else {
+            declarations.push_str(&format!("public type Node{i} is | Next{i}(&Node{next}) | End{i};\n"));
+        }
+    }
+    declarations.push_str(&format!("public type Node{depth} is {{ public last: {last_field} }};"));
+    register(&mut registry, "shapes", &declarations);
+    register(&mut registry, "consumer", "mount shapes.Node0; fn accept(value: &Node0) {}");
+    check(&registry, "consumer")
+}
+
+#[test]
+fn source_nominal_payloads_load_deep_chains_on_an_ordinary_stack() {
+    std::thread::spawn(|| {
+        let errors = check_payload_chain(128, "Int");
+        assert!(errors.is_empty(), "{errors:?}");
+    }).join().unwrap();
+}
+
+#[test]
+fn deep_payload_chain_checks_its_last_referenced_declaration() {
+    std::thread::spawn(|| {
+        let errors = check_payload_chain(128, "MissingPayload");
+        assert!(errors.iter().any(|error| error.contains("MissingPayload")), "{errors:?}");
+    }).join().unwrap();
+}
+
+#[test]
+fn deep_mutually_recursive_reference_payloads_preserve_their_identity() {
+    std::thread::spawn(|| {
+        let errors = check_payload_chain(128, "&Node0");
+        assert!(errors.is_empty(), "{errors:?}");
+    }).join().unwrap();
+}
+
+#[test]
+fn inline_payload_cycle_has_no_finite_layout() {
+    let mut registry = ModuleRegistry::new();
+    register(&mut registry, "shapes", "public type Outer is { child: Inner }; public type Inner is | Cell(Outer) | End;");
+    register(&mut registry, "consumer", "mount shapes.Outer; fn probe(v: &Outer) {}");
+    let errors = check(&registry, "consumer");
+    assert!(errors.iter().any(|e| e.contains("cyclic type definition") && e.contains("shapes.Outer") && e.contains("shapes.Inner")), "{errors:?}");
+}
+
+#[test]
+fn source_alias_cycle_cannot_supply_a_foreign_signature() {
+    let mut registry = ModuleRegistry::new();
+    register(&mut registry, "shapes", "public type First is Second; public type Second is First;");
+    register(&mut registry, "consumer", "mount shapes.First; fn probe(v: &First) {}");
+    let errors = check(&registry, "consumer");
+    assert!(errors.iter().any(|e| e.contains("cyclic type definition")), "{errors:?}");
+}
+
+#[test]
+fn generic_binder_shadows_an_invalid_nominal_homonym_during_scheduling() {
+    let mut registry = ModuleRegistry::new();
+    register(&mut registry, "shapes", "type Item is { bad: Missing }; public type Payload<Item> is { public item: Item };");
+    register(&mut registry, "consumer", "mount shapes.Payload; fn get(p: &Payload<Int>)->Int { p.item }");
+    let errors = check(&registry, "consumer");
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn recursive_storage_follows_the_selected_generic_field() {
+    for (field, finite) in [("T", false), ("&T", true), ("Int", true)] {
+        let mut registry = ModuleRegistry::new();
+        register(&mut registry, "shapes", &format!(
+            "public type Slot<T> is {{ item: {field} }}; public type Wrap<X> is {{ slot: Slot<X> }}; public type Outer is {{ inner: Wrap<Outer> }};"
+        ));
+        register(&mut registry, "consumer", "mount shapes.Outer; fn probe(v: &Outer) {}");
+        let errors = check(&registry, "consumer");
+        if finite { assert!(errors.is_empty(), "{field}: {errors:?}"); }
+        else { assert!(errors.iter().any(|error| error.contains("cyclic type definition")), "{field}: {errors:?}"); }
+    }
+}
+
+#[test]
+fn an_indirect_field_cannot_hide_a_second_inline_cycle() {
+    let mut registry = ModuleRegistry::new();
+    register(&mut registry, "shapes", "public type A is { first: &B, second: B }; public type B is { back: A };");
+    register(&mut registry, "consumer", "mount shapes.A; fn probe(v: &A) {}");
+    let errors = check(&registry, "consumer");
+    assert!(errors.iter().any(|error| error.contains("cyclic type definition")), "{errors:?}");
+}
+
+#[test]
+fn recursive_transparent_aliases_have_no_nominal_head() {
+    let mut registry = ModuleRegistry::new();
+    register(&mut registry, "shapes", "public type First is &Second; public type Second is &First;");
+    register(&mut registry, "consumer", "mount shapes.First; fn probe(v: &First) {}");
+    let errors = check(&registry, "consumer");
+    assert!(errors.iter().any(|error| error.contains("cyclic type definition")), "{errors:?}");
+}
+
+#[test]
+fn transparent_alias_in_a_reference_cycle_resolves_to_its_nominal_target() {
+    let mut registry = ModuleRegistry::new();
+    register(&mut registry, "shapes", "public type First is &Record; public type Record is { public item: First };");
+    register(&mut registry, "consumer", "mount shapes.{First, Record}; fn get(r: &Record) -> First { r.item }");
+    let errors = check(&registry, "consumer");
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn explicit_inductive_recursion_remains_available_to_imported_signatures() {
+    let mut registry = ModuleRegistry::new();
+    register(&mut registry, "shapes", "public type Peano is inductive { | Zero | Succ(Peano) };");
+    register(&mut registry, "consumer", "mount shapes.Peano; fn get(n: &Peano) {}");
+    let errors = check(&registry, "consumer");
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn cancelled_import_cannot_publish_a_provisional_source_payload() {
+    let mut registry = ModuleRegistry::new();
+    register(&mut registry, "shapes", "public type Outer is { child: &Inner }; public type Inner is { parent: &Outer };");
+    register(&mut registry, "consumer", "mount shapes.Outer; fn probe(v: &Outer) {}");
+    let module = registry.get_by_path("consumer").unwrap();
+    let mut checker = TypeChecker::with_minimal_context();
+    checker.register_primitives();
+    checker.set_module_registry_direct(registry.clone());
+    checker.set_current_module_path("consumer");
+    checker.set_analysis_control(verum_types::AnalysisControl::with_deadline(std::time::Instant::now()));
+    assert!(matches!(checker.check_item(&module.ast.items[0]), Err(verum_types::TypeError::AnalysisCancelled)));
+    for name in ["shapes.Outer", "shapes.Inner"] { assert!(checker.resolved_type(name).is_none(), "{name}"); }
+    assert!(check(&registry, "consumer").is_empty());
+}

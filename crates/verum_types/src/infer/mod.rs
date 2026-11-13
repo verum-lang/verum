@@ -18,6 +18,7 @@ mod associated_type_obligations;
 mod source_associated_assignments;
 mod associated_family_applications;
 mod source_declarations;
+mod source_payloads;
 mod protocol_arguments;
 mod protocol_methods;
 mod protocol_default_bodies;
