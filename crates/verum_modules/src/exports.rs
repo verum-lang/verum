@@ -221,6 +221,14 @@ pub struct ExportKindMeta {
 }
 
 impl ExportKind {
+    /// The canonical type declaration retains its injectable protocol facet.
+    pub fn for_type_body(body: &verum_ast::TypeDeclBody) -> Self {
+        match body {
+            verum_ast::TypeDeclBody::Protocol(protocol) if protocol.is_context_protocol() => Self::Context,
+            _ => Self::Type,
+        }
+    }
+
     pub const ALL: &'static [Self] = &[
         Self::Function,
         Self::Type,
@@ -739,7 +747,7 @@ pub fn extract_exports_with_policy(
                     // Export the type itself
                     let exported = ExportedItem::new(
                         type_decl.name.name.as_str(),
-                        ExportKind::Type,
+                        ExportKind::for_type_body(&type_decl.body),
                         effective(&type_decl.visibility),
                         module_id,
                         item.span,
@@ -1690,7 +1698,7 @@ pub fn extract_contexts_from_module(
             ItemKind::Type(type_decl) => {
                 if type_decl.visibility == AstVisibility::Public {
                     // Check if this is a context protocol type definition
-                    if is_context_protocol_type_definition(&type_decl.body) {
+                    if ExportKind::for_type_body(&type_decl.body) == ExportKind::Context {
                         contexts.push(ExportedContext {
                             name: Text::from(type_decl.name.name.as_str()),
                             kind: ContextSourceKind::Protocol,
@@ -1706,25 +1714,6 @@ pub fn extract_contexts_from_module(
     }
 
     contexts
-}
-
-/// Check if a type definition is a context protocol type.
-///
-/// Matches patterns like `context type X is protocol { ... }` where the protocol
-/// has `is_context = true`. Only context protocols can be used in `using [...]`
-/// dependency injection clauses.
-///
-/// Extracts context declarations from a module's AST. Contexts are the
-/// Level 2 (Dynamic) dependency injection system: `context Logger { fn log(...) }`.
-/// Functions declare required contexts with `using [Context]` after return type.
-/// Contexts are provided with `provide Context = impl` for lexically-scoped DI. Section 2.5 - Type System Integration
-fn is_context_protocol_type_definition(type_body: &verum_ast::decl::TypeDeclBody) -> bool {
-    use verum_ast::decl::TypeDeclBody;
-
-    match type_body {
-        TypeDeclBody::Protocol(protocol_body) => protocol_body.is_context,
-        _ => false,
-    }
 }
 
 #[cfg(test)]

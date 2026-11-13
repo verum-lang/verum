@@ -133,3 +133,46 @@ fn independent_context_owners_survive_aliases_and_archive_linking() {
         assert_eq!(vm.execute_function(probe).unwrap().try_as_i64(), Some(37733761));
     }
 }
+
+#[test]
+fn importing_a_callable_resolves_its_protocol_context_in_the_declaring_source() {
+    for (declaration, valid) in [
+        ("public context protocol Device {fn number(&self) -> Int;}", true),
+        ("public context type Device is protocol {fn number(&self) -> Int;};", true),
+        ("public type Device is protocol {fn number(&self) -> Int;};", false),
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("core");
+        fs::create_dir_all(source.join("lab")).unwrap();
+        for (file, contents) in [
+            ("mod.vr", "module core; public module lab;"),
+            ("lab/mod.vr", "module core.lab; public module caps; public module api; public module ops; public module consumer;"),
+            ("lab/caps.vr", &format!("module core.lab.caps; {declaration}")),
+            ("lab/api.vr", "module core.lab.api; public mount super.caps.{Device as Backend};"),
+            ("lab/ops.vr", "module core.lab.ops; mount super.api.Backend;
+             public fn sample<T>(x: T) -> T using [Backend] { x }
+             public fn number<T: Backend>(x: &T) -> Int { x.number() }"),
+            ("lab/consumer.vr", "module core.lab.consumer; mount super.ops.{sample as factory};
+             public fn unrelated() -> Int { 1 }"),
+        ] {
+            fs::write(source.join(file), contents).unwrap();
+        }
+        let output = root.path().join("context.vbca");
+        let mut session = Session::new(CompilerOptions { input: source.join("mod.vr"), ..Default::default() });
+        let result = CompilationPipeline::new_core(&mut session, CoreConfig::new(&source).with_output(&output)).compile_core();
+        if !valid {
+            let reason = result.err().expect("ordinary protocol cannot supply an injectable requirement").to_string();
+            assert!(reason.contains("E605") && reason.contains("Backend"), "{reason}");
+            assert!(!output.exists());
+            continue;
+        }
+        let archive = result.unwrap();
+        assert!(archive.errors.is_empty(), "{declaration}: {:?}", archive.errors);
+        let module = read_archive_from_file(&output).unwrap().load_module("core.lab").unwrap();
+        let id = module.find_function_by_name("core.lab.ops.sample").unwrap();
+        let descriptor = module.get_function(id).unwrap();
+        let contexts: Vec<_> = descriptor.contexts.iter().map(|reference|
+            module.strings.get(module.context_names[reference.0 as usize]).unwrap()).collect();
+        assert_eq!(contexts, ["core.lab.caps.Device"]);
+    }
+}

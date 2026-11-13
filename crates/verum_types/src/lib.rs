@@ -2612,7 +2612,7 @@ impl TypeError {
                         "undefined context: {}\n  \
                          help: check if context or protocol is imported\n  \
                          help: context declarations use `context Name {{ ... }}`\n  \
-                         help: protocols defined with `type Name is protocol {{ ... }}` can also serve as contexts",
+                         help: declare an injectable protocol with `context protocol Name {{ ... }}`",
                         name
                     ));
                 if let Some(diag_span) = convert_span(*span) {

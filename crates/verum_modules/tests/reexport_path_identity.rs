@@ -124,3 +124,28 @@ fn bare_reexport_never_falls_back_to_an_unrelated_child() {
         }
     }
 }
+
+#[test]
+fn context_protocol_facets_survive_direct_extraction_and_reexport() {
+    for declaration in [
+        "public context protocol Device { fn number(&self) -> Int; }",
+        "public context type Device is protocol { fn number(&self) -> Int; };",
+    ] {
+        let mut registry = ModuleRegistry::new();
+        let owner = register(&mut registry, "realm.hardware", &format!("{declaration}
+            public type Constraint is protocol {{ fn number(&self) -> Int; }};
+            context protocol Hidden {{ fn number(&self) -> Int; }}"));
+        let facade = register(&mut registry, "realm.api",
+            "public mount super.hardware.{Device as Active, Constraint};");
+        let module = registry.get(owner).unwrap();
+        assert_eq!(module.exports.get(&Text::from("Device")).unwrap().kind, ExportKind::Context);
+        assert_eq!(module.exports.get(&Text::from("Constraint")).unwrap().kind, ExportKind::Type);
+        assert!(!module.exports.contains("Hidden"));
+        resolve_specific_reexport_kinds(&mut registry).unwrap();
+        let module = registry.get(facade).unwrap();
+        let alias = module.exports.get(&Text::from("Active")).unwrap();
+        assert_eq!(alias.kind, ExportKind::Context);
+        assert_eq!(alias.original_name.as_deref(), Some("Device"));
+        assert_eq!(alias.source_module, owner);
+    }
+}

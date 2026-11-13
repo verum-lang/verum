@@ -6663,7 +6663,9 @@ impl TypeChecker {
                         let Some(export) = module.exports.get(&scope.name) else {
                             continue;
                         };
-                        if export.kind != verum_modules::ExportKind::Type
+                        // A context protocol is a nominal declaration too. The declaration
+                        // lookup below only accepts actual TypeDecls from the selected owner.
+                        if !matches!(export.kind, verum_modules::ExportKind::Type | verum_modules::ExportKind::Context)
                             || export.visibility != verum_ast::Visibility::Public
                         {
                             continue;
@@ -7757,13 +7759,7 @@ impl TypeChecker {
                     });
                 }
                 ItemKind::Type(type_decl) if type_decl.name.name.as_str() == item_name => {
-                    // Check if this is a context protocol type
-                    if let verum_ast::decl::TypeDeclBody::Protocol(proto_body) = &type_decl.body
-                        && proto_body.is_context
-                    {
-                        return Some(ExportKind::Context);
-                    }
-                    return Some(ExportKind::Type);
+                    return Some(ExportKind::for_type_body(&type_decl.body));
                 }
                 ItemKind::Protocol(proto) if proto.name.name.as_str() == item_name => {
                     // Context protocols have ExportKind::Context
