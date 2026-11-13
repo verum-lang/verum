@@ -60,9 +60,14 @@ fn dependent_nominal_carrier_is_instantiated_before_admission() {
 }
 #[test]
 fn mixed_family_preserves_the_dependent_nominal_result_carrier() {
-    accept(
-        "type Indexed<T,V: meta T> is {value:()}; type Family is protocol {type Cell<T,V: meta T>;}; type Owner is {}; implement Family for Owner {type Cell<U,W: meta U> = Indexed<U,W>;} fn keep(cell: Owner.Cell<Bool,true>) -> Indexed<Bool,true> {cell}",
-    );
+    let source = "type Indexed<T,V: meta T> is {value:()}; type Family is protocol {type Cell<T,V: meta T>;}; type Owner is {}; implement Family for Owner {type Cell<U,W: meta U> = Indexed<U,W>;} fn keep(cell: Owner.Cell<Bool,true>) -> Indexed<Bool,true> {cell}";
+    reject(source, "generic_associated_types = false");
+    let mut checker = TypeChecker::new();
+    checker.register_primitives();
+    checker.set_current_module_path("nominal_roles");
+    checker.set_generic_associated_types_enabled(true);
+    let found = errors(&mut checker, source);
+    assert!(found.is_empty(), "{found:#?}");
 }
 #[test]
 fn alpha_renamed_symbolic_carriers_and_aliases_preserve_their_domains() {
