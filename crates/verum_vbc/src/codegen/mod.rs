@@ -8351,11 +8351,6 @@ impl VbcCodegen {
         // loses StructPtr for forward-declared externs (T0362).
         self.collect_unit_declarations(&[module])?;
 
-        // Compile pending default protocol methods.
-        // These were registered during declaration collection but their bodies need to be
-        // compiled after all functions are registered.
-        self.compile_pending_default_methods()?;
-
         // Pass 3: Compile function bodies
         // Pending constants and TLS initialisers are part of compiling a
         // unit's items, so they happen inside — calling them again here
@@ -8470,9 +8465,6 @@ impl VbcCodegen {
         // the bake.
         self.collect_unit_declarations(&[module])?;
 
-        // Compile pending default protocol methods.
-        self.compile_pending_default_methods()?;
-
         // Pass 3: Compile function bodies
         self.compile_unit_items(&[module], ItemFailurePolicy::Strict)?;
 
@@ -8497,11 +8489,6 @@ impl VbcCodegen {
         // saw a different world than the same module compiled through
         // the bake.
         self.collect_unit_declarations(&[module])?;
-
-        // Compile pending default protocol methods.
-        // These were registered during declaration collection but their bodies need to be
-        // compiled after all functions are registered.
-        self.compile_pending_default_methods()?;
 
         // Pass 3: Compile function bodies
         self.compile_unit_items(&[module], ItemFailurePolicy::Strict)?;
@@ -8776,6 +8763,10 @@ impl VbcCodegen {
         // bodies, including the single-module compiler with inline modules.
         self.resolve_pending_imports();
         self.check_source_declaration_error()?;
+        // Every body entry has the same complete callable surface. Deferred
+        // defaults are registered after all explicit overrides, then compiled
+        // before callers using those methods can be lowered.
+        self.compile_default_methods_with_policy(policy)?;
         let mut first_error: Option<CodegenError> = None;
         for (parent, module) in files {
             if !self.selected_source_module(module, &parent)? { continue; }
