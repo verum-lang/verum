@@ -171,6 +171,15 @@ fn test_executor_async_runtime_config_work_stealing_chains() {
 }
 
 @test
+fn explicit_profile_worker_count_overrides_the_default() {
+    let local = AsyncRuntimeConfig.default().worker_threads(0).unwrap();
+    assert_eq(local.configured_worker_threads(), 0);
+    let parallel = local.worker_threads(3).unwrap();
+    assert_eq(parallel.configured_worker_threads(), 3);
+    assert(parallel.worker_threads(-1).is_err());
+}
+
+@test
 fn test_executor_async_runtime_config_poll_budget_chains() {
     let _c = AsyncRuntimeConfig.default().poll_budget(512);
     assert(true);

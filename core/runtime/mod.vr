@@ -144,6 +144,7 @@ public mount .config.{
     NoopDriver,
     RuntimeExecutor,
     AsyncExecutor,
+    ProfileExecutor,
 };
 
 // Runtime configurations
@@ -365,7 +366,7 @@ public fn init() -> Result<(), RuntimeInitError> {
 /// ```verum
 /// type MyRuntime is {
 ///  allocator: MyCustomAllocator,
-///  executor: SingleThreadExecutor,
+///  executor: ProfileExecutor,
 ///  io_driver: PollDriver,
 /// };
 ///

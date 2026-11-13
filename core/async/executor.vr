@@ -282,6 +282,13 @@ implement AsyncRuntimeConfig {
         self.async_worker_threads
     }
 
+    /// Override the manifest's worker count. Zero keeps polling on the calling thread.
+    public fn worker_threads(mut self, count: Int) -> Result<AsyncRuntimeConfig, Text> {
+        if count < 0 { return Result.Err("worker count must be nonnegative"); }
+        self.async_worker_threads = count;
+        Result.Ok(self)
+    }
+
     /// Enable || disable work stealing.
     public fn work_stealing(mut self, enabled: Bool) -> AsyncRuntimeConfig {
         self.enable_work_stealing = enabled;
