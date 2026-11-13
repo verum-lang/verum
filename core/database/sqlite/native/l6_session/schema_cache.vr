@@ -35,6 +35,7 @@ module core.database.sqlite.native.l6_session.schema_cache;
 
 mount collections.{List, Map};
 mount base.{Result, Text, Maybe};
+mount core.base.protocols.{PartialEq, Eq, Hash, Hasher};
 mount core.database.sqlite.native.l2_record.affinity.Affinity;
 
 // -----------------------------------------------------------------------------
@@ -113,9 +114,26 @@ implement Eq for SessionSchemaError {
 // SchemaCache
 // -----------------------------------------------------------------------------
 
+type CatalogKey is { schema: Text, name: Text };
+
+implement PartialEq for CatalogKey {
+    fn eq(&self, other: &CatalogKey) -> Bool {
+        self.schema == other.schema && self.name == other.name
+    }
+}
+implement Eq for CatalogKey {}
+
+implement Hash for CatalogKey {
+    fn hash(&self, hasher: &mut Hasher) {
+        hasher.write_int(self.schema.len());
+        hasher.write(self.schema.as_bytes());
+        hasher.write(self.name.as_bytes());
+    }
+}
+
 public type SchemaCache is {
-    tables: Map<Text, TableMeta>,  // keyed by `schema.name` (or just `name` for main)
-    indexes: Map<Text, IndexMeta>,
+    tables: Map<CatalogKey, TableMeta>,
+    indexes: Map<CatalogKey, IndexMeta>,
     schema_cookie: Int,            // bumped post-DDL
     generation: Int,               // bumped on invalidate
 };
@@ -143,11 +161,10 @@ implement SchemaCache {
     /// qualified name is already in the cache.
     public fn register_table(&mut self, meta: TableMeta) -> Result<(), SessionSchemaError> {
         let key = qualify(&meta.schema, &meta.name);
-        if self.tables.contains_key(key.clone()) {
-            return Result.Err(AlreadyExists(key));
+        match self.tables.insert_if_absent(key, meta) {
+            Result.Ok(_) => Result.Ok(()),
+            Result.Err(rejected) => Result.Err(AlreadyExists(display_name(&rejected.schema, &rejected.name))),
         }
-        let _ = self.tables.insert(key, meta);
-        Result.Ok(())
     }
 
     /// Replace an existing table's metadata (ALTER TABLE path).
@@ -158,11 +175,10 @@ implement SchemaCache {
 
     public fn register_index(&mut self, idx: IndexMeta) -> Result<(), SessionSchemaError> {
         let key = qualify(&idx.schema, &idx.name);
-        if self.indexes.contains_key(key.clone()) {
-            return Result.Err(AlreadyExists(key));
+        match self.indexes.insert_if_absent(key, idx) {
+            Result.Ok(_) => Result.Ok(()),
+            Result.Err(rejected) => Result.Err(AlreadyExists(display_name(&rejected.schema, &rejected.name))),
         }
-        let _ = self.indexes.insert(key, idx);
-        Result.Ok(())
     }
 
     // -------------------------------------------------------------------------
@@ -173,7 +189,7 @@ implement SchemaCache {
         let key = qualify(schema, name);
         match self.tables.get(key) {
             Maybe.Some(meta) => Result.Ok(clone_table_meta(&meta)),
-            Maybe.None => Result.Err(NotFound(key)),
+            Maybe.None => Result.Err(NotFound(display_name(schema, name))),
         }
     }
 
@@ -181,7 +197,7 @@ implement SchemaCache {
         let key = qualify(schema, name);
         match self.indexes.get(key) {
             Maybe.Some(meta) => Result.Ok(clone_index_meta(&meta)),
-            Maybe.None => Result.Err(NotFound(key)),
+            Maybe.None => Result.Err(NotFound(display_name(schema, name))),
         }
     }
 
@@ -201,7 +217,7 @@ implement SchemaCache {
     /// underlying I/O.
     public fn lookup_table_by_root(&self, root_page: Int) -> Maybe<TableMeta> {
         if root_page < 1 { return Maybe.None; }
-        match self.tables.find(|_: &Text, table: &TableMeta| table.root_page == root_page) {
+        match self.tables.find(|_: &CatalogKey, table: &TableMeta| table.root_page == root_page) {
             Maybe.Some((_, table)) => Maybe.Some(clone_table_meta(table)),
             Maybe.None => Maybe.None,
         }
@@ -214,7 +230,7 @@ implement SchemaCache {
     /// O(10) — well below the cost of running the planner once.
     public fn indexes_for_table(&self, schema: &Text, name: &Text) -> List<IndexMeta> {
         let mut out: List<IndexMeta> = List.new();
-        let want_schema = if schema.len() == 0 { "main".clone() } else { schema.clone() };
+        let want_schema = normalized_schema(schema);
         for idx in self.indexes.values() {
             if index_belongs_to(&idx, &want_schema, name) {
                 out.push(clone_index_meta(&idx));
@@ -234,7 +250,7 @@ implement SchemaCache {
                 self.schema_cookie = self.schema_cookie + 1;
                 Result.Ok(())
             }
-            Maybe.None => Result.Err(NotFound(key)),
+            Maybe.None => Result.Err(NotFound(display_name(schema, name))),
         }
     }
 
@@ -245,7 +261,7 @@ implement SchemaCache {
                 self.schema_cookie = self.schema_cookie + 1;
                 Result.Ok(())
             }
-            Maybe.None => Result.Err(NotFound(key)),
+            Maybe.None => Result.Err(NotFound(display_name(schema, name))),
         }
     }
 
@@ -272,14 +288,21 @@ implement SchemaCache {
 // Helpers
 // -----------------------------------------------------------------------------
 
-fn qualify(schema: &Text, name: &Text) -> Text {
+fn normalized_schema(schema: &Text) -> Text {
+    if schema.len() == 0 { "main" } else { schema.clone() }
+}
+
+fn qualify(schema: &Text, name: &Text) -> CatalogKey {
+    CatalogKey { schema: normalized_schema(schema), name: name.clone() }
+}
+
+fn display_name(schema: &Text, name: &Text) -> Text {
     if schema.len() == 0 || schema == &"main" { return name.clone(); }
     schema.clone() + ".".clone() + name.clone()
 }
 
 fn index_belongs_to(index: &IndexMeta, schema: &Text, name: &Text) -> Bool {
-    let index_schema = if index.schema.len() == 0 { "main" } else { index.schema };
-    &index_schema == schema && &index.table_name == name
+    &normalized_schema(&index.schema) == schema && &index.table_name == name
 }
 
 fn clone_column_meta(c: &ColumnMeta) -> ColumnMeta {
