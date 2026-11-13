@@ -24371,14 +24371,14 @@ bake to have this verified.",
                         }
 
                         let resolved_return = self.unifier.apply(return_type);
-                        self.type_registry.register_call_target(span, self.unifier.apply(&instance.ty));
+                        self.type_registry.register_declared_static_target(span, self.unifier.apply(&instance.ty), &scheme);
                         if crate::ctor_trace_enabled() {
                             eprintln!(
                                 "[ctor-trace] path-static ENV-QUALIFIED {} -> {}",
                                 qualified_name, resolved_return
                             );
                         }
-                        return Ok(Some(InferResult::new(resolved_return)));
+                        return Ok(Some(InferResult::method(resolved_return, instance.receiver_kind)));
                     } else {
                         env_resolved = true; // Non-function type, treat as resolved
                     }
@@ -24460,8 +24460,8 @@ bake to have this verified.",
 
                                 // Apply accumulated substitution to return type
                                 let resolved_return = self.unifier.apply(return_type);
-                                self.type_registry.register_call_target(span, self.unifier.apply(&instance.ty));
-                                return Ok(Some(InferResult::new(resolved_return)));
+                                self.type_registry.register_declared_static_target(span, self.unifier.apply(&instance.ty), &scheme);
+                                return Ok(Some(InferResult::method(resolved_return, instance.receiver_kind)));
                             }
                             // Args not compatible — fall through to protocol_checker
                         }

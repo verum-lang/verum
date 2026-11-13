@@ -35,12 +35,14 @@ fn queue<'a>(
     true
 }
 
-fn immediate(ty: &Type) -> Option<bool> {
+fn immediate(ty: &Type, borrowed_views: bool) -> Option<bool> {
     match ty {
         Type::Reference { .. }
         | Type::CheckedReference { .. }
         | Type::UnsafeReference { .. }
         | Type::GenRef { .. } => Some(true),
+        Type::Pointer { .. } | Type::VolatilePointer { .. } | Type::Slice { .. }
+            if borrowed_views => Some(true),
         Type::Unit
         | Type::Never
         | Type::Bool
@@ -125,7 +127,17 @@ impl TypeChecker {
     /// A callable signature does not describe its captures, so callable storage
     /// remains unknown, like any other missing layout evidence.
     pub(super) fn carries_stored_loan(&self, ty: &Type) -> bool {
-        if let Some(present) = immediate(ty) {
+        self.stored_loan_shape(ty, false)
+    }
+
+    /// An opaque call can re-expose a raw address or a borrowed view even if
+    /// reading its elements would yield only scalars.
+    pub(super) fn may_supply_call_borrow(&self, ty: &Type) -> bool {
+        self.stored_loan_shape(ty, true)
+    }
+
+    fn stored_loan_shape(&self, ty: &Type, borrowed_views: bool) -> bool {
+        if let Some(present) = immediate(ty, borrowed_views) {
             return present;
         }
         let mut pending = List::from_iter([Node { ty, scope: 0 }]);
@@ -142,7 +154,7 @@ impl TypeChecker {
             if !visited.insert(node.key()) {
                 continue;
             }
-            if let Some(present) = immediate(node.ty) {
+            if let Some(present) = immediate(node.ty, borrowed_views) {
                 if present {
                     return true;
                 }

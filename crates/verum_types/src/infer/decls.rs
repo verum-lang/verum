@@ -5067,7 +5067,7 @@ impl TypeChecker {
                                         func.is_generator,
                                     );
 
-                                    let func_ty = Type::function_with_requirement(param_types, final_return_type, checker.source_callable_requirement(func));
+                                    let func_ty = checker.declared_function_signature(param_types, final_return_type, func)?;
                                     let qualified_name =
                                         format!("{}.{}", type_name_str, func.name.name);
 
@@ -5087,6 +5087,7 @@ impl TypeChecker {
                                             .with_universe_parameters(checker.current_universe_parameters())
                                             .map_err(|message| TypeError::UniverseBinding { message, span: func.span })?;
                                     func_scheme.impl_self_type = Some(self_type.clone());
+                                    func_scheme.receiver_kind = Some(crate::core_metadata::ReceiverKind::from_declaration(func));
                                     checker.record_callable_declaration(&mut func_scheme, func);
                                     // Record how many ordered vars are impl-level so method-level params
                                     // (e.g., method's own <U>) aren't bound from receiver type args at call time.
@@ -6217,6 +6218,22 @@ impl TypeChecker {
         result
     }
 
+    fn declared_function_signature(
+        &mut self,
+        params: List<Type>,
+        result: Type,
+        function: &verum_ast::FunctionDecl,
+    ) -> Result<Type> {
+        let mut ty = Type::function_with_requirement(params, result, self.source_callable_requirement(function));
+        if !function.contexts.is_empty() {
+            let requirement = self.resolve_declared_callable_contexts(&function.contexts, function.span)?;
+            if let Type::Function { contexts, .. } = &mut ty {
+                *contexts = Some(crate::di::requirement::ContextExpr::Concrete(requirement));
+            }
+        }
+        Ok(ty)
+    }
+
     fn function_scheme_in_universe_scope(&mut self, func: &verum_ast::FunctionDecl) -> Result<TypeScheme> {
         use verum_ast::decl::FunctionParamKind;
         use verum_common::Set;
@@ -6395,21 +6412,7 @@ impl TypeChecker {
             func.is_generator,
         );
 
-        // Build context requirement if present
-        let func_type = if !func.contexts.is_empty() {
-            let contexts_list: List<_> = func.contexts.iter().cloned().collect();
-            // T0660: value-typed contexts — learn plain types first.
-            let requirement = self.resolve_declared_callable_contexts(&contexts_list, func.span)?;
-            Type::function_with_contexts(param_types, return_for_sig, requirement)
-        } else {
-            Type::function(param_types, return_for_sig)
-        };
-
-        let mut func_type = func_type;
-        if let Type::Function { properties, property_requirement, .. } = &mut func_type {
-            *properties = None;
-            *property_requirement = self.source_callable_requirement(func);
-        }
+        let func_type = self.declared_function_signature(param_types, return_for_sig, func)?;
 
         // CRITICAL: Create TypeScheme explicitly with tracked type parameters.
         // We cannot rely on `generalize()` which uses `free_vars()` because:

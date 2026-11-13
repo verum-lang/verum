@@ -397,6 +397,20 @@ impl TypeChecker {
                 ExprKind::Field { expr, .. } | ExprKind::TupleIndex { expr, .. } => {
                     pending.push(expr);
                 }
+                ExprKind::MethodCall { args, .. } => {
+                    // The selected static declaration has no receiver, so a
+                    // caller-local loan must enter through an argument or a
+                    // provided context. Use the selected *parameter* types:
+                    // an implicit borrow need not appear in the argument AST.
+                    let Type::Function { params, contexts, .. } =
+                        self.type_registry.explicit_input_target(value.span)? else { return None };
+                    if params.len() != args.len()
+                        || contexts.as_ref().is_some_and(|contexts| !contexts.is_empty())
+                        || params.iter().any(|ty| self.may_supply_call_borrow(ty))
+                    {
+                        return None;
+                    }
+                }
                 _ => return None,
             }
         }

@@ -287,3 +287,40 @@ fn borrowing_a_projected_field_preserves_every_possible_referent() {
             "{body}: {diagnostics:?}");
     }
 }
+
+#[test]
+fn static_call_results_can_only_receive_caller_loans_through_the_declared_boundary() {
+    let declarations = "
+        type Reply is Empty | Field(&Int);
+        type Factory is ();
+        implement Factory {
+            fn owned(count: Int) -> Reply { Reply.Empty }
+            fn borrowed(value: &Int) -> Reply { Reply.Field(value) }
+        }";
+    let positive = format!("{declarations}
+        fn accept() -> Reply {{ let local = 7; match &local {{ item => Factory.owned(*item) }} }}");
+    assert_eq!(errors(&positive), List::<Text>::new());
+    for body in [
+        "fn reject() -> Reply { let local = 7; match &local { item => Factory.borrowed(item) } }",
+        "fn reject() -> Reply { let local = 7; match &local { _ => Factory.borrowed(&local) } }",
+        "fn reject(select: fn(&Int) -> Reply) -> Reply { let local = 7; match &local { item => select(item) } }",
+        "context Gate { fn ping(); }
+         implement Factory { fn uses(count: Int) -> Reply using [Gate] { Gate.ping(); Reply.Empty } }
+         fn reject() -> Reply using [Gate] { let local = 7; match &local { item => Factory.uses(*item) } }",
+        "implement Factory { fn borrowed_slice(items: [Int]) -> Reply { Reply.Empty } }
+         fn reject(items: [Int]) -> Reply { let local = 7; match &local { _ => Factory.borrowed_slice(items) } }",
+        "implement Factory { fn borrowed_raw(items: *const Int) -> Reply { Reply.Empty } }
+         fn reject(items: *const Int) -> Reply { let local = 7; match &local { _ => Factory.borrowed_raw(items) } }",
+        "implement Factory { fn borrowed_volatile(items: *volatile Int) -> Reply { Reply.Empty } }
+         fn reject(items: *volatile Int) -> Reply { let local = 7; match &local { _ => Factory.borrowed_volatile(items) } }",
+        "implement Factory { fn borrowed_unsafe(items: &unsafe Int) -> Reply { Reply.Empty } }
+         fn reject(items: &unsafe Int) -> Reply { let local = 7; match &local { _ => Factory.borrowed_unsafe(items) } }",
+    ] {
+        let diagnostics = errors(&format!("{declarations} {body}"));
+        assert!(
+            !diagnostics.is_empty()
+                && diagnostics.iter().all(|error| error.contains("does not live long enough")),
+            "{body}: {diagnostics:?}"
+        );
+    }
+}

@@ -43,24 +43,17 @@ fn register(code: &str, type_name: &str, method_name: &str) -> Registration {
     let mut parser = Parser::new(code);
     let module = parser.parse_module().expect("parse should succeed");
     let mut checker = TypeChecker::new();
-    for item in &module.items {
-        if let verum_ast::ItemKind::Type(td) = &item.kind {
-            let _ = checker.register_type_declaration(td);
-        }
-    }
-    for item in &module.items {
-        if let verum_ast::ItemKind::Impl(impl_block) = &item.kind {
-            checker
-                .register_impl_block(impl_block)
-                .expect("impl registration should succeed");
-        }
-    }
+    checker.register_primitives();
+    checker.set_current_module_path("sample");
+    let errors = checker.prepare_module_declarations(&module);
+    assert!(errors.is_empty(), "declaration header errors: {errors:?}");
+    let owner = format!("{}.{}", checker.current_module_path(), type_name);
     Registration {
         instance: checker
-            .lookup_instance_method_for_testing(type_name, method_name)
+            .lookup_instance_method_for_testing(&owner, method_name)
             .is_some(),
         static_fn: checker
-            .lookup_static_method_for_testing(type_name, method_name)
+            .lookup_static_method_for_testing(&owner, method_name)
             .is_some(),
     }
 }

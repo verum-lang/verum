@@ -60,7 +60,7 @@ pub struct TypeRegistry {
     /// function calls, and compound expressions.
     expr_types: Map<Span, Type>,
     /// Callable selected for an executed call, distinct from its result type.
-    call_targets: Map<Span, Type>,
+    call_targets: Map<Span, (Type, bool)>,
     /// A source site consumes its receiver only if every resolution at that
     /// span agrees. Expanded expressions can share a source location.
     consuming_receivers: Map<Span, bool>,
@@ -105,11 +105,44 @@ impl TypeRegistry {
     }
 
     pub fn register_call_target(&mut self, span: Span, ty: Type) {
-        self.call_targets.insert(span, ty);
+        self.record_call_target(span, ty, false);
+    }
+
+    pub(crate) fn register_declared_static_target(
+        &mut self,
+        span: Span,
+        ty: Type,
+        scheme: &crate::TypeScheme,
+    ) {
+        // Unknown metadata, host calls, context providers and receiver values
+        // cannot prove that the explicitly passed values are the only inputs.
+        let explicit_inputs = scheme.callable_source.as_ref().is_some_and(|(_, source)| {
+            crate::core_metadata::ReceiverKind::from_declaration(source)
+                == crate::core_metadata::ReceiverKind::None
+                && source.contexts.is_empty()
+                && !source.is_unsafe
+                && source.extern_abi.is_none()
+                && !source.is_variadic
+                && source.body.is_some()
+        });
+        self.record_call_target(span, ty, explicit_inputs);
+    }
+
+    fn record_call_target(&mut self, span: Span, ty: Type, explicit_inputs: bool) {
+        let previous = self.call_targets.get(&span);
+        let agreed = !span.is_empty()
+            && explicit_inputs
+            && previous.is_none_or(|(previous, known)| *known && previous == &ty);
+        self.call_targets.insert(span, (ty, agreed));
     }
 
     pub fn lookup_call_target(&self, span: Span) -> Maybe<&Type> {
-        self.call_targets.get(&span)
+        self.call_targets.get(&span).map(|(ty, _)| ty)
+    }
+
+    pub(crate) fn explicit_input_target(&self, span: Span) -> Maybe<&Type> {
+        let (ty, agreed) = self.call_targets.get(&span)?;
+        agreed.then_some(ty)
     }
 
     /// Register the type of an expression
@@ -274,7 +307,7 @@ impl TypeRegistry {
     ///
     /// * `unifier` - The unifier containing the accumulated substitutions
     pub fn apply_substitution(&mut self, unifier: &crate::unify::Unifier) {
-        for ty in self.call_targets.values_mut() { *ty = unifier.apply(ty); }
+        for (ty, _) in self.call_targets.values_mut() { *ty = unifier.apply(ty); }
         // Apply substitution to all expression types
         for ty in self.expr_types.values_mut() {
             *ty = unifier.apply(ty);
