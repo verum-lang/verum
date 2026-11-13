@@ -572,12 +572,23 @@ impl super::VbcCodegen {
     /// or rendered bare-leaf guess. Opaque carrier fallbacks remain unknown.
     pub(super) fn publish_binding_type(&mut self, name: &str, ast: &verum_ast::Type) {
         let Some(ty) = self.source_type_in_current_scope(ast) else { return };
-        let discipline = crate::resource_discipline::resource_discipline_with(&ty, |id| {
+        self.publish_resolved_binding_type(name, &ty);
+    }
+
+    /// Keep method selection and ownership tied to the same declared binding.
+    /// A widened reference must replace the initializer's narrower owner.
+    pub(super) fn publish_resolved_binding_type(&mut self, name: &str, ty: &TypeRef) {
+        if let Some(declared) = self.declaration_type_name(ty, 0) {
+            self.ctx.variable_type_names.insert(name.to_owned(), declared);
+        } else {
+            self.ctx.variable_type_names.remove(name);
+        }
+        let discipline = crate::resource_discipline::resource_discipline_with(ty, |id| {
             self.type_index_of(id)
                 .and_then(|index| self.types.get(index))
         });
         if let Some(reg) = self.ctx.lookup_var(name).map(|v| v.reg) {
-            self.ctx.registers.value_uses.set_type(reg, ty, discipline);
+            self.ctx.registers.value_uses.set_type(reg, ty.clone(), discipline);
         }
     }
 }
