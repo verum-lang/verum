@@ -70,6 +70,28 @@ fn helpers_cannot_write_or_reborrow_shared_referents() {
 }
 
 #[test]
+fn byte_literals_keep_shared_permission_through_bindings_and_calls() {
+    for body in [
+        r#"fn inspect(bytes: &[Byte]) -> Byte { bytes[0] } fn f() -> Byte { inspect(b"a") }"#,
+        r#"fn f() -> Byte { let mut bytes = b"a"; bytes = b"b"; bytes[0] }"#,
+        r#"fn f() -> &[Byte] { let bytes = b"a"; bytes }"#,
+        r#"fn take<T>(value: &mut T) {} fn f() { let mut bytes = b"a"; take(&mut bytes); }"#,
+        "fn write(bytes: &mut [Byte]) { bytes[0] = 7_u8; }",
+    ] {
+        let messages = errors(body);
+        assert!(messages.is_empty(), "{body}: {messages:?}");
+    }
+    for body in [
+        r#"fn f() { let mut bytes = b"a"; bytes[0] = 7_u8; }"#,
+        r#"fn write(bytes: &mut [Byte]) {} fn f() { write(&mut b"a"); }"#,
+        r#"fn borrow() -> &[Byte] { b"a" } fn f() { borrow()[0] = 7_u8; }"#,
+    ] {
+        let messages = errors(body);
+        assert!(!messages.is_empty(), "{body} accepted a write to literal storage");
+    }
+}
+
+#[test]
 fn exclusive_references_allow_writes_and_shared_references_can_be_rebound() {
     for body in [
         "fn change(p: &mut Boxed, y: Boxed) { *p = y; }",

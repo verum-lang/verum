@@ -710,6 +710,25 @@ fn native_fixed_array_parameters_require_an_actual_argument_contract() {
 }
 
 #[test]
+fn native_byte_literals_preserve_the_source_extent_and_unsigned_octets() {
+    let module = source(r#"
+fn length(bytes: &[Byte]) -> Int { @intrinsic("slice_len", bytes) }
+fn middle(bytes: &[Byte]) -> Int { bytes[2] as Int }
+fn probe() -> Int {
+    let bytes = b"a\0\xFFb";
+    length(b"") + length(bytes) * 1000 + middle(bytes) * 10 + bytes[1] as Int
+}
+"#);
+    native(&module, |engine| {
+        // SAFETY: probe takes no arguments and returns the native Int ABI.
+        let value = unsafe {
+            engine.get_function::<unsafe extern "C" fn() -> i64>("probe").unwrap().call()
+        };
+        assert_eq!(value, 6550);
+    });
+}
+
+#[test]
 fn native_array_refusal_is_scoped_to_reachable_program_helpers() {
     assert_ne!(
         std::env::var("VERUM_NO_REACHABILITY_LOWERING").as_deref(),

@@ -211,10 +211,27 @@ impl TypeChecker {
         result
     }
 
-    fn check_borrow_operand(&mut self, expr: &Expr, expected: &Type) -> Result<InferResult> {
-        if Self::named_field_place(expr).is_some() {
+    fn check_borrow_operand(
+        &mut self,
+        expr: &Expr,
+        expected: &Type,
+        mutable: bool,
+    ) -> Result<InferResult> {
+        if mutable || Self::named_field_place(expr).is_some() {
             let result = self.synth_borrowed_operand(expr)?;
-            return self.check_synthesized_value(expr, expected, result);
+            let source = result.ty.clone();
+            let checked = self.check_synthesized_value(expr, expected, result)?;
+            if mutable
+                && self
+                    .place_reference_head(expected, expr.span)?
+                    .reference_parts()
+                    .is_none()
+            {
+                // A value coercion can read through a shared reference.
+                // Borrowing the same referent for writing requires exclusive access.
+                self.check_write_access(expr, Some(&source), expr.span)?;
+            }
+            return Ok(checked);
         }
         self.check_expr(expr, expected)
     }
@@ -710,15 +727,14 @@ impl TypeChecker {
         {
             let checked = if mutable {
                 self.with_checked_write(inner, |checker| {
-                    checker.check_borrow_operand(inner, expected_inner)
+                    checker.check_borrow_operand(inner, expected_inner, true)
                 })
             } else {
-                self.check_borrow_operand(inner, expected_inner)
+                self.check_borrow_operand(inner, expected_inner, false)
             };
-            if checked.is_ok() {
-                self.track_reference_borrow(inner, mutable, expr.span)?;
-                return Ok(InferResult::new(expected.clone()));
-            }
+            checked?;
+            self.track_reference_borrow(inner, mutable, expr.span)?;
+            return Ok(InferResult::new(expected.clone()));
         }
         self.synth_and_check(expr, expected)
     }

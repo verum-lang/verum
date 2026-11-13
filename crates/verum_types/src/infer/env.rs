@@ -10831,12 +10831,8 @@ impl TypeChecker {
 
             LiteralKind::Char(_) => Type::Char,
             LiteralKind::ByteChar(_) => Type::u8_refined(0),
-            LiteralKind::ByteString(_bytes) => {
-                // Byte string literal: &[Byte] with known length
-                Type::Slice {
-                    element: Box::new(Type::u8_refined(0)),
-                }
-            }
+            // Literal storage has module lifetime and permits shared reads only.
+            LiteralKind::ByteString(_) => Type::reference(false, Type::slice(Type::u8_refined(0))),
             LiteralKind::Text(_) => Type::text(),
             LiteralKind::Tagged { tag, content: _ } => {
                 // Format-specific type inference for tagged literals

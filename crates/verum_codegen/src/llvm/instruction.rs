@@ -43007,6 +43007,7 @@ fn lower_load_const<'ctx>(
     let vbc_mod = ctx.vbc_module().or_internal("LoadK requires VBC module for constant pool access")?;
     let constant = vbc_mod.get_constant(ConstId(const_id)).or_internal_else(|| format!("LoadK: constant {} not found in pool", const_id))?;
     let is_string_const = matches!(constant, Constant::String(_));
+    let is_byte_literal = matches!(constant, Constant::Bytes(_));
     let is_float_const = matches!(constant, Constant::Float(_));
     // Track constructor type name for Heap.new/Channel.new dispatch
     let constructor_type_name: Option<String> = if let Constant::String(str_id) = constant {
@@ -43083,23 +43084,50 @@ fn lower_load_const<'ctx>(
             global.as_pointer_value().into()
         }
         Constant::Bytes(bytes) => {
-            // Bytes constant: create global byte array
-            let i8_ty = ctx.llvm_context().i8_type();
-            let values: Vec<verum_llvm::values::IntValue<'ctx>> = bytes
-                .iter()
-                .map(|b| i8_ty.const_int(*b as u64, false))
-                .collect();
-            let arr_ty = i8_ty.array_type(values.len() as u32);
-            let arr_val = i8_ty.const_array(&values);
-            let global = ctx.get_module().add_global(arr_ty, None, "bytes_const");
-            global.set_initializer(&arr_val);
-            global.set_constant(true);
-            global.as_pointer_value().into()
+            let name = format!("verum_byte_slice_{const_id}");
+            let module = ctx.get_module();
+            let view = if let Some(view) = module.get_global(&name) {
+                view
+            } else {
+                let llvm = ctx.llvm_context();
+                let i32_ty = llvm.i32_type();
+                let i64_ty = llvm.i64_type();
+                let storage = llvm.const_string(bytes, true);
+                let data = module.add_global(storage.get_type(), None, &format!("{name}_data"));
+                data.set_initializer(&storage);
+                data.set_constant(true);
+                data.set_linkage(verum_llvm::module::Linkage::Private);
+                data.set_unnamed_addr(true);
+                // Same stamped header and two payload words as Text.as_bytes().
+                let descriptor = llvm.const_struct(
+                    &[
+                        i32_ty.const_int(u64::from(TypeId::BYTE_SLICE.0), false).into(),
+                        i32_ty.const_zero().into(),
+                        i32_ty.const_zero().into(),
+                        i32_ty.const_int(2 * verum_common::layout::VALUE_SLOT_SIZE, false).into(),
+                        i64_ty.const_zero().into(),
+                        data.as_pointer_value().const_to_int(i64_ty).into(),
+                        i64_ty.const_int(bytes.len() as u64, false).into(),
+                    ],
+                    false,
+                );
+                let view = module.add_global(descriptor.get_type(), None, &name);
+                view.set_initializer(&descriptor);
+                view.set_constant(true);
+                view.set_linkage(verum_llvm::module::Linkage::Private);
+                view.set_unnamed_addr(true);
+                view.set_alignment(16);
+                view
+            };
+            view.as_pointer_value().into()
         }
     };
     ctx.set_register(dst.0, llvm_val);
     if is_string_const {
         ctx.mark_text_register(dst.0);
+    }
+    if is_byte_literal {
+        ctx.mark_slice_register(dst.0);
     }
     if is_float_const {
         ctx.mark_float_register(dst.0);

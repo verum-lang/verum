@@ -1309,13 +1309,22 @@ impl Heap {
             (ptr, len)
         };
         self.alloc_with_init(TypeId::BYTE_SLICE, 16, |data| {
-            // SAFETY: `data` is the freshly-allocated 16-byte payload;
-            // both raw i64 slots are within it.
-            unsafe {
-                let slots = data.as_mut_ptr() as *mut u64;
-                *slots = ptr as u64;
-                *slots.add(1) = len;
-            }
+            Self::write_byte_slice(data, ptr, len);
+        })
+    }
+
+    fn write_byte_slice(descriptor: &mut [u8], ptr: *mut u8, len: u64) {
+        let (address, length) = descriptor.split_at_mut(8);
+        address.copy_from_slice(&(ptr as u64).to_ne_bytes());
+        length.copy_from_slice(&len.to_ne_bytes());
+    }
+
+    /// Materialize a byte literal and its slice descriptor in one stable allocation.
+    pub fn alloc_byte_literal(&mut self, bytes: &[u8]) -> InterpreterResult<Object> {
+        self.alloc_with_init(TypeId::BYTE_SLICE, 16 + bytes.len(), |data| {
+            let (descriptor, storage) = data.split_at_mut(16);
+            storage.copy_from_slice(bytes);
+            Self::write_byte_slice(descriptor, storage.as_mut_ptr(), storage.len() as u64);
         })
     }
 

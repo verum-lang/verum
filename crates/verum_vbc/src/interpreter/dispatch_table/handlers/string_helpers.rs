@@ -299,11 +299,11 @@ pub(super) fn is_array_type_id(type_id: u32) -> bool {
 /// correct. The duplicate is now deleted.
 /// Normalize a byte-addressable value to a `(ptr, len)` byte range, for
 /// cross-representation byte-slice equality (#20):
-///  * a BYTE_SLICE byte-view object (`Text.as_bytes()`, ARCH-P5) → its
+///  * a BYTE_SLICE byte-view object (literal or `Text.as_bytes()`) → its
 ///    raw `{ptr, len}` payload;
 ///  * a byte/raw-slice FatRef (`reserved != 0`, generic
 ///    `slice_from_raw_parts` output) → its `(ptr, len)` directly;
-///  * a const-bytes `U8` heap object (`b"..."`, load_constant mod.rs:792)
+///  * a packed `U8` array object
 ///    → bytes at `OBJECT_HEADER_SIZE`, length in `header.size`.
 ///
 /// Returns `None` for anything else (value-ref FatRef, Text object, etc.),
@@ -536,11 +536,7 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
     // is a BYTE_SLICE byte-view object (`Text.as_bytes()`, ARCH-P5) or a
     // byte/raw-element slice FatRef (reserved != 0, generic
     // `slice_from_raw_parts` output), normalize BOTH to byte ranges and
-    // compare — covers `as_bytes() == as_bytes()` AND the mixed
-    // `as_bytes() == b"lit"`, where the byte-string literal is a const-bytes
-    // U8 heap object (TypeId::U8, bytes at OBJECT_HEADER_SIZE, length in
-    // header.size) — the reason `subtype.as_bytes() == b"*"`
-    // (select_best_media wildcard) was historically always false.
+    // compare the contents independently of the array or slice producer.
     if is_byte_slice_value(va)
         || is_byte_slice_value(vb)
         || (va.is_fat_ref() && va.as_fat_ref().reserved != 0)

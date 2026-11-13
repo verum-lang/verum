@@ -688,77 +688,47 @@ pub(crate) fn load_constant(
     state: &mut InterpreterState,
     const_id: ConstId,
 ) -> InterpreterResult<Value> {
-    // Clone constant to release borrow before allocation
-    let constant = state
-        .module
-        .get_constant(const_id)
-        .cloned()
-        .ok_or_else(|| InterpreterError::InvalidBytecode {
+    let index = const_id.0 as usize;
+    if let Some(Some(value)) = state.literal_cache.get(index) {
+        return Ok(*value);
+    }
+    let constant = state.module.get_constant(const_id).ok_or_else(|| {
+        InterpreterError::InvalidBytecode {
             pc: state.pc() as usize,
             message: format!("Invalid constant id: {:?}", const_id),
-        })?;
-
-    match constant {
-        Constant::Int(i) => Ok(Value::from_i64(i)),
-        // T0272: a wide integer constant materializes as a boxed-i128 Value,
-        // preserving its full 128 bits (the `Constant::Int(i64)` path would
-        // collapse it). Signedness is carried so display renders correctly.
-        Constant::Int128 { raw, signed } => Ok(Value::from_i128_raw_signed(raw, signed)),
-        Constant::Float(f) => Ok(Value::from_f64(f)),
-        Constant::String(string_id) => {
-            // **String-constant singleton cache** (#93, mirrors AOT
-            // `__rodata` Text globals from #92).
-            //
-            // First load for `const_id` realises the Value (small-
-            // string-optimized via NaN box, or ONE canonical heap Text
-            // record `{ptr, len, cap=0}` — ARCH-P5 final leg; `cap == 0`
-            // is the same immutable-literal marker the AOT rodata Text
-            // globals carry).  Subsequent loads return the cached Value
-            // directly — zero allocation, zero memcpy.  The realised
-            // allocation is module-lifetime (never freed); for SSO
-            // values there's nothing to pin.
-            //
-            // The cache lives on `InterpreterState` because the
-            // module is shared (`Arc<VbcModule>`) and may be
-            // executed by multiple states with independent heaps;
-            // each state owns its own cache.
-            let idx = const_id.0 as usize;
-            if let Some(Some(cached)) = state.string_const_cache.get(idx) {
-                return Ok(*cached);
-            }
-
-            let value = if let Some(s) = state.module.get_string(string_id) {
-                let s = s.to_string();
-                if let Some(small) = Value::from_small_string(&s) {
-                    small
-                } else {
-                    // Heap-allocate the canonical Text record — happens
-                    // at most once per ConstId per InterpreterState
-                    // lifetime.
-                    let obj = state.heap.alloc_text(s.as_bytes())?;
-                    state.record_allocation();
-                    Value::from_ptr(obj.as_ptr() as *mut u8)
-                }
-            } else {
-                Value::from_small_string("").unwrap_or(Value::nil())
-            };
-
-            // Grow the cache to fit `idx` and store the realised
-            // Value.  Linear capacity growth here is fine — the
-            // VBC constant pool is fixed-size per module.
-            if state.string_const_cache.len() <= idx {
-                state.string_const_cache.resize(idx + 1, None);
-            }
-            state.string_const_cache[idx] = Some(value);
-            Ok(value)
         }
-        Constant::Type(type_ref) => match type_ref {
-            crate::types::TypeRef::Concrete(type_id) => Ok(Value::from_type(type_id)),
+    })?;
+    let literal = match constant {
+        Constant::Int(i) => return Ok(Value::from_i64(*i)),
+        Constant::Int128 { raw, signed } => return Ok(Value::from_i128_raw_signed(*raw, *signed)),
+        Constant::Float(f) => return Ok(Value::from_f64(*f)),
+        Constant::String(id) => {
+            let text = state.module.get_string(*id).ok_or_else(|| {
+                InterpreterError::InvalidBytecode {
+                    pc: state.pc() as usize,
+                    message: format!("Invalid string id: {id:?}"),
+                }
+            })?;
+            if let Some(small) = Value::from_small_string(text) {
+                small
+            } else {
+                let obj = state.heap.alloc_text(text.as_bytes())?;
+                state.record_allocation();
+                Value::from_ptr(obj.as_ptr())
+            }
+        }
+        Constant::Bytes(bytes) => {
+            let obj = state.heap.alloc_byte_literal(bytes)?;
+            state.record_allocation();
+            Value::from_ptr(obj.as_ptr())
+        }
+        Constant::Type(type_ref) => return match type_ref {
+            crate::types::TypeRef::Concrete(type_id) => Ok(Value::from_type(*type_id)),
             _ => Ok(Value::nil()),
         },
-        Constant::Function(func_id) => Ok(Value::from_function(func_id)),
-        Constant::Protocol(_) => Ok(Value::nil()),
-        Constant::Array(ref element_ids) => {
+        Constant::Function(func_id) => return Ok(Value::from_function(*func_id)),
+        Constant::Protocol(_) => return Ok(Value::nil()),
+        Constant::Array(element_ids) => {
             let count = element_ids.len();
             let elem_ids: Vec<ConstId> = element_ids.clone();
             let mut elements = Vec::with_capacity(count);
@@ -797,19 +767,14 @@ pub(crate) fn load_constant(
                 *data_ptr.add(1) = count as i64;
                 *data_ptr.add(2) = backing_ptr as i64;
             }
-            Ok(Value::from_ptr(obj.as_ptr() as *mut u8))
+            return Ok(Value::from_ptr(obj.as_ptr()));
         }
-        Constant::Bytes(bytes) => {
-            let obj = state.heap.alloc(TypeId::U8, bytes.len())?;
-            // SAFETY: obj was allocated with bytes.len() data space. Copying the exact
-            // number of bytes into the data region is valid.
-            unsafe {
-                let data_ptr = (obj.as_ptr() as *mut u8).add(super::heap::OBJECT_HEADER_SIZE);
-                std::ptr::copy_nonoverlapping(bytes.as_ptr(), data_ptr, bytes.len());
-            }
-            Ok(Value::from_ptr(obj.as_ptr() as *mut u8))
-        }
+    };
+    if state.literal_cache.len() <= index {
+        state.literal_cache.resize(index + 1, None);
     }
+    state.literal_cache[index] = Some(literal);
+    Ok(literal)
 }
 
 /// A synchronous invocation owns only the frames/scopes it creates. Caller

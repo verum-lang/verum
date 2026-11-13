@@ -38,6 +38,63 @@ fn probe() -> Int { let values = [11, 42, 99]; read(&values) }
 }
 
 #[test]
+fn byte_literals_preserve_the_source_extent_and_unsigned_octets() {
+    let result = run(r#"
+fn length(bytes: &[Byte]) -> Int { @intrinsic("slice_len", bytes) }
+fn middle(bytes: &[Byte]) -> Int { bytes[2] as Int }
+fn probe() -> Int {
+    let bytes = b"a\0\xFFb";
+    length(b"") + length(bytes) * 1000 + middle(bytes) * 10 + bytes[1] as Int
+}
+"#)
+        .expect("literal slice");
+    assert_eq!(result.as_i64(), 6550);
+}
+
+#[test]
+fn literal_storage_is_reused_until_the_interpreter_is_reset() {
+    let mut module = verum_vbc::module::VbcModule::new("literal_lifetime".into());
+    let constant = module.add_constant(verum_vbc::module::Constant::Bytes(vec![0, 128, 255]));
+    let mut function = verum_vbc::module::FunctionDescriptor::new(verum_vbc::types::StringId::EMPTY);
+    function.id = verum_vbc::FunctionId(0);
+    function.register_count = 1;
+    for instruction in [
+        verum_vbc::Instruction::LoadK { dst: verum_vbc::Reg(0), const_id: constant.0 },
+        verum_vbc::Instruction::Ret { value: verum_vbc::Reg(0) },
+    ] {
+        verum_vbc::bytecode::encode_instruction(&instruction, &mut module.bytecode);
+    }
+    function.bytecode_length = module.bytecode.len() as u32;
+    module.functions.push(function);
+    let wire = verum_vbc::serialize::serialize_module(&module).expect("serialize");
+    let module = verum_vbc::deserialize::deserialize_module(&wire).expect("reload");
+    let mut vm = Interpreter::new(Arc::new(module));
+    let first = vm.execute_function(verum_vbc::FunctionId(0)).expect("first load");
+    let allocations = vm.state.heap.stats().total_allocs;
+    for _ in 0..20 {
+        assert_eq!(vm.execute_function(verum_vbc::FunctionId(0)).expect("reload literal"), first);
+        assert_eq!(vm.state.heap.stats().total_allocs, allocations);
+    }
+    vm.reset();
+    assert!(vm.state.literal_cache.is_empty());
+    let fresh = vm.execute_function(verum_vbc::FunctionId(0)).expect("after reset");
+    let (ptr, len) = verum_vbc::interpreter::value_as_byte_slice(&fresh).expect("byte view");
+    assert_eq!(len, 3);
+    // SAFETY: the live interpreter owns the literal storage for the extent above.
+    assert_eq!(unsafe { std::slice::from_raw_parts(ptr, len as usize) }, &[0, 128, 255]);
+}
+
+#[test]
+fn literal_borrows_survive_the_producing_scope_and_repeated_calls() {
+    let value = run(r#"
+fn bytes() -> &[Byte] { let data = b"ABC"; data }
+fn read() -> Int { let first = bytes(); let second = bytes(); first[0] as Int + second[2] as Int }
+fn probe() -> Int { read() + read() }
+"#).expect("module-owned bytes");
+    assert_eq!(value.as_i64(), 264);
+}
+
+#[test]
 fn subslice_of_an_existing_slice_preserves_its_offset() {
     let result = run(r#"
 fn read(values: &[Int]) -> Int { let part = &values[1..2]; part[0] }

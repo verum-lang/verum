@@ -84,6 +84,14 @@ impl VbcCodegen {
         if let Some(result) = self.type_property_result(expr) { return Some(result); }
         let nested = |value, emitted| self.copy_source_type_inner(value, emitted, depth + 1);
         match &expr.kind {
+            ExprKind::Literal(verum_ast::literal::Literal {
+                kind: verum_ast::literal::LiteralKind::ByteString(_),
+                ..
+            }) => Some(TypeRef::reference(
+                TypeRef::Slice(verum_common::Heap::new(TypeRef::Concrete(crate::types::TypeId::U8))),
+                Mutability::Immutable,
+                CbgrTier::Tier0,
+            )),
             ExprKind::Return(_) | ExprKind::Break { .. } | ExprKind::Continue { .. } =>
                 Some(TypeRef::Concrete(crate::types::TypeId::NEVER)),
             ExprKind::Block(block) | ExprKind::Unsafe(block) =>
