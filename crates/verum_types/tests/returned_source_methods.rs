@@ -56,6 +56,56 @@ fn imported_generic_pointer_payloads_preserve_the_pointee_and_access_mode() {
 }
 
 #[test]
+fn a_remote_call_checks_structural_implementations_from_the_protocol_owner() {
+    let modules = [
+        ("demo.route", r#"
+            public type Route is protocol {};
+            implement Route for (&Text, Int) {}
+            implement Route for &Int {}
+        "#),
+        ("demo.foreign", r#"
+            public type Route is protocol {};
+            implement Route for (Bool, Int) {}
+            public fn foreign_route<T:Route>(value: T) -> Bool { true }
+        "#),
+        ("demo.service", r#"
+            mount demo.route.Route;
+            public fn accept<T: Route>(value: T) -> Bool { true }
+            public fn exclude<T: !Route>(value: T) -> Bool { true }
+        "#),
+    ];
+    let check_value = |argument: &str| {
+        check(&format!(r#"
+            mount demo.service.accept;
+            mount demo.foreign.foreign_route;
+            fn test(host: &Text, port: &Int) -> Bool {{
+                foreign_route((true, 443));
+                accept({argument})
+            }}
+        "#), &modules)
+    };
+    for argument in ["(host, 443)", "port"] {
+        let errors = check_value(argument);
+        assert!(errors.is_empty(), "{argument}: {errors:?}");
+    }
+    for argument in ["(true, 443)", "(443, host)", "(host, false)", "(host, 443, false)", "host"] {
+        let errors = check_value(argument);
+        assert!(
+            errors.iter().any(|error| error.contains("E405") && error.contains("Route")),
+            "{argument}: {errors:?}"
+        );
+    }
+    let errors = check(
+        "mount demo.service.exclude; fn test(host: &Text) -> Bool { exclude((host, 443)) }",
+        &modules,
+    );
+    assert!(
+        errors.iter().any(|error| error.contains("E405") && error.contains("Route")),
+        "a missing lazy registration cannot prove a negative: {errors:?}"
+    );
+}
+
+#[test]
 fn plain_call_bounds_load_the_returned_values_own_implementation() {
     let modules = [
         ("demo.capability", "public type Stamp is protocol { fn stamp(&self) -> Int; };"),

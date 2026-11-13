@@ -13,6 +13,34 @@ pub(super) struct ImportedStructuralMethod {
     scopes: verum_common::Set<Text>,
 }
 
+/// A source search discriminator. Only the protocol checker can prove that
+/// the complete receiver, generic arguments and conditions match.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) enum StructuralProtocolHead {
+    Tuple(usize),
+    Reference(verum_ast::expr::ReferenceKind, bool),
+}
+
+impl StructuralProtocolHead {
+    pub(super) fn of(receiver: &Type) -> Option<Self> {
+        match receiver {
+            Type::Tuple(parts) => Some(Self::Tuple(parts.len())),
+            _ => receiver.reference_parts().map(|(_, mutable, tier)| Self::Reference(tier, mutable)),
+        }
+    }
+
+    fn of_source(target: &verum_ast::Type) -> Option<Self> {
+        use verum_ast::{TypeKind, expr::ReferenceKind};
+        match &target.kind {
+            TypeKind::Tuple(parts) => Some(Self::Tuple(parts.len())),
+            TypeKind::Reference { mutable, .. } => Some(Self::Reference(ReferenceKind::Managed, *mutable)),
+            TypeKind::CheckedReference { mutable, .. } => Some(Self::Reference(ReferenceKind::Checked, *mutable)),
+            TypeKind::UnsafeReference { mutable, .. } => Some(Self::Reference(ReferenceKind::Unsafe, *mutable)),
+            _ => None,
+        }
+    }
+}
+
 impl TypeChecker {
     /// Named exports are already bound through ExportTable. Follow only the
     /// remaining implementation surface of glob re-exports, once per owner,
@@ -92,22 +120,25 @@ impl TypeChecker {
         result
     }
 
-    /// The protocol owner can declare a blanket even when the goal's concrete
-    /// receiver has no source module (for example a scalar). Loading that
-    /// declaration supplies a candidate; its bounds are still proved normally.
-    pub(super) fn load_protocol_owner_blankets(&mut self, protocol: &Text) -> Result<()> {
+    /// A protocol can own implementations for receivers with no declaring
+    /// module of their own. Admit relevant headers in the protocol's scope.
+    pub(super) fn load_protocol_owner_candidates(&mut self, protocol: &Text, receiver: &Type) -> Result<()> {
         use verum_ast::{ItemKind, decl::ImplKind};
         let Some((owner, _)) = protocol.rsplit_once('.') else { return Ok(()) };
-        if self.blanket_impls_registered_modules.contains(owner) { return Ok(()); }
+        let structural = StructuralProtocolHead::of(receiver);
+        if structural.is_none() && self.blanket_impls_registered_modules.contains(owner) { return Ok(()); }
         let Some(module) = self.module_registry.read().get_by_path(owner) else { return Ok(()) };
-        if !self.source_type_registration.loading_blankets.insert(protocol.clone()) { return Ok(()); }
+        let key = (protocol.clone(), structural);
+        if !self.source_type_registration.loading_owner_candidates.insert(key.clone()) { return Ok(()); }
         let result = self.with_implementation_owner(owner, |checker| {
             for item in &module.ast.items {
                 let ItemKind::Impl(declaration) = &item.kind else { continue };
                 let ImplKind::Protocol { protocol: path, for_type, .. } = &declaration.kind else { continue };
-                if !checker.cfg_evaluator.should_include(&item.attributes)
-                    || !checker.is_blanket_impl_for_type(for_type, &declaration.generics)
-                {
+                if !checker.cfg_evaluator.should_include_item(item) {
+                    continue;
+                }
+                if !checker.is_blanket_impl_for_type(for_type, &declaration.generics)
+                    && !structural.is_some_and(|head| Some(head) == StructuralProtocolHead::of_source(for_type)) {
                     continue;
                 }
                 let selected = checker.resolve_protocol_reference(path)?;
@@ -117,7 +148,7 @@ impl TypeChecker {
             }
             Ok(())
         });
-        self.source_type_registration.loading_blankets.remove(protocol);
+        self.source_type_registration.loading_owner_candidates.remove(&key);
         result
     }
 

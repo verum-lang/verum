@@ -464,30 +464,19 @@ impl TypeChecker {
                 // (This load-order worry is why the verdict used to be
                 // discarded entirely — the fix is to remove the
                 // uncertainty, not the check.)
-                let satisfied = if first.is_err() {
-                    let leaf: Text = self.get_type_name(&resolved_ty).unwrap_or_default();
-                    if leaf.as_str().is_empty() {
-                        first
-                    } else {
-                        self.ensure_stdlib_type_loaded_transitive(&leaf);
-                        for b in bounds.iter() {
-                            let rendered = format!("{}", b.protocol);
-                            let proto_leaf: Text = rendered
-                                .rsplit('.')
-                                .next()
-                                .unwrap_or(rendered.as_str())
-                                .into();
-                            self.ensure_stdlib_type_loaded_transitive(&proto_leaf);
-                            // A mounted producer may return a type whose owning
-                            // module the caller never mounted directly.
-                            self.load_source_bound_implementations(
-                                &resolved_ty, b, &[], &Map::new(), span,
-                            )?;
-                        }
-                        self.protocol_checker
-                            .read()
-                            .check_bounds(&resolved_ty, bounds)
+                let satisfied = if first.is_err() || bounds.iter().any(|bound| bound.is_negative) {
+                    if let Some(name) = self.get_type_name(&resolved_ty) {
+                        self.ensure_stdlib_type_loaded_transitive(&name);
                     }
+                    for bound in bounds {
+                        let protocol = self.path_to_string(&bound.protocol);
+                        self.ensure_stdlib_type_loaded_transitive(&protocol);
+                        self.load_source_bound_implementations(
+                            &resolved_ty, bound, &[], &Map::new(), span,
+                        )?;
+                        self.load_protocol_owner_candidates(&protocol, &resolved_ty)?;
+                    }
+                    self.protocol_checker.read().check_bounds(&resolved_ty, bounds)
                 } else {
                     first
                 };

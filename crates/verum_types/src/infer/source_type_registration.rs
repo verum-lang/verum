@@ -14,7 +14,7 @@ pub(crate) struct SourceTypeRegistration {
     /// Result declared by the current catch_unwind wrapper and the enclosing closure identity.
     pub(super) catch_unwind_body: Option<(Option<crate::aliasing::RefId>, Type)>,
     pub active_impl_bounds: verum_common::Set<(Text, Text)>,
-    pub(super) loading_blankets: verum_common::Set<Text>,
+    pub(super) loading_owner_candidates: verum_common::Set<(Text, Option<super::implementation_sources::StructuralProtocolHead>)>,
     /// Public sequence methods imported by each source scope. Store the
     /// actual receiver pattern so a method on [Int] cannot apply to [Bool].
     pub(super) structural_methods: Map<Text, Vec<super::implementation_sources::ImportedStructuralMethod>>,

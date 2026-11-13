@@ -430,10 +430,11 @@ impl TypeChecker {
             // follow only the actual matched implementation's owned telescope,
             // never guessed protocols for a nominal argument's spelling.
             let environment = self.source_type_registration.proof_environment(assumptions, callables);
-            if self.protocol_checker.read().check_universal_bounds_in(proof_receiver, std::slice::from_ref(&bound), environment).is_ok() {
+            if !bound.is_negative && self.protocol_checker.read()
+                .check_universal_bounds_in(proof_receiver, std::slice::from_ref(&bound), environment).is_ok() {
                 continue;
             }
-            self.load_protocol_owner_blankets(&name)?;
+            self.load_protocol_owner_candidates(&name, &subject)?;
             let registry = self.protocol_checker.read();
             let environment = self.source_type_registration.proof_environment(assumptions, callables);
             let requirements = registry.source_bound_requirements(&subject, proof_receiver, &bound, environment)
