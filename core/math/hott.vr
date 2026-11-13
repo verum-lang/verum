@@ -46,6 +46,8 @@
 )
 module core.math.hott;
 
+mount core.math.logic.Void;
+
 // =============================================================================
 // §1. Cubical Interval and HottPath Primitives
 // =============================================================================
@@ -730,9 +732,9 @@ public type Trunc<A> is
 ///  set_trunc : IsSet<A/R>
 public type Quotient<A, R: fn(A, A) -> Type> is protocol {
     type Q;
-    fn class(a: A) -> Q;
-    fn relate(a: A, b: A, r: R(a, b)) -> HottPath<Q>(class(a), class(b));
-    fn q_is_set() -> IsSet<Q>;
+    fn class(a: A) -> Self.Q;
+    fn relate(a: A, b: A, r: R(a, b)) -> HottPath<Self.Q>(class(a), class(b));
+    fn q_is_set() -> IsSet<Self.Q>;
 };
 
 /// Pushout of f : C → A and g : C → B.
@@ -972,12 +974,8 @@ public fn unit_is_prop() -> IsProp<()> {
 
 /// Void type is a proposition (vacuously).
 public fn void_is_prop() -> IsProp<Void> {
-    // `Void` has no constructors, so the closure is vacuously total:
-    // it can never be called, and the absurd path is derivable by `auto`.
     IsProp {
-        all_paths: |a: Void, _b: Void| -> HottPath<Void>(a, _b) {
-            @builtin_absurd(a)
-        },
+        all_paths: |a: Void, b: Void| -> HottPath<Void>(a, b) { a },
     }
 }
 
