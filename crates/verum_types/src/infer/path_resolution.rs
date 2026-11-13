@@ -1267,6 +1267,12 @@ impl TypeChecker {
             }
         }
 
+        if matches!(path.segments.first(), Some(PathSegment::Name(_)))
+            && let Some(value) = self.declared_constructor_path(path, span)?
+        {
+            return Ok(value);
+        }
+
         // Extract path segments as strings
         let temp_segments: Vec<Text> = path
             .segments
@@ -1536,6 +1542,14 @@ impl TypeChecker {
         &mut self, path: &Path, span: Span,
     ) -> Result<Option<InferResult>> {
         use verum_ast::ty::PathSegment;
+        let Some(PathSegment::Name(case)) = path.segments.last() else { return Ok(None); };
+        let Some(owner) = self.declared_constructor_owner(path, span)? else { return Ok(None); };
+        self.selected_constructor_value(owner.as_str(), case.name.as_str(), span)
+            .map(|ty| Some(InferResult::new(ty)))
+    }
+
+    pub(super) fn declared_constructor_owner(&mut self, path: &Path, span: Span) -> Result<Option<Text>> {
+        use verum_ast::ty::PathSegment;
         use verum_modules::{ModulePath, visibility::VisibilityChecker};
         let Some((PathSegment::Name(case), prefix)) = path.segments.split_last() else {
             return Ok(None);
@@ -1572,9 +1586,7 @@ impl TypeChecker {
         };
         let declared_case = self.unifier.declared_variant_template(&selected)
             .is_some_and(|(_, body)| matches!(body, Type::Variant(cases) if cases.contains_key(&case.name)));
-        if !declared_case { return Ok(None); }
-        self.selected_constructor_value(selected.as_str(), case.name.as_str(), span)
-            .map(|ty| Some(InferResult::new(ty)))
+        Ok(declared_case.then_some(selected))
     }
 
     /// Resolve cog-rooted path (cog.module.item)

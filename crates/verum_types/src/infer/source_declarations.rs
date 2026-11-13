@@ -708,7 +708,11 @@ impl TypeChecker {
         let previous_alias = self.ctx.type_aliases.get(&local_name).cloned();
         let previous_unifier_alias = self.unifier.alias_binding(local_name.as_str());
         self.ctx.enter_scope();
-        let registration = self.register_type_declaration_in_module(declaration, owner.as_str());
+        // A dependency supplies its representation. A private sum's short case
+        // spellings belong only to a lexical preparation of the declaring module.
+        let registration = self.with_source_signature_scope(owner, |checker| {
+            checker.register_source_declaration(declaration, declaration.visibility.is_public())
+        });
         self.ctx.exit_scope();
         match previous_type {
             Some(ty) => { self.ctx.type_defs.insert(local_name.clone(), ty); }

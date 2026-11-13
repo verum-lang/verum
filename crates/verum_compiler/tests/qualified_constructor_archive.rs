@@ -25,6 +25,10 @@ public pure fn probe() -> Int {
 "#;
 
 fn compile(consumer: &str) -> Result<VbcArchive, Text> {
+    compile_provider(PROVIDER, consumer)
+}
+
+fn compile_provider(provider: &str, consumer: &str) -> Result<VbcArchive, Text> {
     let root = tempfile::tempdir().unwrap();
     let core = root.path().join("core");
     std::fs::create_dir(&core).unwrap();
@@ -33,7 +37,7 @@ fn compile(consumer: &str) -> Result<VbcArchive, Text> {
             "mod.vr",
             "module core; public module provider; public module consumer;".to_owned(),
         ),
-        ("provider.vr", PROVIDER.to_owned()),
+        ("provider.vr", provider.to_owned()),
         ("consumer.vr", format!("module core.consumer; {consumer}")),
     ] {
         std::fs::write(core.join(file), source).unwrap();
@@ -96,6 +100,22 @@ fn archive_errors(archive: &VbcArchive, source: &str, eager: bool) -> List<Text>
             .map(|error| Text::from(format!("{error:?}"))),
     );
     errors
+}
+
+#[test]
+fn a_private_sum_crosses_modules_through_its_public_operations() {
+    let provider = "module core.provider;
+        type Receipt is Issued(Int) | Blank;
+        public fn issue(n:Int)->Receipt { Issued(n) }
+        public fn number(x:Receipt)->Int { match x { Issued(n)=>n, Blank=>0 } }";
+    let consumer = "mount core.provider.{issue, number};
+        public fn probe()->Int { number(issue(73)) }";
+    let archive = compile_provider(provider, consumer).unwrap();
+    execute(&archive, "module app; mount core.consumer.probe; fn main()->Int {probe()}");
+
+    let forged = "mount core.provider.number; public fn probe()->Int { number(Issued(73)) }";
+    let error = compile_provider(provider, forged).err().expect("a foreign module cannot supply the private case");
+    assert!(error.contains("Issued"), "{error}");
 }
 
 #[test]

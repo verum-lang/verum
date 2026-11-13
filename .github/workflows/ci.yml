@@ -783,6 +783,8 @@ jobs:
         run: |
           cargo test --locked --release -p verum_cli --test check_basic glob_imports_preserve_generic_declarations_when_arguments_are_aliases -- --exact
           cargo test --locked --release -p verum_cli --test check_basic foreign_private_source_types_are_not_ambient_bindings -- --exact
+          cargo test --locked --release -p verum_cli --test check_basic hidden_source_case_names_require_their_declaring_scope -- --exact
+          cargo test --locked --release -p verum_compiler --test qualified_constructor_archive a_private_sum_crosses_modules_through_its_public_operations -- --exact
 
       - name: Audit CLI proof authority
         timeout-minutes: 5

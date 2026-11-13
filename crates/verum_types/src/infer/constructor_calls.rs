@@ -60,6 +60,38 @@ impl TypeChecker {
         Ok(scheme)
     }
 
+    /// Reading or constructing a case requires the selected sum's visibility.
+    /// An inferred private result retains its nominal key even though its
+    /// representation is available to the checker.
+    pub(super) fn check_sum_case_visibility(
+        &self, receiver: &Type, case: &str, span: Span,
+    ) -> Result<()> {
+        let mut carrier = receiver;
+        while let Some((inner, _, _)) = carrier.reference_parts() {
+            carrier = inner;
+        }
+        let key = match carrier {
+            Type::Named { path, .. } => self.path_to_string(path),
+            Type::Generic { name, .. } => name.clone(),
+            _ => return Ok(()),
+        };
+        let Some(declaration) = self.source_type_registration.declaration(&key) else {
+            return Ok(());
+        };
+        let verum_ast::TypeDeclBody::Variant(cases) = &declaration.body else {
+            return Ok(());
+        };
+        if declaration.visibility.is_public() || !cases.iter().any(|declared| declared.name.name == case) {
+            return Ok(());
+        }
+        let Some((owner, _)) = key.rsplit_once('.') else {
+            return Ok(());
+        };
+        self.check_declared_member_visibility(
+            &owner.into(), &case.into(), &Some(declaration.visibility.clone()), span,
+        )
+    }
+
     /// Value-position constructors retain the same nominal application and
     /// fresh parameter telescope as call-position constructors.
     pub(super) fn selected_constructor_value(

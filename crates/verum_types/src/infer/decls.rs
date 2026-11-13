@@ -341,16 +341,25 @@ impl TypeChecker {
     /// This should be called before other passes to make types available.
     /// Source payload dependencies are scheduled in declaration order on an explicit work list.
     pub fn register_type_declaration(&mut self, type_decl: &verum_ast::TypeDecl) -> Result<()> {
-        let key = self.declared_type_key(type_decl.name.name.as_str());
-        let result = self.with_source_type_registration(type_decl, key, |checker| {
-            checker.with_declared_universe_scope("type", &type_decl.name.name, &type_decl.generics, |checker| {
-                checker.register_type_declaration_in_universe_scope(type_decl)
-            })
-        });
-        result
+        self.register_source_declaration(type_decl, true)
     }
 
-    fn register_type_declaration_in_universe_scope(&mut self, type_decl: &verum_ast::TypeDecl) -> Result<()> {
+    pub(super) fn register_source_declaration(
+        &mut self,
+        declaration: &verum_ast::TypeDecl,
+        publish_cases: bool,
+    ) -> Result<()> {
+        let key = self.declared_type_key(declaration.name.name.as_str());
+        self.with_source_type_registration(declaration, key, |checker| {
+            checker.with_declared_universe_scope("type", &declaration.name.name, &declaration.generics, |checker| {
+                checker.register_type_declaration_in_universe_scope(declaration, publish_cases)
+            })
+        })
+    }
+
+    fn register_type_declaration_in_universe_scope(
+        &mut self, type_decl: &verum_ast::TypeDecl, publish_cases: bool,
+    ) -> Result<()> {
         // Same scoping as `resolve_type_definition`: the refinement
         // name check (T1112) speaks only about a TYPE DECLARATION's own
         // predicate. Both entries set it because a module-level
@@ -359,10 +368,7 @@ impl TypeChecker {
         // (T1115).
         let prev_in_type_decl = self.in_type_declaration;
         self.in_type_declaration = true;
-        let out = (|| {
-        self.register_type_declaration_inner(type_decl)
-    
-        })();
+        let out = self.register_type_declaration_inner(type_decl, publish_cases);
         self.in_type_declaration = prev_in_type_decl;
         out
     }
@@ -445,7 +451,9 @@ impl TypeChecker {
         Ok(())
     }
 
-    fn register_type_declaration_inner(&mut self, type_decl: &verum_ast::TypeDecl) -> Result<()> {
+    fn register_type_declaration_inner(
+        &mut self, type_decl: &verum_ast::TypeDecl, publish_cases: bool,
+    ) -> Result<()> {
         use crate::context::TypeScheme;
         use indexmap::IndexMap;
         use verum_ast::decl::{TypeDeclBody, VariantData};
@@ -472,7 +480,7 @@ impl TypeChecker {
         if !self.types_being_registered.insert(key.clone()) {
             return Ok(());
         }
-        let result = self.register_type_declaration_body(type_decl, type_name);
+        let result = self.register_type_declaration_body(type_decl, type_name, publish_cases);
         self.types_being_registered.remove(&key);
 
         result
@@ -515,6 +523,7 @@ impl TypeChecker {
         &mut self,
         type_decl: &verum_ast::TypeDecl,
         type_name: verum_common::Text,
+        publish_cases: bool,
     ) -> Result<()> {
         use crate::context::TypeScheme;
         use indexmap::IndexMap;
@@ -709,7 +718,7 @@ impl TypeChecker {
                     }
                 }
             }
-            TypeDeclBody::Variant(_) => self.register_variant_type_body(type_decl, &type_name)?,
+            TypeDeclBody::Variant(_) => self.register_variant_type_body(type_decl, &type_name, publish_cases)?,
             TypeDeclBody::Record(_) => self.register_record_type_body(type_decl, &type_name)?,
             // ── DECLARED-NAME REGISTRATION GOES THROUGH THE MODULE PATH ──
             // Every arm that registers the declared type under its own
@@ -1107,6 +1116,7 @@ impl TypeChecker {
         &mut self,
         type_decl: &verum_ast::TypeDecl,
         type_name: &verum_common::Text,
+        publish_cases: bool,
     ) -> Result<()> {
         use crate::context::TypeScheme;
         use indexmap::IndexMap;
@@ -1239,9 +1249,17 @@ impl TypeChecker {
 
                     // Register record variant fields for pattern matching + construction:
                     if let Type::Record(ref fields) = payload_type {
-                        let struct_key = format!("__struct_fields_{}", variant_name);
-                        self.ctx
-                            .define_type(struct_key, Type::Record(fields.clone()));
+                        let owner = self.declared_type_key(&type_name);
+                        self.ctx.define_type(
+                            format!("__struct_fields_{owner}.{variant_name}"),
+                            Type::Record(fields.clone()),
+                        );
+                        if publish_cases {
+                            self.ctx.define_type(
+                                format!("__struct_fields_{variant_name}"),
+                                Type::Record(fields.clone()),
+                            );
+                        }
                     }
 
                     variant_map.insert(variant_name, payload_type);
@@ -1403,22 +1421,18 @@ impl TypeChecker {
                     });
                 }
 
-                self.ctx
-                    .register_inductive_type(type_name.clone(), inductive_constructors);
+                let inductive_key = if publish_cases { type_name.clone() } else { self.declared_type_key(&type_name) };
+                self.ctx.register_inductive_type(inductive_key, inductive_constructors);
 
-                // Register variant constructor parent mappings for scope-aware resolution.
-                // This enables resolving ambiguous constructors like Ok(x) to the correct
-                // parent type (Result vs CheckedResult) based on expected type context.
-                for variant in variants.iter() {
-                    let variant_name: Text = variant.name.name.as_str().into();
-                    self.journal_variant_parent(&variant_name);
-                    let parents = self
-                        .variant_constructor_parents
-                        .entry(variant_name)
-                        .or_default();
-                    // Avoid duplicate parent entries from re-registration
-                    if !parents.iter().any(|p| p == &type_name) {
-                        parents.push(type_name.clone());
+                // Hidden representation metadata never grants a bare case binding.
+                if publish_cases {
+                    for variant in variants {
+                        let name = &variant.name.name;
+                        self.journal_variant_parent(name);
+                        let parents = self.variant_constructor_parents.entry(name.clone()).or_default();
+                        if !parents.iter().any(|parent| parent == &type_name) {
+                            parents.push(type_name.clone());
+                        }
                     }
                 }
 
@@ -1444,8 +1458,8 @@ impl TypeChecker {
                         verum_common::well_known_types::type_names::is_primitive_value_type(vn)
                             || matches!(vn, "Bytes" | "UInt")
                     };
-                    let short_name_exists = if is_primitive_type_name {
-                        true // Never override primitive type names
+                    let short_name_exists = if !publish_cases || is_primitive_type_name {
+                        true
                     } else if let Some(existing) = self.ctx.env.lookup(&variant_name) {
                         if self.user_code_phase {
                             // In user code phase: user-defined variants always shadow
@@ -1492,7 +1506,7 @@ impl TypeChecker {
                         }
                         // Always register qualified type name
                         let qualified_type_name: Text =
-                            format!("{}.{}", type_name, variant_name).into();
+                            format!("{}.{}", self.declared_type_key(&type_name), variant_name).into();
                         let qualified_variant_type = Type::Named {
                             path: Path::single(verum_ast::ty::Ident::new(
                                 variant_name.as_str(),
@@ -1500,8 +1514,10 @@ impl TypeChecker {
                             )),
                             args: List::new(),
                         };
-                        self.ctx
-                            .define_type(qualified_type_name, qualified_variant_type);
+                        if publish_cases {
+                            self.ctx.define_type(format!("{type_name}.{variant_name}"), qualified_variant_type.clone());
+                        }
+                        self.ctx.define_type(qualified_type_name, qualified_variant_type);
                     } else {
                         // Variant with payload: register as a constructor function
                         // e.g., Some : ∀T. T -> Maybe<T>
@@ -1542,10 +1558,11 @@ impl TypeChecker {
                                     .define_type(variant_name.clone(), payload_type.clone());
                             }
                             // Always register qualified type name
-                            let qualified_type_name: Text =
-                                format!("{}.{}", type_name, variant_name).into();
-                            self.ctx
-                                .define_type(qualified_type_name, payload_type.clone());
+                            let owner = self.declared_type_key(&type_name);
+                            self.ctx.define_type(format!("{owner}.{variant_name}"), payload_type.clone());
+                            if publish_cases {
+                                self.ctx.define_type(format!("{type_name}.{variant_name}"), payload_type.clone());
+                            }
                         }
                     }
                 }

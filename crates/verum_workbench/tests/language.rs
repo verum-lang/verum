@@ -336,13 +336,19 @@ async fn project_analysis_keeps_private_types_in_their_declaring_module() {
     std::fs::write(root.path().join("src/provider.vr"),
         "type Hidden<T> is { public value: T };
          public fn make(x: Int)->Hidden<Int> { Hidden { value: x } }
-         public fn open(x: Hidden<Int>)->Int { x.value }",
+         public fn open(x: Hidden<Int>)->Int { x.value }
+         type Receipt is Issued(Int) | Blank;
+         public fn issue(n:Int)->Receipt { Issued(n) }
+         public fn number(x:Receipt)->Int { match x { Issued(n)=>n, Blank=>0 } }",
     ).unwrap();
     let studio = studio(root.path());
     for (source, issue) in [
         ("mount sample.provider.{make, open}; fn main()->Int { open(make(7)) }", None),
         ("mount sample.provider.make; fn leak(x: Hidden<Int>)->Int { x.value }", Some("Hidden")),
         ("mount sample.provider.Hidden; fn main() {}", Some("Hidden")),
+        ("mount sample.provider.{issue, number}; fn main()->Int { number(issue(7)) }", None),
+        ("mount sample.provider.issue; fn main()->Int { match issue(7) { Issued(n)=>n, _=>0 } }", Some("Issued")),
+        ("mount sample.provider.number; fn main()->Int { number(Blank) }", Some("Blank")),
         ("type Hidden is { public value: Bool }; fn read(x: Hidden)->Bool { x.value }", None),
     ] {
         let reply = studio.call("language.request", json!({

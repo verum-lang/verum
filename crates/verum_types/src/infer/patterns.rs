@@ -427,6 +427,12 @@ impl TypeChecker {
             // eprintln!("[DEBUG bind_pattern] Variant pattern '{}' with scheme.ty: {}", tag_name, scheme.ty);
         }
 
+        if let PatternKind::Variant { path, .. } | PatternKind::Record { path, .. } = &pattern.kind
+            && let Some(verum_ast::PathSegment::Name(tag)) = path.segments.last()
+        {
+            self.check_sum_case_visibility(&scheme.ty, tag.as_str(), tag.span)?;
+        }
+
         match &pattern.kind {
             PatternKind::Wildcard => Ok(()),
 

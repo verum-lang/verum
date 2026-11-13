@@ -13644,11 +13644,9 @@ impl TypeChecker {
                             if let Option::Some(ty) = self.ctx.lookup_type(&struct_key) {
                                 return Ok(ty.clone());
                             }
-                            // Not a predefined type - will be handled as structural
-                            return Ok(Type::Named {
-                                path: path.clone(),
-                                args: List::new(),
-                            });
+                            // A named literal needs a declared type. Synthesizing a
+                            // nominal head here attributes an unknown case to the caller.
+                            return self.resolve_type_name(name, span);
                         }
                     }
                 }
@@ -23366,6 +23364,11 @@ bake to have this verified.",
         segments.extend(suffix.into_iter().rev().map(PathSegment::Name));
         segments.push(PathSegment::Name(method.clone()));
         let path = verum_ast::Path::new(segments, span);
+        // Constructors inhabit a type, not a module's callable namespace.
+        // Resolve their written parent before consulting a cached value scheme.
+        if self.declared_constructor_owner(&path, span)?.is_some() {
+            return self.infer_namespace_callable(path, type_args, args, span).map(Some);
+        }
         // Lazily register the exact metadata owner, including a same-named
         // companion module. This loader enforces owner and visibility; the
         // ordinary call path then consumes that same declaration scheme.

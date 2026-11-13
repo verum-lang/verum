@@ -400,6 +400,59 @@ fn foreign_private_source_types_are_not_ambient_bindings() {
 }
 
 #[test]
+fn hidden_source_case_names_require_their_declaring_scope() {
+    let root = tempfile::tempdir().unwrap();
+    let core = write_source_core(root.path(), &[(
+        "ledger",
+        "module core.ledger;
+         type Receipt is Issued(Int) | Blank | Annotated { n:Int };
+         public type Entry is Line(Int) | Empty | Detail { n:Int };
+         public fn issue(n:Int)->Receipt { Issued(n) }
+         public fn number(receipt:Receipt)->Int {
+             match receipt { Issued(n)=>n, Annotated {n}=>n, _=>0 }
+         }",
+    )]);
+    let project = root.path().join("project");
+    std::fs::create_dir_all(project.join("src")).unwrap();
+    std::fs::write(project.join("verum.toml"), "[cog]\nname='fixture'\nversion='0.1.0'\n").unwrap();
+    for (declarations, body, error) in [
+        ("", "let n=number(issue(7));", None),
+        ("mount core.ledger.Entry as Visible;", "let x=Visible.Line(7);", None),
+        ("mount core.ledger.Entry;", "let f=core.ledger.Entry.Line; let x=f(7);", None),
+        ("mount core.ledger.Entry;", "let x=core.ledger.Entry.Detail { n:7 };", None),
+        ("mount core.ledger.Entry as Visible;", "let x:Visible=Visible.Detail { n:7 };", None),
+        ("type Local is Issued(Bool) | Here;", "let x=Local.Issued(true);", None),
+        ("", "let x=Issued(7);", Some("Issued")),
+        ("", "let x=core.ledger.Receipt.Issued(7);", Some("Private")),
+        ("", "let x=core.ledger.Receipt.Issued; let y=x(7);", Some("Receipt")),
+        ("", "let x=Blank;", Some("Blank")),
+        ("", "let x=Annotated { n:7 };", Some("Annotated")),
+        ("", "let x=core.ledger.Receipt.Annotated { n:7 };", Some("Private")),
+        ("", "let n=number(core.ledger.Receipt.Annotated { n:7 });", Some("Private")),
+        ("fn invalid(x:Blank)->Int {0}", "", Some("Blank")),
+        ("", "let n=number(Blank);", Some("Blank")),
+        ("", "let n=number(Issued(7));", Some("Issued")),
+        ("", "let r=issue(7); let v=match r { Issued(n)=>n, _=>0 };", Some("Issued")),
+        ("", "let r=issue(7); let v=match r { core.ledger.Receipt.Issued(n)=>n, _=>0 };", Some("Issued")),
+        ("", "let r=issue(7); let v=match r { Annotated {n}=>n, _=>0 };", Some("Annotated")),
+        ("", "let r=issue(7); let v=match &r { Issued(n)=>0, _=>1 };", Some("Issued")),
+        ("mount core.ledger.Entry as Visible;", "let x=Visible.Line(true);", Some("expected 'Int', found 'Bool'")),
+        ("mount core.ledger.Entry;", "let x=core.ledger.Entry.Detail { n:true };", Some("expected 'Int', found 'Bool'")),
+    ] {
+        let source = format!(
+            "module fixture.main; mount core.ledger.{{issue, number}}; {declarations} fn main() {{ {body} }}"
+        );
+        let result = check_with_source_core(&core, &project, &source);
+        let log = String::from_utf8_lossy(&result.stderr);
+        assert_eq!(result.status.success(), error.is_none(), "{source}\n{log}");
+        if let Some(error) = error {
+            assert!(log.lines().filter(|line| line.starts_with("error<")).any(|line| line.contains(error)),
+                "{source}\n{log}");
+        }
+    }
+}
+
+#[test]
 fn recursive_protocol_bounds_use_the_selected_source_parameters() {
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path();

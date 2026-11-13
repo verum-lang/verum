@@ -8750,16 +8750,6 @@ impl TypeChecker {
         true
     }
 
-    /// Register a lazily imported source declaration under its resolved owner,
-    /// restoring the consumer's scope on both success and failure.
-    pub(crate) fn register_type_declaration_in_module(
-        &mut self,
-        decl: &verum_ast::TypeDecl,
-        owner: &str,
-    ) -> Result<()> {
-        self.with_source_signature_scope(owner, |checker| checker.register_type_declaration(decl))
-    }
-
     /// Key owned by the declaration currently being registered. Never use this
     /// to infer the owner of a reference to an imported type.
     pub(crate) fn declared_type_key(&self, name: &str) -> Text {

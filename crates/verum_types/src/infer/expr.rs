@@ -903,7 +903,7 @@ impl TypeChecker {
         if let Type::Variant(ref variants) = expanded_expected {
             if let Some(payload_ty) = variants.get(name) {
                 if matches!(payload_ty, Type::Unit) {
-                    // Unit variant (e.g., None) matches expected variant type
+                    self.check_sum_case_visibility(&resolved_expected, name, expr.span)?;
                     return Ok(InferResult::new(expected.clone()));
                 }
             }
@@ -973,6 +973,7 @@ impl TypeChecker {
                 // usable at this type, and a genuine mismatch
                 // must still be reported rather than waved
                 // through by having named the right variant.
+                self.check_sum_case_visibility(return_type, name, expr.span)?;
                 let payload = payload.clone();
                 let param0 = param0.clone();
                 let taken = resolved_expected.clone();
@@ -1188,6 +1189,7 @@ impl TypeChecker {
         }
         if let Type::Variant(ref variants) = expanded_expected {
             if let Some(payload_ty) = variants.get(constructor_name) {
+                self.check_sum_case_visibility(&resolved_expected_call, constructor_name, expr.span)?;
                 // The expected variant type has this constructor — use it
                 // Check call args against the payload type
                 if call_args.len() == 1 {
@@ -1934,17 +1936,19 @@ impl TypeChecker {
         }
     }
 
-    fn record_variant_parent(&self, path: &verum_ast::ty::Path) -> Option<(Text, Text)> {
-        if path.segments.len() < 2 || !path.segments.iter().all(|segment|
-            matches!(segment, verum_ast::ty::PathSegment::Name(_)))
-        {
-            return None;
-        }
-        let mut parent_path = path.clone();
-        let verum_ast::ty::PathSegment::Name(variant) = parent_path.segments.pop()? else {
-            return None;
+    fn record_variant_parent(&mut self, path: &Path, span: Span) -> Result<Option<(Text, Text)>> {
+        let Some((verum_ast::PathSegment::Name(variant), prefix)) = path.segments.split_last() else {
+            return Ok(None);
         };
-        Some((self.path_to_string(&parent_path).into(), variant.name))
+        if prefix.is_empty() { return Ok(None); }
+        if let Some(owner) = self.declared_constructor_owner(path, span)? {
+            return Ok(Some((owner, variant.name.clone())));
+        }
+        if !prefix.iter().all(|part| matches!(part, verum_ast::PathSegment::Name(_))) {
+            return Ok(None);
+        }
+        let parent = Path::new(prefix.iter().cloned().collect(), span);
+        Ok(Some((self.path_to_string(&parent), variant.name.clone())))
     }
 
     fn check_record_expr(&mut self, expr: &Expr, expected: &Type) -> Result<InferResult> {
@@ -2030,7 +2034,7 @@ impl TypeChecker {
                 // Aliases do not publish a second constructor function. Use
                 // their resolved parent declaration before the record guard;
                 // the existing variant checker validates the selected payload.
-                let is_aliased_variant_constructor = if let Some((parent, variant)) = self.record_variant_parent(lookup_path)
+                let is_aliased_variant_constructor = if let Some((parent, variant)) = self.record_variant_parent(lookup_path, expr.span)?
                     && let Ok(parent_ty) = self.resolve_type_name(parent.as_str(), expr.span)
                     && self.resolve_to_record_type(&parent_ty).is_none()
                     && let Type::Variant(variants) = self.expand_generic_to_variant(&parent_ty)?
@@ -8376,6 +8380,11 @@ impl TypeChecker {
     /// A selected namespace retains its owner for values as well as calls.
     /// Source re-exports and archive declarations use the same scoped import.
     fn resolve_qualified_value_path(&mut self, segments: &[&str], span: Span) -> Result<Option<Type>> {
+        let path = Path::new(segments.iter().map(|part|
+            verum_ast::PathSegment::Name(verum_ast::Ident::new(*part, span))).collect(), span);
+        if let Some(constructor) = self.declared_constructor_path(&path, span)? {
+            return Ok(Some(constructor.ty));
+        }
         let item_name = verum_common::Text::from(*segments.last().expect("nonempty qualified path"));
         // Value access and calls use the same declaration-owned metadata. An
         // exact descriptor hit must not lose its obligations through a textual
@@ -8435,15 +8444,6 @@ impl TypeChecker {
             }
             return Ok(None);
         }
-        let path = verum_ast::ty::Path::new(
-            segments
-                .iter()
-                .map(|s| {
-                    verum_ast::ty::PathSegment::Name(verum_ast::ty::Ident::new(*s, span))
-                })
-                .collect(),
-            span,
-        );
         let decl = verum_ast::MountDecl {
             visibility: verum_ast::decl::Visibility::Private,
             tree: verum_ast::decl::MountTree {
@@ -10361,7 +10361,7 @@ impl TypeChecker {
         // eprintln!("[DEBUG] infer_expr_inner: Record at {:?}, path={:?}", current_expr.span, path);
 
         // First check if this is a variant constructor (Type.Variant { ... })
-        if let Some((parent_name, variant_name)) = self.record_variant_parent(path)
+        if let Some((parent_name, variant_name)) = self.record_variant_parent(path, expr.span)?
         {
             // Resolve the complete parent path. A module-qualified constructor
             // has the same payload contract as a locally mounted constructor.
