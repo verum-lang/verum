@@ -1179,3 +1179,21 @@ fn bound_range_literals_and_foreign_nominals_keep_distinct_iteration_semantics()
     let errors = check("mount fixture.foreign.range; fn rejected() { for _ in range() {} }", &modules);
     assert!(errors.iter().any(|e| e.contains("E405") && e.contains("fixture.foreign.Range")), "{errors:?}");
 }
+
+#[test]
+fn implicit_receiver_roles_belong_to_the_selected_nominal() {
+    let providers = [
+        ("demo.sized", "public type Window<Width:meta Int> is { value:Int };"),
+        ("demo.typed", "public type Window<Width> is { value:Width };"),
+    ];
+    let mounts = "mount demo.sized.Window as Sized; mount demo.typed.Window as Typed;";
+    let good = format!("{mounts} implement Typed<Width> {{ fn touch(&self) {{}} }} implement<Width:meta Int> Sized<Width> {{ fn touch(&self) {{}} }} implement Sized<7> {{ fn fixed(&self) {{}} }}");
+    let errors = check(&good, &providers);
+    assert!(errors.is_empty(), "{errors:?}");
+    let wrong = format!("{mounts} const Width:Int=42; implement Sized<Width> {{ fn touch(&self) {{}} }}");
+    let errors = check(&wrong, &providers);
+    assert!(errors.iter().any(|error| error.contains("wrong kind") && error.contains("demo.sized.Window.Width")), "{errors:?}");
+    let unknown = format!("{mounts} implement Typed<UnknownType> {{ fn touch(&self) {{}} }}");
+    let errors = check(&unknown, &providers);
+    assert!(errors.iter().any(|error| error.contains("UnknownType") && !error.contains("wrong kind")), "{errors:?}");
+}

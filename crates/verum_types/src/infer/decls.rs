@@ -4547,7 +4547,14 @@ impl TypeChecker {
         &mut self,
         implementation: &verum_ast::ImplDecl,
     ) -> Result<List<Text>> {
-        use verum_ast::ty::{GenericArg, TypeKind};
+        use verum_ast::ty::{GenericArg, GenericParamKind, TypeKind};
+
+        enum ReceiverSlot {
+            Type(Text),
+            Value(Text),
+            Other,
+        }
+
         let mut binders = List::new();
         if !implementation.generics.is_empty() {
             return Ok(binders);
@@ -4559,34 +4566,33 @@ impl TypeChecker {
         let TypeKind::Generic { base, args } = &receiver.kind else {
             return Ok(binders);
         };
-        let TypeKind::Path(path) = &base.kind else {
+        let TypeKind::Path(receiver_path) = &base.kind else {
             return Ok(binders);
         };
-        let (_, key) = self.resolve_qualified_type_with_parameter_key(path, base.span)?;
-        let parameters = key
-            .as_ref()
-            .and_then(|key| {
-                self.source_type_registration.declaration(key)
-                    .map(|declaration| declaration.generics.clone())
-            })
-            .or_else(|| {
-                path.as_ident().and_then(|name| {
-                    self.declaring_source_type_declaration(name.as_str())
-                        .map(|(declaration, _)| declaration.generics.clone())
-                })
-            });
-        let type_slots: Vec<Option<Text>> = if let Some(parameters) = parameters {
-            parameters
+        let (_, key) = self.resolve_qualified_type_with_parameter_key(receiver_path, base.span)?;
+        let source_slots = |declaration: &verum_ast::TypeDecl| -> List<ReceiverSlot> {
+            declaration.generics
                 .iter()
                 .filter(|p| {
                     !p.is_implicit
-                        && !matches!(p.kind, verum_ast::ty::GenericParamKind::Lifetime { .. })
+                        && !matches!(p.kind, GenericParamKind::Lifetime { .. })
                 })
                 .map(|p| match &p.kind {
-                    verum_ast::ty::GenericParamKind::Type { name, .. } => Some(name.name.clone()),
-                    _ => None,
+                    GenericParamKind::Type { name, .. } => ReceiverSlot::Type(name.name.clone()),
+                    GenericParamKind::Meta { name, .. } | GenericParamKind::Const { name, .. } => {
+                        ReceiverSlot::Value(name.name.clone())
+                    }
+                    _ => ReceiverSlot::Other,
                 })
                 .collect()
+        };
+        let selected = key.as_ref().and_then(|owner| self.source_type_registration.declaration(owner))
+            .map(source_slots).or_else(|| {
+                receiver_path.as_ident().and_then(|name| self.declaring_source_type_declaration(name.as_str()))
+                    .map(|(declaration, _)| source_slots(&declaration))
+            });
+        let receiver_slots = if let Some(slots) = selected {
+            slots
         } else if let Some(Type::Record(slots)) = key
             .as_ref()
             .and_then(|key| self.ctx.lookup_type(&format!("__type_params_{key}")))
@@ -4594,20 +4600,21 @@ impl TypeChecker {
             slots
                 .iter()
                 .map(|(name, ty)| match ty {
-                    Type::Var(_) => Some(name.clone()),
+                    Type::Var(_) => ReceiverSlot::Type(name.clone()),
                     Type::Named { path, args }
                         if args.is_empty()
                             && path.as_ident().is_some_and(|id| &id.name == name) =>
                     {
-                        Some(name.clone())
+                        ReceiverSlot::Type(name.clone())
                     }
-                    _ => None,
+                    Type::Meta { .. } => ReceiverSlot::Value(name.clone()),
+                    _ => ReceiverSlot::Other,
                 })
                 .collect()
         } else {
             return Ok(binders);
         };
-        let mut unresolved = Vec::new();
+        let mut unresolved = List::new();
         for (position, argument) in args
             .iter()
             .filter(|arg| matches!(arg, GenericArg::Type(_) | GenericArg::Const(_)))
@@ -4637,10 +4644,17 @@ impl TypeChecker {
             if occupied {
                 continue;
             }
-            if type_slots.get(position).and_then(Option::as_ref) == Some(name) {
-                binders.push(name.clone());
-            } else {
-                unresolved.push((name, argument.span));
+            match receiver_slots.get(position) {
+                Some(ReceiverSlot::Type(parameter)) if parameter == name => binders.push(name.clone()),
+                Some(ReceiverSlot::Value(parameter)) if parameter == name => {
+                    let owner = key.clone().unwrap_or_else(|| self.path_to_string(receiver_path));
+                    return Err(TypeError::OtherWithCodeSpanned {
+                        code: "E407".into(),
+                        msg: format!("argument for `{owner}.{parameter}` has the wrong kind: an implicit type parameter cannot supply a compile-time value").into(),
+                        span: argument.span,
+                    });
+                }
+                _ => unresolved.push((name, argument.span)),
             }
         }
         // A repeated use may precede the positional declaration of a binder.
