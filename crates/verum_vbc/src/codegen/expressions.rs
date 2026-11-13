@@ -12890,6 +12890,67 @@ impl VbcCodegen {
         self.ctx.free_temp(reference);
     }
 
+    /// Borrow the final projected storage as the receiver of an `&mut self`
+    /// method. Materializing a copied value here loses whole-value writes.
+    fn compile_mutable_deref_receiver(
+        &mut self,
+        origin: &Expr,
+        owner: &str,
+        depth: usize,
+        method: &verum_ast::Ident,
+        args: &verum_common::List<Expr>,
+        resolved_target: Option<&verum_ast::expr::ResolvedCallTarget>,
+        type_args: &verum_common::List<verum_ast::ty::GenericArg>,
+    ) -> CodegenResult<Option<Reg>> {
+        let mut target = verum_common::Text::from(owner);
+        for _ in 0..depth {
+            let Some(next) = self.user_deref_target_type_name(&target) else {
+                return Ok(None);
+            };
+            target = next;
+        }
+        let Some(selected) = self.registered_receiver_method(&target, method.name.as_str())
+            .and_then(|name| self.ctx.lookup_qualified_function(&name))
+        else {
+            return Ok(None);
+        };
+        if !selected.takes_self_mut_ref {
+            return Ok(None);
+        }
+        let refusal = || CodegenError::with_span(
+            CodegenErrorKind::TypeInference(
+                "method requires a mutable dereference of the original place".into()),
+            origin.span,
+        );
+        if !self.mutable_projection_place(origin, 0) {
+            return Err(refusal());
+        }
+        let mut declaration = self.projection_operand_declaration(origin).ok_or_else(refusal)?;
+        while let crate::types::TypeRef::Reference { inner, .. } = declaration {
+            declaration = *inner;
+        }
+        let mut projections = verum_common::List::with_capacity(depth);
+        for _ in 0..depth {
+            let (projection, next) = self.dereference_projection(&declaration, true)
+                .ok_or_else(refusal)?;
+            projections.push(projection);
+            declaration = next;
+        }
+        if self.semantic_type_in_current_scope(&target).as_ref() != Some(&declaration) {
+            return Err(refusal());
+        }
+        let mut value = self.compile_expr(origin)?.or_internal("missing dereference receiver")?;
+        for projection in projections {
+            let reference = self.emit_projection_method(value, projection, None);
+            self.ctx.free_temp(value);
+            value = reference;
+        }
+        self.compile_method_on_adjusted_value(
+            value, &format!("&mut {target}"), origin.span, method, args,
+            resolved_target, type_args, true,
+        )
+    }
+
     /// Evaluate an implicit receiver adjustment once and expose the result as
     /// a scoped compiler value. Source parentheses never encode lowering mode.
     fn compile_adjusted_method_receiver(
@@ -13236,6 +13297,37 @@ impl VbcCodegen {
             );
         }
 
+        // An explicit user dereference in receiver position is still a place.
+        // Include every leading dereference in the same capability check as an
+        // implicit chain, even if an inner wrapper has a homonymous method.
+        let mut origin = array_receiver;
+        let mut explicit = 0;
+        while let ExprKind::Unary { op: UnOp::Deref, expr } = &origin.kind {
+            origin = Self::normalized_place(expr);
+            explicit += 1;
+        }
+        if !receiver_is_borrowed && explicit > 0
+            && let Some(owner) = self.extract_expr_type_name(origin)
+        {
+            let mut after_refs = owner.as_str();
+            let mut native = 0;
+            while native < explicit && let Some(inner) = reference_pointee_type_name(after_refs) {
+                after_refs = inner;
+                native += 1;
+            }
+            if explicit > native && !after_refs.starts_with('*')
+                && self.user_deref_target_type_name(after_refs).is_some()
+                && let Some(target) = self.extract_expr_type_name(receiver)
+            {
+                let depth = explicit - native + self.method_receiver_deref_count(&target, method.name.as_str());
+                if let Some(result) = self.compile_mutable_deref_receiver(
+                    origin, after_refs, depth, method, args, resolved_target, type_args,
+                )? {
+                    return Ok(Some(result));
+                }
+            }
+        }
+
         // An indexed Value receiver borrows its element slot, not the
         // temporary produced by GetE. Reuse explicit-borrow lowering so base
         // and index expressions run once and storage layout stays authoritative.
@@ -13263,6 +13355,11 @@ impl VbcCodegen {
         if let Some(receiver_type) = receiver_declaration.as_deref() {
             let depth = self.method_receiver_deref_count(receiver_type, method.name.as_str());
             if depth > 0 {
+                if let Some(result) = self.compile_mutable_deref_receiver(
+                    receiver, receiver_type, depth, method, args, resolved_target, type_args,
+                )? {
+                    return Ok(Some(result));
+                }
                 return self.compile_adjusted_method_receiver(
                     receiver, receiver_type, depth, method, args, resolved_target, type_args,
                 );

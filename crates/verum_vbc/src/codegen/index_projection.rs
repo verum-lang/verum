@@ -3,6 +3,7 @@ use super::*;
 
 pub(super) struct ProjectionMethod {
     name: String,
+    id: crate::module::FunctionId,
     witnesses: Vec<crate::types::TypeRef>,
     result: crate::types::TypeRef,
 }
@@ -40,7 +41,7 @@ impl VbcCodegen {
         None
     }
 
-    fn index_operand_declaration(&self, base: &Expr) -> Option<crate::types::TypeRef> {
+    pub(super) fn projection_operand_declaration(&self, base: &Expr) -> Option<crate::types::TypeRef> {
         let declared = self
             .declared_expression_result(base, None, 0, 0)
             .or_else(|| self.source_call_declaration(base, None, 0));
@@ -63,13 +64,13 @@ impl VbcCodegen {
     /// A field/index does not discard the access capability of its owner.
     /// Mutable references authorize reborrows; owned bindings need mutation
     /// permission. Layout knowledge cannot turn a shared path into a mutable one.
-    fn mutable_index_place(&self, base: &Expr, depth: usize) -> bool {
+    pub(super) fn mutable_projection_place(&self, base: &Expr, depth: usize) -> bool {
         use crate::types::{Mutability, TypeRef};
         if depth >= 64 {
             return false;
         }
         let base = Self::normalized_place(base);
-        let Some(mut owner) = self.index_operand_declaration(base) else {
+        let Some(mut owner) = self.projection_operand_declaration(base) else {
             return false;
         };
         let mut borrowed = false;
@@ -88,7 +89,7 @@ impl VbcCodegen {
         }
         match &base.kind {
             ExprKind::Field { expr, .. } | ExprKind::TupleIndex { expr, .. } => {
-                self.mutable_index_place(expr, depth + 1)
+                self.mutable_projection_place(expr, depth + 1)
             }
             ExprKind::Index { expr, index } => self.index_projection(expr, index, true).is_some(),
             ExprKind::Unary {
@@ -96,12 +97,12 @@ impl VbcCodegen {
                 expr,
             } => {
                 matches!(
-                    self.index_operand_declaration(expr),
+                    self.projection_operand_declaration(expr),
                     Some(TypeRef::Reference {
                         mutability: Mutability::Mutable,
                         ..
                     })
-                ) && self.mutable_index_place(expr, depth + 1)
+                ) && self.mutable_projection_place(expr, depth + 1)
             }
             ExprKind::Path(path) => {
                 let name = match path.segments.as_slice() {
@@ -146,7 +147,7 @@ impl VbcCodegen {
 
     /// Select a projection on this exact owner, retaining the method's binder
     /// roster and reference result. This lookup never searches through Deref.
-    fn index_projection_method(
+    fn projection_method(
         &self,
         owner: &crate::types::TypeRef,
         method: &str,
@@ -179,7 +180,7 @@ impl VbcCodegen {
             return None;
         }
         if let Some(index) = index {
-            let actual = self.index_operand_declaration(index).or_else(|| {
+            let actual = self.projection_operand_declaration(index).or_else(|| {
                 Self::literal_default_type_name(index)
                     .and_then(|name| self.semantic_type_in_current_scope(&name))
             })?;
@@ -192,6 +193,7 @@ impl VbcCodegen {
         }
         Some(ProjectionMethod {
             name,
+            id: info.id,
             witnesses: info
                 .type_param_ids
                 .iter()
@@ -199,6 +201,37 @@ impl VbcCodegen {
                 .collect::<Option<_>>()?,
             result: bindings.apply(return_type).ok()?,
         })
+    }
+
+    /// A user projection used for mutation must return a mutable reference.
+    /// The callable and its witnesses come from the same declaration as the
+    /// selected target, including inherited owner parameters.
+    pub(super) fn dereference_projection(
+        &self,
+        owner: &crate::types::TypeRef,
+        mutable: bool,
+    ) -> Option<(ProjectionMethod, crate::types::TypeRef)> {
+        use crate::types::{Mutability, TypeRef};
+        let method = self.projection_method(
+            owner, if mutable { "deref_mut" } else { "deref" }, None,
+        )?;
+        let TypeRef::Reference { inner, mutability, .. } = &method.result else {
+            return None;
+        };
+        if mutable {
+            let protocol = verum_common::well_known_types::WellKnownProtocol::DerefMut;
+            let descriptor = owner.base_type_id().and_then(|id| self.type_by_id(id))?;
+            if *mutability != Mutability::Mutable || !descriptor.protocols.iter().any(|row| {
+                row.methods.contains(&method.id.0)
+                    && self.type_by_id(crate::types::TypeId(row.protocol.0))
+                        .and_then(|ty| self.ctx.strings.get(ty.name.0 as usize))
+                        .is_some_and(|name| protocol.matches(name.rsplit('.').next().unwrap_or(name)))
+            }) {
+                return None;
+            }
+        }
+        let target = (**inner).clone();
+        Some((method, target))
     }
 
     /// Resolve the complete receiver before emitting any adjustment. Element
@@ -210,10 +243,10 @@ impl VbcCodegen {
         mutable: bool,
     ) -> Option<IndexProjection> {
         use crate::types::{Mutability, TypeId, TypeRef};
-        if mutable && !self.mutable_index_place(base, 0) {
+        if mutable && !self.mutable_projection_place(base, 0) {
             return None;
         }
-        let mut owner = self.index_operand_declaration(base)?;
+        let mut owner = self.projection_operand_declaration(base)?;
         let mut adjustments = Vec::new();
         let mut seen = Vec::new();
         for _ in 0..64 {
@@ -263,7 +296,7 @@ impl VbcCodegen {
                     method: None,
                 });
             }
-            if let Some(method) = self.index_projection_method(
+            if let Some(method) = self.projection_method(
                 &owner,
                 if mutable { "index_mut" } else { "index" },
                 Some(index),
@@ -289,21 +322,8 @@ impl VbcCodegen {
                 owner = target;
                 continue;
             }
-            let method = self.index_projection_method(
-                &owner,
-                if mutable { "deref_mut" } else { "deref" },
-                None,
-            )?;
-            let TypeRef::Reference {
-                inner, mutability, ..
-            } = &method.result
-            else {
-                return None;
-            };
-            if mutable && *mutability != Mutability::Mutable {
-                return None;
-            }
-            owner = (**inner).clone();
+            let (method, target) = self.dereference_projection(&owner, mutable)?;
+            owner = target;
             // Expanding declarations must not allocate an exponential type tree.
             if self.declaration_type_name(&owner, 0)?.len() > 65536 {
                 return None;
@@ -387,7 +407,7 @@ impl VbcCodegen {
     ) -> CodegenResult<(Reg, Option<ProjectionMethod>)> {
         let projection = self.index_projection(base, index, mutable).ok_or_else(|| {
             let owner = self
-                .index_operand_declaration(base)
+                .projection_operand_declaration(base)
                 .and_then(|owner| self.declaration_type_name(&owner, 0))
                 .unwrap_or_else(|| "receiver with unavailable declaration".into());
             CodegenError::with_span(CodegenErrorKind::TypeInference(format!(

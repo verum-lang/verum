@@ -66,6 +66,9 @@ fn check(body: &str, expected: Option<i64>) -> List<Text> {
         }
     }
     if let Some(expected) = expected {
+        let bytes = verum_vbc::serialize::serialize_module(&module).unwrap();
+        let module = verum_vbc::deserialize::deserialize_module(&bytes).unwrap();
+        verum_vbc::validate::validate_module(&module).unwrap();
         let value = Interpreter::new(Arc::new(module))
             .execute_function(entry_id)
             .expect("execute");
@@ -221,22 +224,29 @@ fn iterable_target_never_keeps_the_guard_method_identity() {
     assert!(!ops.iter().any(|op| op.ends_with("Guard.iter")), "{ops:?}");
 }
 
+fn assert_missing_method(body: &str, expected: &str) {
+    let ast = Parser::new(&format!("{ENV}\n{body}")).parse_module().unwrap();
+    let err = VbcCodegen::with_config(CodegenConfig::new("user_receiver"))
+        .compile_module(&ast).err().expect("no declaration provides this method");
+    assert!(matches!(&err.kind, verum_vbc::codegen::CodegenErrorKind::UndefinedFunction(name)
+        if name == expected), "{err}");
+}
+
 #[test]
 fn cyclic_deref_declarations_do_not_recurse_while_resolving_a_method() {
-    let ops = check(
+    assert_missing_method(
         r#"
 type Cycle is { value: Int };
 implement Deref for Cycle { type Target = Cycle; fn deref(&self) -> &Cycle { self } }
 fn probe(g: Cycle) -> Int { g.missing() }
 "#,
-        None,
+        "Cycle.missing",
     );
-    assert!(!ops.iter().any(|op| op.ends_with(".deref")), "{ops:?}");
 }
 
 #[test]
 fn expanding_deref_declarations_do_not_recurse_while_resolving_a_method() {
-    let ops = check(
+    assert_missing_method(
         r#"
 type Growing<T> is { next: &Growing<Growing<T>> };
 implement<T> Deref for Growing<T> {
@@ -245,9 +255,8 @@ implement<T> Deref for Growing<T> {
 }
 fn probe(g: Growing<Cell>) -> Int { g.missing() }
 "#,
-        None,
+        "Growing.missing",
     );
-    assert!(!ops.iter().any(|op| op.ends_with(".deref")), "{ops:?}");
 }
 
 #[test]
@@ -327,7 +336,7 @@ fn probe() -> Int {
 
 #[test]
 fn duplicating_deref_expansion_has_a_bounded_resolution_budget() {
-    let ops = check(
+    assert_missing_method(
         r#"
 type Pair<Left, Right> is { left: Left, right: Right };
 type Growing<T> is { next: &Growing<Pair<T, T>> };
@@ -337,9 +346,8 @@ implement<T> Deref for Growing<T> {
 }
 fn probe(g: Growing<Cell>) -> Int { g.missing() }
 "#,
-        None,
+        "Growing.missing",
     );
-    assert!(!ops.iter().any(|op| op.ends_with(".deref")), "{ops:?}");
 }
 
 #[test]
@@ -436,4 +444,123 @@ fn replacing_a_reborrowed_record_updates_the_guard_and_returns_the_old_record() 
             old.value * 100 + guard.value.value * 10 + guard.marker
         }
     "#, Some(749));
+}
+
+const MUTATING_TARGET: &str = r#"
+implement Cell {
+    fn overwrite(&mut self, value: Int) {
+        *self = Cell { padding: 0, value: value };
+    }
+}
+"#;
+
+const MUTABLE_GUARD: &str = r#"
+type DerefMut is protocol extends Deref { fn deref_mut(&mut self) -> &mut Self.Target; };
+implement<T> DerefMut for Guard<T> {
+    fn deref_mut(&mut self) -> &mut T { &mut self.value }
+}
+"#;
+
+#[test]
+fn mutable_target_methods_reborrow_the_original_place() {
+    for receiver in ["g", "(*g)"] {
+        let body = format!(r#"{MUTATING_TARGET}
+{MUTABLE_GUARD}
+fn probe() -> Int {{
+    let mut g: Guard<Cell> = Guard {{ marker: 13, value: Cell {{ padding: 55, value: 7 }} }};
+    {receiver}.overwrite(73);
+    g.read()
+}}
+"#);
+        let ops = check(&body, Some(73));
+        assert!(ops.iter().any(|op| op.ends_with("Guard.deref_mut")), "{ops:?}");
+    }
+}
+
+#[test]
+fn target_mutation_requires_a_mutable_projection_at_every_step() {
+    let readonly = r#"
+type Outer<T> is { value: T };
+implement<T> Deref for Outer<T> {
+    type Target = T;
+    fn deref(&self) -> &T { &self.value }
+}
+"#;
+    for (declarations, ty, receiver) in [
+        ("", "Guard<Cell>", "g"),
+        ("", "Guard<Cell>", "(*g)"),
+        (readonly, "Outer<Guard<Cell>>", "g"),
+        (readonly, "Guard<Outer<Cell>>", "g"),
+        (readonly, "Guard<Outer<Cell>>", "(*g)"),
+    ] {
+        let mutable = if declarations.is_empty() { "" } else { MUTABLE_GUARD };
+        let source = format!("{ENV}\n{MUTATING_TARGET}\n{mutable}\n{declarations}\nfn probe(g: &mut {ty}) {{ {receiver}.overwrite(73); }}");
+        let ast = Parser::new(&source).parse_module().unwrap();
+        let err = VbcCodegen::with_config(CodegenConfig::new("user_receiver"))
+            .compile_module(&ast)
+            .err().expect("a read-only dereference cannot authorize mutation");
+        assert!(err.to_string().contains("mutable dereference"), "{err}");
+    }
+}
+
+#[test]
+fn nested_mutable_projections_preserve_the_terminal_place() {
+    for receiver in ["g", "(*g)", "(**g)"] {
+        let body = format!(r#"{MUTATING_TARGET}
+{MUTABLE_GUARD}
+fn probe() -> Int {{
+    let cell = Cell {{ padding: 15, value: 7 }};
+    let inner: Guard<Cell> = Guard {{ marker: 3, value: cell }};
+    let mut g: Guard<Guard<Cell>> = Guard {{ marker: 4, value: inner }};
+    {receiver}.overwrite(73);
+    g.read()
+}}"#);
+        check(&body, Some(73));
+    }
+}
+
+#[test]
+fn read_only_bindings_and_borrowed_wrappers_cannot_give_out_mutable_storage() {
+    for (setup, label) in [
+        ("let g: Guard<Cell> = Guard {marker: 7, value: Cell {padding: 3, value: 5}};", "binding"),
+        ("let owner: Guard<Cell> = Guard {marker: 7, value: Cell {padding: 3, value: 5}}; let g = &owner;", "borrow"),
+    ] {
+        for receiver in ["g", "(*g)"] {
+            let source = format!("{ENV}\n{MUTATING_TARGET}\n{MUTABLE_GUARD}\nfn probe() {{ {setup} {receiver}.overwrite(73); }}");
+            let ast = Parser::new(&source).parse_module().unwrap();
+            let err = VbcCodegen::with_config(CodegenConfig::new("user_receiver"))
+                .compile_module(&ast).err().unwrap_or_else(|| panic!("{label}: {receiver}"));
+            assert!(err.to_string().contains("mutable dereference"), "{err}");
+        }
+    }
+}
+
+#[test]
+fn a_borrowed_guard_keeps_the_place_after_an_explicit_native_dereference() {
+    for receiver in ["g", "(*g)", "(**g)"] {
+        let body = format!(r#"{MUTATING_TARGET}
+{MUTABLE_GUARD}
+fn change(g: &mut Guard<Cell>) {{ {receiver}.overwrite(73); }}
+fn probe() -> Int {{
+    let mut g: Guard<Cell> = Guard {{marker: 97, value: Cell {{padding: 53, value: 7}}}};
+    change(&mut g);
+    g.read()
+}}"#);
+        check(&body, Some(73));
+    }
+}
+
+#[test]
+fn an_inherent_homonym_cannot_authorize_a_mutable_dereference() {
+    let source = format!(r#"{ENV}
+{MUTATING_TARGET}
+implement<T> Guard<T> {{
+    fn deref_mut(&mut self) -> &mut T {{ &mut self.value }}
+}}
+fn probe(g: &mut Guard<Cell>) {{ g.overwrite(73); }}
+"#);
+    let ast = Parser::new(&source).parse_module().unwrap();
+    let err = VbcCodegen::with_config(CodegenConfig::new("user_receiver"))
+        .compile_module(&ast).err().expect("missing DerefMut implementation");
+    assert!(err.to_string().contains("mutable dereference"), "{err}");
 }
