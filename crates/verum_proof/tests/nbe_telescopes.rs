@@ -83,3 +83,33 @@ fn telescope_inference_preserves_dependent_domain_frames() {
     assert!(infer(&Context::new(), &invalid).is_err());
     assert!(nbe::infer(&NbeContext::new(), &invalid).is_err());
 }
+
+#[path = "support/dependent_reflexivity.rs"]
+mod dependent_reflexivity;
+
+#[test]
+fn nested_dependent_reflexivity_checks_the_carrier_and_both_endpoints() {
+    use verum_proof::{
+        admission::{ReplayOutcome, classify_check_failure},
+        proof_checker::Certificate,
+    };
+    for (name, term, claimed_type, accepted) in dependent_reflexivity::cases() {
+        let certificate = Certificate {
+            term,
+            claimed_type,
+            metadata: Default::default(),
+        };
+        let expected = if accepted {
+            ReplayOutcome::Accepted
+        } else {
+            ReplayOutcome::Rejected
+        };
+        for result in [certificate.verify(), nbe::verify_certificate(&certificate)] {
+            let outcome = result.map_or_else(
+                |error| classify_check_failure(&error).0,
+                |_| ReplayOutcome::Accepted,
+            );
+            assert_eq!(outcome, expected, "{name}");
+        }
+    }
+}

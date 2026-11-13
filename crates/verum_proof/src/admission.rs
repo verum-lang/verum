@@ -137,6 +137,7 @@ pub fn checker_identity() -> String {
         include_str!("limits.rs"),
         include_str!("process.rs"),
         include_str!("main.rs"),
+        include_str!("derivation.rs"),
         include_str!("proof_checker.rs"),
         include_str!("proof_checker_nbe.rs"),
     ] {
@@ -150,6 +151,7 @@ pub fn checker_identity() -> String {
 pub fn classify_check_failure(error: &CheckError) -> (ReplayOutcome, &'static str) {
     use ReplayOutcome::{Rejected, ResourceExhausted, Unsupported};
     match error {
+        CheckError::DerivationLimit => (ResourceExhausted, "derivation_limit"),
         CheckError::FuelExhausted => (ResourceExhausted, "normalization_limit"),
         CheckError::FoundationRequired(_) => (Unsupported, "foundation_required"),
         CheckError::InvalidInductive(_) => (Rejected, "invalid_inductive"),

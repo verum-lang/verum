@@ -46,8 +46,10 @@
 //!     `BothAccept` / `BothReject` / `Disagreement` /
 //!     `NotYetSelfHosting` (the last unused once this lands).
 
+use crate::derivation::{Children, Input, WorkStack, copy_child};
 use crate::proof_checker::{CheckError, DataConstructor, DataField, Foundation, Level, Term};
 use std::sync::Arc;
+use std::{borrow::Cow, future::Future, rc::Rc};
 
 // =============================================================================
 // Semantic domain — the load-bearing distinguishing feature of NbE
@@ -1157,7 +1159,12 @@ impl NbeContext {
 /// **Architectural twin** of `proof_checker::infer`: same input/
 /// output behavior, different evaluation strategy.
 pub fn infer(ctx: &NbeContext, term: &Term) -> Result<Term, CheckError> {
-    let inferred_value = infer_value(ctx, term)?;
+    let work = WorkStack::default();
+    let inferred_value = work.run(infer_rule(
+        work.clone(),
+        Rc::new(ctx.clone()),
+        Cow::Borrowed(term),
+    ))?;
     Ok(quote(&inferred_value, ctx.level()))
 }
 
@@ -1175,10 +1182,12 @@ fn values_def_eq(a: &[Value], b: &[Value], level: usize) -> bool {
     a.len() == b.len() && a.iter().zip(b).all(|(a, b)| def_eq(a, b, level))
 }
 
-fn check_index_arguments(
-    ctx: &NbeContext,
+async fn check_index_arguments<'a, 'source>(
+    work: &WorkStack<'a>,
+    ctx: &Rc<NbeContext>,
     telescope: &[Closure],
-    arguments: &[Term],
+    arguments: &'source [Term],
+    child: Children<'a, 'source>,
 ) -> Result<Vec<Value>, CheckError> {
     if telescope.len() != arguments.len() {
         return Err(CheckError::InvalidInductive(
@@ -1187,7 +1196,13 @@ fn check_index_arguments(
     }
     let mut values = Vec::new();
     for (domain, argument) in telescope.iter().zip(arguments) {
-        check_value(ctx, argument, &domain.apply_fields(&values))?;
+        request_check(
+            &work,
+            ctx.clone(),
+            child(argument),
+            &domain.apply_fields(&values),
+        )
+        .await?;
         values.push(eval(argument, ctx.env()));
     }
     Ok(values)
@@ -1195,7 +1210,40 @@ fn check_index_arguments(
 
 /// Internal: infer the type as a semantic Value (avoids quote/eval
 /// roundtrips during recursive checking).
-fn infer_value(ctx: &NbeContext, term: &Term) -> Result<Value, CheckError> {
+fn request_infer<'a>(
+    work: &WorkStack<'a>,
+    ctx: Rc<NbeContext>,
+    term: Input<'a>,
+) -> impl Future<Output = Result<Value, CheckError>> + 'a + use<'a> {
+    work.premise(infer_rule(work.clone(), ctx, term))
+}
+
+fn request_check<'a>(
+    work: &WorkStack<'a>,
+    ctx: Rc<NbeContext>,
+    term: Input<'a>,
+    expected: &Value,
+) -> impl Future<Output = Result<(), CheckError>> + 'a + use<'a> {
+    work.premise(check_rule(work.clone(), ctx, term, expected.clone()))
+}
+
+async fn infer_rule<'a>(
+    work: WorkStack<'a>,
+    ctx: Rc<NbeContext>,
+    term: Input<'a>,
+) -> Result<Value, CheckError> {
+    match term {
+        Cow::Borrowed(term) => infer_term(work, &ctx, term, |child| Cow::Borrowed(child)).await,
+        Cow::Owned(term) => infer_term(work, &ctx, &term, copy_child).await,
+    }
+}
+
+async fn infer_term<'a, 'source>(
+    work: WorkStack<'a>,
+    ctx: &Rc<NbeContext>,
+    term: &'source Term,
+    child: Children<'a, 'source>,
+) -> Result<Value, CheckError> {
     match term {
         Term::FunExt {
             function_type,
@@ -1208,15 +1256,15 @@ fn infer_value(ctx: &NbeContext, term: &Term) -> Result<Value, CheckError> {
                     Foundation::FunctionExtensionality,
                 ));
             }
-            let kind = infer_value(ctx, function_type)?;
+            let kind = request_infer(&work, ctx.clone(), child(function_type)).await?;
             expect_universe(&kind)
                 .ok_or_else(|| CheckError::NotAType((**function_type).clone()))?;
             let function = eval(function_type, ctx.env());
             let Value::VPi { domain, codomain } = &function else {
                 return Err(CheckError::NotAFunction(quote(&function, ctx.level())));
             };
-            check_value(ctx, lhs, &function)?;
-            check_value(ctx, rhs, &function)?;
+            request_check(&work, ctx.clone(), child(lhs), &function).await?;
+            request_check(&work, ctx.clone(), child(rhs), &function).await?;
             let left = eval(lhs, ctx.env());
             let right = eval(rhs, ctx.env());
             // Build the dependent premise in the semantic domain, independently
@@ -1231,7 +1279,13 @@ fn infer_value(ctx: &NbeContext, term: &Term) -> Result<Value, CheckError> {
                 quote(domain, ctx.level()),
                 quote(&pointwise_body, ctx.level() + 1),
             );
-            check_value(ctx, pointwise, &eval(&premise, ctx.env()))?;
+            request_check(
+                &work,
+                ctx.clone(),
+                child(pointwise),
+                &eval(&premise, ctx.env()),
+            )
+            .await?;
             Ok(Value::VId {
                 ty: Box::new(function),
                 lhs: Box::new(left),
@@ -1240,8 +1294,13 @@ fn infer_value(ctx: &NbeContext, term: &Term) -> Result<Value, CheckError> {
         }
 
         Term::Let { value, body } => {
-            let ty = infer_value(ctx, value)?;
-            infer_value(&ctx.define(ty, eval(value, ctx.env()), value), body)
+            let ty = request_infer(&work, ctx.clone(), child(value)).await?;
+            request_infer(
+                &work,
+                Rc::new(ctx.define(ty, eval(value, ctx.env()), value)),
+                child(body),
+            )
+            .await
         }
 
         Term::Data {
@@ -1250,11 +1309,11 @@ fn infer_value(ctx: &NbeContext, term: &Term) -> Result<Value, CheckError> {
             constructors,
             ..
         } => {
-            let mut index_context = ctx.clone();
+            let mut index_context = Rc::clone(ctx);
             for ty in indices {
-                let kind = infer_value(&index_context, ty)?;
+                let kind = request_infer(&work, index_context.clone(), child(ty)).await?;
                 expect_universe(&kind).ok_or_else(|| CheckError::NotAType(ty.clone()))?;
-                index_context = index_context.extend(eval(ty, index_context.env()));
+                index_context = Rc::new(index_context.extend(eval(ty, index_context.env())));
             }
             let declaration = eval(term, ctx.env());
             let Value::VData {
@@ -1265,7 +1324,7 @@ fn infer_value(ctx: &NbeContext, term: &Term) -> Result<Value, CheckError> {
                 unreachable!()
             };
             for constructor in constructors {
-                let mut local = ctx.clone();
+                let mut local = Rc::clone(ctx);
                 for field in &constructor.fields {
                     let domain = match field {
                         DataField::Value(ty) | DataField::Dependent(ty) => {
@@ -1274,7 +1333,7 @@ fn infer_value(ctx: &NbeContext, term: &Term) -> Result<Value, CheckError> {
                             } else {
                                 ctx
                             };
-                            let kind = infer_value(field_ctx, ty)?;
+                            let kind = request_infer(&work, field_ctx.clone(), child(ty)).await?;
                             let field_level = expect_universe(&kind)
                                 .ok_or_else(|| CheckError::NotAType((**ty).clone()))?;
                             if !crate::proof_checker::level_eq(
@@ -1289,16 +1348,18 @@ fn infer_value(ctx: &NbeContext, term: &Term) -> Result<Value, CheckError> {
                         }
                         DataField::Recursive => apply_values(
                             declaration.clone(),
-                            check_index_arguments(&local, index_domains, &[])?,
+                            check_index_arguments(&work, &local, index_domains, &[], child).await?,
                         ),
                         DataField::RecursiveAt(arguments) => apply_values(
                             declaration.clone(),
-                            check_index_arguments(&local, index_domains, arguments)?,
+                            check_index_arguments(&work, &local, index_domains, arguments, child)
+                                .await?,
                         ),
                     };
-                    local = local.extend(domain);
+                    local = Rc::new(local.extend(domain));
                 }
-                check_index_arguments(&local, index_domains, &constructor.indices)?;
+                check_index_arguments(&work, &local, index_domains, &constructor.indices, child)
+                    .await?;
             }
             let signature = indices
                 .iter()
@@ -1313,7 +1374,7 @@ fn infer_value(ctx: &NbeContext, term: &Term) -> Result<Value, CheckError> {
             constructor,
             args,
         } => {
-            infer_value(ctx, data)?;
+            request_infer(&work, ctx.clone(), child(data)).await?;
             let declaration = eval(data, ctx.env());
             let Value::VData {
                 constructors,
@@ -1346,7 +1407,7 @@ fn infer_value(ctx: &NbeContext, term: &Term) -> Result<Value, CheckError> {
                         field.recursive_indices(&previous).unwrap(),
                     )
                 });
-                check_value(ctx, argument, &expected)?;
+                request_check(&work, ctx.clone(), child(argument), &expected).await?;
                 previous.push(eval(argument, ctx.env()));
             }
             let result = constructor
@@ -1361,7 +1422,7 @@ fn infer_value(ctx: &NbeContext, term: &Term) -> Result<Value, CheckError> {
             motive,
             cases,
         } => {
-            let mut declaration = infer_value(ctx, scrutinee)?;
+            let mut declaration = request_infer(&work, ctx.clone(), child(scrutinee)).await?;
             let values = match &mut declaration {
                 Value::VData {
                     indices, arguments, ..
@@ -1376,11 +1437,11 @@ fn infer_value(ctx: &NbeContext, term: &Term) -> Result<Value, CheckError> {
             let Term::Data { constructors, .. } = &raw_declaration else {
                 unreachable!()
             };
-            infer_value(ctx, &raw_declaration)?;
+            request_infer(&work, ctx.clone(), copy_child(&raw_declaration)).await?;
             let Value::VData { indices, .. } = &declaration else {
                 unreachable!()
             };
-            let mut motive_kind = infer_value(ctx, motive)?;
+            let mut motive_kind = request_infer(&work, ctx.clone(), child(motive)).await?;
             let mut references = Vec::new();
             for index_domain in indices {
                 let Value::VPi { domain, codomain } = motive_kind else {
@@ -1430,7 +1491,7 @@ fn infer_value(ctx: &NbeContext, term: &Term) -> Result<Value, CheckError> {
                     index,
                     constructor,
                 );
-                check_value(ctx, case, &eval(&expected, ctx.env()))?;
+                request_check(&work, ctx.clone(), child(case), &eval(&expected, ctx.env())).await?;
             }
             Ok(apply_value(
                 apply_values(eval(motive, ctx.env()), values),
@@ -1447,11 +1508,11 @@ fn infer_value(ctx: &NbeContext, term: &Term) -> Result<Value, CheckError> {
         Term::Universe(level) => Ok(Value::VUniverse(level.clone().normalize().successor())),
 
         Term::Pi(a, b) => {
-            let a_ty = infer_value(ctx, a)?;
+            let a_ty = request_infer(&work, ctx.clone(), child(a)).await?;
             let n = expect_universe(&a_ty).ok_or_else(|| CheckError::NotAType((**a).clone()))?;
             let a_value = eval(a, ctx.env());
-            let extended = ctx.extend(a_value);
-            let b_ty = infer_value(&extended, b)?;
+            let extended = Rc::new(ctx.extend(a_value));
+            let b_ty = request_infer(&work, extended.clone(), child(b)).await?;
             let m = expect_universe(&b_ty).ok_or_else(|| CheckError::NotAType((**b).clone()))?;
             Ok(Value::VUniverse(n.max_with(m)))
         }
@@ -1461,17 +1522,17 @@ fn infer_value(ctx: &NbeContext, term: &Term) -> Result<Value, CheckError> {
             // then read back the final codomain once. Quoting at every binder
             // repeatedly normalizes the whole remaining dependent signature.
             let mut domains = Vec::new();
-            let mut extended = ctx.clone();
+            let mut extended = Rc::clone(ctx);
             let mut body = term;
             while let Term::Lam(domain, inner) = body {
-                let kind = infer_value(&extended, domain)?;
+                let kind = request_infer(&work, extended.clone(), child(domain)).await?;
                 expect_universe(&kind).ok_or_else(|| CheckError::NotAType((**domain).clone()))?;
                 let value = eval(domain, extended.env());
-                extended = extended.extend(value);
+                extended = Rc::new(extended.extend(value));
                 domains.push(domain);
                 body = inner;
             }
-            let body_type = infer_value(&extended, body)?;
+            let body_type = request_infer(&work, extended.clone(), child(body)).await?;
             let result = domains
                 .into_iter()
                 .rev()
@@ -1482,25 +1543,27 @@ fn infer_value(ctx: &NbeContext, term: &Term) -> Result<Value, CheckError> {
         }
 
         Term::App(f, x) => {
-            let f_ty = infer_value(ctx, f)?;
+            let f_ty = request_infer(&work, ctx.clone(), child(f)).await?;
             let (dom, codom) = match f_ty {
                 Value::VPi { domain, codomain } => (domain, codomain),
                 other => {
                     return Err(CheckError::NotAFunction(quote(&other, ctx.level())));
                 }
             };
-            check_domain_value(ctx, x, &dom)?;
+            request_check(&work, ctx.clone(), child(x), &dom)
+                .await
+                .map_err(CheckError::in_domain)?;
             let x_value = eval(x, ctx.env());
             Ok(codom.apply(x_value))
         }
 
         // T-Sigma-Form (NbE): Σ(x:A).B : Universe(max(level(A), level(B)))
         Term::Sigma(a, b) => {
-            let a_ty = infer_value(ctx, a)?;
+            let a_ty = request_infer(&work, ctx.clone(), child(a)).await?;
             let n = expect_universe(&a_ty).ok_or_else(|| CheckError::NotAType((**a).clone()))?;
             let a_value = eval(a, ctx.env());
-            let extended = ctx.extend(a_value);
-            let b_ty = infer_value(&extended, b)?;
+            let extended = Rc::new(ctx.extend(a_value));
+            let b_ty = request_infer(&work, extended.clone(), child(b)).await?;
             let m = expect_universe(&b_ty).ok_or_else(|| CheckError::NotAType((**b).clone()))?;
             Ok(Value::VUniverse(n.max_with(m)))
         }
@@ -1512,8 +1575,8 @@ fn infer_value(ctx: &NbeContext, term: &Term) -> Result<Value, CheckError> {
         // produce it via `Term::Pair`'s ad-hoc shift through
         // re-evaluation below.
         Term::Pair(a, b) => {
-            let a_ty = infer_value(ctx, a)?;
-            let b_ty = infer_value(ctx, b)?;
+            let a_ty = request_infer(&work, ctx.clone(), child(a)).await?;
+            let b_ty = request_infer(&work, ctx.clone(), child(b)).await?;
             let b_ty_term = quote(&b_ty, ctx.level());
             // Build a Σ-value using the existing Lam/Pi closure
             // infrastructure: we evaluate `Sigma(quote(a_ty),
@@ -1528,7 +1591,7 @@ fn infer_value(ctx: &NbeContext, term: &Term) -> Result<Value, CheckError> {
 
         // T-Fst-Elim (NbE): Fst(p) : A where p : Σ(A, B).
         Term::Fst(p) => {
-            let p_ty = infer_value(ctx, p)?;
+            let p_ty = request_infer(&work, ctx.clone(), child(p)).await?;
             match p_ty {
                 Value::VSigma { domain, .. } => Ok(*domain),
                 other => Err(CheckError::NotASigma(quote(&other, ctx.level()))),
@@ -1540,7 +1603,7 @@ fn infer_value(ctx: &NbeContext, term: &Term) -> Result<Value, CheckError> {
         // to `Fst(p)`'s VALUE — this is the NbE realisation of the
         // term-level substitution `B[Fst(p)/0]`.
         Term::Snd(p) => {
-            let p_ty = infer_value(ctx, p)?;
+            let p_ty = request_infer(&work, ctx.clone(), child(p)).await?;
             match p_ty {
                 Value::VSigma { codomain, .. } => {
                     let p_value = eval(p, ctx.env());
@@ -1555,18 +1618,22 @@ fn infer_value(ctx: &NbeContext, term: &Term) -> Result<Value, CheckError> {
 
         // T-Id-Form: A : Universe(n), a, b : A ⇒ Id(A, a, b) : Universe(n).
         Term::Id { ty, lhs, rhs } => {
-            let ty_kind = infer_value(ctx, ty)?;
+            let ty_kind = request_infer(&work, ctx.clone(), child(ty)).await?;
             let n =
                 expect_universe(&ty_kind).ok_or_else(|| CheckError::NotAType((**ty).clone()))?;
             let ty_value = eval(ty, ctx.env());
-            check_domain_value(ctx, lhs, &ty_value)?;
-            check_domain_value(ctx, rhs, &ty_value)?;
+            request_check(&work, ctx.clone(), child(lhs), &ty_value)
+                .await
+                .map_err(CheckError::in_domain)?;
+            request_check(&work, ctx.clone(), child(rhs), &ty_value)
+                .await
+                .map_err(CheckError::in_domain)?;
             Ok(Value::VUniverse(n))
         }
 
         // T-Refl-Intro: a : A ⇒ Refl(a) : Id(A, a, a).
         Term::Refl(value) => {
-            let value_ty = infer_value(ctx, value)?;
+            let value_ty = request_infer(&work, ctx.clone(), child(value)).await?;
             let value_eval = eval(value, ctx.env());
             Ok(Value::VId {
                 ty: Box::new(value_ty),
@@ -1588,13 +1655,13 @@ fn infer_value(ctx: &NbeContext, term: &Term) -> Result<Value, CheckError> {
             scrutinee,
         } => {
             let dependent = matches!(term, Term::IdElim { .. });
-            let s_ty = infer_value(ctx, scrutinee)?;
+            let s_ty = request_infer(&work, ctx.clone(), child(scrutinee)).await?;
             let (a_ty, a_lhs, a_rhs) = match s_ty {
                 Value::VId { ty, lhs, rhs } => (ty, lhs, rhs),
                 other => return Err(CheckError::NotAnIdentity(quote(&other, ctx.level()))),
             };
 
-            let motive_ty = infer_value(ctx, motive)?;
+            let motive_ty = request_infer(&work, ctx.clone(), child(motive)).await?;
             let (motive_dom, motive_codom) = match &motive_ty {
                 Value::VPi { domain, codomain } => (domain.clone(), codomain.clone()),
                 _ => return Err(CheckError::NotAValidJMotive((**motive).clone())),
@@ -1637,7 +1704,9 @@ fn infer_value(ctx: &NbeContext, term: &Term) -> Result<Value, CheckError> {
             if dependent {
                 expected_base_ty = apply_value(expected_base_ty, Value::VRefl(a_lhs));
             }
-            check_domain_value(ctx, base, &expected_base_ty)?;
+            request_check(&work, ctx.clone(), child(base), &expected_base_ty)
+                .await
+                .map_err(CheckError::in_domain)?;
 
             // The result retains the right endpoint and the supplied proof.
             let result = apply_value(motive_value, *a_rhs);
@@ -1656,23 +1725,49 @@ fn infer_value(ctx: &NbeContext, term: &Term) -> Result<Value, CheckError> {
 /// implementations MUST agree on every well-typed certificate;
 /// disagreements are bugs in either side.
 pub fn check(ctx: &NbeContext, term: &Term, expected: &Term) -> Result<(), CheckError> {
-    let kind = infer_value(ctx, expected)?;
+    let work = WorkStack::default();
+    let kind = work.run(infer_rule(
+        work.clone(),
+        Rc::new(ctx.clone()),
+        Cow::Borrowed(expected),
+    ))?;
     expect_universe(&kind).ok_or_else(|| CheckError::NotAType(expected.clone()))?;
     check_value(ctx, term, &eval(expected, ctx.env()))
-}
-
-fn check_domain_value(ctx: &NbeContext, term: &Term, expected: &Value) -> Result<(), CheckError> {
-    check_value(ctx, term, expected).map_err(|error| match error {
-        CheckError::TypeMismatch { expected, actual } => {
-            CheckError::DomainMismatch { expected, actual }
-        }
-        other => other,
-    })
 }
 
 // Expected types are semantic values. Dependent families are instantiated by
 // closure application, independently of the substitution checker's algorithm.
 fn check_value(ctx: &NbeContext, term: &Term, expected: &Value) -> Result<(), CheckError> {
+    let work = WorkStack::default();
+    work.run(check_rule(
+        work.clone(),
+        Rc::new(ctx.clone()),
+        Cow::Borrowed(term),
+        expected.clone(),
+    ))
+}
+
+async fn check_rule<'a>(
+    work: WorkStack<'a>,
+    ctx: Rc<NbeContext>,
+    term: Input<'a>,
+    expected: Value,
+) -> Result<(), CheckError> {
+    match term {
+        Cow::Borrowed(term) => {
+            check_term(work, &ctx, term, &expected, |child| Cow::Borrowed(child)).await
+        }
+        Cow::Owned(term) => check_term(work, &ctx, &term, &expected, copy_child).await,
+    }
+}
+
+async fn check_term<'a, 'source>(
+    work: WorkStack<'a>,
+    ctx: &Rc<NbeContext>,
+    term: &'source Term,
+    expected: &Value,
+    child: Children<'a, 'source>,
+) -> Result<(), CheckError> {
     if let Term::Var(index) = term {
         // A local definition already has a checked type. Reuse that judgment
         // when conversion suffices; unfolding and rechecking every proof use
@@ -1686,16 +1781,18 @@ fn check_value(ctx: &NbeContext, term: &Term, expected: &Value) -> Result<(), Ch
         // Bidirectional introductions may require a more precise expected
         // family than their synthesized type (notably dependent pairs).
         if let Some(source) = ctx.definition(*index) {
-            return check_value(ctx, &source, expected);
+            return request_check(&work, ctx.clone(), copy_child(&source), expected).await;
         }
     }
     if let Term::Let { value, body } = term {
-        let ty = infer_value(ctx, value)?;
-        return check_value(
-            &ctx.define(ty, eval(value, ctx.env()), value),
-            body,
+        let ty = request_infer(&work, ctx.clone(), child(value)).await?;
+        return request_check(
+            &work,
+            Rc::new(ctx.define(ty, eval(value, ctx.env()), value)),
+            child(body),
             expected,
-        );
+        )
+        .await;
     }
     match (term, expected) {
         (
@@ -1705,7 +1802,7 @@ fn check_value(ctx: &NbeContext, term: &Term, expected: &Value) -> Result<(), Ch
                 codomain,
             },
         ) => {
-            let kind = infer_value(ctx, domain)?;
+            let kind = request_infer(&work, ctx.clone(), child(domain)).await?;
             expect_universe(&kind).ok_or_else(|| CheckError::NotAType((**domain).clone()))?;
             let actual_domain = eval(domain, ctx.env());
             if !def_eq(&actual_domain, expected_domain, ctx.level()) {
@@ -1715,14 +1812,28 @@ fn check_value(ctx: &NbeContext, term: &Term, expected: &Value) -> Result<(), Ch
                 });
             }
             let fresh = Value::VNeutral(Neutral::NVar(ctx.level()));
-            return check_value(&ctx.extend(actual_domain), body, &codomain.apply(fresh));
+            return request_check(
+                &work,
+                Rc::new(ctx.extend(actual_domain)),
+                child(body),
+                &codomain.apply(fresh),
+            )
+            .await;
         }
         (Term::Pair(first, second), Value::VSigma { domain, codomain }) => {
-            check_value(ctx, first, domain)?;
-            return check_value(ctx, second, &codomain.apply(eval(first, ctx.env())));
+            request_check(&work, ctx.clone(), child(first), domain).await?;
+            return request_check(
+                &work,
+                ctx.clone(),
+                child(second),
+                &codomain.apply(eval(first, ctx.env())),
+            )
+            .await;
         }
         (Term::Refl(value), Value::VId { ty, lhs, rhs }) => {
-            check_domain_value(ctx, value, ty)?;
+            request_check(&work, ctx.clone(), child(value), ty)
+                .await
+                .map_err(CheckError::in_domain)?;
             let actual = eval(value, ctx.env());
             if def_eq(&actual, lhs, ctx.level()) && def_eq(&actual, rhs, ctx.level()) {
                 return Ok(());
@@ -1741,7 +1852,7 @@ fn check_value(ctx: &NbeContext, term: &Term, expected: &Value) -> Result<(), Ch
         }
         _ => {}
     }
-    let inferred = infer_value(ctx, term)?;
+    let inferred = request_infer(&work, ctx.clone(), child(term)).await?;
     if def_eq(&inferred, expected, ctx.level()) {
         Ok(())
     } else {

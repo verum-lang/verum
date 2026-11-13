@@ -1,4 +1,7 @@
 //! Independent executable replay, including malformed equality certificates.
+#[path = "support/dependent_reflexivity.rs"]
+mod dependent_reflexivity;
+
 use std::process::Command;
 use verum_proof::proof_checker::{Certificate, Term};
 
@@ -100,6 +103,7 @@ fn independent_replay_checks_equality_and_rejects_invalid_proofs() {
         false,
     ));
 
+    cases.extend(dependent_reflexivity::cases());
     let rows: Vec<_> = cases
         .iter()
         .map(|(id, term, claimed_type, expected)| {

@@ -12,7 +12,9 @@
 //! Use the admission and process modules for bounded untrusted replay. Strong
 //! normalization of well-typed terms does not supply a fixed evaluation budget.
 
+use crate::derivation::{Children, Input, WorkStack, copy_child};
 use serde::{Deserialize, Serialize};
+use std::{borrow::Cow, future::Future, rc::Rc};
 
 // =============================================================================
 // Universe levels — polymorphic over level variables
@@ -1892,6 +1894,8 @@ fn shift_down(term: Term, amount: usize, cutoff: usize) -> Term {
 pub enum CheckError {
     /// Normalization did not finish within its operational reduction budget.
     FuelExhausted,
+    /// Typing exceeded its operational budget of dependent premises.
+    DerivationLimit,
     /// The proof uses a principle outside the verifier's selected foundation.
     FoundationRequired(Foundation),
     /// Malformed declaration, constructor ownership, or induction premises.
@@ -1987,6 +1991,15 @@ pub enum CheckError {
     },
 }
 
+impl CheckError {
+    pub(crate) fn in_domain(self) -> Self {
+        match self {
+            Self::TypeMismatch { expected, actual } => Self::DomainMismatch { expected, actual },
+            other => other,
+        }
+    }
+}
+
 /// Infer the type of `term` in `ctx`. Returns the unique type or
 /// a `CheckError` naming the rejecting kernel rule.
 ///
@@ -2008,10 +2021,48 @@ pub fn infer(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
             .lookup(*index)
             .ok_or(CheckError::UnboundVariable(*index));
     }
-    infer_inner(ctx, term)
+    let work = WorkStack::default();
+    work.run(infer_rule(
+        work.clone(),
+        Rc::new(ctx.clone()),
+        Cow::Borrowed(term),
+    ))
 }
 
-fn infer_inner(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
+fn request_infer<'a>(
+    work: &WorkStack<'a>,
+    ctx: Rc<Context>,
+    term: Input<'a>,
+) -> impl Future<Output = Result<Term, CheckError>> + 'a + use<'a> {
+    work.premise(infer_rule(work.clone(), ctx, term))
+}
+
+fn request_check<'a>(
+    work: &WorkStack<'a>,
+    ctx: Rc<Context>,
+    term: Input<'a>,
+    expected: &Term,
+) -> impl Future<Output = Result<(), CheckError>> + 'a + use<'a> {
+    work.premise(check_rule(work.clone(), ctx, term, expected.clone()))
+}
+
+async fn infer_rule<'a>(
+    work: WorkStack<'a>,
+    ctx: Rc<Context>,
+    term: Input<'a>,
+) -> Result<Term, CheckError> {
+    match term {
+        Cow::Borrowed(term) => infer_term(work, &ctx, term, |child| Cow::Borrowed(child)).await,
+        Cow::Owned(term) => infer_term(work, &ctx, &term, copy_child).await,
+    }
+}
+
+async fn infer_term<'a, 'source>(
+    work: WorkStack<'a>,
+    ctx: &Rc<Context>,
+    term: &'source Term,
+    child: Children<'a, 'source>,
+) -> Result<Term, CheckError> {
     match term {
         Term::FunExt {
             function_type,
@@ -2024,7 +2075,7 @@ fn infer_inner(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
                     Foundation::FunctionExtensionality,
                 ));
             }
-            let kind = infer(ctx, function_type)?;
+            let kind = request_infer(&work, ctx.clone(), child(function_type)).await?;
             ctx.conversion()
                 .expect_universe(&kind)?
                 .ok_or_else(|| CheckError::NotAType((**function_type).clone()))?;
@@ -2032,8 +2083,8 @@ fn infer_inner(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
             else {
                 return Err(CheckError::NotAFunction((**function_type).clone()));
             };
-            check_against(ctx, lhs, function_type)?;
-            check_against(ctx, rhs, function_type)?;
+            request_check(&work, ctx.clone(), child(lhs), function_type).await?;
+            request_check(&work, ctx.clone(), child(rhs), function_type).await?;
             let premise = Term::pi(
                 *domain,
                 Term::id_ty(
@@ -2042,7 +2093,7 @@ fn infer_inner(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
                     Term::app(shift_up((**rhs).clone(), 1, 0), Term::var(0)),
                 ),
             );
-            check_against(ctx, pointwise, &premise)?;
+            request_check(&work, ctx.clone(), child(pointwise), &premise).await?;
             Ok(Term::id_ty(
                 (**function_type).clone(),
                 (**lhs).clone(),
@@ -2051,8 +2102,8 @@ fn infer_inner(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
         }
 
         Term::Let { value, body } => {
-            let ty = infer(ctx, value)?;
-            let result = infer(&ctx.define(ty, value), body)?;
+            let ty = request_infer(&work, ctx.clone(), child(value)).await?;
+            let result = request_infer(&work, Rc::new(ctx.define(ty, value)), child(body)).await?;
             Ok(subst(result, 0, value))
         }
 
@@ -2062,23 +2113,23 @@ fn infer_inner(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
             constructors,
             ..
         } => {
-            let mut index_context = ctx.clone();
+            let mut index_context = Rc::clone(ctx);
             for ty in indices {
-                let kind = infer(&index_context, ty)?;
+                let kind = request_infer(&work, index_context.clone(), child(ty)).await?;
                 index_context
                     .conversion()
                     .expect_universe(&kind)?
                     .ok_or_else(|| CheckError::NotAType(ty.clone()))?;
-                index_context = index_context.extend(ty.clone());
+                index_context = Rc::new(index_context.extend(ty.clone()));
             }
             for constructor in constructors {
-                let mut local = ctx.clone();
+                let mut local = Rc::clone(ctx);
                 for (index, field) in constructor.fields.iter().enumerate() {
                     let domain = field_domain(term, field, index);
                     if let Some(values) = recursive_indices(field) {
-                        check_indices(&local, indices, values, index)?;
+                        check_indices(&work, &local, indices, values, index, child).await?;
                     } else {
-                        let kind = infer(&local, &domain)?;
+                        let kind = request_infer(&work, local.clone(), copy_child(&domain)).await?;
                         let field_level = local
                             .conversion()
                             .expect_universe(&kind)?
@@ -2089,14 +2140,17 @@ fn infer_inner(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
                             ));
                         }
                     }
-                    local = local.extend(domain);
+                    local = Rc::new(local.extend(domain));
                 }
                 check_indices(
+                    &work,
                     &local,
                     indices,
                     &constructor.indices,
                     constructor.fields.len(),
-                )?;
+                    child,
+                )
+                .await?;
             }
             Ok(indices
                 .iter()
@@ -2110,7 +2164,7 @@ fn infer_inner(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
             constructor,
             args,
         } => {
-            infer(ctx, data)?;
+            request_infer(&work, ctx.clone(), child(data)).await?;
             let declaration = ctx.conversion().whnf((**data).clone())?;
             let Term::Data { constructors, .. } = &declaration else {
                 return Err(CheckError::InvalidInductive(
@@ -2128,7 +2182,7 @@ fn infer_inner(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
             for (index, (field, argument)) in constructor.fields.iter().zip(args).enumerate() {
                 let expected =
                     instantiate_fields(field_domain(&declaration, field, index), &args[..index]);
-                check_against(ctx, argument, &expected)?;
+                request_check(&work, ctx.clone(), child(argument), &expected).await?;
             }
             let result = constructor
                 .indices
@@ -2142,7 +2196,9 @@ fn infer_inner(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
             motive,
             cases,
         } => {
-            let actual = ctx.conversion().whnf(infer(ctx, scrutinee)?)?;
+            let actual = ctx
+                .conversion()
+                .whnf(request_infer(&work, ctx.clone(), child(scrutinee)).await?)?;
             let (declaration, values) = split_family(ctx, actual)?.ok_or_else(|| {
                 CheckError::InvalidInductive(
                     "induction requires a fully applied data family".into(),
@@ -2159,7 +2215,7 @@ fn infer_inner(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
             // Scrutinee inference has already established this owner's
             // formation. Rechecking its complete signature at every use
             // duplicates validation of all captured dependent definitions.
-            let mut motive_kind = infer(ctx, motive)?;
+            let mut motive_kind = request_infer(&work, ctx.clone(), child(motive)).await?;
             for (index, ty) in indices.iter().enumerate() {
                 let scope = ctx.conversion().under(index);
                 let Term::Pi(domain, result) = scope.whnf(motive_kind)? else {
@@ -2204,11 +2260,13 @@ fn infer_inner(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
                 ));
             }
             for (index, (constructor, case)) in constructors.iter().zip(cases).enumerate() {
-                check_against(
-                    ctx,
-                    case,
+                request_check(
+                    &work,
+                    ctx.clone(),
+                    child(case),
                     &induction_case_type(&declaration, motive, index, constructor),
-                )?;
+                )
+                .await?;
             }
             Ok(Term::app(
                 apply_terms((**motive).clone(), &values),
@@ -2229,13 +2287,13 @@ fn infer_inner(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
         // and reduces to `Concrete(n.max(m))` when both sides are
         // concrete.
         Term::Pi(a, b) => {
-            let a_ty = infer(ctx, a)?;
+            let a_ty = request_infer(&work, ctx.clone(), child(a)).await?;
             let n = ctx
                 .conversion()
                 .expect_universe(&a_ty)?
                 .ok_or_else(|| CheckError::NotAType((**a).clone()))?;
-            let extended = ctx.extend((**a).clone());
-            let b_ty = infer(&extended, b)?;
+            let extended = Rc::new(ctx.extend((**a).clone()));
+            let b_ty = request_infer(&work, extended.clone(), child(b)).await?;
             let m = extended
                 .conversion()
                 .expect_universe(&b_ty)?
@@ -2245,36 +2303,40 @@ fn infer_inner(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
 
         // T-Lam-Intro
         Term::Lam(domain, body) => {
-            let dom_ty = infer(ctx, domain)?;
+            let dom_ty = request_infer(&work, ctx.clone(), child(domain)).await?;
             // Domain annotation must be a type.
             ctx.conversion()
                 .expect_universe(&dom_ty)?
                 .ok_or_else(|| CheckError::NotAType((**domain).clone()))?;
-            let extended = ctx.extend((**domain).clone());
-            let body_ty = infer(&extended, body)?;
+            let extended = Rc::new(ctx.extend((**domain).clone()));
+            let body_ty = request_infer(&work, extended.clone(), child(body)).await?;
             Ok(Term::Pi(domain.clone(), Box::new(body_ty)))
         }
 
         // T-App-Elim (with implicit T-Conv on argument matching)
         Term::App(f, x) => {
-            let f_ty = ctx.conversion().whnf(infer(ctx, f)?)?;
+            let f_ty = ctx
+                .conversion()
+                .whnf(request_infer(&work, ctx.clone(), child(f)).await?)?;
             let (dom, codom) = match f_ty {
                 Term::Pi(a, b) => (a, b),
                 other => return Err(CheckError::NotAFunction(other)),
             };
-            check_domain(ctx, x, &dom)?;
+            request_check(&work, ctx.clone(), child(x), &dom)
+                .await
+                .map_err(CheckError::in_domain)?;
             Ok(subst(*codom, 0, x))
         }
 
         // T-Sigma-Form: Σ(x:A).B : Universe(max(level(A), level(B)))
         Term::Sigma(a, b) => {
-            let a_ty = infer(ctx, a)?;
+            let a_ty = request_infer(&work, ctx.clone(), child(a)).await?;
             let n = ctx
                 .conversion()
                 .expect_universe(&a_ty)?
                 .ok_or_else(|| CheckError::NotAType((**a).clone()))?;
-            let extended = ctx.extend((**a).clone());
-            let b_ty = infer(&extended, b)?;
+            let extended = Rc::new(ctx.extend((**a).clone()));
+            let b_ty = request_infer(&work, extended.clone(), child(b)).await?;
             let m = extended
                 .conversion()
                 .expect_universe(&b_ty)?
@@ -2284,8 +2346,8 @@ fn infer_inner(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
 
         // T-Pair-Intro: Pair(a, b) : Sigma(A, B) where a:A and b:B[a/0]
         Term::Pair(a, b) => {
-            let a_ty = infer(ctx, a)?;
-            let b_ty = infer(ctx, b)?;
+            let a_ty = request_infer(&work, ctx.clone(), child(a)).await?;
+            let b_ty = request_infer(&work, ctx.clone(), child(b)).await?;
             // Synthesis only knows the second component's type at this value.
             // A dependent family is supplied by checking mode, not guessed.
             let b_ty_shifted = shift_up(b_ty, 1, 0);
@@ -2294,7 +2356,9 @@ fn infer_inner(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
 
         // T-Fst-Elim: Fst(p) : A where p : Sigma(A, B)
         Term::Fst(p) => {
-            let p_ty = ctx.conversion().whnf(infer(ctx, p)?)?;
+            let p_ty = ctx
+                .conversion()
+                .whnf(request_infer(&work, ctx.clone(), child(p)).await?)?;
             match p_ty {
                 Term::Sigma(a, _) => Ok(*a),
                 other => Err(CheckError::NotASigma(other)),
@@ -2306,7 +2370,9 @@ fn infer_inner(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
         // reference the first component, and the projection of
         // the second knows what the first was at the term level.
         Term::Snd(p) => {
-            let p_ty = ctx.conversion().whnf(infer(ctx, p)?)?;
+            let p_ty = ctx
+                .conversion()
+                .whnf(request_infer(&work, ctx.clone(), child(p)).await?)?;
             match p_ty {
                 Term::Sigma(_, b) => Ok(subst(*b, 0, &Term::Fst(p.clone()))),
                 other => Err(CheckError::NotASigma(other)),
@@ -2319,13 +2385,17 @@ fn infer_inner(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
         // The Id type lives at the same universe as its carrier — it
         // doesn't introduce a fresh universe level.
         Term::Id { ty, lhs, rhs } => {
-            let ty_kind = infer(ctx, ty)?;
+            let ty_kind = request_infer(&work, ctx.clone(), child(ty)).await?;
             let n = ctx
                 .conversion()
                 .expect_universe(&ty_kind)?
                 .ok_or_else(|| CheckError::NotAType((**ty).clone()))?;
-            check_domain(ctx, lhs, ty)?;
-            check_domain(ctx, rhs, ty)?;
+            request_check(&work, ctx.clone(), child(lhs), ty)
+                .await
+                .map_err(CheckError::in_domain)?;
+            request_check(&work, ctx.clone(), child(rhs), ty)
+                .await
+                .map_err(CheckError::in_domain)?;
             Ok(Term::Universe(n))
         }
 
@@ -2334,7 +2404,7 @@ fn infer_inner(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
         // Asymmetric Id claims (Id(A, a, b) with a ≢ b) are
         // discharged via `check`/Certificate's def_eq.
         Term::Refl(value) => {
-            let value_ty = infer(ctx, value)?;
+            let value_ty = request_infer(&work, ctx.clone(), child(value)).await?;
             Ok(Term::Id {
                 ty: Box::new(value_ty),
                 lhs: value.clone(),
@@ -2366,14 +2436,18 @@ fn infer_inner(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
         } => {
             let dependent = matches!(term, Term::IdElim { .. });
             // Infer the scrutinee's Id type to extract `A`, `a`, `b`.
-            let s_ty = ctx.conversion().whnf(infer(ctx, scrutinee)?)?;
+            let s_ty = ctx
+                .conversion()
+                .whnf(request_infer(&work, ctx.clone(), child(scrutinee)).await?)?;
             let (a_ty, a_lhs, a_rhs) = match s_ty {
                 Term::Id { ty, lhs, rhs } => (ty, lhs, rhs),
                 other => return Err(CheckError::NotAnIdentity(other)),
             };
 
             // Both motives bind the endpoint first; IdElim then binds its path.
-            let motive_ty = ctx.conversion().whnf(infer(ctx, motive)?)?;
+            let motive_ty = ctx
+                .conversion()
+                .whnf(request_infer(&work, ctx.clone(), child(motive)).await?)?;
             let (motive_dom, motive_codom) = match &motive_ty {
                 Term::Pi(d, c) => (d.as_ref().clone(), c.as_ref().clone()),
                 _ => return Err(CheckError::NotAValidJMotive((**motive).clone())),
@@ -2423,7 +2497,9 @@ fn infer_inner(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
             if dependent {
                 expected_base_ty = Term::app(expected_base_ty, Term::refl((*a_lhs).clone()));
             }
-            check_domain(ctx, base, &expected_base_ty)?;
+            request_check(&work, ctx.clone(), child(base), &expected_base_ty)
+                .await
+                .map_err(CheckError::in_domain)?;
 
             let result = Term::App(motive.clone(), a_rhs);
             Ok(if dependent {
@@ -2488,11 +2564,13 @@ fn split_family(ctx: &Context, mut term: Term) -> Result<Option<(Term, Vec<Term>
     })
 }
 
-fn check_indices(
-    ctx: &Context,
+async fn check_indices<'a, 'source>(
+    work: &WorkStack<'a>,
+    ctx: &Rc<Context>,
     telescope: &[Term],
-    arguments: &[Term],
+    arguments: &'source [Term],
     ambient_shift: usize,
+    child: Children<'a, 'source>,
 ) -> Result<(), CheckError> {
     if telescope.len() != arguments.len() {
         return Err(CheckError::InvalidInductive(
@@ -2504,7 +2582,7 @@ fn check_indices(
             shift_up(ty.clone(), ambient_shift, index),
             &arguments[..index],
         );
-        check_against(ctx, value, &expected)?;
+        request_check(&work, ctx.clone(), child(value), &expected).await?;
     }
     Ok(())
 }
@@ -2577,25 +2655,48 @@ pub fn check(ctx: &Context, term: &Term, expected: &Term) -> Result<(), CheckErr
     check_against(ctx, term, expected)
 }
 
-fn check_domain(ctx: &Context, term: &Term, expected: &Term) -> Result<(), CheckError> {
-    check_against(ctx, term, expected).map_err(|error| match error {
-        CheckError::TypeMismatch { expected, actual } => {
-            CheckError::DomainMismatch { expected, actual }
-        }
-        other => other,
-    })
-}
-
 // Internal callers establish the expected type's formation judgment before
 // descending. Keep the public boundary's validation out of recursive checks.
 fn check_against(ctx: &Context, term: &Term, expected: &Term) -> Result<(), CheckError> {
+    let work = WorkStack::default();
+    work.run(check_rule(
+        work.clone(),
+        Rc::new(ctx.clone()),
+        Cow::Borrowed(term),
+        expected.clone(),
+    ))
+}
+
+async fn check_rule<'a>(
+    work: WorkStack<'a>,
+    ctx: Rc<Context>,
+    term: Input<'a>,
+    expected: Term,
+) -> Result<(), CheckError> {
+    match term {
+        Cow::Borrowed(term) => {
+            check_term(work, &ctx, term, &expected, |child| Cow::Borrowed(child)).await
+        }
+        Cow::Owned(term) => check_term(work, &ctx, &term, &expected, copy_child).await,
+    }
+}
+
+async fn check_term<'a, 'source>(
+    work: WorkStack<'a>,
+    ctx: &Rc<Context>,
+    term: &'source Term,
+    expected: &Term,
+    child: Children<'a, 'source>,
+) -> Result<(), CheckError> {
     if let Term::Let { value, body } = term {
-        let ty = infer(ctx, value)?;
-        return check_against(
-            &ctx.define(ty, value),
-            body,
+        let ty = request_infer(&work, ctx.clone(), child(value)).await?;
+        return request_check(
+            &work,
+            Rc::new(ctx.define(ty, value)),
+            child(body),
             &shift_up(expected.clone(), 1, 0),
-        );
+        )
+        .await;
     }
     if let Term::Var(index) = term {
         let actual = ctx
@@ -2606,12 +2707,12 @@ fn check_against(ctx: &Context, term: &Term, expected: &Term) -> Result<(), Chec
         }
         // A synthesized product may be less precise than an expected family.
         if let Some(source) = ctx.definition(*index) {
-            return check_against(ctx, &source, &expected);
+            return request_check(&work, ctx.clone(), copy_child(&source), &expected).await;
         }
     }
     match (term, ctx.conversion().whnf(expected.clone())?) {
         (Term::Lam(domain, body), Term::Pi(expected_domain, codomain)) => {
-            let kind = infer(ctx, domain)?;
+            let kind = request_infer(&work, ctx.clone(), child(domain)).await?;
             ctx.conversion()
                 .expect_universe(&kind)?
                 .ok_or_else(|| CheckError::NotAType((**domain).clone()))?;
@@ -2621,14 +2722,23 @@ fn check_against(ctx: &Context, term: &Term, expected: &Term) -> Result<(), Chec
                     actual: (**domain).clone(),
                 });
             }
-            return check_against(&ctx.extend((**domain).clone()), body, &codomain);
+            return request_check(
+                &work,
+                Rc::new(ctx.extend((**domain).clone())),
+                child(body),
+                &codomain,
+            )
+            .await;
         }
         (Term::Pair(first, second), Term::Sigma(domain, family)) => {
-            check_against(ctx, first, &domain)?;
-            return check_against(ctx, second, &subst(*family, 0, first));
+            request_check(&work, ctx.clone(), child(first), &domain).await?;
+            return request_check(&work, ctx.clone(), child(second), &subst(*family, 0, first))
+                .await;
         }
         (Term::Refl(value), Term::Id { ty, lhs, rhs }) => {
-            check_domain(ctx, value, &ty)?;
+            request_check(&work, ctx.clone(), child(value), &ty)
+                .await
+                .map_err(CheckError::in_domain)?;
             if ctx.conversion().def_eq(value, &lhs)? && ctx.conversion().def_eq(value, &rhs)? {
                 return Ok(());
             }
@@ -2643,7 +2753,7 @@ fn check_against(ctx: &Context, term: &Term, expected: &Term) -> Result<(), Chec
         }
         _ => {}
     }
-    let inferred = infer(ctx, term)?;
+    let inferred = request_infer(&work, ctx.clone(), child(term)).await?;
     if ctx.conversion().def_eq(&inferred, expected)? {
         Ok(())
     } else {
@@ -3835,3 +3945,7 @@ mod tests {
 #[cfg(test)]
 #[path = "../tests/unit/normalization_budget.rs"]
 mod normalization_budget;
+
+#[cfg(test)]
+#[path = "../tests/unit/derivation_budget.rs"]
+mod derivation_budget;

@@ -2630,6 +2630,7 @@ fn run_rust_battery(battery: &[DifferentialCert]) -> Vec<DifferentialVerdict> {
                         CheckError::TypeMismatch { .. } => "TypeMismatch",
                         CheckError::UniverseOverflow { .. } => "UniverseOverflow",
                         CheckError::FuelExhausted => "FuelExhausted",
+                        CheckError::DerivationLimit => "DerivationLimit",
                         CheckError::ClaimedTypeNotAType { .. } => "ClaimedTypeNotAType",
                         CheckError::InvalidInductive(_) => "InvalidInductive",
                         CheckError::NotASigma(_) => "NotASigma",
