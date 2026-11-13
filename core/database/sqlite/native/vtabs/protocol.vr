@@ -80,17 +80,17 @@ implement Eq for VtabError {
 // -----------------------------------------------------------------------------
 
 public type VtabColumn is {
-    name: Text,
+    public name: Text,
     /// SQLite affinity sigil — "INTEGER", "TEXT", "REAL", "BLOB", "NUMERIC",
     /// or "" for default (empty → NUMERIC).
-    affinity: Text,
-    is_hidden: Bool,
+    public affinity: Text,
+    public is_hidden: Bool,
 };
 
 public type VtabSchema is {
     /// "CREATE TABLE x(...)" string the planner uses for column resolution.
-    create_sql: Text,
-    columns: List<VtabColumn>,
+    public create_sql: Text,
+    public columns: List<VtabColumn>,
 };
 
 // -----------------------------------------------------------------------------
@@ -176,31 +176,31 @@ public type VtabProtocolConstraintOp is
     | OpRegexp | OpIsNotNull | OpIsNull | OpIsNotEqual;
 
 public type Constraint is {
-    column: Int,
-    op: VtabProtocolConstraintOp,
-    usable: Bool,
+    public column: Int,
+    public op: VtabProtocolConstraintOp,
+    public usable: Bool,
 };
 
 public type ConstraintUsage is {
-    arg_slot: Int,        // 0 = unused, 1+ = argv slot
-    omit: Bool,           // true = vtab handles, planner skips
+    public arg_slot: Int,        // 0 = unused, 1+ = argv slot
+    public omit: Bool,           // true = vtab handles, planner skips
 };
 
 public type OrderBy is {
-    column: Int,
-    desc: Bool,
+    public column: Int,
+    public desc: Bool,
 };
 
 public type IndexInfo is {
-    constraints: List<Constraint>,
-    order_by: List<OrderBy>,
-    constraint_usage: List<ConstraintUsage>,
-    index_num: Int,
-    index_str: Text,
-    needs_to_free: Bool,
-    order_consumed: Bool,
-    estimated_cost: Float64,
-    estimated_rows: Int64,
+    public constraints: List<Constraint>,
+    public order_by: List<OrderBy>,
+    public constraint_usage: List<ConstraintUsage>,
+    public index_num: Int,
+    public index_str: Text,
+    public needs_to_free: Bool,
+    public order_consumed: Bool,
+    public estimated_cost: Float64,
+    public estimated_rows: Int64,
 };
 
 public fn index_info_new() -> IndexInfo {
