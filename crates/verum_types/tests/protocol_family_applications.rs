@@ -2,9 +2,13 @@
 use verum_fast_parser::Parser;
 use verum_types::TypeChecker;
 fn errors(source: &str) -> Vec<String> {
+    errors_with_policy(source, true)
+}
+fn errors_with_policy(source: &str, generic_associated_types: bool) -> Vec<String> {
     let ast = Parser::new(source).parse_module().unwrap();
     let mut checker = TypeChecker::new();
     checker.register_primitives();
+    checker.set_generic_associated_types_enabled(generic_associated_types);
     checker.set_current_module_path("families");
     let mut errors: Vec<_> = checker.prepare_module_declarations(&ast).iter().map(|e|format!("{e:?}")).collect();
     errors.extend(checker.take_deferred_errors().iter().map(|e| format!("{e:?}")));
@@ -15,6 +19,12 @@ fn refuses_domain(source: &str) { let e=errors(source); assert!(e.iter().any(|e|
 #[test]
 fn complete_family_application_keeps_its_supplied_parameter() {
     accepts("type F is protocol { type C<T>; fn pass<U>(x:Self.C<U>)->Self.C<U>; };");
+}
+#[test]
+fn disabling_generic_associated_types_refuses_the_family_declaration() {
+    let errors = errors_with_policy("type F is protocol { type C<T>; };", false);
+    assert!(errors.iter().any(|error| error.contains("generic_associated_types = false")
+        && error.contains("C<...>")), "{errors:#?}");
 }
 #[test]
 fn a_bare_required_family_still_refuses_missing_arguments() {
