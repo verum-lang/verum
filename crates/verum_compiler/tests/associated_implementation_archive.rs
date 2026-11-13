@@ -629,3 +629,55 @@ fn a_removed_mount_cannot_supply_an_archived_receiver_to_an_edited_declaration()
         );
     }
 }
+
+#[test]
+fn object_result_equality_survives_the_published_archive() {
+    let provider = "module core.family_archive;
+        public type Source is protocol { type Item; fn read(&self) -> Self.Item; };";
+    let metadata = publish(&source_module(provider)).expect("publish protocol with projected result");
+    for eager in [false, true] {
+        for (result, valid) in [("Int", true), ("Bool", false)] {
+            let source = format!("mount core.family_archive.Source;
+                fn read(source: &dyn Source<Item = Int>) -> {result} {{ source.read() }}");
+            let errors = consumer_errors(&metadata, &source, eager);
+            assert_eq!(errors.is_empty(), valid, "eager={eager}, {source}: {errors:?}");
+        }
+    }
+}
+
+#[test]
+fn static_and_dynamic_associated_results_execute_with_the_same_carrier() {
+    let program = r#"type Reading is protocol {
+    type Item;
+    fn read(&self) -> Self.Item;
+};
+
+type Counter is { value: Int };
+
+implement Reading for Counter {
+    type Item = Int;
+    fn read(&self) -> Int { self.value }
+}
+
+fn read_static<R: Reading<Item = Int>>(source: &R) -> Int {
+    source.read()
+}
+
+fn read_dynamic(source: &dyn Reading<Item = Int>) -> Int {
+    source.read()
+}
+
+fn main() -> Int {
+    let sensor = Counter { value: 21 };
+    read_static(&sensor) + read_dynamic(&sensor)
+}
+"#;
+    let module = source_module(program);
+    let wire = deserialize_module(&serialize_module(&module).unwrap()).unwrap();
+    for module in [module, wire] {
+        let main = module.find_function_by_name("core.family_archive.main").unwrap();
+        let actual = verum_vbc::interpreter::Interpreter::new(module.into())
+            .execute_function(main).expect("execute both concrete and object calls");
+        assert_eq!(actual.try_as_i64(), Some(42));
+    }
+}
