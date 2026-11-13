@@ -1310,7 +1310,26 @@ impl VbcCodegen {
                 // inference (source) and a `let x: T = transmute(...)` target
                 // hint (`pending_transmute_target`). Thread them through.
                 type_args,
-            } => self.compile_call(func, args, type_args),
+            } => {
+                let output = self.compile_call(func, args, type_args)?;
+                let end = self.ctx.instructions.len();
+                // A selected call ending in an unconditional trap has no normal
+                // result, even when compiling its arguments emitted other paths.
+                // A jump to the end could bypass that trap.
+                if output.is_none()
+                    && end > start
+                    && expr.span.start < expr.span.end
+                    && matches!(
+                        self.ctx.instructions.last(),
+                        Some(Instruction::Panic { .. } | Instruction::PanicValue { .. } | Instruction::Unreachable)
+                    )
+                    && !self.ctx.has_label_in_instruction_range(end, end)
+                {
+                    let never = crate::types::TypeRef::Concrete(crate::types::TypeId::NEVER);
+                    self.ctx.declared_result_types.insert(expr.span, Some(never));
+                }
+                Ok(output)
+            }
             ExprKind::MethodCall {
                 receiver,
                 method,

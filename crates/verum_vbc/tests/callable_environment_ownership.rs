@@ -232,6 +232,62 @@ fn rewrite(module: &mut VbcModule, mut edit: impl FnMut(&mut verum_vbc::Instruct
 }
 
 #[test]
+fn a_diverging_match_arm_preserves_the_other_arms_capture_declaration() {
+    for failure in ["panic(\"empty\")", "panic(message)", "unreachable()"] {
+        let source = format!(r#"
+            type Slot<T> is Full(T) | Empty;
+            fn read<T>(slot: Slot<T>, message: Text) -> T {{
+                let value = match slot {{ Slot.Full(payload) => payload, Slot.Empty => {failure} }};
+                let get = || value;
+                get()
+            }}
+            fn probe() -> Int {{ read(Slot.Full(73), "empty") }}
+        "#);
+        for bootstrap in [false, true] {
+            let module = compile(&source, bootstrap);
+            let code = verum_vbc::bytecode::decode_instructions(&module.bytecode).unwrap();
+            assert!(code.iter().any(|op| matches!(op,
+                verum_vbc::Instruction::NewClosure { capture_types: Some(types), .. }
+                    if matches!(types.as_slice(), [Some(TypeRef::Generic(_))])
+            )), "missing capture declaration for {failure}");
+            assert_eq!(execute(module).unwrap(), 73);
+        }
+    }
+}
+
+#[test]
+fn a_returning_call_named_panic_still_contributes_its_owned_result() {
+    let source = r#"
+        fn panic() -> Int { 37 }
+        fn probe() -> Int {
+            let other: Int = 73;
+            let value = match false { true => other, false => panic() };
+            let read = || value;
+            read()
+        }
+    "#;
+    for bootstrap in [false, true] {
+        assert_eq!(execute(compile(source, bootstrap)).unwrap(), 37);
+    }
+}
+
+#[test]
+fn a_diverging_arm_does_not_authorize_sharing_an_affine_payload() {
+    let source = r#"
+        type affine Ticket is { id: Int };
+        fn probe() -> Int {
+            let value = match true { true => Ticket { id: 73 }, false => panic("empty") };
+            let read = || value.id;
+            read()
+        }
+    "#;
+    for bootstrap in [false, true] {
+        let error = execute(compile(source, bootstrap)).unwrap_err();
+        assert!(error.contains("requires unrestricted ownership") && error.contains("Affine"), "{error}");
+    }
+}
+
+#[test]
 fn creator_generic_capture_witnesses_survive_specialization() {
     let source =
         "fn make<T>(value: T) -> fn() -> T { || value } fn probe() -> Int { let f = make(7); f() }";

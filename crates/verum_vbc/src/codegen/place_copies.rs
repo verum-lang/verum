@@ -182,6 +182,9 @@ impl VbcCodegen {
                 self.declared_method_result_type(&owner, method.name.as_str(), type_args)
             }
             ExprKind::Call { type_args, args, .. } => {
+                if let Some(result) = self.ctx.declared_result_types.get(&expr.span) {
+                    return result.clone();
+                }
                 if let Some(result) = self.lexical_call_result(expr) {
                     return result;
                 }
