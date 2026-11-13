@@ -8531,8 +8531,8 @@ impl VbcCodegen {
             .then(|| self.method_expression_types(expr).callable).flatten()
     }
 
-    /// Derive descriptor-ordered witnesses for the interpreter and AOT.
-    fn compile_call_operand(
+    /// Scope a nested call's expected result to this particular expression.
+    pub(super) fn compile_call_operand(
         &mut self, argument: &Expr, expected: Option<&crate::types::TypeRef>,
     ) -> CodegenResult<Option<Reg>> {
         let value = Self::normalized_place(argument);
@@ -13776,31 +13776,30 @@ impl VbcCodegen {
             return Ok(Some(dst));
         }
 
-        // Intercept Heap.new(value) / Shared.new(value) — emit CBGR-tracked allocation
-        // via CallM so the interpreter's `dispatch_primitive_method` runs the
-        // intrinsic path (method_dispatch.rs `Heap.new` / `Shared.new`). The stdlib's
-        // user-defined .new returns a flat struct that breaks builtin CBGR introspection
-        // (header_generation, raw_ptr, weak_count, …) on the returned value.
-        if method.name == "new"
-            && args.len() == 1
-            && let Some(ref tn) = static_receiver_type
-            && (tn == "Heap" || tn == "Shared")
+        // Native allocation keeps the constructor declaration's argument context;
+        // an inner generic call may get its only witness from the enclosing type.
+        if method.name == "new" && args.len() == 1
+            && let Some(owner) = static_receiver_type.as_deref()
+            && let Some(id) = self.nominal_type_id(owner)
+            && let Some(carrier) = self.declared_runtime_carrier(id).filter(|kind| kind.is_smart_pointer())
         {
-            let constructor = self.ctx.lookup_function(&format!("{tn}.new"))
-                .map(|info| info.id.0);
-            let inferred = constructor.and_then(|id| self.infer_call_instantiation(id, None, args));
-            let inner = self
-                .compile_expr(&args[0])?
-                .or_internal("wrapper .new arg has no value")?;
+            let selected = self.registered_receiver_method(owner, "new")
+                .and_then(|name| self.ctx.lookup_qualified_function(&name)).cloned();
+            let contextual = selected.as_ref()
+                .and_then(|info| self.contextual_call_parameters(info, type_args, args));
+            let expected = contextual.as_ref().and_then(|params| params.first()?.as_ref());
+            let inferred = selected.as_ref()
+                .and_then(|info| self.infer_call_instantiation(info.id.0, None, args));
+            let inner = self.compile_call_operand(&args[0], expected)?
+                .or_internal("allocation argument has no value")?;
             let inferred = inferred.or_else(|| {
                 self.generic_named_place(&args[0], inner).map(|ty| CallInstantiation::known([ty]))
             });
-            let selected = constructor.and_then(|id| self.ctx.lookup_function_by_id(crate::module::FunctionId(id))).cloned();
             let witnesses = self.apply_explicit_generic_args(selected.as_ref(), type_args, inferred)?;
 
             // Load receiver type name as a small string the interpreter recognizes.
             let receiver_reg = self.ctx.alloc_temp();
-            let name_const = self.ctx.add_const_string(tn);
+            let name_const = self.ctx.add_const_string(carrier.as_str());
             self.ctx.emit(Instruction::LoadK {
                 dst: receiver_reg,
                 const_id: name_const.0,
@@ -13817,9 +13816,7 @@ impl VbcCodegen {
             }
 
             let result = self.ctx.alloc_temp();
-            // The guard above bound `tn` to "Heap" or "Shared" — the
-            // receiver type, free for the asking (T0753).
-            let method_id = self.call_method_id(Some(tn.as_str()), "new");
+            let method_id = self.call_method_id(Some(carrier.as_str()), "new");
             // Preserve builtin dispatch while also supplying the declaration
             // witness if CallM selects the generic source constructor body.
             if let Some(type_args) = witnesses {

@@ -1489,7 +1489,12 @@ impl VbcCodegen {
 
         let copy_start = self.ctx.instructions.len();
         let mut init_reg = if let Some(expr) = value {
-            self.compile_expr(expr)?
+            // Only the initializer is described by this annotation. A selected
+            // callee projects it through its signature to its own operands.
+            let expected = ty.filter(|_| matches!(Self::normalized_place(expr).kind,
+                verum_ast::ExprKind::Call { .. } | verum_ast::ExprKind::MethodCall { .. }))
+                .and_then(|ty| self.source_type_in_current_scope(ty));
+            self.compile_call_operand(expr, expected.as_ref())?
         } else {
             // No initializer - use unit
             let reg = self.ctx.alloc_temp();

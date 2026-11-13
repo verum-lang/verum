@@ -1,4 +1,4 @@
-//! Wrapper constructors retain generic witnesses without bypassing CallM.
+//! Native allocation and source constructors retain their own callable witnesses.
 #![cfg(feature = "codegen")]
 
 use std::sync::Arc;
@@ -23,7 +23,7 @@ static ROOT: {wrapper}<Payload> = {wrapper}.new(Payload {{ value: 42 }});
 fn forward<T>(value: T) -> {wrapper}<T> {{ {wrapper}.new(value) }}
 fn probe() -> Int {{
     let local = forward<Payload>(Payload {{ value: 17 }});
-    42
+    ROOT.value.value + local.value.value
 }}
 "#
         );
@@ -43,6 +43,15 @@ fn probe() -> Int {{
                 &verum_vbc::serialize::serialize_module(&module).unwrap(),
             )
             .unwrap();
+            let new = module.find_function_by_name(&format!("{wrapper}.new")).unwrap();
+            let forward = module.find_function_by_name("wrapper_witness.forward").unwrap();
+            let descriptor = module.get_function(forward).unwrap();
+            let start = descriptor.bytecode_offset as usize;
+            let end = start + descriptor.bytecode_length as usize;
+            let body = verum_vbc::bytecode::decode_instructions(&module.bytecode[start..end]).unwrap();
+            assert!(body.iter().any(|op| matches!(op, verum_vbc::Instruction::CallG {
+                func_id, ..
+            } if *func_id == new.0)), "{wrapper}, bootstrap={bootstrap}: {body:?}");
             let probe = module
                 .find_function_by_name("wrapper_witness.probe")
                 .unwrap();
@@ -50,7 +59,7 @@ fn probe() -> Int {{
             interpreter.run_global_ctors().unwrap();
             assert_eq!(
                 interpreter.execute_function(probe).unwrap().as_i64(),
-                42,
+                59,
                 "{wrapper}, bootstrap={bootstrap}"
             );
         }
@@ -111,5 +120,70 @@ fn dereferenced_arguments_forward_the_declared_protocol_target() {
             let result = Interpreter::new(Arc::new(module)).execute_function(probe).unwrap();
             assert_eq!(result.as_i64(), 37, "bootstrap={bootstrap}");
         }
+    }
+}
+
+#[test]
+fn canonical_allocation_supplies_the_nested_receiver_constructor_result() {
+    use verum_ast::{ItemKind, TypeKind, decl::{ImplItemKind, ImplKind}};
+    use verum_vbc::{Instruction, bytecode::decode_instructions, types::TypeRef};
+
+    // Only signatures of the intercepted .new functions are needed here; source
+    // declaration collection keeps their actual stdlib owner and entire type roster.
+    let mut declarations = Parser::new(include_str!("../../../core/base/memory.vr")).parse_module().unwrap();
+    declarations.items.retain_mut(|item| match &mut item.kind {
+        ItemKind::Module(_) => true,
+        ItemKind::Type(ty) => matches!(ty.name.as_str(), "Heap" | "Shared" | "SharedInner"),
+        ItemKind::Impl(implementation) => {
+            let ImplKind::Inherent(owner) = &implementation.kind else { return false };
+            let TypeKind::Generic { base, .. } = &owner.kind else { return false };
+            let TypeKind::Path(path) = &base.kind else { return false };
+            if !path.as_ident().is_some_and(|name| matches!(name.as_str(), "Heap" | "Shared")) {
+                return false;
+            }
+            implementation.items.retain(|member| matches!(&member.kind,
+                ImplItemKind::Function(function) if function.name.as_str() == "new"));
+            !implementation.items.is_empty()
+        }
+        _ => false,
+    });
+    let source = r#"
+        module allocation_client;
+        mount core.base.memory.{Heap, Shared};
+        type Receipt is { code: Int, count: Int };
+        type Ticket<T> is { number: Int };
+        implement<T> Ticket<T> {
+            fn new(number: Int) -> Ticket<T> { Ticket { number } }
+        }
+        fn make_shared(number: Int) -> Shared<Ticket<Receipt>> {
+            let cell: Shared<Ticket<Receipt>> = Shared.new(Ticket.new(number));
+            cell
+        }
+        fn make_heap(number: Int) -> Heap<Ticket<Receipt>> {
+            let cell: Heap<Ticket<Receipt>> = Heap.new(Ticket.new(number));
+            cell
+        }
+    "#;
+    let consumer = Parser::new(source).parse_module().unwrap();
+    let mut cg = VbcCodegen::with_config(CodegenConfig::new("allocation_client"));
+    cg.collect_unit_declarations(&[&declarations, &consumer]).unwrap();
+    cg.resolve_pending_imports();
+    cg.compile_unit_items(&[&consumer], ItemFailurePolicy::Strict).unwrap();
+    let module = cg.finalize_module_from_state().unwrap();
+    let wire = verum_vbc::serialize::serialize_module(&module).unwrap();
+    let module = verum_vbc::deserialize::deserialize_module(&wire).unwrap();
+    let ticket = module.find_function_by_name("Ticket.new").unwrap();
+    let receipt = module.types.iter().find(|ty| module.strings.get(ty.name)
+        .is_some_and(|name| name.rsplit('.').next() == Some("Receipt"))).unwrap();
+    for name in ["allocation_client.make_heap", "allocation_client.make_shared"] {
+        let entry = module.find_function_by_name(name).unwrap();
+        let function = module.get_function(entry).unwrap();
+        let start = function.bytecode_offset as usize;
+        let end = start + function.bytecode_length as usize;
+        let body = decode_instructions(&module.bytecode[start..end]).unwrap();
+        assert!(body.iter().any(|op| matches!(op,
+            Instruction::CallG { func_id, type_args, .. }
+                if *func_id == ticket.0 && type_args.as_slice() == [TypeRef::Concrete(receipt.id)]
+        )), "{name}: {body:?}");
     }
 }
