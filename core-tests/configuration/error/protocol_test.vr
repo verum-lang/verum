@@ -1,0 +1,23 @@
+mount core.configuration.error.{format_id_toml, format_id_json};
+mount core.base.protocols.{PartialEq, Eq, Hash};
+
+fn equal_identifier<T: Eq>(left: &T, right: &T) -> Bool {
+    left.eq(right)
+}
+
+fn identifier_hash<T: Hash>(value: &T) -> Int {
+    value.hash_value()
+}
+
+@test
+fn test_identifier_protocols_observe_the_same_carrier() {
+    let first = format_id_toml();
+    let same = format_id_toml();
+    let other = format_id_json();
+    assert(equal_identifier(&first, &same));
+    assert(!equal_identifier(&first, &other));
+    assert(!first.ne(&same));
+    assert(first.ne(&other));
+    assert_eq(identifier_hash(&first), identifier_hash(&"toml"));
+    assert_eq(identifier_hash(&other), identifier_hash(&"json"));
+}

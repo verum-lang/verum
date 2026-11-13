@@ -40,6 +40,7 @@
 module core.configuration.error;
 
 mount base.{Result, Ok, Err, Maybe, Some, None, Text};
+mount core.base.protocols.{PartialEq, Eq, Hash, Hasher};
 
 // =============================================================================
 // Format identifier — stable across all configuration modules
@@ -48,6 +49,25 @@ mount base.{Result, Ok, Err, Maybe, Some, None, Text};
 public type FormatId is Text {
     self.matches("^[a-z][a-z0-9_-]{0,31}$")
 };
+
+// These protocols observe the validated identifier through its Text carrier.
+// Their implementations neither construct nor mutate a FormatId.
+implement PartialEq for FormatId {
+    fn eq(&self, other: &FormatId) -> Bool {
+        let value: &Text = self;
+        let other_value: &Text = other;
+        value.eq(other_value)
+    }
+}
+
+implement Eq for FormatId {}
+
+implement Hash for FormatId {
+    fn hash(&self, hasher: &mut Hasher) {
+        let value: &Text = self;
+        value.hash(hasher);
+    }
+}
 
 // Canonical IDs for built-in formats. Extensions register new IDs via
 // FormatRegistry.
