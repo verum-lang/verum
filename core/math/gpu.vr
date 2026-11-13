@@ -1553,7 +1553,7 @@ public fn device_reset_device(device: DeviceId) {
 
 // ComputeDevice context for tensor operations
 // Used with `provide ComputeDevice = ...` syntax
-public context ComputeDevice {
+public context protocol ComputeDevice {
     // Get current device identifier
     fn device_type() -> DeviceId;
 
