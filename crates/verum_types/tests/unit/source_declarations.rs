@@ -218,3 +218,74 @@ fn a_standalone_ast_cannot_borrow_an_unrelated_registered_body() {
     };
     assert_ne!(selected.body, declaration.body);
 }
+
+#[test]
+fn public_reexports_select_the_exact_target_type_attributes() {
+    use verum_modules::{ModuleInfo, ModulePath, extract_exports_from_module};
+    let mut registry = registry_with(
+        "scope.provider",
+        r#"
+        @cfg(target_os = "linux") public type Payload is { count:Int };
+        @cfg(target_os = "windows") public type Payload is { active:Bool };
+    "#,
+    );
+    let ast = Parser::new("public mount scope.provider.{Payload as Published};")
+        .parse_module()
+        .unwrap();
+    let id = registry.allocate_id();
+    let path = ModulePath::from_str("scope.facade");
+    let mut facade = ModuleInfo::new(id, path.clone(), ast, verum_ast::FileId::new(1), "".into());
+    facade.exports = extract_exports_from_module(&facade.ast, id, &path).unwrap();
+    registry.register(facade);
+    let provider = registry.get_by_path("scope.provider").unwrap();
+    let mut checker = TypeChecker::with_minimal_context();
+    for (target, index) in [
+        ("x86_64-pc-windows-msvc", 1),
+        ("x86_64-unknown-linux-gnu", 0),
+    ] {
+        checker.cfg_evaluator = CfgEvaluator::for_target(target);
+        let ItemKind::Type(original) = &provider.ast.items[index].kind else {
+            panic!("target type")
+        };
+        for (entry, name) in [("scope.provider", "Payload"), ("scope.facade", "Published")] {
+            let (selected, owner) = checker
+                .resolve_public_source_type(entry, name, &registry)
+                .expect("the active public declaration");
+            assert_eq!(owner.as_str(), "scope.provider");
+            assert_eq!(selected, *original, "entry={entry}, target={target}");
+        }
+    }
+    checker.cfg_evaluator = CfgEvaluator::for_target("aarch64-apple-darwin");
+    for (entry, name) in [("scope.provider", "Payload"), ("scope.facade", "Published")] {
+        assert!(
+            checker
+                .resolve_public_source_type(entry, name, &registry)
+                .is_none(),
+            "inactive type from {entry}"
+        );
+    }
+}
+
+#[test]
+fn an_active_private_type_cannot_borrow_an_inactive_public_export() {
+    let registry = registry_with(
+        "scope.provider",
+        r#"
+        @cfg(target_os = "linux") public type Payload is { count:Int };
+        @cfg(target_os = "windows") type Payload is { active:Bool };
+    "#,
+    );
+    let mut checker = TypeChecker::with_minimal_context();
+    checker.cfg_evaluator = CfgEvaluator::for_target("x86_64-pc-windows-msvc");
+    assert!(
+        checker
+            .resolve_public_source_type("scope.provider", "Payload", &registry)
+            .is_none()
+    );
+    checker.cfg_evaluator = CfgEvaluator::for_target("x86_64-unknown-linux-gnu");
+    assert!(
+        checker
+            .resolve_public_source_type("scope.provider", "Payload", &registry)
+            .is_some()
+    );
+}

@@ -4937,33 +4937,13 @@ impl TypeChecker {
     fn find_public_source_type_declaration_index(
         &self, ast: &verum_ast::Module, type_name: &str,
     ) -> Option<usize> {
-        use verum_ast::ItemKind;
-        use verum_ast::decl::Visibility as AstVisibility;
-
-        for (index, item) in ast.items.iter().enumerate() {
-            if let ItemKind::Type(type_decl) = &item.kind
-                && type_decl.name.name.as_str() == type_name
-                && self.cfg_evaluator.should_include(&item.attributes)
-            {
-                // Private types MUST NOT be visible to importers.
-                // Before this guard, an `import` resolver that fell
-                // through the normal exports table would still find
-                // private declarations here by AST walk, and then
-                // `register_type_declaration` would try to resolve
-                // their variant-payload / field types against the
-                // *importer's* scope — which doesn't know the private
-                // type's own imports. The symptom was a spurious
-                // "Failed to register imported type 'X': type not
-                // found: Y" warning for private types whose variants
-                // reference types imported via `mount ...{Y}` that
-                // only the defining module knows about.
-                if type_decl.visibility != AstVisibility::Public {
-                    return None;
-                }
-                return Some(index);
-            }
-        }
-        None
+        // Local and exported lookups select the same target declaration;
+        // only visibility differs. Type-level cfg belongs to that selection.
+        let index = self.local_source_type_declaration_index(ast, type_name)?;
+        let verum_ast::ItemKind::Type(declaration) = &ast.items[index].kind else {
+            unreachable!("type declaration index")
+        };
+        (declaration.visibility == verum_ast::Visibility::Public).then_some(index)
     }
 
     /// Extract all type names referenced in a TypeDecl.
