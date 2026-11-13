@@ -10,7 +10,7 @@ use verum_vbc::{
     interpreter::Interpreter,
 };
 
-fn check(source: &str, constructor: &str) {
+fn check(source: &str, constructor: &str) -> Arc<verum_vbc::module::VbcModule> {
     let ast = Parser::new(source).parse_module().unwrap();
     let module = VbcCodegen::with_config(CodegenConfig::new("witnesses"))
         .compile_module(&ast)
@@ -19,6 +19,7 @@ fn check(source: &str, constructor: &str) {
         &verum_vbc::serialize::serialize_module(&module).unwrap(),
     )
     .unwrap();
+    verum_vbc::validate::validate_module(&module).expect("all witnesses belong to their caller");
     let function = module
         .functions
         .iter()
@@ -44,9 +45,11 @@ fn check(source: &str, constructor: &str) {
         "{witnesses:?}"
     );
     let probe = module.find_function_by_name("witnesses.probe").unwrap();
-    let mut interpreter = Interpreter::new(Arc::new(module));
+    let module = Arc::new(module);
+    let mut interpreter = Interpreter::new(module.clone());
     interpreter.run_global_ctors().unwrap();
     assert_eq!(interpreter.execute_function(probe).unwrap().as_i64(), 42);
+    module
 }
 
 const TYPES: &str = r#"
@@ -87,4 +90,59 @@ fn deep_static_constructor_retains_unit_witness() {
     "#),
         "__tls_init_ROOT",
     );
+}
+
+#[test]
+fn record_parameter_reaches_a_nested_nullary_constructor() {
+    check(
+        &(TYPES.to_owned() + r#"
+        type State<Item> is { reason: Holder<Choice<Item>> };
+        fn probe() -> Int {
+            let state: Holder<State<Int>> = Holder.new(State { reason: Holder.new(Choice.Empty) });
+            match state.item.reason.item { Choice.Empty => 42, Choice.Value(_) => 0 }
+        }
+    "#),
+        "witnesses.probe",
+    );
+}
+
+#[test]
+fn record_annotation_supplies_its_own_field_context() {
+    check(
+        &(TYPES.to_owned() + r#"
+        type State<Item> is { item: Holder<Choice<Item>> };
+        fn probe() -> Int {
+            let state: State<Bool> = State { item: Holder.new(Choice.Empty) };
+            match state.item.item { Choice.Empty => 42, Choice.Value(_) => 0 }
+        }
+    "#),
+        "witnesses.probe",
+    );
+}
+
+#[test]
+fn record_fields_use_instantiated_arguments_even_when_caller_slots_collide() {
+    use verum_vbc::types::TypeRef;
+
+    let module = check(
+        &(TYPES.to_owned() + r#"
+        type Envelope<Noise, Item> is { item: Holder<Choice<Item>>, noise: Noise };
+        fn build<Item, Noise>(noise: Noise, _sample: Item) -> Envelope<Noise, Item> {
+            Envelope { item: Holder.new(Choice.Empty), noise }
+        }
+        fn probe() -> Int {
+            let result = build(42, true);
+            match result.item.item { Choice.Empty => result.noise, Choice.Value(_) => 0 }
+        }
+    "#),
+        "witnesses.probe",
+    );
+    let build = module.get_function(module.find_function_by_name("witnesses.build").unwrap()).unwrap();
+    let item = build.type_params.iter().find(|param| module.get_string(param.name) == Some("Item")).unwrap();
+    let choice = module.types.iter().find(|ty| module.get_string(ty.name) == Some("Choice")).unwrap();
+    let body = decode_instructions(&module.bytecode[build.bytecode_offset as usize
+        ..(build.bytecode_offset + build.bytecode_length) as usize]).unwrap();
+    assert!(body.iter().any(|op| matches!(op, Instruction::CallG { type_args, .. }
+        if matches!(type_args.as_slice(), [TypeRef::Instantiated { base, args }] if *base == choice.id
+            && args.as_slice() == [TypeRef::Generic(item.id)]))), "{body:?}");
 }

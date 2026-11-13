@@ -376,13 +376,17 @@ impl VbcCodegen {
         Some(ty)
     }
 
+    pub(super) fn admits_constructor_context(expr: &Expr) -> bool {
+        matches!(Self::normalized_place(expr).kind,
+            ExprKind::Call { .. } | ExprKind::MethodCall { .. } | ExprKind::Record { .. })
+    }
+
     /// A call's expected result can bind its own parameters. Only arguments
     /// fixed by that substitution can supply context to a nested expression.
     pub(super) fn contextual_call_parameters(
         &self, info: &FunctionInfo, explicit: &[verum_ast::ty::GenericArg], operands: &[Expr],
     ) -> Option<Vec<Option<TypeRef>>> {
-        if !operands.iter().any(|arg| matches!(Self::normalized_place(arg).kind,
-            ExprKind::Call { .. } | ExprKind::MethodCall { .. })) {
+        if !operands.iter().any(Self::admits_constructor_context) {
             return None;
         }
         let TypeRef::Function { params, return_type, .. } = info.callable_signature.as_ref()? else {

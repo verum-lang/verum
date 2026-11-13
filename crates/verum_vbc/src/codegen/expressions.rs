@@ -1402,7 +1402,13 @@ impl VbcCodegen {
 
             // === Record/Struct Creation ===
             ExprKind::Record { path, fields, base } => {
-                self.compile_record(path, fields, base.as_deref())
+                let owner = if self.ctx.expected_value_span == Some(expr.span) {
+                    self.ctx.expected_value_type.clone()
+                } else if matches!(demand, ResultDemand::CallableReturn) {
+                    self.ctx.function_return_type_name.as_deref()
+                        .and_then(|name| self.semantic_type_in_current_scope(name))
+                } else { None };
+                self.compile_record(path, fields, base.as_deref(), owner.as_ref())
             }
 
             // === References ===
@@ -8555,7 +8561,7 @@ impl VbcCodegen {
         &mut self, argument: &Expr, expected: Option<&crate::types::TypeRef>,
     ) -> CodegenResult<Option<Reg>> {
         let value = Self::normalized_place(argument);
-        if !matches!(value.kind, ExprKind::Call { .. } | ExprKind::MethodCall { .. }) {
+        if !Self::admits_constructor_context(value) {
             return self.compile_expr(argument);
         }
         let prior_type = std::mem::replace(&mut self.ctx.expected_value_type, expected.cloned());
@@ -25733,6 +25739,7 @@ impl VbcCodegen {
         path: &Path,
         fields: &verum_common::List<FieldInit>,
         base: Option<&Expr>,
+        expected: Option<&crate::types::TypeRef>,
     ) -> CodegenResult<Option<Reg>> {
         let result = self.ctx.alloc_temp();
 
@@ -26246,6 +26253,11 @@ impl VbcCodegen {
             // META-GROUP-XMODULE-1: `record_key` carries the module-
             // qualified re-key when the simple name collided.
             let type_name = record_key.clone();
+            // Only the selected record's own application can instantiate its
+            // field types. A same-spelled formal of the caller has no authority.
+            let applied_owner = expected.filter(|ty| matches!(ty,
+                crate::types::TypeRef::Instantiated { base, .. }
+                    if Some(*base) == self.nominal_type_id(&type_name)));
 
             for field in fields.iter() {
                 // Root fix for Issue #1 (silent impl-method SKIP with
@@ -26256,6 +26268,11 @@ impl VbcCodegen {
                 // `VfsErrorKind.Closed`) can be disambiguated against
                 // other types exporting the same variant.
                 let saved_field_type = self.push_field_type_context(&type_name, &field.name.name);
+                if let Some(owner) = applied_owner {
+                    self.ctx.expected_value_type = self.projected_field_declaration(owner.clone(), &field.name.name)
+                        .filter(|ty| self.declared_type_in_scope(ty));
+                    self.ctx.expected_value_span = field.value.as_ref().map(|expr| Self::normalized_place(expr).span);
+                }
 
                 let copy_start = self.ctx.instructions.len();
                 let value_reg = if let Some(ref v) = field.value {
