@@ -181,6 +181,7 @@ implement<T> Source<T> {
         drop(owned);
     }
 }
+
 fn probe() -> Int {
     let mut count = Count { value: 0 };
     let counter = &mut count;
@@ -190,4 +191,81 @@ fn probe() -> Int {
     count.value
 }
 "#);
+}
+
+#[test]
+fn concrete_generic_clone_keeps_its_method_witnesses() {
+    run(r#"
+type Handle<T> is { marker: Int };
+implement<T> Handle<T> {
+    fn clone(&self) -> Handle<T> {
+        assert_eq(T.size, 8);
+        Handle { marker: self.marker }
+    }
+}
+fn probe() -> Int {
+    let original: Handle<Int> = Handle { marker: 1 };
+    let copied = original.clone();
+    copied.marker
+}
+"#);
+}
+
+#[test]
+fn dynamic_calls_keep_the_same_witnesses_as_direct_generic_methods() {
+    use verum_vbc::{Instruction, Reg, RegRange};
+    let source = r#"
+        type Handle<T> is { marker: Int };
+        implement<T> Handle<T> {
+            fn clone(&self) -> Handle<T> {
+                assert_eq(T.size, 8);
+                Handle { marker: self.marker }
+            }
+        }
+        fn probe() -> Int {
+            let original: Handle<Int> = Handle { marker: 73 };
+            let copied = original.clone();
+            copied.marker
+        }
+    "#;
+    let ast = Parser::new(source).parse_module().unwrap();
+    for bootstrap in [false, true] {
+        let mut module = lower(&ast, bootstrap).unwrap();
+        let entry = module.find_function_by_name("forwarding.probe").unwrap();
+        let descriptor = module.get_function(entry).unwrap();
+        let start = descriptor.bytecode_offset as usize;
+        let end = start + descriptor.bytecode_length as usize;
+        let original = verum_vbc::bytecode::decode_instructions(&module.bytecode[start..end]).unwrap();
+        let mut body = verum_common::List::new();
+        let mut replaced = 0;
+        for instruction in original {
+            if let Instruction::CallG { dst, func_id, type_args, args } = instruction {
+                let callee = module.get_function(verum_vbc::FunctionId(func_id)).unwrap();
+                assert_eq!(module.get_string(callee.params[0].name), Some("self"));
+                assert_eq!(args.count, 1);
+                body.push(Instruction::SetCallWitness { type_args });
+                body.push(Instruction::CallM {
+                    dst,
+                    receiver: args.start,
+                    method_id: callee.name.0,
+                    args: RegRange { start: Reg(args.start.0 + 1), count: 0 },
+                });
+                replaced += 1;
+            } else {
+                body.push(instruction);
+            }
+        }
+        assert_eq!(replaced, 1, "exercise both supported call encodings");
+        let start = module.bytecode.len() as u32;
+        let length = verum_vbc::bytecode::encode_instructions(&body, &mut module.bytecode) as u32;
+        let descriptor = module.functions.iter_mut().find(|f| f.id == entry).unwrap();
+        descriptor.bytecode_offset = start;
+        descriptor.bytecode_length = length;
+        descriptor.instructions = Some(body.into());
+        descriptor.value_uses = None;
+        let module = deserialize_module(&serialize_module(&module).unwrap()).unwrap();
+        verum_vbc::validate::validate_module(&module).unwrap();
+        let result = Interpreter::new(Arc::new(module)).execute_function(entry).unwrap();
+        assert_eq!(result.try_as_i64(), Some(73));
+    }
 }

@@ -1503,7 +1503,9 @@ fn execute_method_call(
         let concrete = state.module.functions_named(&method_name)
             .find(|(_, f)| f.params.len() == 1).map(|(id, _)| id);
         if let Some(fid) = concrete {
-            let result = super::super::call_function_sync(state, fid, &[dispatch_receiver])?;
+            let result = super::super::call_function_sync_with_witnesses(
+                state, fid, &[dispatch_receiver], take_witness(&state.module, fid)?,
+            )?;
             state.set_reg(dst, result);
             return Ok(DispatchResult::Continue);
         }
@@ -3997,7 +3999,9 @@ fn execute_method_call(
                 for i in 0..args.count {
                     call_args.push(state.registers.get(caller_base, Reg(args.start.0 + i as u16)));
                 }
-                let result = call_function_sync(state, func_id, &call_args)?;
+                let result = super::super::call_function_sync_with_witnesses(
+                    state, func_id, &call_args, take_witness(&state.module, func_id)?,
+                )?;
                 state.set_reg(dst, result);
                 return Ok(DispatchResult::Continue);
             }
@@ -4105,7 +4109,9 @@ fn execute_method_call(
                             state.registers.get(caller_base, Reg(args.start.0 + i as u16)),
                         );
                     }
-                    let result = call_function_sync(state, found, &call_args)?;
+                    let result = super::super::call_function_sync_with_witnesses(
+                        state, found, &call_args, take_witness(&state.module, found)?,
+                    )?;
                     state.set_reg(dst, result);
                     return Ok(DispatchResult::Continue);
                 }
@@ -4547,7 +4553,9 @@ fn execute_method_call(
                 argv.len()
             );
         }
-        let result = super::super::call_function_sync(state, fid, &argv)?;
+        let result = super::super::call_function_sync_with_witnesses(
+            state, fid, &argv, take_witness(&state.module, fid)?,
+        )?;
         state.set_reg(dst, result);
         return Ok(DispatchResult::Continue);
     }
