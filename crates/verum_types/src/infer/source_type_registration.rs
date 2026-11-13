@@ -43,6 +43,9 @@ pub(crate) struct SourceTypeRegistration {
 #[derive(Debug)]
 struct AcceptedSourceType {
     declaration: TypeDecl,
+    /// The actual file used when this type was prepared. Its imports remain
+    /// available when a later pass checks the item outside the lexical frame.
+    lexical_source: Option<Shared<verum_ast::Module>>,
     /// Recursive declarations commit together and share their checked inputs.
     dependencies: Shared<ModuleDependencies>,
 }
@@ -67,6 +70,16 @@ impl SourceTypeRegistration {
 
     pub(super) fn is_completed(&self, key: &Text) -> bool {
         self.completed.contains_key(key)
+    }
+
+    pub(super) fn lexical_source(
+        &self, key: &Text, declaration: &TypeDecl,
+    ) -> Option<Shared<verum_ast::Module>> {
+        let accepted = self.completed.get(key)?;
+        if accepted.declaration != *declaration {
+            return None;
+        }
+        accepted.lexical_source.clone()
     }
 }
 
@@ -314,8 +327,13 @@ impl super::TypeChecker {
                 self.ctx.env.insert_root(name, constructor);
             }
             let dependencies = dependencies.expect("outermost registration observes its dependencies");
+            let lexical = &self.source_type_registration.local_declarations;
             self.source_type_registration.completed.extend(pending.into_iter().map(|(key, declaration)| {
-                (key, AcceptedSourceType { declaration, dependencies: dependencies.clone() })
+                let owner = key.rsplit_once('.').map_or("", |(path, _)| path);
+                let lexical_source = lexical.iter().rev()
+                    .find(|(path, _)| path.as_str() == owner)
+                    .map(|(_, file)| file.clone());
+                (key, AcceptedSourceType { declaration, lexical_source, dependencies: dependencies.clone() })
             }));
         }
         result

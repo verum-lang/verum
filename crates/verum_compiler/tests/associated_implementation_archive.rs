@@ -99,6 +99,16 @@ fn consumer_with_family_policy(
     eager: bool,
     enabled: bool,
 ) -> Vec<String> {
+    let mut checker = archive_consumer(metadata, eager, enabled, Some(source));
+    diagnostics(&mut checker, source)
+}
+
+fn archive_consumer(
+    metadata: &CoreMetadata,
+    eager: bool,
+    enable_families: bool,
+    registered_source: Option<&str>,
+) -> TypeChecker {
     let mut registry = verum_modules::ModuleRegistry::new();
     registry.register(verum_modules::ModuleInfo::new(
         verum_modules::ModuleId::new(0),
@@ -107,25 +117,27 @@ fn consumer_with_family_policy(
         verum_ast::FileId::new(0),
         Text::new(),
     ));
-    registry.register(verum_modules::ModuleInfo::new(
-        verum_modules::ModuleId::new(1),
-        verum_modules::ModulePath::from_str("consumer"),
-        Parser::new(source).parse_module().unwrap(),
-        verum_ast::FileId::new(1),
-        source.into(),
-    ));
+    if let Some(source) = registered_source {
+        registry.register(verum_modules::ModuleInfo::new(
+            verum_modules::ModuleId::new(1),
+            verum_modules::ModulePath::from_str("consumer"),
+            Parser::new(source).parse_module().unwrap(),
+            verum_ast::FileId::new(1),
+            source.into(),
+        ));
+    }
     let metadata = Arc::new(metadata.clone());
     let mut checker = TypeChecker::with_minimal_context();
     checker.set_module_registry_direct(registry);
     checker.set_current_module_path("consumer");
-    checker.set_generic_associated_types_enabled(enabled);
+    checker.set_generic_associated_types_enabled(enable_families);
     if eager {
         checker.load_core_eager(metadata);
     } else {
         checker.register_primitives();
         checker.set_core_metadata(metadata);
     }
-    diagnostics(&mut checker, source)
+    checker
 }
 
 #[test]
@@ -588,4 +600,32 @@ fn archive_specializations_preserve_the_protocols_universal_associated_result() 
         error.contains("Item") && (error.contains("potential") || error.contains("implementation")),
         "{error}"
     );
+}
+
+#[test]
+fn current_declaration_mounts_select_the_archived_receiver() {
+    let metadata = publish(&source_module(SIMPLE)).unwrap();
+    let edited = "mount core.family_archive.Owner as Chosen; type Concrete is Chosen; fn probe(value:Concrete.Out<Int>)->core.family_archive.Pair<Bool,Int>{value}";
+    for eager in [false, true] {
+        for stored in [None, Some("mount core.family_archive.Pair as Chosen;")] {
+            let mut checker = archive_consumer(&metadata, eager, true, stored);
+            let errors = diagnostics(&mut checker, edited);
+            assert!(errors.is_empty(), "eager={eager}, stored={stored:?}: {errors:?}");
+        }
+    }
+}
+
+#[test]
+fn a_removed_mount_cannot_supply_an_archived_receiver_to_an_edited_declaration() {
+    let metadata = publish(&source_module(SIMPLE)).unwrap();
+    let stale = "mount core.family_archive.Owner as Chosen;";
+    let edited = "type Concrete is {value:Chosen};";
+    for eager in [false, true] {
+        let mut checker = archive_consumer(&metadata, eager, true, Some(stale));
+        let errors = diagnostics(&mut checker, edited);
+        assert!(
+            errors.iter().any(|error| error.contains("type not found: Chosen")),
+            "eager={eager}: {errors:?}"
+        );
+    }
 }

@@ -161,6 +161,27 @@ impl TypeChecker {
         })
     }
 
+    /// Inspect the defining syntax in the active declaration frame, inline module,
+    /// or registered file. A newer buffer owns even an empty set of imports.
+    fn with_declaring_source_items<R>(
+        &self,
+        owner: &str,
+        inspect: impl FnOnce(&[verum_ast::Item]) -> R,
+    ) -> Option<R> {
+        if let Some((_, module)) = self.source_type_registration.local_declarations.iter().rev()
+            .find(|(path, _)| path.as_str() == owner)
+        {
+            return Some(inspect(&module.items));
+        }
+        if let Some(items) = self.inline_modules.get(&Text::from(owner))
+            .and_then(|module| module.items.as_ref())
+        {
+            return Some(inspect(items));
+        }
+        let file = self.get_module_with_path_aliases(owner, &self.module_registry.read())?;
+        Some(inspect(&file.ast.items))
+    }
+
     /// A signature from a different source module resolves nominal declarations
     /// and private mounts through its defining file, in the caller's registry.
     pub fn with_source_signature_scope<T>(
@@ -170,16 +191,7 @@ impl TypeChecker {
     ) -> T {
         // A single nullary variant can also spell an alias. Its defining
         // module supplies the type names visible for that decision.
-        let aliases = self.source_type_registration.local_declarations.iter().rev()
-            .find(|(path, _)| path.as_str() == owner)
-            .map(|(_, module)| Self::compute_alias_scope(&module.items))
-            .or_else(|| self.inline_modules.get(&Text::from(owner))?.items.as_ref()
-                .map(|items| Self::compute_alias_scope(items)))
-            .or_else(|| {
-                let registry = self.module_registry.read();
-                let module = self.get_module_with_path_aliases(owner, &registry)?;
-                Some(Self::compute_alias_scope(&module.ast.items))
-            });
+        let aliases = self.with_declaring_source_items(owner, Self::compute_alias_scope);
         let previous_owner = std::mem::replace(&mut self.current_module_path, owner.into());
         let previous_scope = std::mem::replace(&mut self.resolving_source_signature, true);
         let previous_aliases = std::mem::replace(&mut self.alias_scope, aliases);
@@ -382,49 +394,40 @@ impl TypeChecker {
         let mut targets = Set::new();
         let mut explicit_globs = Vec::new();
         let mut implicit_globs = Vec::new();
-        {
-            let registry = self.module_registry.read();
-            let inline = self
-                .inline_modules
-                .get(&self.current_module_path)
-                .and_then(|module| module.items.as_ref());
-            let file =
-                self.get_module_with_path_aliases(self.current_module_path.as_str(), &registry);
-            if let Some(items) = inline.or_else(|| file.as_ref().map(|module| &module.ast.items)) {
-                for item in items {
-                    if !self.cfg_evaluator.should_include_item(item) {
-                        continue;
-                    }
-                    if let verum_ast::ItemKind::Mount(mount) = &item.kind {
-                        source_mount_targets(mount, &owner, head, |path, kind| match kind {
-                            MountTargetKind::Named => {
-                                targets.insert(path);
+        self.with_declaring_source_items(&self.current_module_path, |items| {
+            for item in items {
+                if !self.cfg_evaluator.should_include_item(item) {
+                    continue;
+                }
+                if let verum_ast::ItemKind::Mount(mount) = &item.kind {
+                    source_mount_targets(mount, &owner, head, |path, kind| match kind {
+                        MountTargetKind::Named => {
+                            targets.insert(path);
+                        }
+                        MountTargetKind::Glob if tail.is_empty() => {
+                            let module = path.to_string();
+                            let (leaf, declared_owner) = self
+                                .reexport_source_module_for(&module, head)
+                                .unwrap_or_else(|| (head.into(), module.into()));
+                            let key: Text = format!("{declared_owner}.{leaf}").into();
+                            if Self::metadata_type_with_declaring_key(metadata, &key)
+                                .is_some_and(|descriptor| descriptor.is_public)
+                            {
+                                // The language injector prepends a synthetic prelude mount.
+                                // User-written mounts have priority, independent of source order.
+                                let globs = if mount.span.is_empty() {
+                                    &mut implicit_globs
+                                } else {
+                                    &mut explicit_globs
+                                };
+                                globs.push((leaf, declared_owner, path));
                             }
-                            MountTargetKind::Glob if tail.is_empty() => {
-                                let module = path.to_string();
-                                let (leaf, declared_owner) = self
-                                    .reexport_source_module_for(&module, head)
-                                    .unwrap_or_else(|| (head.into(), module.into()));
-                                let key: Text = format!("{declared_owner}.{leaf}").into();
-                                if Self::metadata_type_with_declaring_key(metadata, &key)
-                                    .is_some_and(|descriptor| descriptor.is_public)
-                                {
-                                    // The language injector prepends a synthetic prelude mount.
-                                    // User-written mounts have priority, independent of source order.
-                                    let globs = if mount.span.is_empty() {
-                                        &mut implicit_globs
-                                    } else {
-                                        &mut explicit_globs
-                                    };
-                                    globs.push((leaf, declared_owner, path));
-                                }
-                            }
-                            MountTargetKind::Glob => {}
-                        });
-                    }
+                        }
+                        MountTargetKind::Glob => {}
+                    });
                 }
             }
-        }
+        });
         let mut paths = targets.into_iter();
         let Some(path) = paths.next() else {
             let globs = if explicit_globs.is_empty() {

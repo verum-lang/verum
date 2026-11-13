@@ -133,6 +133,16 @@ impl TypeChecker {
             if local && let verum_ast::ItemKind::Const(declaration) = &item.kind {
                 if !checker.cfg_evaluator.should_include(&item.attributes) { return Ok(()); }
                 checker.check_constant_declaration(declaration, true)
+            } else if !local && let verum_ast::ItemKind::Type(declaration) = &item.kind
+                && let Some(source) = checker.source_type_registration.lexical_source(
+                    &checker.declared_type_key(&declaration.name.name), declaration,
+                )
+            {
+                checker.source_type_registration.local_declarations
+                    .push((checker.current_module_path.clone(), source));
+                let result = checker.check_item_inner(item);
+                checker.source_type_registration.local_declarations.pop();
+                result
             } else {
                 checker.check_item_inner(item)
             }

@@ -68,14 +68,15 @@ fn errors(metadata: &CoreMetadata, source: &str, eager: bool) -> List<Text> {
         ));
     }
     let metadata = Shared::new(metadata.clone()).into_arc();
-    let mut checker = if eager {
-        TypeChecker::new_with_core_eager(metadata)
-    } else {
-        TypeChecker::new_with_core(metadata)
-    };
-    checker.register_primitives();
-    checker.set_current_module_path("reader");
+    let mut checker = TypeChecker::with_minimal_context();
     checker.set_module_registry_direct(registry);
+    checker.set_current_module_path("reader");
+    if eager {
+        checker.load_core_eager(metadata);
+    } else {
+        checker.register_primitives();
+        checker.set_core_metadata(metadata);
+    }
     let ast = Parser::new(source).parse_module().unwrap();
     checker.register_stdlib_types_for_module(&ast);
     let mut errors: List<Text> = ast

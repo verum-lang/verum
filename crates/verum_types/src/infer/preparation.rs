@@ -3,7 +3,7 @@
 use super::TypeChecker;
 use crate::TypeError;
 use verum_ast::{ItemKind, Module};
-use verum_common::{List, Set, Text};
+use verum_common::{List, Set, Shared, Text};
 
 impl TypeChecker {
     /// Use the compilation target for item, implementation and body selection.
@@ -24,8 +24,11 @@ impl TypeChecker {
         self.register_declared_meta_macros(module);
         let parent = self.current_module_path().clone();
         let mut errors = self.prepare_module_imports(module, parent.as_str());
-        errors.extend(self.prepare_module_types(module));
-        errors.extend(self.prepare_module_values(module));
+        errors.extend(self.with_module_declarations(module, |checker| {
+            let mut errors = checker.prepare_module_types_in_source_scope(module);
+            errors.extend(checker.prepare_module_values_in_source_scope(module));
+            errors
+        }));
         errors
     }
 
@@ -63,10 +66,17 @@ impl TypeChecker {
     /// Resolve forward types, contexts, protocols and implementations, in order.
     #[must_use]
     pub fn prepare_module_types(&mut self, module: &Module) -> List<TypeError> {
+        self.with_module_declarations(module, |checker| checker.prepare_module_types_in_source_scope(module))
+    }
+
+    fn with_module_declarations<T>(
+        &mut self, module: &Module, prepare: impl FnOnce(&mut Self) -> T,
+    ) -> T {
         let mut selected = module.clone();
         selected.items.retain(|item| self.cfg_evaluator.should_include(&item.attributes));
-        self.source_type_registration.local_declarations.push((self.current_module_path.clone(), verum_common::Shared::new(selected)));
-        let result = self.prepare_module_types_in_source_scope(module);
+        self.source_type_registration.local_declarations
+            .push((self.current_module_path.clone(), Shared::new(selected)));
+        let result = prepare(self);
         self.source_type_registration.local_declarations.pop();
         result
     }
@@ -128,12 +138,7 @@ impl TypeChecker {
     /// Register function, extern and constant signatures before checking bodies.
     #[must_use]
     pub fn prepare_module_values(&mut self, module: &Module) -> List<TypeError> {
-        let mut selected = module.clone();
-        selected.items.retain(|item| self.cfg_evaluator.should_include(&item.attributes));
-        self.source_type_registration.local_declarations.push((self.current_module_path.clone(), verum_common::Shared::new(selected)));
-        let result = self.prepare_module_values_in_source_scope(module);
-        self.source_type_registration.local_declarations.pop();
-        result
+        self.with_module_declarations(module, |checker| checker.prepare_module_values_in_source_scope(module))
     }
 
     fn prepare_module_values_in_source_scope(&mut self, module: &Module) -> List<TypeError> {
