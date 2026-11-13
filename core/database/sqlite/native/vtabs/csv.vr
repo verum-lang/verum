@@ -106,7 +106,7 @@ implement Debug for CsvError {
     }
 }
 
-implement Eq for CsvError {
+implement PartialEq for CsvError {
     fn eq(&self, other: &CsvError) -> Bool {
         match (self, other) {
             (CeUnclosedQuote(a), CeUnclosedQuote(b)) => a == b,
@@ -116,6 +116,8 @@ implement Eq for CsvError {
         }
     }
 }
+
+implement Eq for CsvError {}
 
 // -----------------------------------------------------------------------------
 // Row + parser
