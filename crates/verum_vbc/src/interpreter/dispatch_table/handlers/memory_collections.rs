@@ -188,6 +188,15 @@ pub(in super::super) fn handle_get_field(
     }
     let obj_val = super::cbgr_helpers::resolve_receiver(state, obj_val)?;
 
+    let field_offset = field_idx.checked_mul(std::mem::size_of::<Value>())
+        .ok_or_else(|| InterpreterError::InvalidOperand { message: "field offset overflow".into() })?;
+    if let Some(slot) = super::cbgr_helpers::raw_record_field_slot(state, obj_val, field_offset)? {
+        // SAFETY: the complete aligned field lies inside a live allocation.
+        let value = unsafe { slot.read() };
+        state.set_reg(dst, value);
+        return Ok(DispatchResult::Continue);
+    }
+
     // TEMP ground-truth oracle (#48): VERUM_TRACE_LISTREPR=1 dumps the
     // List object's field words and peeks the buffer candidates, so the
     // element-representation question (NaN-boxed Values vs raw ints)
@@ -468,6 +477,12 @@ pub(in super::super) fn handle_get_field(
                 return Err(InterpreterError::NullPointer);
             }
         }
+    }
+
+    if !state.heap.contains(ptr.cast::<heap::ObjectHeader>()) {
+        return Err(InterpreterError::InvalidOperand {
+            message: "field receiver has no live object or raw allocation".into(),
+        });
     }
 
     // Auto-deref for a variant wrapper carrying a record payload:
@@ -868,6 +883,14 @@ pub(in super::super) fn handle_set_field(
         obj_val
     };
 
+    let field_offset = field_idx.checked_mul(std::mem::size_of::<Value>())
+        .ok_or_else(|| InterpreterError::InvalidOperand { message: "field offset overflow".into() })?;
+    if let Some(slot) = super::cbgr_helpers::raw_record_field_slot(state, obj_val, field_offset)? {
+        // SAFETY: the complete aligned field lies inside a live allocation.
+        unsafe { slot.write(state.get_reg(val)); }
+        return Ok(DispatchResult::Continue);
+    }
+
     // T0562: mirror the read side (0x8B GetVariantDataRef / T0557) — a
     // `ref mut` variant-payload bind hands SetField a heap-INTERIOR pointer
     // tracked in `cbgr_mutable_ptrs`, which is NOT a register-ref, so the
@@ -912,6 +935,12 @@ pub(in super::super) fn handle_set_field(
                 }
             }
         }
+    }
+
+    if !state.heap.contains(ptr.cast::<heap::ObjectHeader>()) {
+        return Err(InterpreterError::InvalidOperand {
+            message: "field receiver has no live object or raw allocation".into(),
+        });
     }
 
     // Auto-deref for a variant wrapper carrying a record payload

@@ -5178,7 +5178,10 @@ impl VbcCodegen {
             // Evaluate effectful calls only when their declaration proves the address.
             let ptr_expr = Self::normalized_place(ptr_expr);
             let is_probe_shape = matches!(ptr_expr.kind, ExprKind::Path(_) | ExprKind::Field { .. });
-            let declared_raw_address = (is_probe_shape || matches!(
+            let declared_raw_address = matches!(
+                self.declared_expression_result(ptr_expr, None, 0, 0),
+                Some(crate::types::TypeRef::Reference { tier: CbgrTier::Tier2, .. })
+            ) || (is_probe_shape || matches!(
                 ptr_expr.kind, ExprKind::MethodCall { .. } | ExprKind::Call { .. }
             )) && self.infer_expr_type_name(ptr_expr).is_some_and(|ty| {
                 let ty = ty.trim();
@@ -27939,7 +27942,7 @@ impl VbcCodegen {
     /// whatever the declaration said (`&unsafe SharedInner<T>`,
     /// `*mut Foo`, `&checked Bar`) while the layout table is keyed by
     /// simple name.
-    fn record_pointer_base<'e>(&mut self, base: &'e Expr) -> Option<(&'e Expr, String)> {
+    pub(super) fn record_pointer_base<'e>(&mut self, base: &'e Expr) -> Option<(&'e Expr, String)> {
         let mut probe: &'e Expr = base;
         while let ExprKind::Paren(pin) = &probe.kind {
             probe = pin.as_ref();
@@ -27972,6 +27975,10 @@ impl VbcCodegen {
         if let ExprKind::Path(path) = &raw_ptr.kind
             && let Some(verum_ast::ty::PathSegment::Name(ident)) = path.segments.last()
             && self.ctx.reference_bindings.contains(ident.name.as_str())
+            && !matches!(
+                self.declared_expression_result(raw_ptr, None, 0, 0),
+                Some(crate::types::TypeRef::Reference { tier: CbgrTier::Tier2, .. })
+            )
         {
             return None;
         }

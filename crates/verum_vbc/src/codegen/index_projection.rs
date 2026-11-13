@@ -340,6 +340,9 @@ impl VbcCodegen {
     }
 
     fn compile_projection_base(&mut self, base: &Expr, mutable: bool) -> CodegenResult<Reg> {
+        if let Some((pointer, _)) = self.record_pointer_base(base) {
+            return self.compile_expr(pointer)?.or_internal("record pointer has no value");
+        }
         if mutable && let ExprKind::Field { expr, field } = &Self::normalized_place(base).kind {
             let (owner, _, ordinal) = self.compile_field_storage(expr, &field.name, true)?;
             let value = self.ctx.alloc_temp();

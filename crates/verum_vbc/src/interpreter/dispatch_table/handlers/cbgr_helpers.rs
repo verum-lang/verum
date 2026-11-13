@@ -250,6 +250,43 @@ fn reference_value_slot(
     Ok(None)
 }
 
+/// Resolve one inline record field within its live raw allocation. Record
+/// fields use Value slots in the interpreter, without an ObjectHeader prefix.
+pub(super) fn raw_record_field_slot(
+    state: &InterpreterState,
+    receiver: Value,
+    byte_offset: usize,
+) -> InterpreterResult<Option<*mut Value>> {
+    let address = if receiver.is_regular_ptr() && !receiver.is_nil() {
+        receiver.as_ptr::<u8>() as usize
+    } else if receiver.is_int() && receiver.as_i64() > 0 {
+        receiver.as_i64() as usize
+    } else {
+        return Ok(None);
+    };
+    let Some(room) = super::cbgr::bridge_extent_room(state, address) else {
+        return Ok(None);
+    };
+    let slot_size = std::mem::size_of::<Value>();
+    if byte_offset.checked_add(slot_size).is_none_or(|end| end > room) {
+        return Err(InterpreterError::InvalidOperand {
+            message: format!(
+                "record field at byte offset {byte_offset} requires {slot_size} bytes, \
+                 but the live raw allocation has {room} bytes remaining"
+            ),
+        });
+    }
+    let field = address.checked_add(byte_offset).ok_or_else(|| {
+        InterpreterError::InvalidOperand { message: "record field address overflow".into() }
+    })?;
+    if !field.is_multiple_of(std::mem::align_of::<Value>()) {
+        return Err(InterpreterError::InvalidOperand {
+            message: "record field address is not aligned for a Value slot".into(),
+        });
+    }
+    Ok(Some(field as *mut Value))
+}
+
 /// A validated, single Value slot. Register indices stay in the register file;
 /// managed addresses are resolved once, with no callback or allocation in the exchange.
 enum MutableValueSlot {
