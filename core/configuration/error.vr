@@ -52,6 +52,7 @@ public type FormatId is Text {
 // Canonical IDs for built-in formats. Extensions register new IDs via
 // FormatRegistry.
 public fn format_id_toml()        -> FormatId { "toml".to_text() }
+public fn format_id_json()        -> FormatId { "json" }
 public fn format_id_yaml()        -> FormatId { "yaml".to_text() }
 public fn format_id_jsonc()       -> FormatId { "jsonc".to_text() }
 public fn format_id_json5()       -> FormatId { "json5".to_text() }
@@ -70,19 +71,19 @@ public fn format_id_dhall()       -> FormatId { "dhall".to_text() }
 
 public type ConfigError is {
     /// Format the error originated from.
-    format_id: FormatId,
+    public format_id: FormatId,
     /// Structured error category.
-    kind: ConfigErrorKind,
+    public kind: ConfigErrorKind,
     /// 1-indexed line number in source.
-    line: Int,
+    public line: Int,
     /// 1-indexed column number (byte-counted; sources are UTF-8).
-    column: Int,
+    public column: Int,
     /// Byte offset in source (0-indexed).
-    byte_offset: Int,
+    public byte_offset: Int,
     /// Human-readable message.
-    message: Text,
+    public message: Text,
     /// Optional path into the document (for semantic errors).
-    path: Maybe<Text>,
+    public path: Maybe<Text>,
 };
 
 // =============================================================================

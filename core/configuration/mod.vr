@@ -82,7 +82,7 @@ public mount configuration.error.{
     config_err,
     with_path,
     category,
-    format_id_toml, format_id_yaml, format_id_jsonc, format_id_json5,
+    format_id_toml, format_id_json, format_id_yaml, format_id_jsonc, format_id_json5,
     format_id_ini, format_id_properties, format_id_hcl, format_id_hocon,
     format_id_nestedtext, format_id_kdl, format_id_cue, format_id_dhall,
 };
