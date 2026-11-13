@@ -52,6 +52,44 @@ fn cyclic_bindings_cannot_prove_reference_free_storage() {
 }
 
 #[test]
+fn forward_fields_follow_only_the_completed_owner() {
+    let mut checker = TypeChecker::with_minimal_context();
+    checker.register_primitives();
+    for (owner, field) in [("owned", "Int"), ("borrowed", "&Int")] {
+        checker.set_current_module_path(owner);
+        let module = verum_fast_parser::Parser::new(&format!(
+            "type Payload is {{ value: {field} }}; type Parametric<T> is (T);"
+        ))
+        .parse_module()
+        .unwrap();
+        let verum_ast::ItemKind::Type(declaration) = &module.items[0].kind else { unreachable!() };
+        checker.register_type_name_only(declaration);
+        let forward = Type::Placeholder {
+            name: format!("{owner}.Payload").into(),
+            span: declaration.span,
+        };
+        assert!(checker.carries_stored_loan(&forward));
+        checker.resolve_type_definition(declaration, &mut List::new()).unwrap();
+        let verum_ast::ItemKind::Type(generic) = &module.items[1].kind else { unreachable!() };
+        checker.resolve_type_definition(generic, &mut List::new()).unwrap();
+    }
+
+    for (owner, carries_loan) in [("owned", false), ("borrowed", true), ("absent", true)] {
+        let field = Type::Placeholder {
+            name: format!("{owner}.Payload").into(),
+            span: verum_ast::Span::default(),
+        };
+        let result = Type::Tuple(List::from_iter([Type::Bool, field]));
+        assert_eq!(checker.carries_stored_loan(&result), carries_loan, "{owner}");
+    }
+    let missing_argument = Type::Placeholder {
+        name: "owned.Parametric".into(),
+        span: verum_ast::Span::default(),
+    };
+    assert!(checker.carries_stored_loan(&missing_argument));
+}
+
+#[test]
 fn declared_tuple_payloads_bind_only_stored_parameters() {
     let module = verum_fast_parser::Parser::new(
         "type Wrapped<T> is (T); type Pair<A, B> is (A, B); type Phantom<T> is ();"

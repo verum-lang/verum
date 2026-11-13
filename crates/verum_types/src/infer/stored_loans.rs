@@ -101,6 +101,13 @@ impl TypeChecker {
                                 scope: node.scope,
                             })
                     }
+                    // A forward field has an owner but no arguments. Interpret
+                    // a completed, closed declaration in its own lexical scope.
+                    Type::Placeholder { name, .. } => self.source_type_registration
+                        .completed_declaration(name)
+                        .filter(|decl| decl.generics.is_empty() && decl.value_params.is_empty())
+                        .and_then(|_| self.ctx.type_defs.get(name))
+                        .map(|ty| Node { ty, scope: 0 }),
                     _ => None,
                 });
             let Some(next) = bound else {
