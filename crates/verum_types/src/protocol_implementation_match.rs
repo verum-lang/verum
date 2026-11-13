@@ -167,10 +167,10 @@ impl ProtocolChecker {
             )
         }));
         let pattern = implementation.for_type.try_apply_subst(&fresh).ok()?;
-        let pattern = self.expand_declared_alias_head(&pattern).unwrap_or(pattern);
-        let actual = self.expand_declared_alias_head(ty);
-        let ty = actual.as_ref().unwrap_or(ty);
-        if !self.types_structurally_equal(&pattern, ty) {
+        let pattern = self.resolve_alias_head(&pattern)?;
+        let actual = self.resolve_alias_head(ty)?;
+        let ty = actual.as_ref();
+        if !self.resolved_heads_equal(&pattern, ty) {
             matcher.unify(&pattern, ty, Span::default()).ok()?;
         }
         for (pattern, actual) in implementation
@@ -358,14 +358,11 @@ fn compare_heads(
     b: &Type,
     observe: &mut impl FnMut(crate::TypeVar, &Type) -> bool,
 ) -> bool {
-    let left = checker.expand_declared_alias_head(a);
-    let right = checker.expand_declared_alias_head(b);
-    if left.is_some() || right.is_some() {
-        return compare_heads(checker, left.as_ref().unwrap_or(a), right.as_ref().unwrap_or(b), observe);
-    }
-    if checker.has_declared_alias_head(a) || checker.has_declared_alias_head(b) { return false; }
+    let (Some(left), Some(right)) = (checker.resolve_alias_head(a), checker.resolve_alias_head(b))
+    else { return false };
+    let (a, b) = (left.as_ref(), right.as_ref());
     if let Type::Var(variable) = a { return observe(*variable, b); }
-    if checker.types_structurally_equal(a, b) {
+    if checker.resolved_heads_equal(a, b) {
         return false;
     }
     if checker.declared_heads_are_disjoint(a, b) { return true; }

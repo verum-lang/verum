@@ -6648,15 +6648,15 @@ impl ProtocolChecker {
 
     /// Check if two types are structurally equal (for substitution consistency checking)
     pub(crate) fn types_structurally_equal(&self, ty1: &Type, ty2: &Type) -> bool {
+        let (Some(left), Some(right)) = (self.resolve_alias_head(ty1), self.resolve_alias_head(ty2))
+        else { return false };
+        self.resolved_heads_equal(&left, &right)
+    }
+
+    pub(super) fn resolved_heads_equal(&self, ty1: &Type, ty2: &Type) -> bool {
         if ty1 == ty2 {
             return true;
         }
-        let left = self.expand_declared_alias_head(ty1);
-        let right = self.expand_declared_alias_head(ty2);
-        if left.is_some() || right.is_some() {
-            return self.types_structurally_equal(left.as_ref().unwrap_or(ty1), right.as_ref().unwrap_or(ty2));
-        }
-        if self.has_declared_alias_head(ty1) || self.has_declared_alias_head(ty2) { return false; }
         if let Some(equal) = self.builtin_types_equal(ty1, ty2) { return equal; }
         if self.declared_heads_are_disjoint(ty1, ty2) { return false; }
         if let Some(equal) = self.compare_nominal_applications(ty1, ty2,
@@ -11772,12 +11772,9 @@ impl ProtocolChecker {
 
     /// Helper: Check if two types could unify (simple heuristic)
     fn types_could_unify(&self, ty1: &Type, ty2: &Type) -> bool {
-        let left = self.expand_declared_alias_head(ty1);
-        let right = self.expand_declared_alias_head(ty2);
-        if left.is_some() || right.is_some() {
-            return self.types_could_unify(left.as_ref().unwrap_or(ty1), right.as_ref().unwrap_or(ty2));
-        }
-        if self.has_declared_alias_head(ty1) || self.has_declared_alias_head(ty2) { return true; }
+        let (Some(left), Some(right)) = (self.resolve_alias_head(ty1), self.resolve_alias_head(ty2))
+        else { return true };
+        let (ty1, ty2) = (left.as_ref(), right.as_ref());
         if let Some(equal) = self.builtin_types_equal(ty1, ty2) { return equal; }
         if self.declared_heads_are_disjoint(ty1, ty2) { return false; }
         if let Some(overlap) = self.compare_nominal_applications(ty1, ty2,

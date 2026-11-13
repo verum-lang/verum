@@ -175,7 +175,7 @@ impl Type {
         self.contains_type(|ty| matches!(ty, Type::CapabilityRestricted { .. }))
     }
 
-    fn contains_type(&self, predicate: impl Fn(&Type) -> bool) -> bool {
+    pub(crate) fn contains_type(&self, predicate: impl Fn(&Type) -> bool) -> bool {
         let mut stack = vec![self];
         while let Some(ty) = stack.pop() {
             if predicate(ty) {

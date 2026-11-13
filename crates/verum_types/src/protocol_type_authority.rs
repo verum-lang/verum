@@ -1,6 +1,7 @@
 //! Declaration facts used by exact protocol proof, independently of dispatch names.
 use super::{AssociatedTypeAssignment, ProtocolChecker};
 use crate::{Type, unify::Unifier};
+use std::borrow::Cow;
 use std::sync::{Arc, OnceLock};
 use verum_ast::{Ident, Path, Span, decl::TypeDeclBodyKind};
 use verum_common::{List, Map, Text, well_known_types::type_names};
@@ -21,30 +22,26 @@ enum HeadIdentity {
     Refinement,
 }
 
-fn nominal_key(ty: &Type) -> Option<(Text, usize)> {
-    match ty {
+fn nominal_key(ty: &Type) -> Option<(Cow<'_, Text>, usize)> {
+    let (key, arity) = match ty {
         Type::Named { path, args } => {
-            let names: Option<List<_>> = path
-                .segments
-                .iter()
-                .map(|part| match part {
-                    verum_ast::ty::PathSegment::Name(name) => Some(name.name.as_str()),
-                    _ => None,
-                })
-                .collect();
-            let key: Text = names?.join(".").into();
-            (!key.is_empty() && key.as_str().split('.').all(|part| !part.is_empty()))
-                .then_some((key, args.len()))
+            if let Some(name) = path.as_ident() {
+                (Cow::Borrowed(&name.name), args.len())
+            } else {
+                let mut key = Text::new();
+                for (index, part) in path.segments.iter().enumerate() {
+                    let verum_ast::ty::PathSegment::Name(name) = part else { return None };
+                    if index != 0 { key.push('.'); }
+                    key.push_str(name.as_str());
+                }
+                (Cow::Owned(key), args.len())
+            }
         }
-        Type::Generic { name, args }
-            if !name.is_empty()
-                && !name.starts_with("::")
-                && name.as_str().split('.').all(|part| !part.is_empty()) =>
-        {
-            Some((name.clone(), args.len()))
-        }
-        _ => None,
-    }
+        Type::Generic { name, args } if !name.starts_with("::") =>
+            (Cow::Borrowed(name), args.len()),
+        _ => return None,
+    };
+    key.as_str().split('.').all(|part| !part.is_empty()).then_some((key, arity))
 }
 
 fn scalar_identity(name: &str) -> Text {
@@ -72,7 +69,7 @@ impl ProtocolChecker {
             {
                 return;
             }
-            (key, false)
+            (key.into_owned(), false)
         } else {
             return;
         };
@@ -158,30 +155,37 @@ impl ProtocolChecker {
         })
     }
 
-    /// Only a completed source declaration owns this telescope and body.
-    /// An unsupported role, malformed application or cycle supplies no proof.
-    pub(super) fn expand_declared_alias_head(&self, ty: &Type) -> Option<Type> {
-        let mut current = ty.clone();
-        let mut visited = verum_common::Set::new();
-        let mut changed = false;
-        while self.has_declared_alias_head(&current) {
-            let (key, _) = nominal_key(&current)?;
-            if !visited.insert(key.clone()) {
-                return None;
+    /// Borrow ordinary heads. Only an actual alias allocates its instantiated
+    /// body. An incomplete declaration, malformed application or cycle has no
+    /// resolved head and cannot supply evidence of either equality or disjointness.
+    pub(super) fn resolve_alias_head<'a>(&self, ty: &'a Type) -> Option<Cow<'a, Type>> {
+        let mut current = Cow::Borrowed(ty);
+        let mut applications: Map<&Text, Cow<'a, Type>> = Map::new();
+        while let Some((key, arity)) = nominal_key(&current) {
+            let Some((TypeDeclBodyKind::Alias, declared_arity)) =
+                self.type_authority.declarations.get(&key)
+            else { break };
+            let (identity, alias) = self.type_authority.aliases.get_key_value(&key)?;
+            if *declared_arity != Some(arity) { return None; }
+            if let Some(previous) = applications.get(&identity) {
+                // A nonrecursive declaration may expose another application of
+                // itself inside a supplied argument, e.g. Id<Id<Int>>. Revisiting
+                // the same declaration must descend into that earlier input.
+                let (Type::Named { args, .. } | Type::Generic { args, .. }) = previous.as_ref()
+                else { return None };
+                if !args.iter().any(|arg| arg.contains_type(|nested| nested == current.as_ref())) {
+                    return None;
+                }
             }
-            let args = match &current {
+            let args = match current.as_ref() {
                 Type::Named { args, .. } | Type::Generic { args, .. } => args,
                 _ => return None,
             };
-            current = self
-                .type_authority
-                .aliases
-                .get(&key)?
-                .instantiate(args, &crate::ty::Substitution::new())
-                .ok()?;
-            changed = true;
+            let next = alias.instantiate(args, &crate::ty::Substitution::new()).ok()?;
+            applications.insert(identity, current);
+            current = Cow::Owned(next);
         }
-        changed.then_some(current)
+        Some(current)
     }
 
     pub(crate) fn builtin_source_receiver_name(&self, ty: &Type) -> Option<Text> {
@@ -258,7 +262,7 @@ impl ProtocolChecker {
                 continue;
             };
             if let Some((key, _)) = nominal_key(target) {
-                if &key == name || self.type_authority.declarations.contains_key(&key) {
+                if key.as_ref() == name || self.type_authority.declarations.contains_key(&key) {
                     continue;
                 }
             }

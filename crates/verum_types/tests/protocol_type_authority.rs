@@ -2,6 +2,7 @@
 use verum_common::{List, Text};
 use verum_fast_parser::Parser;
 use verum_types::TypeChecker;
+use verum_types::{Type, protocol::{CoherenceMode, ProtocolImpl}};
 
 fn errors(source: &str) -> List<Text> {
     errors_with_owner(source, Some("families"))
@@ -312,6 +313,45 @@ fn nested_generic_alias_pattern_uses_the_owned_telescope() {
         implement Factory for Db { type Rows = Cell<Int>; }
     "#;
     accept(source);
+}
+
+#[test]
+fn receiver_lookup_refuses_even_identical_malformed_alias_applications() {
+    use verum_ast::{Ident, Path, Span};
+    let source = "type Mark is protocol {}; type Cell<T> is { value: T }; type Alias<T> is Cell<T>; type Id<T> is T;";
+    let ast = Parser::new(source).parse_module().unwrap();
+    let mut checker = TypeChecker::new();
+    checker.register_primitives();
+    checker.set_current_module_path("families");
+    assert!(checker.prepare_module_declarations(&ast).is_empty());
+    let mut registry = checker.protocol_checker.write();
+    let owner = |name: &str| Path::single(Ident::new(name, Span::default()));
+    let receiver = |name: &str, args: List<Type>| Type::Named { path: owner(name), args };
+    let valid = receiver("families.Alias", [Type::Int].into_iter().collect());
+    let invalid = receiver("families.Alias", List::new());
+    let implementation = |for_type| ProtocolImpl {
+        parameters: List::new(),
+        protocol: owner("families.Mark"),
+        protocol_args: List::new(),
+        for_type,
+        where_clauses: List::new(),
+        methods: Default::default(),
+        associated_types: Default::default(),
+        associated_consts: Default::default(),
+        specialization: None,
+        impl_crate: None,
+        span: Span::default(),
+        type_param_fn_bounds: Default::default(),
+    };
+    // Isolate lookup from coherence: an index entry is not an applicability proof.
+    registry.set_coherence_mode(CoherenceMode::Off);
+    registry.register_impl(implementation(valid.clone())).unwrap();
+    registry.register_impl(implementation(invalid.clone())).unwrap();
+    let id = |inner| receiver("families.Id", [inner].into_iter().collect());
+    for query in [id(id(valid.clone())), valid, receiver("families.Cell", [Type::Int].into_iter().collect())] {
+        assert!(registry.find_impl_for_instantiation(&query, &owner("families.Mark"), &[]).is_some());
+    }
+    assert!(registry.find_impl_for_instantiation(&invalid, &owner("families.Mark"), &[]).is_none());
 }
 
 

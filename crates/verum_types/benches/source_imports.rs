@@ -185,9 +185,61 @@ fn bench_source_declaration_reads(c: &mut Criterion) {
     group.finish();
 }
 
+/// Measure protocol lookup separately from parsing and registering declarations.
+/// The negative query traverses the ordinary candidate matcher used by method dispatch.
+fn bench_source_protocol_lookup(c: &mut Criterion) {
+    use verum_ast::{Ident, Path, Span};
+    use verum_types::Type;
+
+    let mut group = c.benchmark_group("source_protocol_lookup");
+    group.sample_size(15);
+    group.warm_up_time(Duration::from_millis(300));
+    group.measurement_time(Duration::from_secs(2));
+    for count in [16, 128] {
+        let mut source = Text::from("type Marker is protocol {}; type Missing is {};\n");
+        for index in 0..count {
+            source.push_str(&format!("type Carrier_{index} is {{ value: Int }}; implement Marker for Carrier_{index} {{}}\n"));
+        }
+        let ast = FastParser::new().parse_module_str(&source, FileId::new(1)).unwrap();
+        let mut checker = TypeChecker::with_minimal_context();
+        checker.register_primitives();
+        checker.set_current_module_path("bench.proofs");
+        let builtin_impls = checker.protocol_checker.read().all_implementations().len();
+        assert!(checker.prepare_module_declarations(&ast).is_empty());
+        for item in &ast.items { checker.check_item(item).unwrap(); }
+        assert!(checker.take_deferred_errors().is_empty());
+        assert!(!checker.diagnostics().iter().any(|diagnostic| diagnostic.is_error()));
+        let protocols = checker.protocol_checker.read();
+        assert_eq!(protocols.all_implementations().len(), builtin_impls + count);
+        let receiver = Type::Named {
+            path: Path::single(Ident::new("bench.proofs.Missing", Span::default())),
+            args: List::new(),
+        };
+        let query = || protocols.get_implementations(std::hint::black_box(&receiver));
+        let carries_marker = |receiver| protocols.get_implementations(receiver).iter()
+            .any(|implementation| implementation.protocol.last_segment_name().rsplit('.').next() == Some("Marker"));
+        assert!(!carries_marker(&receiver));
+        assert!(carries_marker(&Type::Named {
+            path: Path::single(Ident::new("bench.proofs.Carrier_0", Span::default())),
+            args: List::new(),
+        }));
+        ALLOCATION_COUNT.store(0, Ordering::Relaxed);
+        ALLOCATION_BYTES.store(0, Ordering::Relaxed);
+        COUNT_ALLOCATIONS.store(true, Ordering::Relaxed);
+        let result = query();
+        COUNT_ALLOCATIONS.store(false, Ordering::Relaxed);
+        std::hint::black_box(result);
+        eprintln!("source_protocol_lookup declarations={count} allocations={} requested_bytes={}",
+            ALLOCATION_COUNT.load(Ordering::Relaxed), ALLOCATION_BYTES.load(Ordering::Relaxed));
+        group.bench_function(BenchmarkId::from_parameter(count), |b| b.iter(&query));
+    }
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_source_imports,
-    bench_source_declaration_reads
+    bench_source_declaration_reads,
+    bench_source_protocol_lookup
 );
 criterion_main!(benches);
