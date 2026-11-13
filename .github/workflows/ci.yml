@@ -778,11 +778,11 @@ jobs:
         timeout-minutes: 5
         run: cargo test --locked --release -p verum_cli --test run_manifest_tier
 
-      - name: Source generic identity through glob imports
+      - name: Source library import identity and visibility
         timeout-minutes: 5
-        run: >-
-          cargo test --locked --release -p verum_cli --test check_basic
-          glob_imports_preserve_generic_declarations_when_arguments_are_aliases -- --exact
+        run: |
+          cargo test --locked --release -p verum_cli --test check_basic glob_imports_preserve_generic_declarations_when_arguments_are_aliases -- --exact
+          cargo test --locked --release -p verum_cli --test check_basic foreign_private_source_types_are_not_ambient_bindings -- --exact
 
       - name: Audit CLI proof authority
         timeout-minutes: 5

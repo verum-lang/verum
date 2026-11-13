@@ -357,6 +357,49 @@ fn glob_imports_preserve_generic_declarations_when_arguments_are_aliases() {
 }
 
 #[test]
+fn foreign_private_source_types_are_not_ambient_bindings() {
+    let root = tempfile::tempdir().unwrap();
+    let core = write_source_core(root.path(), &[(
+        "source",
+        "module core.source;
+         type Hidden<T> is { public body: T };
+         type PrivateCount is Int;
+         type PrivateChoice is Stored(Int) | Reset;
+         public(cog) type CogCount is Int;
+         public type Carton<T> is { public item: T };
+         public fn make(value: Int)->Hidden<Int> { Hidden { body: value } }
+         public fn open(value: Hidden<Int>)->Int { value.body }",
+    )]);
+    std::fs::write(core.join("mod.vr"),
+        "module core; public module base; public module source;
+         public module prelude { public mount super.source.Carton as Published; }",
+    ).unwrap();
+    let project = root.path().join("project");
+    std::fs::create_dir_all(project.join("src")).unwrap();
+    std::fs::write(project.join("verum.toml"), "[cog]\nname='fixture'\nversion='0.1.0'\n").unwrap();
+    for (body, diagnostic) in [
+        ("mount core.source.{make, open}; fn value()->Int { open(make(7)) }", None),
+        ("fn read(x: Published<Int>)->Int { x.item }", None),
+        ("type Hidden<T> is { public local: T }; fn read(x: Hidden<Int>)->Int { x.local }", None),
+        ("fn leak(x: Hidden<Int>)->Int { x.body }", Some("type not found: Hidden")),
+        ("fn leak(x: PrivateCount)->Int { x }", Some("type not found: PrivateCount")),
+        ("fn leak(x: PrivateChoice)->Int { 0 }", Some("type not found: PrivateChoice")),
+        ("fn leak(x: CogCount)->Int { x }", Some("type not found: CogCount")),
+        ("fn leak(x: core.source.Hidden<Int>)->Int { x.body }", Some("visibility error: 'Hidden' is Private")),
+        ("mount core.source.Hidden; fn name()->Int { 1 }", Some("cannot find `Hidden`")),
+        ("mount core.source.{make, open}; fn wrong()->Bool { open(make(7)) }", Some("expected 'Bool', found 'Int'")),
+    ] {
+        let source = format!("module fixture.main; {body} fn main() {{}}");
+        let result = check_with_source_core(&core, &project, &source);
+        let log = String::from_utf8_lossy(&result.stderr);
+        assert_eq!(result.status.success(), diagnostic.is_none(), "{source}\n{log}");
+        if let Some(expected) = diagnostic {
+            assert!(log.contains(expected), "{source}\n{log}");
+        }
+    }
+}
+
+#[test]
 fn recursive_protocol_bounds_use_the_selected_source_parameters() {
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path();

@@ -1043,30 +1043,7 @@ impl<'s> CompilationPipeline<'s> {
                         stdlib_entries.len()
                     );
 
-                    // Pass S0a: Register all stdlib type names (module-scoped so
-                    // fully-qualified `{mod}.{name}` keys are populated for
-                    // same-named stdlib types across different modules).
-                    for (module_path, stdlib_mod) in &stdlib_entries {
-                        checker.set_current_module_path(module_path.clone());
-                        checker.register_all_type_names(&stdlib_mod.items);
-                    }
-
-                    // Pass S0b: Resolve all stdlib type definitions
-                    let mut resolution_stack = List::new();
-                    for (module_path, stdlib_mod) in &stdlib_entries {
-                        checker.set_current_module_path(module_path.clone());
-                        // ALIAS-VS-MARKER scope (#41).
-                        checker.set_alias_scope_from_items(&stdlib_mod.items);
-                        for item in &stdlib_mod.items {
-                            if let ItemKind::Type(type_decl) = &item.kind {
-                                if let Err(e) = checker
-                                    .resolve_type_definition(type_decl, &mut resolution_stack)
-                                {
-                                    debug!("Stdlib type resolution error: {:?}", e);
-                                }
-                            }
-                        }
-                    }
+                    checker.prepare_source_library_types(&stdlib_entries);
 
                     // Pass S1: Register stdlib function signatures
                     for (module_path, stdlib_mod) in &stdlib_entries {

@@ -1309,28 +1309,8 @@ impl<'s> CompilationPipeline<'s> {
 
                 if !stdlib_entries.is_empty() {
                     if self.stdlib_metadata.is_none() {
-                        // S0a: Register stdlib type names (module-scoped so the
-                        // fully-qualified `{mod}.{name}` key is populated and
-                        // same-named stdlib types don't collide on flat lookup).
-                        for (module_path, stdlib_mod) in &stdlib_entries {
-                            checker.set_current_module_path(module_path.clone());
-                            // ALIAS-VS-MARKER scope (#41).
-                            checker.set_alias_scope_from_items(&stdlib_mod.items);
-                            checker.register_all_type_names(&stdlib_mod.items);
-                        }
-                        // S0b: Resolve stdlib type definitions
-                        let mut resolution_stack = List::new();
-                        for (module_path, stdlib_mod) in &stdlib_entries {
-                            checker.set_current_module_path(module_path.clone());
-                            // ALIAS-VS-MARKER scope (#41).
-                            checker.set_alias_scope_from_items(&stdlib_mod.items);
-                            for item in &stdlib_mod.items {
-                                if let verum_ast::ItemKind::Type(type_decl) = &item.kind {
-                                    let _ = checker
-                                        .resolve_type_definition(type_decl, &mut resolution_stack);
-                                }
-                            }
-                        }
+                        checker.prepare_source_library_types(&stdlib_entries);
+
                         // S1: Register stdlib function signatures
                         for (module_path, stdlib_mod) in &stdlib_entries {
                             checker.set_current_module_path(module_path.clone());

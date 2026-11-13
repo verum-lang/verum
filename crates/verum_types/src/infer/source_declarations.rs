@@ -3,7 +3,7 @@
 use super::TypeChecker;
 use crate::{Result, Type, TypeError};
 use verum_ast::{Span, decl::ImplItemKind};
-use verum_common::{Set, Shared, Text};
+use verum_common::{List, Set, Shared, Text};
 use verum_modules::{ModuleInfo, ModulePath, visibility::VisibilityChecker};
 
 /// An immutable declaration location, not a memoized lookup result. Registered
@@ -226,6 +226,55 @@ impl TypeChecker {
                 .and_then(|module| module.items.as_deref())
                 .map(|items| from_items(items, owner))
         })
+    }
+
+    /// Elaborate source-library declarations under their owning module. Only
+    /// names visible from this consumer may also enter its lexical type scope.
+    pub fn prepare_source_library_types(
+        &mut self,
+        modules: &[(Text, std::sync::Arc<verum_ast::Module>)],
+    ) {
+        let consumer = self.current_module_path.clone();
+        let previous_aliases = self.alias_scope.take();
+        let mut declarations = List::new();
+        for (owner, module) in modules {
+            self.set_current_module_path(owner.clone());
+            let mut items = List::new();
+            for item in &module.items {
+                let verum_ast::ItemKind::Type(declaration) = &item.kind else {
+                    continue;
+                };
+                if !self.cfg_evaluator.should_include_item(item) {
+                    continue;
+                }
+                let visible = declaration.visibility.resolve_declared_scope(owner).is_ok_and(|scope| {
+                    scope.visible_from(owner.as_str().split('.'), consumer.as_str().split('.'))
+                });
+                if visible {
+                    self.register_type_name_only(declaration);
+                }
+                items.push((declaration, visible));
+            }
+            declarations.push((owner, module, items));
+        }
+        let mut resolving = List::new();
+        for (owner, module, items) in declarations {
+            self.set_current_module_path(owner.clone());
+            self.set_alias_scope_from_items(&module.items);
+            for (declaration, visible) in items {
+                let result = if visible {
+                    self.resolve_type_definition(declaration, &mut resolving)
+                } else {
+                    self.load_source_type_declaration_with_parameter_key(declaration, owner, declaration.span)
+                        .map(|_| ())
+                };
+                if let Err(error) = result {
+                    tracing::debug!("Source type preparation for {}.{}: {error}", owner, declaration.name.name);
+                }
+            }
+        }
+        self.alias_scope = previous_aliases;
+        self.set_current_module_path(consumer);
     }
 
     /// An imported signature belongs to the declaring file, including its

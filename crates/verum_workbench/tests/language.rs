@@ -329,6 +329,37 @@ async fn project_dependency_edits_reach_the_same_studio_and_agent_snapshot() {
 }
 
 #[tokio::test]
+async fn project_analysis_keeps_private_types_in_their_declaring_module() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join("Verum.toml"), "[cog]\nname='sample'\n").unwrap();
+    std::fs::create_dir(root.path().join("src")).unwrap();
+    std::fs::write(root.path().join("src/provider.vr"),
+        "type Hidden<T> is { public value: T };
+         public fn make(x: Int)->Hidden<Int> { Hidden { value: x } }
+         public fn open(x: Hidden<Int>)->Int { x.value }",
+    ).unwrap();
+    let studio = studio(root.path());
+    for (source, issue) in [
+        ("mount sample.provider.{make, open}; fn main()->Int { open(make(7)) }", None),
+        ("mount sample.provider.make; fn leak(x: Hidden<Int>)->Int { x.value }", Some("Hidden")),
+        ("mount sample.provider.Hidden; fn main() {}", Some("Hidden")),
+        ("type Hidden is { public value: Bool }; fn read(x: Hidden)->Bool { x.value }", None),
+    ] {
+        let reply = studio.call("language.request", json!({
+            "path": "src/main.vr", "source": source,
+        })).await.unwrap();
+        assert_eq!(reply["result"]["parsed"], true, "{reply}");
+        let diagnostics = reply["result"]["diagnostics"].as_array().unwrap();
+        if let Some(issue) = issue {
+            assert!(diagnostics.iter().any(|d| d["message"].as_str().is_some_and(|m| m.contains(issue))),
+                "{source}\n{reply}");
+        } else {
+            assert!(diagnostics.is_empty(), "{source}\n{reply}");
+        }
+    }
+}
+
+#[tokio::test]
 async fn architecture_uses_checked_record_dependencies_for_the_current_buffer() {
     let root = tempfile::tempdir().unwrap();
     let studio = studio(root.path());
