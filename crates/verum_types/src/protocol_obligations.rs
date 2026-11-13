@@ -9,7 +9,9 @@ use crate::{
     ty::{Substitution, Type, TypeVar},
     unify::Unifier,
 };
-use verum_common::{List, Text, ToText};
+use verum_common::{List, Map, Set, Text, ToText};
+
+pub(super) const PROTOCOL_OBLIGATION_BUDGET: usize = 4096;
 
 impl ProtocolChecker {
     /// Discover declaration-owned prerequisites for source loading. This does
@@ -90,6 +92,115 @@ impl ProtocolChecker {
         Ok(())
     }
 
+    fn bound_entails(&self, actual: &ProtocolBound, expected: &ProtocolBound) -> bool {
+        self.paths_equal(&actual.protocol, &expected.protocol)
+            && actual.is_negative == expected.is_negative
+            && actual.args.len() == expected.args.len()
+            && actual
+                .args
+                .iter()
+                .zip(&expected.args)
+                .all(|(a, b)| self.types_structurally_equal(a, b))
+            && expected.associated_types.iter().all(|(name, expected)| {
+                actual
+                    .associated_types
+                    .get(name)
+                    .is_some_and(|actual| self.types_structurally_equal(actual, expected))
+            })
+    }
+
+    /// An erased receiver supplies its declared interface, with each member's
+    /// exact equality. This evidence grants no value-layout or copy permission.
+    pub(super) fn dynamic_protocol_premises(
+        &self,
+        subject: &Type,
+        remaining: &mut usize,
+    ) -> Result<List<ProtocolBound>, Text> {
+        if !matches!(subject, Type::DynProtocol { .. }) {
+            return Ok(List::new());
+        }
+        let declared = self
+            .object_protocol_bounds(subject)
+            .ok_or_else(|| Text::from("dynamic receiver lacks a complete protocol declaration"))?;
+        enum Visit {
+            Enter(ProtocolBound),
+            Leave(ProtocolBound),
+        }
+        let mut pending: List<_> = declared.into_iter().map(Visit::Enter).collect();
+        let mut established = List::new();
+        let mut completed: Map<Text, List<ProtocolBound>> = Map::new();
+        let mut active = Set::new();
+        while let Some(visit) = pending.pop() {
+            let bound = match visit {
+                Visit::Leave(bound) => {
+                    let owner = self.make_protocol_key(&bound.protocol);
+                    active.remove(&owner);
+                    completed.entry(owner).or_default().push(bound.clone());
+                    established.push(bound);
+                    continue;
+                }
+                Visit::Enter(bound) => bound,
+            };
+            let owner = self.make_protocol_key(&bound.protocol);
+            if bound.is_negative || active.contains(&owner) {
+                return Err("dynamic protocol evidence has an invalid inheritance cycle".into());
+            }
+            if completed.get(&owner).is_some_and(|prior| {
+                prior.iter().any(|prior| {
+                    self.bound_entails(prior, &bound) && self.bound_entails(&bound, prior)
+                })
+            }) {
+                continue;
+            }
+            if *remaining == 0 {
+                return Err("dynamic protocol evidence budget exhausted".into());
+            }
+            *remaining -= 1;
+            active.insert(owner.clone());
+            let protocol = self.lookup_protocol(&bound.protocol).ok_or_else(|| {
+                Text::from("dynamic protocol evidence references an unknown owner")
+            })?;
+            if !protocol.is_constraint() {
+                return Err("a runtime context alone supplies no dynamic type bound".into());
+            }
+            let required = self.check_definition_object_safety(protocol).map_err(|_| {
+                Text::from("dynamic protocol evidence requires object-safe inherited methods")
+            })?;
+            if required
+                .iter()
+                .any(|name| !bound.associated_types.contains_key(name))
+            {
+                return Err(
+                    "dynamic protocol evidence lacks a required associated equality".into(),
+                );
+            }
+            let ProtocolConstraints::Declared {
+                self_type,
+                parameters,
+                ..
+            } = &protocol.constraints
+            else {
+                return Err("dynamic protocol evidence lacks its declared telescope".into());
+            };
+            if parameters.len() != bound.args.len() {
+                return Err("dynamic protocol evidence has the wrong argument arity".into());
+            }
+            let mut substitution: Substitution = parameters
+                .iter()
+                .zip(&bound.args)
+                .map(|(parameter, argument)| (*parameter, argument.clone()))
+                .collect();
+            substitution.insert(*self_type, subject.clone());
+            pending.push(Visit::Leave(bound.clone()));
+            for parent in &protocol.super_protocols {
+                let mut parent = parent.try_apply_subst(&substitution)?;
+                self.inherit_associated_equalities(subject, &bound, &mut parent)?;
+                pending.push(Visit::Enter(parent));
+            }
+        }
+        Ok(established)
+    }
+
     /// A lexical premise can discharge a bound before concrete implementations
     /// are loaded, including inside the declaring protocol's own method header.
     pub(crate) fn bound_follows_from_assumptions(
@@ -114,27 +225,10 @@ impl<'a> Obligations<'a> {
         checker: &'a ProtocolChecker,
         environment: ConstraintEnvironment<'a>,
     ) -> Self {
-        Self { checker, environment, active: Vec::new(), remaining: 4096 }
+        Self { checker, environment, active: Vec::new(), remaining: PROTOCOL_OBLIGATION_BUDGET }
     }
     fn same(&self, a: &Type, b: &Type) -> bool {
         self.checker.types_structurally_equal(a, b)
-    }
-    fn entails(&self, actual: &ProtocolBound, expected: &ProtocolBound) -> bool {
-        self.checker
-            .paths_equal(&actual.protocol, &expected.protocol)
-            && actual.is_negative == expected.is_negative
-            && actual.args.len() == expected.args.len()
-            && actual
-                .args
-                .iter()
-                .zip(&expected.args)
-                .all(|(a, b)| self.same(a, b))
-            && expected.associated_types.iter().all(|(name, expected)| {
-                actual
-                    .associated_types
-                    .get(name)
-                    .is_some_and(|actual| self.same(actual, expected))
-            })
     }
     fn assumption(&mut self, ty: &Type, expected: &ProtocolBound) -> Result<bool, Text> {
         let mut pending: Vec<_> = self
@@ -147,9 +241,11 @@ impl<'a> Obligations<'a> {
                     .map(|bound| (clause.ty.clone(), bound.clone()))
             })
             .collect();
+        pending.extend(self.checker.dynamic_protocol_premises(ty, &mut self.remaining)?.into_iter()
+            .map(|bound| (ty.clone(), bound)));
         let mut seen: Vec<(Type, ProtocolBound)> = Vec::new();
         while let Some((subject, actual)) = pending.pop() {
-            if self.same(&subject, ty) && self.entails(&actual, expected) {
+            if self.same(&subject, ty) && self.checker.bound_entails(&actual, expected) {
                 return Ok(true);
             }
             if self.same(&subject, ty)
@@ -173,8 +269,8 @@ impl<'a> Obligations<'a> {
             if actual.is_negative
                 || seen.iter().any(|(prior, bound)| {
                     self.same(prior, &subject)
-                        && self.entails(bound, &actual)
-                        && self.entails(&actual, bound)
+                        && self.checker.bound_entails(bound, &actual)
+                        && self.checker.bound_entails(&actual, bound)
                 })
             {
                 continue;
@@ -387,3 +483,7 @@ impl<'a> Obligations<'a> {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/unit/dynamic_protocol_evidence.rs"]
+mod dynamic_protocol_evidence_tests;

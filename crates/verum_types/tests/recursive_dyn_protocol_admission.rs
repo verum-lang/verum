@@ -512,3 +512,198 @@ fn writable_wrapper_erasure_is_refused_without_any_write_in_the_callee() {
     }
     good(&format!("{declarations} fn keep(slot: &mut Carrier<dyn Tag>) {{ consume(slot); }}"));
 }
+
+
+#[test]
+fn generic_method_calls_retain_the_erased_receivers_declared_bounds() {
+    let declarations = "type Counter is protocol {
+        fn set(&mut self, value: Int); fn get(&self) -> Int;
+    }; type Marker is protocol {};";
+    for tier in ["", "checked ", "unsafe "] {
+        good(&format!(
+            "{declarations}
+            fn edit<T: Counter>(value: &{tier}mut T) -> Int {{ value.set(73); value.get() }}
+            fn probe(value: &{tier}mut dyn Counter) -> Int {{ edit(value) }}"
+        ));
+    }
+    good(&format!(
+        "{declarations}
+        fn read<T: Counter + Marker>(value: &T) -> Int {{ value.get() }}
+        fn probe(value: &dyn Counter + Marker) -> Int {{ read(value) }}"
+    ));
+    bad(&format!(
+        "{declarations}
+        fn read<T: Counter + Marker>(value: &T) -> Int {{ value.get() }}
+        fn probe(value: &dyn Counter) -> Int {{ read(value) }}"
+    ));
+    bad(&format!(
+        "{declarations}
+        fn read<T: Counter + !Marker>(value: &T) -> Int {{ value.get() }}
+        fn probe(value: &dyn Counter) -> Int {{ read(value) }}"
+    ));
+}
+
+#[test]
+fn generic_object_bounds_require_the_exact_associated_equality() {
+    let declarations = "type Source is protocol { type Item; fn read(&self) -> Self.Item; };
+        fn read<T: Source<Item = Int>>(value: &T) -> Int { value.read() }";
+    good(&format!(
+        "{declarations}
+        fn probe(value: &dyn Source<Item = Int>) -> Int {{ read(value) }}"
+    ));
+    good(
+        "type Source is protocol { type Item; fn read(&self) -> Self.Item; };
+        fn read<Item, R: Source<Item = Item>>(value: &R) -> Item { value.read() }
+        fn probe(value: &dyn Source<Item = Int>) -> Int { let result = read(value); result }",
+    );
+    for binding in ["Item = Bool", "Other = Int", ""] {
+        let object = if binding.is_empty() {
+            "dyn Source".to_owned()
+        } else {
+            format!("dyn Source<{binding}>")
+        };
+        bad(&format!(
+            "{declarations} fn probe(value: &{object}) -> Int {{ read(value) }}"
+        ));
+    }
+}
+
+#[test]
+fn inherited_object_evidence_preserves_protocol_arguments() {
+    let declarations = "type Parent<T> is protocol { fn read(&self) -> T; };
+        type Child is protocol extends Parent<Int> {};";
+    good(&format!(
+        "{declarations}
+        fn read<T: Parent<Int>>(value: &T) -> Int {{ value.read() }}
+        fn probe(value: &dyn Child) -> Int {{ read(value) }}"
+    ));
+    bad(&format!(
+        "{declarations}
+        fn read<T: Parent<Bool>>(value: &T) -> Bool {{ value.read() }}
+        fn probe(value: &dyn Child) -> Bool {{ read(value) }}"
+    ));
+}
+
+#[test]
+fn inherited_object_unsafe_methods_cannot_supply_generic_evidence() {
+    for method in [
+        "fn create() -> Int;",
+        "fn copy(&self) -> Self;",
+        "fn map<T>(&self, value: T) -> T;",
+    ] {
+        bad(&format!(
+            "type Parent is protocol {{ {method} }};
+            type Child is protocol extends Parent {{}};
+            fn inspect<T: Parent>(value: &T) {{}}
+            fn probe(value: &dyn Child) {{ inspect(value); }}"
+        ));
+    }
+}
+
+#[test]
+fn imported_object_evidence_keeps_the_declaring_protocol_identity() {
+    let provider = "public type Source is protocol { type Item; fn read(&self) -> Self.Item; };
+        public fn read<T: Source<Item = Int>>(value: &T) -> Int { value.read() }";
+    let source = "mount fixture.lib.{Source as Chosen, read};
+        fn probe(value: &dyn Chosen<Item = Int>) -> Int { read(value) }";
+    let e = imported(source, provider, None);
+    assert!(e.is_empty(), "{e:#?}");
+    let foreign = "public type Source is protocol { type Item; fn read(&self) -> Self.Item; };";
+    for source in [
+        "mount fixture.lib.read; mount fixture.foreign.Source;
+            fn probe(value: &dyn Source<Item = Int>) -> Int { read(value) }",
+        "mount fixture.lib.{Source,read};
+            fn probe(value: &dyn Source<Item = Bool>) -> Int { read(value) }",
+    ] {
+        assert!(
+            !imported(source, provider, Some(foreign)).is_empty(),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn unknown_dynamic_owner_cannot_supply_a_protocol_bound() {
+    use verum_types::{Type, protocol::ProtocolBound};
+    let checker = replay("type Source is protocol { fn read(&self) -> Int; };");
+    let registry = checker.protocol_checker.read();
+    let bound = ProtocolBound::simple(verum_ast::Path::new(
+        [
+            verum_ast::ty::PathSegment::Name(verum_ast::Ident::new("owner", Default::default())),
+            verum_ast::ty::PathSegment::Name(verum_ast::Ident::new("Source", Default::default())),
+        ]
+        .into_iter()
+        .collect(),
+        Default::default(),
+    ));
+    for owner in ["owner.Source", "foreign.Source", "Missing"] {
+        let object = Type::DynProtocol {
+            bounds: [owner.into()].into_iter().collect(),
+            bindings: Default::default(),
+        };
+        assert_eq!(
+            registry
+                .check_universal_bounds(&object, std::slice::from_ref(&bound), &[])
+                .is_ok(),
+            owner == "owner.Source",
+            "{owner}"
+        );
+        assert_eq!(
+            registry
+                .check_bounds(&object, std::slice::from_ref(&bound))
+                .is_ok(),
+            owner == "owner.Source",
+            "{owner}"
+        );
+    }
+}
+
+
+#[test]
+fn unverified_dynamic_telescope_cannot_reuse_prior_evidence() {
+    use verum_types::{
+        Type,
+        protocol::{ProtocolBound, ProtocolConstraints},
+    };
+    let checker = replay("type Source is protocol { fn read(&self) -> Int; };");
+    let bound = ProtocolBound::simple(verum_ast::Path::single(verum_ast::Ident::new(
+        "owner.Source",
+        Default::default(),
+    )));
+    let object = Type::DynProtocol {
+        bounds: ["owner.Source".into()].into_iter().collect(),
+        bindings: Default::default(),
+    };
+    let valid = checker
+        .protocol_checker
+        .read()
+        .get_protocol_definition("owner.Source")
+        .unwrap()
+        .clone();
+    assert!(
+        checker
+            .protocol_checker
+            .read()
+            .check_universal_bounds(&object, std::slice::from_ref(&bound), &[])
+            .is_ok()
+    );
+    for constraints in [
+        ProtocolConstraints::Unknown,
+        ProtocolConstraints::Unsupported("missing declaration".into()),
+    ] {
+        let mut unverified = valid.clone();
+        unverified.constraints = constraints;
+        checker
+            .protocol_checker
+            .write()
+            .register_protocol(unverified)
+            .unwrap();
+        assert!(
+            checker
+                .protocol_checker
+                .read()
+                .check_universal_bounds(&object, std::slice::from_ref(&bound), &[])
+                .is_err()
+        );
+    }
+}

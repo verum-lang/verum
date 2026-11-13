@@ -7505,6 +7505,60 @@ impl ProtocolChecker {
         Satisfied
     }
 
+    /// The selected protocol declarations own every object equality.
+    pub(crate) fn object_protocol_bounds(&self, ty: &Type) -> Option<List<ProtocolBound>> {
+        let path = |name: &Text| {
+            Path::new(
+                name.as_str()
+                    .split('.')
+                    .map(|segment| {
+                        verum_ast::ty::PathSegment::Name(Ident::new(segment, Span::default()))
+                    })
+                    .collect(),
+                Span::default(),
+            )
+        };
+        if let Type::DynProtocol { bounds, bindings } = ty {
+            let mut required = List::new();
+            for name in bounds {
+                let protocol = self.get_protocol_definition(name.as_str())?;
+                if !protocol.type_params.is_empty() {
+                    return None; // The erased spelling cannot supply an omitted positional argument.
+                }
+                required.push(ProtocolBound::simple(path(name)));
+            }
+            for (name, value) in bindings {
+                let mut owners = required.iter_mut().filter(|bound| {
+                    self.lookup_associated_type_by_path(&bound.protocol, name)
+                        .is_some()
+                });
+                let owner = owners.next()?;
+                if owners.next().is_some() {
+                    return None;
+                }
+                owner.associated_types.insert(name.clone(), value.clone());
+            }
+            return Some(required);
+        }
+        let (name, args) = match ty {
+            Type::Named { path, args } => (self.make_protocol_key(path), args),
+            Type::Generic { name, args } => (name.clone(), args),
+            _ => return None,
+        };
+        let declaration = self.get_protocol_definition(name.as_str())?;
+        if declaration.type_params.len() != args.len() {
+            return None;
+        }
+        Some(
+            [ProtocolBound::positive(
+                path(&name),
+                args.iter().cloned().collect(),
+            )]
+            .into_iter()
+            .collect(),
+        )
+    }
+
     /// Check if a type satisfies protocol bounds
     ///
     /// Handles both positive bounds (T: Protocol) and negative bounds (T: !Protocol).
@@ -7512,6 +7566,13 @@ impl ProtocolChecker {
     /// Multi-protocol bounds: combining multiple protocol constraints (T: Display + Debug) — Negative Bounds
     pub fn check_bounds(&self, ty: &Type, bounds: &[ProtocolBound]) -> Result<(), ProtocolError> {
         for bound in bounds {
+            if matches!(ty, Type::DynProtocol { .. }) {
+                self.check_universal_bounds(ty, std::slice::from_ref(bound), &[])
+                    .map_err(|_| ProtocolError::BoundNotSatisfied {
+                        ty: ty.clone(), protocol: bound.protocol.clone(),
+                    })?;
+                continue;
+            }
             let _guard =
                 ImplQueryGuard::enter((self.resolution_revision, ty.clone(), bound.clone()))
                     .ok_or_else(|| ProtocolError::BoundNotSatisfied {
@@ -7682,6 +7743,12 @@ impl ProtocolChecker {
         args: Option<&[Type]>,
         assoc_name: &Text,
     ) -> Result<Type, ProtocolError> {
+        if matches!(ty, Type::DynProtocol { .. }) {
+            return self.resolve_dynamic_associated_family(ty, protocol, args, assoc_name)
+                .map_err(|_| ProtocolError::BoundNotSatisfied {
+                    ty: ty.clone(), protocol: protocol.clone(),
+                });
+        }
         let (impl_, substitution) =
             self.find_impl_matching(ty, protocol, args).ok_or_else(|| {
                 ProtocolError::NotImplemented {

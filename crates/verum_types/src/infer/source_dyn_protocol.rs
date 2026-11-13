@@ -151,7 +151,7 @@ impl TypeChecker {
             return actual.reference_parts().is_some_and(|(source, writable, tier)| {
                 tier == kind
                     && (!mutable || writable)
-                    && if mutable && self.protocol_object_bounds(inner, registry).is_none() {
+                    && if mutable && registry.object_protocol_bounds(inner).is_none() {
                         // Writing a nominal wrapper can replace its payload. Erasing
                         // that payload would change the original owner's type.
                         registry.types_structurally_equal(source, inner)
@@ -161,13 +161,13 @@ impl TypeChecker {
             });
         }
 
-        if let Some(required) = self.protocol_object_bounds(expected, registry) {
+        if let Some(required) = registry.object_protocol_bounds(expected) {
             if required.is_empty() {
                 return false;
             }
             let declared = match actual {
                 Type::Var(var) => Some(self.get_type_var_bounds(var)),
-                _ => self.protocol_object_bounds(actual, registry),
+                _ => registry.object_protocol_bounds(actual),
             };
             if let Some(declared) = declared {
                 return required.iter().all(|need| {
@@ -203,7 +203,7 @@ impl TypeChecker {
         }
         source_args.iter().zip(target_args).all(|(source, target)| {
             source == target
-                || self.protocol_object_bounds(target, registry).is_some()
+                || registry.object_protocol_bounds(target).is_some()
                     && self.check_protocol_coercion_with(source, target, registry)
         })
     }
@@ -214,49 +214,6 @@ impl TypeChecker {
             Type::Generic { name, args } => Some((name.clone(), args)),
             _ => None,
         }
-    }
-
-    fn protocol_object_bounds(
-        &self,
-        ty: &Type,
-        registry: &ProtocolChecker,
-    ) -> Option<List<ProtocolBound>> {
-        if let Type::DynProtocol { bounds, bindings } = ty {
-            let mut required = List::new();
-            for name in bounds {
-                let protocol = registry.get_protocol_definition(name.as_str())?;
-                if !protocol.type_params.is_empty() {
-                    return None; // The erased spelling cannot supply an omitted positional argument.
-                }
-                required.push(ProtocolBound::simple(Self::text_to_path(name)));
-            }
-            for (name, value) in bindings {
-                let mut owners = required.iter_mut().filter(|bound| {
-                    registry
-                        .lookup_associated_type_by_path(&bound.protocol, name)
-                        .is_some()
-                });
-                let owner = owners.next()?;
-                if owners.next().is_some() {
-                    return None;
-                }
-                owner.associated_types.insert(name.clone(), value.clone());
-            }
-            return Some(required);
-        }
-        let (name, args) = self.protocol_carrier_application(ty)?;
-        let declaration = registry.get_protocol_definition(name.as_str())?;
-        if declaration.type_params.len() != args.len() {
-            return None;
-        }
-        Some(
-            [ProtocolBound::positive(
-                Self::text_to_path(&name),
-                args.iter().cloned().collect(),
-            )]
-            .into_iter()
-            .collect(),
-        )
     }
 
     pub(super) fn check_pending_protocol_object_safety(

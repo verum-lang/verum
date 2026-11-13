@@ -114,6 +114,73 @@ impl ProtocolChecker {
         )
     }
 
+    /// A dynamic object's own interface fixes an associated member. Resolve it
+    /// through the same declaration and family domain checks as a rigid premise.
+    pub(super) fn resolve_dynamic_associated_family(
+        &self,
+        receiver: &Type,
+        protocol: &verum_ast::Path,
+        arguments: Option<&[Type]>,
+        name: &Text,
+    ) -> Result<Type, Text> {
+        let mut remaining = super::obligations::PROTOCOL_OBLIGATION_BUDGET;
+        let bounds = self.dynamic_protocol_premises(receiver, &mut remaining)?;
+        let mut selected = None;
+        for bound in &bounds {
+            if !self.paths_equal(&bound.protocol, protocol)
+                || arguments.is_some_and(|arguments| {
+                    arguments.len() != bound.args.len()
+                        || !arguments
+                            .iter()
+                            .zip(&bound.args)
+                            .all(|(a, b)| self.types_structurally_equal(a, b))
+                })
+            {
+                continue;
+            }
+            if let Some(previous) = selected {
+                if !self.same_associated_owner(previous, bound) {
+                    return Err("dynamic member has competing protocol applications".into());
+                }
+            }
+            selected = Some(bound);
+        }
+        let selected = selected.ok_or_else(|| {
+            Text::from("dynamic receiver does not establish the selected protocol")
+        })?;
+        let selected = self
+            .associated_declaration_application(
+                &self.make_protocol_key(&selected.protocol),
+                &selected.args,
+                receiver,
+                name,
+                &mut Default::default(),
+            )?
+            .ok_or_else(|| Text::from("selected protocol has no such associated member"))?;
+        // The validated closure already transports inherited equalities to
+        // their declaring application. Select that application directly, so
+        // an ambiguous member on a different ancestor cannot replace it.
+        let premises: List<_> = bounds
+            .into_iter()
+            .filter(|bound| {
+                self.make_protocol_key(&bound.protocol) == selected.owner
+                    && bound.args.len() == selected.arguments.len()
+                    && bound
+                        .args
+                        .iter()
+                        .zip(&selected.arguments)
+                        .all(|(a, b)| self.types_structurally_equal(a, b))
+            })
+            .map(|bound| WhereClause {
+                ty: receiver.clone(),
+                bounds: List::from_iter([bound]),
+            })
+            .collect();
+        self.resolve_associated_family(receiver, name, &[], &premises)?
+            .map(|application| application.result)
+            .ok_or_else(|| Text::from("dynamic receiver lacks the selected associated equality"))
+    }
+
     fn same_family_application(&self, left: &FamilyApplication, right: &FamilyApplication) -> bool {
         left.arguments.len() == right.arguments.len()
             && left.arguments.iter().zip(&right.arguments).all(|(a, b)| self.types_structurally_equal(a, b))

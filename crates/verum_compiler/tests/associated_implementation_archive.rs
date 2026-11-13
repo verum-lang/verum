@@ -744,3 +744,70 @@ fn writable_object_methods_keep_the_concrete_storage_after_wire_reload() {
         assert_eq!(actual.try_as_i64(), Some(73));
     }
 }
+
+
+#[test]
+fn published_generic_calls_keep_the_objects_protocol_and_associated_equality() {
+    let provider = "module core.family_archive;
+        public type Source is protocol { type Item; fn read(&self) -> Self.Item; };
+        public type Child is protocol extends Source<Item = Int> {};
+        public fn read<T: Source<Item = Int>>(value: &T) -> Int { value.read() }";
+    let metadata = publish(&source_module(provider)).unwrap();
+    for eager in [false, true] {
+        for (object, valid) in [
+            ("Source<Item = Int>", true),
+            ("Source<Item = Bool>", false),
+            ("Child", true),
+        ] {
+            let source = format!(
+                "mount core.family_archive.{{Source,Child,read}};
+                fn probe(value: &dyn {object}) -> Int {{ read(value) }}"
+            );
+            let errors = consumer_errors(&metadata, &source, eager);
+            assert_eq!(
+                errors.is_empty(),
+                valid,
+                "eager={eager}, {source}: {errors:?}"
+            );
+        }
+        let source = "mount core.family_archive.read;
+            type Source is protocol { type Item; fn read(&self) -> Self.Item; };
+            fn probe(value: &dyn Source<Item = Int>) -> Int { read(value) }";
+        assert!(
+            !consumer_errors(&metadata, source, eager).is_empty(),
+            "foreign owner supplied archived bound"
+        );
+    }
+}
+
+#[test]
+fn generic_mutable_object_methods_execute_after_wire_reload() {
+    let program = r#"type Counter is protocol {
+        fn set(&mut self, value: Int);
+        fn get(&self) -> Int;
+    };
+    type Cell is { value: Int };
+    implement Counter for Cell {
+        fn set(&mut self, value: Int) { self.value = value; }
+        fn get(&self) -> Int { self.value }
+    }
+    fn edit<T: Counter>(counter: &mut T) -> Int { counter.set(73); counter.get() }
+    fn erased(counter: &mut dyn Counter) -> Int { edit(counter) }
+    fn main() -> Int {
+        let mut cell = Cell { value: 1 };
+        erased(&mut cell)
+    }"#;
+    let module = source_module(program);
+    let wire = deserialize_module(&serialize_module(&module).unwrap()).unwrap();
+    for mut module in [module, wire] {
+        assert!(module.resolve_external_bands().is_empty());
+        verum_vbc::validate::validate_module(&module).unwrap();
+        let main = module
+            .find_function_by_name("core.family_archive.main")
+            .unwrap();
+        let actual = verum_vbc::interpreter::Interpreter::new(module.into())
+            .execute_function(main)
+            .expect("execute mutable object through checked generic body");
+        assert_eq!(actual.try_as_i64(), Some(73));
+    }
+}

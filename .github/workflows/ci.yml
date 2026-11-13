@@ -744,6 +744,7 @@ jobs:
         run: >-
           cargo test --locked --release -p verum_compiler
           --test archive_mount_declaration_owner
+          --test associated_implementation_archive
           --test companion_factory_archive
           --test checked_source_callbacks
           --test checked_source_arithmetic
