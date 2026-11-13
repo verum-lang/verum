@@ -1,0 +1,42 @@
+module tests.security.x509.oid;
+
+mount core.base.protocols.{PartialEq, Hash, Hasher, DefaultHasher};
+mount core.security.x509.oid.Oid;
+
+fn compare<T: PartialEq>(left: &T, right: &T) -> Bool {
+    left.eq(right)
+}
+
+fn fingerprint<T: Hash>(value: &T) -> Int {
+    let mut hasher = DefaultHasher.new();
+    value.hash(&mut hasher);
+    hasher.finish()
+}
+
+@test
+fn structural_identity_survives_separate_allocations() {
+    let first = Oid.from(&[1_u32, 2_u32, 840_u32]);
+    let same = Oid.from(&[1_u32, 2_u32, 840_u32]);
+    let different_arc = Oid.from(&[1_u32, 2_u32, 841_u32]);
+    let different_length = Oid.from(&[1_u32, 2_u32]);
+    assert(compare(&first, &same));
+    assert(!compare(&first, &different_arc));
+    assert(!compare(&first, &different_length));
+    assert(!first.ne(&same));
+    assert(first.ne(&different_arc));
+    assert_eq(fingerprint(&first), fingerprint(&same));
+}
+
+@test
+fn hashing_reads_arc_values_and_the_sequence_length() {
+    let first = Oid.from(&[1_u32, 2_u32, 840_u32]);
+    let different_arc = Oid.from(&[1_u32, 2_u32, 841_u32]);
+    let different_length = Oid.from(&[1_u32, 2_u32]);
+    let largest_arc = Oid.from(&[1_u32, 2_u32, 4294967295_u32]);
+    let repeated_largest = Oid.from(&[1_u32, 2_u32, 4294967295_u32]);
+    assert(fingerprint(&first) != fingerprint(&different_arc));
+    assert(fingerprint(&first) != fingerprint(&different_length));
+    assert_eq(largest_arc.arc(2), 4294967295_u32);
+    assert_eq(fingerprint(&largest_arc), fingerprint(&repeated_largest));
+    assert(fingerprint(&largest_arc) != fingerprint(&first));
+}

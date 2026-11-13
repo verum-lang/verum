@@ -53,6 +53,7 @@
 )
 module core.security.x509.oid;
 
+mount core.base.protocols.{PartialEq, Eq, Hash, Hasher};
 
 // =============================================================================
 // Oid type
@@ -66,9 +67,7 @@ public type Oid is {
 };
 
 implement Oid {
-    /// Construct from a slice of arc values. No validation beyond
-    /// "first arc ∈ {0, 1, 2}" (X.690 §8.19.4) — higher-layer parsers
-    /// reject malformed OIDs at DER level.
+    /// Construct by copying the supplied arc values.
     public fn from(arcs: &[UInt32]) -> Oid {
         let mut v: List<UInt32> = [];
         let mut i: Int = 0;
@@ -79,23 +78,26 @@ implement Oid {
         Oid { arcs: v }
     }
 
-    /// Structural equality on arc sequences.
-    public fn eq(&self, other: &Oid) -> Bool {
-        if self.arcs.len() != other.arcs.len() { return false; }
-        let mut i: Int = 0;
-        while i < self.arcs.len() {
-            if self.arcs[i] != other.arcs[i] { return false; }
-            i = i + 1;
-        }
-        true
-    }
-
     /// Number of arcs in the identifier.
     public fn len(&self) -> Int { self.arcs.len() }
 
     /// Arc at position `i`. Panics on out-of-bounds — caller knows
     /// OID length by construction in all current call sites.
     public fn arc(&self, i: Int) -> UInt32 { self.arcs[i] }
+}
+
+implement PartialEq for Oid {
+    fn eq(&self, other: &Oid) -> Bool {
+        self.arcs.eq(&other.arcs)
+    }
+}
+
+implement Eq for Oid {}
+
+implement Hash for Oid {
+    fn hash(&self, hasher: &mut Hasher) {
+        self.arcs.hash(hasher);
+    }
 }
 
 // =============================================================================
