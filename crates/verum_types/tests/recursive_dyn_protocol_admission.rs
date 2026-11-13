@@ -428,3 +428,32 @@ fn associated_object_results_survive_source_and_metadata_replay() {
         assert_eq!(errors.is_empty(), valid, "{consumer}: {errors:?}");
     }
 }
+
+#[test]
+fn selected_generic_implementer_supplies_its_associated_default() {
+    for assignment in ["", "type Item = Int;"] {
+        let source = format!("type Marker is protocol {{}};
+            type Reading is protocol {{ type Item = Int; fn read(&self) -> Self.Item; }};
+            type Sensor<T> is {{ inner: T }};
+            implement<T: Marker> Reading for Sensor<T> {{ {assignment} fn read(&self) -> Int {{ 21 }} }}
+            fn require<R: Reading<Item = Int>>(source: R) {{}}
+            fn forward<T: Marker>(source: Sensor<T>) {{ require(source); }}");
+        good(&source);
+    }
+}
+
+#[test]
+fn associated_default_cannot_prove_a_missing_or_conflicting_implementation() {
+    let prelude = "type Marker is protocol {};
+        type Reading is protocol { type Item = Int; fn read(&self) -> Self.Item; };
+        type Sensor<T> is { inner: T };
+        fn require<R: Reading<Item = Int>>(source: R) {}";
+    for implementation in ["", "implement<T: Marker> Reading for Sensor<T> {
+        type Item = Bool; fn read(&self) -> Bool { true } }"] {
+        bad(&format!("{prelude} {implementation}
+            fn forward<T: Marker>(source: Sensor<T>) {{ require(source); }}"));
+    }
+    bad(&format!("{prelude}
+        implement<T: Marker> Reading for Sensor<T> {{ fn read(&self) -> Int {{ 21 }} }}
+        fn unbounded<T>(source: Sensor<T>) {{ require(source); }}"));
+}

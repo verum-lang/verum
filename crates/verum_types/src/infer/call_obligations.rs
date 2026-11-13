@@ -350,15 +350,28 @@ impl TypeChecker {
     ) -> Result<()> {
         for (type_var, bounds) in protocol_bounds {
             let resolved_ty = self.unifier.apply(&Type::Var(*type_var));
-            self.enforce_protocol_bound_evidence(&resolved_ty, bounds, span)?;
+            let variables = resolved_ty.free_vars();
+            let universal_receiver = !variables.is_empty()
+                && variables.iter().all(|variable| self.unifier.is_rigid(*variable));
+            let needs_inference = bounds.iter().any(|bound| {
+                bound.args.iter().chain(bound.associated_types.values()).any(|argument| {
+                    self.unifier.apply(argument).free_vars().iter()
+                        .any(|variable| !self.unifier.is_rigid(*variable))
+                })
+            });
+            // A completed universal goal selects conditional implementations in
+            // the caller's proof environment. Inferring its projections without
+            // that environment can reject an established caller premise.
+            if !universal_receiver || needs_inference {
+                self.enforce_protocol_bound_evidence(&resolved_ty, bounds, span)?;
+            }
             let substitution = self.unifier.save_substitution();
             let resolved_bounds: List<_> = bounds
                 .iter()
                 .map(|bound| bound.apply_subst(&substitution))
                 .collect();
             let bounds = &resolved_bounds;
-            let variables = resolved_ty.free_vars();
-            if !variables.is_empty() && variables.iter().all(|variable| self.unifier.is_rigid(*variable)) {
+            if universal_receiver {
                 // A universally bound caller chooses its arguments. Check the
                 // complete type, including any reference or nominal constructor,
                 // before the surrounding function leaves its declaration scope.
