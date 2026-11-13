@@ -516,3 +516,27 @@ fn cancelled_import_cannot_publish_a_provisional_source_payload() {
     for name in ["shapes.Outer", "shapes.Inner"] { assert!(checker.resolved_type(name).is_none(), "{name}"); }
     assert!(check(&registry, "consumer").is_empty());
 }
+
+#[test]
+fn generic_nominal_cycles_keep_their_declared_telescope() {
+    for (owner, declarations) in [
+        ("Node", "public type Node<T> is { next: &Node<T>, item: T };"),
+        ("Left", "public type Left<L> is { next: &Right<L> }; public type Right<R> is { next: &Left<R> };"),
+    ] {
+        for (arguments, valid) in [("Int", true), ("Int, Bool", false)] {
+            let mut registry = ModuleRegistry::new();
+            register(&mut registry, "shapes", declarations);
+            register(
+                &mut registry, "consumer",
+                &format!("mount shapes.{owner}; fn get(n: &{owner}<{arguments}>) {{}}"),
+            );
+            let errors = check(&registry, "consumer");
+            if valid {
+                assert!(errors.is_empty(), "{owner}: {errors:?}");
+            } else {
+                let expected = format!("type `shapes.{owner}` takes 1 type argument(s), but 2 were supplied");
+                assert!(errors.iter().any(|error| error.contains(expected.as_str())), "{errors:?}");
+            }
+        }
+    }
+}
