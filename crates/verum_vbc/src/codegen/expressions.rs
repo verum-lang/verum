@@ -6629,7 +6629,7 @@ impl VbcCodegen {
                 && self.ctx.is_required_context(&head)
             {
                 let ctx_name = self.ctx.resolve_context_alias(&head);
-                let ctx_type_id = self.intern_string(&ctx_name);
+                let ctx_type_id = self.context_operand(&ctx_name)?;
                 let ctx_value_reg = self.ctx.alloc_temp();
                 self.ctx.emit(Instruction::CtxGet {
                     dst: ctx_value_reg,
@@ -13139,7 +13139,7 @@ impl VbcCodegen {
             // Context method call: Logger.method(args) or db.method(args)
             // Resolve alias (db → Database) then emit CtxGet + CallM.
             let ctx_name = self.ctx.resolve_context_alias(&ctx_ident.name);
-            let ctx_type_id = self.intern_string(&ctx_name);
+            let ctx_type_id = self.context_operand(&ctx_name)?;
 
             // Get the context value from the context stack
             let ctx_value_reg = self.ctx.alloc_temp();
@@ -23839,7 +23839,7 @@ impl VbcCodegen {
             && self.ctx.is_required_context(&ctx_ident.name)
         {
             let ctx_name = self.ctx.resolve_context_alias(&ctx_ident.name);
-            let ctx_type_id = self.intern_string(&ctx_name);
+            let ctx_type_id = self.context_operand(&ctx_name)?;
 
             // Retrieve the context value
             let ctx_value_reg = self.ctx.alloc_temp();
@@ -33416,12 +33416,8 @@ impl VbcCodegen {
     ///
     /// Grammar: inject_expr = 'inject' , type_path ;
     fn compile_inject(&mut self, type_path: &verum_ast::ty::Path) -> CodegenResult<Option<Reg>> {
-        let type_name = type_path
-            .as_ident()
-            .map(|i| i.name.to_string())
-            .unwrap_or_else(|| format!("{:?}", type_path));
-
-        let ctx_type_id = self.intern_string(&type_name);
+        let type_name = Self::format_type_path(type_path);
+        let ctx_type_id = self.context_operand(&type_name)?;
         let result = self.ctx.alloc_temp();
 
         // Primary path: CtxGet retrieves the injectable from context stack.

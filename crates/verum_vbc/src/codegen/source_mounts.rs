@@ -66,7 +66,7 @@ struct ModuleExports {
 /// Category and visibility belong to the same declaration. A public value
 /// cannot change the visibility of a same-named private type.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum DeclarationCategory { Type, Callable, Value, Namespace }
+enum DeclarationCategory { Type, Callable, Value, Context, ContextProtocol, Namespace }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 enum DeclarationNamespace { Type, Value, Module }
@@ -74,8 +74,8 @@ enum DeclarationNamespace { Type, Value, Module }
 impl DeclarationCategory {
     fn namespace(self) -> DeclarationNamespace {
         match self {
-            Self::Type => DeclarationNamespace::Type,
-            Self::Callable | Self::Value => DeclarationNamespace::Value,
+            Self::Type | Self::ContextProtocol => DeclarationNamespace::Type,
+            Self::Callable | Self::Value | Self::Context => DeclarationNamespace::Value,
             Self::Namespace => DeclarationNamespace::Module,
         }
     }
@@ -167,7 +167,7 @@ impl ExportCandidates {
     fn nominal(&self) -> Option<&String> {
         if self.unresolved { return None; }
         let mut types = self.declarations.iter()
-            .filter(|(_, kinds)| kinds.contains(&DeclarationCategory::Type));
+            .filter(|(_, kinds)| kinds.iter().any(|kind| kind.namespace() == DeclarationNamespace::Type));
         let first = types.next()?.0;
         types.next().is_none().then_some(first)
     }
@@ -175,7 +175,7 @@ impl ExportCandidates {
     fn only_values(&self) -> bool {
         !self.inaccessible && !self.unresolved && !self.declarations.is_empty()
             && self.declarations.values().all(|kinds| kinds.iter()
-                .all(|kind| matches!(kind, DeclarationCategory::Callable | DeclarationCategory::Value)))
+                .all(|kind| matches!(kind, DeclarationCategory::Callable | DeclarationCategory::Value | DeclarationCategory::Context)))
     }
 }
 
@@ -225,6 +225,89 @@ impl VbcCodegen {
             let target = self.select_source_mount_path(&written, owner);
             self.record_source_type_mount(owner, alias, &target);
         });
+    }
+
+    /// Bind runtime dependency slots to the declaration shared by users and
+    /// providers. An injectable context lives in the value namespace; a
+    /// context protocol or value-typed dependency already has a nominal ID.
+    pub(super) fn declared_context_owner(&self, written: &str) -> super::CodegenResult<String> {
+        let mut scope = self.lexical_type_scope();
+        let name = Text::from(written);
+        loop {
+            let local = crate::module::qualify_module_name(scope, written);
+            if self.source_context_declarations.contains_key(&local) {
+                return Ok(local);
+            }
+            let mut owners = BTreeSet::new();
+            let mut select = |path: &str| -> super::CodegenResult<()> {
+                let candidates = self.source_export_candidates(path, Some(scope));
+                if (candidates.inaccessible || candidates.unresolved)
+                    && self.source_export_has_context(path) {
+                    return Err(super::CodegenError::internal(format!(
+                        "context binding `{path}` is inaccessible or unresolved in `{scope}`"
+                    )));
+                }
+                owners.extend(candidates.declarations.into_iter().filter_map(|(owner, kinds)| {
+                    kinds.iter().any(|kind| matches!(
+                        kind, DeclarationCategory::Context | DeclarationCategory::ContextProtocol
+                    )).then_some(owner)
+                }));
+                Ok(())
+            };
+            match self.source_type_mounts.get(&Text::from(scope)).and_then(|mounts| mounts.get(&name)) {
+                Some(SourceMountBinding::Targets(targets)) => {
+                    for target in targets { select(target)?; }
+                }
+                Some(SourceMountBinding::Blocked) => return Err(super::CodegenError::internal(
+                    format!("ambiguous context binding `{written}` in `{scope}`")
+                )),
+                None => {
+                    if let Some(source) = self.source_export_scope(scope) {
+                        for root in &source.lexical_globs {
+                            select(&format!("{}.{written}", root.select(self, scope)))?;
+                        }
+                    }
+                }
+            }
+            if owners.len() > 1 {
+                return Err(super::CodegenError::internal(format!(
+                    "ambiguous context binding `{written}` in `{scope}`"
+                )));
+            }
+            if let Some(owner) = owners.pop_first() {
+                return Ok(owner);
+            }
+            if let Some(Some(id)) = self.source_nominal_type_id(written)
+                && let Some(owner) = self.type_by_id(id).and_then(|ty| self.type_declaration_identity(ty)) {
+                return Ok(owner.into_string());
+            }
+            match self.lexical_type_parent(scope) {
+                Some(Some(parent)) => scope = parent,
+                _ => return Err(super::CodegenError::internal(format!(
+                    "no declaration for context binding `{written}` in `{scope}`"
+                ))),
+            }
+        }
+    }
+
+    pub(super) fn context_operand(&mut self, written: &str) -> super::CodegenResult<u32> {
+        let owner = self.declared_context_owner(written)?;
+        Ok(self.intern_string(&owner))
+    }
+
+    pub(super) fn declared_context_ref(&mut self, written: &str) -> super::CodegenResult<crate::types::ContextRef> {
+        let owner = self.declared_context_owner(written)?;
+        Ok(crate::types::ContextRef(self.intern_context_name(&owner)))
+    }
+
+    fn source_export_has_context(&self, path: &str) -> bool {
+        self.source_context_declarations.contains_key(path)
+            || path.rsplit_once('.').is_some_and(|(owner, leaf)| {
+                self.source_export_scope(owner).and_then(|source| source.declarations.get(leaf))
+                    .is_some_and(|decls| decls.iter().any(|d| matches!(
+                        d.category, DeclarationCategory::Context | DeclarationCategory::ContextProtocol
+                    )))
+            })
     }
 
     /// Record a selected canonical path, never an unresolved source spelling.
@@ -295,7 +378,7 @@ impl VbcCodegen {
             if !visited.insert(path.clone()) { continue; }
             let Some(scope) = self.source_export_scope(&path) else { continue };
             candidates.extend(scope.declarations.iter().filter(|(_, declarations)|
-                declarations.iter().any(|decl| decl.category == DeclarationCategory::Type))
+                declarations.iter().any(|decl| decl.category.namespace() == DeclarationNamespace::Type))
                 .map(|(name, _)| name.clone()));
             candidates.extend(scope.named.keys().cloned());
             pending.extend(scope.globs.iter().map(|edge| edge.select(self, &path).into_string()));
@@ -402,7 +485,10 @@ impl VbcCodegen {
                     }
                 }
                 ItemKind::Type(d) => {
-                    declare(&d.name, &d.visibility, Type);
+                    let category = if matches!(&d.body, verum_ast::TypeDeclBody::Protocol(body) if body.is_context) {
+                        DeclarationCategory::ContextProtocol
+                    } else { Type };
+                    declare(&d.name, &d.visibility, category);
                     if let verum_ast::TypeDeclBody::Variant(variants)
                         | verum_ast::TypeDeclBody::Inductive(variants) = &d.body
                     {
@@ -413,10 +499,11 @@ impl VbcCodegen {
                         }
                     }
                 }
-                ItemKind::Protocol(d) => declare(&d.name, &d.visibility, Type),
+                ItemKind::Protocol(d) => declare(&d.name, &d.visibility,
+                    if d.is_context { DeclarationCategory::ContextProtocol } else { Type }),
                 ItemKind::Const(d) => declare(&d.name, &d.visibility, Value),
                 ItemKind::Static(d) => declare(&d.name, &d.visibility, Value),
-                ItemKind::Context(d) => declare(&d.name, &d.visibility, Value),
+                ItemKind::Context(d) => declare(&d.name, &d.visibility, DeclarationCategory::Context),
                 ItemKind::ContextGroup(d) => declare(&d.name, &d.visibility, Value),
                 ItemKind::Meta(d) => declare(&d.name, &d.visibility, Value),
                 ItemKind::Predicate(d) => declare(&d.name, &d.visibility, Value),

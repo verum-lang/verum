@@ -15296,7 +15296,7 @@ impl VbcCodegen {
     /// 3. CtxProvide the transformed value as the local context
     ///
     /// Returns the number of transforms emitted (for potential CtxEnd cleanup).
-    fn emit_context_transforms(&mut self, func: &verum_ast::decl::FunctionDecl) -> usize {
+    fn emit_context_transforms(&mut self, func: &verum_ast::decl::FunctionDecl) -> CodegenResult<usize> {
         let mut count = 0;
 
         for ctx in &func.contexts {
@@ -15324,7 +15324,7 @@ impl VbcCodegen {
                 continue;
             }
 
-            let ctx_type_id = self.intern_string(&ctx_name);
+            let ctx_type_id = self.context_operand(&ctx_name)?;
 
             // Step 1: CtxGet the base context value
             let base_reg = self.ctx.alloc_temp();
@@ -15341,7 +15341,9 @@ impl VbcCodegen {
                 // Compile transform arguments
                 let args_start = if !transform.args.is_empty() {
                     let first = self.ctx.alloc_temp();
-                    if let Ok(Some(val)) = self.compile_expr(&transform.args[0]) {
+                    {
+                        let val = self.compile_expr(&transform.args[0])?
+                            .or_internal("context transform argument has no value")?;
                         self.ctx.emit(Instruction::Mov {
                             dst: first,
                             src: val,
@@ -15352,7 +15354,9 @@ impl VbcCodegen {
                     }
                     for arg in transform.args.iter().skip(1) {
                         let arg_reg = self.ctx.alloc_temp();
-                        if let Ok(Some(val)) = self.compile_expr(arg) {
+                        {
+                            let val = self.compile_expr(arg)?
+                                .or_internal("context transform argument has no value")?;
                             self.ctx.emit(Instruction::Mov {
                                 dst: arg_reg,
                                 src: val,
@@ -15399,7 +15403,7 @@ impl VbcCodegen {
             // Context transform emitted for ctx_name with N transforms
         }
 
-        count
+        Ok(count)
     }
 
     /// Evaluate a compile-time condition for conditional contexts.
@@ -19811,7 +19815,7 @@ impl VbcCodegen {
         // `using [Database.transactional()]`, emit CtxGet + method call + CtxProvide
         // at function entry to wrap the base context with the transform.
         // Grammar: transformed_context = context_path , context_transform , { context_transform }
-        let _ctx_transform_count = self.emit_context_transforms(func);
+        let _ctx_transform_count = self.emit_context_transforms(func)?;
 
         // Emit runtime negative context checks for `using [!Context]` constraints.
         // These fire at function entry and abort if an excluded context is present.
@@ -19832,7 +19836,7 @@ impl VbcCodegen {
             if ctx_type_name.is_empty() {
                 continue;
             }
-            let ctx_type_id = self.intern_string(&ctx_type_name);
+            let ctx_type_id = self.context_operand(&ctx_type_name)?;
             self.ctx.emit(Instruction::CtxCheckNegative {
                 ctx_type: ctx_type_id,
                 func_name: func_name_id,
@@ -20376,8 +20380,7 @@ impl VbcCodegen {
 
         // Map context names to ContextRef IDs and register in context_names table
         for ctx_name in &func_info.contexts {
-            let ctx_id = self.intern_context_name(ctx_name);
-            descriptor.contexts.push(crate::types::ContextRef(ctx_id));
+            descriptor.contexts.push(self.declared_context_ref(ctx_name)?);
         }
 
         // ARCH-P2 stage 1 — enrich the canonical entry with the
@@ -20706,8 +20709,7 @@ impl VbcCodegen {
             descriptor.properties |= crate::types::PropertySet::ASYNC;
         }
         for ctx_name in &func_info.contexts {
-            let ctx_id = self.intern_context_name(ctx_name);
-            descriptor.contexts.push(crate::types::ContextRef(ctx_id));
+            descriptor.contexts.push(self.declared_context_ref(ctx_name)?);
         }
 
         // Set parent_type so archive_metadata's Pass-2 function walker

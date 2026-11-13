@@ -4599,6 +4599,29 @@ impl TypeChecker {
         resolved_module_path: &Text,
         registry: &verum_modules::ModuleRegistry,
     ) -> Result<()> {
+        // The export table already follows re-exports and preserves the
+        // declared name. Bind this surface alias directly to that owner.
+        let declared_context = module_info.exports.get(&Text::from(item_name))
+            .and_then(|export| {
+                let source = registry.get(export.source_module)?;
+                let name = export.original_name.as_ref().unwrap_or(&export.name);
+                let declaration = self.find_context_declaration_in_module(&source.ast, name)?;
+                Some((declaration, Text::from(source.path.to_string())))
+            });
+        if let Some((declaration, owner)) = declared_context {
+            let identity = verum_common::qualified_name::qualify_module_name(&owner, &declaration.name.name);
+            let ty = self.with_source_signature_scope(&owner, |checker|
+                checker.build_context_type_from_decl(&declaration)
+            )?;
+            let binding: Text = register_name.into();
+            self.context_checker.register_context_binding(binding.clone(), identity, declaration.clone());
+            if let Some(signatures) = self.context_method_signatures.remove(&declaration.name.name) {
+                self.context_method_signatures.insert(binding.clone(), signatures);
+            }
+            self.context_declarations.insert(binding.clone(), declaration);
+            self.context_resolver.register_context_type(binding, ty);
+            return Ok(());
+        }
         if let Some((declaration, owner)) = self.find_type_declaration_with_source_module(
             &module_info.ast, item_name, resolved_module_path, registry,
         ) {
@@ -4689,75 +4712,6 @@ impl TypeChecker {
                                 Err(e) => {
                                     tracing::warn!(
                                         "Failed to build context type for protocol '{}' from module '{}': {}",
-                                        item_name,
-                                        resolved_module_path.as_str(),
-                                        e
-                                    );
-                                    // Fallback to Named type
-                                    use verum_ast::ty::{Ident, Path};
-                                    let ident = Ident::new(item_name, Span::dummy());
-                                    Type::Named {
-                                        path: Path::single(ident),
-                                        args: List::new(),
-                                    }
-                                }
-                            }
-                        } else if let Some(ctx_decl) = self.find_context_declaration_with_reexports(
-                            &module_info.ast,
-                            item_name,
-                            &resolved_module_path,
-                            registry,
-                        ) {
-                            // The DECLARATION itself, not only its type.
-                            //
-                            // `provide Ctx = backend;` looks the context up in
-                            // the context CHECKER's declaration map; everything
-                            // below registers it with the RESOLVER. A mounted
-                            // context therefore resolved as a name, answered
-                            // method calls, and still reported
-                            // "undefined context" at the `provide` that would
-                            // have installed a backend for it (T0892) — so the
-                            // whole dependency-injection system stopped at the
-                            // module boundary, which is the one place it is
-                            // needed.
-                            //
-                            // Same Step 4 the stdlib path already performs in
-                            // `register_stdlib_context_full`; a mounted context
-                            // is not a weaker kind of context.
-                            let owner = module_info.exports.get(&Text::from(item_name))
-                                .and_then(|export| registry.get(export.source_module))
-                                .map(|module| module.path.to_string())
-                                .unwrap_or_else(|| resolved_module_path.to_string());
-                            let identity = verum_common::qualified_name::qualify_module_name(&owner, &ctx_decl.name.name);
-                            self.context_checker.register_context_binding(register_name.into(), identity, ctx_decl.clone());
-
-                            // Found a context declaration - build Record type with methods.
-                            // Module-aware: pin the checker's module path to the SOURCE
-                            // module while resolving the context body so that bare type
-                            // references inside method signatures (e.g. `LogLevel` in
-                            // `fn log(level: LogLevel, msg: Text)` inside
-                            // `core.context.standard.Logger`) resolve against the
-                            // source module's qualified-name layer first — not the
-                            // flat map which may surface a same-named stranger from
-                            // another module.
-                            let saved_ctx_path = self.current_module_path().clone();
-                            self.set_current_module_path(resolved_module_path.clone());
-                            let ctx_type_result = self.build_context_type_from_decl(&ctx_decl);
-                            self.set_current_module_path(saved_ctx_path);
-
-                            match ctx_type_result {
-                                Ok(record_type) => {
-                                    // Store the context declaration for method-level capability extraction
-                                    let context_name: Text = register_name.into();
-                                    if let Some(signatures) = self.context_method_signatures.remove(&ctx_decl.name.name) {
-                                        self.context_method_signatures.insert(context_name.clone(), signatures);
-                                    }
-                                    self.context_declarations.insert(context_name, ctx_decl);
-                                    record_type
-                                }
-                                Err(e) => {
-                                    tracing::warn!(
-                                        "Failed to build context type for '{}' from module '{}': {}",
                                         item_name,
                                         resolved_module_path.as_str(),
                                         e
@@ -6347,132 +6301,9 @@ impl TypeChecker {
         for item in &ast.items {
             if let ItemKind::Context(ctx_decl) = &item.kind
                 && ctx_decl.name.name.as_str() == context_name
+                && self.cfg_evaluator.should_include_item(item)
             {
                 return Some(ctx_decl.clone());
-            }
-        }
-        None
-    }
-
-    /// Find a context declaration, following re-export chains if needed.
-    ///
-    /// When a context is re-exported via `pub import`, we need to follow the import
-    /// chain to find the actual context declaration in the original module.
-    ///
-    /// Context type system integration: context requirements tracked in function types, checked at call sites — Cross-file contexts
-    fn find_context_declaration_with_reexports(
-        &self,
-        ast: &verum_ast::Module,
-        context_name: &str,
-        current_module_path: &Text,
-        registry: &verum_modules::ModuleRegistry,
-    ) -> Option<verum_ast::decl::ContextDecl> {
-        use verum_ast::ItemKind;
-        use verum_ast::decl::{MountTreeKind, Visibility as AstVisibility};
-        use verum_ast::ty::PathSegment;
-
-        // First, try to find the context declaration directly
-        if let Some(decl) = self.find_context_declaration_in_module(ast, context_name) {
-            return Some(decl);
-        }
-
-        // Helper to check if path starts with relative marker
-        let is_relative = |path: &verum_ast::ty::Path| -> bool {
-            path.segments
-                .first()
-                .is_some_and(|s| matches!(s, PathSegment::Relative))
-        };
-
-        // Helper to resolve relative module path to absolute path
-        let resolve_relative_path = |relative_path: &str| -> String {
-            if relative_path.is_empty() {
-                return String::new();
-            }
-            format!("{}.{}", current_module_path.as_str(), relative_path)
-        };
-
-        // If not found directly, check if it's re-exported via `pub import`
-        for item in &ast.items {
-            if let ItemKind::Mount(import_decl) = &item.kind {
-                if import_decl.visibility != AstVisibility::Public {
-                    continue;
-                }
-
-                // Check if this import re-exports our context
-                let source_module_path: Option<String> = match &import_decl.tree.kind {
-                    MountTreeKind::Path(path) => {
-                        if let Some(PathSegment::Name(last_ident)) = path.segments.last() {
-                            if last_ident.name.as_str() == context_name {
-                                let has_relative = is_relative(path);
-                                let module_segments: Vec<&str> = path
-                                    .segments
-                                    .iter()
-                                    .take(path.segments.len() - 1)
-                                    .filter_map(|seg| match seg {
-                                        PathSegment::Name(id) => Some(id.name.as_str()),
-                                        _ => None,
-                                    })
-                                    .collect();
-                                let module_path = module_segments.join(".");
-                                if has_relative && !module_path.is_empty() {
-                                    Some(resolve_relative_path(&module_path))
-                                } else if !module_path.is_empty() {
-                                    Some(module_path)
-                                } else {
-                                    None
-                                }
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
-                    }
-                    MountTreeKind::Nested { prefix, trees } => {
-                        // Check if any nested tree imports our context
-                        let mut found_path = None;
-                        for tree in trees {
-                            if let MountTreeKind::Path(inner_path) = &tree.kind
-                                && let Some(PathSegment::Name(ident)) = inner_path.segments.last()
-                                && ident.name.as_str() == context_name
-                            {
-                                let has_relative = is_relative(prefix);
-                                let prefix_segments: Vec<&str> = prefix
-                                    .segments
-                                    .iter()
-                                    .filter_map(|seg| match seg {
-                                        PathSegment::Name(id) => Some(id.name.as_str()),
-                                        _ => None,
-                                    })
-                                    .collect();
-                                let module_path = prefix_segments.join(".");
-                                if has_relative && !module_path.is_empty() {
-                                    found_path = Some(resolve_relative_path(&module_path));
-                                } else if !module_path.is_empty() {
-                                    found_path = Some(module_path);
-                                }
-                                break;
-                            }
-                        }
-                        found_path
-                    }
-                    _ => None,
-                };
-
-                // If we found the source module, look up the context there
-                if let Some(source_path) = source_module_path
-                    && let Some(source_module) = registry.get_by_path(&source_path)
-                {
-                    // Recursively search (handles chains of re-exports)
-                    if let Some(decl) = self.find_context_declaration_with_reexports(
-                        &source_module.ast,
-                        context_name,
-                        &verum_common::Text::from(source_path),
-                        registry,
-                    ) {
-                        return Some(decl);
-                    }
-                }
             }
         }
         None

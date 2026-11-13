@@ -143,8 +143,7 @@ impl VbcCodegen {
         if info.is_async { descriptor.properties |= crate::types::PropertySet::ASYNC; }
         descriptor.intrinsic_name = info.intrinsic_name.as_ref().map(|name| StringId(self.intern_string(name)));
         for context in &info.contexts {
-            let id = self.intern_context_name(context);
-            descriptor.contexts.push(crate::types::ContextRef(id));
+            descriptor.contexts.push(self.declared_context_ref(context)?);
         }
         self.declared_callable_defaults.insert(info.id, source.params.iter().map(|parameter| {
             match &parameter.kind {

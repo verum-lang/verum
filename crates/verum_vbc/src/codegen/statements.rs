@@ -2099,7 +2099,7 @@ impl VbcCodegen {
                 let value_reg = self
                     .compile_expr(&expr)?
                     .or_internal("layer provide value has no value")?;
-                let ctx_id = self.intern_string(&ctx_name);
+                let ctx_id = self.context_operand(&ctx_name)?;
                 self.ctx.emit(Instruction::CtxProvide {
                     ctx_type: ctx_id,
                     value: value_reg,
@@ -2114,7 +2114,7 @@ impl VbcCodegen {
             .compile_expr(value)?
             .or_internal("provide value has no value")?;
 
-        let context_id = self.intern_string(context);
+        let context_id = self.context_operand(context)?;
 
         // Emit context provide instruction with 0 offset (no scoped body)
         self.ctx.emit(Instruction::CtxProvide {
@@ -2201,7 +2201,7 @@ impl VbcCodegen {
             .compile_expr(value)?
             .or_internal("provide-scope value has no value")?;
 
-        let context_id = self.intern_string(context);
+        let context_id = self.context_operand(context)?;
 
         // Create end label for body offset calculation
         let end_label = self.ctx.new_label("ctx_end");
