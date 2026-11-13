@@ -108,32 +108,10 @@ impl ProtocolChecker {
         let Some(declaration) = self.associated_declaration_application(
             &key, &owner.args, receiver, name, &mut Vec::new(),
         )? else { return Err("selected protocol does not declare this associated member".into()); };
-        let Some(index) = self.impls_by_protocol.get(&key) else { return Ok(None) };
-        let callables = Default::default();
-        let environment = super::ConstraintEnvironment::new(assumptions, &callables);
-        let mut selected = None;
-        for index in index.candidates(receiver, self.requires_unfiltered_type_candidates(receiver)) {
-            let implementation = &self.impls[index];
-            let substitution = match self.match_implementation_candidate_in_environment(
-                implementation, receiver, Some(&owner.args), true, &environment,
-            ) {
-                CandidateMatch::Disjoint => continue,
-                CandidateMatch::Unknown => return Err("cannot establish the selected family's receiver domain".into()),
-                CandidateMatch::Matched(substitution) => substitution,
-            };
-            let application = self.instantiate_declared_family(
-                implementation, &declaration.declaration, receiver, name,
-                &declaration.arguments, arguments, &substitution, assumptions,
-            )?;
-            if let Some(prior) = &selected {
-                if !self.same_family_application(prior, &application) {
-                    return Err("selected family has competing implementation bindings".into());
-                }
-            } else {
-                selected = Some(application);
-            }
-        }
-        Ok(selected)
+        self.resolve_family_implementations(
+            self.impls_by_protocol.get_key_value(&key),
+            receiver, name, arguments, assumptions, Some((&owner.args, &declaration)), None,
+        )
     }
 
     fn same_family_application(&self, left: &FamilyApplication, right: &FamilyApplication) -> bool {
@@ -321,18 +299,32 @@ impl ProtocolChecker {
         if let Some((_, _, application, _)) = symbolic {
             return Ok(Some(application));
         }
+        self.resolve_family_implementations(
+            &self.impls_by_protocol, receiver, name, arguments, assumptions, None, header,
+        )
+    }
+
+    /// A known owner narrows the index search. Every remaining candidate must
+    /// prove its domain in the caller's scope and agree on the same application.
+    fn resolve_family_implementations<'a>(
+        &self,
+        indices: impl IntoIterator<Item = (&'a Text, &'a super::ImplOverlapIndex)>,
+        receiver: &Type, name: &Text, arguments: &[Type], assumptions: &[WhereClause],
+        owner: Option<(&[Type], &DeclarationApplication)>,
+        header: Option<AssociatedDeclarationHeader<'_>>,
+    ) -> Result<Option<FamilyApplication>, Text> {
+        let callables = Default::default();
+        let environment = super::ConstraintEnvironment::new(assumptions, &callables);
+        let mut receiver_scope = None;
         let mut selected: Option<(Text, List<Type>, FamilyApplication)> = None;
-        for (key, index) in &self.impls_by_protocol {
-            if !self.has_associated_declaration(key, name, false, &mut Vec::new()) {
+        for (key, index) in indices {
+            if owner.is_none() && !self.has_associated_declaration(key, name, false, &mut Vec::new()) {
                 continue;
             }
             for index in index.candidates(receiver, self.requires_unfiltered_type_candidates(receiver)) {
                 let implementation = &self.impls[index];
-                let substitution = match self.match_implementation_candidate(
-                    implementation,
-                    receiver,
-                    None,
-                    true,
+                let substitution = match self.match_implementation_candidate_in_environment(
+                    implementation, receiver, owner.map(|(args, _)| args), true, &environment,
                 ) {
                     CandidateMatch::Disjoint => continue,
                     CandidateMatch::Unknown => return Err(
@@ -341,48 +333,42 @@ impl ProtocolChecker {
                     ),
                     CandidateMatch::Matched(substitution) => substitution,
                 };
-                let owner_arguments: List<_> = implementation
-                    .protocol_args
-                    .iter()
-                    .map(|argument| argument.try_apply_subst(&substitution))
-                    .collect::<Result<_, _>>()?;
-                let Some(selected_declaration) = self.associated_declaration_application_in_scope(
-                    key,
-                    &owner_arguments,
-                    receiver,
-                    name,
-                    &mut Vec::new(),
-                    header,
-                )?
-                else {
-                    continue;
+                let inferred;
+                let declaration = match owner {
+                    Some((_, declaration)) => declaration,
+                    None => {
+                        let owner_arguments: List<_> = implementation.protocol_args.iter()
+                            .map(|arg| arg.try_apply_subst(&substitution)).collect::<Result<_, _>>()?;
+                        let Some(found) = self.associated_declaration_application_in_scope(
+                            key, &owner_arguments, receiver, name, &mut Vec::new(), header,
+                        )? else { continue };
+                        for argument in &found.arguments {
+                            let (variables, values) = receiver_scope
+                                .get_or_insert_with(|| (receiver.free_vars(), receiver.value_ids()));
+                            if argument.has_value_inference()
+                                || argument.free_vars().iter().any(|id| !variables.contains(id))
+                                || argument.value_ids().iter().any(|id| !values.contains(id))
+                            {
+                                return Err("family owner application is not determined by its receiver".into());
+                            }
+                        }
+                        inferred = found;
+                        &inferred
+                    }
                 };
-                let owner_arguments = selected_declaration.arguments;
-                let receiver_variables = receiver.free_vars();
-                let receiver_values = receiver.value_ids();
-                if owner_arguments.iter().any(|argument| {
-                    argument
-                        .free_vars()
-                        .iter()
-                        .any(|variable| !receiver_variables.contains(variable))
-                        || argument.value_ids().iter().any(|id| !receiver_values.contains(id))
-                        || argument.has_value_inference()
-                }) {
-                    return Err("family owner application is not determined by its receiver".into());
-                }
                 let application = self.instantiate_declared_family(
                     implementation,
-                    &selected_declaration.declaration,
+                    &declaration.declaration,
                     receiver,
                     name,
-                    &owner_arguments,
+                    &declaration.arguments,
                     arguments,
                     &substitution,
                     assumptions,
                 )?;
                 if let Some((prior_protocol, prior_owner, prior)) = &selected {
-                    if prior_protocol != &selected_declaration.owner
-                        || *prior_owner != owner_arguments
+                    if prior_protocol != &declaration.owner
+                        || prior_owner != &declaration.arguments
                         || !self.same_family_application(prior, &application)
                     {
                         return Err(
@@ -391,7 +377,7 @@ impl ProtocolChecker {
                         );
                     }
                 } else {
-                    selected = Some((selected_declaration.owner, owner_arguments, application));
+                    selected = Some((declaration.owner.clone(), declaration.arguments.clone(), application));
                 }
             }
         }
@@ -764,6 +750,8 @@ impl ProtocolChecker {
         assumptions: &[WhereClause],
     ) -> Result<Option<FamilyApplication>, Text> {
         let mut is_family = false;
+        let callables = Default::default();
+        let environment = super::ConstraintEnvironment::new(assumptions, &callables);
         for clause in assumptions {
             if !self.types_structurally_equal(&clause.ty, receiver) {
                 continue;
@@ -790,10 +778,12 @@ impl ProtocolChecker {
             }
             for index in index.candidates(receiver, self.requires_unfiltered_type_candidates(receiver)) {
                 let implementation = &self.impls[index];
-                let substitution=match self.match_implementation_candidate(implementation,receiver,None,true) {
-                    CandidateMatch::Disjoint=>continue,
-                    CandidateMatch::Unknown=>return Err("cannot determine omitted family arguments for an overlapping implementation".into()),
-                    CandidateMatch::Matched(substitution)=>substitution,
+                let substitution = match self.match_implementation_candidate_in_environment(
+                    implementation, receiver, None, true, &environment,
+                ) {
+                    CandidateMatch::Disjoint => continue,
+                    CandidateMatch::Unknown => return Err("cannot determine omitted family arguments for an overlapping implementation".into()),
+                    CandidateMatch::Matched(substitution) => substitution,
                 };
                 let args: List<_> = implementation
                     .protocol_args

@@ -17,6 +17,64 @@ fn declaration(source: &str) -> TypeDecl {
     };
     declaration.clone()
 }
+
+#[test]
+fn conditional_family_arguments_use_the_callers_associated_equality() {
+    use verum_ast::{Ident, Path, PathSegment, Span};
+    use verum_types::{
+        protocol::{ProtocolBound, WhereClause},
+        ty::TypeVar,
+    };
+
+    let source = r#"
+        type Channel is protocol { type Item; };
+        type Other is protocol { type Item; };
+        type Family is protocol { type PairWith<K = Int>; };
+        type Envelope<F> is { value: F };
+        implement<F, E> Family for Envelope<F> where F: Channel<Item = E> {
+            type PairWith<K> = (E, K);
+        }
+    "#;
+    let module = Parser::new(source).parse_module().unwrap();
+    let mut checker = TypeChecker::new();
+    checker.set_current_module_path("families");
+    checker.set_generic_associated_types_enabled(true);
+    checker.register_primitives();
+    assert!(checker.prepare_module_declarations(&module).is_empty());
+    for item in &module.items {
+        checker.check_item(item).unwrap();
+    }
+    assert!(checker.take_deferred_errors().is_empty());
+    let parameter = Type::Var(TypeVar::fresh());
+    let path = |name: &str| {
+        let span = Span::dummy();
+        let segments = ["families", name].map(|part| PathSegment::Name(Ident::new(part, span)));
+        Path::new(segments.into_iter().collect(), span)
+    };
+    let protocols = checker.protocol_checker.read();
+    let receiver = Type::Named {
+        path: path("Envelope"),
+        args: List::from_iter([parameter.clone()]),
+    };
+    let premise = |name: &str| {
+        let mut bound = ProtocolBound::positive(path(name), List::new());
+        bound.associated_types.insert("Item".into(), Type::Bool);
+        WhereClause { ty: parameter.clone(), bounds: List::from_iter([bound]) }
+    };
+    let member = Text::from("PairWith");
+    let assumptions = [premise("Channel")];
+    let applied = protocols.resolve_associated_family(&receiver, &member, &[Type::Char], &assumptions)
+        .expect("the caller determines E").expect("declared family");
+    assert_eq!(applied.result, Type::Tuple(List::from_iter([Type::Bool, Type::Char])));
+    let omitted = protocols.resolve_omitted_family_arguments(&receiver, &member, &assumptions)
+        .expect("omitting K preserves the same evidence").expect("declared default");
+    assert_eq!(omitted.result, Type::Tuple(List::from_iter([Type::Bool, Type::Int])));
+    for invalid in [&[][..], &[premise("Other")][..]] {
+        assert!(protocols.resolve_associated_family(&receiver, &member, &[Type::Char], invalid).is_err());
+        assert!(protocols.resolve_omitted_family_arguments(&receiver, &member, invalid).is_err());
+    }
+}
+
 fn assert_telescope(checker: &TypeChecker, owner: &str, bound_owner: &str, shadowed: bool) {
     let registry = checker.protocol_checker.read();
     let protocol = registry
