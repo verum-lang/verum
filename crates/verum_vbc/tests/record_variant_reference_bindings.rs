@@ -95,3 +95,23 @@ fn probe() -> Int {
         44
     );
 }
+
+
+#[test]
+fn borrowed_numeric_payloads_are_read_before_conversion() {
+    assert_eq!(run(r#"
+type Atom is Real(Float64) | Empty;
+fn read(v: &Atom) -> Int {
+    match v { Atom.Real(number) => number as Int, Atom.Empty => -1 }
+}
+fn probe() -> Int { let v = Atom.Real(73.75); read(&v) }
+"#), 73);
+}
+
+#[test]
+fn nested_scalar_references_are_read_at_each_declared_layer() {
+    assert_eq!(run(r#"
+fn read(v: &&Float64) -> Int { v as Int }
+fn probe() -> Int { let value = 73.75; let r = &value; read(&r) }
+"#), 73);
+}

@@ -142,3 +142,49 @@ fn null_reference_markers_are_never_read_as_heap_addresses() {
         }
     }
 }
+
+
+#[test]
+fn typed_float_conversion_rejects_foreign_values_and_unknown_rounding_modes() {
+    use verum_vbc::{instruction::FloatToIntMode, interpreter::InterpreterError};
+    for (mode, expected) in [
+        (FloatToIntMode::Trunc, -2),
+        (FloatToIntMode::Floor, -3),
+        (FloatToIntMode::Ceil, -2),
+        (FloatToIntMode::Round, -3),
+    ] {
+        let mut module = VbcModule::new("typed_conversion".into());
+        for instruction in [
+            Instruction::CvtFI { mode, dst: Reg(1), src: Reg(0) },
+            Instruction::Ret { value: Reg(1) },
+        ] {
+            verum_vbc::bytecode::encode_instruction(&instruction, &mut module.bytecode);
+        }
+        let mut function = FunctionDescriptor::new(StringId::EMPTY);
+        function.id = FunctionId(0);
+        function.params.push(verum_vbc::module::ParamDescriptor {
+            type_ref: verum_vbc::types::TypeRef::Concrete(verum_vbc::types::TypeId::F64),
+            ..Default::default()
+        });
+        function.register_count = 2;
+        function.bytecode_length = module.bytecode.len() as u32;
+        module.functions.push(function);
+        let mut vm = Interpreter::new(Arc::new(module.clone()));
+        let actual = vm.execute_function_with_args(FunctionId(0), &[Value::from_f64(-2.7)]).unwrap();
+        assert_eq!(actual.as_i64(), expected);
+        for argument in [Value::from_i64(3), Value::nil(), Value::from_bool(false)] {
+            let mut vm = Interpreter::new(Arc::new(module.clone()));
+            assert!(matches!(
+                vm.execute_function_with_args(FunctionId(0), &[argument]),
+                Err(InterpreterError::TypeMismatch { operation: "CvtFI", .. })
+            ));
+        }
+        // CvtFI's first operand is the encoded rounding-mode byte.
+        module.bytecode[1] = u8::MAX;
+        let mut vm = Interpreter::new(Arc::new(module));
+        assert!(matches!(
+            vm.execute_function_with_args(FunctionId(0), &[Value::from_f64(-2.7)]),
+            Err(InterpreterError::InvalidBytecode { .. })
+        ));
+    }
+}

@@ -778,3 +778,22 @@ fn native_array_refusal_is_scoped_to_reachable_program_helpers() {
         }
     }
 }
+
+
+#[test]
+fn native_borrowed_numeric_payloads_are_read_before_conversion() {
+    let module = source(r#"
+type Atom is Real(Float64) | Empty;
+fn read(v: &Atom) -> Int {
+    match v { Atom.Real(number) => number as Int, Atom.Empty => -1 }
+}
+fn probe() -> Int { let v = Atom.Real(73.75); read(&v) }
+"#);
+    native(&module, |engine| {
+        // SAFETY: probe takes no arguments and returns the native Int ABI.
+        let value = unsafe {
+            engine.get_function::<unsafe extern "C" fn() -> i64>("probe").unwrap().call()
+        };
+        assert_eq!(value, 73);
+    });
+}

@@ -27555,10 +27555,12 @@ impl VbcCodegen {
             return Ok(Some(result));
         }
 
-        // Compile the source expression
-        let src_reg = self
+        // Preserve the selected operand's declaration before allocating conversion temporaries.
+        let source_start = self.ctx.current_pc();
+        let mut src_reg = self
             .compile_expr(inner)?
             .or_internal("cast source has no value")?;
+        let source_end = self.ctx.current_pc();
 
         // T1537: a raw-address conversion must remain an operation across
         // backends. A passthrough loses the address when native RefField keeps
@@ -27589,6 +27591,21 @@ impl VbcCodegen {
             _ => None,
         };
         let target_kind = normalized_target.as_ref().unwrap_or(target_kind);
+
+        if matches!(
+            target_kind,
+            TypeKind::Int | TypeKind::Float | TypeKind::Char | TypeKind::Bool
+        ) {
+            let mut source_type =
+                self.declared_expression_result(inner, Some(src_reg), source_start, source_end);
+            while let Some(crate::types::TypeRef::Reference { inner, tier, .. }) = source_type {
+                let value = self.ctx.alloc_temp();
+                self.emit_deref_instruction(value, src_reg, tier);
+                self.ctx.free_temp(src_reg);
+                src_reg = value;
+                source_type = Some(*inner);
+            }
+        }
 
         // Normalize source type similarly for path-based aliases
         let src_kind = src_kind.map(|sk| {

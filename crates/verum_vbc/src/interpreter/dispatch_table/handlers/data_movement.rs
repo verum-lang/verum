@@ -204,17 +204,27 @@ pub(in super::super) fn handle_cvt_if(
 pub(in super::super) fn handle_cvt_fi(
     state: &mut InterpreterState,
 ) -> InterpreterResult<DispatchResult> {
-    let mode = read_u8(state)?;
+    use crate::instruction::FloatToIntMode;
+    let mode_byte = read_u8(state)?;
+    let mode = FloatToIntMode::from_byte(mode_byte)
+        .ok_or_else(|| InterpreterError::InvalidBytecode {
+            pc: state.pc() as usize,
+            message: format!("invalid float-to-int conversion mode {mode_byte}"),
+        })?;
     let dst = read_reg(state)?;
     let src = read_reg(state)?;
-    let float_val = state.get_reg(src).as_f64();
+    let float_val = state.get_reg(src).try_as_f64()
+        .ok_or(InterpreterError::TypeMismatch {
+            expected: "Float",
+            got: "non-float value",
+            operation: "CvtFI",
+        })?;
 
     let int_val = match mode {
-        0 => float_val.trunc() as i64,
-        1 => float_val.floor() as i64,
-        2 => float_val.ceil() as i64,
-        3 => float_val.round() as i64,
-        _ => float_val.trunc() as i64,
+        FloatToIntMode::Trunc => float_val.trunc() as i64,
+        FloatToIntMode::Floor => float_val.floor() as i64,
+        FloatToIntMode::Ceil => float_val.ceil() as i64,
+        FloatToIntMode::Round => float_val.round() as i64,
     };
     state.set_reg(dst, Value::from_i64(int_val));
     Ok(DispatchResult::Continue)
