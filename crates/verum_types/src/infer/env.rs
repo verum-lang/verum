@@ -2683,20 +2683,22 @@ impl TypeChecker {
                                 return Ok(InferResult::new(field_ty));
                             }
                         }
-                        Err(TypeError::OtherWithCode {
+                        Err(TypeError::OtherWithCodeSpanned {
                             code: verum_common::Text::from("E103"),
                             msg: verum_common::Text::from(format!(
                                 "Cannot access field on non-record type: {}",
                                 normalized_ty
                             )),
+                            span: field.span,
                         })
                     }
-                    _ => Err(TypeError::OtherWithCode {
+                    _ => Err(TypeError::OtherWithCodeSpanned {
                         code: verum_common::Text::from("E103"),
                         msg: verum_common::Text::from(format!(
                             "Cannot access field on non-record type: {}",
                             normalized_ty
                         )),
+                        span: field.span,
                     }),
                 }
             }

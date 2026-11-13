@@ -9172,7 +9172,7 @@ impl TypeChecker {
                                     available: Text::from(
                                         members.join(", ").as_str(),
                                     ),
-                                    span: expr.span,
+                                    span: field.span,
                                 });
                             }
                         }
@@ -9237,12 +9237,13 @@ impl TypeChecker {
                     }
                 }
                 if matches!(&normalized_ty, Type::Var(_) | Type::Unknown | Type::Placeholder { .. }) {
-                    return Err(TypeError::OtherWithCode {
+                    return Err(TypeError::OtherWithCodeSpanned {
                         code: "E103".into(),
                         msg: format!(
                             "Cannot access field '{}' on an unresolved type; declare a record type or use a protocol method",
                             field.name
                         ).into(),
+                        span: field.span,
                     });
                 }
                 if matches!(&normalized_ty, Type::Variant(_)) {
@@ -9259,9 +9260,10 @@ impl TypeChecker {
                     self.record_deref_adjustment(obj.span, hops);
                     return Ok(InferResult::new(ty));
                 }
-                Err(TypeError::OtherWithCode {
+                Err(TypeError::OtherWithCodeSpanned {
                     code: "E103".into(),
                     msg: format!("Cannot access field '{}' on non-record type: {}", field.name, normalized_ty).into(),
+                    span: field.span,
                 })
             }
         }
