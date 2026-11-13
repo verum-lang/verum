@@ -24,6 +24,7 @@
 //! (with its soundness hole) for A/B differential comparison ONLY.
 
 use super::super::super::error::{InterpreterError, InterpreterResult};
+use super::super::super::state::InterpreterState;
 use crate::value::{Capabilities, Value};
 use std::sync::OnceLock;
 
@@ -247,6 +248,66 @@ fn reference_value_slot(
         }
     }
     Ok(None)
+}
+
+/// A validated, single Value slot. Register indices stay in the register file;
+/// managed addresses are resolved once, with no callback or allocation in the exchange.
+enum MutableValueSlot {
+    Register(u32),
+    Memory(*mut Value),
+}
+
+impl MutableValueSlot {
+    fn resolve(state: &InterpreterState, reference: Value) -> InterpreterResult<Self> {
+        let invalid = || InterpreterError::InvalidOperand {
+            message: "expected a live, aligned mutable Value slot".into(),
+        };
+        if is_cbgr_ref(&reference) {
+            if !is_cbgr_ref_mutable(reference) {
+                return Err(InterpreterError::CapabilityDenied {
+                    required: u64::from(Capabilities::WRITE),
+                    actual: u64::from(Capabilities::READ_ONLY.0),
+                });
+            }
+            let (index, generation) = decode_cbgr_ref(reference);
+            if index as usize >= state.registers.top() {
+                return Err(invalid());
+            }
+            validate_cbgr_generation(state, index, generation)?;
+            return Ok(Self::Register(index));
+        }
+        require_reference_write(state, reference)?;
+        reference_value_slot(state, reference)?.map(Self::Memory).ok_or_else(invalid)
+    }
+
+    fn read(&self, state: &InterpreterState) -> Value {
+        match *self {
+            Self::Register(index) => state.registers.get_absolute(index),
+            // SAFETY: resolve established an aligned initialized slot, still live.
+            Self::Memory(address) => unsafe { address.read() },
+        }
+    }
+
+    fn write(&self, state: &mut InterpreterState, value: Value) {
+        match *self {
+            Self::Register(index) => state.registers.set_absolute(index, value),
+            // SAFETY: resolve established write access to this exact slot.
+            Self::Memory(address) => unsafe { address.write(value); },
+        }
+    }
+}
+
+pub(super) fn swap_referents(
+    state: &mut InterpreterState, left: Value, right: Value,
+) -> InterpreterResult<()> {
+    let first = MutableValueSlot::resolve(state, left)?;
+    let second = MutableValueSlot::resolve(state, right)?;
+    let a = first.read(state);
+    let b = second.read(state);
+    first.write(state, b);
+    second.write(state, a);
+    state.cbgr_epoch = state.cbgr_epoch.wrapping_add(1);
+    Ok(())
 }
 
 /// Check the capability carried by a heap reference before a store or writeback.

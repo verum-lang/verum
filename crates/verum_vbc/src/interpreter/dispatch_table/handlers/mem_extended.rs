@@ -315,37 +315,11 @@ fn mem_extended_body(
             Ok(DispatchResult::Continue)
         }
 
-        // Swap: [a, b]
-        //
-        // The args are `&mut T` references which materialise as CBGR
-        // register-refs (negative-i64-encoded `(abs_index, generation)`
-        // pairs) — NOT raw pointers.  Pre-fix `as_ptr::<u64>()` on a
-        // CBGR ref dereferenced the negative integer as a pointer and
-        // SIGSEGV'd at runtime.  Resolve through `cbgr_helpers` so the
-        // swap operates on the abs-register slots in the Value world,
-        // not raw memory addresses.
+        // Swap the two places named by &mut T, including mixed representations.
         0x04 => {
-            use super::cbgr_helpers::{decode_cbgr_ref, is_cbgr_ref};
             let a_reg = read_reg(state)?;
             let b_reg = read_reg(state)?;
-            let a_val = state.get_reg(a_reg);
-            let b_val = state.get_reg(b_reg);
-            if is_cbgr_ref(&a_val) && is_cbgr_ref(&b_val) {
-                let (a_abs, _) = decode_cbgr_ref(a_val);
-                let (b_abs, _) = decode_cbgr_ref(b_val);
-                let tmp = state.registers.get_absolute(a_abs);
-                let b_inner = state.registers.get_absolute(b_abs);
-                state.registers.set_absolute(a_abs, b_inner);
-                state.registers.set_absolute(b_abs, tmp);
-            } else {
-                // Raw-pointer fallback (preserves the legacy path for
-                // direct-pointer call sites that bypass CBGR encoding).
-                let a_ptr = a_val.as_ptr::<u64>();
-                let b_ptr = b_val.as_ptr::<u64>();
-                if !a_ptr.is_null() && !b_ptr.is_null() {
-                    unsafe { core::ptr::swap(a_ptr, b_ptr); }
-                }
-            }
+            super::cbgr_helpers::swap_referents(state, state.get_reg(a_reg), state.get_reg(b_reg))?;
             Ok(DispatchResult::Continue)
         }
 

@@ -428,6 +428,27 @@ fn probe<U: Reader>(g: Guard<U>) -> Int { g.read() }
 }
 
 #[test]
+fn swapping_a_projected_field_and_a_local_moves_each_record_once() {
+    check(r#"
+        type DerefMut is protocol { type Target; fn deref_mut(&mut self) -> &mut Self.Target; };
+        implement<T> DerefMut for Guard<T> {
+            type Target = T;
+            fn deref_mut(&mut self) -> &mut T { &mut self.value }
+        }
+        type Frame is { marker: Int, item: Cell };
+        fn exchange<T>(a: &mut T, b: &mut T) { @intrinsic("swap", a, b) }
+        fn probe() -> Int {
+            let mut guard = Guard { marker: 19, value: Frame { marker: 11, item: Cell { padding: 13, value: 7 } } };
+            let mut local = Cell { padding: 23, value: 3 };
+            exchange(&mut guard.item, &mut local);
+            if guard.item.value != 3 || local.padding != 13 { return -1; }
+            exchange(&mut local, &mut guard.item);
+            guard.marker + guard.item.padding + guard.item.value + local.padding + local.value
+        }
+    "#, Some(65));
+}
+
+#[test]
 fn replacing_a_reborrowed_record_updates_the_guard_and_returns_the_old_record() {
     check(r#"
         type DerefMut is protocol { type Target; fn deref_mut(&mut self) -> &mut Self.Target; };

@@ -181,3 +181,44 @@ fn readonly_heap_references_reject_both_store_paths() {
         assert_eq!(slot.as_i64(), 17);
     }
 }
+
+#[test]
+fn swap_validates_both_places_before_any_write() {
+    use super::{encode_cbgr_ref, swap_referents};
+    let mut machine = state();
+    machine.registers.set_absolute(0, Value::from_i64(17));
+    machine.registers.set_absolute(1, Value::from_i64(23));
+    let generation = machine.registers.get_generation(0);
+    let valid = encode_cbgr_ref_mut(0, generation);
+    let mut cell = Value::from_i64(37);
+    let cell_ptr: *mut Value = &mut cell;
+    let readonly = Value::from_thin_ref(ThinRef::new(cell_ptr.cast(), 1, 0, Capabilities::READ_ONLY));
+    let stale_generation = machine.registers.get_generation(1);
+    machine.registers.bump_generation(1);
+    let stale = encode_cbgr_ref_mut(1, stale_generation);
+    let outside = encode_cbgr_ref_mut(machine.registers.top() as u32, generation);
+    for invalid in [readonly, encode_cbgr_ref(1, machine.registers.get_generation(1)), stale,
+                    outside, Value::nil(), Value::from_i64(5), Value::from_thin_ref(ThinRef::null())] {
+        for (a, b) in [(valid, invalid), (invalid, valid)] {
+            assert!(swap_referents(&mut machine, a, b).is_err());
+            assert_eq!(machine.registers.get_absolute(0).as_i64(), 17);
+            assert_eq!(machine.registers.get_absolute(1).as_i64(), 23);
+            assert_eq!(cell.as_i64(), 37);
+        }
+    }
+    let writable = thin(&mut cell);
+    let nested = encode_cbgr_ref_mut(1, machine.registers.get_generation(1));
+    machine.registers.set_absolute(0, nested);
+    swap_referents(&mut machine, valid, writable).unwrap();
+    assert_eq!(cell.bits(), nested.bits());
+    assert_eq!(machine.registers.get_absolute(1).as_i64(), 23);
+    cell = Value::from_i64(17);
+    swap_referents(&mut machine, valid, writable).unwrap();
+    assert_eq!(cell.as_i64(), 37);
+    assert_eq!(machine.registers.get_absolute(0).as_i64(), 17);
+    swap_referents(&mut machine, writable, writable).unwrap();
+    assert_eq!(cell.as_i64(), 37);
+    swap_referents(&mut machine, writable, valid).unwrap();
+    assert_eq!(cell.as_i64(), 17);
+    assert_eq!(machine.registers.get_absolute(0).as_i64(), 37);
+}
