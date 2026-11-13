@@ -2,6 +2,7 @@
 
 use super::TypeChecker;
 use crate::context::{InstantiatedScheme, TypeScheme};
+use crate::protocol::{ProtocolBound, WhereClause};
 use crate::ty::{Substitution, Type, TypeVar};
 use crate::{Result, TypeError};
 use verum_ast::Span;
@@ -10,15 +11,28 @@ use verum_common::{List, Map, Text, ToText};
 pub(super) struct PendingValueObligation {
     value_parameters: List<Type>,
     type_bounds: Map<TypeVar, List<Type>>,
-    protocol_bounds: Map<TypeVar, List<crate::protocol::ProtocolBound>>,
-    where_clauses: List<crate::protocol::WhereClause>,
+    protocol_bounds: Map<TypeVar, List<ProtocolBound>>,
+    where_clauses: List<WhereClause>,
     nominal_applications: List<crate::context::NominalApplication>,
     span: Span,
 }
 
 pub(super) struct CallProjectionScope<'a> {
-    pub assumptions: List<crate::protocol::WhereClause>,
+    pub declaration: &'a [WhereClause],
+    /// At proof boundaries, an unresolved family must still denote the same
+    /// declaring protocol after substitution into the caller.
+    pub caller: Option<&'a [WhereClause]>,
     pub arguments: &'a Substitution,
+}
+
+fn declaration_premises(
+    bounds: &Map<TypeVar, List<ProtocolBound>>,
+    clauses: &[WhereClause],
+) -> List<WhereClause> {
+    bounds.iter()
+        .map(|(variable, bounds)| WhereClause { ty: Type::Var(*variable), bounds: bounds.clone() })
+        .chain(clauses.iter().cloned())
+        .collect()
 }
 
 impl TypeChecker {
@@ -27,17 +41,11 @@ impl TypeChecker {
     pub(super) fn resolve_call_output(
         &self,
         ty: &Type,
-        bounds: &Map<TypeVar, List<crate::protocol::ProtocolBound>>,
-        clauses: &[crate::protocol::WhereClause],
+        bounds: &Map<TypeVar, List<ProtocolBound>>,
+        clauses: &[WhereClause],
         arguments: &Substitution,
     ) -> Result<Type> {
-        let mut assumptions = List::new();
-        for (variable, bounds) in bounds {
-            assumptions.push(crate::protocol::WhereClause {
-                ty: Type::Var(*variable), bounds: bounds.clone(),
-            });
-        }
-        assumptions.extend(clauses.iter().cloned());
+        let mut assumptions = declaration_premises(bounds, clauses);
         // Captured generic function values retain the same fresh declaration
         // variables in their pending obligations and their callable signature.
         let variables = ty.free_vars();
@@ -45,7 +53,7 @@ impl TypeChecker {
             for pending in &self.pending_value_obligations {
                 assumptions.extend(pending.protocol_bounds.iter()
                     .filter(|(variable, _)| variables.contains(variable))
-                    .map(|(variable, bounds)| crate::protocol::WhereClause {
+                    .map(|(variable, bounds)| WhereClause {
                         ty: Type::Var(*variable), bounds: bounds.clone(),
                     }));
                 assumptions.extend(pending.where_clauses.iter()
@@ -53,7 +61,7 @@ impl TypeChecker {
                     .cloned());
             }
         }
-        self.resolve_call_output_projections(ty, &CallProjectionScope { assumptions, arguments })
+        self.resolve_call_output_projections(ty, &CallProjectionScope { declaration: &assumptions, arguments, caller: None })
     }
 
     pub(super) fn check_callable_contexts(
@@ -197,7 +205,7 @@ impl TypeChecker {
                 }
                 self.enforce_call_type_bounds(&obligation.type_bounds, obligation.span)?;
                 self.enforce_call_protocol_bounds(&obligation.protocol_bounds, obligation.span)?;
-                self.enforce_call_where_clauses(&obligation.where_clauses, obligation.span)?;
+                self.enforce_call_where_clauses(&obligation.where_clauses, &obligation.protocol_bounds, obligation.span)?;
                 for application in &obligation.nominal_applications {
                     let arguments: List<_> = application.arguments.iter()
                         .map(|argument| self.unifier.apply(argument)).collect();
@@ -228,7 +236,7 @@ impl TypeChecker {
             self.pending_value_obligations.push(PendingValueObligation {
                 value_parameters: instance.value_parameters.clone(),
                 type_bounds: Map::new(),
-                protocol_bounds: Map::new(),
+                protocol_bounds: instance.protocol_bounds.clone(),
                 where_clauses: instance.where_clauses.clone(),
                 nominal_applications: instance.nominal_applications.clone(),
                 span,
@@ -244,69 +252,60 @@ impl TypeChecker {
         Ok(instance)
     }
 
+    /// Normalize the subject and every family inside the bound under the same
+    /// declaration. Substituting first would conflate equal member names.
+    fn instantiate_call_clause(&self, clause: &WhereClause, scope: &CallProjectionScope<'_>) -> Result<WhereClause> {
+        let mut bounds = clause.bounds.clone();
+        for bound in &mut bounds {
+            for ty in bound.args.iter_mut().chain(bound.associated_types.values_mut()) {
+                *ty = self.resolve_call_output_projections(ty, scope)?;
+            }
+        }
+        Ok(WhereClause { ty: self.resolve_call_output_projections(&clause.ty, scope)?, bounds })
+    }
+
     /// Conditional requirements remain obligations of this call. They
     /// are proved from the caller's declared assumptions and actual impls, not
     /// introduced as new assumptions or attached to every implementation.
     pub(super) fn enforce_call_where_clauses(
         &mut self,
-        clauses: &[crate::protocol::WhereClause],
+        clauses: &[WhereClause],
+        declaration_bounds: &Map<TypeVar, List<ProtocolBound>>,
         span: Span,
     ) -> Result<()> {
         if clauses.is_empty() {
             return Ok(());
         }
         let substitution = self.unifier.save_substitution();
-        let normalize = |checker: &Self, ty: &Type| -> Result<Type> {
-            let ty = ty
-                .try_apply_subst(&substitution)
-                .map_err(|message| TypeError::UniverseBinding { message, span })?;
-            Ok(checker.resolve_assoc_projections_deep(&ty))
-        };
-        let mut assumptions = List::new();
+        let mut caller = self.source_type_registration.projection_assumptions.clone();
         for (variable, bounds) in &self.type_var_bounds {
-            // Only active universal caller binders introduce assumptions. A
-            // flexible call variable carries obligations, never its own proof.
-            if !self.unifier.is_rigid(*variable) {
-                continue;
+            if self.unifier.is_rigid(*variable) {
+                let premise = WhereClause { ty: Type::Var(*variable), bounds: bounds.clone() };
+                if !caller.contains(&premise) { caller.push(premise); }
             }
-            assumptions.push(crate::protocol::WhereClause {
-                ty: normalize(self, &Type::Var(*variable))?,
-                bounds: bounds
-                    .iter()
-                    .map(|bound| {
-                        bound
-                            .try_apply_subst(&substitution)
-                            .map_err(|message| TypeError::UniverseBinding { message, span })
-                    })
-                    .collect::<Result<_>>()?,
-            });
         }
+        let caller_scope = CallProjectionScope {
+            declaration: &caller,
+            caller: Some(&caller),
+            arguments: &substitution,
+        };
+        let assumptions: List<_> = caller.iter()
+            .map(|premise| self.instantiate_call_clause(premise, &caller_scope))
+            .collect::<Result<_>>()?;
+        let declaration = declaration_premises(declaration_bounds, clauses);
+        let required_scope = CallProjectionScope {
+            declaration: &declaration,
+            caller: Some(&caller),
+            arguments: &substitution,
+        };
         let callables = self.unifier.rigid_callable_bounds()
-            .map(|(variable, contract)| Ok((variable, normalize(self, contract)?)))
+            .map(|(variable, contract)| Ok((variable, self.resolve_call_output_projections(contract, &caller_scope)?)))
             .collect::<Result<Map<_, _>>>()?;
         for clause in clauses {
-            let subject = normalize(self, &clause.ty)?;
+            let WhereClause { ty: subject, bounds } = self.instantiate_call_clause(clause, &required_scope)?;
             if let Some(owner) = self.get_type_name(&subject) {
                 self.ensure_stdlib_type_loaded_transitive(&owner);
             }
-            let bounds: List<_> = clause
-                .bounds
-                .iter()
-                .map(|bound| {
-                    let mut bound = bound
-                        .try_apply_subst(&substitution)
-                        .map_err(|message| TypeError::UniverseBinding { message, span })?;
-                    bound.args = bound
-                        .args
-                        .iter()
-                        .map(|ty| normalize(self, ty))
-                        .collect::<Result<_>>()?;
-                    for ty in bound.associated_types.values_mut() {
-                        *ty = normalize(self, ty)?;
-                    }
-                    Ok(bound)
-                })
-                .collect::<Result<_>>()?;
             for bound in &bounds {
                 self.ensure_stdlib_type_loaded_transitive(&self.path_to_string(&bound.protocol));
             }
@@ -328,7 +327,7 @@ impl TypeChecker {
     /// Universally quantified caller variables require declaration evidence.
     pub(super) fn enforce_call_protocol_bounds(
         &mut self,
-        protocol_bounds: &Map<TypeVar, List<crate::protocol::ProtocolBound>>,
+        protocol_bounds: &Map<TypeVar, List<ProtocolBound>>,
         span: Span,
     ) -> Result<()> {
         for (type_var, bounds) in protocol_bounds {
@@ -346,11 +345,11 @@ impl TypeChecker {
                 // complete type, including any reference or nominal constructor,
                 // before the surrounding function leaves its declaration scope.
                 self.enforce_call_where_clauses(
-                    &[crate::protocol::WhereClause {
+                    &[WhereClause {
                         ty: resolved_ty.clone(),
                         bounds: bounds.clone(),
                     }],
-                    span,
+                    &Map::new(), span,
                 )?;
                 continue;
             }

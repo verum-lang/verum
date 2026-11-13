@@ -18785,7 +18785,7 @@ impl TypeChecker {
 
                                 self.enforce_call_type_bounds(&type_bounds, span)?;
                                 self.enforce_call_protocol_bounds(&protocol_bounds, span)?;
-                                self.enforce_call_where_clauses(&where_clauses, span)?;
+                                self.enforce_call_where_clauses(&where_clauses, &protocol_bounds, span)?;
 
                                 // Apply substitution and unifier to get concrete return type
                                 let subst_return_type = self.resolve_call_output(
@@ -22549,7 +22549,7 @@ impl TypeChecker {
         for (argument, parameter) in args.iter().zip(params.iter()) {
             self.check_expr(argument, &parameter.apply_subst(&substitution))?;
         }
-        self.enforce_call_where_clauses(&where_clauses, span)?;
+        self.enforce_call_where_clauses(&where_clauses, &protocol_bounds, span)?;
         self.enforce_call_protocol_bounds(&protocol_bounds, span)?;
         self.enforce_call_type_bounds(&type_bounds, span)?;
         let output = self.resolve_call_output(return_type, &protocol_bounds, &where_clauses, &substitution)?;

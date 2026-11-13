@@ -4,11 +4,11 @@ use verum_fast_parser::FastParser;
 use verum_types::TypeChecker;
 
 const DECLARATIONS: &str = r#"
-type Channel is protocol { type Item; fn get(&self) -> Self.Item; };
+type Channel is protocol { type Item; fn get(self) -> Self.Item; };
 type Ready<T> is { value: T };
 implement<T> Channel for Ready<T> {
     type Item = T;
-    fn get(&self) -> T { self.value }
+    fn get(self) -> T { self.value }
 }
 "#;
 
@@ -56,6 +56,78 @@ fn check_with_protocol(protocol: &str, declarations: &str, probe: &str, accepted
         result.is_ok() && deferred.is_empty() && diagnostics.is_empty(),
         accepted,
         "{result:?}; {deferred:?}; {diagnostics:?}"
+    );
+}
+
+#[test]
+fn projected_call_premises_belong_to_the_declaring_receiver() {
+    let declarations = "
+        type Transfer is protocol {};
+        type Engine is {};
+        implement Engine {
+            fn accept<T: Channel>(&self, value: T) -> Int where T.Item: Transfer { 1 }
+        }
+        fn accept<T: Channel>(value: T) -> Int where T.Item: Transfer { 1 }
+    ";
+    for call in ["accept(x)", "engine.accept(x)"] {
+        for (premise, accepted) in [
+            ("where F.Item: Transfer", true),
+            ("where G.Item: Transfer", false),
+            ("", false),
+        ] {
+            let probe = format!(
+                "fn probe<F: Channel, G: Channel>(engine: &Engine, x: F, y: G) -> Int {premise} {{ {call} }}"
+            );
+            check(declarations, &probe, accepted);
+        }
+    }
+}
+
+#[test]
+fn a_projected_return_can_borrow_its_receiver() {
+    let channel = "
+        type Channel is protocol { type Item; fn get(&self) -> Self.Item; };
+        type Lens is { value: Int };
+        implement Channel for Lens {
+            type Item = &Int;
+            fn get(&self) -> &Int { &self.value }
+        }
+    ";
+    check_with_protocol(channel, "",
+        "fn probe<T, F: Channel<Item = T>>(owner: F) -> T { owner.get() }", false);
+    check_with_protocol(channel, "",
+        "fn probe<T, F: Channel<Item = T>>(owner: &F) -> T { owner.get() }", true);
+    check_with_protocol(channel, "",
+        "fn probe() -> &Int { let local = Lens { value: 7 }; local.get() }", false);
+}
+
+#[test]
+fn a_transparent_alias_retains_the_loan_shape_of_its_target() {
+    let source = "
+        type Scalar is Int;
+        type Borrowed is &Int;
+        type Source is protocol { type Item; fn get(&self) -> Self.Item; };
+    ";
+    check_with_protocol(source, "",
+        "fn probe<F: Source<Item = Scalar>>(value: F) -> Scalar { value.get() }", true);
+    check_with_protocol(source, "",
+        "fn probe<F: Source<Item = Borrowed>>(value: F) -> Borrowed { value.get() }", false);
+}
+
+#[test]
+fn same_named_projections_from_distinct_protocols_do_not_forward_evidence() {
+    let protocols = "
+        type Carrier is protocol { type Item; };
+        type Other is protocol { type Item; };
+        type Transfer is protocol {};
+        type Fixed is {};
+        implement<F: Other> Carrier for F { type Item = Fixed; }
+    ";
+    check_with_protocol(
+        protocols,
+        "fn accept<F: Carrier>(x: F) -> Int where F.Item: Transfer { 1 }",
+        "fn probe<F: Other>(x: F) -> Int where F.Item: Transfer { accept(x) }",
+        false,
     );
 }
 

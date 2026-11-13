@@ -190,6 +190,7 @@ impl TypeChecker {
                         .lookup_type(&format!("__struct_fields_{name}"))
                         .or_else(|| self.ctx.lookup_type(&format!("__newtype_inner_{name}")))
                         .or_else(|| self.ctx.lookup_type(&format!("__tuple_fields_{name}")))
+                        .or_else(|| self.ctx.type_aliases.get(&name))
                         .or_else(|| self.ctx.lookup_type(&name))
                     else {
                         return true;

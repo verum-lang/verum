@@ -54,6 +54,12 @@ pub struct FamilyApplication {
 }
 
 impl ProtocolChecker {
+    pub(crate) fn same_associated_owner(&self, left: &ProtocolBound, right: &ProtocolBound) -> bool {
+        self.paths_equal(&left.protocol, &right.protocol)
+            && left.args.len() == right.args.len()
+            && left.args.iter().zip(&right.args).all(|(a, b)| self.types_structurally_equal(a, b))
+    }
+
     /// Select a member in the declaration's scope before substituting its
     /// receiver. Two distinct parameters may later become the same concrete
     /// type while projecting members of different protocols.
@@ -79,9 +85,7 @@ impl ProtocolChecker {
                 );
                 let candidate = ProtocolBound::positive(protocol, selected.arguments);
                 if let Some(previous) = &owner {
-                    if !self.paths_equal(&previous.protocol, &candidate.protocol)
-                        || previous.args != candidate.args
-                    {
+                    if !self.same_associated_owner(previous, &candidate) {
                         return Err("associated projection has competing declaration owners".into());
                     }
                 } else { owner = Some(candidate); }

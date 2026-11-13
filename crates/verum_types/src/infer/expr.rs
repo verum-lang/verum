@@ -6758,10 +6758,20 @@ impl TypeChecker {
             let arguments = arguments.iter().map(nested).collect::<Result<verum_common::List<_>>>()?;
             if let Some(call) = call {
                 let checker = self.protocol_checker.read();
-                let owner = checker.associated_projection_owner(receiver, &assoc, &call.assumptions)
+                let owner = checker.associated_projection_owner(receiver, &assoc, call.declaration)
                     .map_err(TypeError::Other)?;
                 if let Some(mut owner) = owner {
                     owner.args = owner.args.iter().map(instantiate).collect::<Result<_>>()?;
+                    if let Some(premises) = call.caller
+                        && checker.associated_projection_owner(&base, &assoc, premises).map_err(TypeError::Other)?
+                            .as_ref().is_some_and(|actual| checker.same_associated_owner(&owner, actual))
+                    {
+                        let application = checker.resolve_associated_family(&base, &assoc, &arguments, premises)
+                            .map_err(TypeError::Other)?;
+                        if let Some(application) = application {
+                            return Ok(application.result);
+                        }
+                    }
                     let resolved = checker.resolve_owned_associated_family(&base, &owner, &assoc, &arguments, &[])
                         .map_err(TypeError::Other)?;
                     drop(checker);
@@ -6772,6 +6782,11 @@ impl TypeChecker {
                     }
                     // An unresolved selected application never falls through
                     // to an unrelated implementation with the same leaf name.
+                    if call.caller.is_some() {
+                        return Err(TypeError::Other(format!(
+                            "cannot establish the declared projection `{}.{assoc}` for `{base}`", owner.protocol
+                        ).into()));
+                    }
                     return instantiate(ty);
                 }
             }
