@@ -687,8 +687,7 @@ impl TypeChecker {
         let mut callable = if contexts.is_empty() {
             Type::function(params, output)
         } else {
-            self.ensure_using_types_registered(&contexts.requirements);
-            let requirement = self.context_resolver.resolve_requirement(&contexts.requirements, span)?;
+            let requirement = self.resolve_declared_callable_contexts(&contexts.requirements, span)?;
             Type::function_with_contexts(params, output, requirement)
         };
         if let Type::Function { properties, .. } = &mut callable { *properties = None; }

@@ -1034,7 +1034,6 @@ impl TypeChecker {
             context_resolver: crate::context_resolution::ContextResolver::new(),
             current_self_type: Maybe::None,
             decl_param_frames: Vec::new(),
-            capability_checker: crate::capability::CapabilityChecker::new(),
             context_declarations: Map::new(),
             context_method_signatures: Map::new(),
             current_source_contexts: List::new(),
@@ -1199,7 +1198,6 @@ impl TypeChecker {
             context_resolver: crate::context_resolution::ContextResolver::new(),
             current_self_type: Maybe::None,
             decl_param_frames: Vec::new(),
-            capability_checker: crate::capability::CapabilityChecker::new(),
             context_declarations: Map::new(),
             context_method_signatures: Map::new(),
             current_source_contexts: List::new(),
@@ -1365,7 +1363,6 @@ impl TypeChecker {
             context_resolver: crate::context_resolution::ContextResolver::new(),
             current_self_type: Maybe::None,
             decl_param_frames: Vec::new(),
-            capability_checker: crate::capability::CapabilityChecker::new(),
             context_declarations: Map::new(),
             context_method_signatures: Map::new(),
             current_source_contexts: List::new(),
@@ -9021,7 +9018,10 @@ impl TypeChecker {
             .register_protocol_as_context(name.clone());
 
         // Step 4: register in checker
-        self.context_checker.register_context(name.clone(), decl);
+        match self.declared_context_identity(&name) {
+            Ok(identity) => self.context_checker.register_context_binding(name, identity, decl),
+            Err(error) => self.deferred_soundness_errors.push(error),
+        }
     }
 
     /// Enable/disable lenient context checking. In lenient mode,
@@ -10281,8 +10281,8 @@ impl TypeChecker {
             // Provide statement - type checks the context value
             // Also validates for duplicate provide statements in same scope (E808)
             StmtKind::Provide { context, value, .. } => {
-                self.synth_expr(value)?;
-                self.bind_provided_context(context, stmt.span)?;
+                let provider = self.synth_expr(value)?;
+                self.bind_provided_context(context, &provider.ty, stmt.span)?;
                 Ok(false)
             }
 
@@ -10314,9 +10314,9 @@ impl TypeChecker {
             } => {
                 // The initializer belongs to the enclosing scope. Only the
                 // body sees the provider and its context-name binding.
-                self.synth_expr(value)?;
+                let provider = self.synth_expr(value)?;
                 self.with_lexical_scope(|checker| {
-                    checker.bind_provided_context(context, stmt.span)?;
+                    checker.bind_provided_context(context, &provider.ty, stmt.span)?;
                     let result = checker.synth_expr(block)?;
                     Ok(matches!(result.ty, Type::Never))
                 })
@@ -10329,7 +10329,30 @@ impl TypeChecker {
 
     /// Bind an already evaluated provider in the current lexical scope.
     /// Declaration and duplicate checks apply equally to both provide forms.
-    fn bind_provided_context(&mut self, context: &Text, span: Span) -> Result<()> {
+    fn bind_provided_context(&mut self, context: &Text, provider: &Type, span: Span) -> Result<()> {
+        // An unqualified context requirement must not erase its provider's
+        // permissions, including through an alias, refinement, or reference.
+        let mut ty = self.unifier.normalize_aliases(&self.unifier.apply(provider));
+        loop {
+            match ty {
+                Type::CapabilityRestricted { base, capabilities } => {
+                    if crate::capability::TypeCapabilitySet::all().is_satisfied_by(&capabilities) {
+                        ty = self.unifier.normalize_aliases(&base);
+                        continue;
+                    }
+                    return Err(TypeError::OtherWithCodeSpanned {
+                        code: "E411".into(),
+                        msg: format!("context `{context}` requires an unrestricted provider; this value carries [{}]", capabilities.names().join(", ")).into(),
+                        span,
+                    });
+                }
+                Type::Reference { inner, .. } | Type::CheckedReference { inner, .. }
+                | Type::UnsafeReference { inner, .. } | Type::Refined { base: inner, .. } => {
+                    ty = self.unifier.normalize_aliases(&inner);
+                }
+                _ => break,
+            }
+        }
         self.context_checker.provide_context(context.clone(), span)?;
         if let Maybe::Some(ty) = self.context_resolver.get_context_type(context) {
             self.ctx

@@ -15,6 +15,96 @@ pub(super) struct ContextMethodSignatures {
 }
 
 impl TypeChecker {
+    /// Contexts use declaration identities in callable contracts. The consumer's
+    /// local names remain available for expressions and for diagnostics.
+    pub(super) fn declared_context_identity(&self, name: &Text) -> Result<Text> {
+        Ok(self.source_context_identity(name)?
+            .unwrap_or_else(|| self.context_checker.context_identity(name).into()))
+    }
+
+    fn source_context_identity(&self, name: &Text) -> Result<Option<Text>> {
+        use super::source_declarations::{MountTargetKind, source_mount_targets};
+        use verum_ast::ItemKind;
+        use verum_modules::{ExportKind, ModulePath};
+        let owner = &self.current_module_path;
+        let registry = self.module_registry.read();
+        let module = self.get_module_with_path_aliases(owner, &registry);
+        let owner_path = ModulePath::from_str(owner);
+        let mut explicit = verum_common::Set::<Text>::new();
+        let mut glob = verum_common::Set::<Text>::new();
+        let Some(module) = module else { return Ok(None); };
+        for item in &module.ast.items {
+            if !self.cfg_evaluator.should_include_item(item) { continue; }
+            match &item.kind {
+                ItemKind::Context(declaration) if declaration.name.name == *name => {
+                    return Ok(Some(verum_common::qualified_name::qualify_module_name(owner, name)));
+                }
+                ItemKind::Type(declaration) if declaration.name.name == *name
+                    && matches!(&declaration.body, verum_ast::TypeDeclBody::Protocol(protocol) if protocol.is_context) => {
+                    return Ok(Some(verum_common::qualified_name::qualify_module_name(owner, name)));
+                }
+                ItemKind::Mount(mount) => {
+                    source_mount_targets(mount, &owner_path, name, |target, kind| {
+                        let (surface, exported_name) = match kind {
+                            MountTargetKind::Glob => (target, name.clone()),
+                            MountTargetKind::Named => {
+                                let (Some(parent), Some(leaf)) = (target.parent(), target.name()) else { return };
+                                (parent, leaf.clone())
+                            }
+                        };
+                        let Some(source) = self.get_module_with_path_aliases(&surface.to_string(), &registry) else { return };
+                        let Some(export) = source.exports.get(&exported_name) else { return };
+                        if export.kind != ExportKind::Context { return; }
+                        let Some(definition) = registry.get(export.source_module) else { return };
+                        let leaf = export.original_name.as_ref().unwrap_or(&export.name);
+                        let key = verum_common::qualified_name::qualify_module_name(&definition.path.to_string(), leaf);
+                        let slot = match kind { MountTargetKind::Named => &mut explicit, MountTargetKind::Glob => &mut glob };
+                        slot.insert(key);
+                    });
+                }
+                _ => {}
+            }
+        }
+        let selected = if explicit.is_empty() { glob } else { explicit };
+        if selected.len() > 1 {
+            let mut candidates: List<_> = selected.into_iter().collect();
+            candidates.sort();
+            return Err(TypeError::AmbiguousName { name: name.clone(), sources: candidates.join(", ").into(), span: module.ast.span });
+        }
+        Ok(selected.into_iter().next())
+    }
+
+    pub(super) fn resolve_declared_callable_contexts(
+        &mut self,
+        contexts: &[verum_ast::context::ContextRequirement],
+        span: Span,
+    ) -> Result<crate::di::requirement::ContextRequirement> {
+        use crate::di::requirement::ContextRequirement;
+        self.ensure_using_types_registered(contexts);
+        let mut written = contexts.to_vec();
+        for requirement in &mut written {
+            let Some(name) = requirement.path.as_ident() else { continue };
+            if let Some(identity) = self.source_context_identity(&name.name)? {
+                // Only canonical identities persist across source scopes. A
+                // consumer must never acquire an unmounted name merely because
+                // an imported function mentions it in its own declaration.
+                self.context_resolver.register_protocol_as_context(identity.clone());
+                requirement.path = verum_ast::ty::Path::single(Ident::new(identity, name.span));
+            }
+        }
+        let requirement = self.context_resolver.resolve_requirement(&written, span)?;
+        let mut resolved = ContextRequirement::empty();
+        for context in requirement.iter() {
+            let mut context = context.clone();
+            // The resolver can also expand a context group.
+            if !context.name.as_str().contains('.') {
+                context.name = self.declared_context_identity(&context.name)?;
+            }
+            resolved.add_context(context);
+        }
+        Ok(resolved)
+    }
+
     pub(super) fn register_context_method_source(&mut self, name: Text) {
         self.context_method_signatures.insert(
             name,
@@ -60,7 +150,7 @@ impl TypeChecker {
             span: declaration.span,
         };
         self.context_checker
-            .register_context(binding.clone(), availability.clone());
+            .register_context_binding(binding.clone(), identity.clone(), availability.clone());
         self.context_declarations
             .insert(binding.clone(), availability);
         self.context_resolver

@@ -299,7 +299,7 @@ impl TypeChecker {
                 // Also register with context_checker for context call validation
                 // Context type system integration: context requirements tracked in function types, checked at call sites — Type System Integration
                 self.context_checker
-                    .register_context(context_name, ctx_decl.clone());
+                    .register_context_binding(context_name.clone(), verum_common::qualified_name::qualify_module_name(&self.current_module_path, &context_name), ctx_decl.clone());
 
                 Ok(())
             }
@@ -4735,10 +4735,12 @@ impl TypeChecker {
                             // Same Step 4 the stdlib path already performs in
                             // `register_stdlib_context_full`; a mounted context
                             // is not a weaker kind of context.
-                            self.context_checker.register_context(
-                                verum_common::Text::from(register_name),
-                                ctx_decl.clone(),
-                            );
+                            let owner = module_info.exports.get(&Text::from(item_name))
+                                .and_then(|export| registry.get(export.source_module))
+                                .map(|module| module.path.to_string())
+                                .unwrap_or_else(|| resolved_module_path.to_string());
+                            let identity = verum_common::qualified_name::qualify_module_name(&owner, &ctx_decl.name.name);
+                            self.context_checker.register_context_binding(register_name.into(), identity, ctx_decl.clone());
 
                             // Found a context declaration - build Record type with methods.
                             // Module-aware: pin the checker's module path to the SOURCE
@@ -10948,14 +10950,6 @@ impl TypeChecker {
                 }
             }
 
-            // Register contexts with capability checker
-            // Context system core: "context Name { fn method(...) }" declarations, "using [Ctx1, Ctx2]" on functions, "provide Ctx = impl" for injection — 0 - Capability Attenuation
-            // Each context declared in the `using` clause gets full capabilities by default
-            for context_ref in req.iter() {
-                use crate::capability::ContextCapabilities;
-                let caps = ContextCapabilities::full(context_ref.name.clone());
-                self.capability_checker.register_context(caps);
-            }
         }
 
         // ============================================================
@@ -10969,7 +10963,11 @@ impl TypeChecker {
         if let Some(ref req) = context_requirement {
             let mut context_set = ContextSet::new();
             for context_ref in req.iter() {
-                context_set.add(ContextRequirement::new(context_ref.name.clone(), func.span));
+                context_set.add(if context_ref.is_negative {
+                    ContextRequirement::negative(context_ref.name.clone(), func.span)
+                } else {
+                    ContextRequirement::new(context_ref.name.clone(), func.span)
+                });
             }
             // Also set up the context checker's required contexts
             self.context_checker.set_required(context_set.clone());
@@ -18105,7 +18103,7 @@ impl TypeChecker {
 
             // Check if this name is a registered context with capabilities
             if let Maybe::Some(caps) = self
-                .capability_checker
+                .context_checker
                 .get_context_capabilities(context_name)
             {
                 // This is a context call - check if the method requires specific capabilities
@@ -18134,7 +18132,7 @@ impl TypeChecker {
                 );
 
                 // Check if capabilities are sufficient
-                if let Err(cap_err) = self.capability_checker.check_requirement(&requirement) {
+                if let Err(cap_err) = self.context_checker.check_capability_requirement(&requirement) {
                     // E0306: Capability violation - method requires capability not available
                     use verum_diagnostics::capability_attenuation_errors::CapabilityViolationError;
 

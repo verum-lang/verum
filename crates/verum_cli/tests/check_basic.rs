@@ -693,3 +693,82 @@ fn inherent_method_conditions_cover_signatures_and_calls() {
         "{diagnostics}"
     );
 }
+
+#[test]
+fn providers_authorize_imported_calls_in_their_lexical_scope() {
+    let directory = tempfile::tempdir().unwrap();
+    let core = write_source_core(directory.path(), &[]);
+    let project = directory.path().join("project");
+    std::fs::create_dir_all(project.join("src")).unwrap();
+    std::fs::write(project.join("verum.toml"), "[cog]\nname='fixture'\nversion='0.1.0'\n").unwrap();
+    std::fs::write(
+        project.join("src/service.vr"),
+        "module fixture.service;
+         public context RepositoryGate { fn read() -> Int; }
+         public type Device is { public value: Int };
+         implement Device { public fn read(&self) -> Int { self.value } }
+         public fn snapshot() -> Int using [RepositoryGate] { RepositoryGate.read() }",
+    ).unwrap();
+    let cases = [
+        ("fn main() {provide RepositoryGate = Device {value: 7}; let n = fetch();}", None),
+        ("fn main() {provide RepositoryGate = Device {value: 1} in {let n = fetch();}}", None),
+        ("fn main() {provide RepositoryGate = Device {value: 1};
+            provide RepositoryGate = Device {value: 2} in {let n = fetch();} let m = fetch();}", None),
+        ("fn forward() -> Int using [RepositoryGate] {fetch()}
+          fn main() {provide RepositoryGate = Device {value: 7}; let n = forward();}", None),
+        ("fn main() {provide RepositoryGate = Device {value: 1};
+            let call = fetch; let n = call();}", None),
+        ("fn main() {let n = fetch();}", Some("error<E613>")),
+        ("fn main() {provide RepositoryGate = Device {value: 1} in {let n = fetch();} let m = fetch();}", Some("error<E613>")),
+        ("fn main() {provide RepositoryGate = Device {value: 1};
+            provide RepositoryGate = Device {value: 2};}", Some("already provided")),
+        ("fn bad(backend: Device with [Read]) {provide RepositoryGate = backend; let n = fetch();}
+          fn main() {}", Some("error<E411>")),
+        ("type Limited is Device with [Read]; fn bad(backend: &Limited) {
+            provide RepositoryGate = backend in {let n = fetch();}} fn main() {}", Some("error<E411>")),
+        ("fn main() {provide RepositoryGate = Device {value: 1};
+            let limited = RepositoryGate.attenuate(Capability.ReadOnly);
+            provide RepositoryGate = limited in {let n = fetch();}}", Some("error<E411>")),
+        ("fn main() {provide RepositoryGate = Device {value: 1};
+            let limited = RepositoryGate.attenuate(Capability.ReadOnly); let n = fetch();}", Some("error<E0306>")),
+        ("fn main() {provide RepositoryGate = Device {value: 1};
+            let limited = RepositoryGate.attenuate(Capability.ReadOnly);
+            provide RepositoryGate = RepositoryGate in {let n = fetch();}}", Some("error<E411>")),
+        ("fn main() {provide RepositoryGate = Device {value: 1};
+            let limited = RepositoryGate.attenuate(Capability.Admin);
+            provide RepositoryGate = limited in {let n = fetch();} let m = fetch();}", None),
+        ("fn main() {provide RepositoryGate = Device {value: 1};
+            provide RepositoryGate = Device {value: 2} in {
+                let limited = RepositoryGate.attenuate(Capability.ReadOnly);
+            } let n = fetch();}", None),
+    ];
+    std::fs::write(project.join("src/consumer.vr"), "module fixture.consumer;
+        mount fixture.service.{RepositoryGate as Backend, snapshot};
+        public fn relay()->Int using [Backend] {snapshot()}").unwrap();
+    for (body, accepted) in [
+        ("mount fixture.service.{RepositoryGate as Backend, Device, snapshot};
+          fn main() {provide Backend = Device {value: 7}; let n = snapshot();}", true),
+        ("mount fixture.service.{RepositoryGate as Backend, Device}; mount fixture.consumer.relay;
+          fn main() {provide Backend = Device {value: 7}; let n = relay();}", true),
+        ("mount fixture.service.{RepositoryGate as Backend, Device, snapshot};
+          context RepositoryGate {fn read()->Int;}
+          fn main() {provide RepositoryGate = Device {value: 7}; let n = snapshot();}", false),
+    ] {
+        let output = check_with_source_core(&core, &project, &format!("module fixture.main; {body}"));
+        let errors = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.success(), accepted, "{body}: {errors}");
+        if !accepted {
+            assert!(errors.contains("error<E613>") && errors.contains("RepositoryGate"), "{errors}");
+        }
+    }
+    for (body, expected) in cases {
+        let source = format!("module fixture.main; mount fixture.service.{{RepositoryGate, Device, snapshot as fetch}}; {body}");
+        let output = check_with_source_core(&core, &project, &source);
+        let errors = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.success(), expected.is_none(), "{body}: {errors}");
+        if let Some(expected) = expected {
+            assert!(errors.contains(expected), "{body}: {errors}");
+            assert!(!errors.contains("error<E0308>"), "{body}: {errors}");
+        }
+    }
+}

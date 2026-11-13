@@ -22,6 +22,7 @@
 //! 3. **Scope Closure (β-reduction)**: Context availability is lexically scoped by `provide`
 //! 4. **Method Validation**: Context method calls must match their signatures
 
+use crate::capability::{CapabilityChecker, CapabilityError, CapabilityRequirement, ContextCapabilities, TypeCapabilitySet};
 use crate::{Result, TypeError};
 use verum_ast::{decl::ContextDecl, span::Span};
 use verum_common::ToText;
@@ -249,6 +250,8 @@ impl FromIterator<ContextRequirement> for ContextSet {
 pub struct ContextEnv {
     /// Currently provided contexts in this scope
     provided: Map<Text, ContextDecl>,
+    /// Permissions of this frame's providers, requirements, and local restrictions.
+    capabilities: CapabilityChecker,
     /// Parent environment (for nested scopes)
     parent: Option<Box<ContextEnv>>,
 }
@@ -258,6 +261,7 @@ impl ContextEnv {
     pub fn new() -> Self {
         Self {
             provided: Map::new(),
+            capabilities: CapabilityChecker::new(),
             parent: None,
         }
     }
@@ -266,6 +270,7 @@ impl ContextEnv {
     pub fn child(&self) -> Self {
         Self {
             provided: Map::new(),
+            capabilities: CapabilityChecker::new(),
             parent: Some(Box::new(self.clone())),
         }
     }
@@ -278,8 +283,18 @@ impl ContextEnv {
         if self.provided.contains_key(&name_text) {
             return false; // Duplicate in current scope
         }
+        self.capabilities.register_context(ContextCapabilities::full(name_text.clone()));
         self.provided.insert(name_text, decl);
         true
+    }
+
+    fn capability_scope(&self, name: &str) -> &CapabilityChecker {
+        let mut scope = self;
+        while scope.capabilities.get_context_capabilities(name).is_none() {
+            let Some(parent) = scope.parent.as_deref() else { break };
+            scope = parent;
+        }
+        &scope.capabilities
     }
 
     /// Check if a context is already provided in the current scope only (not parent scopes)
@@ -513,6 +528,8 @@ pub struct ContextChecker {
     required: ContextSet,
     /// Context declarations (interface definitions)
     declarations: Map<Text, ContextDecl>,
+    /// Source aliases resolve to declaration-owned keys before scope lookup.
+    declaration_bindings: Map<Text, Text>,
     /// Function registry for transitive checking
     /// Maps function name -> context info
     function_registry: Map<Text, FunctionContextInfo>,
@@ -550,6 +567,7 @@ impl ContextChecker {
             env: ContextEnv::new(),
             required: ContextSet::new(),
             declarations: Map::new(),
+            declaration_bindings: Map::new(),
             function_registry: Map::new(),
             lenient: false,
         }
@@ -566,7 +584,17 @@ impl ContextChecker {
         self.lenient
     }
     pub fn register_context(&mut self, name: impl Into<Text>, decl: ContextDecl) {
-        self.declarations.insert(name.into(), decl);
+        let name = name.into();
+        self.register_context_binding(name.clone(), name, decl);
+    }
+
+    pub(crate) fn register_context_binding(&mut self, name: Text, identity: Text, decl: ContextDecl) {
+        self.declaration_bindings.insert(name, identity.clone());
+        self.declarations.insert(identity, decl);
+    }
+
+    pub(crate) fn context_identity<'a>(&'a self, name: &'a str) -> &'a str {
+        self.declaration_bindings.get(&Text::from(name)).map_or(name, |identity| identity.as_str())
     }
 
     /// Was this name declared as a `context` of either spelling?
@@ -588,7 +616,7 @@ impl ContextChecker {
     /// `has_context` answers a different question again: whether a
     /// context is PROVIDED in the current scope chain.
     pub fn is_declared_context(&self, name: &str) -> bool {
-        self.declarations.contains_key(&Text::from(name))
+        self.declarations.contains_key(&Text::from(self.context_identity(name)))
     }
 
     /// Enter a new scope
@@ -613,6 +641,7 @@ impl ContextChecker {
     /// Returns error E808 if the context is already provided in the current scope.
     pub fn provide_context(&mut self, name: impl Into<Text>, span: Span) -> Result<()> {
         let name = name.into();
+        let name: Text = self.context_identity(&name).into();
         // Lookup the context declaration
         let decl = match self.declarations.get(&name) {
             Some(d) => d.clone(),
@@ -641,7 +670,62 @@ impl ContextChecker {
     ///
     /// Called when entering a function with `using [Context1, Context2]`
     pub fn set_required(&mut self, contexts: ContextSet) {
-        self.required = contexts;
+        let mut required = ContextSet::new();
+        for context in contexts.iter() {
+            let mut context = context.clone();
+            context.name = self.context_identity(&context.name).into();
+            if !context.is_negative {
+                self.env.capabilities.register_context(ContextCapabilities::full(context.name.clone()));
+            }
+            required.add(context);
+        }
+        self.required = required;
+    }
+
+    pub(crate) fn get_context_capabilities(&self, name: &str) -> Option<&ContextCapabilities> {
+        let identity = self.context_identity(name);
+        self.env.capability_scope(identity).get_context_capabilities(identity)
+    }
+
+    pub(crate) fn check_capability_requirement(&self, requirement: &CapabilityRequirement) -> std::result::Result<(), CapabilityError> {
+        let mut requirement = requirement.clone();
+        requirement.context_name = self.context_identity(&requirement.context_name).into();
+        self.env.capability_scope(&requirement.context_name).check_requirement(&requirement)
+    }
+
+    pub(crate) fn check_call_authority(&self, name: &Text, span: Span) -> Result<()> {
+        let permission = self.get_context_capabilities(name).ok_or_else(|| TypeError::MissingContext {
+            context: name.clone(),
+            span,
+        })?;
+        if permission.is_attenuated {
+            let required = CapabilityRequirement::new(name.clone(), TypeCapabilitySet::all(), "function call".into());
+            self.check_capability_requirement(&required).map_err(|error| TypeError::OtherWithCodeSpanned {
+                code: "E0306".into(), msg: error.message(), span,
+            })?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn attenuate_context(&mut self, name: &str, requested: TypeCapabilitySet) -> std::result::Result<ContextCapabilities, CapabilityError> {
+        let source = self.get_context_capabilities(name).ok_or_else(|| CapabilityError::ContextNotFound {
+            context_name: name.into(), operation: "attenuate".into(),
+        })?;
+        if !requested.is_satisfied_by(&source.capabilities) {
+            return Err(CapabilityError::InsufficientCapabilities {
+                context_name: name.into(), operation: "attenuate".into(),
+                missing: requested.difference(&source.capabilities),
+                required: requested, available: source.capabilities.clone(),
+            });
+        }
+        let restricted = ContextCapabilities {
+            context_name: source.context_name.clone(),
+            capabilities: requested,
+            is_attenuated: true,
+            original_capabilities: Some(source.original_capabilities.as_ref().unwrap_or(&source.capabilities).clone()),
+        };
+        self.env.capabilities.register_context(restricted.clone());
+        Ok(restricted)
     }
 
     /// Check if a context is available (either required or provided)
@@ -649,7 +733,8 @@ impl ContextChecker {
         // Context is available if either:
         // 1. It's in the function's required contexts
         // 2. It's provided via `provide` statement
-        self.required.contains(name) || self.env.has_context(name)
+        let identity = self.context_identity(name);
+        self.required.contains(identity) || self.env.has_context(identity)
     }
 
     /// Validate a context method call
@@ -673,7 +758,7 @@ impl ContextChecker {
         }
 
         // Lookup context declaration
-        let decl = match self.declarations.get(&Text::from(context_name)) {
+        let decl = match self.declarations.get(&Text::from(self.context_identity(context_name))) {
             Some(d) => d,
             None => {
                 return Err(TypeError::UndefinedContext {
@@ -731,7 +816,7 @@ impl ContextChecker {
     /// ```
     pub fn check_sub_context(&self, context: &str, sub: &str, span: Span) -> Result<()> {
         // Lookup parent context declaration
-        match self.declarations.get(&Text::from(context)) {
+        match self.declarations.get(&Text::from(self.context_identity(context))) {
             Some(decl) => {
                 // Check if sub-context exists in the parent context's sub_contexts
                 let sub_context_exists = decl
@@ -846,7 +931,7 @@ impl ContextChecker {
         }
 
         // Verify the context is actually declared
-        if !self.declarations.contains_key(&Text::from(context_name)) {
+        if !self.declarations.contains_key(&Text::from(self.context_identity(context_name))) {
             return Err(TypeError::UndefinedContext {
                 name: context_name.to_text(),
                 span,
@@ -917,12 +1002,13 @@ impl ContextChecker {
         }
         // Check each required context individually
         for required in required_contexts.iter() {
-            let context_name = required.name.as_str();
+            let context_name = self.context_identity(&required.name);
 
             // Check if the context is satisfied either by:
             // 1. Being in the provided contexts (caller's `using` clause)
             // 2. Being available in the environment (via `provide`)
-            let is_provided = provided_contexts.contains(context_name);
+            let is_provided = provided_contexts.iter().any(|provided|
+                !provided.is_negative && self.context_identity(&provided.name) == context_name);
             let is_in_env = self.env.has_context(context_name);
 
             if !is_provided && !is_in_env {
@@ -934,7 +1020,7 @@ impl ContextChecker {
             }
 
             // Verify the context is actually declared (interface exists)
-            if !self.declarations.contains_key(&Text::from(context_name)) {
+            if !self.declarations.contains_key(&Text::from(self.context_identity(context_name))) {
                 return Err(TypeError::UndefinedContext {
                     name: context_name.to_text(),
                     span: call_span,

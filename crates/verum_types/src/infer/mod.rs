@@ -962,9 +962,6 @@ pub struct TypeChecker {
     /// deleted any LEGITIMATE same-named global type — frames
     /// don't.
     pub(crate) decl_param_frames: Vec<indexmap::IndexMap<Text, Type>>,
-    /// Capability checker for context attenuation
-    /// Context system core: "context Name { fn method(...) }" declarations, "using [Ctx1, Ctx2]" on functions, "provide Ctx = impl" for injection — 0 - Capability Attenuation
-    capability_checker: crate::capability::CapabilityChecker,
     /// Context declarations for method-level capability extraction
     /// Maps context name to its AST declaration
     context_declarations: Map<Text, verum_ast::decl::ContextDecl>,

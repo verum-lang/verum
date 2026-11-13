@@ -187,7 +187,6 @@ impl TypeChecker {
             .property_inferrer
             .context()
             .body_scope_snapshot(&function.name.name);
-        let capabilities = self.capability_checker.body_scope_snapshot();
         let contract = self.function_contracts.get(&function.name.name).cloned();
         let ambiguity = self.pending_ambiguity.len();
         let statics = self.pending_protocol_static_calls.len();
@@ -269,7 +268,6 @@ impl TypeChecker {
         self.property_inferrer
             .context_mut()
             .restore_body_scope(&function.name.name, properties);
-        self.capability_checker.restore_body_scope(capabilities);
         match contract {
             Some(contract) => {
                 self.function_contracts

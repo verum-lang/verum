@@ -5880,7 +5880,7 @@ impl TypeChecker {
 
                     // Check if the context is registered
                     let current_caps = match self
-                        .capability_checker
+                        .context_checker
                         .get_context_capabilities(context_name.as_str())
                     {
                         Maybe::Some(caps) => caps.clone(),
@@ -5903,7 +5903,7 @@ impl TypeChecker {
 
                     // Verify that new capabilities are a subset of current capabilities
                     // If not, this is an invalid attenuation (E0308)
-                    if !new_caps.is_subset_of(&current_caps.capabilities) {
+                    if !new_caps.is_satisfied_by(&current_caps.capabilities) {
                         let missing = new_caps.difference(&current_caps.capabilities);
                         let missing_names: List<verum_common::Text> = missing
                             .iter()
@@ -5940,12 +5940,18 @@ impl TypeChecker {
 
                     // Create attenuated context in capability checker
                     match self
-                        .capability_checker
+                        .context_checker
                         .attenuate_context(context_name.as_str(), new_caps)
                     {
-                        Ok(_) => {
-                            // Attenuation succeeds - return the same context type
-                            Ok(InferResult::new(context_result.ty))
+                        Ok(restricted) => {
+                            let ty = Type::CapabilityRestricted {
+                                base: Box::new(context_result.ty),
+                                capabilities: restricted.capabilities,
+                            };
+                            // Rebinding this dependency through its original name must
+                            // carry the same restriction as the returned value.
+                            self.ctx.env.insert(context_name, TypeScheme::mono(ty.clone()));
+                            Ok(InferResult::new(ty))
                         }
                         Err(cap_err) => {
                             // Convert capability error to type error with diagnostic
@@ -7539,22 +7545,8 @@ impl TypeChecker {
                     }
                 };
 
-                // Context satisfaction check
-                if let Some(ref callee_contexts) = contexts {
-                    let mut callee_context_set = ContextSet::new();
-                    for ctx_ref in callee_contexts.iter() {
-                        callee_context_set
-                            .add(ContextRequirement::new(ctx_ref.name.clone(), expr.span));
-                    }
-
-                    let caller_context_set =
-                        self.current_function_contexts.clone().unwrap_or_default();
-
-                    self.context_checker.check_context_satisfaction(
-                        &callee_context_set,
-                        &caller_context_set,
-                        expr.span,
-                    )?;
+                if let Some(callee_contexts) = &contexts {
+                    self.check_callable_contexts(callee_contexts, expr.span)?;
                 }
 
                 // Check each argument against parameter type
@@ -8053,128 +8045,6 @@ impl TypeChecker {
         }
         if let Some(callee_contexts) = contexts {
             self.check_callable_contexts(callee_contexts, expr.span)?;
-        }
-
-        // Check capability requirements if function has contexts
-        // Context system core: "context Name { fn method(...) }" declarations, "using [Ctx1, Ctx2]" on functions, "provide Ctx = impl" for injection — 0 - Capability Attenuation
-        if let Some(req) = contexts {
-            for context_ref in req.iter() {
-                let context_name = &context_ref.name;
-                // Check if the required context is available
-                match self
-                    .capability_checker
-                    .get_context_capabilities(context_name.as_str())
-                {
-                    Maybe::Some(caps) => {
-                        // Context is available - verify it has necessary capabilities
-                        // Extract capability requirements from function name and signature
-                        use crate::capability::{CapabilityRequirement, TypeCapabilitySet};
-
-                        // Extract function name for heuristic analysis
-                        let func_name = if let ExprKind::Path(path) = &func.kind {
-                            path.segments
-                                .last()
-                                .and_then(|seg| match seg {
-                                    verum_ast::ty::PathSegment::Name(id) => Some(id.name.as_str()),
-                                    _ => None,
-                                })
-                                .unwrap_or("function")
-                        } else {
-                            "function"
-                        };
-
-                        // Use the method capability mapper to extract requirements
-                        // For function calls, we use the function name as a hint
-                        let context_decl = self.context_declarations.get(context_name);
-                        let required_caps =
-                            self.method_capability_mapper.extract_method_capabilities(
-                                context_name,
-                                &verum_common::Text::from(func_name),
-                                context_decl,
-                            );
-
-                        let requirement = CapabilityRequirement::new(
-                            context_name.clone(),
-                            required_caps.clone(),
-                            verum_common::Text::from(format!("function call to {}", func_name)),
-                        );
-
-                        if let Err(cap_err) =
-                            self.capability_checker.check_requirement(&requirement)
-                        {
-                            // E0306: Capability violation
-                            use verum_diagnostics::capability_attenuation_errors::CapabilityViolationError;
-
-                            let func_name = if let ExprKind::Path(path) = &func.kind {
-                                path.segments
-                                    .iter()
-                                    .filter_map(|seg| match seg {
-                                        verum_ast::ty::PathSegment::Name(id) => {
-                                            Some(id.name.as_str())
-                                        }
-                                        _ => None,
-                                    })
-                                    .collect::<Vec<_>>()
-                                    .join("::")
-                            } else {
-                                "function".to_string()
-                            };
-
-                            let cap_names: Vec<String> = caps
-                                .capabilities
-                                .names()
-                                .iter()
-                                .map(|t| t.to_string())
-                                .collect();
-
-                            let diagnostic = CapabilityViolationError::new(
-                                format!("{}::{}", context_name, "ReadOnly"),
-                                span_to_line_col(func.span),
-                            )
-                            .with_declared_capabilities(
-                                cap_names.iter().map(|s| s.as_str().into()).collect(),
-                            )
-                            .with_function_name(func_name.as_str())
-                            .build();
-
-                            self.diagnostics.push(diagnostic);
-
-                            return Err(TypeError::Other(cap_err.message()));
-                        }
-                    }
-                    Maybe::None => {
-                        // E0308: Required context not provided
-                        use verum_diagnostics::capability_attenuation_errors::CapabilityNotProvidedError;
-
-                        let func_name = if let ExprKind::Path(path) = &func.kind {
-                            path.segments
-                                .iter()
-                                .filter_map(|seg| match seg {
-                                    verum_ast::ty::PathSegment::Name(id) => Some(id.name.as_str()),
-                                    _ => None,
-                                })
-                                .collect::<Vec<_>>()
-                                .join("::")
-                        } else {
-                            "function".to_string()
-                        };
-
-                        let diagnostic = CapabilityNotProvidedError::new(
-                            context_name.as_str(),
-                            span_to_line_col(func.span),
-                        )
-                        .with_function_name(func_name.as_str())
-                        .build();
-
-                        self.diagnostics.push(diagnostic);
-
-                        return Err(TypeError::Other(verum_common::Text::from(format!(
-                            "Function requires context '{}' which is not provided",
-                            context_name
-                        ))));
-                    }
-                }
-            }
         }
 
         // Check each argument against parameter type with substitution

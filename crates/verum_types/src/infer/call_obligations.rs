@@ -89,7 +89,14 @@ impl TypeChecker {
         }
         self.context_checker.check_context_satisfaction(
             &required, &self.current_function_contexts.clone().unwrap_or_default(), span,
-        )
+        )?;
+
+        // A callee requiring an unqualified context receives its entire
+        // interface. The operation's spelling cannot narrow that contract.
+        for context in required.iter() {
+            self.context_checker.check_call_authority(&context.name, span)?;
+        }
+        Ok(())
     }
 
     /// Keep value-domain obligations only after selecting a callable candidate.

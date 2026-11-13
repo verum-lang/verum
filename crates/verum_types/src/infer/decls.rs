@@ -6399,15 +6399,8 @@ impl TypeChecker {
         let func_type = if !func.contexts.is_empty() {
             let contexts_list: List<_> = func.contexts.iter().cloned().collect();
             // T0660: value-typed contexts — learn plain types first.
-            self.ensure_using_types_registered(&contexts_list);
-            if let Ok(requirement) = self
-                .context_resolver
-                .resolve_requirement(&contexts_list, func.span)
-            {
-                Type::function_with_contexts(param_types, return_for_sig, requirement)
-            } else {
-                Type::function(param_types, return_for_sig)
-            }
+            let requirement = self.resolve_declared_callable_contexts(&contexts_list, func.span)?;
+            Type::function_with_contexts(param_types, return_for_sig, requirement)
         } else {
             Type::function(param_types, return_for_sig)
         };

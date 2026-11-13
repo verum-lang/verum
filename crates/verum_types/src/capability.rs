@@ -92,12 +92,12 @@ impl ContextCapabilities {
 
     /// Check if this context can satisfy required capabilities
     pub fn satisfies(&self, required: &TypeCapabilitySet) -> bool {
-        required.is_subset_of(&self.capabilities)
+        required.is_satisfied_by(&self.capabilities)
     }
 
     /// Get missing capabilities compared to requirements
     pub fn missing_capabilities(&self, required: &TypeCapabilitySet) -> List<TypeCapability> {
-        required.difference(&self.capabilities)
+        required.capabilities.iter().filter(|required| !self.capabilities.grants(required)).cloned().collect()
     }
 }
 
@@ -594,20 +594,13 @@ impl CapabilityRequirement {
 /// Capability checker for type checking
 ///
 /// Verifies that operations have the required capabilities at compile time.
+#[derive(Debug, Clone)]
 pub struct CapabilityChecker {
     /// Currently available context capabilities
     context_capabilities: List<ContextCapabilities>,
 }
 
 impl CapabilityChecker {
-    pub(crate) fn body_scope_snapshot(&self) -> List<ContextCapabilities> {
-        self.context_capabilities.clone()
-    }
-
-    pub(crate) fn restore_body_scope(&mut self, state: List<ContextCapabilities>) {
-        self.context_capabilities = state;
-    }
-
     /// Create a new capability checker
     pub fn new() -> Self {
         Self {
