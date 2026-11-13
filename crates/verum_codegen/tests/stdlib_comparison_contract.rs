@@ -54,6 +54,16 @@ fn declared_comparison_and_inherited_inequality_execute_in_a_native_image() {
         "actual error and both protocol implementations"
     );
     let probe = Parser::new(r#"
+        type Count is { value: Int };
+        type Counts is { left: Count, right: Count };
+        implement Count {
+            fn equal(&self, other: &Count) -> Bool { self.value == other.value }
+        }
+        fn compare_counts(left: &Count, right: &Count) -> Bool { left.equal(right) }
+        fn compare_fields(values: &Counts) -> Bool { values.left.equal(&values.right) }
+        fn compare_fields_direct(values: &Counts) -> Bool {
+            compare_counts(&values.left, &values.right)
+        }
         fn compare<T: PartialEq>(left: &T, right: &T) -> Bool { left.eq(right) }
         fn reflexive<T: Eq>(value: &T) -> Bool { value.eq(value) }
         fn main() -> Int {
@@ -64,6 +74,10 @@ fn declared_comparison_and_inherited_inequality_execute_in_a_native_image() {
             if first.ne(&first) || !first.ne(&different_value) || !first.ne(&different_variant) { return 2; }
             if !compare(&first, &first) || compare(&first, &different_value) { return 3; }
             if !reflexive(&first) || !reflexive(&CeShortRow(8)) { return 4; }
+            let equal = Counts { left: Count { value: 37 }, right: Count { value: 37 } };
+            let unequal = Counts { left: Count { value: 37 }, right: Count { value: 91 } };
+            if !compare_fields(&equal) || compare_fields(&unequal) { return 5; }
+            if !compare_fields_direct(&equal) || compare_fields_direct(&unequal) { return 6; }
             73
         }
     "#).parse_module().expect("probe grammar");

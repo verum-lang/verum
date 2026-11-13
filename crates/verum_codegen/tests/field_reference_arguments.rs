@@ -49,6 +49,26 @@ fn field_reference_cast_has_explicit_raw_address_conversion() {
     assert!(output.contains("refield_raw_addr"), "{output}");
 }
 
+#[test]
+fn returned_call_result_does_not_retain_field_reference_identity() {
+    let output = ir(r#"
+        type Value is { count: Int };
+        type Pair is { left: Value, right: Value };
+        implement Value {
+            fn equal(&self, other: &Value) -> Bool { self.count == other.count }
+        }
+        fn compare(left: &Value, right: &Value) -> Bool { left.equal(right) }
+        fn probe(pair: &Pair) -> Bool { pair.left.equal(&pair.right) }
+        fn direct(pair: &Pair) -> Bool { compare(&pair.left, &pair.right) }
+    "#);
+    for name in ["probe", "direct"] {
+        let start = output.find(&format!("@{name}(")).expect("declared function");
+        let body = output[start..].split_once("\n}").unwrap().0;
+        assert!(body.contains("refield_loaded"), "{body}");
+        assert!(!body.contains("refield_slot_addr"), "{body}");
+    }
+}
+
 fn execute(source: &str, first: i64, second: i64, choose: bool) -> (i64, [i64; 5]) {
     execute_with_runtime(source, first, second, choose, &[])
 }

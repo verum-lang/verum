@@ -10872,7 +10872,13 @@ fn load_returned_slot_address<'ctx>(
                 .and_then(|entry| vbc.functions.get(entry.index))
                 .and_then(|fd| fd.instructions.as_ref())
         })
-        .map(|here| slot_address_fate(here, dst, Aliasing::Conservative))
+        .map(|here| {
+            slot_address_fate(
+                &here[ctx.current_vbc_instr_idx() + 1..],
+                dst,
+                Aliasing::Conservative,
+            )
+        })
         .unwrap_or(SlotAddressFate::DerefedHere);
     let load = callee_hands_back_address && wanted_here == SlotAddressFate::Dropped;
     if std::env::var("VERUM_TRACE_RETSLOT").is_ok() {
@@ -25088,8 +25094,9 @@ fn emit_slice_elem_load<'ctx>(
 /// &Text { &self.inner }` compiles to a RETURNED slot address, and the
 /// caller is then the one that must load through it.
 ///
-/// The walk is deliberately simple: `Mov` propagates the alias set, any
-/// other write to a register drops it, and the first instruction that
+/// The walk starts after the producer. `Mov` propagates the alias set,
+/// replacement moves and call results kill their destination aliases in
+/// killing mode, and the first instruction that
 /// consumes an aliased register as a reference names the fate. It is
 /// O(instructions), and a function with no seed answers without
 /// walking.
@@ -25129,9 +25136,8 @@ enum SlotAddressFate {
 /// so the walk answered `Dropped` for a value the function RETURNS. The
 /// two readers need opposite treatments of that:
 ///
-/// * `Killing` — what the RefField arm has always done. Kept for it
-///   bit-for-bit; changing that arm's verdict is a separate question
-///   with T1056's history attached to it.
+/// * `Killing` — replacement moves and call results end the previous
+///   alias at that destination. The RefField producer uses this mode.
 /// * `Conservative` — never remove. The alias set over-approximates, so
 ///   every error ends in "this address is wanted here", which means "do
 ///   not load", which is what the compiler did before this change. The
@@ -25151,7 +25157,7 @@ fn slot_address_fate(
     seed: u16,
     aliasing: Aliasing,
 ) -> SlotAddressFate {
-    let mut alias: std::collections::HashSet<u16> = std::collections::HashSet::new();
+    let mut alias = verum_common::Set::new();
     alias.insert(seed);
     for ins in instrs.iter() {
         match ins {
@@ -25159,6 +25165,13 @@ fn slot_address_fate(
                 alias.insert(d.0);
             }
             verum_vbc::Instruction::Mov { dst: d, .. }
+            | verum_vbc::Instruction::Call { dst: d, .. }
+            | verum_vbc::Instruction::CallM { dst: d, .. }
+            | verum_vbc::Instruction::CallG { dst: d, .. }
+            | verum_vbc::Instruction::CallClosure { dst: d, .. }
+            | verum_vbc::Instruction::CallV { dst: d, .. }
+            | verum_vbc::Instruction::CallC { dst: d, .. }
+            | verum_vbc::Instruction::CallR { dst: d, .. }
                 if aliasing == Aliasing::Killing =>
             {
                 alias.remove(&d.0);
@@ -25668,7 +25681,11 @@ fn lower_cbgr_extended<'ctx>(
                             // has never acted on, and reading it would
                             // change a verdict this task did not measure.
                             matches!(
-                                slot_address_fate(instrs, dst, Aliasing::Killing),
+                                slot_address_fate(
+                                    &instrs[ctx.current_vbc_instr_idx() + 1..],
+                                    dst,
+                                    Aliasing::Killing,
+                                ),
                                 SlotAddressFate::DerefedHere | SlotAddressFate::Returned
                             )
                         })
