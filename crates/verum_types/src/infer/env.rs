@@ -12175,20 +12175,22 @@ with .to_float() or .to_int() (at {:?})",
                 self.handle_assignment(left, _span);
 
                 let right_result = self.synth_expr(right)?;
-                let mut origins = self.aggregate_origins(right, &self.unifier.apply(&right_result.ty));
-                if !origins.is_empty() && let Some((holder, _)) = self.borrow_place(left) {
-                    for source in self.ctx.env.reference_candidates(&holder) {
-                        if !origins.contains(&source) { origins.push(source); }
-                    }
-                }
-                self.with_checked_write(left, |tc| {
+                let stored_type = self.with_checked_write(left, |tc| {
                     let target = tc.assignment_target_type(left)?;
                     tc.check_synthesized_value(right, &target.ty, right_result.clone())?;
                     if target.ty.contains_record_field() {
                         tc.check_record_family_agreement(&right_result.ty, &target.ty, right.span)?;
                     }
-                    Ok(())
+                    Ok(tc.unifier.apply(&target.ty))
                 })?;
+                // Loan retention follows the checked destination value. Copying
+                // a scalar through a reference stores no reference to its input.
+                let mut origins = self.aggregate_origins(right, &stored_type);
+                if !origins.is_empty() && let Some((holder, _)) = self.borrow_place(left) {
+                    for source in self.ctx.env.reference_candidates(&holder) {
+                        if !origins.contains(&source) { origins.push(source); }
+                    }
+                }
                 self.retain_assignment_origins(left, &origins)?;
 
                 Ok(InferResult::new(Type::unit()))

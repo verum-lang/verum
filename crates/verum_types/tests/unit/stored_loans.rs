@@ -134,3 +134,25 @@ fn declared_tuple_payloads_bind_only_stored_parameters() {
         assert_eq!(checker.carries_stored_loan(&ty), borrowed, "{ty:?}");
     }
 }
+
+#[test]
+fn scalar_storage_requires_the_exact_registered_language_declaration() {
+    let mut checker = TypeChecker::with_minimal_context();
+    let scalar = Type::i64_refined(0);
+    assert!(checker.carries_stored_loan(&scalar));
+    checker.register_primitives();
+    for scalar in [scalar, Type::u8_refined(0), Type::u32_refined(0), Type::i128_refined(0)] {
+        assert!(!checker.carries_stored_loan(&scalar), "{scalar:?}");
+        assert!(!checker.may_supply_call_borrow(&scalar), "{scalar:?}");
+        assert!(checker.carries_stored_loan(&Type::reference(false, scalar)));
+    }
+    checker.set_current_module_path("model");
+    let ast = verum_fast_parser::Parser::new(
+        "type Int64 is { value: &Int }; type Words is { value: Int64 };"
+    ).parse_module().unwrap();
+    assert!(checker.prepare_module_declarations(&ast).is_empty());
+    for name in ["model.Int64", "model.Words"] {
+        let carrier = Type::Named { path: TypeChecker::text_to_path(&name.into()), args: List::new() };
+        assert!(checker.carries_stored_loan(&carrier), "{carrier:?}");
+    }
+}

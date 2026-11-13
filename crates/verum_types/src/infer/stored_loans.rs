@@ -197,6 +197,15 @@ impl TypeChecker {
                     let Some((name, args)) = self.conversion_nominal_head(node.ty) else {
                         return true;
                     };
+                    // Width-specific scalars have a nominal carrier. Only the
+                    // registrar's exact definition proves their scalar storage;
+                    // a same-named source record still needs its real layout.
+                    if args.is_empty()
+                        && self.ctx.builtin_type_definition(&name) == Some(node.ty)
+                        && verum_common::well_known_types::type_names::is_primitive_value_type(&name)
+                    {
+                        continue;
+                    }
                     let Some(body) = self
                         .ctx
                         .lookup_type(&format!("__struct_fields_{name}"))
