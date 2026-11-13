@@ -62,14 +62,8 @@ mount core.async.future.Future;
 mount core.async.task.JoinHandle;
 mount core.base.protocols.Send;
 mount core.runtime.pool.ThreadPool;
+mount core.runtime.stack_alloc.StackAllocator;
 mount mem.{Alloc, Layout, AllocError, TieredAllocator, SimpleAllocator};
-// `StackAllocator` is `core.runtime.stack_alloc`'s, not `core.mem`'s —
-// mounting it from `mem` never resolved. It is const-generic, so a
-// profile names a SIZE at the use site: the `SmallStackAllocator` ALIAS
-// does not carry the constructor (`SmallStackAllocator.new()` answers
-// `unbound variable`, measured 2026-09-09), while
-// `StackAllocator<4096>.new()` returns `cap=4096 used=0`. (T1296)
-mount .stack_alloc.{StackAllocator};
 mount core.{Result, Text};
 // =============================================================================
 // Initialization Errors
