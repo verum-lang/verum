@@ -49,7 +49,7 @@ public type SqlJsonValue is
     | JArray(List<SqlJsonValue>)
     | JObject(List<JsonField>);
 
-public type JsonField is { key: Text, value: SqlJsonValue };
+public type JsonField is { public key: Text, public value: SqlJsonValue };
 
 // -----------------------------------------------------------------------------
 // JSON_VALID
