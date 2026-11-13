@@ -93,7 +93,7 @@ implement Debug for CidrError {
     }
 }
 
-implement Eq for CidrError {
+implement PartialEq for CidrError {
     fn eq(&self, other: &CidrError) -> Bool {
         match (self, other) {
             (CidrError.Malformed(a),        CidrError.Malformed(b))        => a == b,
@@ -103,6 +103,8 @@ implement Eq for CidrError {
         }
     }
 }
+
+implement Eq for CidrError {}
 
 // =============================================================================
 // Parser
@@ -298,7 +300,7 @@ fn v6_segment_mask(prefix_len: Int, index: Int) -> Int {
     (0xFFFF << (16 - keep)) & 0xFFFF
 }
 
-implement Eq for Cidr {
+implement PartialEq for Cidr {
     fn eq(&self, other: &Cidr) -> Bool {
         match (self, other) {
             (Cidr.V4 { addr: a, prefix_len: ap }, Cidr.V4 { addr: b, prefix_len: bp }) =>
@@ -309,6 +311,8 @@ implement Eq for Cidr {
         }
     }
 }
+
+implement Eq for Cidr {}
 
 implement Display for Cidr {
     /// `addr/prefix` — dotted-decimal for v4, RFC 5952 canonical

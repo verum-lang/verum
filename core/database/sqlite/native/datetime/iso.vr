@@ -63,7 +63,7 @@ implement Debug for IsoParseError {
     }
 }
 
-implement Eq for IsoParseError {
+implement PartialEq for IsoParseError {
     fn eq(&self, other: &IsoParseError) -> Bool {
         match (self, other) {
             (IpeBadFormat,  IpeBadFormat)  => true,
@@ -74,6 +74,8 @@ implement Eq for IsoParseError {
         }
     }
 }
+
+implement Eq for IsoParseError {}
 
 public fn parse_error_name(e: &IsoParseError) -> Text {
     match e {

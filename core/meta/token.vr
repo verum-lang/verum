@@ -815,8 +815,10 @@ implement Debug for LexError {
     }
 }
 
-implement Eq for LexError {
+implement PartialEq for LexError {
     fn eq(&self, other: &LexError) -> Bool {
         self.message == other.message
     }
 }
+
+implement Eq for LexError {}

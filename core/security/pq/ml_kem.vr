@@ -126,7 +126,7 @@ implement Debug for PqError {
     }
 }
 
-implement Eq for PqError {
+implement PartialEq for PqError {
     fn eq(&self, other: &PqError) -> Bool {
         match (self, other) {
             (
@@ -144,6 +144,8 @@ implement Eq for PqError {
         }
     }
 }
+
+implement Eq for PqError {}
 
 // =============================================================================
 // Key material + encapsulation

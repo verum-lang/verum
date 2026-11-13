@@ -245,7 +245,7 @@ public fn autopoiesis(e: Enactment) -> Enactment {
 // Foundation Protocol Impls — Display + Debug + Eq for Enactment
 // =============================================================================
 
-implement Eq for Enactment {
+implement PartialEq for Enactment {
     /// Structural equality across all four fields. Two enactments
     /// are equal iff they share name, step sequence, activation
     /// rank, and articulation.
@@ -262,6 +262,8 @@ implement Eq for Enactment {
         true
     }
 }
+
+implement Eq for Enactment {}
 
 implement Display for Enactment {
     /// Renders a compact one-line summary suitable for audit logs:

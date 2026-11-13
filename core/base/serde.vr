@@ -121,11 +121,13 @@ implement Clone for SerdeError {
     }
 }
 
-implement Eq for SerdeError {
+implement PartialEq for SerdeError {
     fn eq(&self, other: &SerdeError) -> Bool {
         self.message == other.message
     }
 }
+
+implement Eq for SerdeError {}
 
 /// Canonical alias for serialization-result types.  Equivalent to
 /// `Result<T, SerdeError>` — the alias surface centralises the

@@ -95,7 +95,7 @@ implement Debug for GlobError {
     }
 }
 
-implement Eq for GlobError {
+implement PartialEq for GlobError {
     fn eq(&self, other: &GlobError) -> Bool {
         match (self, other) {
             (UnclosedClass,  UnclosedClass)  => true,
@@ -105,6 +105,8 @@ implement Eq for GlobError {
         }
     }
 }
+
+implement Eq for GlobError {}
 
 // =============================================================================
 // Compiled pattern

@@ -100,7 +100,7 @@ public fn primitive_eq(a: Primitive, b: Primitive) -> Bool {
 // Foundation Protocol Impls — Display + Debug + Eq + Copy for Primitive
 // =============================================================================
 
-implement Eq for Primitive {
+implement PartialEq for Primitive {
     /// Variant-form equality across the 8-tag ε-primitive space.
     /// Wraps the existing `primitive_eq` standalone function so
     /// `==` works directly without forcing callers to import the
@@ -119,6 +119,8 @@ implement Eq for Primitive {
         }
     }
 }
+
+implement Eq for Primitive {}
 
 implement Copy for Primitive {}
 

@@ -98,7 +98,7 @@ implement Debug for JsonPointerError {
     }
 }
 
-implement Eq for JsonPointerError {
+implement PartialEq for JsonPointerError {
     fn eq(&self, other: &JsonPointerError) -> Bool {
         match (self, other) {
             (JsonPointerError.Malformed(a),     JsonPointerError.Malformed(b))     => a == b,
@@ -109,6 +109,8 @@ implement Eq for JsonPointerError {
         }
     }
 }
+
+implement Eq for JsonPointerError {}
 
 /// Maximum permitted JSON Pointer string length in bytes. RFC 6901
 /// places no upper bound — hostile callers can construct multi-MB

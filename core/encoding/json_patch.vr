@@ -115,7 +115,7 @@ implement Debug for JsonPatchError {
     }
 }
 
-implement Eq for JsonPatchError {
+implement PartialEq for JsonPatchError {
     fn eq(&self, other: &JsonPatchError) -> Bool {
         match (self, other) {
             (Malformed(a),       Malformed(b))       => a == b,
@@ -128,6 +128,8 @@ implement Eq for JsonPatchError {
         }
     }
 }
+
+implement Eq for JsonPatchError {}
 
 // =============================================================================
 // Parse

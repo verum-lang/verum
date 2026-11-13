@@ -90,13 +90,15 @@ implement Debug for CountMinError {
     }
 }
 
-implement Eq for CountMinError {
+implement PartialEq for CountMinError {
     fn eq(&self, other: &CountMinError) -> Bool {
         match (self, other) {
             (BadParameters(a), BadParameters(b)) => a == b,
         }
     }
 }
+
+implement Eq for CountMinError {}
 
 // =============================================================================
 // Sketch

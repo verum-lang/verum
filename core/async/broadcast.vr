@@ -98,7 +98,7 @@ implement Debug for BroadcastRecvError {
     }
 }
 
-implement Eq for BroadcastRecvError {
+implement PartialEq for BroadcastRecvError {
     fn eq(&self, other: &BroadcastRecvError) -> Bool {
         match (self, other) {
             (Closed,    Closed)    => true,
@@ -107,6 +107,8 @@ implement Eq for BroadcastRecvError {
         }
     }
 }
+
+implement Eq for BroadcastRecvError {}
 
 /// Result of a non-blocking receive attempt.
 public type TryRecvResult<T> is

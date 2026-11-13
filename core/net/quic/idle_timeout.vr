@@ -98,13 +98,15 @@ implement Debug for IdleTimeoutError {
     }
 }
 
-implement Eq for IdleTimeoutError {
+implement PartialEq for IdleTimeoutError {
     // Single-variant type: two values are always equal. Avoids
     // a `match (AlreadyExpired, AlreadyExpired)` form that confuses
     // the type checker into reading bare `AlreadyExpired` as a
     // path-type.
     fn eq(&self, _other: &IdleTimeoutError) -> Bool { true }
 }
+
+implement Eq for IdleTimeoutError {}
 
 public type TickResult is
       Active(Duration)        // milliseconds remaining until expiry

@@ -133,7 +133,7 @@ implement Debug for ConvertError {
     }
 }
 
-implement Eq for ConvertError {
+implement PartialEq for ConvertError {
     fn eq(&self, other: &ConvertError) -> Bool {
         match (self, other) {
             (CeUnsupportedVariant(a),         CeUnsupportedVariant(b))         => a == b,
@@ -147,6 +147,8 @@ implement Eq for ConvertError {
         }
     }
 }
+
+implement Eq for ConvertError {}
 
 // =============================================================================
 // Construction helpers — terse builders for common cases

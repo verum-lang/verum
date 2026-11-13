@@ -64,7 +64,7 @@ implement Debug for RegistryError {
     }
 }
 
-implement Eq for RegistryError {
+implement PartialEq for RegistryError {
     fn eq(&self, other: &RegistryError) -> Bool {
         match (self, other) {
             (AlreadyRegistered(a), AlreadyRegistered(b)) => a == b,
@@ -74,6 +74,8 @@ implement Eq for RegistryError {
         }
     }
 }
+
+implement Eq for RegistryError {}
 
 // -----------------------------------------------------------------------------
 // ScalarFn entry — stored as a Heap<dyn ScalarFn>

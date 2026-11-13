@@ -102,7 +102,7 @@ implement Debug for SnowflakeError {
     }
 }
 
-implement Eq for SnowflakeError {
+implement PartialEq for SnowflakeError {
     fn eq(&self, other: &SnowflakeError) -> Bool {
         match (self, other) {
             (WorkerIdOutOfRange(a), WorkerIdOutOfRange(b)) => a == b,
@@ -112,6 +112,8 @@ implement Eq for SnowflakeError {
         }
     }
 }
+
+implement Eq for SnowflakeError {}
 
 // =============================================================================
 // Generator

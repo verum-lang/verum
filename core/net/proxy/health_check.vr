@@ -320,7 +320,7 @@ implement Debug for HealthCheckError {
     }
 }
 
-implement Eq for HealthCheckError {
+implement PartialEq for HealthCheckError {
     fn eq(&self, other: &HealthCheckError) -> Bool {
         match (self, other) {
             (Connect(a),       Connect(b))       => a == b,
@@ -330,3 +330,5 @@ implement Eq for HealthCheckError {
         }
     }
 }
+
+implement Eq for HealthCheckError {}

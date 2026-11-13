@@ -104,11 +104,13 @@ fn task_lifecycle_state_tag(s: &TaskLifecycleState) -> Int {
     }
 }
 
-implement Eq for TaskLifecycleState {
+implement PartialEq for TaskLifecycleState {
     fn eq(&self, other: &TaskLifecycleState) -> Bool {
         task_lifecycle_state_tag(self) == task_lifecycle_state_tag(other)
     }
 }
+
+implement Eq for TaskLifecycleState {}
 
 // =============================================================================
 // TaskInfo — snapshot of a single live task

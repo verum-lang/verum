@@ -68,7 +68,7 @@ implement Debug for MigrationPlanError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> { self.fmt(f) }
 }
 
-implement Eq for MigrationPlanError {
+implement PartialEq for MigrationPlanError {
     fn eq(&self, other: &MigrationPlanError) -> Bool {
         match (self, other) {
             (PeDuplicateVersion(a), PeDuplicateVersion(b)) => a == b,
@@ -78,6 +78,8 @@ implement Eq for MigrationPlanError {
         }
     }
 }
+
+implement Eq for MigrationPlanError {}
 
 // -----------------------------------------------------------------------------
 // MigrationPlan

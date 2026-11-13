@@ -2061,7 +2061,7 @@ implement<K: Hash + Eq, V> Index<K> for Map<K, V> {
 // Eq && Debug
 // =============================================================================
 
-implement<K: Hash + Eq + Debug, V: Eq + Debug> Eq for Map<K, V> {
+implement<K: Hash + Eq + Debug, V: Eq + Debug> PartialEq for Map<K, V> {
     fn eq(&self, other: &Map<K, V>) -> Bool {
         if self.len != other.len {
             return false;
@@ -2111,6 +2111,8 @@ implement<K: Hash + Eq + Debug, V: Eq + Debug> Eq for Map<K, V> {
         false
     }
 }
+
+implement<K: Hash + Eq + Debug, V: Eq + Debug> Eq for Map<K, V> {}
 
 implement<K: Hash + Eq, V: Hash> Hash for Map<K, V> {
     fn hash(&self, hasher: &mut Hasher) {

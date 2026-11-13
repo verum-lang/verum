@@ -319,7 +319,7 @@ implement Debug for WebSocketDecodeError {
     }
 }
 
-implement Eq for WebSocketDecodeError {
+implement PartialEq for WebSocketDecodeError {
     fn eq(&self, other: &WebSocketDecodeError) -> Bool {
         match (self, other) {
             (IncompleteFrame,             IncompleteFrame)             => true,
@@ -334,6 +334,8 @@ implement Eq for WebSocketDecodeError {
         }
     }
 }
+
+implement Eq for WebSocketDecodeError {}
 
 public type WebSocketDecodeResult is
     | Decoded { frame: WsFrame, consumed: Int }

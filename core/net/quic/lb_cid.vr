@@ -354,7 +354,7 @@ implement Debug for LbCidError {
     }
 }
 
-implement Eq for LbCidError {
+implement PartialEq for LbCidError {
     fn eq(&self, other: &LbCidError) -> Bool {
         match (self, other) {
             (InvalidServerIdLen { expected: ea, actual: aa },
@@ -367,3 +367,5 @@ implement Eq for LbCidError {
         }
     }
 }
+
+implement Eq for LbCidError {}

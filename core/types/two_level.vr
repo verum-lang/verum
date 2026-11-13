@@ -100,7 +100,7 @@ public fn check_layer_flow(actual: StratifiedUniverse, expected: StratifiedUnive
 // Foundation Protocol Impls — Display + Debug + Eq for Layer / StratifiedUniverse / LayerVerdict
 // =============================================================================
 
-implement Eq for Layer {
+implement PartialEq for Layer {
     fn eq(&self, other: &Layer) -> Bool {
         match (self, other) {
             (Layer.Fibrant, Layer.Fibrant) => true,
@@ -109,6 +109,8 @@ implement Eq for Layer {
         }
     }
 }
+
+implement Eq for Layer {}
 
 implement Clone for Layer {
     fn clone(&self) -> Layer {
@@ -154,11 +156,13 @@ implement Debug for Layer {
     }
 }
 
-implement Eq for StratifiedUniverse {
+implement PartialEq for StratifiedUniverse {
     fn eq(&self, other: &StratifiedUniverse) -> Bool {
         self.layer == other.layer && self.level == other.level
     }
 }
+
+implement Eq for StratifiedUniverse {}
 
 implement Clone for StratifiedUniverse {
     fn clone(&self) -> StratifiedUniverse {
@@ -185,7 +189,7 @@ implement Debug for StratifiedUniverse {
     }
 }
 
-implement Eq for LayerVerdict {
+implement PartialEq for LayerVerdict {
     fn eq(&self, other: &LayerVerdict) -> Bool {
         match (self, other) {
             (LayerVerdict.LayerOk, LayerVerdict.LayerOk) => true,
@@ -198,6 +202,8 @@ implement Eq for LayerVerdict {
         }
     }
 }
+
+implement Eq for LayerVerdict {}
 
 implement Clone for LayerVerdict {
     fn clone(&self) -> LayerVerdict {

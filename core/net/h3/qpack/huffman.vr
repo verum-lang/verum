@@ -95,7 +95,7 @@ implement Debug for HuffError {
     }
 }
 
-implement Eq for HuffError {
+implement PartialEq for HuffError {
     fn eq(&self, other: &HuffError) -> Bool {
         match (self, other) {
             (InvalidPadding, InvalidPadding) => true,
@@ -105,6 +105,8 @@ implement Eq for HuffError {
         }
     }
 }
+
+implement Eq for HuffError {}
 
 // =============================================================================
 // Encoded length (RFC 7541 §5.2) — used by encoder to decide whether

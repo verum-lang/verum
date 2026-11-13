@@ -105,11 +105,13 @@ implement Debug for UrlErrorKind {
     }
 }
 
-implement Eq for UrlErrorKind {
+implement PartialEq for UrlErrorKind {
     fn eq(&self, other: &UrlErrorKind) -> Bool {
         url_error_kind_tag(self) == url_error_kind_tag(other)
     }
 }
+
+implement Eq for UrlErrorKind {}
 
 implement Display for UrlError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
@@ -123,11 +125,13 @@ implement Debug for UrlError {
     }
 }
 
-implement Eq for UrlError {
+implement PartialEq for UrlError {
     fn eq(&self, other: &UrlError) -> Bool {
         self.kind == other.kind && self.position == other.position && self.message == other.message
     }
 }
+
+implement Eq for UrlError {}
 
 // Maximum permitted URL length in bytes. Hostile inputs with multi-
 // megabyte URLs would otherwise pin the parser doing per-byte scans.

@@ -87,7 +87,7 @@ implement Debug for RecoveryError {
     }
 }
 
-implement Eq for RecoveryError {
+implement PartialEq for RecoveryError {
     fn eq(&self, other: &RecoveryError) -> Bool {
         match (self, other) {
             (ShortFile(a), ShortFile(b)) => a == b,
@@ -97,6 +97,8 @@ implement Eq for RecoveryError {
         }
     }
 }
+
+implement Eq for RecoveryError {}
 
 // -----------------------------------------------------------------------------
 // Main entry point

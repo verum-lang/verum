@@ -387,7 +387,7 @@ public fn to_smtlib_decl(f: ReflectedFunction) -> Text {
 // Foundation Protocol Impls — Display + Debug + Eq for ReflectabilityVerdict
 // =============================================================================
 
-implement Eq for ReflectabilityVerdict {
+implement PartialEq for ReflectabilityVerdict {
     fn eq(&self, other: &ReflectabilityVerdict) -> Bool {
         match (self, other) {
             (ReflectabilityVerdict.Reflectable,
@@ -398,6 +398,8 @@ implement Eq for ReflectabilityVerdict {
         }
     }
 }
+
+implement Eq for ReflectabilityVerdict {}
 
 implement Display for ReflectabilityVerdict {
     /// Renders the verdict in human-readable form for diagnostic

@@ -70,7 +70,7 @@ implement Debug for UriError {
     }
 }
 
-implement Eq for UriError {
+implement PartialEq for UriError {
     fn eq(&self, other: &UriError) -> Bool {
         match (self, other) {
             (UeBadScheme,      UeBadScheme)      => true,
@@ -80,6 +80,8 @@ implement Eq for UriError {
         }
     }
 }
+
+implement Eq for UriError {}
 
 public fn uri_error_name(e: &UriError) -> Text {
     match e {

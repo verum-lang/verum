@@ -102,7 +102,7 @@ implement Debug for HkdfError {
     }
 }
 
-implement Eq for HkdfError {
+implement PartialEq for HkdfError {
     fn eq(&self, other: &HkdfError) -> Bool {
         match (self, other) {
             (
@@ -114,6 +114,8 @@ implement Eq for HkdfError {
         }
     }
 }
+
+implement Eq for HkdfError {}
 
 // =============================================================================
 // SHA-256 variant

@@ -107,7 +107,7 @@ implement Debug for RecordError {
     }
 }
 
-implement Eq for RecordError {
+implement PartialEq for RecordError {
     fn eq(&self, other: &RecordError) -> Bool {
         match (self, other) {
             (RecordError.ShortBuffer,      RecordError.ShortBuffer)      => true,
@@ -118,6 +118,8 @@ implement Eq for RecordError {
         }
     }
 }
+
+implement Eq for RecordError {}
 
 /// Encode a SerialType as its on-disk varint-able u64 code.
 public fn serial_type_encode(st: SerialType) -> Int64 {

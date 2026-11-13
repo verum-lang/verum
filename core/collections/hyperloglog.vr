@@ -88,7 +88,7 @@ implement Debug for HllError {
     }
 }
 
-implement Eq for HllError {
+implement PartialEq for HllError {
     fn eq(&self, other: &HllError) -> Bool {
         match (self, other) {
             (PrecisionOutOfRange(a), PrecisionOutOfRange(b)) => a == b,
@@ -97,6 +97,8 @@ implement Eq for HllError {
         }
     }
 }
+
+implement Eq for HllError {}
 
 public const MIN_PRECISION: Int = 4;
 public const MAX_PRECISION: Int = 16;

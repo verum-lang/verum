@@ -1997,7 +1997,7 @@ implement<T: Hash> Hash for Deque<T> {
     }
 }
 
-implement<T: Eq> Eq for Deque<T> {
+implement<T: Eq> PartialEq for Deque<T> {
     fn eq(&self, other: &Deque<T>) -> Bool {
         if self.len != other.len {
             return false;
@@ -2023,6 +2023,8 @@ implement<T: Eq> Eq for Deque<T> {
         false
     }
 }
+
+implement<T: Eq> Eq for Deque<T> {}
 
 implement<T: Debug> Debug for Deque<T> {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {

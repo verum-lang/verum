@@ -954,17 +954,21 @@ fn try_recv_error_tag(e: &TryRecvError) -> Int {
     }
 }
 
-implement Eq for TryRecvError {
+implement PartialEq for TryRecvError {
     fn eq(&self, other: &TryRecvError) -> Bool {
         try_recv_error_tag(self) == try_recv_error_tag(other)
     }
 }
 
-implement Eq for RecvError {
+implement Eq for TryRecvError {}
+
+implement PartialEq for RecvError {
     fn eq(&self, _other: &RecvError) -> Bool {
         true
     }
 }
+
+implement Eq for RecvError {}
 
 // Identity Deref: field access through Shared<ChannelInner> lowers to
 // an explicit `ChannelInner.deref()` call in baked code; the identity

@@ -162,7 +162,7 @@ public fn protocols_equal(a: Protocol, b: Protocol) -> Bool {
 // Foundation Protocol Impls — Display + Debug + Eq for Protocol
 // =============================================================================
 
-implement Eq for Protocol {
+implement PartialEq for Protocol {
     /// Structural equality — delegates to the existing
     /// `protocols_equal` recursive walk. Two `Protocol` values are
     /// equal iff their step sequences match operator-for-operator.
@@ -185,6 +185,8 @@ implement Eq for Protocol {
         }
     }
 }
+
+implement Eq for Protocol {}
 
 implement Display for Protocol {
     /// Renders a session-type protocol in the standard notation:

@@ -456,7 +456,7 @@ implement Debug for AdapterId {
     }
 }
 
-implement Eq for AdapterId {
+implement PartialEq for AdapterId {
     fn eq(&self, other: &AdapterId) -> Bool {
         match (self, other) {
             (AdPostgres, AdPostgres) => true,
@@ -466,6 +466,8 @@ implement Eq for AdapterId {
         }
     }
 }
+
+implement Eq for AdapterId {}
 
 implement Display for SqlState {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
@@ -479,11 +481,13 @@ implement Debug for SqlState {
     }
 }
 
-implement Eq for SqlState {
+implement PartialEq for SqlState {
     fn eq(&self, other: &SqlState) -> Bool {
         self.code == other.code
     }
 }
+
+implement Eq for SqlState {}
 
 implement Display for ErrorCategory {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
@@ -511,7 +515,7 @@ implement Debug for ErrorCategory {
     }
 }
 
-implement Eq for ErrorCategory {
+implement PartialEq for ErrorCategory {
     fn eq(&self, other: &ErrorCategory) -> Bool {
         match (self, other) {
             (EcTransient, EcTransient) => true,
@@ -523,6 +527,8 @@ implement Eq for ErrorCategory {
         }
     }
 }
+
+implement Eq for ErrorCategory {}
 
 implement Display for TimeoutPhase {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
@@ -542,7 +548,7 @@ implement Debug for TimeoutPhase {
     }
 }
 
-implement Eq for TimeoutPhase {
+implement PartialEq for TimeoutPhase {
     fn eq(&self, other: &TimeoutPhase) -> Bool {
         match (self, other) {
             (TpConnect,   TpConnect)   => true,
@@ -553,6 +559,8 @@ implement Eq for TimeoutPhase {
         }
     }
 }
+
+implement Eq for TimeoutPhase {}
 
 implement Display for PoolErrorKind {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
@@ -571,7 +579,7 @@ implement Debug for PoolErrorKind {
     }
 }
 
-implement Eq for PoolErrorKind {
+implement PartialEq for PoolErrorKind {
     fn eq(&self, other: &PoolErrorKind) -> Bool {
         match (self, other) {
             (PekExhausted,          PekExhausted)         => true,
@@ -582,6 +590,8 @@ implement Eq for PoolErrorKind {
         }
     }
 }
+
+implement Eq for PoolErrorKind {}
 
 implement Display for ConnectionErrorKind {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
@@ -609,7 +619,7 @@ implement Debug for ConnectionErrorKind {
     }
 }
 
-implement Eq for ConnectionErrorKind {
+implement PartialEq for ConnectionErrorKind {
     fn eq(&self, other: &ConnectionErrorKind) -> Bool {
         match (self, other) {
             (CekDnsFailure(a),         CekDnsFailure(b))         => a == b,
@@ -622,6 +632,8 @@ implement Eq for ConnectionErrorKind {
         }
     }
 }
+
+implement Eq for ConnectionErrorKind {}
 
 implement Display for AuthErrorKind {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
@@ -643,7 +655,7 @@ implement Debug for AuthErrorKind {
     }
 }
 
-implement Eq for AuthErrorKind {
+implement PartialEq for AuthErrorKind {
     fn eq(&self, other: &AuthErrorKind) -> Bool {
         match (self, other) {
             (AekBadCredentials,         AekBadCredentials)         => true,
@@ -655,6 +667,8 @@ implement Eq for AuthErrorKind {
         }
     }
 }
+
+implement Eq for AuthErrorKind {}
 
 implement Display for AdapterSpecific {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
@@ -668,7 +682,7 @@ implement Debug for AdapterSpecific {
     }
 }
 
-implement Eq for AdapterSpecific {
+implement PartialEq for AdapterSpecific {
     fn eq(&self, other: &AdapterSpecific) -> Bool {
         self.adapter == other.adapter
             && self.code == other.code
@@ -676,6 +690,8 @@ implement Eq for AdapterSpecific {
             && self.retryable == other.retryable
     }
 }
+
+implement Eq for AdapterSpecific {}
 
 implement Display for DecodeFault {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
@@ -689,7 +705,7 @@ implement Debug for DecodeFault {
     }
 }
 
-implement Eq for DecodeFault {
+implement PartialEq for DecodeFault {
     fn eq(&self, other: &DecodeFault) -> Bool {
         self.column_index == other.column_index
             && self.column_name == other.column_name
@@ -698,6 +714,8 @@ implement Eq for DecodeFault {
             && self.detail == other.detail
     }
 }
+
+implement Eq for DecodeFault {}
 
 implement Display for EncodeFault {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
@@ -711,13 +729,15 @@ implement Debug for EncodeFault {
     }
 }
 
-implement Eq for EncodeFault {
+implement PartialEq for EncodeFault {
     fn eq(&self, other: &EncodeFault) -> Bool {
         self.param_index == other.param_index
             && self.type_name == other.type_name
             && self.reason == other.reason
     }
 }
+
+implement Eq for EncodeFault {}
 
 implement Display for DbError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
@@ -751,7 +771,7 @@ implement Debug for DbError {
     }
 }
 
-implement Eq for DbError {
+implement PartialEq for DbError {
     fn eq(&self, other: &DbError) -> Bool {
         match (self, other) {
             (ConnectionFailed { source: sa, adapter: aa },
@@ -772,6 +792,8 @@ implement Eq for DbError {
         }
     }
 }
+
+implement Eq for DbError {}
 
 // =============================================================================
 // ConstraintViolation — unified detail for client-preflight + server-reject

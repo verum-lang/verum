@@ -69,7 +69,7 @@ implement WeftErrorCategory {
     }
 }
 
-implement Eq for WeftErrorCategory {
+implement PartialEq for WeftErrorCategory {
     fn eq(&self, other: &WeftErrorCategory) -> Bool {
         match (self, other) {
             (ErrTransient, ErrTransient) => true,
@@ -81,6 +81,8 @@ implement Eq for WeftErrorCategory {
         }
     }
 }
+
+implement Eq for WeftErrorCategory {}
 
 implement Copy for WeftErrorCategory {}
 implement Clone for WeftErrorCategory {
@@ -128,7 +130,7 @@ implement Debug for WeftError {
     }
 }
 
-implement Eq for WeftError {
+implement PartialEq for WeftError {
     fn eq(&self, other: &WeftError) -> Bool {
         match (self, other) {
             (BadRequest(a),         BadRequest(b))         => a == b,
@@ -143,6 +145,8 @@ implement Eq for WeftError {
         }
     }
 }
+
+implement Eq for WeftError {}
 
 implement WeftError {
     public fn category(&self) -> WeftErrorCategory {

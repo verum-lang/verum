@@ -3676,11 +3676,13 @@ public fn f2_eq(x: &F2, y: &F2) -> Bool {
 // a hand-written `true` — vacuous). Over the refined carrier
 // `Int{>= 0, <= 1}` each law is a finite SMT goal.
 
-implement Eq for F2 {
+implement PartialEq for F2 {
     fn eq(&self, other: &F2) -> Bool {
         self.value == other.value
     }
 }
+
+implement Eq for F2 {}
 
 implement Add for F2 {
     type Output = F2;

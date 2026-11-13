@@ -239,7 +239,7 @@ implement Debug for UnixError {
     }
 }
 
-implement Eq for UnixError {
+implement PartialEq for UnixError {
     fn eq(&self, other: &UnixError) -> Bool {
         match (self, other) {
             (UnixError.IoFailure(a),   UnixError.IoFailure(b))   => a == b,
@@ -256,6 +256,8 @@ implement Eq for UnixError {
         }
     }
 }
+
+implement Eq for UnixError {}
 
 // =============================================================================
 // sockaddr_un — POSIX Unix-domain address
@@ -1039,7 +1041,7 @@ implement Debug for FdPassingError {
     }
 }
 
-implement Eq for FdPassingError {
+implement PartialEq for FdPassingError {
     fn eq(&self, other: &FdPassingError) -> Bool {
         match (self, other) {
             (FdPassingError.NotImplemented(a), FdPassingError.NotImplemented(b)) => a == b,
@@ -1052,6 +1054,8 @@ implement Eq for FdPassingError {
         }
     }
 }
+
+implement Eq for FdPassingError {}
 
 implement UnixStream {
     /// Send `buf` plus file descriptors `fds` over this stream. The

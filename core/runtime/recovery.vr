@@ -926,11 +926,13 @@ fn min(a: UInt64, b: UInt64) -> UInt64 {
 
 // --- Eq ---
 
-implement Eq for RecoveryCircuitState {
+implement PartialEq for RecoveryCircuitState {
     fn eq(&self, other: &RecoveryCircuitState) -> Bool {
         self.to_u8() == other.to_u8()
     }
 }
+
+implement Eq for RecoveryCircuitState {}
 
 // --- Clone ---
 

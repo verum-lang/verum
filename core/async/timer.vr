@@ -348,11 +348,13 @@ implement Display for TimeoutError {
     }
 }
 
-implement Eq for TimeoutError {
+implement PartialEq for TimeoutError {
     fn eq(&self, _other: &TimeoutError) -> Bool {
         true
     }
 }
+
+implement Eq for TimeoutError {}
 
 /// Wraps a future with a timeout.
 ///

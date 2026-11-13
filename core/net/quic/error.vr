@@ -87,11 +87,13 @@ implement Debug for TransportErrorCode {
     }
 }
 
-implement Eq for TransportErrorCode {
+implement PartialEq for TransportErrorCode {
     fn eq(&self, other: &TransportErrorCode) -> Bool {
         self.code == other.code
     }
 }
+
+implement Eq for TransportErrorCode {}
 
 implement Display for ApplicationErrorCode {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
@@ -105,11 +107,13 @@ implement Debug for ApplicationErrorCode {
     }
 }
 
-implement Eq for ApplicationErrorCode {
+implement PartialEq for ApplicationErrorCode {
     fn eq(&self, other: &ApplicationErrorCode) -> Bool {
         self.code == other.code
     }
 }
+
+implement Eq for ApplicationErrorCode {}
 
 implement Display for QuicError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
@@ -155,7 +159,7 @@ implement Debug for QuicError {
     }
 }
 
-implement Eq for QuicError {
+implement PartialEq for QuicError {
     fn eq(&self, other: &QuicError) -> Bool {
         match (self, other) {
             (QuicError.ConnectionRefused(a),  QuicError.ConnectionRefused(b))  => a == b,
@@ -175,3 +179,5 @@ implement Eq for QuicError {
         }
     }
 }
+
+implement Eq for QuicError {}

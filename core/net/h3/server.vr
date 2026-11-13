@@ -170,7 +170,7 @@ implement Debug for H3ServerError {
     }
 }
 
-implement Eq for H3ServerError {
+implement PartialEq for H3ServerError {
     fn eq(&self, other: &H3ServerError) -> Bool {
         match (self, other) {
             (Bind(a),       Bind(b))       => a == b,
@@ -181,6 +181,8 @@ implement Eq for H3ServerError {
         }
     }
 }
+
+implement Eq for H3ServerError {}
 
 implement H3Server {
     /// Bind a UDP socket + prepare the accept loop. The returned

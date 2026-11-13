@@ -181,11 +181,13 @@ implement Debug for RpcStatus {
     }
 }
 
-implement Eq for RpcStatus {
+implement PartialEq for RpcStatus {
     fn eq(&self, other: &RpcStatus) -> Bool {
         self.to_code() == other.to_code()
     }
 }
+
+implement Eq for RpcStatus {}
 
 // =============================================================================
 // RpcError
@@ -235,13 +237,15 @@ implement Debug for RpcError {
     }
 }
 
-implement Eq for RpcError {
+implement PartialEq for RpcError {
     fn eq(&self, other: &RpcError) -> Bool {
         self.status == other.status
             && self.message == other.message
             && self.details_json == other.details_json
     }
 }
+
+implement Eq for RpcError {}
 
 implement IntoResponse for RpcError {
     fn into_response(self) -> Response {

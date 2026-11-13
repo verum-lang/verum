@@ -118,11 +118,13 @@ implement Debug for SqlLexError {
     }
 }
 
-implement Eq for SqlLexError {
+implement PartialEq for SqlLexError {
     fn eq(&self, other: &SqlLexError) -> Bool {
         self.message == other.message && self.position == other.position
     }
 }
+
+implement Eq for SqlLexError {}
 
 // -----------------------------------------------------------------------------
 // SqlKeyword lookup

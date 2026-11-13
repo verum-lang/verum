@@ -136,11 +136,13 @@ implement ContextLogLevel {
     }
 }
 
-implement Eq for ContextLogLevel {
+implement PartialEq for ContextLogLevel {
     fn eq(&self, other: &ContextLogLevel) -> Bool {
         self.severity() == other.severity()
     }
 }
+
+implement Eq for ContextLogLevel {}
 
 implement Ord for ContextLogLevel {
     fn cmp(&self, other: &ContextLogLevel) -> Ordering {

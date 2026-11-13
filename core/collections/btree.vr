@@ -3059,7 +3059,7 @@ implement<T: Ord> IntoIterator for &BTreeSet<T> {
 // Eq for BTreeMap and BTreeSet
 // =============================================================================
 
-implement<K: Ord + Eq, V: Eq> Eq for BTreeMap<K, V> {
+implement<K: Ord + Eq, V: Eq> PartialEq for BTreeMap<K, V> {
     fn eq(&self, other: &BTreeMap<K, V>) -> Bool {
         if self.len() != other.len() {
             return false;
@@ -3100,7 +3100,9 @@ implement<K: Ord + Eq, V: Eq> Eq for BTreeMap<K, V> {
     }
 }
 
-implement<T: Ord + Eq> Eq for BTreeSet<T> {
+implement<K: Ord + Eq, V: Eq> Eq for BTreeMap<K, V> {}
+
+implement<T: Ord + Eq> PartialEq for BTreeSet<T> {
     fn eq(&self, other: &BTreeSet<T>) -> Bool {
         if self.len() != other.len() {
             return false;
@@ -3140,6 +3142,8 @@ implement<T: Ord + Eq> Eq for BTreeSet<T> {
         }
     }
 }
+
+implement<T: Ord + Eq> Eq for BTreeSet<T> {}
 
 // =============================================================================
 // Extend for BTreeMap and BTreeSet

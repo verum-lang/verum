@@ -100,7 +100,7 @@ implement Debug for Tls13RecordError {
     }
 }
 
-implement Eq for Tls13RecordError {
+implement PartialEq for Tls13RecordError {
     fn eq(&self, other: &Tls13RecordError) -> Bool {
         match (self, other) {
             (SequenceOverflow,        SequenceOverflow)        => true,
@@ -113,6 +113,8 @@ implement Eq for Tls13RecordError {
         }
     }
 }
+
+implement Eq for Tls13RecordError {}
 
 // =============================================================================
 // AeadState — one per direction (client→server, server→client)

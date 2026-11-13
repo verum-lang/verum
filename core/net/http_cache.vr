@@ -101,13 +101,15 @@ implement Debug for CacheControlError {
     }
 }
 
-implement Eq for CacheControlError {
+implement PartialEq for CacheControlError {
     fn eq(&self, other: &CacheControlError) -> Bool {
         match (self, other) {
             (CacheControlError.Malformed(a), CacheControlError.Malformed(b)) => a == b,
         }
     }
 }
+
+implement Eq for CacheControlError {}
 
 // =============================================================================
 // Parser

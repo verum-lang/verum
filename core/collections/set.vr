@@ -816,7 +816,7 @@ implement<T: Hash + Eq + Display> Display for Set<T> {
     }
 }
 
-implement<T: Hash + Eq> Eq for Set<T> {
+implement<T: Hash + Eq> PartialEq for Set<T> {
     fn eq(&self, other: &Set<T>) -> Bool {
         if self.len() != other.len() {
             return false;
@@ -856,6 +856,8 @@ implement<T: Hash + Eq> Eq for Set<T> {
         false
     }
 }
+
+implement<T: Hash + Eq> Eq for Set<T> {}
 
 implement<T: Hash + Eq> FromIterator<T> for Set<T> {
     fn from_iter<I: Iterator<Item = T>>(iter: I) -> Set<T> {

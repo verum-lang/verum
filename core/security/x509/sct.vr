@@ -122,7 +122,7 @@ implement Debug for SctError {
     }
 }
 
-implement Eq for SctError {
+implement PartialEq for SctError {
     fn eq(&self, other: &SctError) -> Bool {
         match (self, other) {
             (SctError.Truncated,             SctError.Truncated)             => true,
@@ -133,6 +133,8 @@ implement Eq for SctError {
         }
     }
 }
+
+implement Eq for SctError {}
 
 // =============================================================================
 // Byte readers (big-endian helpers)

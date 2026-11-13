@@ -143,7 +143,7 @@ implement Debug for ConnectionError {
     }
 }
 
-implement Eq for ConnectionError {
+implement PartialEq for ConnectionError {
     fn eq(&self, other: &ConnectionError) -> Bool {
         match (self, other) {
             (NotWritable,     NotWritable)     => true,
@@ -155,6 +155,8 @@ implement Eq for ConnectionError {
         }
     }
 }
+
+implement Eq for ConnectionError {}
 
 public type SqliteNativeConnection is {
     mode: ConnectionMode,

@@ -105,7 +105,7 @@ implement Debug for RangeError {
     }
 }
 
-implement Eq for RangeError {
+implement PartialEq for RangeError {
     fn eq(&self, other: &RangeError) -> Bool {
         match (self, other) {
             (RangeError.Malformed(a),       RangeError.Malformed(b))       => a == b,
@@ -116,6 +116,8 @@ implement Eq for RangeError {
         }
     }
 }
+
+implement Eq for RangeError {}
 
 /// Hard cap on the number of byte ranges in a single `Range:` header.
 /// Apache CVE-2011-3192 ("killapache") demonstrated the DoS vector:

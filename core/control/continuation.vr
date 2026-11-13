@@ -405,7 +405,7 @@ fn cc_alpha_eq_ctx(
 // Foundation Protocol Impls — Display + Debug + Eq for CcTerm / CcStep
 // =============================================================================
 
-implement Eq for CcTerm {
+implement PartialEq for CcTerm {
     /// Syntactic equality on continuation-calculus terms. Not
     /// α-equivalence — for that use `cc_alpha_eq` /
     /// `cc_alpha_eq_ctx`. `λx.x` and `λy.y` compare unequal under
@@ -433,6 +433,8 @@ implement Eq for CcTerm {
         }
     }
 }
+
+implement Eq for CcTerm {}
 
 implement Display for CcTerm {
     /// Renders in standard delimited-control notation:
@@ -508,7 +510,7 @@ implement Debug for CcTerm {
     }
 }
 
-implement Eq for CcStep {
+implement PartialEq for CcStep {
     fn eq(&self, other: &CcStep) -> Bool {
         match (self, other) {
             (CcStep.Stepped { next: a },
@@ -519,6 +521,8 @@ implement Eq for CcStep {
         }
     }
 }
+
+implement Eq for CcStep {}
 
 implement Display for CcStep {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {

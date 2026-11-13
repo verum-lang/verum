@@ -135,13 +135,15 @@ implement Debug for ShutdownError {
     }
 }
 
-implement Eq for ShutdownError {
+implement PartialEq for ShutdownError {
     fn eq(&self, other: &ShutdownError) -> Bool {
         match (self, other) {
             (DrainTimeout { remaining: a }, DrainTimeout { remaining: b }) => a == b,
         }
     }
 }
+
+implement Eq for ShutdownError {}
 
 // =============================================================================
 // GracefulShutdown — controller
@@ -296,7 +298,7 @@ implement Debug for ListenFdsError {
     }
 }
 
-implement Eq for ListenFdsError {
+implement PartialEq for ListenFdsError {
     fn eq(&self, other: &ListenFdsError) -> Bool {
         match (self, other) {
             (NoSocketActivation, NoSocketActivation) => true,
@@ -307,6 +309,8 @@ implement Eq for ListenFdsError {
         }
     }
 }
+
+implement Eq for ListenFdsError {}
 
 public fn listen_fds() -> Result<Int, ListenFdsError> {
     @intrinsic("verum.net.listen_fds")

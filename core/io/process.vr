@@ -162,11 +162,13 @@ implement Debug for ExitStatus {
     }
 }
 
-implement Eq for ExitStatus {
+implement PartialEq for ExitStatus {
     fn eq(&self, other: &ExitStatus) -> Bool {
         self.raw == other.raw
     }
 }
+
+implement Eq for ExitStatus {}
 
 // =============================================================================
 // Output

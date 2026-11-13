@@ -52,7 +52,7 @@ implement Debug for SubProgramError {
     }
 }
 
-implement Eq for SubProgramError {
+implement PartialEq for SubProgramError {
     fn eq(&self, other: &SubProgramError) -> Bool {
         match (self, other) {
             (SpDuplicateName,          SpDuplicateName)          => true,
@@ -62,6 +62,8 @@ implement Eq for SubProgramError {
         }
     }
 }
+
+implement Eq for SubProgramError {}
 
 // -----------------------------------------------------------------------------
 // Configuration

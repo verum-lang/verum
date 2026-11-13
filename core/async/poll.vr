@@ -139,7 +139,7 @@ implement<T: Clone> Clone for Poll<T> {
 }
 
 // Eq if T is Eq
-implement<T: Eq> Eq for Poll<T> {
+implement<T: Eq> PartialEq for Poll<T> {
     fn eq(&self, other: &Poll<T>) -> Bool {
         match (self, other) {
             (Ready(a), Ready(b)) => a == b,
@@ -148,6 +148,8 @@ implement<T: Eq> Eq for Poll<T> {
         }
     }
 }
+
+implement<T: Eq> Eq for Poll<T> {}
 
 // Debug
 implement<T: Debug> Debug for Poll<T> {

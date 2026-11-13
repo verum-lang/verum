@@ -142,7 +142,7 @@ implement Debug for GcmError {
     }
 }
 
-implement Eq for GcmError {
+implement PartialEq for GcmError {
     fn eq(&self, other: &GcmError) -> Bool {
         match (self, other) {
             (GcmError.TagMismatch, GcmError.TagMismatch) => true,
@@ -155,6 +155,8 @@ implement Eq for GcmError {
         }
     }
 }
+
+implement Eq for GcmError {}
 
 // NIST SP 800-38D §5.2.1.1 absolute upper bound on plaintext size for
 // a single (key, IV) pair under AES-GCM:

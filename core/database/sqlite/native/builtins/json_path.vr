@@ -73,7 +73,7 @@ implement Debug for PathParseError {
     }
 }
 
-implement Eq for PathParseError {
+implement PartialEq for PathParseError {
     fn eq(&self, other: &PathParseError) -> Bool {
         match (self, other) {
             (PpEmpty,           PpEmpty)           => true,
@@ -84,6 +84,8 @@ implement Eq for PathParseError {
         }
     }
 }
+
+implement Eq for PathParseError {}
 
 public fn parse_path(s: &Text) -> Result<List<PathSeg>, PathParseError> {
     let bs = s.as_bytes();

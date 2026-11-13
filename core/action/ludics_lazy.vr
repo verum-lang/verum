@@ -273,7 +273,7 @@ public theorem productivity_gate_necessary(d: LazyDesign) -> Bool
 // Foundation Protocol Impls — Display + Debug + Eq for CutElimVerdict / OrthogonalityVerdict
 // =============================================================================
 
-implement Eq for CutElimVerdict {
+implement PartialEq for CutElimVerdict {
     fn eq(&self, other: &CutElimVerdict) -> Bool {
         match (self, other) {
             (CutElimVerdict.Normalised { steps_taken: a },
@@ -284,6 +284,8 @@ implement Eq for CutElimVerdict {
         }
     }
 }
+
+implement Eq for CutElimVerdict {}
 
 implement Display for CutElimVerdict {
     /// Renders the verdict for diagnostic surfaces:
@@ -315,7 +317,7 @@ implement Debug for CutElimVerdict {
     }
 }
 
-implement Eq for OrthogonalityVerdict {
+implement PartialEq for OrthogonalityVerdict {
     fn eq(&self, other: &OrthogonalityVerdict) -> Bool {
         match (self, other) {
             (OrthogonalityVerdict.Orthogonal,         OrthogonalityVerdict.Orthogonal)         => true,
@@ -325,6 +327,8 @@ implement Eq for OrthogonalityVerdict {
         }
     }
 }
+
+implement Eq for OrthogonalityVerdict {}
 
 implement Copy for OrthogonalityVerdict {}
 

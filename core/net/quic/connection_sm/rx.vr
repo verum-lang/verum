@@ -96,7 +96,7 @@ implement Debug for RxError {
     }
 }
 
-implement Eq for RxError {
+implement PartialEq for RxError {
     fn eq(&self, other: &RxError) -> Bool {
         match (self, other) {
             (Truncated,             Truncated)             => true,
@@ -111,6 +111,8 @@ implement Eq for RxError {
         }
     }
 }
+
+implement Eq for RxError {}
 
 // =============================================================================
 // Parsed inbound packet (decrypted)

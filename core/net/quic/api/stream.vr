@@ -60,7 +60,7 @@ implement Debug for QuicStreamError {
     }
 }
 
-implement Eq for QuicStreamError {
+implement PartialEq for QuicStreamError {
     fn eq(&self, other: &QuicStreamError) -> Bool {
         match (self, other) {
             (QuicStreamError.Closed,       QuicStreamError.Closed)       => true,
@@ -72,6 +72,8 @@ implement Eq for QuicStreamError {
         }
     }
 }
+
+implement Eq for QuicStreamError {}
 
 /// Bidirectional QUIC stream handle. Both halves owned — caller may
 /// split via `into_halves()` for independent read/write tasks.

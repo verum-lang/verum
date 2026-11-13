@@ -147,11 +147,13 @@ implement EpistemicStatus {
     }
 }
 
-implement Eq for EpistemicStatus {
+implement PartialEq for EpistemicStatus {
     fn eq(&self, other: &EpistemicStatus) -> Bool {
         self.rank() == other.rank()
     }
 }
+
+implement Eq for EpistemicStatus {}
 
 implement Display for EpistemicStatus {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {

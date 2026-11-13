@@ -60,7 +60,7 @@ implement Debug for KdfError {
     }
 }
 
-implement Eq for KdfError {
+implement PartialEq for KdfError {
     fn eq(&self, other: &KdfError) -> Bool {
         match (self, other) {
             (KeBadParams(a),   KeBadParams(b))   => a == b,
@@ -70,6 +70,8 @@ implement Eq for KdfError {
         }
     }
 }
+
+implement Eq for KdfError {}
 
 // -----------------------------------------------------------------------------
 // KdfParams

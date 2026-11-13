@@ -141,11 +141,13 @@ implement Debug for JsonErrorKind {
     }
 }
 
-implement Eq for JsonErrorKind {
+implement PartialEq for JsonErrorKind {
     fn eq(&self, other: &JsonErrorKind) -> Bool {
         json_error_kind_tag(self) == json_error_kind_tag(other)
     }
 }
+
+implement Eq for JsonErrorKind {}
 
 implement Display for JsonError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
@@ -159,7 +161,7 @@ implement Debug for JsonError {
     }
 }
 
-implement Eq for JsonError {
+implement PartialEq for JsonError {
     fn eq(&self, other: &JsonError) -> Bool {
         self.kind == other.kind
             && self.line == other.line
@@ -168,6 +170,8 @@ implement Eq for JsonError {
             && self.message == other.message
     }
 }
+
+implement Eq for JsonError {}
 
 // =============================================================================
 // Parser state

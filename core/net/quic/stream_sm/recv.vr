@@ -90,7 +90,7 @@ implement Debug for QuicRecvError {
     }
 }
 
-implement Eq for QuicRecvError {
+implement PartialEq for QuicRecvError {
     fn eq(&self, other: &QuicRecvError) -> Bool {
         match (self, other) {
             (FinalSizeChanged,     FinalSizeChanged)     => true,
@@ -101,6 +101,8 @@ implement Eq for QuicRecvError {
         }
     }
 }
+
+implement Eq for QuicRecvError {}
 
 /// A contiguous run of received bytes at offset `start`.
 type Run is { start: UInt64, bytes: List<Byte> };

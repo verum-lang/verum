@@ -106,11 +106,13 @@ implement Debug for StreamState {
     }
 }
 
-implement Eq for StreamState {
+implement PartialEq for StreamState {
     fn eq(&self, other: &StreamState) -> Bool {
         stream_state_tag(self) == stream_state_tag(other)
     }
 }
+
+implement Eq for StreamState {}
 
 implement Display for StreamTransitionError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
@@ -134,7 +136,7 @@ implement Debug for StreamTransitionError {
     }
 }
 
-implement Eq for StreamTransitionError {
+implement PartialEq for StreamTransitionError {
     fn eq(&self, other: &StreamTransitionError) -> Bool {
         match (self, other) {
             (InvalidTransition { state: sa, event: ea },
@@ -144,6 +146,8 @@ implement Eq for StreamTransitionError {
         }
     }
 }
+
+implement Eq for StreamTransitionError {}
 
 public type StreamFsm is {
     stream_id: UInt32,

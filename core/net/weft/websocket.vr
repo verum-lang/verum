@@ -185,7 +185,7 @@ implement Debug for WsError {
     }
 }
 
-implement Eq for WsError {
+implement PartialEq for WsError {
     fn eq(&self, other: &WsError) -> Bool {
         match (self, other) {
             (BadHandshake(a),                  BadHandshake(b))                  => a == b,
@@ -199,6 +199,8 @@ implement Eq for WsError {
         }
     }
 }
+
+implement Eq for WsError {}
 
 // =============================================================================
 // WsSession — framed WebSocket connection over a WeftTransport

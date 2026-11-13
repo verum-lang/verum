@@ -78,7 +78,7 @@ public fn is_raw_actic(a: Articulation) -> Bool {
 // Foundation Protocol Impls — Display + Debug + Eq for Articulation
 // =============================================================================
 
-implement Eq for Articulation {
+implement PartialEq for Articulation {
     /// Structural equality across all three fields — same shape as
     /// the existing `articulation_eq` standalone fn (same file).
     fn eq(&self, other: &Articulation) -> Bool {
@@ -87,6 +87,8 @@ implement Eq for Articulation {
             && self.lineage == other.lineage
     }
 }
+
+implement Eq for Articulation {}
 
 implement Hash for Articulation {
     fn hash(&self, hasher: &mut Hasher) {

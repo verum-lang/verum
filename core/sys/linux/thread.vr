@@ -176,7 +176,7 @@ implement Debug for LinuxThreadError {
     }
 }
 
-implement Eq for LinuxThreadError {
+implement PartialEq for LinuxThreadError {
     fn eq(&self, other: &LinuxThreadError) -> Bool {
         match (self, other) {
             (StackAllocationFailed { code: a }, StackAllocationFailed { code: b }) => a == b,
@@ -187,6 +187,8 @@ implement Eq for LinuxThreadError {
         }
     }
 }
+
+implement Eq for LinuxThreadError {}
 
 /// Default stack size (2 MB)
 public const DEFAULT_STACK_SIZE: USize = 2 * 1024 * 1024;

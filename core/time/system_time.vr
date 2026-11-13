@@ -316,7 +316,7 @@ implement Display for SystemTimeError {
     }
 }
 
-implement Eq for SystemTimeError {
+implement PartialEq for SystemTimeError {
     fn eq(&self, other: &SystemTimeError) -> Bool {
         match (self, other) {
             (SystemTimeError.WentBackwards(a), SystemTimeError.WentBackwards(b)) => a == b,
@@ -325,6 +325,8 @@ implement Eq for SystemTimeError {
         }
     }
 }
+
+implement Eq for SystemTimeError {}
 
 // =============================================================================
 // Operator Implementations
@@ -350,11 +352,13 @@ implement Sub<Duration> for SystemTime {
 // Comparison Implementations
 // =============================================================================
 
-implement Eq for SystemTime {
+implement PartialEq for SystemTime {
     fn eq(&self, other: &SystemTime) -> Bool {
         self.secs == other.secs && self.nanos == other.nanos
     }
 }
+
+implement Eq for SystemTime {}
 
 implement Ord for SystemTime {
     fn cmp(&self, other: &SystemTime) -> Ordering {

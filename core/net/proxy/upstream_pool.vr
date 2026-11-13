@@ -112,13 +112,15 @@ implement Clone for Upstream {
     }
 }
 
-implement Eq for Upstream {
+implement PartialEq for Upstream {
     fn eq(&self, other: &Upstream) -> Bool {
         self.scheme == other.scheme
             && self.host == other.host
             && self.port == other.port
     }
 }
+
+implement Eq for Upstream {}
 
 /// Map-key for the pool — same shape as Upstream minus labelling.
 type UpstreamKey is {
@@ -137,13 +139,15 @@ implement UpstreamKey {
     }
 }
 
-implement Eq for UpstreamKey {
+implement PartialEq for UpstreamKey {
     fn eq(&self, other: &UpstreamKey) -> Bool {
         self.scheme == other.scheme
             && self.host == other.host
             && self.port == other.port
     }
 }
+
+implement Eq for UpstreamKey {}
 
 implement Hash for UpstreamKey {
     fn hash(&self, h: &mut Hasher) {

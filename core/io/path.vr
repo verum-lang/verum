@@ -139,7 +139,7 @@ implement Component {
     }
 }
 
-implement Eq for Component {
+implement PartialEq for Component {
     fn eq(&self, other: &Component) -> Bool {
         match (self, other) {
             (Prefix(a), Prefix(b)) => a == b,
@@ -151,6 +151,8 @@ implement Eq for Component {
         }
     }
 }
+
+implement Eq for Component {}
 
 implement Debug for Component {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
@@ -580,11 +582,13 @@ implement Clone for Path {
     }
 }
 
-implement Eq for Path {
+implement PartialEq for Path {
     fn eq(&self, other: &Path) -> Bool {
         self.inner == other.inner
     }
 }
+
+implement Eq for Path {}
 
 implement Hash for Path {
     fn hash(&self, hasher: &mut Hasher) {
@@ -885,11 +889,13 @@ implement Default for PathBuf {
     }
 }
 
-implement Eq for PathBuf {
+implement PartialEq for PathBuf {
     fn eq(&self, other: &PathBuf) -> Bool {
         self.path.inner == other.path.inner
     }
 }
+
+implement Eq for PathBuf {}
 
 implement Hash for PathBuf {
     fn hash(&self, hasher: &mut Hasher) {

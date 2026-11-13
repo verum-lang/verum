@@ -186,11 +186,13 @@ implement Debug for VfsErrorKind {
     }
 }
 
-implement Eq for VfsErrorKind {
+implement PartialEq for VfsErrorKind {
     fn eq(&self, other: &VfsErrorKind) -> Bool {
         vfs_error_kind_tag(self) == vfs_error_kind_tag(other)
     }
 }
+
+implement Eq for VfsErrorKind {}
 
 implement Display for VfsError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
@@ -204,11 +206,13 @@ implement Debug for VfsError {
     }
 }
 
-implement Eq for VfsError {
+implement PartialEq for VfsError {
     fn eq(&self, other: &VfsError) -> Bool {
         self.kind == other.kind && self.message == other.message
     }
 }
+
+implement Eq for VfsError {}
 
 // =============================================================================
 // Access / device flags / timestamps (auxiliary types for the protocol surface)

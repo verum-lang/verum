@@ -105,7 +105,7 @@ implement Debug for WindowsTlsError {
     }
 }
 
-implement Eq for WindowsTlsError {
+implement PartialEq for WindowsTlsError {
     fn eq(&self, other: &WindowsTlsError) -> Bool {
         match (self, other) {
             (WindowsTlsError.NotInitialized,         WindowsTlsError.NotInitialized)         => true,
@@ -121,6 +121,8 @@ implement Eq for WindowsTlsError {
         }
     }
 }
+
+implement Eq for WindowsTlsError {}
 
 implement WindowsTlsError {
     public fn message(&self) -> Text {

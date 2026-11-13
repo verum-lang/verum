@@ -66,7 +66,7 @@ implement Debug for BackupError {
     }
 }
 
-implement Eq for BackupError {
+implement PartialEq for BackupError {
     fn eq(&self, other: &BackupError) -> Bool {
         match (self, other) {
             (BeSourceClosed,        BeSourceClosed)        => true,
@@ -78,6 +78,8 @@ implement Eq for BackupError {
         }
     }
 }
+
+implement Eq for BackupError {}
 
 // -----------------------------------------------------------------------------
 // Phase

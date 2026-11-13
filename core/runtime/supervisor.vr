@@ -908,7 +908,7 @@ implement Debug for SupervisorError {
     }
 }
 
-implement Eq for SupervisorError {
+implement PartialEq for SupervisorError {
     fn eq(&self, other: &SupervisorError) -> Bool {
         match (self, other) {
             (TooManyRestarts { count: ca, window_secs: wa },
@@ -925,6 +925,8 @@ implement Eq for SupervisorError {
         }
     }
 }
+
+implement Eq for SupervisorError {}
 
 // =============================================================================
 // Supervisor Protocol

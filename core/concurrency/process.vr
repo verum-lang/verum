@@ -411,7 +411,7 @@ fn clone_env(env: &Map<Text, Int>) -> Map<Text, Int> {
 // 5. Foundation Protocol Impls — Display + Debug + Eq for Process
 // =============================================================================
 
-implement Eq for Process {
+implement PartialEq for Process {
     /// Structural (syntactic) equality on π-calculus processes.
     /// Note: this is *not* α-equivalence — `(νx) P` and `(νy) P[x:=y]`
     /// compare unequal under this Eq even though they denote the
@@ -440,6 +440,8 @@ implement Eq for Process {
         }
     }
 }
+
+implement Eq for Process {}
 
 implement Display for Process {
     /// Renders a process in standard π-calculus notation:

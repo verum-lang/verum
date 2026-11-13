@@ -76,7 +76,7 @@ implement Debug for Pbkdf2Error {
     }
 }
 
-implement Eq for Pbkdf2Error {
+implement PartialEq for Pbkdf2Error {
     fn eq(&self, other: &Pbkdf2Error) -> Bool {
         match (self, other) {
             (Pbkdf2Error.OutputTooLong,   Pbkdf2Error.OutputTooLong)   => true,
@@ -86,6 +86,8 @@ implement Eq for Pbkdf2Error {
         }
     }
 }
+
+implement Eq for Pbkdf2Error {}
 
 /// Max output length per RFC 8018 §5.2: (2^32 - 1) × hLen bytes.
 /// For HMAC-SHA256 (hLen = 32) this is ~137 GiB — we cap at

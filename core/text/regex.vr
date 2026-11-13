@@ -91,11 +91,13 @@ implement Debug for RegexError {
     }
 }
 
-implement Eq for RegexError {
+implement PartialEq for RegexError {
     fn eq(&self, other: &RegexError) -> Bool {
         self.message == other.message
     }
 }
+
+implement Eq for RegexError {}
 
 // =============================================================================
 // Regex Methods

@@ -174,7 +174,7 @@ implement Debug for DerErrorKind {
     }
 }
 
-implement Eq for DerErrorKind {
+implement PartialEq for DerErrorKind {
     fn eq(&self, other: &DerErrorKind) -> Bool {
         match (self, other) {
             (DerErrorKind.UnexpectedEndOfInput, DerErrorKind.UnexpectedEndOfInput) => true,
@@ -192,6 +192,8 @@ implement Eq for DerErrorKind {
     }
 }
 
+implement Eq for DerErrorKind {}
+
 implement Display for DerError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
         f.write_str(f"{self.kind} at position {self.position}: {self.message}".as_str())
@@ -204,13 +206,15 @@ implement Debug for DerError {
     }
 }
 
-implement Eq for DerError {
+implement PartialEq for DerError {
     fn eq(&self, other: &DerError) -> Bool {
         self.kind == other.kind
             && self.position == other.position
             && self.message == other.message
     }
 }
+
+implement Eq for DerError {}
 
 // =============================================================================
 // BitString — preserved as slice + unused-bit count (caller decides meaning)

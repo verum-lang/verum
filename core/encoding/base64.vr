@@ -61,7 +61,7 @@ implement Debug for Base64ErrorKind {
     }
 }
 
-implement Eq for Base64ErrorKind {
+implement PartialEq for Base64ErrorKind {
     fn eq(&self, other: &Base64ErrorKind) -> Bool {
         match (self, other) {
             (InvalidChar,    InvalidChar)    => true,
@@ -71,6 +71,8 @@ implement Eq for Base64ErrorKind {
         }
     }
 }
+
+implement Eq for Base64ErrorKind {}
 
 implement Display for Base64Error {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
@@ -84,11 +86,13 @@ implement Debug for Base64Error {
     }
 }
 
-implement Eq for Base64Error {
+implement PartialEq for Base64Error {
     fn eq(&self, other: &Base64Error) -> Bool {
         self.kind == other.kind && self.position == other.position && self.message == other.message
     }
 }
+
+implement Eq for Base64Error {}
 
 const STD_ALPHABET: [Byte; 64] = [
     0x41_u8, 0x42_u8, 0x43_u8, 0x44_u8, 0x45_u8, 0x46_u8, 0x47_u8, 0x48_u8,

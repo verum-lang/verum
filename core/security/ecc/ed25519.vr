@@ -141,7 +141,7 @@ implement Debug for Ed25519Error {
     }
 }
 
-implement Eq for Ed25519Error {
+implement PartialEq for Ed25519Error {
     fn eq(&self, other: &Ed25519Error) -> Bool {
         match (self, other) {
             (Malformed(a),         Malformed(b))         => a == b,
@@ -151,6 +151,8 @@ implement Eq for Ed25519Error {
         }
     }
 }
+
+implement Eq for Ed25519Error {}
 
 // =============================================================================
 // Ed25519 namespace

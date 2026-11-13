@@ -546,7 +546,7 @@ implement Debug for EngineIoError {
     }
 }
 
-implement Eq for EngineIoError {
+implement PartialEq for EngineIoError {
     fn eq(&self, other: &EngineIoError) -> Bool {
         match (self, other) {
             (WouldBlock,           WouldBlock)           => true,
@@ -571,6 +571,8 @@ implement Eq for EngineIoError {
         }
     }
 }
+
+implement Eq for EngineIoError {}
 
 
 implement EngineIoError {

@@ -103,7 +103,7 @@ implement Debug for ResumeVerifyError {
     }
 }
 
-implement Eq for ResumeVerifyError {
+implement PartialEq for ResumeVerifyError {
     fn eq(&self, other: &ResumeVerifyError) -> Bool {
         match (self, other) {
             (NoAcceptableIdentity,    NoAcceptableIdentity)    => true,
@@ -117,6 +117,8 @@ implement Eq for ResumeVerifyError {
         }
     }
 }
+
+implement Eq for ResumeVerifyError {}
 
 // =============================================================================
 // ResumedSession — output of a successful resumption verify

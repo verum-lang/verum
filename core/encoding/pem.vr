@@ -126,7 +126,7 @@ implement Debug for PemError {
     }
 }
 
-implement Eq for PemError {
+implement PartialEq for PemError {
     fn eq(&self, other: &PemError) -> Bool {
         match (self, other) {
             (NoBlockFound,        NoBlockFound)        => true,
@@ -138,6 +138,8 @@ implement Eq for PemError {
         }
     }
 }
+
+implement Eq for PemError {}
 
 /// Hard cap on a single PEM block's base64 body length (bytes BEFORE
 /// decode). 16 MiB is well above any realistic certificate / key blob:

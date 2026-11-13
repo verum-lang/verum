@@ -121,7 +121,7 @@ implement Ordering {
 // Equality for Ordering
 // =============================================================================
 
-implement Eq for Ordering {
+implement PartialEq for Ordering {
     @inline(always)
     fn eq(&self, other: &Ordering) -> Bool {
         match (self, other) {
@@ -132,6 +132,8 @@ implement Eq for Ordering {
         }
     }
 }
+
+implement Eq for Ordering {}
 
 // =============================================================================
 // Clone for Ordering

@@ -110,7 +110,7 @@ implement Debug for OtpError {
     }
 }
 
-implement Eq for OtpError {
+implement PartialEq for OtpError {
     fn eq(&self, other: &OtpError) -> Bool {
         match (self, other) {
             (OtpError.InvalidSecret,    OtpError.InvalidSecret)    => true,
@@ -122,6 +122,8 @@ implement Eq for OtpError {
         }
     }
 }
+
+implement Eq for OtpError {}
 
 // =============================================================================
 // Constants

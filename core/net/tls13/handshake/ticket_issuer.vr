@@ -99,13 +99,15 @@ implement Debug for IssueError {
     }
 }
 
-implement Eq for IssueError {
+implement PartialEq for IssueError {
     fn eq(&self, other: &IssueError) -> Bool {
         match (self, other) {
             (Ticket(a), Ticket(b)) => a == b,
         }
     }
 }
+
+implement Eq for IssueError {}
 
 // =============================================================================
 // Issuance

@@ -138,7 +138,7 @@ implement Debug for PumpError {
     }
 }
 
-implement Eq for PumpError {
+implement PartialEq for PumpError {
     fn eq(&self, other: &PumpError) -> Bool {
         match (self, other) {
             (PumpError.Transport(a),   PumpError.Transport(b))   => a == b,
@@ -151,6 +151,8 @@ implement Eq for PumpError {
         }
     }
 }
+
+implement Eq for PumpError {}
 
 // =============================================================================
 // ConnectionPump

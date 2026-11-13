@@ -62,11 +62,13 @@ implement Debug for Http3ErrorCode {
     }
 }
 
-implement Eq for Http3ErrorCode {
+implement PartialEq for Http3ErrorCode {
     fn eq(&self, other: &Http3ErrorCode) -> Bool {
         self.code == other.code
     }
 }
+
+implement Eq for Http3ErrorCode {}
 
 implement Display for Http3Error {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
@@ -98,7 +100,7 @@ implement Debug for Http3Error {
     }
 }
 
-implement Eq for Http3Error {
+implement PartialEq for Http3Error {
     fn eq(&self, other: &Http3Error) -> Bool {
         match (self, other) {
             (Http3Error.ConnectionError { code: ca, reason: ra },
@@ -113,3 +115,5 @@ implement Eq for Http3Error {
         }
     }
 }
+
+implement Eq for Http3Error {}

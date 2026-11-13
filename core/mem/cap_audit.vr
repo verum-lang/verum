@@ -128,11 +128,13 @@ fn cap_event_kind_tag(k: &CapEventKind) -> Int {
     }
 }
 
-implement Eq for CapEventKind {
+implement PartialEq for CapEventKind {
     fn eq(&self, other: &CapEventKind) -> Bool {
         cap_event_kind_tag(self) == cap_event_kind_tag(other)
     }
 }
+
+implement Eq for CapEventKind {}
 
 // =============================================================================
 // CapEvent — single auditable CBGR state transition

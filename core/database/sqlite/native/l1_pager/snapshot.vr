@@ -79,7 +79,7 @@ implement Debug for SnapshotError {
     }
 }
 
-implement Eq for SnapshotError {
+implement PartialEq for SnapshotError {
     fn eq(&self, other: &SnapshotError) -> Bool {
         match (self, other) {
             (Closed, Closed) => true,
@@ -88,6 +88,8 @@ implement Eq for SnapshotError {
         }
     }
 }
+
+implement Eq for SnapshotError {}
 
 // -----------------------------------------------------------------------------
 // Constructors

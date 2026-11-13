@@ -314,7 +314,7 @@ implement Debug for CursorTableError {
     }
 }
 
-implement Eq for CursorTableError {
+implement PartialEq for CursorTableError {
     fn eq(&self, other: &CursorTableError) -> Bool {
         match (self, other) {
             (NoSuchSlot(a),          NoSuchSlot(b))          => a == b,
@@ -325,6 +325,8 @@ implement Eq for CursorTableError {
         }
     }
 }
+
+implement Eq for CursorTableError {}
 
 // -----------------------------------------------------------------------------
 // Cursor table

@@ -116,7 +116,7 @@ implement Debug for SemVerError {
     }
 }
 
-implement Eq for SemVerError {
+implement PartialEq for SemVerError {
     fn eq(&self, other: &SemVerError) -> Bool {
         match (self, other) {
             (Malformed(a),         Malformed(b))         => a == b,
@@ -127,6 +127,8 @@ implement Eq for SemVerError {
         }
     }
 }
+
+implement Eq for SemVerError {}
 
 // UInt64.MAX = 18_446_744_073_709_551_615 — exactly 20 decimal digits.
 // A major/minor/patch component longer than 20 digits cannot fit; reject pre-loop.
@@ -489,7 +491,7 @@ implement Display for SemVer {
     }
 }
 
-implement Eq for SemVer {
+implement PartialEq for SemVer {
     /// Precedence equality per §11: build-meta is NOT significant, so
     /// `1.0.0+a == 1.0.0+b`.  Defined through the same comparison the
     /// Ord impl uses, so the two can never disagree.
@@ -500,6 +502,8 @@ implement Eq for SemVer {
         }
     }
 }
+
+implement Eq for SemVer {}
 
 implement Ord for SemVer {
     fn cmp(&self, other: &SemVer) -> Ordering {

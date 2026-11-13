@@ -56,13 +56,15 @@ implement Debug for CidError {
     }
 }
 
-implement Eq for CidError {
+implement PartialEq for CidError {
     fn eq(&self, other: &CidError) -> Bool {
         match (self, other) {
             (TooLong(a), TooLong(b)) => a == b,
         }
     }
 }
+
+implement Eq for CidError {}
 
 public type ConnectionId is {
     bytes: List<Byte>,

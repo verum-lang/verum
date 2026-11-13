@@ -99,7 +99,7 @@ implement Debug for SessionSchemaError {
     }
 }
 
-implement Eq for SessionSchemaError {
+implement PartialEq for SessionSchemaError {
     fn eq(&self, other: &SessionSchemaError) -> Bool {
         match (self, other) {
             (NotFound(a),         NotFound(b))         => a == b,
@@ -109,6 +109,8 @@ implement Eq for SessionSchemaError {
         }
     }
 }
+
+implement Eq for SessionSchemaError {}
 
 // -----------------------------------------------------------------------------
 // SchemaCache

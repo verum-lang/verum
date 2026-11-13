@@ -79,7 +79,7 @@ implement Debug for BindError {
     }
 }
 
-implement Eq for BindError {
+implement PartialEq for BindError {
     fn eq(&self, other: &BindError) -> Bool {
         match (self, other) {
             (BeRange(a),         BeRange(b))         => a == b,
@@ -91,3 +91,5 @@ implement Eq for BindError {
         }
     }
 }
+
+implement Eq for BindError {}

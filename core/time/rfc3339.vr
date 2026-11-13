@@ -100,7 +100,7 @@ implement Debug for Rfc3339Error {
     }
 }
 
-implement Eq for Rfc3339Error {
+implement PartialEq for Rfc3339Error {
     fn eq(&self, other: &Rfc3339Error) -> Bool {
         match (self, other) {
             (Malformed(a),    Malformed(b))    => a == b,
@@ -110,6 +110,8 @@ implement Eq for Rfc3339Error {
         }
     }
 }
+
+implement Eq for Rfc3339Error {}
 
 // =============================================================================
 // Parse

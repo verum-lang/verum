@@ -1148,7 +1148,7 @@ public fn bson_value_equals(a: &BsonValue, b: &BsonValue) -> Bool {
     }
 }
 
-implement Eq for BsonError {
+implement PartialEq for BsonError {
     fn eq(&self, other: &BsonError) -> Bool {
         match (self, other) {
             (BsonE_Truncated(a),       BsonE_Truncated(b))       => a == b,
@@ -1165,3 +1165,5 @@ implement Eq for BsonError {
         }
     }
 }
+
+implement Eq for BsonError {}

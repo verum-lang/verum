@@ -88,7 +88,7 @@ implement Debug for QuicSendError {
     }
 }
 
-implement Eq for QuicSendError {
+implement PartialEq for QuicSendError {
     fn eq(&self, other: &QuicSendError) -> Bool {
         match (self, other) {
             (AlreadyReset,        AlreadyReset)        => true,
@@ -99,6 +99,8 @@ implement Eq for QuicSendError {
         }
     }
 }
+
+implement Eq for QuicSendError {}
 
 public type SendStream is {
     state:          SendState,

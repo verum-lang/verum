@@ -2152,7 +2152,7 @@ implement Debug for SchemaErrorSeverity {
     }
 }
 
-implement Eq for SchemaErrorSeverity {
+implement PartialEq for SchemaErrorSeverity {
     fn eq(&self, other: &SchemaErrorSeverity) -> Bool {
         match (self, other) {
             (Error,   Error)   => true,
@@ -2162,6 +2162,8 @@ implement Eq for SchemaErrorSeverity {
         }
     }
 }
+
+implement Eq for SchemaErrorSeverity {}
 
 implement Display for SchemaError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
@@ -2175,13 +2177,15 @@ implement Debug for SchemaError {
     }
 }
 
-implement Eq for SchemaError {
+implement PartialEq for SchemaError {
     fn eq(&self, other: &SchemaError) -> Bool {
         self.message == other.message
             && self.severity == other.severity
             && self.suggestion == other.suggestion
     }
 }
+
+implement Eq for SchemaError {}
 
 // =============================================================================
 // DepGraph Context (Dependency Analysis)

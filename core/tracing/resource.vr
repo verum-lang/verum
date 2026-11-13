@@ -108,7 +108,7 @@ implement Resource {
     }
 }
 
-implement Eq for Resource {
+implement PartialEq for Resource {
     /// Two resources compare equal iff their attribute sets compare
     /// equal (same keys AND values, in insertion order — delegated to
     /// AttributeSet's Eq) and their schema_url values match.
@@ -123,3 +123,5 @@ implement Eq for Resource {
         }
     }
 }
+
+implement Eq for Resource {}

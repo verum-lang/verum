@@ -113,7 +113,7 @@ public type GPUBackend is
     | SYCL       // Intel oneAPI/SYCL
     | None;      // No GPU available
 
-implement Eq for GPUBackend {
+implement PartialEq for GPUBackend {
     fn eq(&self, other: &Self) -> Bool {
         match (self, other) {
             (GPUBackend.CUDA, GPUBackend.CUDA) => true,
@@ -127,6 +127,8 @@ implement Eq for GPUBackend {
     }
 }
 
+implement Eq for GPUBackend {}
+
 // Hardware vendor for backend selection
 public type Vendor is
     | Nvidia     // CUDA
@@ -137,7 +139,7 @@ public type Vendor is
     | Qualcomm   // Adreno (mobile)
     | Unknown;
 
-implement Eq for Vendor {
+implement PartialEq for Vendor {
     fn eq(&self, other: &Self) -> Bool {
         match (self, other) {
             (Vendor.Nvidia, Vendor.Nvidia) => true,
@@ -151,6 +153,8 @@ implement Eq for Vendor {
         }
     }
 }
+
+implement Eq for Vendor {}
 
 // =============================================================================
 // Device ID and Encoding
@@ -211,11 +215,13 @@ implement DeviceId {
     }
 }
 
-implement Eq for DeviceId {
+implement PartialEq for DeviceId {
     fn eq(&self, other: &Self) -> Bool {
         self.0 == other.0
     }
 }
+
+implement Eq for DeviceId {}
 
 // =============================================================================
 // Compute Capability

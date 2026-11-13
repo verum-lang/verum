@@ -75,13 +75,15 @@ implement Debug for Ipv6CanonicalError {
     }
 }
 
-implement Eq for Ipv6CanonicalError {
+implement PartialEq for Ipv6CanonicalError {
     fn eq(&self, other: &Ipv6CanonicalError) -> Bool {
         match (self, other) {
             (Ipv6CanonicalError.ParseFailed(a), Ipv6CanonicalError.ParseFailed(b)) => a == b,
         }
     }
 }
+
+implement Eq for Ipv6CanonicalError {}
 
 // =============================================================================
 // Public API

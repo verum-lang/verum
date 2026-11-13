@@ -193,7 +193,7 @@ implement Display for AllocError {
     }
 }
 
-implement Eq for AllocError {
+implement PartialEq for AllocError {
     fn eq(&self, other: &AllocError) -> Bool {
         match (self, other) {
             (OutOfMemory { requested: a },        OutOfMemory { requested: b })        => a == b,
@@ -211,6 +211,8 @@ implement Eq for AllocError {
         }
     }
 }
+
+implement Eq for AllocError {}
 
 // =============================================================================
 // Memory Layout

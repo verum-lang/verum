@@ -109,7 +109,7 @@ implement Debug for RollbackError {
     }
 }
 
-implement Eq for RollbackError {
+implement PartialEq for RollbackError {
     fn eq(&self, other: &RollbackError) -> Bool {
         match (self, other) {
             (BadMagic,    BadMagic)    => true,
@@ -120,6 +120,8 @@ implement Eq for RollbackError {
         }
     }
 }
+
+implement Eq for RollbackError {}
 
 // -----------------------------------------------------------------------------
 // Header serialise / parse

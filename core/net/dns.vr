@@ -267,7 +267,7 @@ implement Display for DnsError {
     }
 }
 
-implement Eq for DnsError {
+implement PartialEq for DnsError {
     fn eq(&self, other: &DnsError) -> Bool {
         match (self, other) {
             (NotFound,         NotFound)         => true,
@@ -287,6 +287,8 @@ implement Eq for DnsError {
         }
     }
 }
+
+implement Eq for DnsError {}
 
 // =============================================================================
 // DNS Wire Protocol Types

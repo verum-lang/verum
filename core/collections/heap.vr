@@ -850,7 +850,7 @@ implement<T: Ord> IntoIterator for BinaryHeap<T> {
     }
 }
 
-implement<T: Ord + Eq> Eq for BinaryHeap<T> {
+implement<T: Ord + Eq> PartialEq for BinaryHeap<T> {
     fn eq(&self, other: &BinaryHeap<T>) -> Bool {
         if self.data.len() != other.data.len() {
             return false;
@@ -868,6 +868,8 @@ implement<T: Ord + Eq> Eq for BinaryHeap<T> {
         true
     }
 }
+
+implement<T: Ord + Eq> Eq for BinaryHeap<T> {}
 
 implement<T: Ord + Clone> Clone for BinaryHeap<T> {
     fn clone(&self) -> BinaryHeap<T> {

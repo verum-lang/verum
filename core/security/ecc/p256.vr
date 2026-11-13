@@ -168,7 +168,7 @@ implement Debug for P256Error {
     }
 }
 
-implement Eq for P256Error {
+implement PartialEq for P256Error {
     fn eq(&self, other: &P256Error) -> Bool {
         match (self, other) {
             (InvalidPrivateKey(a), InvalidPrivateKey(b)) => a == b,
@@ -181,6 +181,8 @@ implement Eq for P256Error {
         }
     }
 }
+
+implement Eq for P256Error {}
 
 // =============================================================================
 // P-256 namespace

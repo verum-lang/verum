@@ -121,7 +121,7 @@ implement Debug for AeadError {
     }
 }
 
-implement Eq for AeadError {
+implement PartialEq for AeadError {
     fn eq(&self, other: &AeadError) -> Bool {
         match (self, other) {
             (AeadError.TagMismatch, AeadError.TagMismatch) => true,
@@ -134,6 +134,8 @@ implement Eq for AeadError {
         }
     }
 }
+
+implement Eq for AeadError {}
 
 /// RFC 7539 §2.8 absolute upper bound on plaintext per (key, nonce):
 ///

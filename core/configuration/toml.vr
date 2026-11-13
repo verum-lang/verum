@@ -164,11 +164,13 @@ implement Debug for TomlErrorKind {
     }
 }
 
-implement Eq for TomlErrorKind {
+implement PartialEq for TomlErrorKind {
     fn eq(&self, other: &Self) -> Bool {
         toml_error_kind_name(self) == toml_error_kind_name(other)
     }
 }
+
+implement Eq for TomlErrorKind {}
 
 implement Display for TomlError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
@@ -190,7 +192,7 @@ implement Debug for TomlError {
     }
 }
 
-implement Eq for TomlError {
+implement PartialEq for TomlError {
     fn eq(&self, other: &Self) -> Bool {
         self.kind == other.kind
             && self.line == other.line
@@ -198,6 +200,8 @@ implement Eq for TomlError {
             && self.message == other.message
     }
 }
+
+implement Eq for TomlError {}
 
 // =============================================================================
 // Limits — DoS protection per §"Spec ambiguities" (informative)

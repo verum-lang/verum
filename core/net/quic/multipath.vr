@@ -465,7 +465,7 @@ implement Debug for MultipathError {
     }
 }
 
-implement Eq for MultipathError {
+implement PartialEq for MultipathError {
     fn eq(&self, other: &MultipathError) -> Bool {
         match (self, other) {
             (UnknownPathId(a),        UnknownPathId(b))        => a.eq(b),
@@ -477,3 +477,5 @@ implement Eq for MultipathError {
         }
     }
 }
+
+implement Eq for MultipathError {}

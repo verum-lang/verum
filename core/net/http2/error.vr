@@ -96,11 +96,13 @@ implement Debug for ErrorCode {
     }
 }
 
-implement Eq for ErrorCode {
+implement PartialEq for ErrorCode {
     fn eq(&self, other: &ErrorCode) -> Bool {
         self.code == other.code
     }
 }
+
+implement Eq for ErrorCode {}
 
 implement Display for Http2Error {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
@@ -152,7 +154,7 @@ implement Debug for Http2Error {
     }
 }
 
-implement Eq for Http2Error {
+implement PartialEq for Http2Error {
     fn eq(&self, other: &Http2Error) -> Bool {
         match (self, other) {
             (Http2Error.ConnectionError { code: ca, reason: ra },
@@ -171,3 +173,5 @@ implement Eq for Http2Error {
         }
     }
 }
+
+implement Eq for Http2Error {}

@@ -3006,7 +3006,7 @@ implement<T> IndexMut<Int> for List<T> {
 // Eq && Debug
 // =============================================================================
 
-implement<T: Eq> Eq for List<T> {
+implement<T: Eq> PartialEq for List<T> {
     fn eq(&self, other: &List<T>) -> Bool {
         if self.len != other.len {
             return false;
@@ -3061,6 +3061,8 @@ implement<T: Eq> Eq for List<T> {
         false
     }
 }
+
+implement<T: Eq> Eq for List<T> {}
 
 implement<T: Debug> Debug for List<T> {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {

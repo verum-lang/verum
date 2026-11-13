@@ -99,7 +99,7 @@ implement Debug for PacketError {
     }
 }
 
-implement Eq for PacketError {
+implement PartialEq for PacketError {
     fn eq(&self, other: &PacketError) -> Bool {
         match (self, other) {
             (Truncated,                    Truncated)                    => true,
@@ -113,6 +113,8 @@ implement Eq for PacketError {
         }
     }
 }
+
+implement Eq for PacketError {}
 
 // =============================================================================
 // Packet-type discriminant for long headers

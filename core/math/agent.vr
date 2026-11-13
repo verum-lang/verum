@@ -1941,11 +1941,13 @@ implement Debug for AgentParseError {
     }
 }
 
-implement Eq for AgentParseError {
+implement PartialEq for AgentParseError {
     fn eq(&self, other: &AgentParseError) -> Bool {
         self.message == other.message && self.position == other.position
     }
 }
+
+implement Eq for AgentParseError {}
 
 // =============================================================================
 // Substantive agent theorems (SMT-discharged)

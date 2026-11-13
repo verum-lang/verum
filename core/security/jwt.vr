@@ -182,7 +182,7 @@ implement Debug for JwtError {
     }
 }
 
-implement Eq for JwtError {
+implement PartialEq for JwtError {
     fn eq(&self, other: &JwtError) -> Bool {
         // All variants are unit — structural equality reduces to
         // discriminant equality, expressed via the (self, other)
@@ -205,6 +205,8 @@ implement Eq for JwtError {
         }
     }
 }
+
+implement Eq for JwtError {}
 
 // Maximum permitted JWT compact-form token length in bytes. Hostile
 // inputs with multi-megabyte tokens would force the verifier to do

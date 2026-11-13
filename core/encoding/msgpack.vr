@@ -113,7 +113,7 @@ implement Debug for MsgPackError {
     }
 }
 
-implement Eq for MsgPackError {
+implement PartialEq for MsgPackError {
     fn eq(&self, other: &MsgPackError) -> Bool {
         match (self, other) {
             (Truncated(a),       Truncated(b))       => a == b,
@@ -135,6 +135,8 @@ implement Eq for MsgPackError {
         }
     }
 }
+
+implement Eq for MsgPackError {}
 
 public const MAX_MSGPACK_NESTING: Int = 128;
 

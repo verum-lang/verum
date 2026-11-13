@@ -186,7 +186,7 @@ implement Debug for TpError {
     }
 }
 
-implement Eq for TpError {
+implement PartialEq for TpError {
     fn eq(&self, other: &TpError) -> Bool {
         match (self, other) {
             (TpError.Truncated,        TpError.Truncated)        => true,
@@ -197,6 +197,8 @@ implement Eq for TpError {
         }
     }
 }
+
+implement Eq for TpError {}
 
 fn vfail<T>(_: VarintError) -> Result<T, TpError> { Result.Err(TpError.VarintFailure) }
 

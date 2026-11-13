@@ -96,7 +96,7 @@ implement Debug for MerkleError {
     }
 }
 
-implement Eq for MerkleError {
+implement PartialEq for MerkleError {
     fn eq(&self, other: &MerkleError) -> Bool {
         match (self, other) {
             (MerkleError.EmptyTree, MerkleError.EmptyTree) => true,
@@ -106,6 +106,8 @@ implement Eq for MerkleError {
         }
     }
 }
+
+implement Eq for MerkleError {}
 
 // =============================================================================
 // Inclusion proof

@@ -181,13 +181,15 @@ implement Debug for SelectError {
     }
 }
 
-implement Eq for SelectError {
+implement PartialEq for SelectError {
     fn eq(&self, other: &SelectError) -> Bool {
         match (self, other) {
             (EmptyInput, EmptyInput) => true,
         }
     }
 }
+
+implement Eq for SelectError {}
 
 /// Result of select_all operation.
 public type SelectAllResult<T, F> is {
@@ -580,9 +582,11 @@ implement Debug for SelectTimeoutError {
     }
 }
 
-implement Eq for SelectTimeoutError {
+implement PartialEq for SelectTimeoutError {
     fn eq(&self, _other: &SelectTimeoutError) -> Bool { true }
 }
+
+implement Eq for SelectTimeoutError {}
 
 /// Add a timeout to a future.
 ///

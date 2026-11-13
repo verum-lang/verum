@@ -339,7 +339,7 @@ public fn parallel_coherent(kinds: List<EffectKind>) -> Bool {
 // Foundation Protocol Impls — Display + Debug + Eq for EffectKind
 // =============================================================================
 
-implement Eq for EffectKind {
+implement PartialEq for EffectKind {
     fn eq(&self, other: &EffectKind) -> Bool {
         match (self, other) {
             (EffectKind.PureEffect,        EffectKind.PureEffect)        => true,
@@ -354,6 +354,8 @@ implement Eq for EffectKind {
         }
     }
 }
+
+implement Eq for EffectKind {}
 
 implement Copy for EffectKind {}
 

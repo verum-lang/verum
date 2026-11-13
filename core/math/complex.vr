@@ -357,11 +357,13 @@ implement<T: Mul<Output = T> + Clone> Complex<T> {
 // Protocol Implementations
 // =============================================================================
 
-implement<T: Eq> Eq for Complex<T> {
+implement<T: Eq> PartialEq for Complex<T> {
     fn eq(&self, other: &Complex<T>) -> Bool {
         self.re == other.re && self.im == other.im
     }
 }
+
+implement<T: Eq> Eq for Complex<T> {}
 
 implement<T: Clone> Clone for Complex<T> {
     fn clone(&self) -> Complex<T> {

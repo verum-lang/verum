@@ -65,7 +65,7 @@ implement Debug for ReplicationStreamError {
     }
 }
 
-implement Eq for ReplicationStreamError {
+implement PartialEq for ReplicationStreamError {
     fn eq(&self, other: &ReplicationStreamError) -> Bool {
         match (self, other) {
             (SeOutOfOrder(ea, ga),    SeOutOfOrder(eb, gb))    => ea == eb && ga == gb,
@@ -76,6 +76,8 @@ implement Eq for ReplicationStreamError {
         }
     }
 }
+
+implement Eq for ReplicationStreamError {}
 
 // -----------------------------------------------------------------------------
 // ReplicaTrack — primary's per-replica state

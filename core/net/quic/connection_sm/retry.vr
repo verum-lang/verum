@@ -89,7 +89,7 @@ implement Debug for RetryError {
     }
 }
 
-implement Eq for RetryError {
+implement PartialEq for RetryError {
     fn eq(&self, other: &RetryError) -> Bool {
         match (self, other) {
             (MalformedPseudo,      MalformedPseudo)      => true,
@@ -99,6 +99,8 @@ implement Eq for RetryError {
         }
     }
 }
+
+implement Eq for RetryError {}
 
 // =============================================================================
 // Parsed Retry packet (wire layout: first_byte | version | DCID |

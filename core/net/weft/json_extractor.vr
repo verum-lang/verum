@@ -110,7 +110,7 @@ implement Debug for JsonExtractError {
     }
 }
 
-implement Eq for JsonExtractError {
+implement PartialEq for JsonExtractError {
     fn eq(&self, other: &JsonExtractError) -> Bool {
         match (self, other) {
             (MissingContentType, MissingContentType) => true,
@@ -124,6 +124,8 @@ implement Eq for JsonExtractError {
         }
     }
 }
+
+implement Eq for JsonExtractError {}
 
 implement JsonExtractError {
     /// Map every variant to a (status, body) pair for the error path.

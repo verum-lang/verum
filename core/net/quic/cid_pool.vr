@@ -90,7 +90,7 @@ implement Debug for CidPoolError {
     }
 }
 
-implement Eq for CidPoolError {
+implement PartialEq for CidPoolError {
     fn eq(&self, other: &CidPoolError) -> Bool {
         match (self, other) {
             (LimitExceeded(a),       LimitExceeded(b))       => a == b,
@@ -102,6 +102,8 @@ implement Eq for CidPoolError {
         }
     }
 }
+
+implement Eq for CidPoolError {}
 
 // =============================================================================
 // A single entry in the pool

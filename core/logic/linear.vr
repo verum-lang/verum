@@ -380,7 +380,7 @@ public fn lin_atom_count(f: LinForm) -> Int {
 // Foundation Protocol Impls — Display + Debug + Eq for LinForm
 // =============================================================================
 
-implement Eq for LinForm {
+implement PartialEq for LinForm {
     /// Structural (syntactic) equality on linear-logic formulas.
     /// Not provability — `A ⊗ B` and `B ⊗ A` compare unequal under
     /// `==` even though they are linearly equivalent up to
@@ -419,6 +419,8 @@ implement Eq for LinForm {
         }
     }
 }
+
+implement Eq for LinForm {}
 
 implement Display for LinForm {
     /// Renders a linear-logic formula in standard notation:

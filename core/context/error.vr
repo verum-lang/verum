@@ -85,7 +85,7 @@ implement Debug for ContextError {
     }
 }
 
-implement Eq for ContextError {
+implement PartialEq for ContextError {
     fn eq(&self, other: &ContextError) -> Bool {
         // FUNDAMENTAL: qualify variants `ContextError.<Variant>` in
         // BOTH match-arm sides to avoid bare-name first-wins
@@ -118,3 +118,5 @@ implement Eq for ContextError {
         }
     }
 }
+
+implement Eq for ContextError {}

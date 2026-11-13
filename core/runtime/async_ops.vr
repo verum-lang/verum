@@ -72,11 +72,13 @@ implement Debug for AsyncRecoveryError {
     }
 }
 
-implement Eq for AsyncRecoveryError {
+implement PartialEq for AsyncRecoveryError {
     fn eq(&self, other: &AsyncRecoveryError) -> Bool {
         self.message == other.message
     }
 }
+
+implement Eq for AsyncRecoveryError {}
 
 /// Spawn a task with an execution environment.
 @intrinsic("spawn_with_env")

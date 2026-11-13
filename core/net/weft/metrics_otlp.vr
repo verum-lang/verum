@@ -356,7 +356,7 @@ implement Debug for OtlpError {
     }
 }
 
-implement Eq for OtlpError {
+implement PartialEq for OtlpError {
     fn eq(&self, other: &OtlpError) -> Bool {
         match (self, other) {
             (ConnectFailed(a), ConnectFailed(b)) => a == b,
@@ -367,6 +367,8 @@ implement Eq for OtlpError {
         }
     }
 }
+
+implement Eq for OtlpError {}
 
 // =============================================================================
 // Protobuf primitive helpers — minimal, deterministic encoder

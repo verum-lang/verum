@@ -108,7 +108,7 @@ implement Debug for FrameError {
     }
 }
 
-implement Eq for FrameError {
+implement PartialEq for FrameError {
     fn eq(&self, other: &FrameError) -> Bool {
         match (self, other) {
             (FrameError.Truncated,        FrameError.Truncated)        => true,
@@ -119,6 +119,8 @@ implement Eq for FrameError {
         }
     }
 }
+
+implement Eq for FrameError {}
 
 fn vfail<T>(_: VarintError) -> Result<T, FrameError> { Result.Err(FrameError.VarintFailure) }
 

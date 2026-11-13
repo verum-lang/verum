@@ -273,7 +273,7 @@ public fn is_stricter_than(level: VerificationLevel, other: VerificationLevel) -
 // Foundation Protocol Impls — Display + Debug + Eq + Clone for VerificationLevel
 // =============================================================================
 
-implement Eq for VerificationLevel {
+implement PartialEq for VerificationLevel {
     /// Verification levels compare by their canonical annotation
     /// string — equivalent to a tag-only comparison since each
     /// variant has no payload, but stays robust if future variants
@@ -282,6 +282,8 @@ implement Eq for VerificationLevel {
         to_annotation(self.clone()) == to_annotation(other.clone())
     }
 }
+
+implement Eq for VerificationLevel {}
 
 implement Clone for VerificationLevel {
     fn clone(&self) -> VerificationLevel {

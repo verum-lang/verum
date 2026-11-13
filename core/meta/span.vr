@@ -272,11 +272,13 @@ implement MetaSpan {
 }
 
 // Implement equality
-implement Eq for MetaSpan {
+implement PartialEq for MetaSpan {
     fn eq(&self, other: &Self) -> Bool {
         self.id == other.id && self.hygiene == other.hygiene
     }
 }
+
+implement Eq for MetaSpan {}
 
 // Implement ordering (by position)
 implement Ord for MetaSpan {
@@ -335,13 +337,15 @@ implement Debug for SourceLocation {
     }
 }
 
-implement Eq for SourceLocation {
+implement PartialEq for SourceLocation {
     fn eq(&self, other: &Self) -> Bool {
         self.file == other.file &&
         self.line == other.line &&
         self.column == other.column
     }
 }
+
+implement Eq for SourceLocation {}
 
 // =============================================================================
 // SpanRange

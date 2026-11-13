@@ -302,11 +302,13 @@ implement Sub<Instant> for Instant {
 // Comparison Implementations
 // =============================================================================
 
-implement Eq for Instant {
+implement PartialEq for Instant {
     fn eq(&self, other: &Instant) -> Bool {
         self.nanos == other.nanos
     }
 }
+
+implement Eq for Instant {}
 
 implement Ord for Instant {
     fn cmp(&self, other: &Instant) -> Ordering {

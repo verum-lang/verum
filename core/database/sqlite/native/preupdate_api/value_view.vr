@@ -49,7 +49,7 @@ implement Debug for PreupdateValueError {
     }
 }
 
-implement Eq for PreupdateValueError {
+implement PartialEq for PreupdateValueError {
     fn eq(&self, other: &PreupdateValueError) -> Bool {
         match (self, other) {
             (PveOutOfRange,    PveOutOfRange)    => true,
@@ -58,6 +58,8 @@ implement Eq for PreupdateValueError {
         }
     }
 }
+
+implement Eq for PreupdateValueError {}
 
 /// Validate an `sqlite3_preupdate_old(i, &pVal)` request. Returns
 /// PveWrongOp if `op` has no old values (INSERT), PveOutOfRange if the

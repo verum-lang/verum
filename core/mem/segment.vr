@@ -759,7 +759,7 @@ implement Debug for SegmentError {
     }
 }
 
-implement Eq for SegmentError {
+implement PartialEq for SegmentError {
     fn eq(&self, other: &SegmentError) -> Bool {
         match (self, other) {
             (MmapFailed { code: a },    MmapFailed { code: b })    => a == b,
@@ -770,6 +770,8 @@ implement Eq for SegmentError {
         }
     }
 }
+
+implement Eq for SegmentError {}
 
 // =============================================================================
 // OS Operations

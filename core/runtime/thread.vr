@@ -75,11 +75,13 @@ implement ThreadId {
     }
 }
 
-implement Eq for ThreadId {
+implement PartialEq for ThreadId {
     fn eq(&self, other: &ThreadId) -> Bool {
         self.id == other.id
     }
 }
+
+implement Eq for ThreadId {}
 
 implement Hash for ThreadId {
     fn hash(&self, hasher: &mut Hasher) {
@@ -455,11 +457,13 @@ fn thread_error_tag(e: &ThreadError) -> Int {
     }
 }
 
-implement Eq for ThreadError {
+implement PartialEq for ThreadError {
     fn eq(&self, other: &ThreadError) -> Bool {
         thread_error_tag(self) == thread_error_tag(other)
     }
 }
+
+implement Eq for ThreadError {}
 
 // =============================================================================
 // Stack Trace Capture

@@ -101,7 +101,7 @@ implement Debug for DurationParseError {
     }
 }
 
-implement Eq for DurationParseError {
+implement PartialEq for DurationParseError {
     fn eq(&self, other: &DurationParseError) -> Bool {
         match (self, other) {
             (Empty,           Empty)           => true,
@@ -113,6 +113,8 @@ implement Eq for DurationParseError {
         }
     }
 }
+
+implement Eq for DurationParseError {}
 
 /// Maximum accepted duration-input length. Real-world Go-style
 /// durations top out at ~30 chars (`-9999999h59m59.999999999s`);

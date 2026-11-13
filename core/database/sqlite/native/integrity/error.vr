@@ -120,11 +120,13 @@ implement Debug for ErrorClass {
     }
 }
 
-implement Eq for ErrorClass {
+implement PartialEq for ErrorClass {
     fn eq(&self, other: &ErrorClass) -> Bool {
         class_tag(self) == class_tag(other)
     }
 }
+
+implement Eq for ErrorClass {}
 
 implement Display for IntegrityError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
@@ -170,7 +172,7 @@ implement Debug for IntegrityError {
     }
 }
 
-implement Eq for IntegrityError {
+implement PartialEq for IntegrityError {
     fn eq(&self, other: &IntegrityError) -> Bool {
         match (self, other) {
             (IePageNotFound(a),                 IePageNotFound(b))                 => a == b,
@@ -192,3 +194,5 @@ implement Eq for IntegrityError {
         }
     }
 }
+
+implement Eq for IntegrityError {}

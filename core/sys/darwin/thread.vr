@@ -109,7 +109,7 @@ implement Debug for DarwinThreadError {
     }
 }
 
-implement Eq for DarwinThreadError {
+implement PartialEq for DarwinThreadError {
     fn eq(&self, other: &DarwinThreadError) -> Bool {
         match (self, other) {
             (CreateFailed { code: a },     CreateFailed { code: b })     => a == b,
@@ -126,6 +126,8 @@ implement Eq for DarwinThreadError {
         }
     }
 }
+
+implement Eq for DarwinThreadError {}
 
 // =============================================================================
 // DarwinThread Type

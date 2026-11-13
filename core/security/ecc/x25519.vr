@@ -134,7 +134,7 @@ implement Debug for X25519Error {
     }
 }
 
-implement Eq for X25519Error {
+implement PartialEq for X25519Error {
     fn eq(&self, other: &X25519Error) -> Bool {
         match (self, other) {
             (AllZeroOutput,   AllZeroOutput)   => true,
@@ -143,6 +143,8 @@ implement Eq for X25519Error {
         }
     }
 }
+
+implement Eq for X25519Error {}
 
 // =============================================================================
 // X25519 entry points

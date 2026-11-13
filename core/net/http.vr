@@ -142,11 +142,13 @@ implement Method {
     }
 }
 
-implement Eq for Method {
+implement PartialEq for Method {
     fn eq(&self, other: &Method) -> Bool {
         self.as_str() == other.as_str()
     }
 }
+
+implement Eq for Method {}
 
 implement Clone for Method {
     fn clone(&self) -> Method { *self }
@@ -271,11 +273,13 @@ implement StatusCode {
     public fn internal_server_error() -> StatusCode { StatusCode { code: 500 } }
 }
 
-implement Eq for StatusCode {
+implement PartialEq for StatusCode {
     fn eq(&self, other: &StatusCode) -> Bool {
         self.code == other.code
     }
 }
+
+implement Eq for StatusCode {}
 
 implement Ord for StatusCode {
     fn cmp(&self, other: &StatusCode) -> Ordering {
@@ -333,11 +337,13 @@ implement Version {
     }
 }
 
-implement Eq for Version {
+implement PartialEq for Version {
     fn eq(&self, other: &Version) -> Bool {
         self.as_str() == other.as_str()
     }
 }
+
+implement Eq for Version {}
 
 implement Hash for Version {
     /// Hash via the as_str canonical wire-form. Stable across calls
@@ -818,7 +824,7 @@ implement Describable for HttpError {
     }
 }
 
-implement Eq for HttpError {
+implement PartialEq for HttpError {
     fn eq(&self, other: &HttpError) -> Bool {
         match (self, other) {
             (HttpError.ConnectionFailed(a), HttpError.ConnectionFailed(b)) => a == b,
@@ -834,6 +840,8 @@ implement Eq for HttpError {
         }
     }
 }
+
+implement Eq for HttpError {}
 
 // =============================================================================
 // URL Parsing (Basic)
@@ -970,11 +978,13 @@ implement Clone for HttpUrl {
     }
 }
 
-implement Eq for HttpUrl {
+implement PartialEq for HttpUrl {
     fn eq(&self, other: &HttpUrl) -> Bool {
         self.to_string() == other.to_string()
     }
 }
+
+implement Eq for HttpUrl {}
 
 // =============================================================================
 // HTTP Cookie
@@ -1222,13 +1232,15 @@ implement PoolKey {
     }
 }
 
-implement Eq for PoolKey {
+implement PartialEq for PoolKey {
     fn eq(&self, other: &PoolKey) -> Bool {
         self.scheme == other.scheme
             && self.host == other.host
             && self.port == other.port
     }
 }
+
+implement Eq for PoolKey {}
 
 implement Hash for PoolKey {
     fn hash(&self, hasher: &mut Hasher) {

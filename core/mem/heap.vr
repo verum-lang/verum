@@ -1371,7 +1371,7 @@ implement Debug for HeapError {
     }
 }
 
-implement Eq for HeapError {
+implement PartialEq for HeapError {
     fn eq(&self, other: &HeapError) -> Bool {
         match (self, other) {
             (OutOfMemory,                       OutOfMemory)                       => true,
@@ -1385,6 +1385,8 @@ implement Eq for HeapError {
         }
     }
 }
+
+implement Eq for HeapError {}
 
 // =============================================================================
 // Thread-Local Storage

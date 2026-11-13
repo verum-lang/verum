@@ -52,11 +52,13 @@ implement Debug for SqlParseError {
     }
 }
 
-implement Eq for SqlParseError {
+implement PartialEq for SqlParseError {
     fn eq(&self, other: &SqlParseError) -> Bool {
         self.message == other.message && self.position == other.position
     }
 }
+
+implement Eq for SqlParseError {}
 
 // -----------------------------------------------------------------------------
 // SqlTokenStream

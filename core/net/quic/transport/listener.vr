@@ -107,7 +107,7 @@ implement Debug for ListenerError {
     }
 }
 
-implement Eq for ListenerError {
+implement PartialEq for ListenerError {
     fn eq(&self, other: &ListenerError) -> Bool {
         match (self, other) {
             (ListenerError.Bind(a),                 ListenerError.Bind(b))                 => a == b,
@@ -119,6 +119,8 @@ implement Eq for ListenerError {
         }
     }
 }
+
+implement Eq for ListenerError {}
 
 // =============================================================================
 // Accepted connection handle — what user code gets from `accept()`

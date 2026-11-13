@@ -153,7 +153,7 @@ implement Debug for CancelReason {
     }
 }
 
-implement Eq for CancelReason {
+implement PartialEq for CancelReason {
     fn eq(&self, other: &CancelReason) -> Bool {
         match (self, other) {
             (Cancelled,                Cancelled)                => true,
@@ -164,6 +164,8 @@ implement Eq for CancelReason {
         }
     }
 }
+
+implement Eq for CancelReason {}
 
 // -----------------------------------------------------------------------------
 // CancellationError — returned by `throw_if_cancelled`
@@ -201,11 +203,13 @@ implement Debug for CancellationError {
     }
 }
 
-implement Eq for CancellationError {
+implement PartialEq for CancellationError {
     fn eq(&self, other: &CancellationError) -> Bool {
         self.reason == other.reason
     }
 }
+
+implement Eq for CancellationError {}
 
 // -----------------------------------------------------------------------------
 // Internal: waiter / callback registration entries

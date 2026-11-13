@@ -67,7 +67,7 @@ implement Debug for BpfError {
     }
 }
 
-implement Eq for BpfError {
+implement PartialEq for BpfError {
     fn eq(&self, other: &BpfError) -> Bool {
         match (self, other) {
             (OsError { errno: a },        OsError { errno: b })        => a == b,
@@ -85,3 +85,5 @@ implement Eq for BpfError {
         }
     }
 }
+
+implement Eq for BpfError {}

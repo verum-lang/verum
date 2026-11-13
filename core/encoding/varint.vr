@@ -105,7 +105,7 @@ implement Debug for VarintErrorKind {
     }
 }
 
-implement Eq for VarintErrorKind {
+implement PartialEq for VarintErrorKind {
     fn eq(&self, other: &VarintErrorKind) -> Bool {
         match (self, other) {
             (Truncated, Truncated) => true,
@@ -114,6 +114,8 @@ implement Eq for VarintErrorKind {
         }
     }
 }
+
+implement Eq for VarintErrorKind {}
 
 implement Display for VarintError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
@@ -127,11 +129,13 @@ implement Debug for VarintError {
     }
 }
 
-implement Eq for VarintError {
+implement PartialEq for VarintError {
     fn eq(&self, other: &VarintError) -> Bool {
         self.kind == other.kind && self.position == other.position && self.message == other.message
     }
 }
+
+implement Eq for VarintError {}
 
 // =============================================================================
 // SQLite varint — encoding

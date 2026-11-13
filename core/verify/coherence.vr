@@ -224,7 +224,7 @@ public fn identity_coherence_cert(
 // Foundation Protocol Impls — Display + Debug + Eq for CoherenceVerdict
 // =============================================================================
 
-implement Eq for CoherenceVerdict {
+implement PartialEq for CoherenceVerdict {
     fn eq(&self, other: &CoherenceVerdict) -> Bool {
         match (self, other) {
             (CoherenceVerdict.Decidable,
@@ -237,6 +237,8 @@ implement Eq for CoherenceVerdict {
         }
     }
 }
+
+implement Eq for CoherenceVerdict {}
 
 implement Display for CoherenceVerdict {
     /// Renders the verdict for diagnostic surfaces:

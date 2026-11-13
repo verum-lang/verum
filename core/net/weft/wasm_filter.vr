@@ -229,7 +229,7 @@ implement Debug for WasmFilterError {
     }
 }
 
-implement Eq for WasmFilterError {
+implement PartialEq for WasmFilterError {
     fn eq(&self, other: &WasmFilterError) -> Bool {
         match (self, other) {
             (ModuleInvalid(a),       ModuleInvalid(b))       => a == b,
@@ -240,6 +240,8 @@ implement Eq for WasmFilterError {
         }
     }
 }
+
+implement Eq for WasmFilterError {}
 
 implement WasmFilter {
     /// Load a Wasm module from its raw bytes. Parses + validates

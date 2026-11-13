@@ -416,7 +416,7 @@ public fn check_usage(bindings: List<TrackedBinding>, usage: &UsageMap) -> List<
 // Foundation Protocol Impls — Eq + Clone + Display + Debug for Quantity
 // =============================================================================
 
-implement Eq for Quantity {
+implement PartialEq for Quantity {
     /// Quantities compare by their normalised canonical form.
     /// `AtMost { n: 0 }` and `Zero` are NOT distinct under Eq —
     /// they admit the same set of runtime usages. `AtMost { n: 1 }`
@@ -426,6 +426,8 @@ implement Eq for Quantity {
         quantity_eq(self.clone(), other.clone())
     }
 }
+
+implement Eq for Quantity {}
 
 implement Clone for Quantity {
     fn clone(&self) -> Quantity {
@@ -471,11 +473,13 @@ implement Debug for Quantity {
 // Foundation Protocol Impls — UsageCount / TrackedBinding / QttViolation
 // =============================================================================
 
-implement Eq for UsageCount {
+implement PartialEq for UsageCount {
     fn eq(&self, other: &UsageCount) -> Bool {
         self.runtime == other.runtime
     }
 }
+
+implement Eq for UsageCount {}
 
 implement Clone for UsageCount {
     fn clone(&self) -> UsageCount { UsageCount { runtime: self.runtime } }
@@ -495,11 +499,13 @@ implement Debug for UsageCount {
     }
 }
 
-implement Eq for TrackedBinding {
+implement PartialEq for TrackedBinding {
     fn eq(&self, other: &TrackedBinding) -> Bool {
         self.name == other.name && self.declared == other.declared
     }
 }
+
+implement Eq for TrackedBinding {}
 
 implement Clone for TrackedBinding {
     fn clone(&self) -> TrackedBinding {
@@ -526,7 +532,7 @@ implement Debug for TrackedBinding {
     }
 }
 
-implement Eq for QttViolation {
+implement PartialEq for QttViolation {
     fn eq(&self, other: &QttViolation) -> Bool {
         match (self, other) {
             (QttViolation.OverUse { binding: ba, observed: oa, declared: da },
@@ -542,6 +548,8 @@ implement Eq for QttViolation {
         }
     }
 }
+
+implement Eq for QttViolation {}
 
 implement Clone for QttViolation {
     fn clone(&self) -> QttViolation {

@@ -125,7 +125,7 @@ implement Debug for CrlError {
     }
 }
 
-implement Eq for CrlError {
+implement PartialEq for CrlError {
     fn eq(&self, other: &CrlError) -> Bool {
         match (self, other) {
             (CrlError.DerParseError(a), CrlError.DerParseError(b)) => a == b,
@@ -135,6 +135,8 @@ implement Eq for CrlError {
         }
     }
 }
+
+implement Eq for CrlError {}
 
 // =============================================================================
 // Parser (TBSCertList DER → CertificateList)

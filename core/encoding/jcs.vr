@@ -101,7 +101,7 @@ implement Debug for JcsError {
     }
 }
 
-implement Eq for JcsError {
+implement PartialEq for JcsError {
     fn eq(&self, other: &JcsError) -> Bool {
         match (self, other) {
             (JsonParseFailed(a),  JsonParseFailed(b))  => a == b,
@@ -110,6 +110,8 @@ implement Eq for JcsError {
         }
     }
 }
+
+implement Eq for JcsError {}
 
 // =============================================================================
 // Canonicalise a JsonValue

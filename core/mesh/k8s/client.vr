@@ -75,7 +75,7 @@ implement Debug for KubeError {
     }
 }
 
-implement Eq for KubeError {
+implement PartialEq for KubeError {
     fn eq(&self, other: &KubeError) -> Bool {
         match (self, other) {
             (NotFound(a),        NotFound(b))        => a == b,
@@ -94,6 +94,8 @@ implement Eq for KubeError {
         }
     }
 }
+
+implement Eq for KubeError {}
 
 // =============================================================================
 // ListOptions + watch events

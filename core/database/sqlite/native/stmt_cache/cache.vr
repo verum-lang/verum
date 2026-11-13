@@ -57,7 +57,7 @@ implement Debug for CacheError {
     }
 }
 
-implement Eq for CacheError {
+implement PartialEq for CacheError {
     fn eq(&self, other: &CacheError) -> Bool {
         match (self, other) {
             (CeNoSpace,       CeNoSpace)       => true,
@@ -66,6 +66,8 @@ implement Eq for CacheError {
         }
     }
 }
+
+implement Eq for CacheError {}
 
 // -----------------------------------------------------------------------------
 // Statistics

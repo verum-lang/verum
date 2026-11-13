@@ -247,7 +247,7 @@ implement Debug for TicketError {
     }
 }
 
-implement Eq for TicketError {
+implement PartialEq for TicketError {
     fn eq(&self, other: &TicketError) -> Bool {
         match (self, other) {
             (SealFailure,     SealFailure)     => true,
@@ -260,6 +260,8 @@ implement Eq for TicketError {
         }
     }
 }
+
+implement Eq for TicketError {}
 
 public fn issue_ticket(
     stek: &SessionTicketKey,

@@ -65,7 +65,7 @@ implement Debug for ScalarFnError {
     }
 }
 
-implement Eq for ScalarFnError {
+implement PartialEq for ScalarFnError {
     fn eq(&self, other: &ScalarFnError) -> Bool {
         match (self, other) {
             (ArityMismatch(a), ArityMismatch(b)) => a == b,
@@ -76,6 +76,8 @@ implement Eq for ScalarFnError {
         }
     }
 }
+
+implement Eq for ScalarFnError {}
 
 // -----------------------------------------------------------------------------
 // Protocol

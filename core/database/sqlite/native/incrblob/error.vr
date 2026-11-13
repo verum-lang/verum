@@ -80,7 +80,7 @@ implement Debug for BlobError {
     }
 }
 
-implement Eq for BlobError {
+implement PartialEq for BlobError {
     fn eq(&self, other: &BlobError) -> Bool {
         match (self, other) {
             (BeNoTable(a),              BeNoTable(b))              => a == b,
@@ -94,3 +94,5 @@ implement Eq for BlobError {
         }
     }
 }
+
+implement Eq for BlobError {}

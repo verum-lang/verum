@@ -80,7 +80,7 @@ implement Debug for XdsError {
     }
 }
 
-implement Eq for XdsError {
+implement PartialEq for XdsError {
     fn eq(&self, other: &XdsError) -> Bool {
         match (self, other) {
             (ConnectionLost(a),    ConnectionLost(b))    => a == b,
@@ -97,3 +97,5 @@ implement Eq for XdsError {
         }
     }
 }
+
+implement Eq for XdsError {}

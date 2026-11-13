@@ -117,7 +117,7 @@ implement Debug for InitError {
     }
 }
 
-implement Eq for InitError {
+implement PartialEq for InitError {
     fn eq(&self, other: &InitError) -> Bool {
         match (self, other) {
             (InitError.TlsFailed { reason: a },          InitError.TlsFailed { reason: b })          => a == b,
@@ -130,6 +130,8 @@ implement Eq for InitError {
         }
     }
 }
+
+implement Eq for InitError {}
 
 // =============================================================================
 // Main Initialization Entry Point

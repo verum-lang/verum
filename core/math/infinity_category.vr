@@ -325,9 +325,11 @@ theorem one_object_is_dim_zero()
 /// value with a pretended meaning.
 public type SpaceHandle is (Int);
 
-implement Eq for SpaceHandle {
+implement PartialEq for SpaceHandle {
     fn eq(&self, other: &SpaceHandle) -> Bool { self.0 == other.0 }
 }
+
+implement Eq for SpaceHandle {}
 
 /// Given a source and target object in an ∞-category, designate the
 /// mapping space between them. The concrete Kan complex is produced
@@ -355,9 +357,11 @@ fn hash_pair(a: Int, b: Int) -> Int {
 /// Opaque designator for an ∞-functor.
 public type FunctorHandle is (Int);
 
-implement Eq for FunctorHandle {
+implement PartialEq for FunctorHandle {
     fn eq(&self, other: &FunctorHandle) -> Bool { self.0 == other.0 }
 }
+
+implement Eq for FunctorHandle {}
 
 /// The identity ∞-functor on an ∞-category.
 public fn identity_functor_handle(c: Int) -> FunctorHandle {

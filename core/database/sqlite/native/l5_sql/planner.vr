@@ -77,11 +77,13 @@ implement Debug for PlanError {
     }
 }
 
-implement Eq for PlanError {
+implement PartialEq for PlanError {
     fn eq(&self, other: &PlanError) -> Bool {
         self.message == other.message
     }
 }
+
+implement Eq for PlanError {}
 
 // -----------------------------------------------------------------------------
 // PlanColumn — resolved output column

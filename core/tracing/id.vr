@@ -84,7 +84,7 @@ implement TraceId {
     public fn as_bytes(&self) -> &[UInt8; 16] { &self.bytes }
 }
 
-implement Eq for TraceId {
+implement PartialEq for TraceId {
     fn eq(&self, other: &TraceId) -> Bool {
         let mut i = 0;
         while i < 16 {
@@ -94,6 +94,8 @@ implement Eq for TraceId {
         true
     }
 }
+
+implement Eq for TraceId {}
 
 implement Hash for TraceId {
     fn hash(&self, hasher: &mut Hasher) {
@@ -169,7 +171,7 @@ implement SpanId {
     public fn as_bytes(&self) -> &[UInt8; 8] { &self.bytes }
 }
 
-implement Eq for SpanId {
+implement PartialEq for SpanId {
     fn eq(&self, other: &SpanId) -> Bool {
         let mut i = 0;
         while i < 8 {
@@ -179,6 +181,8 @@ implement Eq for SpanId {
         true
     }
 }
+
+implement Eq for SpanId {}
 
 implement Hash for SpanId {
     fn hash(&self, hasher: &mut Hasher) {

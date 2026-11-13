@@ -120,7 +120,7 @@ implement Debug for ScramError {
     }
 }
 
-implement Eq for ScramError {
+implement PartialEq for ScramError {
     fn eq(&self, other: &ScramError) -> Bool {
         match (self, other) {
             (SeMechanismRejected,                     SeMechanismRejected)                     => true,
@@ -136,6 +136,8 @@ implement Eq for ScramError {
         }
     }
 }
+
+implement Eq for ScramError {}
 
 /// RFC 7677 §4: SCRAM-SHA-256 servers SHOULD use at least 4096
 /// iterations. We accept anything ≥ this; lower values indicate a

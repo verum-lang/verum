@@ -125,7 +125,7 @@ implement Debug for CompressCertificateError {
     }
 }
 
-implement Eq for CompressCertificateError {
+implement PartialEq for CompressCertificateError {
     fn eq(&self, other: &CompressCertificateError) -> Bool {
         match (self, other) {
             (Truncated,              Truncated)              => true,
@@ -134,6 +134,8 @@ implement Eq for CompressCertificateError {
         }
     }
 }
+
+implement Eq for CompressCertificateError {}
 
 public fn encode_compress_certificate(ext: &CompressCertificate, out: &mut List<Byte>)
     -> Result<(), CompressCertificateError>

@@ -368,7 +368,7 @@ implement Debug for WireReadError {
     }
 }
 
-implement Eq for WireReadError {
+implement PartialEq for WireReadError {
     fn eq(&self, other: &WireReadError) -> Bool {
         match (self, other) {
             (WrShortRead { wanted: wa, available: aa },
@@ -378,6 +378,8 @@ implement Eq for WireReadError {
         }
     }
 }
+
+implement Eq for WireReadError {}
 
 implement WireReader {
     public fn new(src: List<Byte>) -> WireReader {

@@ -89,7 +89,7 @@ implement Debug for WorkloadApiError {
     }
 }
 
-implement Eq for WorkloadApiError {
+implement PartialEq for WorkloadApiError {
     fn eq(&self, other: &WorkloadApiError) -> Bool {
         match (self, other) {
             (NoEndpointConfigured,           NoEndpointConfigured)           => true,
@@ -106,6 +106,8 @@ implement Eq for WorkloadApiError {
         }
     }
 }
+
+implement Eq for WorkloadApiError {}
 
 // =============================================================================
 // Endpoint discovery

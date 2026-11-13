@@ -60,7 +60,7 @@ implement Debug for ResultError {
     }
 }
 
-implement Eq for ResultError {
+implement PartialEq for ResultError {
     fn eq(&self, other: &ResultError) -> Bool {
         match (self, other) {
             (ReCustom { code: ca, message: ma },
@@ -71,3 +71,5 @@ implement Eq for ResultError {
         }
     }
 }
+
+implement Eq for ResultError {}

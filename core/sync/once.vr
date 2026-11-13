@@ -67,7 +67,7 @@ implement Debug for OnceState {
     }
 }
 
-implement Eq for OnceState {
+implement PartialEq for OnceState {
     /// Tag-only equality — variants are unit.
     fn eq(&self, other: &OnceState) -> Bool {
         match (self, other) {
@@ -79,6 +79,8 @@ implement Eq for OnceState {
         }
     }
 }
+
+implement Eq for OnceState {}
 
 // Guard that sets POISONED if dropped without completing.
 // This handles the case where the initialization function panics.

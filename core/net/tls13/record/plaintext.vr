@@ -83,13 +83,15 @@ implement Debug for RecordEncodeError {
     }
 }
 
-implement Eq for RecordEncodeError {
+implement PartialEq for RecordEncodeError {
     fn eq(&self, other: &RecordEncodeError) -> Bool {
         match (self, other) {
             (RecordEncodeError.FragmentTooLarge(a), RecordEncodeError.FragmentTooLarge(b)) => a == b,
         }
     }
 }
+
+implement Eq for RecordEncodeError {}
 
 // =============================================================================
 // TLSInnerPlaintext — the encrypted payload structure
@@ -181,7 +183,7 @@ implement Debug for RecordDecodeError {
     }
 }
 
-implement Eq for RecordDecodeError {
+implement PartialEq for RecordDecodeError {
     fn eq(&self, other: &RecordDecodeError) -> Bool {
         match (self, other) {
             (RecordDecodeError.NoContentType,    RecordDecodeError.NoContentType)    => true,
@@ -190,3 +192,5 @@ implement Eq for RecordDecodeError {
         }
     }
 }
+
+implement Eq for RecordDecodeError {}

@@ -553,7 +553,7 @@ implement<T> Default for Maybe<T> {
     }
 }
 
-implement<T: Eq> Eq for Maybe<T> {
+implement<T: Eq> PartialEq for Maybe<T> {
     fn eq(&self, other: &Maybe<T>) -> Bool {
         match (self, other) {
             (None, None) => true,
@@ -572,6 +572,8 @@ implement<T: Eq> Eq for Maybe<T> {
         !s_eq
     }
 }
+
+implement<T: Eq> Eq for Maybe<T> {}
 
 implement<T: Ord> Ord for Maybe<T> {
     fn cmp(&self, other: &Maybe<T>) -> Ordering {

@@ -158,7 +158,7 @@ implement Debug for ChainError {
     }
 }
 
-implement Eq for ChainError {
+implement PartialEq for ChainError {
     fn eq(&self, other: &ChainError) -> Bool {
         match (self, other) {
             (ChainError.EmptyChain,                     ChainError.EmptyChain)                     => true,
@@ -180,6 +180,8 @@ implement Eq for ChainError {
         }
     }
 }
+
+implement Eq for ChainError {}
 
 // =============================================================================
 // Result

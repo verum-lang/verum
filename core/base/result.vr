@@ -354,7 +354,7 @@ implement<T, E> IntoIterator for Result<T, E> {
 // Protocol implementations
 // =============================================================================
 
-implement<T: Eq, E: Eq> Eq for Result<T, E> {
+implement<T: Eq, E: Eq> PartialEq for Result<T, E> {
     fn eq(&self, other: &Result<T, E>) -> Bool {
         match (self, other) {
             (Ok(a), Ok(b)) => a == b,
@@ -373,6 +373,8 @@ implement<T: Eq, E: Eq> Eq for Result<T, E> {
         !s_eq
     }
 }
+
+implement<T: Eq, E: Eq> Eq for Result<T, E> {}
 
 implement<T: Ord, E: Ord> Ord for Result<T, E> {
     fn cmp(&self, other: &Result<T, E>) -> Ordering {
@@ -503,11 +505,13 @@ implement Describable for Error {
 
 implement ErrorSource for Error {}
 
-implement Eq for Error {
+implement PartialEq for Error {
     fn eq(&self, other: &Error) -> Bool {
         self.message == other.message
     }
 }
+
+implement Eq for Error {}
 
 implement Clone for Error {
     fn clone(&self) -> Error {

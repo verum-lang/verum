@@ -76,7 +76,7 @@ implement Debug for Fts5VtabParseError {
     }
 }
 
-implement Eq for Fts5VtabParseError {
+implement PartialEq for Fts5VtabParseError {
     fn eq(&self, other: &Fts5VtabParseError) -> Bool {
         match (self, other) {
             (PeUnexpectedEnd,      PeUnexpectedEnd)      => true,
@@ -85,6 +85,8 @@ implement Eq for Fts5VtabParseError {
         }
     }
 }
+
+implement Eq for Fts5VtabParseError {}
 
 public type Fts5VtabParseState is {
     tokens: List<Text>,

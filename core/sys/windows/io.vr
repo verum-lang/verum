@@ -185,7 +185,7 @@ implement Debug for WindowsIoDriverError {
     }
 }
 
-implement Eq for WindowsIoDriverError {
+implement PartialEq for WindowsIoDriverError {
     fn eq(&self, other: &WindowsIoDriverError) -> Bool {
         match (self, other) {
             (WindowsIoDriverError.WouldBlock,        WindowsIoDriverError.WouldBlock)        => true,
@@ -207,6 +207,8 @@ implement Eq for WindowsIoDriverError {
         }
     }
 }
+
+implement Eq for WindowsIoDriverError {}
 
 // =============================================================================
 // Operation Types

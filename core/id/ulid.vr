@@ -116,7 +116,7 @@ implement Debug for UlidError {
     }
 }
 
-implement Eq for UlidError {
+implement PartialEq for UlidError {
     fn eq(&self, other: &UlidError) -> Bool {
         match (self, other) {
             (InvalidLength(a),    InvalidLength(b))    => a == b,
@@ -125,6 +125,8 @@ implement Eq for UlidError {
         }
     }
 }
+
+implement Eq for UlidError {}
 
 // =============================================================================
 // Typed ULID

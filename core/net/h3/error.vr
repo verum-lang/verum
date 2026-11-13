@@ -81,11 +81,13 @@ implement Debug for H3ErrorCode {
     }
 }
 
-implement Eq for H3ErrorCode {
+implement PartialEq for H3ErrorCode {
     fn eq(&self, other: &H3ErrorCode) -> Bool {
         self.code == other.code
     }
 }
+
+implement Eq for H3ErrorCode {}
 
 implement Display for H3Error {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
@@ -145,7 +147,7 @@ implement Debug for H3Error {
     }
 }
 
-implement Eq for H3Error {
+implement PartialEq for H3Error {
     fn eq(&self, other: &H3Error) -> Bool {
         match (self, other) {
             (ConnectionError { code: ca, reason: ra },
@@ -166,3 +168,5 @@ implement Eq for H3Error {
         }
     }
 }
+
+implement Eq for H3Error {}

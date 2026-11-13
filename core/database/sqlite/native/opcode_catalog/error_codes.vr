@@ -229,11 +229,13 @@ implement Debug for OpcodeErrorCode {
     }
 }
 
-implement Eq for OpcodeErrorCode {
+implement PartialEq for OpcodeErrorCode {
     fn eq(&self, other: &OpcodeErrorCode) -> Bool {
         primary_wire(self) == primary_wire(other)
     }
 }
+
+implement Eq for OpcodeErrorCode {}
 
 fn constraint_kind_name(k: &ConstraintKind) -> Text {
     match k {
@@ -287,11 +289,13 @@ implement Debug for ConstraintKind {
     }
 }
 
-implement Eq for ConstraintKind {
+implement PartialEq for ConstraintKind {
     fn eq(&self, other: &ConstraintKind) -> Bool {
         constraint_kind_tag(self) == constraint_kind_tag(other)
     }
 }
+
+implement Eq for ConstraintKind {}
 
 fn corruption_kind_name(k: &CorruptionKind) -> Text {
     match k {
@@ -332,11 +336,13 @@ implement Debug for CorruptionKind {
     }
 }
 
-implement Eq for CorruptionKind {
+implement PartialEq for CorruptionKind {
     fn eq(&self, other: &CorruptionKind) -> Bool {
         corruption_kind_tag(self) == corruption_kind_tag(other)
     }
 }
+
+implement Eq for CorruptionKind {}
 
 fn io_subkind_name(k: &IoSubKind) -> Text {
     match k {
@@ -402,11 +408,13 @@ implement Debug for IoSubKind {
     }
 }
 
-implement Eq for IoSubKind {
+implement PartialEq for IoSubKind {
     fn eq(&self, other: &IoSubKind) -> Bool {
         io_subkind_tag(self) == io_subkind_tag(other)
     }
 }
+
+implement Eq for IoSubKind {}
 
 implement Display for OpcodeDbError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
@@ -462,7 +470,7 @@ implement Debug for OpcodeDbError {
     }
 }
 
-implement Eq for OpcodeDbError {
+implement PartialEq for OpcodeDbError {
     fn eq(&self, other: &OpcodeDbError) -> Bool {
         match (self, other) {
             (DbeOk, DbeOk)                                        => true,
@@ -489,3 +497,5 @@ implement Eq for OpcodeDbError {
         }
     }
 }
+
+implement Eq for OpcodeDbError {}

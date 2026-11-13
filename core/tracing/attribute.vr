@@ -155,7 +155,7 @@ implement AttributeSet {
 // Equality — order-sensitive (insertion order is part of the contract)
 // =============================================================================
 
-implement Eq for AttributeValue {
+implement PartialEq for AttributeValue {
     fn eq(&self, other: &AttributeValue) -> Bool {
         match (self, other) {
             (AttributeValue.Text(a), AttributeValue.Text(b)) => a == b,
@@ -171,7 +171,9 @@ implement Eq for AttributeValue {
     }
 }
 
-implement Eq for AttributeSet {
+implement Eq for AttributeValue {}
+
+implement PartialEq for AttributeSet {
     /// Two sets are equal iff they hold the same (key, value) pairs in
     /// the same insertion order. Order sensitivity keeps equality O(n)
     /// and matches the set's ordered-entries export contract.
@@ -186,6 +188,8 @@ implement Eq for AttributeSet {
         true
     }
 }
+
+implement Eq for AttributeSet {}
 
 // -------------------------------------------------------------------------
 

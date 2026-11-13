@@ -91,11 +91,13 @@ implement TlsVersion {
     }
 }
 
-implement Eq for TlsVersion {
+implement PartialEq for TlsVersion {
     fn eq(&self, other: &TlsVersion) -> Bool {
         self.as_str() == other.as_str()
     }
 }
+
+implement Eq for TlsVersion {}
 
 implement Clone for TlsVersion {
     fn clone(&self) -> TlsVersion { *self }
@@ -881,7 +883,7 @@ implement Describable for LegacyTlsError {
     }
 }
 
-implement Eq for LegacyTlsError {
+implement PartialEq for LegacyTlsError {
     fn eq(&self, other: &LegacyTlsError) -> Bool {
         match (self, other) {
             (LegacyTlsError.HandshakeFailed(a),
@@ -908,4 +910,6 @@ implement Eq for LegacyTlsError {
         }
     }
 }
+
+implement Eq for LegacyTlsError {}
 

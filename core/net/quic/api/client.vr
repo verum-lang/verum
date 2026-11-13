@@ -147,7 +147,7 @@ implement Debug for QuicClientError {
     }
 }
 
-implement Eq for QuicClientError {
+implement PartialEq for QuicClientError {
     fn eq(&self, other: &QuicClientError) -> Bool {
         match (self, other) {
             (QuicClientError.Resolve(a),     QuicClientError.Resolve(b))     => a == b,
@@ -160,6 +160,8 @@ implement Eq for QuicClientError {
         }
     }
 }
+
+implement Eq for QuicClientError {}
 
 // =============================================================================
 // QuicClient

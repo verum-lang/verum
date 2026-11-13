@@ -4298,11 +4298,13 @@ implement Display for Utf8Error {
     }
 }
 
-implement Eq for Utf8Error {
+implement PartialEq for Utf8Error {
     fn eq(&self, other: &Utf8Error) -> Bool {
         self.valid_up_to == other.valid_up_to
     }
 }
+
+implement Eq for Utf8Error {}
 
 /// UTF-16 decoding error.
 ///
@@ -4325,11 +4327,13 @@ implement Display for Utf16Error {
     }
 }
 
-implement Eq for Utf16Error {
+implement PartialEq for Utf16Error {
     fn eq(&self, other: &Utf16Error) -> Bool {
         self.index == other.index
     }
 }
+
+implement Eq for Utf16Error {}
 
 // `ParseError` — the canonical parse-failure record — lives beside the
 // `FromStr` protocol that names it, in `core.base.protocols` (moved

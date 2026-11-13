@@ -59,7 +59,7 @@ implement Debug for HexErrorKind {
     }
 }
 
-implement Eq for HexErrorKind {
+implement PartialEq for HexErrorKind {
     fn eq(&self, other: &HexErrorKind) -> Bool {
         match (self, other) {
             (InvalidChar,   InvalidChar)   => true,
@@ -68,6 +68,8 @@ implement Eq for HexErrorKind {
         }
     }
 }
+
+implement Eq for HexErrorKind {}
 
 implement Display for HexError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
@@ -81,11 +83,13 @@ implement Debug for HexError {
     }
 }
 
-implement Eq for HexError {
+implement PartialEq for HexError {
     fn eq(&self, other: &HexError) -> Bool {
         self.kind == other.kind && self.position == other.position && self.message == other.message
     }
 }
+
+implement Eq for HexError {}
 
 // Encode using lowercase hex digits ('0'-'9', 'a'-'f').
 @inline(always)

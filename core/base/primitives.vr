@@ -1931,9 +1931,11 @@ implement Display for Char {
 // Unit type ()
 // =============================================================================
 
-implement Eq for () {
+implement PartialEq for () {
     public fn eq(&self, _other: &()) -> Bool { true }
 }
+
+implement Eq for () {}
 
 implement Ord for () {
     public fn cmp(&self, _other: &()) -> Ordering { Equal }
@@ -6030,9 +6032,11 @@ implement Display for TryFromIntError {
     }
 }
 
-implement Eq for TryFromIntError {
+implement PartialEq for TryFromIntError {
     public fn eq(&self, _other: &TryFromIntError) -> Bool { true }
 }
+
+implement Eq for TryFromIntError {}
 
 // --- TryFrom<Int> for signed types ---
 

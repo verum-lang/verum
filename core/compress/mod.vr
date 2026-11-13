@@ -169,11 +169,13 @@ implement Debug for Algorithm {
     }
 }
 
-implement Eq for Algorithm {
+implement PartialEq for Algorithm {
     fn eq(&self, other: &Algorithm) -> Bool {
         algorithm_tag(self) == algorithm_tag(other)
     }
 }
+
+implement Eq for Algorithm {}
 
 implement Display for CompressError {
     /// Qualify variants (task #17/#39 workaround).
@@ -204,7 +206,7 @@ implement Debug for CompressError {
     }
 }
 
-implement Eq for CompressError {
+implement PartialEq for CompressError {
     fn eq(&self, other: &CompressError) -> Bool {
         match (self, other) {
             (CompressError.UnsupportedAlgorithm(a),       CompressError.UnsupportedAlgorithm(b))       => a == b,
@@ -220,6 +222,8 @@ implement Eq for CompressError {
         }
     }
 }
+
+implement Eq for CompressError {}
 
 // =============================================================================
 // Codec protocol — one-shot encode/decode

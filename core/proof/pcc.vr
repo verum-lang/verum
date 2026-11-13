@@ -190,11 +190,13 @@ public fn bundle_clear(b: ProofBundle) -> ProofBundle {
 // Foundation Protocol Impls — Display + Debug + Eq for GoalHash / ProofCertificate
 // =============================================================================
 
-implement Eq for GoalHash {
+implement PartialEq for GoalHash {
     fn eq(&self, other: &GoalHash) -> Bool {
         self.digest == other.digest
     }
 }
+
+implement Eq for GoalHash {}
 
 implement Hash for GoalHash {
     fn hash(&self, hasher: &mut Hasher) {
@@ -223,7 +225,7 @@ implement Debug for GoalHash {
     }
 }
 
-implement Eq for ProofCertificate {
+implement PartialEq for ProofCertificate {
     /// Structural equality on every field. Two certificates are
     /// equal iff they were emitted by the same solver for the same
     /// goal text with the same proof object, duration, and
@@ -237,6 +239,8 @@ implement Eq for ProofCertificate {
             && self.timestamp == other.timestamp
     }
 }
+
+implement Eq for ProofCertificate {}
 
 implement Display for ProofCertificate {
     /// Renders a single-line summary suitable for log lines:

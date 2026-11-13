@@ -64,7 +64,7 @@ implement Debug for PoolError {
     }
 }
 
-implement Eq for PoolError {
+implement PartialEq for PoolError {
     fn eq(&self, other: &PoolError) -> Bool {
         match (self, other) {
             (Timeout,      Timeout)      => true,
@@ -74,6 +74,8 @@ implement Eq for PoolError {
         }
     }
 }
+
+implement Eq for PoolError {}
 
 // -----------------------------------------------------------------------------
 // SqliteNativeConnection slot — opaque ID + sequence number for ABA protection

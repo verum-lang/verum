@@ -306,7 +306,7 @@ implement Display for IoErrorKind {
     }
 }
 
-implement Eq for IoErrorKind {
+implement PartialEq for IoErrorKind {
     fn eq(&self, other: &IoErrorKind) -> Bool {
         match (self, other) {
             (NotFound, NotFound) => true,
@@ -333,6 +333,8 @@ implement Eq for IoErrorKind {
         }
     }
 }
+
+implement Eq for IoErrorKind {}
 
 implement Clone for IoErrorKind {
     fn clone(&self) -> IoErrorKind {
@@ -361,13 +363,15 @@ implement Clone for IoErrorKind {
     }
 }
 
-implement Eq for StreamError {
+implement PartialEq for StreamError {
     fn eq(&self, other: &StreamError) -> Bool {
         self.kind == other.kind && self.message == other.message
     }
 }
 
-implement Eq for SeekFrom {
+implement Eq for StreamError {}
+
+implement PartialEq for SeekFrom {
     fn eq(&self, other: &SeekFrom) -> Bool {
         match (self, other) {
             (Start(a), Start(b)) => a == b,
@@ -377,6 +381,8 @@ implement Eq for SeekFrom {
         }
     }
 }
+
+implement Eq for SeekFrom {}
 
 implement Clone for SeekFrom {
     fn clone(&self) -> SeekFrom {

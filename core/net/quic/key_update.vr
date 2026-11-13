@@ -153,7 +153,7 @@ implement Debug for KeyUpdateError {
     }
 }
 
-implement Eq for KeyUpdateError {
+implement PartialEq for KeyUpdateError {
     fn eq(&self, other: &KeyUpdateError) -> Bool {
         match (self, other) {
             (PendingRotationInProgress,    PendingRotationInProgress)    => true,
@@ -165,6 +165,8 @@ implement Eq for KeyUpdateError {
         }
     }
 }
+
+implement Eq for KeyUpdateError {}
 
 /// Outcome of an inbound phase observation.
 public type InboundPhaseAction is

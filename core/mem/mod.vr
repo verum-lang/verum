@@ -346,7 +346,7 @@ implement Display for UseAfterFreeError {
     }
 }
 
-implement Eq for UseAfterFreeError {
+implement PartialEq for UseAfterFreeError {
     fn eq(&self, other: &UseAfterFreeError) -> Bool {
         self.expected_gen == other.expected_gen
             && self.actual_gen == other.actual_gen
@@ -355,6 +355,8 @@ implement Eq for UseAfterFreeError {
             && self.type_name == other.type_name
     }
 }
+
+implement Eq for UseAfterFreeError {}
 
 /// Error returned when revocation fails.
 public type RevocationError is
@@ -413,7 +415,7 @@ implement Display for RevocationError {
     }
 }
 
-implement Eq for RevocationError {
+implement PartialEq for RevocationError {
     fn eq(&self, other: &RevocationError) -> Bool {
         match (self, other) {
             (RevocationError.NullPointer { type_name: a },
@@ -428,6 +430,8 @@ implement Eq for RevocationError {
         }
     }
 }
+
+implement Eq for RevocationError {}
 
 // =============================================================================
 // Execution Tiers

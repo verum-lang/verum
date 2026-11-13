@@ -334,11 +334,13 @@ implement Display for Signal {
     }
 }
 
-implement Eq for Signal {
+implement PartialEq for Signal {
     fn eq(&self, other: &Signal) -> Bool {
         self.to_raw() == other.to_raw()
     }
 }
+
+implement Eq for Signal {}
 
 implement Clone for Signal {
     fn clone(&self) -> Signal { *self }
@@ -677,7 +679,7 @@ implement Describable for SignalError {
     }
 }
 
-implement Eq for SignalError {
+implement PartialEq for SignalError {
     fn eq(&self, other: &SignalError) -> Bool {
         match (self, other) {
             (SignalError.Uncatchable(a),       SignalError.Uncatchable(b))       => a == b,
@@ -688,3 +690,5 @@ implement Eq for SignalError {
         }
     }
 }
+
+implement Eq for SignalError {}

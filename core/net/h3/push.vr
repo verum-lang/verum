@@ -90,7 +90,7 @@ implement Debug for PushError {
     }
 }
 
-implement Eq for PushError {
+implement PartialEq for PushError {
     fn eq(&self, other: &PushError) -> Bool {
         match (self, other) {
             (BudgetExhausted { requested: ra, limit: la },
@@ -101,6 +101,8 @@ implement Eq for PushError {
         }
     }
 }
+
+implement Eq for PushError {}
 
 // =============================================================================
 // PushEmitter — server-side allocator + budget tracker

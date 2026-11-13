@@ -96,7 +96,7 @@ implement Debug for CompileError {
     }
 }
 
-implement Eq for CompileError {
+implement PartialEq for CompileError {
     fn eq(&self, other: &CompileError) -> Bool {
         match (self, other) {
             (CeLex(a),     CeLex(b))     => a == b,
@@ -107,6 +107,8 @@ implement Eq for CompileError {
         }
     }
 }
+
+implement Eq for CompileError {}
 
 // -----------------------------------------------------------------------------
 // Entry point

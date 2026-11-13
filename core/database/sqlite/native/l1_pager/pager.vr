@@ -191,11 +191,13 @@ implement Debug for PagerErrorKind {
     }
 }
 
-implement Eq for PagerErrorKind {
+implement PartialEq for PagerErrorKind {
     fn eq(&self, other: &PagerErrorKind) -> Bool {
         pager_error_kind_tag(self) == pager_error_kind_tag(other)
     }
 }
+
+implement Eq for PagerErrorKind {}
 
 implement Display for PagerError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
@@ -209,11 +211,13 @@ implement Debug for PagerError {
     }
 }
 
-implement Eq for PagerError {
+implement PartialEq for PagerError {
     fn eq(&self, other: &PagerError) -> Bool {
         self.kind == other.kind && self.message == other.message
     }
 }
+
+implement Eq for PagerError {}
 
 // =============================================================================
 // Pager (v0.1 skeleton)

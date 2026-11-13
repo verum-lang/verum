@@ -354,7 +354,7 @@ implement FileType {
     }
 }
 
-implement Eq for FileType {
+implement PartialEq for FileType {
     fn eq(&self, other: &FileType) -> Bool {
         match (self, other) {
             (File, File) => true,
@@ -365,6 +365,8 @@ implement Eq for FileType {
         }
     }
 }
+
+implement Eq for FileType {}
 
 implement Debug for FileType {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {

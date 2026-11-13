@@ -332,7 +332,7 @@ implement Debug for DynamicTableError {
     }
 }
 
-implement Eq for DynamicTableError {
+implement PartialEq for DynamicTableError {
     fn eq(&self, other: &DynamicTableError) -> Bool {
         match (self, other) {
             (CapacityExceedsSettings, CapacityExceedsSettings) => true,
@@ -346,6 +346,8 @@ implement Eq for DynamicTableError {
         }
     }
 }
+
+implement Eq for DynamicTableError {}
 
 // =============================================================================
 // Helpers

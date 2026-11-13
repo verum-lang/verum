@@ -235,13 +235,15 @@ implement Debug for SemaphoreError {
     }
 }
 
-implement Eq for SemaphoreError {
+implement PartialEq for SemaphoreError {
     fn eq(&self, other: &SemaphoreError) -> Bool {
         match (self, other) {
             (Closed, Closed) => true,
         }
     }
 }
+
+implement Eq for SemaphoreError {}
 
 // The Future impl: on first poll, try to grab a permit; if not
 // available, register the waker once and return Pending. Subsequent

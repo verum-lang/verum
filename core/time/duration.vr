@@ -516,11 +516,13 @@ implement Div<Int> for Duration {
 // Comparison Implementations
 // =============================================================================
 
-implement Eq for Duration {
+implement PartialEq for Duration {
     fn eq(&self, other: &Duration) -> Bool {
         self.nanos == other.nanos
     }
 }
+
+implement Eq for Duration {}
 
 implement Ord for Duration {
     fn cmp(&self, other: &Duration) -> Ordering {

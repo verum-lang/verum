@@ -106,7 +106,7 @@ implement Debug for MoneyError {
     }
 }
 
-implement Eq for MoneyError {
+implement PartialEq for MoneyError {
     /// Per-variant payload-equal. `Underlying` is treated as
     /// opaque-equal — two Underlying wrappers compare equal iff
     /// both are Underlying (BigDecimalError doesn't have Eq today).
@@ -126,6 +126,8 @@ implement Eq for MoneyError {
         }
     }
 }
+
+implement Eq for MoneyError {}
 
 // =============================================================================
 // Constructors

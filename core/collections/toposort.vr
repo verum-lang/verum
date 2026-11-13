@@ -82,13 +82,15 @@ implement Debug for TopoError {
     }
 }
 
-implement Eq for TopoError {
+implement PartialEq for TopoError {
     fn eq(&self, other: &TopoError) -> Bool {
         match (self, other) {
             (Cycle(a), Cycle(b)) => a == b,
         }
     }
 }
+
+implement Eq for TopoError {}
 
 // =============================================================================
 // Graph

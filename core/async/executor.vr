@@ -2458,11 +2458,13 @@ implement Display for ExecutorTimeoutError {
     }
 }
 
-implement Eq for ExecutorTimeoutError {
+implement PartialEq for ExecutorTimeoutError {
     fn eq(&self, _other: &ExecutorTimeoutError) -> Bool {
         true
     }
 }
+
+implement Eq for ExecutorTimeoutError {}
 
 /// Future that wraps another future with a timeout.
 public type ExecutorTimeout<F: Future> is {

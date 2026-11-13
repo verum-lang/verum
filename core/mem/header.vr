@@ -234,7 +234,7 @@ implement Display for MemValidationError {
     }
 }
 
-implement Eq for MemValidationError {
+implement PartialEq for MemValidationError {
     fn eq(&self, other: &MemValidationError) -> Bool {
         match (self, other) {
             (GenerationMismatch { expected: ea, actual: aa },
@@ -245,6 +245,8 @@ implement Eq for MemValidationError {
         }
     }
 }
+
+implement Eq for MemValidationError {}
 
 @repr(C, align(32))
 public type AllocationHeader is {

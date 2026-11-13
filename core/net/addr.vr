@@ -199,11 +199,13 @@ fn parse_hex_segment(s: &Text) -> Result<Int, AddrParseError> {
     Result.Ok(res)
 }
 
-implement Eq for Ipv4Addr {
+implement PartialEq for Ipv4Addr {
     fn eq(&self, other: &Ipv4Addr) -> Bool {
         self.octets == other.octets
     }
 }
+
+implement Eq for Ipv4Addr {}
 
 implement Hash for Ipv4Addr {
     fn hash(&self, hasher: &mut Hasher) {
@@ -454,11 +456,13 @@ implement Ipv6Addr {
     }
 }
 
-implement Eq for Ipv6Addr {
+implement PartialEq for Ipv6Addr {
     fn eq(&self, other: &Ipv6Addr) -> Bool {
         self.segments == other.segments
     }
 }
+
+implement Eq for Ipv6Addr {}
 
 implement Hash for Ipv6Addr {
     fn hash(&self, hasher: &mut Hasher) {
@@ -552,7 +556,7 @@ implement IpAddr {
     }
 }
 
-implement Eq for IpAddr {
+implement PartialEq for IpAddr {
     fn eq(&self, other: &IpAddr) -> Bool {
         match (*self, *other) {
             (V4(a), V4(b)) => a == b,
@@ -561,6 +565,8 @@ implement Eq for IpAddr {
         }
     }
 }
+
+implement Eq for IpAddr {}
 
 implement Hash for IpAddr {
     fn hash(&self, hasher: &mut Hasher) {
@@ -626,11 +632,13 @@ implement SocketAddrV4 {
     }
 }
 
-implement Eq for SocketAddrV4 {
+implement PartialEq for SocketAddrV4 {
     fn eq(&self, other: &SocketAddrV4) -> Bool {
         self.ip == other.ip && self.port == other.port
     }
 }
+
+implement Eq for SocketAddrV4 {}
 
 implement Hash for SocketAddrV4 {
     fn hash(&self, hasher: &mut Hasher) {
@@ -682,12 +690,14 @@ implement SocketAddrV6 {
     }
 }
 
-implement Eq for SocketAddrV6 {
+implement PartialEq for SocketAddrV6 {
     fn eq(&self, other: &SocketAddrV6) -> Bool {
         self.ip == other.ip && self.port == other.port &&
         self.flowinfo == other.flowinfo && self.scope_id == other.scope_id
     }
 }
+
+implement Eq for SocketAddrV6 {}
 
 implement Hash for SocketAddrV6 {
     fn hash(&self, hasher: &mut Hasher) {
@@ -827,7 +837,7 @@ implement SocketAddr {
     }
 }
 
-implement Eq for SocketAddr {
+implement PartialEq for SocketAddr {
     fn eq(&self, other: &SocketAddr) -> Bool {
         match (*self, *other) {
             (V4(a), V4(b)) => a == b,
@@ -836,6 +846,8 @@ implement Eq for SocketAddr {
         }
     }
 }
+
+implement Eq for SocketAddr {}
 
 implement Hash for SocketAddr {
     fn hash(&self, hasher: &mut Hasher) {
@@ -882,7 +894,7 @@ public type AddrParseError is
     | InvalidOctet
     | InvalidPort;
 
-implement Eq for AddrParseError {
+implement PartialEq for AddrParseError {
     fn eq(&self, other: &AddrParseError) -> Bool {
         match (*self, *other) {
             (InvalidFormat, InvalidFormat) => true,
@@ -892,6 +904,8 @@ implement Eq for AddrParseError {
         }
     }
 }
+
+implement Eq for AddrParseError {}
 
 implement Debug for AddrParseError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {

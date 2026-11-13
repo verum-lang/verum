@@ -232,7 +232,7 @@ implement Debug for ArenaError {
     }
 }
 
-implement Eq for ArenaError {
+implement PartialEq for ArenaError {
     fn eq(&self, other: &ArenaError) -> Bool {
         match (self, other) {
             (OutOfMemory { requested: ra, available: aa },
@@ -246,6 +246,8 @@ implement Eq for ArenaError {
         }
     }
 }
+
+implement Eq for ArenaError {}
 
 // =============================================================================
 // Generational Arena

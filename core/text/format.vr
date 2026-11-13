@@ -142,7 +142,7 @@ implement Display for WriteError {
     }
 }
 
-implement Eq for WriteErrorKind {
+implement PartialEq for WriteErrorKind {
     fn eq(&self, other: &WriteErrorKind) -> Bool {
         match (self, other) {
             (Io,         Io)         => true,
@@ -152,6 +152,8 @@ implement Eq for WriteErrorKind {
         }
     }
 }
+
+implement Eq for WriteErrorKind {}
 
 implement Display for WriteErrorKind {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
@@ -173,11 +175,13 @@ implement Debug for WriteErrorKind {
     }
 }
 
-implement Eq for WriteError {
+implement PartialEq for WriteError {
     fn eq(&self, other: &WriteError) -> Bool {
         self.kind == other.kind
     }
 }
+
+implement Eq for WriteError {}
 
 // =============================================================================
 // FmtResult — the standard formatting result type — is re-exported from

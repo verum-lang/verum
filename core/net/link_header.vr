@@ -101,7 +101,7 @@ implement Debug for LinkHeaderError {
     }
 }
 
-implement Eq for LinkHeaderError {
+implement PartialEq for LinkHeaderError {
     fn eq(&self, other: &LinkHeaderError) -> Bool {
         match (self, other) {
             (LinkHeaderError.Malformed(a), LinkHeaderError.Malformed(b)) => a == b,
@@ -113,6 +113,8 @@ implement Eq for LinkHeaderError {
         }
     }
 }
+
+implement Eq for LinkHeaderError {}
 
 /// Hard cap on the number of `<uri>; param=...` entries in a single
 /// `Link:` header. CVE-2011-3192-class fan-out — a peer sending

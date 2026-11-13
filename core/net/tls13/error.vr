@@ -137,7 +137,7 @@ implement Debug for TlsError {
     }
 }
 
-implement Eq for TlsError {
+implement PartialEq for TlsError {
     fn eq(&self, other: &TlsError) -> Bool {
         match (self, other) {
             (TlsError.ProtocolVersion,         TlsError.ProtocolVersion)         => true,
@@ -170,6 +170,8 @@ implement Eq for TlsError {
         }
     }
 }
+
+implement Eq for TlsError {}
 
 implement TlsError {
     /// Translate this error into the AlertDescription we'd send to

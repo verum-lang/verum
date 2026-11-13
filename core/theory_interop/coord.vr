@@ -421,7 +421,7 @@ public fn theorem_coord_as_text(t: MsfsTheoremCoord) -> Text {
 // Foundation Protocol Impls — Display + Debug + Eq for TranslationVerdict
 // =============================================================================
 
-implement Eq for TranslationVerdict {
+implement PartialEq for TranslationVerdict {
     fn eq(&self, other: &TranslationVerdict) -> Bool {
         match (self, other) {
             (TranslationVerdict.Morita,         TranslationVerdict.Morita)         => true,
@@ -433,6 +433,8 @@ implement Eq for TranslationVerdict {
         }
     }
 }
+
+implement Eq for TranslationVerdict {}
 
 implement Clone for TranslationVerdict {
     fn clone(&self) -> TranslationVerdict {

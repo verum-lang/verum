@@ -41,7 +41,7 @@ implement Debug for KubeConfigError {
     }
 }
 
-implement Eq for KubeConfigError {
+implement PartialEq for KubeConfigError {
     fn eq(&self, other: &KubeConfigError) -> Bool {
         match (self, other) {
             (NotFound(a),         NotFound(b))         => a == b,
@@ -53,6 +53,8 @@ implement Eq for KubeConfigError {
         }
     }
 }
+
+implement Eq for KubeConfigError {}
 
 // =============================================================================
 // Cluster endpoint

@@ -153,7 +153,7 @@ implement Debug for CoseError {
     }
 }
 
-implement Eq for CoseError {
+implement PartialEq for CoseError {
     fn eq(&self, other: &CoseError) -> Bool {
         match (self, other) {
             (MalformedStructure,      MalformedStructure)      => true,
@@ -166,6 +166,8 @@ implement Eq for CoseError {
         }
     }
 }
+
+implement Eq for CoseError {}
 
 // =============================================================================
 // Key types

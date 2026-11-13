@@ -239,7 +239,7 @@ implement Debug for OcspError {
     }
 }
 
-implement Eq for OcspError {
+implement PartialEq for OcspError {
     fn eq(&self, other: &OcspError) -> Bool {
         match (self, other) {
             (OcspError.DerParseError(a),     OcspError.DerParseError(b))     => a == b,
@@ -253,6 +253,8 @@ implement Eq for OcspError {
         }
     }
 }
+
+implement Eq for OcspError {}
 
 // =============================================================================
 // Parser (scaffold — v1.1 will integrate DerReader + algorithm + Name parsing)

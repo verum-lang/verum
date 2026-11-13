@@ -301,7 +301,7 @@ fn free_vars_into(k: Kind, out: &mut Set<Text>) {
 // Foundation Protocol Impls — Eq + Display + Debug for Kind / KindError
 // =============================================================================
 
-implement Eq for Kind {
+implement PartialEq for Kind {
     fn eq(&self, other: &Kind) -> Bool {
         match (self, other) {
             (Kind.KType, Kind.KType) => true,
@@ -314,6 +314,8 @@ implement Eq for Kind {
         }
     }
 }
+
+implement Eq for Kind {}
 
 implement Display for Kind {
     /// Renders kinds in the standard kind-algebra notation:
@@ -364,7 +366,7 @@ implement Debug for Kind {
     }
 }
 
-implement Eq for KindError {
+implement PartialEq for KindError {
     fn eq(&self, other: &KindError) -> Bool {
         match (self, other) {
             (KindError.Mismatch { lhs: la, rhs: ra },
@@ -380,6 +382,8 @@ implement Eq for KindError {
         }
     }
 }
+
+implement Eq for KindError {}
 
 implement Display for KindError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {

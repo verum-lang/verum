@@ -129,7 +129,7 @@ implement Debug for Fts5ParseError {
     }
 }
 
-implement Eq for Fts5ParseError {
+implement PartialEq for Fts5ParseError {
     fn eq(&self, other: &Fts5ParseError) -> Bool {
         match (self, other) {
             (PeUnexpected(a),  PeUnexpected(b))  => a == b,
@@ -139,6 +139,8 @@ implement Eq for Fts5ParseError {
         }
     }
 }
+
+implement Eq for Fts5ParseError {}
 
 public fn parse(text: &Text) -> Result<MatchAst, Fts5ParseError> {
     let toks = lex(text);

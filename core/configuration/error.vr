@@ -287,11 +287,13 @@ implement Debug for ConfigErrorKind {
     }
 }
 
-implement Eq for ConfigErrorKind {
+implement PartialEq for ConfigErrorKind {
     fn eq(&self, other: &Self) -> Bool {
         config_error_kind_name(self) == config_error_kind_name(other)
     }
 }
+
+implement Eq for ConfigErrorKind {}
 
 implement Display for ConfigError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
@@ -323,7 +325,7 @@ implement Debug for ConfigError {
     }
 }
 
-implement Eq for ConfigError {
+implement PartialEq for ConfigError {
     fn eq(&self, other: &Self) -> Bool {
         self.format_id == other.format_id
             && self.kind == other.kind
@@ -332,6 +334,8 @@ implement Eq for ConfigError {
             && self.byte_offset == other.byte_offset
     }
 }
+
+implement Eq for ConfigError {}
 
 // =============================================================================
 // Tests

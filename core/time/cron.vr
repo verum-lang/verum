@@ -123,7 +123,7 @@ implement Debug for CronError {
     }
 }
 
-implement Eq for CronError {
+implement PartialEq for CronError {
     fn eq(&self, other: &CronError) -> Bool {
         match (self, other) {
             (WrongFieldCount(a), WrongFieldCount(b)) => a == b,
@@ -133,6 +133,8 @@ implement Eq for CronError {
         }
     }
 }
+
+implement Eq for CronError {}
 
 // =============================================================================
 // Parser

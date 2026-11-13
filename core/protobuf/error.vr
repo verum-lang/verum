@@ -65,7 +65,7 @@ implement Debug for ProtobufError {
     }
 }
 
-implement Eq for ProtobufError {
+implement PartialEq for ProtobufError {
     fn eq(&self, other: &ProtobufError) -> Bool {
         match (self, other) {
             (ProtobufError.UnexpectedEof,                  ProtobufError.UnexpectedEof)                  => true,
@@ -82,5 +82,7 @@ implement Eq for ProtobufError {
         }
     }
 }
+
+implement Eq for ProtobufError {}
 
 public type DecodeResult<T> is Result<T, ProtobufError>;

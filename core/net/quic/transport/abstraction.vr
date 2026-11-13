@@ -74,7 +74,7 @@ implement Debug for TransportError {
     }
 }
 
-implement Eq for TransportError {
+implement PartialEq for TransportError {
     fn eq(&self, other: &TransportError) -> Bool {
         match (self, other) {
             (Closed,      Closed)      => true,
@@ -85,6 +85,8 @@ implement Eq for TransportError {
         }
     }
 }
+
+implement Eq for TransportError {}
 
 public type InboundDatagram is {
     data:      List<Byte>,

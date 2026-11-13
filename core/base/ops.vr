@@ -104,7 +104,7 @@ implement<B: Clone, C: Clone> Clone for ControlFlow<B, C> {
     }
 }
 
-implement<B: Eq, C: Eq> Eq for ControlFlow<B, C> {
+implement<B: Eq, C: Eq> PartialEq for ControlFlow<B, C> {
     fn eq(&self, other: &ControlFlow<B, C>) -> Bool {
         match (self, other) {
             (Continue(a), Continue(b)) => a == b,
@@ -113,6 +113,8 @@ implement<B: Eq, C: Eq> Eq for ControlFlow<B, C> {
         }
     }
 }
+
+implement<B: Eq, C: Eq> Eq for ControlFlow<B, C> {}
 
 implement<B: Debug, C: Debug> Debug for ControlFlow<B, C> {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {

@@ -466,9 +466,11 @@ implement Debug for FormatError {
     }
 }
 
-implement Eq for FormatError {
+implement PartialEq for FormatError {
     fn eq(&self, _other: &FormatError) -> Bool { true }
 }
+
+implement Eq for FormatError {}
 
 /// Format result alias - used by Display and Debug implementations.
 public type FmtResult is Result<Unit, FormatError>;
@@ -1548,11 +1550,13 @@ implement Display for ParseError {
     }
 }
 
-implement Eq for ParseError {
+implement PartialEq for ParseError {
     fn eq(&self, other: &ParseError) -> Bool {
         self.message == other.message
     }
 }
+
+implement Eq for ParseError {}
 
 // =============================================================================
 // ToString Protocol

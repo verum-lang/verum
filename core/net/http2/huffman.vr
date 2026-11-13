@@ -49,7 +49,7 @@ implement Debug for DecodeError {
     }
 }
 
-implement Eq for DecodeError {
+implement PartialEq for DecodeError {
     fn eq(&self, other: &DecodeError) -> Bool {
         match (self, other) {
             (Invalid,                    Invalid)                    => true,
@@ -58,6 +58,8 @@ implement Eq for DecodeError {
         }
     }
 }
+
+implement Eq for DecodeError {}
 
 /// Encode `input` with the HPACK Huffman code. The result is appended
 /// to `out` with the standard all-ones padding on the trailing byte.

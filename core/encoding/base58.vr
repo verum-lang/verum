@@ -112,7 +112,7 @@ implement Debug for Base58Error {
     }
 }
 
-implement Eq for Base58Error {
+implement PartialEq for Base58Error {
     fn eq(&self, other: &Base58Error) -> Bool {
         match (self, other) {
             (InvalidCharacter(a), InvalidCharacter(b)) => a == b,
@@ -124,6 +124,8 @@ implement Eq for Base58Error {
         }
     }
 }
+
+implement Eq for Base58Error {}
 
 /// Hard cap on `decode` input length. Base58 decode is O(N²) — every
 /// character requires an inner loop scaling with the accumulated big-

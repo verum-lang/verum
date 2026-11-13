@@ -143,7 +143,7 @@ implement Debug for SqliteApiDbError {
     }
 }
 
-implement Eq for SqliteApiDbError {
+implement PartialEq for SqliteApiDbError {
     fn eq(&self, other: &SqliteApiDbError) -> Bool {
         match (self, other) {
             (DbOk,                    DbOk)                    => true,
@@ -171,6 +171,8 @@ implement Eq for SqliteApiDbError {
         }
     }
 }
+
+implement Eq for SqliteApiDbError {}
 
 /// Map ConnectionError → SqliteApiDbError for the facade layer.
 public fn db_error_from_conn(e: ConnectionError) -> SqliteApiDbError {

@@ -524,7 +524,7 @@ implement<T: Debug> Debug for Heap<T> {
 }
 
 // Eq if T is Eq
-implement<T: Eq> Eq for Heap<T> {
+implement<T: Eq> PartialEq for Heap<T> {
     fn eq(&self, other: &Heap<T>) -> Bool {
         **self == **other
     }
@@ -539,6 +539,8 @@ implement<T: Eq> Eq for Heap<T> {
         !s_eq
     }
 }
+
+implement<T: Eq> Eq for Heap<T> {}
 
 // Ord if T is Ord
 implement<T: Ord> Ord for Heap<T> {
@@ -888,7 +890,7 @@ implement<T: Debug> Debug for Shared<T> {
     }
 }
 
-implement<T: Eq> Eq for Shared<T> {
+implement<T: Eq> PartialEq for Shared<T> {
     fn eq(&self, other: &Shared<T>) -> Bool {
         **self == **other
     }
@@ -899,6 +901,8 @@ implement<T: Eq> Eq for Shared<T> {
         !s_eq
     }
 }
+
+implement<T: Eq> Eq for Shared<T> {}
 
 implement<T: Ord> Ord for Shared<T> {
     fn cmp(&self, other: &Shared<T>) -> Ordering {
@@ -1068,7 +1072,7 @@ implement<T> Debug for Weak<T> {
     }
 }
 
-implement<T> Eq for Weak<T> {
+implement<T> PartialEq for Weak<T> {
     /// Identity equality — two `Weak<T>` are equal iff they were
     /// produced from the same `Shared<T>` allocation. Comparing
     /// generation + epoch + pointer is sufficient under CBGR
@@ -1081,6 +1085,8 @@ implement<T> Eq for Weak<T> {
             && self.epoch == other.epoch
     }
 }
+
+implement<T> Eq for Weak<T> {}
 
 implement<T> Hash for Weak<T> {
     /// Identity hash matching Eq's identity semantics. Allows
@@ -1271,11 +1277,13 @@ implement<T: Display> Display for ManuallyDrop<T> {
     }
 }
 
-implement<T: Eq> Eq for ManuallyDrop<T> {
+implement<T: Eq> PartialEq for ManuallyDrop<T> {
     fn eq(&self, other: &ManuallyDrop<T>) -> Bool {
         self.value == other.value
     }
 }
+
+implement<T: Eq> Eq for ManuallyDrop<T> {}
 
 implement<T: Ord> Ord for ManuallyDrop<T> {
     fn cmp(&self, other: &ManuallyDrop<T>) -> Ordering {
@@ -1535,11 +1543,13 @@ implement<T: Clone> Cow<T> {
 // not before it — and do not re-derive "id shift" from the paragraph
 // above, which is kept only so the correction has something to correct.
 
-implement<T: Clone + Eq> Eq for Cow<T> {
+implement<T: Clone + Eq> PartialEq for Cow<T> {
     fn eq(&self, other: &Cow<T>) -> Bool {
         *self.as_ref() == *other.as_ref()
     }
 }
+
+implement<T: Clone + Eq> Eq for Cow<T> {}
 
 implement<T: Clone + Ord> Ord for Cow<T> {
     fn cmp(&self, other: &Cow<T>) -> Ordering {
@@ -1696,11 +1706,13 @@ implement<T> DerefMut for Pin<T> {
     }
 }
 
-implement<T: Eq> Eq for Pin<T> {
+implement<T: Eq> PartialEq for Pin<T> {
     fn eq(&self, other: &Pin<T>) -> Bool {
         self.pointer == other.pointer
     }
 }
+
+implement<T: Eq> Eq for Pin<T> {}
 
 implement<T: Ord> Ord for Pin<T> {
     fn cmp(&self, other: &Pin<T>) -> Ordering {

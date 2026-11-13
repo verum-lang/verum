@@ -521,7 +521,7 @@ implement<T: Hash + Eq + Clone> Clone for Multiset<T> {
 }
 
 /// Multiset equality: same support and per-element multiplicity.
-implement<T: Hash + Eq> Eq for Multiset<T> {
+implement<T: Hash + Eq> PartialEq for Multiset<T> {
     fn eq(&self, other: &Multiset<T>) -> Bool {
         if self.cardinality != other.cardinality { return false; }
         if self.distinct_len() != other.distinct_len() { return false; }
@@ -543,6 +543,8 @@ implement<T: Hash + Eq> Eq for Multiset<T> {
         false
     }
 }
+
+implement<T: Hash + Eq> Eq for Multiset<T> {}
 
 implement<T: Hash + Eq + Debug> Debug for Multiset<T> {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {

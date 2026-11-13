@@ -486,7 +486,7 @@ fn cbpv_alpha_eq_ctx(
 // Foundation Protocol Impls — Display + Debug + Eq for CbpvKind / CbpvTerm / CbpvStep
 // =============================================================================
 
-implement Eq for CbpvKind {
+implement PartialEq for CbpvKind {
     fn eq(&self, other: &CbpvKind) -> Bool {
         match (self, other) {
             (CbpvKind.Value,       CbpvKind.Value)       => true,
@@ -495,6 +495,8 @@ implement Eq for CbpvKind {
         }
     }
 }
+
+implement Eq for CbpvKind {}
 
 implement Display for CbpvKind {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
@@ -514,7 +516,7 @@ implement Debug for CbpvKind {
     }
 }
 
-implement Eq for CbpvTerm {
+implement PartialEq for CbpvTerm {
     /// Syntactic equality on CBPV terms. This is **not**
     /// α-equivalence — for α-equivalence use `cbpv_alpha_eq` (or
     /// `cbpv_alpha_eq_ctx` for the context-tracking variant).
@@ -546,6 +548,8 @@ implement Eq for CbpvTerm {
         }
     }
 }
+
+implement Eq for CbpvTerm {}
 
 implement Display for CbpvTerm {
     /// Renders in standard call-by-push-value notation:
@@ -635,7 +639,7 @@ implement Debug for CbpvTerm {
     }
 }
 
-implement Eq for CbpvStep {
+implement PartialEq for CbpvStep {
     fn eq(&self, other: &CbpvStep) -> Bool {
         match (self, other) {
             (CbpvStep.Stepped { next: a },
@@ -646,6 +650,8 @@ implement Eq for CbpvStep {
         }
     }
 }
+
+implement Eq for CbpvStep {}
 
 implement Display for CbpvStep {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {

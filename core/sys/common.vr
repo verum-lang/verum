@@ -94,7 +94,7 @@ implement Display for OSError {
     }
 }
 
-implement Eq for OSError {
+implement PartialEq for OSError {
     fn eq(&self, other: &OSError) -> Bool {
         self.code == other.code
     }
@@ -144,6 +144,8 @@ implement Eq for OSError {
         sc != oc
     }
 }
+
+implement Eq for OSError {}
 
 // =============================================================================
 // File Descriptor
@@ -266,11 +268,13 @@ implement Debug for FileDesc {
     }
 }
 
-implement Eq for FileDesc {
+implement PartialEq for FileDesc {
     fn eq(&self, other: &FileDesc) -> Bool {
         self.0 == other.0
     }
 }
+
+implement Eq for FileDesc {}
 
 // =============================================================================
 // I/O Vector (for scatter/gather I/O)
@@ -1461,7 +1465,7 @@ implement Debug for SysContextError {
     }
 }
 
-implement Eq for SysContextError {
+implement PartialEq for SysContextError {
     fn eq(&self, other: &SysContextError) -> Bool {
         match (self, other) {
             (SysContextError.SlotNotFound { slot: a },
@@ -1478,6 +1482,8 @@ implement Eq for SysContextError {
         }
     }
 }
+
+implement Eq for SysContextError {}
 
 // =============================================================================
 // Tier-0 Store-Authority Raw Intrinsics (CTX-STORE-AUTHORITY-1)

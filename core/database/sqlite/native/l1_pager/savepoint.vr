@@ -77,7 +77,7 @@ implement Debug for SavepointError {
     }
 }
 
-implement Eq for SavepointError {
+implement PartialEq for SavepointError {
     fn eq(&self, other: &SavepointError) -> Bool {
         match (self, other) {
             (NotFound(a), NotFound(b)) => a == b,
@@ -87,6 +87,8 @@ implement Eq for SavepointError {
         }
     }
 }
+
+implement Eq for SavepointError {}
 
 /// LIFO savepoint stack. Call `push`, `release`, `rollback_to`.
 public type PagerSavepointStack is {

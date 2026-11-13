@@ -61,11 +61,13 @@ implement Clone for Simplex {
     }
 }
 
-implement Eq for Simplex {
+implement PartialEq for Simplex {
     fn eq(&self, other: &Simplex) -> Bool {
         self.dim == other.dim && self.vertices == other.vertices
     }
 }
+
+implement Eq for Simplex {}
 
 /// A **simplicial set** is a contravariant functor Δ^op → Set. We
 /// expose it as a protocol whose implementations provide:

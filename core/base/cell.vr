@@ -102,7 +102,7 @@ implement<T: Clone> Cell<T> {
     }
 }
 
-implement<T: Clone + Eq> Eq for Cell<T> {
+implement<T: Clone + Eq> PartialEq for Cell<T> {
     @inline(always)
     fn eq(&self, other: &Cell<T>) -> Bool {
         self.get() == other.get()
@@ -116,6 +116,8 @@ implement<T: Clone + Eq> Eq for Cell<T> {
         !s_eq
     }
 }
+
+implement<T: Clone + Eq> Eq for Cell<T> {}
 
 implement<T: Clone + Ord> Ord for Cell<T> {
     @inline(always)
@@ -308,7 +310,7 @@ implement<T: Clone> Clone for RefCell<T> {
     }
 }
 
-implement<T: Eq> Eq for RefCell<T> {
+implement<T: Eq> PartialEq for RefCell<T> {
     fn eq(&self, other: &RefCell<T>) -> Bool {
         *self.borrow().value == *other.borrow().value
     }
@@ -319,6 +321,8 @@ implement<T: Eq> Eq for RefCell<T> {
         !s_eq
     }
 }
+
+implement<T: Eq> Eq for RefCell<T> {}
 
 implement<T: Debug> Debug for RefCell<T> {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
@@ -421,17 +425,21 @@ implement Display for BorrowMutError {
     }
 }
 
-implement Eq for BorrowError {
+implement PartialEq for BorrowError {
     fn eq(&self, other: &BorrowError) -> Bool {
         self.message == other.message
     }
 }
 
-implement Eq for BorrowMutError {
+implement Eq for BorrowError {}
+
+implement PartialEq for BorrowMutError {
     fn eq(&self, other: &BorrowMutError) -> Bool {
         self.message == other.message
     }
 }
+
+implement Eq for BorrowMutError {}
 
 // =============================================================================
 // OnceCell<T> - Write-once cell for lazy initialization
@@ -541,11 +549,13 @@ implement<T> OnceCell<T> {
     }
 }
 
-implement<T: Clone + Eq> Eq for OnceCell<T> {
+implement<T: Clone + Eq> PartialEq for OnceCell<T> {
     fn eq(&self, other: &OnceCell<T>) -> Bool {
         self.value == other.value
     }
 }
+
+implement<T: Clone + Eq> Eq for OnceCell<T> {}
 
 implement<T: Clone> Clone for OnceCell<T> {
     fn clone(&self) -> OnceCell<T> {

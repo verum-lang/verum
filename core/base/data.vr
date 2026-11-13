@@ -99,7 +99,7 @@ implement Display for DataError {
     }
 }
 
-implement Eq for DataError {
+implement PartialEq for DataError {
     fn eq(&self, other: &DataError) -> Bool {
         match (self, other) {
             (TypeMismatch { expected: ea, actual: aa },
@@ -114,6 +114,8 @@ implement Eq for DataError {
         }
     }
 }
+
+implement Eq for DataError {}
 
 implement Data {
     // =========================================================================

@@ -116,11 +116,13 @@ implement Debug for JsonRpcError {
     }
 }
 
-implement Eq for JsonRpcError {
+implement PartialEq for JsonRpcError {
     fn eq(&self, other: &JsonRpcError) -> Bool {
         self.code == other.code && self.message == other.message
     }
 }
+
+implement Eq for JsonRpcError {}
 
 // =============================================================================
 // §2. Typed Parameter Records
