@@ -289,3 +289,252 @@ fn an_active_private_type_cannot_borrow_an_inactive_public_export() {
             .is_some()
     );
 }
+
+fn add_dependency_module(registry: &mut verum_modules::ModuleRegistry, owner: &str, source: &str) {
+    use verum_modules::{ModuleInfo, ModulePath, extract_exports_from_module};
+    let ast = Parser::new(source).parse_module().unwrap();
+    let id = registry.allocate_id();
+    let path = ModulePath::from_str(owner);
+    let mut module = ModuleInfo::new(
+        id,
+        path.clone(),
+        ast,
+        verum_ast::FileId::new(id.as_u32()),
+        source.into(),
+    );
+    module.exports = extract_exports_from_module(&module.ast, id, &path).unwrap();
+    registry.register(module);
+}
+
+fn source_dependency_registry() -> verum_modules::ModuleRegistry {
+    let mut registry = registry_with(
+        "scope.carrier",
+        "mount selected.Value; public type Carrier is {public value:Value};",
+    );
+    add_dependency_module(
+        &mut registry,
+        "scope.left",
+        "public type Value is {public number:Int};",
+    );
+    add_dependency_module(
+        &mut registry,
+        "scope.right",
+        "public type Value is {public flag:Bool};",
+    );
+    registry.register_path_alias("selected", "scope.left");
+    registry
+}
+
+fn dependency_checker(registry: verum_modules::ModuleRegistry) -> TypeChecker {
+    let mut checker = TypeChecker::with_minimal_context();
+    checker.register_primitives();
+    checker.set_current_module_path("scope.carrier");
+    checker.set_module_registry_direct(registry);
+    checker
+}
+
+fn load_carrier(checker: &mut TypeChecker) -> crate::Result<(crate::Type, verum_common::Text)> {
+    let (declaration, owner) = checker
+        .declaring_source_type_declaration("Carrier")
+        .unwrap();
+    checker.load_source_type_declaration_with_parameter_key(&declaration, &owner, declaration.span)
+}
+
+#[test]
+fn unchanged_source_carrier_cannot_reuse_a_rebound_dependency_alias() {
+    let registry = source_dependency_registry();
+    let mut checker = dependency_checker(registry.clone());
+    let active = verum_common::Shared::new(parking_lot::RwLock::new(registry));
+    checker.set_module_registry(active.clone());
+    load_carrier(&mut checker).unwrap();
+    let fields = "__struct_fields_scope.carrier.Carrier";
+    let before = checker.resolved_type(fields).unwrap().clone();
+    active
+        .write()
+        .register_path_alias("selected", "scope.right");
+    let mut fresh = dependency_checker(active.read().clone());
+    load_carrier(&mut fresh).unwrap();
+    assert_ne!(
+        &before,
+        fresh.resolved_type(fields).unwrap(),
+        "the new dependency must change the checked field type"
+    );
+    assert!(
+        load_carrier(&mut checker).is_err(),
+        "an unchanged AST reused a type checked against the old dependency alias"
+    );
+}
+
+#[test]
+fn unrelated_module_addition_preserves_a_completed_source_carrier() {
+    let registry = source_dependency_registry();
+    let mut checker = dependency_checker(registry.clone());
+    let before = load_carrier(&mut checker).unwrap();
+    assert_eq!(load_carrier(&mut checker).unwrap(), before);
+    let mut next = registry.clone();
+    add_dependency_module(
+        &mut next,
+        "scope.unrelated",
+        "public type Unrelated is {public text:Text};",
+    );
+    next.register_path_alias("unrelated_alias", "scope.unrelated");
+    checker.set_module_registry_direct(next);
+    assert_eq!(load_carrier(&mut checker).unwrap(), before);
+    assert!(
+        checker
+            .source_type_registration.is_completed(&"scope.carrier.Carrier".into())
+    );
+}
+
+fn check_source(
+    checker: &mut TypeChecker,
+    owner: &str,
+    source: &str,
+) -> verum_common::List<verum_common::Text> {
+    let module = Parser::new(source).parse_module().unwrap();
+    checker.set_current_module_path(owner);
+    let mut errors = checker.prepare_module_declarations(&module);
+    if errors.is_empty() {
+        for item in &module.items {
+            if let Err(error) = checker.check_item(item) {
+                errors.push(error);
+            }
+        }
+    }
+    errors.extend(checker.take_deferred_errors());
+    errors
+        .iter()
+        .chain(checker.diagnostic_sources().iter())
+        .map(|error| error.to_string().into())
+        .collect()
+}
+
+#[test]
+fn ordinary_consumer_cannot_accept_an_obsolete_imported_field() {
+    let registry = source_dependency_registry();
+    let active = verum_common::Shared::new(parking_lot::RwLock::new(registry.clone()));
+    let mut checker = dependency_checker(registry);
+    checker.set_module_registry(active.clone());
+    let old_consumer = "mount scope.carrier.Carrier; fn old_field(v:Carrier)->Int {v.value.number}";
+    let new_consumer = "mount scope.carrier.Carrier; fn new_field(v:Carrier)->Bool {v.value.flag}";
+    let initial = check_source(&mut checker, "app.first", old_consumer);
+    assert!(initial.is_empty(), "{initial:?}");
+    active
+        .write()
+        .register_path_alias("selected", "scope.right");
+    let updated = active.read().clone();
+    let current = check_source(
+        &mut dependency_checker(updated.clone()),
+        "app.new",
+        new_consumer,
+    );
+    assert!(current.is_empty(), "{current:?}");
+    assert!(!check_source(&mut dependency_checker(updated), "app.old", old_consumer).is_empty());
+    let stale = check_source(&mut checker, "app.old", old_consumer);
+    assert!(
+        stale
+            .iter()
+            .any(|error| error.to_string().contains("source dependencies changed")),
+        "{stale:?}"
+    );
+}
+
+#[test]
+fn outer_carrier_retains_transitive_dependencies_of_a_cached_child() {
+    let mut registry = source_dependency_registry();
+    add_dependency_module(
+        &mut registry,
+        "scope.outer",
+        "mount scope.carrier.Carrier; public type Outer is {public child:Carrier};",
+    );
+    let mut checker = dependency_checker(registry.clone());
+    load_carrier(&mut checker).unwrap();
+    checker.set_current_module_path("scope.outer");
+    let (declaration, owner) = checker.declaring_source_type_declaration("Outer").unwrap();
+    let load = |checker: &mut TypeChecker| {
+        checker.load_source_type_declaration_with_parameter_key(
+            &declaration,
+            &owner,
+            declaration.span,
+        )
+    };
+    load(&mut checker).unwrap();
+    let mut broken = registry.clone();
+    broken.register_path_alias("selected", "missing");
+    checker.set_module_registry_direct(broken);
+    let error =
+        load(&mut checker).expect_err("an outer field depended on the previously accepted child");
+    assert!(error.to_string().contains("scope.outer.Outer"), "{error}");
+    checker.set_module_registry_direct(registry);
+    load(&mut checker).expect("restoring the observed inputs preserves the completed declaration");
+}
+
+#[test]
+fn source_retry_after_an_unavailable_dependency_publishes_only_the_new_evidence() {
+    let mut registry = source_dependency_registry();
+    registry.register_path_alias("selected", "scope.absent");
+    let mut checker = dependency_checker(registry.clone());
+    assert!(load_carrier(&mut checker).is_err());
+    assert!(
+        !checker
+            .source_type_registration.is_completed(&"scope.carrier.Carrier".into())
+    );
+    add_dependency_module(
+        &mut registry,
+        "scope.absent",
+        "public type Value is {public count:Int};",
+    );
+    checker.set_module_registry_direct(registry);
+    load_carrier(&mut checker).unwrap();
+    let errors = check_source(
+        &mut checker,
+        "app",
+        "mount scope.carrier.Carrier; fn read(v:Carrier)->Int {v.value.count}",
+    );
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn replacing_the_exact_dependency_body_invalidates_an_unchanged_carrier() {
+    let original = source_dependency_registry();
+    let active = verum_common::Shared::new(parking_lot::RwLock::new(original.clone()));
+    let mut checker = dependency_checker(original);
+    checker.set_module_registry(active.clone());
+    load_carrier(&mut checker).unwrap();
+    let before = active.read().get_by_path("scope.carrier").unwrap();
+    {
+        let mut registry = active.write();
+        let keep = ["scope.carrier".to_owned(), "scope.right".to_owned()]
+            .into_iter()
+            .collect();
+        assert_eq!(registry.retain_paths(&keep), (2, 1));
+        add_dependency_module(
+            &mut registry,
+            "scope.left",
+            "public type Value is {public count:Int};",
+        );
+    }
+    let after = active.read().get_by_path("scope.carrier").unwrap();
+    assert!(std::ptr::eq(&*before, &*after));
+    assert_eq!(
+        active
+            .read()
+            .get_by_path_aliased("selected")
+            .unwrap()
+            .path
+            .to_string(),
+        "scope.left"
+    );
+    let error = load_carrier(&mut checker).unwrap_err();
+    assert!(
+        error.to_string().contains("scope.carrier.Carrier"),
+        "{error}"
+    );
+    let mut fresh = dependency_checker(active.read().clone());
+    let errors = check_source(
+        &mut fresh,
+        "app",
+        "mount scope.carrier.Carrier; fn read(v:Carrier)->Int {v.value.count}",
+    );
+    assert!(errors.is_empty(), "{errors:?}");
+}

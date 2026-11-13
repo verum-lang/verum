@@ -184,11 +184,7 @@ impl TypeChecker {
         arguments: &[Type],
         span: Span,
     ) -> Result<()> {
-        let Some(declaration) = self
-            .source_type_registration
-            .pending
-            .get(key)
-            .or_else(|| self.source_type_registration.completed.get(key))
+        let Some(declaration) = self.source_type_registration.declaration(key)
             .filter(|decl| {
                 decl.has_application_bounds()
                     && !matches!(

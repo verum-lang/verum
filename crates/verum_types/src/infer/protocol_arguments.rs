@@ -588,11 +588,7 @@ impl TypeChecker {
         key: &Text,
         span: Span,
     ) -> Result<(List<GenericParam>, Text)> {
-        if let Some(declaration) = self
-            .source_type_registration
-            .completed
-            .get(key)
-            .or_else(|| self.source_type_registration.pending.get(key))
+        if let Some(declaration) = self.source_type_registration.declaration(key)
         {
             let owner = key.as_str().rsplit_once('.').map_or("", |(owner, _)| owner);
             return Ok((declaration.generics.clone(), owner.into()));

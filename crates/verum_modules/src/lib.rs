@@ -118,7 +118,7 @@ pub mod cog_resolver;
 pub mod coherence;
 pub mod dependency;
 mod observations;
-pub use observations::ModuleObservations;
+pub use observations::{ModuleDependencies, ModuleObservations};
 pub mod error;
 pub mod exports;
 pub mod imports;
@@ -311,6 +311,37 @@ struct RegistryData {
     external_cogs: Set<Text>,
 }
 
+impl RegistryData {
+    /// Missing and ambiguous are distinct: an alias must never conceal an
+    /// ambiguous direct request by selecting an unrelated third declaration.
+    fn resolve_path_id(&self, path: &str) -> Result<Option<ModuleId>, ()> {
+        let qualified = path::qualified_module_key(path, self.cog_name.as_deref(), |first| {
+            self.external_cogs.contains(&Text::from(first))
+        });
+        let exact = self.path_to_id.get(&Text::from(path)).copied();
+        let relative = self.path_to_id.get(&Text::from(qualified)).copied();
+        match (exact, relative) {
+            (Some(left), Some(right)) if left != right => Err(()),
+            (Some(id), _) | (_, Some(id)) => Ok(Some(id)),
+            _ => Ok(None),
+        }
+    }
+
+    fn lookup_by_path(&self, path: &str) -> Maybe<Shared<ModuleInfo>> {
+        self.resolve_path_id(path).ok().flatten()
+            .and_then(|id| self.modules.get(&id).cloned())
+    }
+
+    fn lookup_by_path_aliased(&self, path: &str) -> Maybe<Shared<ModuleInfo>> {
+        match self.resolve_path_id(path) {
+            Ok(Some(id)) => self.modules.get(&id).cloned(),
+            Ok(None) => self.path_aliases.get(&Text::from(path))
+                .and_then(|canonical| self.lookup_by_path(canonical.as_str())),
+            Err(()) => Maybe::None,
+        }
+    }
+}
+
 /// Central storage for loaded modules, with constant-time immutable snapshots.
 ///
 /// Clones share declarations until a write; their monotone ID allocator remains
@@ -319,7 +350,7 @@ struct RegistryData {
 pub struct ModuleRegistry {
     data: Shared<RegistryData>,
     next_id: Shared<std::sync::atomic::AtomicU32>,
-    observations: Option<std::sync::Arc<parking_lot::Mutex<observations::Reads>>>,
+    observations: Option<std::sync::Arc<observations::Recorder>>,
 }
 
 impl ModuleRegistry {
@@ -363,6 +394,7 @@ impl ModuleRegistry {
     /// (e.g. `verum audit --module-aliases`) and for downstream
     /// tooling that needs to render the alias chain.
     pub fn path_aliases(&self) -> &Map<Text, Text> {
+        self.observe(|reads| reads.alias_table = true);
         &self.data.path_aliases
     }
 
@@ -374,6 +406,7 @@ impl ModuleRegistry {
 
     /// Current cog name, if set.
     pub fn cog_name(&self) -> Option<&str> {
+        self.observe(|reads| reads.cog_name = true);
         self.data.cog_name.as_deref()
     }
 
@@ -452,27 +485,7 @@ impl ModuleRegistry {
     /// must qualify it. Namespace and shorthand aliases are explicit policy.
     pub fn get_by_path(&self, path: &str) -> Maybe<Shared<ModuleInfo>> {
         self.observe(|reads| { reads.paths.insert(path.into()); });
-        self.lookup_by_path(path)
-    }
-
-    /// Missing and ambiguous are distinct: an alias must never conceal an
-    /// ambiguous direct request by selecting an unrelated third declaration.
-    fn resolve_path_id(&self, path: &str) -> Result<Option<ModuleId>, ()> {
-        let qualified = path::qualified_module_key(path, self.data.cog_name.as_deref(), |first| {
-            self.data.external_cogs.contains(&Text::from(first))
-        });
-        let exact = self.data.path_to_id.get(&Text::from(path)).copied();
-        let relative = self.data.path_to_id.get(&Text::from(qualified)).copied();
-        match (exact, relative) {
-            (Some(left), Some(right)) if left != right => Err(()),
-            (Some(id), _) | (_, Some(id)) => Ok(Some(id)),
-            _ => Ok(None),
-        }
-    }
-
-    fn lookup_by_path(&self, path: &str) -> Maybe<Shared<ModuleInfo>> {
-        self.resolve_path_id(path).ok().flatten()
-            .and_then(|id| self.data.modules.get(&id).cloned())
+        self.data.lookup_by_path(path)
     }
 
     /// Alias-aware variant of [`Self::get_by_path`]. Probes the direct
@@ -487,16 +500,7 @@ impl ModuleRegistry {
     /// pipeline at startup, queried by every consumer.
     pub fn get_by_path_aliased(&self, path: &str) -> Maybe<Shared<ModuleInfo>> {
         self.observe(|reads| { reads.aliases.insert(path.into()); });
-        self.lookup_by_path_aliased(path)
-    }
-
-    fn lookup_by_path_aliased(&self, path: &str) -> Maybe<Shared<ModuleInfo>> {
-        match self.resolve_path_id(path) {
-            Ok(Some(id)) => self.data.modules.get(&id).cloned(),
-            Ok(None) => self.data.path_aliases.get(&Text::from(path))
-                .and_then(|canonical| self.lookup_by_path(canonical.as_str())),
-            Err(()) => Maybe::None,
-        }
+        self.data.lookup_by_path_aliased(path)
     }
 
     /// Get all modules

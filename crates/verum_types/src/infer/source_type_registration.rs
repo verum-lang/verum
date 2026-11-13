@@ -1,7 +1,8 @@
 //! Source declaration loads publish success only after recursive loading closes.
 use crate::{Result, Type, TypeError};
 use verum_ast::TypeDecl;
-use verum_common::{List, Map, Text};
+use verum_common::{List, Map, Shared, Text};
+use verum_modules::ModuleDependencies;
 
 #[derive(Debug, Default)]
 pub(crate) struct SourceTypeRegistration {
@@ -22,13 +23,34 @@ pub(crate) struct SourceTypeRegistration {
     pub callable_assumptions: List<(Type, Type)>,
     /// Qualified constructor values staged with the declaration transaction.
     pub constructor_values: Map<Text, crate::context::TypeScheme>,
-    pub completed: Map<Text, TypeDecl>,
+    completed: Map<Text, AcceptedSourceType>,
     pub pending: Map<Text, TypeDecl>,
     pub depth: usize,
     pub failure: Option<Text>,
     pub aliases: Map<Text, (Option<Type>, Option<verum_common::List<Text>>)>,
     pub protocols: Map<Text, SourceProtocolRegistration>,
     pub variants: SourceVariantRegistration,
+}
+
+#[derive(Debug)]
+struct AcceptedSourceType {
+    declaration: TypeDecl,
+    /// Recursive declarations commit together and share their checked inputs.
+    dependencies: Shared<ModuleDependencies>,
+}
+
+impl SourceTypeRegistration {
+    pub(super) fn declaration(&self, key: &Text) -> Option<&TypeDecl> {
+        self.pending.get(key).or_else(|| self.completed_declaration(key))
+    }
+
+    pub(super) fn completed_declaration(&self, key: &Text) -> Option<&TypeDecl> {
+        self.completed.get(key).map(|accepted| &accepted.declaration)
+    }
+
+    pub(super) fn is_completed(&self, key: &Text) -> bool {
+        self.completed.contains_key(key)
+    }
 }
 
 #[derive(Debug)]
@@ -63,6 +85,49 @@ fn restore_entries<T>(target: &mut Map<Text, T>, journal: Map<Text, Option<T>>) 
 }
 
 impl super::TypeChecker {
+    /// Existing derived fields, constructors and protocol publications belong
+    /// to this checker. Rebinding one of their inputs requires a fresh checker.
+    pub(super) fn require_source_dependencies(
+        &mut self, key: &Text, span: verum_ast::Span,
+    ) -> Result<()> {
+        if let Some(accepted) = self.source_type_registration.completed.get(key)
+            && !accepted.dependencies.reuse_in(&self.module_registry.read())
+        {
+            let message: Text = format!("source dependencies changed while loading {key}").into();
+            if self.source_type_registration.depth != 0 {
+                self.source_type_registration.failure = Some(message.clone());
+            }
+            return Err(TypeError::UniverseBinding { message, span });
+        }
+        Ok(())
+    }
+
+    /// The whole registration reads one immutable registry generation. Lazy
+    /// writes still reach the live session registry, which is restored on exit.
+    /// A changed observed input rolls back through the existing journals.
+    fn observe_source_registration<T>(
+        &mut self,
+        declaration: &TypeDecl,
+        key: &Text,
+        register: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> (Result<T>, Shared<ModuleDependencies>) {
+        let (snapshot, reads) = self.module_registry.read().observe_snapshot();
+        let live = std::mem::replace(
+            &mut self.module_registry,
+            Shared::new(parking_lot::RwLock::new(snapshot)),
+        );
+        let result = register(self);
+        self.module_registry = live;
+        let dependencies = reads.finish();
+        let result = result.and_then(|value| {
+            dependencies.unchanged(&self.module_registry.read()).then_some(value).ok_or_else(|| TypeError::UniverseBinding {
+                message: format!("source dependencies changed while loading {key}").into(),
+                span: declaration.span,
+            })
+        });
+        (result, Shared::new(dependencies))
+    }
+
     /// All declaration entry points share the source-load transaction. A
     /// provisional recursive carrier is usable only until this whole load
     /// succeeds; a later field or dependency error rolls its namespace back.
@@ -86,6 +151,7 @@ impl super::TypeChecker {
                 span: declaration.span,
             });
         }
+        self.require_source_dependencies(&key, declaration.span)?;
         let outermost = self.source_type_registration.depth == 0;
         if outermost {
             self.ctx.begin_type_definition_journal();
@@ -128,17 +194,25 @@ impl super::TypeChecker {
         // Eager preparation and lazy loads share the declaration's lexical
         // imports. A prior consumer may have populated the nominal cache
         // before this module reaches its ordinary two-pass registration.
-        let owner = self.current_module_path.clone();
-        let has_source = key == Self::source_type_declaration_key(&owner, &declaration.name.name)
-            && (self.source_type_registration.local_declarations.iter()
-                .any(|(path, _)| path == &owner)
-                || self.inline_modules.contains_key(&owner)
-                || self.get_module_with_path_aliases(&owner, &self.module_registry.read())
-                    .is_some_and(|module| !module.ast.items.is_empty()));
-        let result = if has_source {
-            self.with_source_signature_scope(&owner, register)
+        let register = |checker: &mut Self| {
+            let owner = checker.current_module_path.clone();
+            let has_source = key == Self::source_type_declaration_key(&owner, &declaration.name.name)
+                && (checker.source_type_registration.local_declarations.iter()
+                    .any(|(path, _)| path == &owner)
+                    || checker.inline_modules.contains_key(&owner)
+                    || checker.get_module_with_path_aliases(&owner, &checker.module_registry.read())
+                        .is_some_and(|module| !module.ast.items.is_empty()));
+            if has_source {
+                checker.with_source_signature_scope(&owner, register)
+            } else {
+                register(checker)
+            }
+        };
+        let (result, dependencies) = if outermost {
+            let (result, reads) = self.observe_source_registration(declaration, &key, register);
+            (result, Some(reads))
         } else {
-            register(self)
+            (register(self), None)
         };
         self.source_type_registration.depth -= 1;
         if let Err(error) = &result {
@@ -214,7 +288,10 @@ impl super::TypeChecker {
             for (name, constructor) in constructors {
                 self.ctx.env.insert_root(name, constructor);
             }
-            self.source_type_registration.completed.extend(pending);
+            let dependencies = dependencies.expect("outermost registration observes its dependencies");
+            self.source_type_registration.completed.extend(pending.into_iter().map(|(key, declaration)| {
+                (key, AcceptedSourceType { declaration, dependencies: dependencies.clone() })
+            }));
         }
         result
     }

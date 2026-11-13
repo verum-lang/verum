@@ -1056,8 +1056,7 @@ fn substitute_refinement_binder(
     }
 
     fn declared_variant(&self, name: &Text) -> bool {
-        let declaration = self.source_type_registration.pending.get(name)
-            .or_else(|| self.source_type_registration.completed.get(name))
+        let declaration = self.source_type_registration.declaration(name)
             .or_else(|| self.core_metadata.as_ref()?.types.get(name)?.source_declaration.as_ref());
         if let Some(declaration) = declaration {
             return declaration.body.is_variant();

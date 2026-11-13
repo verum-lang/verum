@@ -447,8 +447,7 @@ impl TypeChecker {
             // exact active declaration or successfully committed source owns
             // this name. Recursive bounds consult their current transaction.
             let key = self.declared_type_key(name);
-            return self.source_type_registration.pending.get(&key)
-                .or_else(|| self.source_type_registration.completed.get(&key))
+            return self.source_type_registration.declaration(&key)
                 .map(|declaration| (SourceTypeDeclaration::Owned(Shared::new(declaration.clone())), self.current_module_path.clone()));
         };
         let declared = self.find_type_declaration_with_source_module_inner(
@@ -567,8 +566,7 @@ impl TypeChecker {
         // A nominal entry may only be a placeholder left by failed source
         // elaboration. Completed loads, and recursive loads in this active
         // transaction, are the only authority for a cache hit.
-        if let Some(accepted) = self.source_type_registration.pending.get(&key)
-            .or_else(|| self.source_type_registration.completed.get(&key))
+        if let Some(accepted) = self.source_type_registration.declaration(&key)
         {
             if accepted != declaration {
                 let message: Text = format!("conflicting source declarations while loading {key}").into();
@@ -576,6 +574,9 @@ impl TypeChecker {
                     self.source_type_registration.failure = Some(message.clone());
                 }
                 return Err(TypeError::UniverseBinding { message, span });
+            }
+            if !self.source_type_registration.pending.contains_key(&key) {
+                self.require_source_dependencies(&key, span)?;
             }
             let result = self.ctx.lookup_type(key.as_str()).cloned()
                 .map(|ty| (ty, key.clone()))

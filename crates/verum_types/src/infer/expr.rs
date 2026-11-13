@@ -7674,7 +7674,7 @@ impl TypeChecker {
             unreachable!()
         };
         let canonical = self.path_to_string(path);
-        if self.source_type_registration.completed.get(&canonical)
+        if self.source_type_registration.completed_declaration(&canonical)
             .is_some_and(|declaration| matches!(declaration.body, verum_ast::TypeDeclBody::Unit))
         {
             return self.check_constructor_call(args, &[], &func_ty, expr.span);

@@ -15508,7 +15508,7 @@ impl TypeChecker {
                 return self.instantiate_declared_type(&key, def, args);
             }
             if desc.source_declaration.is_none()
-                && !self.source_type_registration.completed.contains_key(&key)
+                && !self.source_type_registration.is_completed(&key)
             {
                 match &desc.kind {
                     TypeDescriptorKind::Variant { .. } => {

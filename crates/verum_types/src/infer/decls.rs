@@ -4566,10 +4566,7 @@ impl TypeChecker {
         let parameters = key
             .as_ref()
             .and_then(|key| {
-                self.source_type_registration
-                    .pending
-                    .get(key)
-                    .or_else(|| self.source_type_registration.completed.get(key))
+                self.source_type_registration.declaration(key)
                     .map(|declaration| declaration.generics.clone())
             })
             .or_else(|| {

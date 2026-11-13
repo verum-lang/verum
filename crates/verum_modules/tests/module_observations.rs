@@ -95,3 +95,77 @@ fn successful_rebase_releases_old_generation_but_failure_preserves_evidence() {
     assert!(reads.rebase_if_unchanged(current));
     assert!(weak.upgrade().is_none());
 }
+
+#[test]
+fn nested_snapshot_reads_belong_to_parent_and_freeze_at_completion() {
+    let base = registry();
+    let (outer, outer_reads) = base.observe_reads();
+    let (inner, inner_reads) = outer.observe_snapshot();
+    assert!(inner.get_by_path("dependency").is_some());
+    assert!(inner.get_by_path_aliased("missing").is_none());
+    let dependencies = inner_reads.finish();
+    let mut added = base.deep_clone();
+    added.register(module(8, "later", ""));
+    assert!(inner.get_by_path("later").is_none());
+    assert!(
+        dependencies.unchanged(&added),
+        "a read after completion extended the receipt"
+    );
+    assert!(
+        !outer_reads.unchanged(&added),
+        "the live outer analysis missed the late read"
+    );
+    added.register_path_alias("missing", "dependency");
+    assert!(
+        !dependencies.unchanged(&added),
+        "a failed alias lookup belongs to the computation"
+    );
+}
+
+#[test]
+fn cached_reads_reach_independent_consumers_even_when_they_refuse_reuse() {
+    let base = registry();
+    let (checked, checked_reads) = base.observe_reads();
+    assert!(checked.get_by_path("dependency").is_some());
+    let dependencies = checked_reads.finish();
+    let (cached, cached_reads) = base.observe_reads();
+    assert!(dependencies.reuse_in(&cached));
+    let empty = Arc::new(ModuleRegistry::new());
+    assert!(!cached_reads.unchanged(&empty));
+    let (unavailable, unavailable_reads) = empty.observe_reads();
+    assert!(!dependencies.reuse_in(&unavailable));
+    assert!(!unavailable_reads.unchanged(&base));
+}
+
+#[test]
+fn whole_namespace_reads_have_broader_dependencies_than_one_alias_lookup() {
+    let mut initial = registry().deep_clone();
+    initial.set_cog_name("application");
+    initial.register_path_alias("selected", "dependency");
+    let initial = Arc::new(initial);
+    let (narrow, narrow_reads) = initial.observe_reads();
+    narrow.get_by_path_aliased("selected").unwrap();
+    let (whole, whole_reads) = initial.observe_reads();
+    assert_eq!(whole.path_aliases().len(), 1);
+    let (identity, identity_reads) = initial.observe_reads();
+    assert_eq!(identity.cog_name(), Some("application"));
+    let mut next = initial.deep_clone();
+    next.register_path_alias("unrelated", "missing");
+    next.set_cog_name("other");
+    assert!(narrow_reads.unchanged(&next));
+    assert!(!whole_reads.unchanged(&next));
+    assert!(!identity_reads.unchanged(&next));
+}
+
+#[test]
+fn sealing_a_mutated_snapshot_never_upgrades_its_evidence() {
+    let base = registry();
+    let (mut snapshot, reads) = base.observe_snapshot();
+    snapshot.register(module(8, "local", ""));
+    let dependencies = reads.finish();
+    assert!(!dependencies.unchanged(&base));
+    assert!(!dependencies.unchanged(&snapshot));
+    let (outer, receipt) = base.observe_reads();
+    assert!(!dependencies.reuse_in(&outer));
+    assert!(!receipt.unchanged(&base));
+}

@@ -49,8 +49,7 @@ impl TypeChecker {
             slots.push(Some(binder));
         }
         scheme.explicit_method_vars = Some(slots);
-        if self.source_type_registration.pending.get(owner)
-            .or_else(|| self.source_type_registration.completed.get(owner))
+        if self.source_type_registration.declaration(owner)
             .is_some_and(|declaration| declaration.has_application_bounds())
         {
             scheme.nominal_applications.push(crate::context::NominalApplication {
