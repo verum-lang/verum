@@ -24,7 +24,13 @@ public type Parcel<T> is | Empty | Full(T);
 type Phase is State;
 public fn supplied(value: Int = 29) -> Int { value }
 public fn identity<T>(value: T) -> T { value }
+fn read(value: &Int) -> Int { *value }
 fn run() -> Int {
+    let super = true;
+    let cog = 41;
+    if super {
+        if read(&cog) != 41 { return 10; }
+    } else { return 12; }
     let first = cog.State.Cold;
     if first.marker() != 11 { return 1; }
     if cog.State.Warm.marker() != 17 { return 2; }

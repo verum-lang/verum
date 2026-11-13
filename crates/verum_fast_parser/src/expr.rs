@@ -1118,7 +1118,8 @@ impl<'a> RecursiveParser<'a> {
                     // For identifiers, self, Some, None, etc., use single-segment parsing
                     // so that `.` is left for postfix processing.
                     let path = match self.stream.peek_kind() {
-                        Some(TokenKind::Super) | Some(TokenKind::Cog) => {
+                        Some(TokenKind::Super | TokenKind::Cog)
+                            if self.stream.peek_nth_kind(1) == Some(&TokenKind::Dot) => {
                             // Module paths like super.module.item need multi-segment parsing
                             self.parse_path()?
                         }
@@ -3911,6 +3912,10 @@ impl<'a> RecursiveParser<'a> {
 
         // Parse first (and only) segment in expression context
         let first_span = self.stream.current_span();
+        // A module root qualifies a following path segment. Alone, the
+        // contextual keyword is a value name, including as a call argument.
+        let qualifies = matches!(self.stream.peek_nth_kind(1),
+            Some(TokenKind::Dot | TokenKind::ColonColon));
         let first_segment = if self.stream.consume(&TokenKind::SelfValue).is_some() {
             PathSegment::SelfValue
         } else if self.stream.consume(&TokenKind::SelfType).is_some() {
@@ -3919,11 +3924,9 @@ impl<'a> RecursiveParser<'a> {
                 Text::from("Self"),
                 first_span,
             ))
-        } else if self.stream.consume(&TokenKind::Super).is_some() {
-            // Handle super keyword token
+        } else if qualifies && self.stream.consume(&TokenKind::Super).is_some() {
             PathSegment::Super
-        } else if self.stream.consume(&TokenKind::Cog).is_some() {
-            // Handle crate keyword token
+        } else if qualifies && self.stream.consume(&TokenKind::Cog).is_some() {
             PathSegment::Cog
         } else {
             // Parse regular identifier or keyword as path segment

@@ -192,6 +192,14 @@ fn self_type_expression_path_is_a_name_with_its_token_span() {
 }
 
 #[test]
+fn contextual_module_roots_are_names_when_used_alone() {
+    for spelling in ["cog", "super"] {
+        let parsed = expression_path(spelling);
+        assert_name(spelling, name(&parsed, 0), spelling, 0, spelling.len() as u32);
+    }
+}
+
+#[test]
 fn recovery_colon_paths_retain_each_identifier_span() {
     // `::` is diagnostic recovery syntax, not a new accepted Verum separator.
     for (source, first, second, first_end, end) in [
