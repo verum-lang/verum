@@ -389,6 +389,14 @@ fn compare_heads(
                     .zip(ba)
                     .any(|(a, b)| compare_heads(checker, a, b, observe))
         }
+        (
+            Type::Function { params: a, return_type: ar, .. },
+            Type::Function { params: b, return_type: br, .. },
+        ) => a.len() != b.len()
+            || a.iter().zip(b).any(|(a, b)| compare_heads(checker, a, b, observe))
+            || compare_heads(checker, ar, br, observe),
+        (Type::Function { .. }, Type::Record(_) | Type::Variant(_) | Type::Tuple(_))
+        | (Type::Record(_) | Type::Variant(_) | Type::Tuple(_), Type::Function { .. }) => true,
         (Type::Tuple(a), Type::Tuple(b)) => {
             a.len() != b.len()
                 || a.iter()

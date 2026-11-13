@@ -5607,35 +5607,6 @@ impl ProtocolChecker {
             return true;
         }
 
-        // Fn / FnMut / FnOnce are satisfied by CALLABLES, structurally.
-        //
-        // There is no `type Fn is protocol` anywhere in core/ and no
-        // `implement … Fn … for` either, so `find_impl` below could never
-        // answer yes and all 71 `: Fn(…)` / `: FnOnce(…)` bounds across 11
-        // stdlib files were unsatisfiable — a plain function and a closure
-        // failed identically:
-        //
-        //     fn apply<F>(f: F, x: Int) -> Int where F: Fn(Int) -> Int
-        //     apply(square, 3)
-        //     error<E405>: type `fn(Int) -> Int` does not implement `Fn`
-        //
-        // The compiler already HOLDS this fact and used it in one
-        // direction only: `specialization_selection.rs` answers "functions
-        // implement Fn traits" when deciding a NEGATIVE bound (`!Fn`). The
-        // positive side was started and left empty — `infer/decls.rs` has
-        // the `matches!(proto_name, "Fn" | "FnOnce" | "FnMut")` arm with a
-        // comment where the body should be (T1066).
-        //
-        // Same shape as the Deref arm above: a protocol nothing declares,
-        // answered from the type's own structure. NOT a blanket yes — a
-        // non-callable still fails, which is the property that keeps 71
-        // unsatisfiable bounds from becoming 71 unchecked ones.
-        if let Some(protocol_name) = protocol.as_ident().map(|i| i.as_str())
-            && matches!(protocol_name, "Fn" | "FnMut" | "FnOnce")
-        {
-            return matches!(ty, Type::Function { .. });
-        }
-
         // Use find_impl which handles exact matching, generic matching, and where clauses
         // This ensures implements() and find_impl() have consistent behavior
         let found = self.find_impl(ty, protocol).is_some();
@@ -6742,23 +6713,15 @@ impl ProtocolChecker {
             // Check each bound is satisfied
             for bound in clause.bounds.iter() {
                 let bound = self.substitute_protocol_bound(bound, substitution);
-                // Parameterized and equality obligations need exact evidence;
-                // optimistic name-only applicability cannot establish them.
-                if !bound.args.is_empty() || !bound.associated_types.is_empty() {
+                // A negative result needs positive evidence of disjointness.
+                // Optimistic dispatch is applicable only to positive bare bounds.
+                if bound.is_negative || !bound.args.is_empty() || !bound.associated_types.is_empty() {
                     if self.check_bounds(&substituted_ty, &[bound]).is_err() {
                         return false;
                     }
                     continue;
                 }
-                let bound_satisfied = if bound.is_negative {
-                    // Negative bound: type must NOT implement the protocol
-                    !self.implements_optimistic(&substituted_ty, &bound.protocol)
-                } else {
-                    // Positive bound: type must implement the protocol
-                    self.implements_optimistic(&substituted_ty, &bound.protocol)
-                };
-
-                if !bound_satisfied {
+                if !self.implements_optimistic(&substituted_ty, &bound.protocol) {
                     return false;
                 }
             }
@@ -7506,6 +7469,75 @@ impl ProtocolChecker {
         Ok(None)
     }
 
+    /// Whether the selected carrier implements this nominal protocol application.
+    fn implements_protocol_application(&self, ty: &Type, bound: &ProtocolBound) -> bool {
+        if bound.args.is_empty() {
+            self.implements(ty, &bound.protocol)
+        } else {
+            self.find_impl_for_instantiation(ty, &bound.protocol, &bound.args)
+                .is_some()
+        }
+    }
+
+    /// A failed implementation search can also mean an unresolved premise or
+    /// ambiguity. Negation requires every competing head to be disjoint.
+    pub(crate) fn concrete_negative_bound(
+        &self,
+        ty: &Type,
+        bound: &ProtocolBound,
+    ) -> crate::specialization_selection::NegativeBoundResult {
+        use crate::specialization_selection::NegativeBoundResult::{Satisfied, Unknown, Violated};
+        use implementation_match::CandidateMatch;
+
+        let Some(protocol) = self.lookup_protocol(&bound.protocol) else {
+            return Unknown;
+        };
+        let arity = protocol
+            .source_parameters
+            .as_ref()
+            .map_or(protocol.type_params.len(), |p| p.len());
+        if arity != bound.args.len()
+            || !protocol.is_constraint()
+            || !bound.associated_types.is_empty()
+            || std::iter::once(ty).chain(&bound.args).any(|ty| {
+                !ty.free_vars().is_empty() || !ty.value_ids().is_empty()
+            })
+        {
+            return Unknown;
+        }
+        if self.implements_protocol_application(ty, bound) {
+            return Violated;
+        }
+        // Inherited applications need their owner's argument substitution. A
+        // missing direct implementation alone cannot decide this case.
+        if self.protocols.values().any(|decl| {
+            decl.super_protocols.iter().any(|parent| {
+                !parent.is_negative && self.paths_equal(&parent.protocol, &bound.protocol)
+            })
+        }) {
+            return Unknown;
+        }
+        if let Some(index) = self.impls_by_protocol.get(&protocol.name) {
+            for candidate in index.candidates(ty, self.requires_unfiltered_type_candidates(ty)) {
+                let implementation = &self.impls[candidate];
+                if self.paths_equal(&implementation.protocol, &bound.protocol)
+                    && !matches!(
+                        self.match_implementation_candidate(
+                            implementation,
+                            ty,
+                            Some(&bound.args),
+                            true
+                        ),
+                        CandidateMatch::Disjoint
+                    )
+                {
+                    return Unknown;
+                }
+            }
+        }
+        Satisfied
+    }
+
     /// Check if a type satisfies protocol bounds
     ///
     /// Handles both positive bounds (T: Protocol) and negative bounds (T: !Protocol).
@@ -7519,29 +7551,25 @@ impl ProtocolChecker {
                         ty: ty.clone(),
                         protocol: bound.protocol.clone(),
                     })?;
-            let implements = if bound.args.is_empty() {
-                self.implements(ty, &bound.protocol)
-            } else {
-                self.find_impl_for_instantiation(ty, &bound.protocol, &bound.args)
-                    .is_some()
-            };
             if bound.is_negative {
-                if !bound.associated_types.is_empty() {
-                    return Err(ProtocolError::BoundNotSatisfied {
-                        ty: ty.clone(),
-                        protocol: bound.protocol.clone(),
-                    });
-                }
-                // Negative bound: type must NOT implement the protocol
-                if implements {
-                    return Err(ProtocolError::NegativeBoundViolated {
-                        ty: ty.clone(),
-                        protocol: bound.protocol.clone(),
-                    });
+                use crate::specialization_selection::NegativeBoundResult;
+                match self.concrete_negative_bound(ty, bound) {
+                    NegativeBoundResult::Satisfied => {}
+                    NegativeBoundResult::Violated => {
+                        return Err(ProtocolError::NegativeBoundViolated {
+                            ty: ty.clone(),
+                            protocol: bound.protocol.clone(),
+                        });
+                    }
+                    NegativeBoundResult::Unknown => {
+                        return Err(ProtocolError::BoundNotSatisfied {
+                            ty: ty.clone(),
+                            protocol: bound.protocol.clone(),
+                        });
+                    }
                 }
             } else {
-                // Positive bound: type must implement the protocol
-                if !implements {
+                if !self.implements_protocol_application(ty, bound) {
                     return Err(ProtocolError::BoundNotSatisfied {
                         ty: ty.clone(),
                         protocol: bound.protocol.clone(),
@@ -7582,7 +7610,8 @@ impl ProtocolChecker {
     ///
     /// Returns true if the type does NOT implement the protocol.
     pub fn satisfies_negative_bound(&self, ty: &Type, protocol: &Path) -> bool {
-        !self.implements(ty, protocol)
+        let bound = ProtocolBound::negative(protocol.clone(), List::new());
+        self.check_bounds(ty, &[bound]).is_ok()
     }
 
     /// Check if type satisfies protocol (including superprotocols)

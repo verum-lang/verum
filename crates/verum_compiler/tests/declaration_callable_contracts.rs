@@ -223,3 +223,34 @@ fn context_method_can_be_an_unrestricted_callback() {
     let e = context_capture_errors(true);
     assert!(e.is_empty(), "{e:?}");
 }
+
+#[test]
+fn nominal_callback_protocols_need_implementation_evidence() {
+    let provider = "public type Fn is protocol {};
+        public type Tag is { public value:Int };
+        implement Fn for Tag {}
+        public fn tagged<F:Fn>(value:F)->Int { 42 }
+        public fn apply<F>(f:F, value:Int)->Int where F:fn(Int)->Int { f(value) }";
+    let providers = [("demo.callbacks", provider)];
+    let imports = "mount demo.callbacks.{Tag, tagged, apply};";
+    let accepted = format!(
+        "{imports}
+        pure fn step(value:Int)->Int {{ value+1 }}
+        fn probe()->Int {{ tagged(Tag {{ value:1 }}) + apply(step,29) + apply(|x:Int| x,1) }}"
+    );
+    let accepted_errors = errors(&accepted, &providers);
+    assert!(accepted_errors.is_empty(), "{accepted_errors:?}");
+
+    let rejected = format!(
+        "{imports}
+        pure fn step(value:Int)->Int {{ value+1 }}
+        fn probe()->Int {{ tagged(step) }}"
+    );
+    let refused = errors(&rejected, &providers);
+    assert!(
+        !refused.is_empty()
+            && refused.iter().all(|error| error.contains("Fn")
+                && (error.contains("BoundNotSatisfied") || error.contains("does not implement"))),
+        "{refused:?}"
+    );
+}

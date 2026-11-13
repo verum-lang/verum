@@ -1068,3 +1068,198 @@ fn test_negative_spec_rank_precedence() {
             > rank1.specialization.as_ref().unwrap().specificity_rank
     );
 }
+
+#[test]
+fn protocol_evidence_on_functions_is_independent_of_the_protocols_spelling() {
+    use verum_types::specialization_selection::NegativeBoundResult::{Satisfied, Violated};
+
+    let callback = Type::function(List::from_iter([Type::Int]), Type::Bool);
+    let other_signature = Type::function(List::from_iter([Type::Bool]), Type::Int);
+    let record = Type::Record(Default::default());
+    for name in ["Fn", "FnOnce", "FnMut", "CallableRole"] {
+        let protocol = make_protocol(name);
+        let path = Path::single(verum_ast::Ident::new(name, Span::default()));
+        let bound = ProtocolBound::negative(path, List::new());
+        let mut registry = ProtocolChecker::new();
+        registry.register_protocol(protocol).unwrap();
+        let selector = SpecializationSelector::new();
+        assert!(!registry.implements(&callback, &bound.protocol), "{name}");
+        assert_eq!(
+            selector.check_negative_bound(&callback, &bound, &registry),
+            Satisfied,
+            "{name}"
+        );
+
+        registry
+            .register_impl(make_impl(name, record.clone(), 0))
+            .unwrap();
+        assert!(registry.implements(&record, &bound.protocol), "{name}");
+        assert!(!registry.implements(&callback, &bound.protocol), "{name}");
+
+        registry
+            .register_impl(make_impl(name, callback.clone(), 0))
+            .unwrap();
+        assert!(registry.implements(&callback, &bound.protocol), "{name}");
+        assert_eq!(
+            selector.check_negative_bound(&callback, &bound, &registry),
+            Violated,
+            "{name}"
+        );
+        assert!(
+            !registry.implements(&other_signature, &bound.protocol),
+            "{name}"
+        );
+        assert_eq!(
+            selector.check_negative_bound(&other_signature, &bound, &registry),
+            Satisfied,
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn negative_callable_specialization_retains_protocol_arguments_and_unresolved_binders() {
+    use verum_types::protocol::TypeParam;
+    use verum_types::specialization_selection::NegativeBoundResult::{
+        Satisfied, Unknown, Violated,
+    };
+
+    let mut protocol = make_protocol("CallableRole");
+    protocol.type_params.push(TypeParam {
+        name: "Target".into(),
+        bounds: List::new(),
+        default: None,
+    });
+    let mut registry = ProtocolChecker::new();
+    registry.register_protocol(protocol).unwrap();
+    let callback = Type::function(List::from_iter([Type::Int]), Type::Bool);
+    let mut implementation = make_impl("CallableRole", callback.clone(), 0);
+    implementation.protocol_args.push(Type::Int);
+    registry.register_impl(implementation).unwrap();
+
+    let selector = SpecializationSelector::new();
+    let path = Path::single(verum_ast::Ident::new("CallableRole", Span::default()));
+    let missing = ProtocolBound::negative(
+        Path::single(verum_ast::Ident::new("Missing", Span::default())),
+        List::new(),
+    );
+    let incomplete = ProtocolBound::negative(path.clone(), List::new());
+    for bound in [missing, incomplete] {
+        assert_eq!(
+            selector.check_negative_bound(&callback, &bound, &registry),
+            Unknown
+        );
+        assert!(registry.check_bounds(&callback, &[bound]).is_err());
+    }
+    for (argument, expected) in [(Type::Int, Violated), (Type::Bool, Satisfied)] {
+        let bound = ProtocolBound::negative(path.clone(), List::from_iter([argument]));
+        assert_eq!(
+            selector.check_negative_bound(&callback, &bound, &registry),
+            expected
+        );
+        assert_eq!(
+            registry
+                .check_bounds(&callback, std::slice::from_ref(&bound))
+                .is_err(),
+            expected == Violated
+        );
+    }
+    let unknown = ProtocolBound::negative(path.clone(), List::from_iter([make_type_var(1)]));
+    assert_eq!(
+        selector.check_negative_bound(&callback, &unknown, &registry),
+        Unknown
+    );
+    let mut value = Type::meta("Index".into(), Type::Int, None);
+    let value_subject = Type::function(List::from_single(value.clone()), Type::Bool);
+    let exact = ProtocolBound::negative(path.clone(), List::from_single(Type::Int));
+    assert_eq!(selector.check_negative_bound(&value_subject, &exact, &registry), Unknown);
+    if let Type::Meta { value, .. } = &mut value {
+        *value = verum_types::ty::ValueTerm::Inference(verum_types::ty::ValueId::fresh());
+    }
+    let unresolved_value = ProtocolBound::negative(path.clone(), List::from_single(value));
+    assert!(registry.check_bounds(&callback, &[unresolved_value]).is_err());
+    let unknown_callback = Type::function(List::from_iter([make_type_var(1)]), Type::Bool);
+    let concrete = ProtocolBound::negative(path, List::from_iter([Type::Int]));
+    assert_eq!(
+        selector.check_negative_bound(&unknown_callback, &concrete, &registry),
+        Unknown
+    );
+}
+
+#[test]
+fn a_selected_negative_specialization_checks_the_instantiated_protocol_arguments() {
+    use verum_types::protocol::TypeParam;
+
+    let callback = Type::function(List::from_iter([Type::Int]), Type::Bool);
+    let mut role = make_protocol("Role");
+    role.type_params.push(TypeParam {
+        name: "Target".into(),
+        bounds: List::new(),
+        default: None,
+    });
+    let route = make_protocol("Route");
+    let mut registry = ProtocolChecker::new();
+    registry.register_protocol(role).unwrap();
+    registry.register_protocol(route.clone()).unwrap();
+    let mut implementation = make_impl("Role", callback.clone(), 0);
+    implementation.protocol_args.push(Type::Int);
+    registry.register_impl(implementation).unwrap();
+
+    let path = Path::single(verum_ast::Ident::new("Role", Span::default()));
+    let mut route_impl = make_impl("Route", callback.clone(), 1);
+    route_impl.specialization.as_mut().unwrap().is_default = true;
+    route_impl.where_clauses.push(WhereClause {
+        ty: callback.clone(),
+        bounds: List::from_single(ProtocolBound::negative(path, List::from_single(Type::Bool))),
+    });
+    registry.register_impl(route_impl).unwrap();
+    let selected = SpecializationSelector::new().select_implementation(
+        &route,
+        &callback,
+        &registry,
+        &mut Unifier::new(),
+    );
+    assert!(selected.is_ok(), "{selected:?}");
+}
+
+#[test]
+fn a_conditional_implementation_cannot_prove_its_own_absence() {
+    use verum_types::specialization_selection::NegativeBoundResult::{Unknown, Violated};
+
+    let callback = Type::function(List::from_single(Type::Int), Type::Bool);
+    let receiver = Type::Record(Default::default());
+    let mut registry = ProtocolChecker::new();
+    registry.register_protocol(make_protocol("Fn")).unwrap();
+    registry.register_protocol(make_protocol("Ready")).unwrap();
+    let bound = ProtocolBound::negative(
+        Path::single(verum_ast::Ident::new("Fn", Span::default())),
+        List::new(),
+    );
+    let mut implementation = make_impl("Fn", callback.clone(), 0);
+    implementation.where_clauses.push(WhereClause {
+        ty: receiver.clone(),
+        bounds: List::from_single(ProtocolBound::positive(
+            Path::single(verum_ast::Ident::new("Ready", Span::default())),
+            List::new(),
+        )),
+    });
+    registry.register_impl(implementation).unwrap();
+    let selector = SpecializationSelector::new();
+    assert_eq!(
+        selector.check_negative_bound(&callback, &bound, &registry),
+        Unknown
+    );
+    assert!(
+        registry
+            .check_bounds(&callback, std::slice::from_ref(&bound))
+            .is_err()
+    );
+    registry
+        .register_impl(make_impl("Ready", receiver, 0))
+        .unwrap();
+    assert_eq!(
+        selector.check_negative_bound(&callback, &bound, &registry),
+        Violated
+    );
+    assert!(registry.check_bounds(&callback, &[bound]).is_err());
+}
