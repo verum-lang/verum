@@ -156,8 +156,31 @@ impl TypeChecker {
         result
     }
 
+    /// Only the borrowed place's path is read without consuming its value.
+    /// Computations that produce a temporary still consume their operands.
+    /// Projections borrow their receiver through `synth_expr_for_field_access`.
+    fn with_borrowed_operand_context<T>(
+        &mut self,
+        expr: &Expr,
+        check: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> Result<T> {
+        let mut operand = expr;
+        while let ExprKind::Paren(inner) = &operand.kind {
+            operand = inner;
+        }
+        let previous = std::mem::replace(
+            &mut self.in_call_arg_context,
+            matches!(operand.kind, ExprKind::Path(_)),
+        );
+        let result = check(self);
+        self.in_call_arg_context = previous;
+        result
+    }
+
     pub(super) fn synth_borrowed_operand(&mut self, expr: &Expr) -> Result<InferResult> {
-        self.with_call_argument_context(|checker| checker.synth_field_use(expr, FieldUse::Borrow))
+        self.with_borrowed_operand_context(expr, |checker| {
+            checker.synth_field_use(expr, FieldUse::Borrow)
+        })
     }
 
     fn with_async_context<T>(
@@ -233,7 +256,7 @@ impl TypeChecker {
             }
             return Ok(checked);
         }
-        self.check_expr(expr, expected)
+        self.with_borrowed_operand_context(expr, |checker| checker.check_expr(expr, expected))
     }
 
     pub fn synth_expr(&mut self, expr: &Expr) -> Result<InferResult> {
