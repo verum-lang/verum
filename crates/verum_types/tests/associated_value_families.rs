@@ -37,6 +37,7 @@ fn errors(checker: &mut TypeChecker, source: &str) -> Vec<String> {
 }
 fn checked(source: &str) -> (TypeChecker, Vec<String>) {
     let mut checker = TypeChecker::new();
+    checker.set_generic_associated_types_enabled(true);
     checker.register_primitives();
     checker.set_current_module_path("families");
     let errors = errors(&mut checker, source);
@@ -213,7 +214,9 @@ fn value_domains_survive_sidecar_and_actual_declaration_replay() {
             .as_ref(),
         Some(&saved)
     );
-    let mut checker = TypeChecker::new_with_core_eager(Arc::new(restored));
+    let mut checker = TypeChecker::with_minimal_context();
+    checker.set_generic_associated_types_enabled(true);
+    checker.load_core_eager(Arc::new(restored));
     assert!(checker.take_deferred_errors().is_empty());
     assert!(checker.diagnostics().is_empty());
     let registry = checker.protocol_checker.read();
@@ -310,7 +313,9 @@ fn metadata_implementation_uses_the_same_value_domain_admission() {
     let valid = "implement provider.Family for provider.Owner {type Cell<M: meta Int{>= 0}> = provider.Indexed<M>;}";
     let metadata = family_metadata(valid);
     TypeChecker::validate_source_implementation_metadata(Arc::new(metadata.clone())).unwrap();
-    let mut checker = TypeChecker::new_with_core_eager(Arc::new(metadata));
+    let mut checker = TypeChecker::with_minimal_context();
+    checker.set_generic_associated_types_enabled(true);
+    checker.load_core_eager(Arc::new(metadata));
     checker.set_current_module_path("consumer");
     let found = errors(
         &mut checker,

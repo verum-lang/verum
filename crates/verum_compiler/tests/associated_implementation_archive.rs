@@ -54,6 +54,7 @@ fn diagnostics(checker: &mut TypeChecker, source: &str) -> Vec<String> {
 
 fn source_module(source: &str) -> VbcModule {
     let mut checker = TypeChecker::new();
+    checker.set_generic_associated_types_enabled(true);
     checker.register_primitives();
     checker.set_current_module_path(OWNER);
     let errors = diagnostics(&mut checker, source);
@@ -61,6 +62,10 @@ fn source_module(source: &str) -> VbcModule {
         errors.is_empty(),
         "source producer must typecheck: {errors:?}"
     );
+    unchecked_module(source)
+}
+
+fn unchecked_module(source: &str) -> VbcModule {
     let ast = Parser::new(source).parse_module().unwrap();
     VbcCodegen::with_config(CodegenConfig::new(OWNER))
         .compile_module(&ast)
@@ -85,6 +90,15 @@ fn publish(module: &VbcModule) -> Result<CoreMetadata, String> {
 }
 
 fn consumer_errors(metadata: &CoreMetadata, source: &str, eager: bool) -> Vec<String> {
+    consumer_with_family_policy(metadata, source, eager, true)
+}
+
+fn consumer_with_family_policy(
+    metadata: &CoreMetadata,
+    source: &str,
+    eager: bool,
+    enabled: bool,
+) -> Vec<String> {
     let mut registry = verum_modules::ModuleRegistry::new();
     registry.register(verum_modules::ModuleInfo::new(
         verum_modules::ModuleId::new(0),
@@ -93,15 +107,24 @@ fn consumer_errors(metadata: &CoreMetadata, source: &str, eager: bool) -> Vec<St
         verum_ast::FileId::new(0),
         Text::new(),
     ));
+    registry.register(verum_modules::ModuleInfo::new(
+        verum_modules::ModuleId::new(1),
+        verum_modules::ModulePath::from_str("consumer"),
+        Parser::new(source).parse_module().unwrap(),
+        verum_ast::FileId::new(1),
+        source.into(),
+    ));
     let metadata = Arc::new(metadata.clone());
-    let mut checker = if eager {
-        TypeChecker::new_with_core_eager(metadata)
-    } else {
-        TypeChecker::new_with_core(metadata)
-    };
-    checker.register_primitives();
-    checker.set_current_module_path("consumer");
+    let mut checker = TypeChecker::with_minimal_context();
     checker.set_module_registry_direct(registry);
+    checker.set_current_module_path("consumer");
+    checker.set_generic_associated_types_enabled(enabled);
+    if eager {
+        checker.load_core_eager(metadata);
+    } else {
+        checker.register_primitives();
+        checker.set_core_metadata(metadata);
+    }
     diagnostics(&mut checker, source)
 }
 
@@ -507,4 +530,62 @@ fn an_explicit_override_and_a_default_select_their_own_receivers() {
             }
         }
     }
+}
+
+#[test]
+fn value_indexed_family_wire_preserves_domain_and_consumer_policy() {
+    let source = r#"
+        module core.family_archive;
+        public type Indexed<N: meta Int> is { value: Int };
+        public type Family is protocol { type Cell<N: meta Int{>= 0}>; };
+        public type Owner is {};
+        implement Family for Owner { type Cell<M: meta Int{>= 0}> = Indexed<M>; }
+    "#;
+    let module = source_module(source);
+    let metadata = publish(&module).expect("publish declared value family through the archive wire");
+    let use_site = "mount core.family_archive.{Owner,Indexed,Family}; fn same(value:Owner.Cell<3>) -> Indexed<3> {value}";
+    for eager in [false, true] {
+        let admitted = consumer_errors(&metadata, use_site, eager);
+        assert!(admitted.is_empty(), "eager={eager}: {admitted:?}");
+        let disabled = consumer_with_family_policy(&metadata, use_site, eager, false);
+        assert!(
+            disabled.iter().any(|e| e.contains("generic_associated_types = false")),
+            "eager={eager}: {disabled:?}"
+        );
+        let mismatch = consumer_errors(&metadata, &use_site.replace("Indexed<3>", "Indexed<4>"), eager);
+        assert!(
+            mismatch.iter().any(|e| e.contains("exact value index")),
+            "eager={eager}: {mismatch:?}"
+        );
+    }
+
+    // Shape-correct VBC from an unchecked frontend still has to prove the
+    // declared family contract when publishing its implementation catalogue.
+    let narrowed = source.replace("Cell<M: meta Int{>= 0}>", "Cell<M: meta Int{> 0}>");
+    let failure = publish(&unchecked_module(&narrowed))
+        .expect_err("the producer cannot narrow the protocol's admitted value domain");
+    assert!(failure.contains("domain"), "{failure}");
+}
+
+#[test]
+fn archive_specializations_preserve_the_protocols_universal_associated_result() {
+    let source = r#"
+        module core.family_archive;
+        public type Stream is protocol { type Item; };
+        public type Connection is protocol { type Rows<R>: Stream<Item = R>; };
+        public type Cursor<T> is { value: T };
+        implement<T> Stream for Cursor<T> { type Item = T; }
+        public type Db is {};
+        implement Connection for Db { type Rows<R> = Cursor<R>; }
+        @specialize implement Stream for Cursor<Int> { type Item = Int; }
+    "#;
+    publish(&source_module(source))
+        .expect("matching specialization preserves every Rows<R> result");
+    let invalid = source.replace("type Item = Int;", "type Item = Bool;");
+    let error = publish(&unchecked_module(&invalid))
+        .expect_err("a concrete specialization cannot change a promised item");
+    assert!(
+        error.contains("Item") && (error.contains("potential") || error.contains("implementation")),
+        "{error}"
+    );
 }

@@ -2846,10 +2846,16 @@ impl TypeChecker {
     pub fn validate_source_implementation_metadata(
         metadata: std::sync::Arc<crate::core_metadata::CoreMetadata>,
     ) -> Result<()> {
-        let mut checker = Self::new_with_core(metadata.clone());
+        // Publication validates the declarations the archive actually carries.
+        // The consuming project's feature policy is applied separately when
+        // its checker loads those declarations. Neither policy proves a
+        // receiver identity, an implementation bound or a family domain.
+        let mut checker = Self::with_minimal_context();
+        checker.set_universe_poly_enabled(true);
+        checker.set_generic_associated_types_enabled(true);
+        checker.set_core_metadata(metadata.clone());
         if let Some(error) = checker.take_deferred_errors().into_iter().next() { return Err(error); }
         checker.register_primitives();
-        checker.set_universe_poly_enabled(true);
         for owner in metadata.inherent_implementations.keys() {
             let descriptor = Self::metadata_type_with_declaring_key(&metadata, owner)
                 .ok_or_else(|| TypeError::Other("inherent implementation has no target declaration".into()))?;
