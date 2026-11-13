@@ -309,30 +309,7 @@ impl<'s> CompilationPipeline<'s> {
             let file_data: Vec<(Text, String, PathBuf)> = stdlib_files
                 .par_iter()
                 .filter_map(|file_path| {
-                    let module_path_str = {
-                        // Compute module path from file path
-                        let rel = file_path.strip_prefix(&stdlib_path).ok()?;
-                        let mut parts: Vec<String> = Vec::new();
-                        parts.push("core".to_string());
-                        for component in rel.components() {
-                            if let std::path::Component::Normal(os_str) = component {
-                                let s = os_str.to_str()?;
-                                if s.ends_with(".vr") {
-                                    parts.push(s.trim_end_matches(".vr").to_string());
-                                } else {
-                                    parts.push(s.to_string());
-                                }
-                            }
-                        }
-                        // Handle "mod" files: mod.vr represents its parent directory.
-                        // e.g., "core.intrinsics.mod" -> "core.intrinsics"
-                        let joined = parts.join(".");
-                        if joined.ends_with(".mod") {
-                            Text::from(joined.trim_end_matches(".mod"))
-                        } else {
-                            Text::from(joined)
-                        }
-                    };
+                    let module_path_str = Text::from(Self::stdlib_source_owner(&stdlib_path, file_path).to_string());
                     let source_text = std::fs::read_to_string(file_path).ok()?;
                     Some((module_path_str, source_text, file_path.clone()))
                 })
@@ -1032,6 +1009,11 @@ impl<'s> CompilationPipeline<'s> {
                     .unwrap_or("project")
                     .to_string()
             })
+    }
+
+    /// Eager and on-demand stdlib loading share the same source namespace.
+    pub(super) fn stdlib_source_owner(root: &Path, file: &Path) -> ModulePath {
+        ModulePath::for_source_file(root, "core", file)
     }
 
     /// The dotted module path a project file declares.

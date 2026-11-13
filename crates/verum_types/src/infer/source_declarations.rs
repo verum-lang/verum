@@ -154,10 +154,17 @@ impl TypeChecker {
     pub(super) fn local_source_type_declaration_index(
         &self, ast: &verum_ast::Module, name: &str,
     ) -> Option<usize> {
-        ast.items.iter().position(|item| {
+        self.source_type_item_index(&ast.items, name, true)
+    }
+
+    pub(super) fn source_type_item_index(
+        &self, items: &[verum_ast::Item], name: &str, allow_private: bool,
+    ) -> Option<usize> {
+        items.iter().position(|item| {
             self.cfg_evaluator.should_include_item(item)
                 && matches!(&item.kind, verum_ast::ItemKind::Type(declaration)
-                    if declaration.name.name.as_str() == name)
+                    if declaration.name.name.as_str() == name
+                        && (allow_private || declaration.visibility == verum_ast::Visibility::Public))
         })
     }
 
@@ -517,60 +524,71 @@ impl TypeChecker {
                 }
             }
         }
-        // Inline and file modules own their local declarations equally. The
-        // registry contains file modules; inline bodies live in this source
-        // index and must not fall through to the consumer's flat bindings.
-        if let Some(module) = self.inline_modules.get(&self.current_module_path)
-            && let Some(items) = &module.items
-            && let Some(declaration) = items.iter()
-                .filter(|item| self.cfg_evaluator.should_include_item(item))
-                .find_map(|item| match &item.kind {
-                verum_ast::ItemKind::Type(declaration) if declaration.name.name == name => Some(declaration),
-                _ => None,
-            })
-        {
-            return Some((SourceTypeDeclaration::Owned(Shared::new(declaration.clone())), self.current_module_path.clone()));
-        }
         let registry = self.module_registry.read();
-        let Some(module) = self.get_module_with_path_aliases(self.current_module_path.as_str(), &registry) else {
-            // Low-level declaration APIs may have no file registry. Only an
-            // exact active declaration or successfully committed source owns
-            // this name. Recursive bounds consult their current transaction.
+        let mut owner = self.current_module_path.clone();
+        let consumer = ModulePath::from_str(&owner);
+        let mut module = self.get_module_with_path_aliases(&owner, &registry);
+        // A direct checker may register only the containing file. Traverse the
+        // actual inline bodies until reaching its registered lexical owner.
+        while module.is_none() {
+            let Some(inline) = self.inline_modules.get(&owner) else { break; };
+            let items = inline.items.as_deref()?;
+            if let Some(selected) = self.find_type_declaration_with_source_module_inner(
+                items, name, &owner, &registry, &mut Set::new(), true, true,
+            ) {
+                return Some(selected);
+            }
+            if self.source_items_bind_type_name(items, name) { return None; }
+            let (parent, leaf) = owner.rsplit_once('.')?;
+            let declaring_parent = self.with_declaring_source_items(parent, |items| {
+                items.iter().any(|item| self.cfg_evaluator.should_include_item(item)
+                    && matches!(&item.kind, verum_ast::ItemKind::Module(declaration)
+                        if declaration.name.name == leaf && declaration.span == inline.span
+                            && declaration.items.is_some()))
+            }).unwrap_or(false);
+            if !declaring_parent { break; }
+            owner = parent.into();
+            module = self.get_module_with_path_aliases(&owner, &registry);
+        }
+        let Some(mut scope) = module else {
+            // With no registered enclosing file, only the original declaration
+            // transaction may supply a nominal name.
             let key = self.declared_type_key(name);
             return self.source_type_registration.declaration(&key)
                 .map(|declaration| (SourceTypeDeclaration::Owned(Shared::new(declaration.clone())), self.current_module_path.clone()));
         };
-        let mut scope = module.clone();
         loop {
             if let Some((declaration, owner)) = self.find_type_declaration_with_source_module_inner(
-                &scope.ast, name, &Text::from(scope.path.to_string()), &registry, &mut Set::new(), true, true,
+                &scope.ast.items, name, &Text::from(scope.path.to_string()), &registry, &mut Set::new(), true, true,
             ) {
-                if scope.id == module.id || declaration.visibility.resolve_declared_scope(owner.as_str())
+                if scope.path == consumer || declaration.visibility.resolve_declared_scope(owner.as_str())
                     .is_ok_and(|visibility| VisibilityChecker::new().is_visible(
-                        visibility, &ModulePath::from_str(owner.as_str()), &module.path,
+                        visibility, &ModulePath::from_str(owner.as_str()), &consumer,
                     ))
                 {
                     return Some((declaration, owner));
                 }
                 return None;
             }
-            // A written mount shadows enclosing and prelude names even if the
-            // selected target is unavailable.
-            let explicitly_bound = scope.ast.items.iter()
-                .filter(|item| self.cfg_evaluator.should_include_item(item))
-                .any(|item| matches!(&item.kind, verum_ast::ItemKind::Mount(mount)
-                    if mount.alias.as_ref().is_some_and(|alias| alias.name.as_str() == name)
-                    || source_mount_binds_name(&mount.tree, name)));
-            if explicitly_bound { return None; }
+            if self.source_items_bind_type_name(&scope.ast.items, name) { return None; }
             let Some(parent) = registry.inline_parent(&scope) else { break; };
             scope = parent;
         }
         let prelude = verum_ast::prelude::implicit_prelude_path(&scope.ast)?;
         let prelude = self.get_module_with_path_aliases(prelude, &registry)?;
         self.find_type_declaration_with_source_module_inner(
-            &prelude.ast, name, &Text::from(prelude.path.to_string()),
+            &prelude.ast.items, name, &Text::from(prelude.path.to_string()),
             &registry, &mut Set::new(), true, false,
         )
+    }
+
+    /// An unresolved explicit mount still shadows any enclosing declaration or prelude.
+    fn source_items_bind_type_name(&self, items: &[verum_ast::Item], name: &str) -> bool {
+        items.iter().filter(|item| self.cfg_evaluator.should_include_item(item)).any(|item| {
+            matches!(&item.kind, verum_ast::ItemKind::Mount(mount)
+                if mount.alias.as_ref().is_some_and(|alias| alias.name.as_str() == name)
+                    || source_mount_binds_name(&mount.tree, name))
+        })
     }
 
     /// A qualified source name selects its declaration before any template
@@ -646,7 +664,7 @@ impl TypeChecker {
                 // Reuse the exact re-export walker, with no parent-module
                 // fallback. Only the declaring file may follow private mounts.
                 self.find_type_declaration_with_source_module_inner(
-                    &module.ast, type_name, &owner, &registry, &mut Set::new(),
+                    &module.ast.items, type_name, &owner, &registry, &mut Set::new(),
                     true, owner == self.current_module_path,
                 )
             };

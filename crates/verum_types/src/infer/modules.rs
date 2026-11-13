@@ -1392,11 +1392,9 @@ impl TypeChecker {
             for item in items.iter() {
                 match &item.kind {
                     ItemKind::Function(func) if func.name.name.as_str() == item_name => {
-                        // Register function type
-                        let func_ty = self.infer_function_type(func)?;
-                        self.ctx
-                            .env
-                            .insert(register_name, crate::context::TypeScheme::mono(func_ty));
+                        let scheme = self.scheme_from_source_function(func, &owner)?;
+                        let key = verum_common::qualified_name::qualify_module_name(&owner, &func.name.name);
+                        self.bind_imported_callable(register_name, scheme, key);
                         return Ok(());
                     }
                     ItemKind::Type(type_decl) if type_decl.name.name.as_str() == item_name => {
@@ -1798,8 +1796,11 @@ impl TypeChecker {
                         }
                     }
                     verum_ast::ty::PathSegment::Cog => {
-                        // cog = reset to root
+                        // A rooted mount starts at the cog which owns this source.
                         parts.clear();
+                        if let Some(root) = current.segments().first() {
+                            parts.push(root.to_string());
+                        }
                     }
                     verum_ast::ty::PathSegment::Relative => {} // Already handled above
                 }
@@ -1999,7 +2000,13 @@ impl TypeChecker {
                 let is_rel = is_relative_path(path);
                 let full_path = resolve_relative(raw_path.as_str(), is_rel);
                 let full_path_str = full_path.as_str();
-                let inline_target = self.inline_module_mount_target(full_path_str);
+                let inline_target = self.inline_module_mount_target(full_path_str).or_else(|| {
+                    if !path_starts_with_crate(path) { return None; }
+                    // Single-file preparation registers true root namespaces under
+                    // the literal cog key. A project sibling keeps its file owner.
+                    let rooted = format!("cog.{}", simple_process_path(path));
+                    self.inline_module_mount_target(&rooted)
+                });
 
                 // A whole declared namespace wins before interpreting its
                 // final segment as an item of the enclosing module.
@@ -2064,12 +2071,38 @@ impl TypeChecker {
                             Maybe::None => None,
                         },
                     };
-                    if let Some(alias) = top_level_alias {
-                        let alias_name: Text = alias.name.as_str().into();
-                        self.module_aliases
-                            .insert(alias_name, full_normalized.clone());
+                    let local = top_level_alias.map(|alias| alias.name.clone())
+                        .or_else(|| path.segments.last().and_then(|segment| match segment {
+                            verum_ast::PathSegment::Name(name) => Some(name.name.clone()),
+                            _ => None,
+                        }));
+                    let registered = registry.get_by_path_aliased(&full_normalized);
+                    let namespace_access = match &registered {
+                        Some(module) => self.check_namespace_visibility(
+                            &module.path.to_string().into(), registry, import.span,
+                        ),
+                        None => Ok(()),
+                    };
+                    if let Some((parent, name)) = full_normalized.rsplit_once('.')
+                        && let Some(parent_module) = registry.get_by_path_aliased(parent)
+                        && parent_module.exports.get(&Text::from(name))
+                            .is_some_and(|export| export.kind == verum_modules::ExportKind::Type)
+                        && self.local_source_type_declaration_index(&parent_module.ast, name).is_some()
+                    {
+                        // A public nominal type may have a private companion.
+                        // Selecting the type grants only its own visible facets.
+                        self.import_item_from_module_inner(
+                            &Text::from(parent), name, local.as_deref(), registry, Some(import.span),
+                        )?;
+                        if namespace_access.is_err() {
+                            return Ok(());
+                        }
                     }
+                    namespace_access?;
                     self.import_all_from_module(&full_normalized, registry)?;
+                    if let Some(local) = local {
+                        self.module_aliases.insert(local, full_normalized);
+                    }
                 } else if let Some(dot_pos) = full_path_str.rfind('.') {
                     // Split into module path and item name
                     // Normalize the module path (handles std.*, stdlib modules, and relative paths)
@@ -2166,40 +2199,23 @@ impl TypeChecker {
             }
 
             MountTreeKind::Glob(path) => {
-                // Try inline module resolution first
-                let simple_glob_path = simple_process_path(path);
-                let glob_candidates = if path_starts_with_crate(path) {
-                    vec![simple_glob_path.clone()]
-                } else {
-                    vec![
-                        simple_glob_path.clone(),
-                        verum_common::Text::from(format!("cog.{}", simple_glob_path)),
-                    ]
-                };
-                let mut found_inline = false;
-                for candidate in &glob_candidates {
-                    if self.inline_modules.contains_key(candidate) {
-                        if let Ok(()) = self.import_all_from_inline_module(candidate.as_str()) {
-                            found_inline = true;
-                            break;
+                let requested = extract_path(path);
+                let canonical = normalize_module_path(requested.as_str());
+                let module_path = self.inline_module_mount_target(&canonical)
+                    .or_else(|| {
+                        if path_starts_with_crate(path) {
+                            self.inline_module_mount_target(&format!("cog.{}", simple_process_path(path)))
+                        } else {
+                            None
                         }
-                    }
+                    })
+                    .unwrap_or(canonical);
+                if let Some(module) = registry.get_by_path_aliased(&module_path) {
+                    self.check_namespace_visibility(&module.path.to_string().into(), registry, import.span)?;
                 }
-                if found_inline {
-                    return Ok(());
-                }
-
-                // import module.path.*
-                let raw_path = extract_path(path);
-                let is_rel = is_relative_path(path);
-                let resolved = resolve_relative(raw_path.as_str(), is_rel);
-
-                // Normalize the module path (handles std.*, stdlib modules, and relative paths)
-                let module_path = normalize_module_path(resolved.as_str());
                 tracing::debug!(
-                    "mount Glob: raw='{}', resolved='{}', normalized='{}', registry_has={}",
-                    raw_path.as_str(),
-                    resolved.as_str(),
+                    "mount Glob: requested='{}', normalized='{}', registry_has={}",
+                    requested.as_str(),
                     module_path.as_str(),
                     registry.get_by_path(module_path.as_str()).is_some()
                 );
@@ -2921,7 +2937,7 @@ impl TypeChecker {
         // This handles the case where inline modules are registered without file name prefix.
         let (resolved_module_path, module_info_opt) =
             if let Some(info) = self.get_module_with_path_aliases(module_path.as_str(), registry) {
-                (module_path.clone(), Some(info))
+                (Text::from(info.path.to_string()), Some(info))
             } else {
                 // Try stripping the first segment (file name prefix) for inline modules
                 let path_str = module_path.as_str();
@@ -2934,7 +2950,7 @@ impl TypeChecker {
                         // module_path.as_str(),
                         // simple_path
                         // );
-                        (verum_common::Text::from(simple_path), Some(info))
+                        (Text::from(info.path.to_string()), Some(info))
                     } else {
                         (module_path.clone(), None)
                     }
@@ -4367,8 +4383,10 @@ impl TypeChecker {
                                             source_module_path.as_str(),
                                             item_name
                                         );
-                                        if let verum_common::Maybe::Some(inline_mod_info) =
-                                            registry.get_by_path(&inline_path_str)
+                                        if let Some(inline_mod_info) = registry.get_by_path(&inline_path_str)
+                                            && self.check_namespace_visibility(
+                                                &inline_path_str.as_str().into(), registry, type_decl.span,
+                                            ).is_ok()
                                         {
                                             let synthetic_decl = verum_ast::decl::ModuleDecl {
                                                 visibility: verum_ast::decl::Visibility::Public,
@@ -4807,13 +4825,7 @@ impl TypeChecker {
     fn find_public_source_type_declaration_index(
         &self, ast: &verum_ast::Module, type_name: &str,
     ) -> Option<usize> {
-        // Local and exported lookups select the same target declaration;
-        // only visibility differs. Type-level cfg belongs to that selection.
-        let index = self.local_source_type_declaration_index(ast, type_name)?;
-        let verum_ast::ItemKind::Type(declaration) = &ast.items[index].kind else {
-            unreachable!("type declaration index")
-        };
-        (declaration.visibility == verum_ast::Visibility::Public).then_some(index)
+        self.source_type_item_index(&ast.items, type_name, false)
     }
 
     /// Extract all type names referenced in a TypeDecl.
@@ -6537,7 +6549,7 @@ impl TypeChecker {
         let module = self.get_module_with_path_aliases(module_path, registry)?;
         let mut visited = Set::new();
         self.find_type_declaration_with_source_module_inner(
-            &module.ast, type_name, &Text::from(module.path.to_string()), registry,
+            &module.ast.items, type_name, &Text::from(module.path.to_string()), registry,
             &mut visited, true, false,
         ).map(|(declaration, owner)| ((*declaration).clone(), owner))
     }
@@ -6568,7 +6580,7 @@ impl TypeChecker {
         // the same pattern for the sibling kind-resolution walk.
         let mut visited = Set::new();
         self.find_type_declaration_with_source_module_inner(
-            ast,
+            &ast.items,
             type_name,
             current_module_path,
             registry,
@@ -6581,7 +6593,7 @@ impl TypeChecker {
     /// Inner implementation of find_type_declaration_with_source_module.
     pub(super) fn find_type_declaration_with_source_module_inner(
         &self,
-        ast: &verum_ast::Module,
+        items: &[verum_ast::Item],
         type_name: &str,
         current_module_path: &Text,
         registry: &verum_modules::ModuleRegistry,
@@ -6596,21 +6608,21 @@ impl TypeChecker {
         // The entry AST can be a lexical source scope rather than the registry
         // module's AST. Later scopes retain immutable owners, never AST copies.
         enum Source<'a> {
-            Borrowed(&'a verum_ast::Module),
+            Borrowed(&'a [verum_ast::Item]),
             Registered(Shared<verum_modules::ModuleInfo>),
         }
         impl Source<'_> {
-            fn ast(&self) -> &verum_ast::Module {
+            fn items(&self) -> &[verum_ast::Item] {
                 match self {
-                    Self::Borrowed(ast) => ast,
-                    Self::Registered(module) => &module.ast,
+                    Self::Borrowed(items) => items,
+                    Self::Registered(module) => &module.ast.items,
                 }
             }
             fn select(self, item: usize) -> SourceTypeDeclaration {
                 match self {
                     Self::Registered(module) => SourceTypeDeclaration::Registered { module, item },
-                    Self::Borrowed(ast) => {
-                        let ItemKind::Type(declaration) = &ast.items[item].kind else {
+                    Self::Borrowed(items) => {
+                        let ItemKind::Type(declaration) = &items[item].kind else {
                             unreachable!("type declaration index")
                         };
                         SourceTypeDeclaration::Owned(Shared::new(declaration.clone()))
@@ -6632,7 +6644,7 @@ impl TypeChecker {
 
         let mut work = List::new();
         work.push(Work::Enter(Scope {
-            source: Source::Borrowed(ast),
+            source: Source::Borrowed(items),
             owner: current_module_path.clone(),
             name: type_name.into(),
             allow_local_mounts,
@@ -6647,7 +6659,7 @@ impl TypeChecker {
                         // Reuse this canonical-owner read to retain its exact
                         // AST. A different lexical AST with the same spelling
                         // still requires its own ownership boundary.
-                        if matches!(&scope.source, Source::Borrowed(ast) if std::ptr::eq(&module.ast, *ast)) {
+                        if matches!(&scope.source, Source::Borrowed(items) if std::ptr::eq(module.ast.items.as_slice(), *items)) {
                             scope.source = Source::Registered(module);
                         }
                     }
@@ -6692,19 +6704,15 @@ impl TypeChecker {
                     }
                 }
                 Work::Body(scope) => {
-                    let ast = scope.source.ast();
-                    let item = if scope.allow_local_mounts {
-                        self.local_source_type_declaration_index(ast, &scope.name)
-                    } else {
-                        self.find_public_source_type_declaration_index(ast, &scope.name)
-                    };
+                    let items = scope.source.items();
+                    let item = self.source_type_item_index(items, &scope.name, scope.allow_local_mounts);
                     if let Some(item) = item {
                         return Some((scope.source.select(item), scope.owner));
                     }
 
                     let owner = verum_modules::ModulePath::from_str(&scope.owner);
                     let mut targets = List::new();
-                    for item in &ast.items {
+                    for item in items {
                         if !self.cfg_evaluator.should_include(&item.attributes) {
                             continue;
                         }
@@ -6780,7 +6788,7 @@ impl TypeChecker {
         registry: &verum_modules::ModuleRegistry,
     ) -> Option<verum_ast::decl::TypeDecl> {
         self.find_type_declaration_with_source_module_inner(
-            ast, type_name, current_module_path, registry, &mut Set::new(), false, false,
+            &ast.items, type_name, current_module_path, registry, &mut Set::new(), false, false,
         ).map(|(declaration, _)| (*declaration).clone())
     }
 
@@ -23196,8 +23204,16 @@ bake to have this verified.",
                 .map(|module| (module, Text::from(member)))
         });
         if let Some((module, member)) = source {
-            let (scheme, _) = self.source_qualified_callable(module, member)
-                .ok_or_else(|| TypeError::UnboundVariable { name: written_path.clone(), span })?;
+            let Some((scheme, _)) = self.source_qualified_callable(module.clone(), member.clone()) else {
+                if let Some(function) = module.ast.items.iter()
+                    .find_map(|item| self.imported_function(item, &member))
+                {
+                    self.check_declared_member_visibility(
+                        &module.path.to_string().into(), &written_path, &Some(function.visibility.clone()), span,
+                    )?;
+                }
+                return Err(TypeError::UnboundVariable { name: written_path.clone(), span });
+            };
             // Publish only this qualified callable, never the namespace's bare
             // items. Ordinary call inference then retains its generic bounds.
             self.ctx.env.insert(qualified, scheme);
@@ -23797,6 +23813,7 @@ bake to have this verified.",
         mut name: Text,
         registry: &ModuleRegistry,
     ) -> Option<(Shared<verum_modules::ModuleInfo>, Text)> {
+        self.check_namespace_visibility(&module.path.to_string().into(), registry, module.ast.span).ok()?;
         let mut caller = verum_modules::ModulePath::from_str(&self.current_module_path);
         let mut visited = Set::new();
         loop {

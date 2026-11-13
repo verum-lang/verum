@@ -87,12 +87,12 @@ fn declared_rooted_functions_constants_and_chains_preserve_their_actual_types() 
     for source in [
         "module api {public fn value()->Int {42}} fn probe()->Int {api.value()}",
         "module api {public fn value()->Int {42}} mount cog.api as chosen; fn probe()->Int {chosen.value()}",
-        "type Cell is {public value:Int}; implement Cell {public fn read(&self)->Int {self.value}} module api {public fn value()->Cell {Cell {value:42}}} fn probe()->Int {api.value().read()}",
+        "public type Cell is {public value:Int}; implement Cell {public fn read(&self)->Int {self.value}} module api {public fn value()->Cell {Cell {value:42}}} fn probe()->Int {api.value().read()}",
         "module api {public fn value()->Int {42}} fn probe()->Int {cog.api.value()}",
         "module api {public const VALUE:Int=42;} fn probe()->Int {cog.api.VALUE}",
         "module parent {public fn value()->Int {42} public module child {public fn probe()->Int {super.value()}}}",
         "module parent {public const VALUE:Int=42; public module child {public fn probe()->Int {super.VALUE}}}",
-        "type Cell is {public value:Int}; implement Cell {public fn read(&self)->Int {self.value}} module api {public fn value()->Cell {Cell {value:42}}} fn probe()->Int {cog.api.value().read()}",
+        "public type Cell is {public value:Int}; implement Cell {public fn read(&self)->Int {self.value}} module api {public fn value()->Cell {Cell {value:42}}} fn probe()->Int {cog.api.value().read()}",
         "type Inner is {public value:Int}; type Outer is {public inner:Inner}; fn probe(x:Outer)->Int {x.inner.value}",
     ] { accepts(source, &[]); }
     for source in [
@@ -102,6 +102,14 @@ fn declared_rooted_functions_constants_and_chains_preserve_their_actual_types() 
         let errors = check(source, &[]);
         assert!(errors.iter().any(|e| e.contains("Mismatch")), "lost declared result: {source}: {errors:?}");
     }
+}
+
+#[test]
+fn inline_result_cannot_capture_a_private_type_from_the_callers_scope() {
+    let source = "type Cell is {public value:Int}; module api {public fn make()->Cell {Cell {value:42}}} fn probe()->Int {api.make().value}";
+    let errors = check(source, &[]);
+    assert!(errors.iter().any(|e| e.contains("Cell")
+        && (e.contains("TypeNotFound") || e.contains("VisibilityError"))), "{errors:?}");
 }
 
 #[test]

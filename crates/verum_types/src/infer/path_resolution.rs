@@ -997,8 +997,9 @@ impl TypeChecker {
                 span,
             })?;
 
-        // Navigate through intermediate segments (modules)
-        // For path `api.v2.func`, navigate: api -> v2 -> func
+        let mut owner = first_module_name;
+        // Each nested declaration is relative to the module actually selected
+        // by the mount, even if its spelling in the caller was an alias.
         for (i, &segment_name) in segments.iter().enumerate().skip(consumed) {
             let segment_text = verum_common::Text::from(segment_name);
 
@@ -1023,6 +1024,8 @@ impl TypeChecker {
                                     self.path_to_string(path)
                                 ))));
                             }
+                            owner.push('.');
+                            owner.push_str(segment_name);
                             current_module = nested_module.clone();
                             found = true;
                             break;
@@ -1031,22 +1034,17 @@ impl TypeChecker {
                         // Function - return its type (only for last segment)
                         ItemKind::Function(func) if func.name.name.as_str() == segment_name => {
                             if is_last {
-                                // Check visibility - function must be public to access from outside
-                                if !matches!(func.visibility, verum_ast::decl::Visibility::Public) {
-                                    return Err(TypeError::VisibilityError {
-                                        name: verum_common::Text::from(segment_name),
-                                        visibility: verum_common::Text::from(format!(
-                                            "{:?}",
-                                            func.visibility
-                                        )),
-                                        module_path: verum_common::Text::from(
-                                            current_module.name.name.as_str(),
-                                        ),
-                                        span,
-                                    });
+                                self.check_declared_member_visibility(
+                                    &owner, &func.name.name, &Some(func.visibility.clone()), span,
+                                )?;
+                                let scheme = self.scheme_from_source_function(func, &owner)?;
+                                let instance = self.instantiate_value_instance(&scheme, span)?;
+                                if let Some(arguments) = arguments.filter(|args| !args.is_empty()) {
+                                    self.bind_explicit_method_arguments(
+                                        instance.explicit_method_vars.as_ref(), arguments, &func.name, span,
+                                    )?;
                                 }
-                                let func_ty = self.infer_function_type_with_arguments(func, arguments)?;
-                                return Ok(InferResult::new(func_ty));
+                                return Ok(InferResult::new(instance.ty));
                             } else {
                                 return Err(TypeError::Other(verum_common::Text::from(format!(
                                     "'{}' is a function, not a module",

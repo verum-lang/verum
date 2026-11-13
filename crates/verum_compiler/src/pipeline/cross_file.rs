@@ -191,9 +191,11 @@ impl<'s> CompilationPipeline<'s> {
 
         // Work queue for iterative module loading
         // Each item is (module, current_module_path)
-        let mut work_queue: Vec<(Module, String)> =
-            vec![(module.clone(), current_module_path.to_string())];
-        let src_root = src_root.to_path_buf();
+        let mut work_queue = vec![(Arc::new(module.clone()), current_module_path.to_owned())];
+        let src_root = src_root.canonicalize()?;
+        let project = Self::nearest_manifest_root(&src_root)
+            .filter(|root| Self::owns_source_dir(root, &src_root))
+            .map(|root| (root, Self::project_prefix_for(root)));
 
         while let Some((current_module, current_path)) = work_queue.pop() {
             // Collect every module path this file pulls in transitively:
@@ -343,29 +345,45 @@ impl<'s> CompilationPipeline<'s> {
                                 resolved_path, candidate
                             );
 
-                            // Load and parse the module
-                            let source_text = match std::fs::read_to_string(&candidate) {
-                                Ok(s) => s,
-                                Err(e) => {
-                                    debug!("Failed to read imported module {:?}: {}", candidate, e);
-                                    continue;
-                                }
-                            };
-
-                            // Load source into session
-                            let file_id = match self
-                                .session
-                                .load_source_string(&source_text, candidate.clone())
+                            let file = candidate.canonicalize()?;
+                            let owner = if !is_stdlib_import
+                                && let Some((root, prefix)) = &project
+                                && file.starts_with(root)
                             {
-                                Ok(id) => id,
-                                Err(e) => {
-                                    debug!("Failed to load source for {:?}: {}", candidate, e);
-                                    continue;
-                                }
+                                Self::project_module_path_for(root, prefix, &file)
+                            } else if is_stdlib_import {
+                                Self::stdlib_source_owner(&base_dir, &candidate).to_string()
+                            } else {
+                                resolved_path.clone()
                             };
+                            let registry = self.session.module_registry();
+                            // Eager project loading and this mount walk may reach the
+                            // same file. Retain its parsed body, source ID and exports.
+                            let registered = registry.read().get_by_path(&owner);
+                            if let Some(existing) = registered
+                                && self.session.get_source(existing.file_id)
+                                    .and_then(|source| source.path.as_ref()?.canonicalize().ok())
+                                    .as_ref() == Some(&file)
+                            {
+                                if owner != resolved_path {
+                                    registry.write().register_path_alias(resolved_path.as_str(), owner.as_str());
+                                }
+                                let key = Text::from(owner.as_str());
+                                let parsed = self.project_modules.get(&key)
+                                    .or_else(|| self.modules.get(&key)).cloned()
+                                    .unwrap_or_else(|| Arc::new(existing.ast.clone()));
+                                work_queue.push((parsed, owner));
+                                loaded = true;
+                                break;
+                            }
+                            let module_path = ModulePath::from_str(&owner);
+                            let file_id = self.session.load_file(&file)?;
+                            let source = self.session.get_source(file_id)
+                                .ok_or_else(|| anyhow::anyhow!("missing loaded source {}", file.display()))?;
+                            let source_text = &source.source;
 
                             // Parse the module
-                            let lexer = Lexer::new(&source_text, file_id);
+                            let lexer = Lexer::new(source_text, file_id);
                             let parser = VerumParser::new();
                             let mut imported_module = match parser.parse_module(lexer, file_id) {
                                 Ok(m) => m,
@@ -426,7 +444,7 @@ impl<'s> CompilationPipeline<'s> {
                                 module_path.clone(),
                                 imported_module.clone(),
                                 file_id,
-                                source_text.clone().into(),
+                                source_text.clone(),
                             );
                             module_info.header_warnings = header_warnings;
 
@@ -473,21 +491,26 @@ impl<'s> CompilationPipeline<'s> {
                             {
                                 let mut reg = registry.write();
                                 reg.register(module_info);
+                                if owner != resolved_path {
+                                    reg.register_path_alias(resolved_path.as_str(), owner.as_str());
+                                }
                             }
+                            self.register_inline_modules(&imported_module, &module_path)?;
+                            let imported_module = Arc::new(imported_module);
 
                             // For user-imported modules (non-stdlib), also store in
                             // project_modules so their items get merged into the main
                             // compilation unit for VBC codegen.
                             if !is_stdlib_import {
-                                let module_key = Text::from(resolved_path.as_str());
+                                let module_key = Text::from(owner.as_str());
                                 if !self.project_modules.contains_key(&module_key) {
                                     self.project_modules
-                                        .insert(module_key, Arc::new(imported_module.clone()));
+                                        .insert(module_key, imported_module.clone());
                                 }
                             }
 
                             // Add to work queue instead of recursive call
-                            work_queue.push((imported_module, resolved_path.clone()));
+                            work_queue.push((imported_module, owner));
 
                             loaded = true;
                             break;
