@@ -751,6 +751,7 @@ jobs:
           --test imported_callable_properties
           --test scalar_constant_patterns
           --test source_admission_diagnostics
+          --test parallel_source_analysis
           --test source_context_protocol_runtime
           --test shadowed_type_metadata_owner
           --test structural_generic_archive
