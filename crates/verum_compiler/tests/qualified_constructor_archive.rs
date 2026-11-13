@@ -53,27 +53,40 @@ fn compile_provider(provider: &str, consumer: &str) -> Result<VbcArchive, Text> 
     Ok(verum_vbc::archive::read_archive_from_file(&output).unwrap())
 }
 
-fn archive_errors(archive: &VbcArchive, source: &str, eager: bool) -> List<Text> {
-    let metadata = verum_compiler::archive_metadata::archive_to_core_metadata(archive).unwrap();
-    let encoded = verum_types::core_metadata::encode_metadata(&metadata).unwrap();
-    let metadata =
-        Shared::new(verum_types::core_metadata::decode_metadata(&encoded).unwrap()).into_arc();
-    let mut checker = if eager {
-        TypeChecker::new_with_core_eager(metadata)
-    } else {
-        TypeChecker::new_with_core(metadata)
-    };
-    checker.register_primitives();
-    checker.set_current_module_path("app");
+fn provider_registry(source: &str) -> verum_modules::ModuleRegistry {
     let mut registry = verum_modules::ModuleRegistry::new();
     registry.register(verum_modules::ModuleInfo::new(
         verum_modules::ModuleId::new(0),
         verum_modules::ModulePath::from_str("core.provider"),
-        Parser::new("").parse_module().unwrap(),
+        Parser::new(source).parse_module().unwrap(),
         verum_ast::FileId::new(0),
-        Text::new(),
+        source.into(),
     ));
-    checker.set_module_registry_direct(registry);
+    registry
+}
+
+fn archive_checker(archive: &VbcArchive, eager: bool) -> TypeChecker {
+    let metadata = verum_compiler::archive_metadata::archive_to_core_metadata(archive).unwrap();
+    let encoded = verum_types::core_metadata::encode_metadata(&metadata).unwrap();
+    let metadata =
+        Shared::new(verum_types::core_metadata::decode_metadata(&encoded).unwrap()).into_arc();
+    let registry = provider_registry("");
+    let mut checker = if eager {
+        let mut checker = TypeChecker::with_minimal_context();
+        checker.set_module_registry_direct(registry);
+        checker.load_core_eager(metadata);
+        checker
+    } else {
+        let mut checker = TypeChecker::new_with_core(metadata);
+        checker.set_module_registry_direct(registry);
+        checker.register_primitives();
+        checker
+    };
+    checker.set_current_module_path("app");
+    checker
+}
+
+fn archive_errors(checker: &mut TypeChecker, source: &str) -> List<Text> {
     let ast = Parser::new(source).parse_module().unwrap();
     checker.register_stdlib_types_for_module(&ast);
     let mut errors: List<Text> = checker
@@ -111,10 +124,15 @@ fn a_private_sum_crosses_modules_through_its_public_operations() {
     let consumer = "mount core.provider.{issue, number};
         public fn probe()->Int { number(issue(73)) }";
     let archive = compile_provider(provider, consumer).unwrap();
-    execute(&archive, "module app; mount core.consumer.probe; fn main()->Int {probe()}");
+    execute(
+        &archive,
+        "module app; mount core.consumer.probe; fn main()->Int {probe()}",
+    );
 
     let forged = "mount core.provider.number; public fn probe()->Int { number(Issued(73)) }";
-    let error = compile_provider(provider, forged).err().expect("a foreign module cannot supply the private case");
+    let error = compile_provider(provider, forged)
+        .err()
+        .expect("a foreign module cannot supply the private case");
     assert!(error.contains("Issued"), "{error}");
 }
 
@@ -185,7 +203,7 @@ fn archive_loaded_constructors_execute_without_source_definitions() {
 fn fresh_archive_constructor_schemes_preserve_domains_and_owners() {
     let archive = compile("public fn probe()->Int {73}").unwrap();
     for eager in [false, true] {
-        let errors = archive_errors(&archive, CONSUMER, eager);
+        let errors = archive_errors(&mut archive_checker(&archive, eager), CONSUMER);
         assert!(errors.is_empty(), "eager={eager}: {errors:?}");
         for (source, expected) in [
             (
@@ -201,7 +219,7 @@ fn fresh_archive_constructor_schemes_preserve_domains_and_owners() {
                 "mismatch",
             ),
         ] {
-            let errors = archive_errors(&archive, source, eager);
+            let errors = archive_errors(&mut archive_checker(&archive, eager), source);
             assert!(
                 errors
                     .iter()
@@ -210,4 +228,18 @@ fn fresh_archive_constructor_schemes_preserve_domains_and_owners() {
             );
         }
     }
+}
+
+#[test]
+fn an_eager_constructor_rejects_a_changed_source_registry() {
+    let archive = compile("public fn probe()->Int {73}").unwrap();
+    let mut checker = archive_checker(&archive, true);
+    checker.set_module_registry_direct(provider_registry("public type Wrapped is (Bool);"));
+    let source = "mount core.provider.Wrapped; fn invalid()->Int { core.provider.Wrapped(73).0 }";
+    let errors = archive_errors(&mut checker, source);
+    assert!(
+        errors.iter().any(|error| error
+            .contains("source dependencies changed while loading core.provider.Wrapped")),
+        "{errors:?}"
+    );
 }
