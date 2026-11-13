@@ -34,7 +34,7 @@ module core.database.sqlite.native.l6_session.schema_cache;
 // =============================================================================
 
 mount collections.{List, Map};
-mount base.{Result, Ok, Err, Text, Maybe};
+mount base.{Result, Text, Maybe};
 mount core.database.sqlite.native.l2_record.affinity.Affinity;
 
 // -----------------------------------------------------------------------------
@@ -171,18 +171,18 @@ implement SchemaCache {
 
     public fn lookup_table(&self, schema: &Text, name: &Text) -> Result<TableMeta, SessionSchemaError> {
         let key = qualify(schema, name);
-        if !self.tables.contains_key(key.clone()) {
-            return Result.Err(NotFound(key));
+        match self.tables.get(key) {
+            Maybe.Some(meta) => Result.Ok(clone_table_meta(&meta)),
+            Maybe.None => Result.Err(NotFound(key)),
         }
-        Result.Ok(clone_table_meta(&self.tables.get(key)))
     }
 
     public fn lookup_index(&self, schema: &Text, name: &Text) -> Result<IndexMeta, SessionSchemaError> {
         let key = qualify(schema, name);
-        if !self.indexes.contains_key(key.clone()) {
-            return Result.Err(NotFound(key));
+        match self.indexes.get(key) {
+            Maybe.Some(meta) => Result.Ok(clone_index_meta(&meta)),
+            Maybe.None => Result.Err(NotFound(key)),
         }
-        Result.Ok(clone_index_meta(&self.indexes.get(key)))
     }
 
     public fn has_table(&self, schema: &Text, name: &Text) -> Bool {
@@ -201,17 +201,10 @@ implement SchemaCache {
     /// underlying I/O.
     public fn lookup_table_by_root(&self, root_page: Int) -> Maybe<TableMeta> {
         if root_page < 1 { return Maybe.None; }
-        let keys = self.tables.keys();
-        let mut i: Int = 0;
-        while i < keys.len() {
-            let k = keys[i].clone();
-            let meta = &self.tables.get(k);
-            if meta.root_page == root_page {
-                return Maybe.Some(clone_table_meta(meta));
-            }
-            i = i + 1;
+        match self.tables.find(|_: &Text, table: &TableMeta| table.root_page == root_page) {
+            Maybe.Some((_, table)) => Maybe.Some(clone_table_meta(table)),
+            Maybe.None => Maybe.None,
         }
-        Maybe.None
     }
 
     /// Enumerate every index whose `table_name` matches the given
@@ -222,16 +215,10 @@ implement SchemaCache {
     public fn indexes_for_table(&self, schema: &Text, name: &Text) -> List<IndexMeta> {
         let mut out: List<IndexMeta> = List.new();
         let want_schema = if schema.len() == 0 { "main".clone() } else { schema.clone() };
-        let keys = self.indexes.keys();
-        let mut i: Int = 0;
-        while i < keys.len() {
-            let k = keys[i].clone();
-            let idx = &self.indexes.get(k);
-            let idx_schema_norm = if idx.schema.len() == 0 { "main".clone() } else { idx.schema.clone() };
-            if idx_schema_norm == want_schema && &idx.table_name == name {
-                out.push(clone_index_meta(idx));
+        for idx in self.indexes.values() {
+            if index_belongs_to(&idx, &want_schema, name) {
+                out.push(clone_index_meta(&idx));
             }
-            i = i + 1;
         }
         out
     }
@@ -242,22 +229,24 @@ implement SchemaCache {
 
     public fn drop_table(&mut self, schema: &Text, name: &Text) -> Result<(), SessionSchemaError> {
         let key = qualify(schema, name);
-        if !self.tables.contains_key(key.clone()) {
-            return Result.Err(NotFound(key));
+        match self.tables.remove(key) {
+            Maybe.Some(_) => {
+                self.schema_cookie = self.schema_cookie + 1;
+                Result.Ok(())
+            }
+            Maybe.None => Result.Err(NotFound(key)),
         }
-        let _ = self.tables.remove(key);
-        self.schema_cookie = self.schema_cookie + 1;
-        Result.Ok(())
     }
 
     public fn drop_index(&mut self, schema: &Text, name: &Text) -> Result<(), SessionSchemaError> {
         let key = qualify(schema, name);
-        if !self.indexes.contains_key(key.clone()) {
-            return Result.Err(NotFound(key));
+        match self.indexes.remove(key) {
+            Maybe.Some(_) => {
+                self.schema_cookie = self.schema_cookie + 1;
+                Result.Ok(())
+            }
+            Maybe.None => Result.Err(NotFound(key)),
         }
-        let _ = self.indexes.remove(key);
-        self.schema_cookie = self.schema_cookie + 1;
-        Result.Ok(())
     }
 
     /// Post-DDL signal — bumps cookie + generation. Callers that
@@ -284,8 +273,13 @@ implement SchemaCache {
 // -----------------------------------------------------------------------------
 
 fn qualify(schema: &Text, name: &Text) -> Text {
-    if schema.len() == 0 { return name.clone(); }
+    if schema.len() == 0 || schema == &"main" { return name.clone(); }
     schema.clone() + ".".clone() + name.clone()
+}
+
+fn index_belongs_to(index: &IndexMeta, schema: &Text, name: &Text) -> Bool {
+    let index_schema = if index.schema.len() == 0 { "main" } else { index.schema };
+    &index_schema == schema && &index.table_name == name
 }
 
 fn clone_column_meta(c: &ColumnMeta) -> ColumnMeta {
