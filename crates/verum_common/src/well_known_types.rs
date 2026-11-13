@@ -463,6 +463,12 @@ impl WellKnownType {
         !self.primitive_protocols().is_empty()
     }
 
+    /// Source module which owns the standard representation or implementations.
+    /// Archive bundle parents are lookup locations, never declaring owners.
+    pub fn declaring_source_module(name: &str) -> Option<&'static str> {
+        Self::from_name(name)?.canonical_archive_modules().first().copied()
+    }
+
     /// Canonical archive-module prefixes that contain this well-known
     /// type's inherent + protocol-impl methods. Used by the archive
     /// lazy-loader (`verum_compiler::archive_ctx_loader`) to expand

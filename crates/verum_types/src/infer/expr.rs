@@ -9171,7 +9171,14 @@ impl TypeChecker {
                 _ => break,
             };
         }
-        let normalized_ty = normalized_ty;
+        // A standard record may represent a scalar with its own language type.
+        // Its exact declaring shape supplies fields after the visibility check above.
+        if let Some(key) = Self::scalar_representation_key(&normalized_ty)
+            && let Some(Type::Record(fields)) = self.ctx.lookup_type(&format!("__struct_fields_{key}"))
+            && let Some(field_type) = fields.get(field.name.as_str())
+        {
+            return Ok(InferResult::new(field_type.clone()));
+        }
 
         match &normalized_ty {
             Type::Record(fields) => {
@@ -9470,27 +9477,7 @@ impl TypeChecker {
                     field.name, normalized_ty
                 ))))
             }
-            // CRITICAL: Handle user-defined `Text` struct field access.
-            // text.vr defines `public type Text is { ptr, len, cap }`. When the type
-            // checker resolves `TypeKind::Text` to `Type::Text` (the primitive), direct
-            // field accesses inside `implement Text` fail with E103. Check for
-            // user-registered struct fields before emitting the error.
             Type::Text => {
-                let struct_key = "__struct_fields_Text".to_string();
-                if let Some(Type::Record(fields)) = self.ctx.lookup_type(&struct_key) {
-                    let field_name_key = verum_common::Text::from(field.name.as_str());
-                    if let Some(field_ty) = fields.get(&field_name_key).cloned() {
-                        return Ok(InferResult::new(field_ty));
-                    }
-                    // Field not found in user-defined struct
-                    let available: Vec<&str> =
-                        fields.keys().map(|k| k.as_str()).collect();
-                    return Err(TypeError::Other(verum_common::Text::from(format!(
-                        "field '{}' not found in Text struct. Available: [{}]",
-                        field.name,
-                        available.join(", ")
-                    ))));
-                }
                 // Built-in type properties (T0216-c: one authority), else E103.
                 if let Some(t) = Self::builtin_type_property_result_type(
                     field.name.as_str(),

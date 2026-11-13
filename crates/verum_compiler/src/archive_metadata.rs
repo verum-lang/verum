@@ -462,8 +462,7 @@ fn register_declared_function(meta: &mut CoreMetadata, key: Text, function: &Fun
 fn builtin_record_declaration(ty: &TypeDescriptor) -> bool {
     let owner = ty.origin_module_path.as_ref().unwrap_or(&ty.module_path);
     matches!(ty.kind, TypeDescriptorKind::Record { .. })
-        && verum_common::well_known_types::WellKnownType::from_name(ty.name.as_str())
-            .and_then(|known| known.canonical_archive_modules().first().copied())
+        && verum_common::well_known_types::WellKnownType::declaring_source_module(ty.name.as_str())
             == Some(owner.as_str())
 }
 

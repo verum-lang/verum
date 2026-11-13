@@ -398,3 +398,162 @@ fn unresolved_retained_bindings_cannot_be_replaced_by_builtins() {
         }
     }
 }
+
+#[test]
+fn literal_carrier_uses_the_declared_standard_text_representation_through_aliases() {
+    let library = "@no_implicit_prelude module core.text.text; @opaque public type Text is { ptr: &unsafe Byte, len: Int, cap: Int };";
+    for body in [
+        "fn make()->Words { \"verum\" }",
+        "fn receive(words:Words)->Text {words}",
+        "fn storage_size()->Int {Words.size}",
+        "fn take(text:Text)->Int {0} fn call(words:Words)->Int {take(words)}",
+    ] {
+        let consumer = format!(
+            "@no_implicit_prelude module consumer; mount core.text.text.Text as Words; {body}"
+        );
+        let errors = check(
+            &mut checker(),
+            "consumer",
+            &[("core.text.text", library), ("consumer", &consumer)],
+        );
+        assert!(errors.is_empty(), "{body}: {errors:?}");
+    }
+}
+
+#[test]
+fn foreign_text_records_remain_distinct_from_the_literal_carrier() {
+    let library = "@no_implicit_prelude module foreign; @opaque public type Text is { ptr: &unsafe Byte, len: Int, cap: Int };";
+    for body in [
+        "fn make()->Words { \"verum\" }",
+        "fn receive(words:Words)->Text {words}",
+    ] {
+        let consumer =
+            format!("@no_implicit_prelude module consumer; mount foreign.Text as Words; {body}");
+        let errors = check(
+            &mut checker(),
+            "consumer",
+            &[("foreign", library), ("consumer", &consumer)],
+        );
+        assert!(
+            errors.iter().any(|e| e.contains("Mismatch")),
+            "{body}: {errors:?}"
+        );
+    }
+}
+
+#[test]
+fn source_representation_methods_share_the_literal_type_and_keep_fields_private() {
+    let library = r#"@no_implicit_prelude module core.text.text;
+        @opaque public type Text is { ptr: &unsafe Byte, len: Int, cap: Int };
+        implement Text {
+            public fn byte_count(&self) -> Int { self.len }
+            public fn from_owned(value: Text) -> Text { value }
+        }"#;
+    for consumer in [
+        "@no_implicit_prelude module consumer; mount core.text.text.Text as Words; fn make()->Text {Words.from_owned(\"abc\")}",
+        "@no_implicit_prelude module consumer; mount core.text.text.Text as Words; fn read(words:Words)->Int { words.byte_count() }",
+    ] {
+        let errors = check(
+            &mut checker(),
+            "consumer",
+            &[("core.text.text", library), ("consumer", consumer)],
+        );
+        assert!(errors.is_empty(), "{consumer}: {errors:?}");
+    }
+    let consumer = "@no_implicit_prelude module consumer; mount core.text.text.Text as Words; fn read(words:Words)->Int {words.cap}";
+    let errors = check(
+        &mut checker(),
+        "consumer",
+        &[("core.text.text", library), ("consumer", consumer)],
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("VisibilityError") && error.contains("cap")),
+        "{errors:?}"
+    );
+    let decoy =
+        "@no_implicit_prelude module foreign; public type Text is { public foreign_field: Bool };";
+    let consumer = "@no_implicit_prelude module consumer; mount core.text.text.Text as Words; mount foreign.Text as Foreign; fn read(words:Words)->Bool {words.foreign_field}";
+    let errors = check(
+        &mut checker(),
+        "consumer",
+        &[
+            ("core.text.text", library),
+            ("foreign", decoy),
+            ("consumer", consumer),
+        ],
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("E103") && error.contains("foreign_field")),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn archive_representation_keeps_literal_identity_only_for_the_defining_module() {
+    for eager in [false, true] {
+        for (owner, accepts) in [("core.text.text", true), ("foreign", false)] {
+            let mut meta = verum_types::core_metadata::CoreMetadata::default();
+            add_archive_record(&mut meta, owner, "Text", "size_field", "Int", true);
+            let consumer = format!(
+                "@no_implicit_prelude module consumer; mount {owner}.Text as Words; fn make()->Words {{ \"verum\" }}"
+            );
+            let errors = check(
+                &mut archive_checker(meta, eager),
+                "consumer",
+                &[("consumer", &consumer)],
+            );
+            if accepts {
+                assert!(errors.is_empty(), "eager={eager} {owner}: {errors:?}");
+            } else {
+                assert!(
+                    errors.iter().any(|e| e.contains("Mismatch")),
+                    "eager={eager} {owner}: {errors:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn descriptor_only_archives_use_the_representation_field_owner_and_type() {
+    use verum_types::core_metadata::{CoreMetadata, TypeDescriptorKind};
+    for (visibility, is_public) in [
+        (verum_ast::Visibility::Public, true),
+        (verum_ast::Visibility::Private, false),
+    ] {
+        let mut metadata = CoreMetadata::default();
+        add_archive_record(&mut metadata, "core.text.text", "Text", "data", "Int", true);
+        let descriptor = metadata
+            .types
+            .get_mut(&Text::from("core.text.text.Text"))
+            .unwrap();
+        descriptor.source_declaration = None;
+        let TypeDescriptorKind::Record { fields } = &mut descriptor.kind else {
+            panic!("expected a record descriptor")
+        };
+        fields[0].declared_visibility = Some(visibility);
+        fields[0].is_public = is_public;
+        let source = "@no_implicit_prelude module consumer; mount core.text.text.Text as Words; fn read(words:Words)->Int { words.data }";
+        for eager in [false, true] {
+            let errors = check(
+                &mut archive_checker(metadata.clone(), eager),
+                "consumer",
+                &[("consumer", source)],
+            );
+            if is_public {
+                assert!(errors.is_empty(), "eager={eager}: {errors:?}");
+            } else {
+                assert!(
+                    errors
+                        .iter()
+                        .any(|e| e.contains("VisibilityError") && e.contains("data")),
+                    "eager={eager}: {errors:?}"
+                );
+            }
+        }
+    }
+}

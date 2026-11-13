@@ -1212,7 +1212,12 @@ impl TypeChecker {
         // entry with a reference to itself erases the authority needed to
         // inspect variants and other nominal representations. Only additional
         // import spellings are references to the declaration.
-        let binding = if register_name == declared_name || register_name == declaration_key.as_str() {
+        let binding = if register_name == declared_name
+            || register_name == declaration_key.as_str()
+            || registered_type.primitive_name().is_some_and(|name| {
+                self.ctx.builtin_type_definition(name) == Some(&registered_type)
+            })
+        {
             registered_type
         } else {
             Type::Named {
@@ -24359,7 +24364,9 @@ bake to have this verified.",
                                     owner.as_str(), declaration.name.name.as_str(),
                                 ))
                         }
-                        _ => None,
+                        ty => ty.primitive_name()
+                            .filter(|name| self.ctx.builtin_type_definition(name) == Some(&ty))
+                            .map(Text::from),
                     });
                 let type_name = nominal_owner.unwrap_or_else(|| type_name.into());
                 let canonical = self.canonical_alias_target(type_name.as_str());

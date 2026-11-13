@@ -166,6 +166,22 @@ impl TypeChecker {
         Ok(self.declared_parameter_roster(name, span)?.values().cloned().collect())
     }
 
+    /// A literal carrier keeps its language identity in the record that supplies
+    /// its standard representation. Other records remain nominal, including a
+    /// record with the same name and layout in a different module.
+    fn declared_record_type(&self, declaration: &TypeDecl) -> Result<Type> {
+        let name = declaration.name.as_str();
+        let args = self.declared_nominal_arguments(&declaration.name.name, declaration.span)?;
+        if args.is_empty()
+            && WKT::declaring_source_module(name) == Some(self.current_module_path.as_str())
+            && let Some(builtin) = self.ctx.builtin_type_definition(name)
+            && builtin.primitive_name() == Some(name)
+        {
+            return Ok(builtin.clone());
+        }
+        Ok(Type::Named { path: Path::single(declaration.name.clone()), args })
+    }
+
     fn declared_parameter_roster(&self, name: &Text, span: Span)
         -> Result<&indexmap::IndexMap<Text, Type>>
     {
@@ -1666,10 +1682,7 @@ impl TypeChecker {
                 // This prevents type checker from treating them as structural `{ }` types.
                 if fields.is_empty() {
                     // Register as opaque Named type (no field structure)
-                    let named_type = Type::Named {
-                        path: Path::single(type_decl.name.clone()),
-                        args: self.declared_nominal_arguments(&type_name, type_decl.span)?,
-                    };
+                    let named_type = self.declared_record_type(type_decl)?;
                     // Store ONLY the named type, no __struct_fields_ entry
                     self.define_type_in_current_module(type_name.clone(), named_type);
 
@@ -1684,10 +1697,7 @@ impl TypeChecker {
                     //
 
                     // The record structure is stored separately for field access validation
-                    let named_type = Type::Named {
-                        path: Path::single(type_decl.name.clone()),
-                        args: self.declared_nominal_arguments(&type_name, type_decl.span)?,
-                    };
+                    let named_type = self.declared_record_type(type_decl)?;
 
                     // Store the named type for protocol method dispatch
                     self.define_type_in_current_module(type_name.clone(), named_type.clone());
@@ -3017,10 +3027,7 @@ impl TypeChecker {
                 // Empty records (e.g., `type Empty is { };`) need field structure for pattern matching.
                 if fields.is_empty() {
                     // Register as Named type
-                    let named_type = Type::Named {
-                        path: Path::single(type_decl.name.clone()),
-                        args: self.declared_nominal_arguments(&type_name, type_decl.span)?,
-                    };
+                    let named_type = self.declared_record_type(type_decl)?;
                     // Module-aware: empty record registration.
                     self.define_type_in_current_module(type_name.clone(), named_type);
 
@@ -3031,10 +3038,7 @@ impl TypeChecker {
                     // Non-empty record: Register as Named type with field structure
 
                     // Register as Named type for nominal identity
-                    let named_type = Type::Named {
-                        path: Path::single(type_decl.name.clone()),
-                        args: self.declared_nominal_arguments(&type_name, type_decl.span)?,
-                    };
+                    let named_type = self.declared_record_type(type_decl)?;
 
                     // Module-aware: non-empty record registration.
                     self.define_type_in_current_module(type_name.clone(), named_type.clone());

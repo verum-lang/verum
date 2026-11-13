@@ -1329,6 +1329,9 @@ impl TypeChecker {
         metadata: std::sync::Arc<crate::core_metadata::CoreMetadata>,
     ) -> Self {
         let mut checker = Self::with_minimal_context();
+        // Retained source records must see their language carriers when first
+        // elaborated, even if a consumer installs the remaining builtins later.
+        checker.register_primitives();
         if checker.install_core_metadata(metadata.clone()) {
             checker.load_stdlib_from_metadata(&metadata);
         }

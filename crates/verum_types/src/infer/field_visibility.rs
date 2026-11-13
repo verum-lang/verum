@@ -1,7 +1,7 @@
 //! Authorize declaration and callable contracts before value conversion.
 
 use super::TypeChecker;
-use crate::core_metadata::TypeDescriptorKind;
+use crate::core_metadata::{TypeDescriptor, TypeDescriptorKind};
 use crate::{Result, Type, TypeError};
 use verum_ast::{Span, Visibility, decl::TypeDeclBody};
 use verum_common::{List, Maybe, Text};
@@ -29,6 +29,26 @@ impl TypeChecker {
                     .collect(),
             },
         );
+    }
+
+    pub(super) fn scalar_representation_key(receiver: &Type) -> Option<Text> {
+        let name = receiver.primitive_name()?;
+        let owner = verum_common::well_known_types::WellKnownType::declaring_source_module(name)?;
+        Some(Self::source_type_declaration_key(owner, name))
+    }
+
+    fn metadata_record_visibility(descriptor: &TypeDescriptor) -> Option<RecordVisibility> {
+        let TypeDescriptorKind::Record { fields } = &descriptor.kind else {
+            return None;
+        };
+        let owner = descriptor.origin_module_path.as_ref()
+            .filter(|owner| !owner.is_empty()).unwrap_or(&descriptor.module_path);
+        Some(RecordVisibility {
+            owner: owner.clone(),
+            fields: fields.iter().map(|field| {
+                (field.name.clone(), field.declared_visibility.clone())
+            }).collect(),
+        })
     }
 
     fn unknown_record_visibility(&self, key: &Text, member: &str, span: Span) -> TypeError {
@@ -75,6 +95,14 @@ impl TypeChecker {
                     continue;
                 }
                 _ => {}
+            }
+            if let Some(key) = Self::scalar_representation_key(&current) {
+                if let Some(policy) = self.source_record_field_visibility.get(&key) {
+                    return Ok(Some(policy.clone()));
+                }
+                return Ok(self.core_metadata.as_ref()
+                    .and_then(|metadata| Self::metadata_type_with_declaring_key(metadata, &key))
+                    .and_then(Self::metadata_record_visibility));
             }
             let (key, args) = match &current {
                 Type::Named { path, args } => (self.path_to_string(path), args),
@@ -129,28 +157,10 @@ impl TypeChecker {
             if let Some(metadata) = &self.core_metadata
                 && let Some(descriptor) = Self::metadata_type_with_declaring_key(metadata, &key)
             {
-                match &descriptor.kind {
-                    TypeDescriptorKind::Record { fields } => {
-                        let owner = descriptor
-                            .origin_module_path
-                            .as_ref()
-                            .filter(|owner| !owner.is_empty())
-                            .unwrap_or(&descriptor.module_path);
-                        return Ok(Some(RecordVisibility {
-                            owner: owner.clone(),
-                            fields: fields
-                                .iter()
-                                .map(|field| {
-                                    (field.name.clone(), field.declared_visibility.clone())
-                                })
-                                .collect(),
-                        }));
-                    }
-                    TypeDescriptorKind::Alias { .. } => {
-                        return Err(self.unknown_record_visibility(&key, member, span));
-                    }
-                    _ => return Ok(None),
+                if matches!(descriptor.kind, TypeDescriptorKind::Alias { .. }) {
+                    return Err(self.unknown_record_visibility(&key, member, span));
                 }
+                return Ok(Self::metadata_record_visibility(descriptor));
             }
             // A module mount changes the spelling of a nominal path, not its
             // field policy. Follow only the registered owner after exact
