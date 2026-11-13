@@ -5,7 +5,7 @@ use std::sync::Arc;
 use verum_ast::ItemKind;
 use verum_fast_parser::Parser;
 use verum_vbc::{
-    codegen::VbcCodegen, deserialize::deserialize_module, interpreter::Interpreter,
+    codegen::VbcCodegen, deserialize::deserialize_module_validated, interpreter::Interpreter,
     serialize::serialize_module,
 };
 
@@ -48,7 +48,7 @@ fn catalog_key_probe() -> Int {
     .unwrap();
     source.items.extend(control.items);
     let module = VbcCodegen::new().compile_module(&source).unwrap();
-    let wire = deserialize_module(&serialize_module(&module).unwrap()).unwrap();
+    let wire = deserialize_module_validated(&serialize_module(&module).unwrap()).unwrap();
     for (path, module) in [("source", module), ("wire", wire)] {
         let id = module
             .functions
