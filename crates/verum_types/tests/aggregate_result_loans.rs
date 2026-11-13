@@ -110,6 +110,15 @@ fn forwarding_shared_inputs_and_mutating_outside_the_borrow_are_valid() {
 #[test]
 fn concrete_owned_generic_results_do_not_retain_transient_input_loans() {
     for source in [
+        "type Packed is (Int);
+         fn copy_count(x: &Int) -> Packed { Packed(*x) }
+         fn owned() -> Packed { let x = 7; copy_count(&x) }",
+        "type Packed is (Int, Bool);
+         fn copy_count(x: &Int) -> Packed { Packed(*x, true) }
+         fn owned() -> Packed { let x = 7; copy_count(&x) }",
+        "type Marker is ();
+         fn copy_count(x: &Int) -> Marker { Marker }
+         fn owned() -> Marker { let x = 7; copy_count(&x) }",
         "fn copy_count(x: &Int) -> Batch<Int> { Batch.Full(*x) }
          fn owned() -> Batch<Int> { let x = 7; copy_count(&x) }",
         "type Parcel<T> is { public value: T };
@@ -136,6 +145,12 @@ fn concrete_owned_generic_results_do_not_retain_transient_input_loans() {
 #[test]
 fn instantiated_fields_still_reject_local_reference_escape() {
     for source in [
+        "type Packed is (&Int);
+         fn hold(x: &Int) -> Packed { Packed(x) }
+         fn leak() -> Packed { let x = 7; hold(&x) }",
+        "type Packed is (Bool, &Int);
+         fn hold(x: &Int) -> Packed { Packed(true, x) }
+         fn leak() -> Packed { let x = 7; hold(&x) }",
         "type Parcel<T> is { public value: T };
          fn hold(x: &Int) -> Parcel<&Int> { Parcel { value: x } }
          fn leak() -> Parcel<&Int> { let x = 7; hold(&x) }",
