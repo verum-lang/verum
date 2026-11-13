@@ -32,7 +32,7 @@ module core.database.sqlite.native.l3_btree.comparator;
 // =============================================================================
 
 mount collections.List;
-mount base.{Result, Ok, Err, Text, Maybe};
+mount core.base.result.Result;
 
 // -----------------------------------------------------------------------------
 // KeyKind / SeekKey
@@ -67,7 +67,9 @@ public fn seek_key_kind(k: &SeekKey) -> KeyKind {
 /// Compare two `Int64` values.  Used for rowid keys + integer
 /// columns inside records.
 public fn cmp_int64(a: Int64, b: Int64) -> Ordering {
-    Ordering.from_int(a - b)
+    if a < b { Less }
+    else if a > b { Greater }
+    else { Equal }
 }
 
 /// Lex-compare two byte sequences.  Used as the BINARY collation
@@ -122,9 +124,7 @@ public fn cmp_keys(target: &SeekKey, cell: &CellKey) -> Result<Ordering, Text> {
 }
 
 // -----------------------------------------------------------------------------
-// Binary search — given a cell-key extractor + cell count, find the
-// largest cell index whose key is <= target.  Standard textbook
-// B-tree descent uses this on every interior page.
+// Binary search for an exact key or its insertion position.
 // -----------------------------------------------------------------------------
 
 /// Result of a binary search at one level of a B-tree page.
@@ -139,8 +139,8 @@ public fn cmp_keys(target: &SeekKey, cell: &CellKey) -> Result<Ordering, Text> {
 ///                   for interior pages descend via the LEFT child;
 ///                   for leaves position the cursor BEFORE this cell
 public type BinarySearchResult is {
-    index: Int,
-    ordering: Ordering,
+    public index: Int,
+    public ordering: Ordering,
 };
 
 /// `cell_at` is a pure callback returning the cell key at index `i`
@@ -161,7 +161,6 @@ where F: fn(Int) -> CellKey
 {
     let mut lo: Int = 0;
     let mut hi: Int = cell_count;
-    let mut last_ordering: Ordering = Less;
 
     while lo < hi {
         let mid = lo + (hi - lo) / 2;
@@ -177,18 +176,16 @@ where F: fn(Int) -> CellKey
             Less    => {
                 // target < cell[mid] — search left half.
                 hi = mid;
-                last_ordering = Greater;   // relative to cells we passed
             }
             Greater => {
                 // target > cell[mid] — search right half.
                 lo = mid + 1;
-                last_ordering = Less;
             }
         }
     }
 
     Result.Ok(BinarySearchResult {
         index: lo,
-        ordering: last_ordering,
+        ordering: if lo == cell_count { Less } else { Greater },
     })
 }

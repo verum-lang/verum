@@ -1,0 +1,33 @@
+mount core.base.result.Result;
+mount core.database.sqlite.native.l3_btree.comparator.{CellKey, SeekKey, binary_search_cells, cmp_int64};
+
+fn assert_position(count: Int, key: Int64, position: Int, relation: Ordering) {
+    let step: Int = 10;
+    let target = SeekKey.SkRowId(key);
+    let found = binary_search_cells(count, &target, |i: Int| CellKey.CkRowId(((i + 1) * step) as Int64));
+    match found {
+        Result.Ok(hit) => {
+            assert_eq(hit.index, position);
+            assert_eq(hit.ordering, relation);
+        }
+        Result.Err(message) => panic(message),
+    }
+}
+
+@test
+fn test_rowid_search_returns_the_relation_at_the_insertion_point() {
+    assert_position(4, 30_i64, 2, Equal);
+    assert_position(4, 5_i64, 0, Greater);
+    assert_position(4, 25_i64, 2, Greater);
+    assert_position(4, 41_i64, 4, Less);
+    assert_position(0, 25_i64, 0, Less);
+}
+
+@test
+fn test_signed_rowid_order_spans_the_entire_domain() {
+    assert_eq(cmp_int64(Int64.MIN, Int64.MAX), Less);
+    assert_eq(cmp_int64(Int64.MAX, Int64.MIN), Greater);
+    assert_eq(cmp_int64(Int64.MIN, Int64.MIN), Equal);
+}
+
+fn main() {}
