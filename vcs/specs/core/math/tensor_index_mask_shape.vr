@@ -1,0 +1,11 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: stdlib, tensor, protocols
+mount core.math.tensor.{DynTensor, Tensor, RuntimeShapedTensor, tensor_sqrt};
+mount core.math.algebra.RealField;
+
+fn index_rank(indices: &DynTensor<USize>) -> USize { indices.rank() }
+fn mask_rank(mask: &Tensor<Bool>) -> USize { mask.ndim() }
+fn first_dimension<T>(values: &RuntimeShapedTensor<T>) -> USize { values.dim(0) }
+fn numeric_root<T: RealField>(values: &DynTensor<T>) -> DynTensor<T> { tensor_sqrt(values) }

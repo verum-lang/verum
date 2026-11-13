@@ -117,13 +117,14 @@ fn test_memory_pool_reuse() {
 
 #[test]
 fn test_tensor_zeros_creation() {
-    let shapes = vec![vec![10], vec![4, 4], vec![2, 3, 4], vec![2, 2, 2, 2]];
-
-    for shape in shapes {
-        let t = TensorHandle::zeros(&shape, DType::F32).unwrap();
-        assert_eq!(t.ndim as usize, shape.len());
-        for (i, &dim) in shape.iter().enumerate() {
-            assert_eq!(t.shape[i], dim);
+    let shapes: &[&[usize]] = &[&[], &[10], &[4, 0], &[4, 4], &[2, 3, 4], &[2, 2, 2, 2]];
+    for dtype in [DType::F32, DType::U32, DType::U64, DType::Bool] {
+        for &shape in shapes {
+            let tensor = TensorHandle::zeros(shape, dtype).unwrap();
+            assert_eq!(tensor.dtype, dtype);
+            assert_eq!(tensor.ndim as usize, shape.len());
+            assert_eq!(&tensor.shape[..shape.len()], shape);
+            assert_eq!(tensor.numel, shape.iter().product::<usize>());
         }
     }
 }

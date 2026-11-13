@@ -1,0 +1,9 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L2
+// @tags: stdlib, tensor, protocols
+// @expected-error: E405
+// @expected-error-count: 1
+mount core.math.tensor.{DynTensor, tensor_sqrt};
+
+fn invalid(indices: &DynTensor<USize>) -> DynTensor<USize> { tensor_sqrt(indices) }
