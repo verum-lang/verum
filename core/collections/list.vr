@@ -3143,7 +3143,7 @@ implement<T: Hash> Hash for List<T> {
     fn hash(&self, hasher: &mut Hasher) {
         hasher.write_int(self.len);
         for i in range(0, self.len) {
-            let item: &T = unsafe { &*self.ptr.offset(i) };
+            let item: &T = &self[i];
             item.hash(hasher);
         }
     }
