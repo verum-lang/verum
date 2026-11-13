@@ -17300,6 +17300,7 @@ impl TypeChecker {
     fn resolve_dyn_method(
         &mut self,
         bounds: &[Text],
+        bindings: &Map<Text, Type>,
         method: &Ident,
         args: &[Expr],
         span: Span,
@@ -17314,7 +17315,15 @@ impl TypeChecker {
                 self.ensure_stdlib_type_loaded_transitive(bound);
                 lookup(self)
             });
-            if let Some((signature, receiver)) = contract {
+            if let Some((mut signature, receiver)) = contract {
+                signature.try_replace_types(|ty| {
+                    let Some(slot) = ty.self_projection_name() else { return Ok(None) };
+                    bindings.get(&Text::from(slot)).cloned().map(Some).ok_or_else(|| TypeError::OtherWithCodeSpanned {
+                        code: "E405".into(),
+                        msg: format!("dynamic method `{method}` requires associated type binding `{slot}`").into(),
+                        span,
+                    })
+                })?;
                 let Type::Function { params, return_type, .. } = signature else {
                     return Err(TypeError::NotAFunction { ty: signature.to_string().into(), span });
                 };
@@ -17702,8 +17711,8 @@ impl TypeChecker {
         // When receiver is &dyn Protocol (DynProtocol type), resolve method
         // from the protocol's declared methods. Look up via protocol_checker.
         // ============================================================
-        if let Type::DynProtocol { ref bounds, .. } = recv_ty
-            && let Some(result) = self.resolve_dyn_method(bounds, method, args, span)?
+        if let Type::DynProtocol { ref bounds, ref bindings } = recv_ty
+            && let Some(result) = self.resolve_dyn_method(bounds, bindings, method, args, span)?
         {
             return Ok(result);
         }
@@ -17898,8 +17907,8 @@ impl TypeChecker {
                 | Type::Ownership { inner, .. } => inner.as_ref(),
                 other => other,
             };
-            if let Type::DynProtocol { bounds, .. } = peeled
-                && let Some(result) = self.resolve_dyn_method(bounds, method, args, span)?
+            if let Type::DynProtocol { bounds, bindings } = peeled
+                && let Some(result) = self.resolve_dyn_method(bounds, bindings, method, args, span)?
             {
                 return Ok(result);
             }

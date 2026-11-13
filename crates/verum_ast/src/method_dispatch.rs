@@ -135,13 +135,20 @@ impl MethodDispatch {
         impl Visitor for SelfInResult {
             fn visit_type(&mut self, ty: &crate::Type) {
                 use crate::ty::{PathSegment, TypeKind};
-                if let TypeKind::Path(path) = &ty.kind
-                    && (matches!(path.segments.as_slice(), [PathSegment::SelfValue])
-                        || matches!(path.segments.as_slice(), [PathSegment::Name(name)] if name.as_str() == "Self"))
-                {
+                let is_self = |ty: &crate::Type| matches!(&ty.kind, TypeKind::Path(path)
+                    if matches!(path.segments.as_slice(), [PathSegment::SelfValue])
+                        || matches!(path.segments.as_slice(), [PathSegment::Name(name)] if name.as_str() == "Self"));
+                if is_self(ty) {
                     self.0 = true;
                 } else if !self.0 {
-                    walk_type(self, ty);
+                    // Both syntactic representations project a member: the base
+                    // names its owner and is not returned as a runtime value.
+                    let projected = match &ty.kind {
+                        TypeKind::AssociatedType { base, .. } => is_self(base),
+                        TypeKind::Qualified { self_ty, .. } => is_self(self_ty),
+                        _ => false,
+                    };
+                    if !projected { walk_type(self, ty); }
                 }
             }
         }

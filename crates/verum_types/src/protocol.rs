@@ -11340,17 +11340,18 @@ impl ProtocolChecker {
             None => return Ok(()), // Unknown protocol, skip check
         };
 
-        self.check_definition_object_safety(protocol)
+        self.check_definition_object_safety(protocol).map(|_| ())
     }
 
-    /// Check the complete declaration without publishing it into the registry.
-    /// Source admission uses this same policy for a recursive `dyn` obligation.
+    /// Check a complete definition before publication and return the associated
+    /// equalities that must be bound at an individual object type.
     pub(crate) fn check_definition_object_safety(
         &self,
         protocol: &Protocol,
-    ) -> Result<(), List<ObjectSafetyError>> {
+    ) -> Result<verum_common::Set<Text>, List<ObjectSafetyError>> {
         let protocol_name = &protocol.name;
         let mut errors = List::new();
+        let mut associated = verum_common::Set::new();
 
         // Rule 1: Check for associated constants
         // Basic protocols with simple associated types (initial release) — 2 line 11664
@@ -11477,7 +11478,9 @@ impl ProtocolChecker {
                 // Rule 3d: Must not return Self
                 // Basic protocols with simple associated types (initial release) — 2 line 11662
                 if method.dispatch.is_some_and(|m| m.returns_self)
-                    || self.type_contains_self(return_type)
+                    || Self::object_result_exposes_self(return_type, |name| {
+                        associated.insert(name.into());
+                    })
                 {
                     errors.push(ObjectSafetyError::ReturnsSelf {
                         method_name: method_name.clone(),
@@ -11487,57 +11490,26 @@ impl ProtocolChecker {
         }
 
         if errors.is_empty() {
-            Ok(())
+            Ok(associated)
         } else {
             Err(errors)
         }
     }
 
-    /// Check if a type contains Self
-    fn type_contains_self(&self, ty: &Type) -> bool {
-        match ty {
-            Type::Named { path, args } => {
-                if Self::path_is_name(path, "Self") {
-                    return true;
-                }
-                // Check type arguments recursively
-                for arg in args {
-                    if self.type_contains_self(arg) {
-                        return true;
-                    }
-                }
-                false
+    /// Collect the receiver-associated slots exposed in an object result. A
+    /// bound projection is a distinct type; its receiver is a qualifier. A
+    /// bare Self anywhere else, including inside wrappers, cannot be erased.
+    fn object_result_exposes_self(
+        result: &Type, mut projection: impl FnMut(&str),
+    ) -> bool {
+        use std::ops::ControlFlow::{Break, Continue};
+        result.find_type(|ty| {
+            if let Some(name) = ty.self_projection_name() {
+                projection(name);
+                return Continue(false);
             }
-            Type::Function {
-                params,
-                return_type,
-                ..
-            } => {
-                for param in params {
-                    if self.type_contains_self(param) {
-                        return true;
-                    }
-                }
-                self.type_contains_self(return_type)
-            }
-            Type::Tuple(types) => {
-                for t in types {
-                    if self.type_contains_self(t) {
-                        return true;
-                    }
-                }
-                false
-            }
-            Type::Array { element, .. } => self.type_contains_self(element),
-            Type::Reference { inner, .. }
-            | Type::CheckedReference { inner, .. }
-            | Type::UnsafeReference { inner, .. }
-            | Type::Ownership { inner, .. }
-            | Type::Pointer { inner, .. }
-            | Type::VolatilePointer { inner, .. } => self.type_contains_self(inner),
-            Type::Refined { base, .. } => self.type_contains_self(base),
-            _ => false,
-        }
+            if ty.is_declared_self() { Break(()) } else { Continue(true) }
+        }).is_some()
     }
 
     // ==================== Coherence Checking ====================

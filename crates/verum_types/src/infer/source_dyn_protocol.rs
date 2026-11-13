@@ -3,7 +3,53 @@
 use super::TypeChecker;
 use crate::{Result, Type, TypeError, protocol::{ObjectSafetyError, Protocol, ProtocolBound, ProtocolChecker}};
 use verum_ast::{Span, ty::{TypeBinding, TypeBound, TypeBoundKind}};
-use verum_common::{List, Map, Text};
+use verum_common::{List, Map, Set, Text};
+
+fn binding_error(span: Span, message: impl Into<Text>) -> TypeError {
+    TypeError::OtherWithCodeSpanned { code: "E405".into(), msg: message.into(), span }
+}
+
+fn require_object_result_bindings(
+    protocol: &Protocol,
+    available: &Set<Text>,
+    span: Span,
+    registry: &ProtocolChecker,
+) -> Result<()> {
+    let required = registry.check_definition_object_safety(protocol)
+        .map_err(|errors| object_safety_error(&protocol.name, errors))?;
+    let mut missing: List<_> = required.into_iter().filter(|name| !available.contains(name)).collect();
+    missing.sort();
+    if missing.is_empty() {
+        Ok(())
+    } else {
+        Err(binding_error(span, format!("dynamic protocol `{}` requires explicit associated type bindings for {}",
+            protocol.name, missing.join(", "))))
+    }
+}
+
+/// A binding refers to a single ordinary member of one erased protocol.
+fn bind_object_members(
+    associated: &Map<Text, crate::protocol::AssociatedType>,
+    bindings: &Map<Text, Type>,
+    claimed: &mut Set<Text>,
+    span: Span,
+) -> Result<Set<Text>> {
+    let mut matched = Set::new();
+    for name in bindings.keys() {
+        if let Some(member) = associated.get(name) {
+            if !matches!(member.kind, crate::advanced_protocols::AssociatedTypeKind::Regular)
+                || !member.binders.local.is_empty()
+            {
+                return Err(binding_error(span, format!("associated family `{name}` requires its declared arguments")));
+            }
+            if !claimed.insert(name.clone()) {
+                return Err(binding_error(span, format!("multiple dynamic protocol bounds declare associated type `{name}`")));
+            }
+            matched.insert(name.clone());
+        }
+    }
+    Ok(matched)
+}
 
 fn object_safety_error(name: &Text, errors: List<ObjectSafetyError>) -> TypeError {
     let mut messages: List<Text> = errors.iter().map(|error| error.to_string().into()).collect();
@@ -22,6 +68,14 @@ impl TypeChecker {
         span: Span,
     ) -> Result<Type> {
         let mut names = List::new();
+        let mut binding_types = Map::new();
+        for binding in bindings.into_iter().flatten() {
+            let ty = self.ast_to_type(&binding.ty)?;
+            if binding_types.insert(binding.name.name.clone(), ty).is_some() {
+                return Err(binding_error(binding.name.span, format!("duplicate dynamic associated type binding `{}`", binding.name)));
+            }
+        }
+        let mut bound_members = Set::new();
         for bound in bounds {
             let TypeBoundKind::Protocol(path) = &bound.kind else { continue; };
             let lexical = self.path_to_string(path);
@@ -47,7 +101,9 @@ impl TypeChecker {
                         "recursive dyn bound `{identity}` has no shared source registration transaction"
                     ).into()));
                 }
-                self.source_type_registration.headers[index].dyn_required.get_or_insert(span);
+                let header = &mut self.source_type_registration.headers[index];
+                let matched = bind_object_members(&header.associated, &binding_types, &mut bound_members, span)?;
+                header.dyn_required.push((span, matched));
                 names.push(identity);
                 continue;
             }
@@ -67,18 +123,16 @@ impl TypeChecker {
                     "dyn bound `{identity}` requires a protocol declaration"
                 ).into()));
             };
-            registry.check_object_safety(&selected)
-                .map_err(|errors| object_safety_error(&selected, errors))?;
+            let protocol = registry.get_protocol_definition(selected.as_str())
+                .ok_or_else(|| binding_error(span, format!("dynamic protocol `{selected}` has no declaration")))?;
+            let matched = bind_object_members(&protocol.associated_types, &binding_types, &mut bound_members, span)?;
+            require_object_result_bindings(protocol, &matched, span, &registry)?;
             names.push(selected);
         }
-        let mut bindings_map = Map::new();
-        if let Some(bindings) = bindings {
-            for binding in bindings {
-                let ty = self.ast_to_type(&binding.ty)?;
-                bindings_map.insert(binding.name.name.clone(), ty);
-            }
+        if let Some(name) = binding_types.keys().find(|name| !bound_members.contains(*name)) {
+            return Err(binding_error(span, format!("no selected dynamic protocol declares associated type `{name}`")));
         }
-        Ok(Type::DynProtocol { bounds: names, bindings: bindings_map })
+        Ok(Type::DynProtocol { bounds: names, bindings: binding_types })
     }
 
     /// Erasure requires evidence for the selected declaration and its indices.
@@ -202,11 +256,11 @@ impl TypeChecker {
     pub(super) fn check_pending_protocol_object_safety(
         &self,
         protocol: &Protocol,
-        required: Option<Span>,
+        required: super::source_protocol_header::DynObligations,
     ) -> Result<()> {
-        if required.is_some() {
-            self.protocol_checker.read().check_definition_object_safety(protocol)
-                .map_err(|errors| object_safety_error(&protocol.name, errors))?;
+        let registry = self.protocol_checker.read();
+        for (span, available) in required {
+            require_object_result_bindings(protocol, &available, span, &registry)?;
         }
         Ok(())
     }

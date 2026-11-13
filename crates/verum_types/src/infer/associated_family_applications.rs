@@ -29,10 +29,10 @@ pub(super) fn projection_parts(ty: &Type) -> Option<(&Type, Text, &[Type])> {
 /// Source admission also proves ordinary zero-argument associated members.
 /// Keep their existing normalization representation unchanged.
 pub(super) fn checked_projection_parts(ty: &Type) -> Option<(&Type, Text, &[Type])> {
-    match ty {
-        Type::Generic { name, args } if name.starts_with("::") && args.len() == 1 =>
-            Some((&args[0], name[2..].into(), &[])),
-        _ => projection_parts(ty),
+    if let Some((receiver, name)) = ty.ordinary_projection() {
+        Some((receiver, name.into(), &[]))
+    } else {
+        projection_parts(ty)
     }
 }
 
@@ -89,7 +89,7 @@ impl TypeChecker {
             .map(|variable| Type::Var(*variable))
             .collect();
         let header = super::source_protocol_header::SourceProtocolHeader {
-            dyn_required: None,
+            dyn_required: List::new(),
             identity: protocol.name.clone(), parameters: protocol.source_parameters.clone().unwrap_or_default(),
             owner: Some(owner.clone()), constraints: protocol.constraints.clone(), associated: protocol.associated_types.clone(), supers: protocol.super_protocols.clone(),
         };

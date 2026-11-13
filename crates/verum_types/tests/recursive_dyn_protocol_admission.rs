@@ -73,17 +73,15 @@ fn imported(source: &str, provider: &str, extra: Option<&str>) -> Vec<String> {
     let ast = FastParser::new()
         .parse_module_str(source, FileId::new(1))
         .unwrap();
-    let mut e = Vec::new();
+    let mut errors = c.prepare_module_declarations(&ast);
     for item in &ast.items {
-        if let verum_ast::ItemKind::Mount(m) = &item.kind {
-            if let Err(x) = c.process_import(m, "fixture.main", &registry) {
-                e.push(x.to_string());
-            }
+        if let Err(error) = c.check_item(item) {
+            errors.push(error);
         }
     }
-    e.extend(c.take_deferred_errors().iter().map(ToString::to_string));
-    e.extend(c.diagnostic_sources().iter().map(ToString::to_string));
-    e
+    errors.extend(c.take_deferred_errors());
+    errors.iter().map(ToString::to_string)
+        .chain(c.diagnostic_sources().iter().map(ToString::to_string)).collect()
 }
 
 #[test]
@@ -359,4 +357,74 @@ fn erasure_preserves_declared_associated_equalities() {
     good(&format!("{declarations} fn get(x: &Log) -> &dyn Source<Item = Int> {{ x }}"));
     bad(&format!("{declarations} fn get(x: &Log) -> &dyn Source<Item = Bool> {{ x }}"));
     bad(&format!("{declarations} fn get(x: &Log) -> &dyn Source<Missing = Int> {{ x }}"));
+}
+
+#[test]
+fn dyn_result_projections_require_declared_concrete_bindings() {
+    let source = "
+        type Packet<T> is Empty | Value(T);
+        type Source is protocol { type Item; fn read(&self) -> Packet<Self.Item>; };
+        type IntSource is ();
+        implement Source for IntSource {
+            type Item = Int; fn read(&self) -> Packet<Int> { Packet.Value(41) }
+        }";
+    good(&format!("{source} fn erase(x: &IntSource) -> &dyn Source<Item = Int> {{ x }}
+        fn read(x: &dyn Source<Item = Int>) -> Packet<Int> {{ x.read() }}
+        fn erase_generic<S: Source<Item = Int>>(x: &S) -> &dyn Source<Item = Int> {{ x }}"));
+    for declaration in [
+        "type Unbound is (&dyn Source);",
+        "type WrongSlot is (&dyn Source<Other = Int>);",
+        "type DuplicateSlot is (&dyn Source<Item = Int, Item = Bool>);",
+        "type Defaults is protocol { type Item = Int; fn get(&self) -> Self.Item; };
+         type UnboundDefault is (&dyn Defaults);",
+        "fn erase(x: &IntSource) -> &dyn Source<Item = Bool> { x }",
+        "fn erase_generic<S: Source>(x: &S) -> &dyn Source<Item = Int> { x }",
+        "type Other is protocol { type Item; fn other(&self) -> Self.Item; };
+         type Ambiguous is (&dyn Source<Item = Int> + Other);",
+        "fn wrong(x: &dyn Source<Item = Int>) -> Packet<Bool> { x.read() }",
+    ] {
+        bad(&format!("{source} {declaration}"));
+    }
+    for output in ["Self", "Packet<Self>", "(Self.Item, Self)"] {
+        unsafe_dyn(&format!("type Packet<T> is Empty | Value(T);
+            type Source is protocol {{ type Item; fn read(&self) -> {output}; }};
+            type Invalid is (&dyn Source<Item = Int>);"));
+    }
+}
+
+#[test]
+fn recursive_object_obligations_keep_independent_associated_bindings() {
+    for (bound, expected) in [
+        ("&dyn Feed<Item = Int>", true),
+        ("&dyn Feed<Other = Int>", false),
+        ("&dyn Feed", false),
+    ] {
+        let source = format!("type Feed is protocol {{
+            type Item; fn next(&self) -> &dyn Feed<Item = Int>;
+            fn another(&self) -> {bound}; fn get(&self) -> Self.Item;
+        }};");
+        assert_eq!(errors(&source).is_empty(), expected, "{source}");
+    }
+}
+
+#[test]
+fn associated_object_results_survive_source_and_metadata_replay() {
+    let provider = "public type Feed is protocol { type Item; fn get(&self) -> Self.Item; };";
+    for (result, valid) in [("Int", true), ("Bool", false)] {
+        let consumer = format!("mount fixture.lib.Feed as Renamed;
+            fn read(x: &dyn Renamed<Item = Int>) -> {result} {{ x.get() }}");
+        let mut checker = replay("type Feed is protocol { type Item; fn get(&self) -> Self.Item; };");
+        checker.set_current_module_path("fixture.client");
+        let metadata_consumer = format!("mount owner.Feed;
+            fn read(x: &dyn Feed<Item = Int>) -> {result} {{ x.get() }}");
+        let archive_ast = FastParser::new().parse_module_str(&metadata_consumer, FileId::new(19)).unwrap();
+        let mut diagnostics = checker.prepare_module_declarations(&archive_ast);
+        for item in &archive_ast.items {
+            if let Err(error) = checker.check_item(item) { diagnostics.push(error); }
+        }
+        diagnostics.extend(checker.take_deferred_errors());
+        assert_eq!(diagnostics.is_empty(), valid, "{metadata_consumer}: {diagnostics:?}");
+        let errors = imported(&consumer, provider, None);
+        assert_eq!(errors.is_empty(), valid, "{consumer}: {errors:?}");
+    }
 }

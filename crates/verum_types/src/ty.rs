@@ -1697,6 +1697,28 @@ impl Type {
             crate::computational_properties::PropertyRequirement::Unrestricted)
     }
 
+    /// The ordinary associated type carrier keeps its receiver as its sole operand.
+    pub(crate) fn ordinary_projection(&self) -> Option<(&Type, &str)> {
+        match self {
+            Type::Generic { name, args } if let [receiver] = args.as_slice() => {
+                Some((receiver, name.as_str().strip_prefix("::")?))
+            }
+            _ => None,
+        }
+    }
+
+    /// Only a projection of this receiver consumes equality evidence from a
+    /// dynamic object. Equal spellings on some other receiver are unrelated.
+    pub(crate) fn self_projection_name(&self) -> Option<&str> {
+        let (receiver, name) = self.ordinary_projection()?;
+        receiver.is_declared_self().then_some(name)
+    }
+
+    pub(crate) fn is_declared_self(&self) -> bool {
+        matches!(self, Type::Named { path, args } if args.is_empty()
+            && path.as_ident().is_some_and(|ident| ident.as_str() == "Self"))
+    }
+
     /// Construct a callable whose body footprint is not known.
     pub fn function_with_requirement(params: List<Type>, return_type: Type, property_requirement: crate::computational_properties::PropertyRequirement) -> Self {
         Type::Function { params, return_type: Box::new(return_type), contexts: None,

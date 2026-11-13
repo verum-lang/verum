@@ -10,6 +10,8 @@ use verum_ast::{
 };
 use verum_common::{List, Map, Text};
 
+pub(super) type DynObligations = List<(Span, verum_common::Set<Text>)>;
+
 #[derive(Debug)]
 pub(crate) struct SourceProtocolHeader {
     pub identity: Text,
@@ -18,7 +20,7 @@ pub(crate) struct SourceProtocolHeader {
     pub constraints: ProtocolConstraints,
     pub associated: Map<Text, AssociatedType>,
     pub supers: List<ProtocolBound>,
-    pub dyn_required: Option<Span>,
+    pub(super) dyn_required: DynObligations,
 }
 
 impl SourceProtocolHeader {
@@ -54,7 +56,7 @@ impl TypeChecker {
         supers: &[ProtocolBound],
         items: &[ProtocolItem],
         declared_default_methods: &[Text],
-    ) -> Result<(Map<Text, ProtocolMethod>, Map<Text, AssociatedType>, Option<Span>)> {
+    ) -> Result<(Map<Text, ProtocolMethod>, Map<Text, AssociatedType>, DynObligations)> {
         // A recursive source load introduces a different Self. Its method
         // obligations must not inherit the caller's equally-spelled receiver.
         let previous = std::mem::take(&mut self.source_type_registration.projection_assumptions);
@@ -80,7 +82,7 @@ impl TypeChecker {
         supers: &[ProtocolBound],
         items: &[ProtocolItem],
         declared_default_methods: &[Text],
-    ) -> Result<(Map<Text, ProtocolMethod>, Map<Text, AssociatedType>, Option<Span>)> {
+    ) -> Result<(Map<Text, ProtocolMethod>, Map<Text, AssociatedType>, DynObligations)> {
         let mut associated = Map::new();
         for item in items {
             if let ProtocolItemKind::Type { name, .. } = &item.kind {
@@ -108,7 +110,7 @@ impl TypeChecker {
             constraints: constraints.clone(),
             associated: associated.clone(),
             supers: supers.iter().cloned().collect(),
-            dyn_required: None,
+            dyn_required: List::new(),
         };
         let span = items.first().map(|item| item.span).unwrap_or_default();
         let self_bound = header.self_bound(span);

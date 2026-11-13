@@ -176,14 +176,26 @@ impl Type {
     }
 
     pub(crate) fn contains_type(&self, predicate: impl Fn(&Type) -> bool) -> bool {
-        let mut stack = vec![self];
-        while let Some(ty) = stack.pop() {
-            if predicate(ty) {
-                return true;
+        use std::ops::ControlFlow;
+        self.find_type(|ty| {
+            if predicate(ty) { ControlFlow::Break(()) } else { ControlFlow::Continue(true) }
+        }).is_some()
+    }
+
+    /// Visit children unless the caller has discharged this whole subtree.
+    pub(crate) fn find_type<R>(
+        &self,
+        mut visit: impl FnMut(&Type) -> std::ops::ControlFlow<R, bool>,
+    ) -> Option<R> {
+        let mut pending = List::from_single(self);
+        while let Some(ty) = pending.pop() {
+            match visit(ty) {
+                std::ops::ControlFlow::Break(result) => return Some(result),
+                std::ops::ControlFlow::Continue(true) => push_type_children!(ty, pending),
+                std::ops::ControlFlow::Continue(false) => {}
             }
-            push_type_children!(ty, stack);
         }
-        false
+        None
     }
 
     /// Collect just the declaration slots; previously projected types are closed.
@@ -215,19 +227,26 @@ impl Type {
         mut resolve: impl FnMut(&RecordFieldSlot, &UniverseLevel) -> Result<Type, Text>,
     ) -> Result<Type, Text> {
         let mut result = self.clone();
-        let mut stack = vec![&mut result];
+        result.try_replace_types(|ty| match ty {
+            Type::RecordField { slot, receiver: None, level } => resolve(slot, level).map(Some),
+            _ => Ok(None),
+        })?;
+        Ok(result)
+    }
+
+    /// Parallel rewriting: children of a replacement belong to its original
+    /// caller's scope, and must not be rewritten again.
+    pub(crate) fn try_replace_types<E>(
+        &mut self, mut replace: impl FnMut(&Type) -> Result<Option<Type>, E>,
+    ) -> Result<(), E> {
+        let mut stack = List::from_single(self);
         while let Some(ty) = stack.pop() {
-            if let Type::RecordField {
-                slot,
-                receiver: None,
-                level,
-            } = ty
-            {
-                *ty = resolve(slot, level)?;
+            if let Some(replacement) = replace(ty)? {
+                *ty = replacement;
             } else {
                 push_type_children!(ty, stack, mut);
             }
         }
-        Ok(result)
+        Ok(())
     }
 }
