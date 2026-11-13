@@ -706,13 +706,12 @@ fn declared_tuple_construction_adds_no_effects_to_its_arguments() {
     }
 }
 
-#[test]
-fn actual_runtime_config_source_admission() {
+fn release_stdlib_graph(session: &crate::Session) -> (SourceRegistry, crate::phases::semantic_analysis::SemanticAnalysisPhase) {
     use crate::core_compiler::StdlibModuleResolver;
     use crate::phases::semantic_analysis::SemanticAnalysisPhase;
     use verum_fast_parser::FastParser;
+
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../core");
-    let session = crate::Session::new(crate::options::CompilerOptions::default());
     let target = session.cfg_evaluator().config().clone();
     let mut resolver = StdlibModuleResolver::with_target(&root, target.clone());
     resolver.discover().unwrap();
@@ -732,9 +731,37 @@ fn actual_runtime_config_source_admission() {
     let registry = source_registry(selected.iter().map(|(owner, path, ast)|
         (owner.as_str(), path.as_str(), ast))).unwrap();
     let phase = SemanticAnalysisPhase::new().with_language_features(session.language_features()).with_target(target);
-    let (owner, _, module) = selected.iter().find(|(name, _, _)| name == "core.runtime.config").unwrap();
-    let mut checker = phase.configured_checker();
-    let result = check_source_types(&mut checker, owner, module, &registry,
-        |error| error.to_diagnostic_with_span(Some(|span| session.convert_span(span))));
-    result.unwrap();
+    (registry, phase)
+}
+
+#[test]
+fn release_runtime_and_sync_source_admission() {
+    let session = crate::Session::new(crate::options::CompilerOptions::default());
+    let (registry, phase) = release_stdlib_graph(&session);
+    for owner in ["core.runtime.config", "core.sync"] {
+        let module = registry.read().get_by_path(owner).unwrap().ast.clone();
+        check_source_types(&mut phase.configured_checker(), owner, &module, &registry,
+            |error| error.to_diagnostic_with_span(Some(|span| session.convert_span(span))))
+            .unwrap_or_else(|errors| panic!("{owner}: {errors:?}"));
+    }
+
+    for (receiver, marker, valid) in [
+        ("Map<Int, Int>", "Send", true),
+        ("Set<Int>", "Sync", true),
+        ("Result<Int, Bool>", "Sync", true),
+        ("Map<Int, Local>", "Send", false),
+        ("Result<Int, Local>", "Send", false),
+        ("Result<Local, Int>", "Sync", false),
+    ] {
+        let source = format!("module marker_probe; mount core.sync.{{Send, Sync}}; mount core.collections.map.Map; mount core.collections.set.Set; type Local is {{ value: Int }}; fn bound<T: {marker}>(_value: T) {{}} fn probe(value: {receiver}) {{ bound(value); }}");
+        let module = Parser::new(&source).parse_module().unwrap();
+        let result = check_source_module(&mut phase.configured_checker(), "marker_probe", &module, &registry);
+        if valid {
+            result.unwrap_or_else(|errors| panic!("{receiver}: {marker}: {errors:?}"));
+        } else {
+            let errors = result.expect_err("unmarked payload satisfied a transfer bound");
+            assert!(errors.iter().any(|error| error.code() == Some("E405") && error.message().contains(marker)),
+                "{receiver}: {marker}: {errors:?}");
+        }
+    }
 }
