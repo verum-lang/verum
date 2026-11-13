@@ -25,9 +25,9 @@
     lifecycle: Lifecycle.Definition
 )
 module core.math.guardrails;
-mount core.math.tensor;
-mount core.math.nn;
-mount core.math.agent;
+mount core.math.nn.Module;
+mount core.math.agent.Agent;
+mount core.math.internal.Value;
 mount core.sync.mutex.{Mutex};
 mount core.text.regex.{Regex};
 

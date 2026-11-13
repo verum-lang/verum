@@ -25,9 +25,10 @@
     lifecycle: Lifecycle.Definition
 )
 module core.math.rag;
-mount core.math.tensor;
-mount core.math.nn;
-mount core.math.agent;
+mount core.math.tensor.{DynTensor, sub, mul, sum};
+mount core.math.nn.Module;
+mount core.math.agent.{ChatMessage, Role, MessageContent};
+mount core.encoding.value.Value;
 
 // =============================================================================
 // Document Types
