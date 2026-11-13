@@ -28,6 +28,9 @@ pub(crate) struct SourceTypeRegistration {
     /// Completed alias bodies usable by this transaction's own proof queries.
     /// Other checkers see them only after the entire registration commits.
     staged_aliases: Map<Text, crate::protocol::AssociatedTypeAssignment>,
+    /// Fully elaborated nested declarations. Only proof queries issued by
+    /// this transaction may use their kind and arity before publication.
+    pub(super) staged_heads: crate::protocol::DeclarationHeads,
     pub depth: usize,
     pub failure: Option<Text>,
     pub aliases: Map<Text, (Option<Type>, Option<verum_common::List<Text>>)>,
@@ -43,6 +46,15 @@ struct AcceptedSourceType {
 }
 
 impl SourceTypeRegistration {
+    pub(super) fn proof_environment<'a>(
+        &'a self, protocols: &'a [crate::protocol::WhereClause],
+        callables: &'a Map<crate::ty::TypeVar, Type>,
+    ) -> crate::protocol::ConstraintEnvironment<'a> {
+        crate::protocol::ConstraintEnvironment {
+            protocols, callables, local_heads: (!self.staged_heads.is_empty()).then_some(&self.staged_heads),
+        }
+    }
+
     pub(super) fn declaration(&self, key: &Text) -> Option<&TypeDecl> {
         self.pending.get(key).or_else(|| self.completed_declaration(key))
     }
@@ -220,12 +232,15 @@ impl super::TypeChecker {
         self.source_type_registration.depth -= 1;
         if let Err(error) = &result {
             self.source_type_registration.failure = Some(error.to_string().into());
-        } else if !outermost && matches!(declaration.body, verum_ast::TypeDeclBody::Alias(_)) {
-            if let (_, Some(alias)) = self.completed_protocol_type_authority(&key, declaration) {
+        } else if !outermost {
+            let (arity, alias) = self.completed_protocol_type_authority(&key, declaration);
+            self.source_type_registration.staged_heads.insert(key.clone(), (declaration.body.kind(), arity));
+            if let Some(alias) = alias {
                 self.source_type_registration.staged_aliases.insert(key.clone(), alias);
             }
         }
         if outermost {
+            self.source_type_registration.staged_heads.clear();
             self.source_type_registration.staged_aliases.clear();
             let pending = std::mem::take(&mut self.source_type_registration.pending);
             let aliases = std::mem::take(&mut self.source_type_registration.aliases);

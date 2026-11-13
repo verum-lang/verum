@@ -20,8 +20,7 @@ impl ProtocolChecker {
         source_receiver: &Type,
         proof_receiver: &Type,
         bound: &ProtocolBound,
-        assumptions: &[WhereClause],
-        callables: &verum_common::Map<TypeVar, Type>,
+        environment: ConstraintEnvironment<'_>,
     ) -> Result<List<WhereClause>, Text> {
         let key = self.make_protocol_key(&bound.protocol);
         let mut requirements = List::new();
@@ -29,7 +28,7 @@ impl ProtocolChecker {
             for index in index.candidates(proof_receiver, self.requires_unfiltered_type_candidates(proof_receiver)) {
                 let implementation = &self.impls[index];
                 if let CandidateMatch::Matched(substitution) = self.match_implementation_candidate_in_environment(
-                    implementation, proof_receiver, Some(&bound.args), true, &ConstraintEnvironment { protocols: assumptions, callables },
+                    implementation, proof_receiver, Some(&bound.args), true, &environment,
                 ) {
                     for clause in &implementation.where_clauses {
                         requirements.push(clause.try_apply_subst(&substitution)?);
@@ -80,7 +79,13 @@ impl ProtocolChecker {
         assumptions: &[WhereClause],
         callables: &verum_common::Map<TypeVar, Type>,
     ) -> Result<(), Text> {
-        let mut context = Obligations::new(self, assumptions, callables);
+        self.check_universal_bounds_in(ty, bounds, ConstraintEnvironment::new(assumptions, callables))
+    }
+
+    pub(crate) fn check_universal_bounds_in(
+        &self, ty: &Type, bounds: &[ProtocolBound], environment: ConstraintEnvironment<'_>,
+    ) -> Result<(), Text> {
+        let mut context = Obligations::new(self, environment);
         for bound in bounds {
             context.check(ty, bound)?;
         }
@@ -95,14 +100,13 @@ impl ProtocolChecker {
         bound: &ProtocolBound,
         assumptions: &[WhereClause],
     ) -> Result<bool, Text> {
-        Obligations::new(self, assumptions, &Default::default()).assumption(subject, bound)
+        Obligations::new(self, ConstraintEnvironment::new(assumptions, &Default::default())).assumption(subject, bound)
     }
 }
 
 struct Obligations<'a> {
     checker: &'a ProtocolChecker,
-    assumptions: &'a [WhereClause],
-    callables: &'a verum_common::Map<TypeVar, Type>,
+    environment: ConstraintEnvironment<'a>,
     active: Vec<(Type, ProtocolBound)>,
     remaining: usize,
 }
@@ -110,10 +114,9 @@ struct Obligations<'a> {
 impl<'a> Obligations<'a> {
     fn new(
         checker: &'a ProtocolChecker,
-        assumptions: &'a [WhereClause],
-        callables: &'a verum_common::Map<TypeVar, Type>,
+        environment: ConstraintEnvironment<'a>,
     ) -> Self {
-        Self { checker, assumptions, callables, active: Vec::new(), remaining: 4096 }
+        Self { checker, environment, active: Vec::new(), remaining: 4096 }
     }
     fn same(&self, a: &Type, b: &Type) -> bool {
         self.checker.types_structurally_equal(a, b)
@@ -137,7 +140,7 @@ impl<'a> Obligations<'a> {
     }
     fn assumption(&mut self, ty: &Type, expected: &ProtocolBound) -> Result<bool, Text> {
         let mut pending: Vec<_> = self
-            .assumptions
+            .environment.protocols
             .iter()
             .flat_map(|clause| {
                 clause
@@ -160,7 +163,7 @@ impl<'a> Obligations<'a> {
                 let mut proved = true;
                 for name in expected.associated_types.keys() {
                     let equations = self.checker.associated_premise_equations(
-                        ty, expected, name, self.assumptions,
+                        ty, expected, name, self.environment.protocols,
                     )?;
                     if equations.is_empty() || !equations.iter().all(|(a, b)| self.same(a, b)) {
                         proved = false;
@@ -258,7 +261,7 @@ impl<'a> Obligations<'a> {
                 ty,
                 Some(&bound.args),
                 false,
-                &ConstraintEnvironment { protocols: self.assumptions, callables: self.callables },
+                &self.environment,
             ) {
                 CandidateMatch::Matched(substitution) => substitution,
                 CandidateMatch::Disjoint => continue,
@@ -277,11 +280,11 @@ impl<'a> Obligations<'a> {
             self.check_equalities(implementation, bound, &overlap)?;
             if let CandidateMatch::Matched(substitution) = self
                 .checker
-                .match_implementation_candidate_in_environment(implementation, ty, Some(&bound.args), true, &ConstraintEnvironment { protocols: self.assumptions, callables: self.callables })
+                .match_implementation_candidate_in_environment(implementation, ty, Some(&bound.args), true, &self.environment)
             {
                 let mut proved = self
                     .checker
-                    .check_implementation_callable_bounds_in_environment(implementation, &substitution, &ConstraintEnvironment { protocols: self.assumptions, callables: self.callables })
+                    .check_implementation_callable_bounds_in_environment(implementation, &substitution, &self.environment)
                     .is_ok();
                 for clause in &implementation.where_clauses {
                     let clause_ty = clause.ty.try_apply_subst(&substitution)?;

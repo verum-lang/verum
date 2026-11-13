@@ -5,12 +5,18 @@ use verum_ast::Span;
 
 /// Checked lexical premises used by both candidate inference and final proof.
 /// Candidate-owned variables may be inferred; caller declarations remain rigid.
-pub(super) struct ConstraintEnvironment<'a> {
+#[derive(Clone, Copy)]
+pub(crate) struct ConstraintEnvironment<'a> {
     pub protocols: &'a [WhereClause],
     pub callables: &'a verum_common::Map<crate::ty::TypeVar, Type>,
+    pub local_heads: Option<&'a super::DeclarationHeads>,
 }
 
-impl ConstraintEnvironment<'_> {
+impl<'a> ConstraintEnvironment<'a> {
+    pub fn new(protocols: &'a [WhereClause], callables: &'a verum_common::Map<crate::ty::TypeVar, Type>) -> Self {
+        Self { protocols, callables, local_heads: None }
+    }
+
     /// Reachable premise owners carry their whole declared contracts. Follow
     /// protocol subjects as well as callable outputs until neither adds a
     /// variable; no variable is introduced by an implementation requirement.
@@ -66,7 +72,7 @@ impl ProtocolChecker {
         args: Option<&[Type]>,
         rigid: bool,
     ) -> CandidateMatch {
-        self.match_implementation_candidate_in_environment(implementation, ty, args, rigid, &ConstraintEnvironment { protocols: &[], callables: &Default::default() })
+        self.match_implementation_candidate_in_environment(implementation, ty, args, rigid, &ConstraintEnvironment::new(&[], &Default::default()))
     }
 
     pub(super) fn match_implementation_candidate_in_environment(
@@ -91,21 +97,22 @@ impl ProtocolChecker {
         {
             return CandidateMatch::Unknown;
         }
+        let heads = HeadComparison { checker: self, local: environment.local_heads };
         if args.is_some_and(|args| implementation.protocol_args.len() != args.len())
-            || provably_disjoint(self, &implementation.for_type, ty)
+            || heads.disjoint(&implementation.for_type, ty)
             || args.is_some_and(|args| {
                 implementation
                     .protocol_args
                     .iter()
                     .zip(args)
-                    .any(|(a, b)| provably_disjoint(self, a, b))
+                    .any(|(a, b)| heads.disjoint(a, b))
             })
         {
             return CandidateMatch::Disjoint;
         }
         match self.try_match_candidate(implementation, ty, args, rigid, environment) {
             Some(substitution) => CandidateMatch::Matched(substitution),
-            None if repeated_head_is_disjoint(self, implementation, ty, args) => CandidateMatch::Disjoint,
+            None if heads.repeated_head_is_disjoint(implementation, ty, args) => CandidateMatch::Disjoint,
             None => CandidateMatch::Unknown,
         }
     }
@@ -324,90 +331,98 @@ pub(super) enum CandidateMatch {
     Unknown,
 }
 
-fn provably_disjoint(checker: &ProtocolChecker, a: &Type, b: &Type) -> bool {
-    compare_heads(checker, a, b, &mut |_, _| false)
+struct HeadComparison<'a> {
+    checker: &'a ProtocolChecker,
+    local: Option<&'a super::DeclarationHeads>,
 }
 
-/// All occurrences of a quantified implementation parameter must denote one
-/// type. A clash between two closed occurrences is evidence even when each
-/// receiver or argument, considered on its own, could match the implementation.
-fn repeated_head_is_disjoint(
-    checker: &ProtocolChecker, implementation: &ProtocolImpl, receiver: &Type, args: Option<&[Type]>,
-) -> bool {
-    let mut known = verum_common::Map::<crate::TypeVar, Type>::new();
-    let mut observe = |variable, actual: &Type| {
-        if !implementation.parameters.contains(&crate::context::GenericBinder::Type(variable))
-            || actual.has_value_inference() || !actual.free_vars().is_empty()
-        {
+impl HeadComparison<'_> {
+    fn disjoint(&self, a: &Type, b: &Type) -> bool {
+        self.compare(a, b, &mut |_, _| false)
+    }
+
+    /// All occurrences of a quantified implementation parameter must denote one
+    /// type. A clash between two closed occurrences is evidence even when each
+    /// receiver or argument, considered on its own, could match the implementation.
+    fn repeated_head_is_disjoint(
+        &self, implementation: &ProtocolImpl, receiver: &Type, args: Option<&[Type]>,
+    ) -> bool {
+        let mut known = verum_common::Map::<crate::TypeVar, Type>::new();
+        let mut observe = |variable, actual: &Type| {
+            if !implementation.parameters.contains(&crate::context::GenericBinder::Type(variable))
+                || actual.has_value_inference() || !actual.free_vars().is_empty()
+            {
+                return false;
+            }
+            if let Some(prior) = known.get(&variable) {
+                return self.disjoint(prior, actual);
+            }
+            known.insert(variable, actual.clone());
+            false
+        };
+        std::iter::once((&implementation.for_type, receiver))
+            .chain(implementation.protocol_args.iter().zip(args.into_iter().flatten()))
+            .any(|(pattern, actual)| self.compare(pattern, actual, &mut observe))
+    }
+
+    fn compare(
+        &self,
+        a: &Type,
+        b: &Type,
+        observe: &mut impl FnMut(crate::TypeVar, &Type) -> bool,
+    ) -> bool {
+        let checker = self.checker;
+        let (Some(left), Some(right)) = (checker.resolve_alias_head(a), checker.resolve_alias_head(b))
+        else { return false };
+        let (a, b) = (left.as_ref(), right.as_ref());
+        if let Type::Var(variable) = a { return observe(*variable, b); }
+        if checker.resolved_heads_equal(a, b) {
             return false;
         }
-        if let Some(prior) = known.get(&variable) {
-            return provably_disjoint(checker, prior, actual);
-        }
-        known.insert(variable, actual.clone());
-        false
-    };
-    std::iter::once((&implementation.for_type, receiver))
-        .chain(implementation.protocol_args.iter().zip(args.into_iter().flatten()))
-        .any(|(pattern, actual)| compare_heads(checker, pattern, actual, &mut observe))
-}
+        if checker.declared_heads_are_disjoint_in(a, b, self.local) { return true; }
+        if let Some(compatible) = ProtocolChecker::compare_reference_applications(a, b,
+            |left, right| !self.compare(left, right, observe))
+        { return !compatible; }
+        match (a, b) {
+            (Type::Named { path: a, args: aa }, Type::Named { path: b, args: ba }) => {
+                !checker.paths_equal(a, b)
+                    || aa.len() != ba.len()
+                    || aa
+                        .iter()
+                        .zip(ba)
+                        .any(|(a, b)| self.compare(a, b, observe))
+            }
 
-fn compare_heads(
-    checker: &ProtocolChecker,
-    a: &Type,
-    b: &Type,
-    observe: &mut impl FnMut(crate::TypeVar, &Type) -> bool,
-) -> bool {
-    let (Some(left), Some(right)) = (checker.resolve_alias_head(a), checker.resolve_alias_head(b))
-    else { return false };
-    let (a, b) = (left.as_ref(), right.as_ref());
-    if let Type::Var(variable) = a { return observe(*variable, b); }
-    if checker.resolved_heads_equal(a, b) {
-        return false;
-    }
-    if checker.declared_heads_are_disjoint(a, b) { return true; }
-    if let Some(compatible) = ProtocolChecker::compare_reference_applications(a, b,
-        |left, right| !compare_heads(checker, left, right, observe))
-    { return !compatible; }
-    match (a, b) {
-        (Type::Named { path: a, args: aa }, Type::Named { path: b, args: ba }) => {
-            !checker.paths_equal(a, b)
-                || aa.len() != ba.len()
-                || aa
-                    .iter()
-                    .zip(ba)
-                    .any(|(a, b)| compare_heads(checker, a, b, observe))
+            (Type::Generic { name: a, args: aa }, Type::Generic { name: b, args: ba })
+                if !a.starts_with("::") && !b.starts_with("::") =>
+            {
+                a != b
+                    || aa.len() != ba.len()
+                    || aa
+                        .iter()
+                        .zip(ba)
+                        .any(|(a, b)| self.compare(a, b, observe))
+            }
+            (
+                Type::Function { params: a, return_type: ar, .. },
+                Type::Function { params: b, return_type: br, .. },
+            ) => a.len() != b.len()
+                || a.iter().zip(b).any(|(a, b)| self.compare(a, b, observe))
+                || self.compare(ar, br, observe),
+            (Type::Function { .. }, Type::Record(_) | Type::Variant(_) | Type::Tuple(_))
+            | (Type::Record(_) | Type::Variant(_) | Type::Tuple(_), Type::Function { .. }) => true,
+            (Type::Tuple(a), Type::Tuple(b)) => {
+                a.len() != b.len()
+                    || a.iter()
+                        .zip(b)
+                        .any(|(a, b)| self.compare(a, b, observe))
+            }
+            (
+                Type::Unit | Type::Bool | Type::Int | Type::Float | Type::Char | Type::Text,
+                Type::Unit | Type::Bool | Type::Int | Type::Float | Type::Char | Type::Text,
+            ) => a != b,
+            _ => false,
         }
-
-        (Type::Generic { name: a, args: aa }, Type::Generic { name: b, args: ba })
-            if !a.starts_with("::") && !b.starts_with("::") =>
-        {
-            a != b
-                || aa.len() != ba.len()
-                || aa
-                    .iter()
-                    .zip(ba)
-                    .any(|(a, b)| compare_heads(checker, a, b, observe))
-        }
-        (
-            Type::Function { params: a, return_type: ar, .. },
-            Type::Function { params: b, return_type: br, .. },
-        ) => a.len() != b.len()
-            || a.iter().zip(b).any(|(a, b)| compare_heads(checker, a, b, observe))
-            || compare_heads(checker, ar, br, observe),
-        (Type::Function { .. }, Type::Record(_) | Type::Variant(_) | Type::Tuple(_))
-        | (Type::Record(_) | Type::Variant(_) | Type::Tuple(_), Type::Function { .. }) => true,
-        (Type::Tuple(a), Type::Tuple(b)) => {
-            a.len() != b.len()
-                || a.iter()
-                    .zip(b)
-                    .any(|(a, b)| compare_heads(checker, a, b, observe))
-        }
-        (
-            Type::Unit | Type::Bool | Type::Int | Type::Float | Type::Char | Type::Text,
-            Type::Unit | Type::Bool | Type::Int | Type::Float | Type::Char | Type::Text,
-        ) => a != b,
-        _ => false,
     }
 }
 
@@ -419,7 +434,7 @@ impl ProtocolChecker {
         implementation: &ProtocolImpl,
         substitution: &Substitution,
     ) -> Result<(), verum_common::Text> {
-        self.check_implementation_callable_bounds_in_environment(implementation, substitution, &ConstraintEnvironment { protocols: &[], callables: &Default::default() })
+        self.check_implementation_callable_bounds_in_environment(implementation, substitution, &ConstraintEnvironment::new(&[], &Default::default()))
     }
 
     pub(super) fn check_implementation_callable_bounds_in_environment(

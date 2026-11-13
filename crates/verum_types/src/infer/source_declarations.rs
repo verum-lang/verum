@@ -691,7 +691,8 @@ impl TypeChecker {
             // implementation or an explicit caller assumption may still prove
             // this exact instantiated goal independently of that declaration.
             return self.protocol_checker.read()
-                .check_universal_bounds_with_callables(receiver, std::slice::from_ref(bound), assumptions, callables)
+                .check_universal_bounds_in(receiver, std::slice::from_ref(bound),
+                    self.source_type_registration.proof_environment(assumptions, callables))
                 .map_err(|error| TypeError::OtherWithCodeSpanned {
                     code: "E405".into(),
                     msg: format!("recursive source implementation obligation has no independent evidence: {error}").into(),

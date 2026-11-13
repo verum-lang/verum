@@ -6,11 +6,13 @@ use std::sync::{Arc, OnceLock};
 use verum_ast::{Ident, Path, Span, decl::TypeDeclBodyKind};
 use verum_common::{List, Map, Text, well_known_types::type_names};
 
+pub(crate) type DeclarationHeads = Map<Text, (TypeDeclBodyKind, Option<usize>)>;
+
 #[derive(Clone, Default)]
 pub(super) struct TypeAuthority {
     builtins: Map<Text, Text>,
     representatives: Map<Text, Type>,
-    declarations: Map<Text, (TypeDeclBodyKind, Option<usize>)>,
+    declarations: DeclarationHeads,
     aliases: Map<Text, AssociatedTypeAssignment>,
     proof_aliases: OnceLock<Arc<Map<Text, Type>>>,
 }
@@ -117,6 +119,10 @@ impl ProtocolChecker {
     }
 
     fn head_identity(&self, ty: &Type) -> Option<HeadIdentity> {
+        self.head_identity_in(ty, None)
+    }
+
+    fn head_identity_in(&self, ty: &Type, local: Option<&DeclarationHeads>) -> Option<HeadIdentity> {
         if ty.reference_parts().is_some() {
             return Some(HeadIdentity::Reference);
         }
@@ -129,7 +135,9 @@ impl ProtocolChecker {
             return Some(HeadIdentity::Builtin(scalar_identity(name)));
         }
         let (key, arity) = nominal_key(ty)?;
-        if let Some((kind, declared_arity)) = self.type_authority.declarations.get(&key) {
+        if let Some((kind, declared_arity)) = local.and_then(|heads| heads.get(&key))
+            .or_else(|| self.type_authority.declarations.get(&key))
+        {
             return (*declared_arity == Some(arity)
                 && (kind.is_product_type()
                     || kind.is_sum_type()
@@ -210,7 +218,13 @@ impl ProtocolChecker {
     }
 
     pub(super) fn declared_heads_are_disjoint(&self, left: &Type, right: &Type) -> bool {
-        match (self.head_identity(left), self.head_identity(right)) {
+        self.declared_heads_are_disjoint_in(left, right, None)
+    }
+
+    pub(super) fn declared_heads_are_disjoint_in(
+        &self, left: &Type, right: &Type, local: Option<&DeclarationHeads>,
+    ) -> bool {
+        match (self.head_identity_in(left, local), self.head_identity_in(right, local)) {
             (Some(HeadIdentity::Builtin(left)), Some(HeadIdentity::Builtin(right))) => {
                 left != right
             }

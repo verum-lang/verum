@@ -30,6 +30,46 @@
     }
 
     #[test]
+    fn transaction_local_heads_only_discharge_exact_nominal_disjointness() {
+        use verum_ast::decl::TypeDeclBodyKind::{Alias, Record};
+
+        let key = Type::Generic { name: "inventory.Key".into(), args: List::new() };
+        let mut checker = ProtocolChecker::new_empty();
+        checker.register_protocol(Protocol {
+            source_parameters: Some(Arc::new(List::new())),
+            constraints: ProtocolConstraints::Declared {
+                self_type: TypeVar::fresh(), parameters: List::new(),
+                defaults: List::new(), parameter_bounds: List::new(),
+            },
+            name: "ExactEvidence".into(), kind: ProtocolKind::Constraint,
+            type_params: List::new(), methods: Map::new(), associated_types: Map::new(),
+            associated_consts: Map::new(), super_protocols: List::new(),
+            specialization_info: None, defining_crate: None, span: Span::default(),
+        }).unwrap();
+        register(&mut checker, Type::Text);
+        register(&mut checker, key.clone());
+        let bounds = [ProtocolBound::simple(path())];
+        let callables = Map::new();
+        let prove = |heads: &DeclarationHeads| {
+            checker.check_universal_bounds_in(&key, &bounds, ConstraintEnvironment {
+                protocols: &[], callables: &callables, local_heads: Some(heads),
+            })
+        };
+        for (owner, kind, arity, accepted) in [
+            ("other.Key", Record, Some(0), false),
+            ("inventory.Key", Record, None, false),
+            ("inventory.Key", Record, Some(1), false),
+            ("inventory.Key", Alias, Some(0), false),
+            ("inventory.Key", Record, Some(0), true),
+        ] {
+            let heads = [(Text::from(owner), (kind, arity))].into_iter().collect();
+            let result = prove(&heads);
+            assert_eq!(result.is_ok(), accepted, "{owner} {kind:?} {arity:?}: {result:?}");
+        }
+        assert!(checker.check_universal_bounds(&key, &bounds, &[]).is_err());
+    }
+
+    #[test]
     fn optimistic_cache_rechecks_exact_receiver_after_routing_collision() {
         let first = nan(1);
         let second = nan(2);

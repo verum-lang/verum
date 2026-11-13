@@ -429,12 +429,14 @@ impl TypeChecker {
             // A declaration assumption can already prove this goal. Otherwise
             // follow only the actual matched implementation's owned telescope,
             // never guessed protocols for a nominal argument's spelling.
-            if self.protocol_checker.read().check_universal_bounds_with_callables(proof_receiver, std::slice::from_ref(&bound), assumptions, callables).is_ok() {
+            let environment = self.source_type_registration.proof_environment(assumptions, callables);
+            if self.protocol_checker.read().check_universal_bounds_in(proof_receiver, std::slice::from_ref(&bound), environment).is_ok() {
                 continue;
             }
             self.load_protocol_owner_blankets(&name)?;
             let registry = self.protocol_checker.read();
-            let requirements = registry.source_bound_requirements(&subject, proof_receiver, &bound, assumptions, callables)
+            let environment = self.source_type_registration.proof_environment(assumptions, callables);
+            let requirements = registry.source_bound_requirements(&subject, proof_receiver, &bound, environment)
                 .map_err(|error| refusal(span, error))?;
             for clause in requirements {
                 for required in clause.bounds {
@@ -443,9 +445,10 @@ impl TypeChecker {
             }
         }
         let expanded = self.staged_proof_receiver(ty, span)?;
+        let environment = self.source_type_registration.proof_environment(assumptions, callables);
         self.protocol_checker
             .read()
-            .check_universal_bounds_with_callables(expanded.as_ref().unwrap_or(ty), bounds, assumptions, callables)
+            .check_universal_bounds_in(expanded.as_ref().unwrap_or(ty), bounds, environment)
             .map_err(|error| refusal(span, error))
     }
 }

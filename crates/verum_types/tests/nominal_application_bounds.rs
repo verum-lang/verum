@@ -423,6 +423,26 @@ fn nested_settings(policy: &str, key: &str, settings: &str) -> Vec<String> {
 }
 
 #[test]
+fn nested_source_record_keys_use_their_own_nominal_evidence() {
+    let key = "mount demo.main.Observe; type Identifier is { part: Text };
+        implement Observe for Identifier { type Output = Bool; }";
+    let consumer = |key: &str| nested_settings(REFINED_POLICY, "", &format!(
+        "{key} mount demo.main.Table; public type Settings is {{ value: Table<Identifier> }};"
+    ));
+    let found = consumer(key);
+    assert!(found.is_empty(), "{found:#?}");
+
+    for bad_key in [
+        key.replace("part: Text", "part: Missing"),
+        key.replace("Output = Bool", "Output = Int"),
+        key.split("implement Observe").next().unwrap().to_owned(),
+    ] {
+        let found = consumer(&bad_key);
+        assert!(!found.is_empty(), "{bad_key}");
+    }
+}
+
+#[test]
 fn nested_source_loads_use_the_checked_refined_receiver() {
     let found = nested_settings(REFINED_POLICY, REFINED_KEY, NESTED_SETTINGS);
     assert!(found.is_empty(), "{found:#?}");

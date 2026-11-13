@@ -24,6 +24,8 @@ mod associated_assignment;
 mod implementation_match;
 #[path = "protocol_type_authority.rs"]
 mod type_authority;
+pub(crate) use implementation_match::ConstraintEnvironment;
+pub(crate) use type_authority::DeclarationHeads;
 #[path = "protocol_obligations.rs"]
 mod obligations;
 pub use associated_assignment::AssociatedTypeAssignment;
