@@ -337,32 +337,29 @@ implement Default for AsyncRuntimeConfig {
 // Task State
 // =============================================================================
 
-/// Internal task state wrapper for executor.
-/// Stores both the future and its result once completed.
-type TaskState<F: Future> is {
-    future: F,
-    task_id: Int,
-    completed: Bool,
-    /// Result storage - populated when future completes
-    result: Maybe<F.Output>,
-};
+/// A completed driver retains the exact output of its last poll.
+type TaskState<F: Future> is { future: F, result: Maybe<F.Output> };
 
 implement<F: Future> TaskState<F> {
-    fn new(future: F, task_id: Int) -> TaskState<F> {
-        TaskState {
-            future: future,
-            task_id: task_id,
-            completed: false,
-            result: Maybe.None,
+    fn new(future: F) -> TaskState<F> {
+        TaskState { future, result: Maybe.None }
+    }
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<()> {
+        if self.result is Maybe.Some(_) { return Poll.Ready(()); }
+        match self.future.poll(cx) {
+            Poll.Pending => Poll.Pending,
+            Poll.Ready(value) => {
+                self.result = Maybe.Some(value);
+                Poll.Ready(())
+            },
         }
     }
 
-    /// Take the result out of the task state.
-    /// Panics if res is not available.
-    fn take_result(&mut self) -> F.Output {
-        match self.result.take() {
-            Maybe.Some(r) => r,
-            Maybe.None => panic("TaskState.take_result called before completion"),
+    fn into_result(self) -> F.Output {
+        match self.result {
+            Maybe.Some(value) => value,
+            Maybe.None => panic("task result requested before completion"),
         }
     }
 }
@@ -1588,25 +1585,13 @@ implement AsyncRuntime {
         let task_id = self.next_task_id.fetch_add(1, MemoryOrdering.Relaxed);
 
         // Create task state wrapper
-        let state = Heap.new(TaskState.new(future, task_id));
+        let state = Heap.new(TaskState.new(future));
         let state_ptr = Heap.into_raw(state) as &unsafe Byte;
 
         // Define poll function (type-erased)
         let poll_fn: fn(&unsafe Byte, &mut Context) -> Poll<()> = |state_ptr: &unsafe Byte, cx: &mut Context| -> Poll<()> {
             let state = unsafe { &mut *(state_ptr as &mut TaskState<F>) };
-            if state.completed {
-                return Poll.Ready(());
-            }
-
-            match state.future.poll(cx) {
-                Poll.Ready(res) => {
-                    state.result = Maybe.Some(res);
-                    state.completed = true;
-                    return Poll.Ready(());
-                }
-                Poll.Pending => {}
-            };
-            Poll.Pending
+            state.poll(cx)
         };
 
         // Define drop function
@@ -1747,7 +1732,7 @@ implement AsyncRuntime {
 
         // Create task state with result storage
         let task_id = self.next_task_id.fetch_add(1, MemoryOrdering.Relaxed);
-        let mut state = TaskState.new(future, task_id);
+        let mut state = TaskState.new(future);
 
         // Create waker for this task
         let waker = create_runtime_waker(task_id, self);
@@ -1770,12 +1755,8 @@ implement AsyncRuntime {
             self.tick_count.fetch_add(1, MemoryOrdering.Relaxed);
 
             // Poll the main future
-            match state.future.poll(&mut cx) {
-                Poll.Ready(res) => {
-                    state.result = Maybe.Some(res);
-                    state.completed = true;
-                    break;
-                }
+            match state.poll(&mut cx) {
+                Poll.Ready(()) => break,
                 Poll.Pending => {
                     // Process spawned tasks with cooperative budget.
                     // Each tick processes at most `poll_budget` tasks to
@@ -1819,7 +1800,7 @@ implement AsyncRuntime {
         self.running.store(false, MemoryOrdering.Release);
 
         // Extract the result
-        state.take_result()
+        state.into_result()
     }
 
     /// Process ready tasks from the queue.
@@ -2361,25 +2342,13 @@ implement LocalExecutor {
         self.next_id = self.next_id + 1;
 
         // Create task state wrapper
-        let state = Heap.new(TaskState.new(future, task_id));
+        let state = Heap.new(TaskState.new(future));
         let state_ptr = Heap.into_raw(state) as &unsafe Byte;
 
         // Define poll function (type-erased)
         let poll_fn: fn(&unsafe Byte, &mut Context) -> Poll<()> = |state_ptr: &unsafe Byte, cx: &mut Context| -> Poll<()> {
             let state = unsafe { &mut *(state_ptr as &mut TaskState<F>) };
-            if state.completed {
-                return Poll.Ready(());
-            }
-
-            match state.future.poll(cx) {
-                Poll.Ready(res) => {
-                    state.result = Maybe.Some(res);
-                    state.completed = true;
-                    return Poll.Ready(());
-                }
-                Poll.Pending => {}
-            };
-            return Poll.Pending;
+            state.poll(cx)
         };
 
         // Define drop function
