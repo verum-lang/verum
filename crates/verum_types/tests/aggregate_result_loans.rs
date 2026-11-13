@@ -93,6 +93,25 @@ fn a_bound_payload_keeps_its_owner_borrowed() {
 }
 
 #[test]
+fn consuming_receivers_forward_stored_loans_without_borrowing_their_own_slot() {
+    let declarations = "
+        implement Node { fn finish(mut self, value: &Int) -> Sample { self.n = 2; Sample { ptr: value, total: self.n } } }
+        implement Sample { fn finish(self) -> Sample { self } }
+    ";
+    let good = format!("{declarations} fn build(value: &Int) -> Sample {{
+        let config = Node {{ n: 1 }}; config.finish(value) }}");
+    assert_eq!(errors(&good), List::<Text>::new());
+    for body in [
+        "fn leak() -> Sample { let local = 9; let stored = Sample { ptr: &local, total: 1 }; stored.finish() }",
+        "fn leak() -> Sample { let local = 9; let config = Node { n: 1 }; config.finish(&local) }",
+        "fn leak() -> Batch<(&Int, &Int)> { let config = Node { n: 1 }; config.view() }",
+    ] {
+        let diagnostics = errors(&format!("{declarations} {body}"));
+        assert!(diagnostics.iter().any(|d| d.contains("does not live long enough")), "{body}: {diagnostics:?}");
+    }
+}
+
+#[test]
 fn forwarding_shared_inputs_and_mutating_outside_the_borrow_are_valid() {
     for source in [
         "fn forward(x: &Int) -> Sample { let n = Node { n: 1 }; Sample { ptr: x, total: n.count() } }",

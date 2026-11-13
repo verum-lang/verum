@@ -391,7 +391,11 @@ impl TypeChecker {
                 }
             }
             ExprKind::MethodCall { receiver, args, .. } => {
-                if let Some((source, _)) = self.borrowed_record_place(receiver) {
+                // A consumed receiver passes on any loans in its value. Only
+                // a borrowed (or unresolved) receiver also lends its own slot.
+                if !self.type_registry.consumes_receiver(unparen(value).span)
+                    && let Some((source, _)) = self.borrowed_record_place(receiver)
+                {
                     add(found, source);
                 }
                 self.collect_reference_candidates(receiver, found);

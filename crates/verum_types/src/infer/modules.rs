@@ -17503,6 +17503,7 @@ impl TypeChecker {
                     tc.affine_tracker.use_value(&name.name, span)?;
                 }
             }
+            tc.type_registry.record_receiver_kind(span, kind);
             Ok(result)
         })
     }

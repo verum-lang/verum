@@ -2,6 +2,31 @@ use super::{Bindings, MAX_LOAN_SHAPE_STEPS, Node, Type, TypeChecker};
 use verum_common::List;
 
 #[test]
+fn every_resolution_at_a_source_site_must_consume_the_receiver() {
+    use crate::core_metadata::ReceiverKind::{SelfRef, SelfValue};
+    use crate::type_registry::TypeRegistry;
+    use verum_ast::{FileId, Span};
+
+    let site = Span::new(2, 5, FileId::new(1));
+    let mut registry = TypeRegistry::new();
+    for borrowed in [Some(SelfRef), None] {
+        for order in [[Some(SelfValue), borrowed], [borrowed, Some(SelfValue)]] {
+            for kind in order {
+                registry.record_receiver_kind(site, kind);
+            }
+            assert!(!registry.consumes_receiver(site));
+            registry.clear();
+        }
+    }
+    registry.record_receiver_kind(site, Some(SelfValue));
+    assert!(registry.consumes_receiver(site));
+    registry.record_receiver_kind(Span::dummy(), Some(SelfValue));
+    assert!(!registry.consumes_receiver(Span::dummy()));
+    registry.clear();
+    assert!(!registry.consumes_receiver(site));
+}
+
+#[test]
 fn wide_storage_cannot_bypass_the_work_budget() {
     let checker = TypeChecker::with_minimal_context();
     let fields: List<_> = std::iter::repeat_n(Type::Int, MAX_LOAN_SHAPE_STEPS - 1).collect();

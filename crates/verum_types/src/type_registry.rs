@@ -61,6 +61,9 @@ pub struct TypeRegistry {
     expr_types: Map<Span, Type>,
     /// Callable selected for an executed call, distinct from its result type.
     call_targets: Map<Span, Type>,
+    /// A source site consumes its receiver only if every resolution at that
+    /// span agrees. Expanded expressions can share a source location.
+    consuming_receivers: Map<Span, bool>,
 
     /// Variable types indexed by (span, name)
     ///
@@ -80,12 +83,25 @@ pub struct TypeRegistry {
 impl TypeRegistry {
     /// Create a new empty type registry
     pub fn new() -> Self {
-        Self {
-            expr_types: Map::new(),
-            call_targets: Map::new(),
-            var_types: Map::new(),
-            func_return_types: Map::new(),
+        Self::default()
+    }
+
+    pub(crate) fn record_receiver_kind(
+        &mut self,
+        span: Span,
+        kind: Option<crate::core_metadata::ReceiverKind>,
+    ) {
+        if !span.is_empty() {
+            let consumes = kind == Some(crate::core_metadata::ReceiverKind::SelfValue);
+            self.consuming_receivers
+                .entry(span)
+                .and_modify(|previous| *previous &= consumes)
+                .or_insert(consumes);
         }
+    }
+
+    pub(crate) fn consumes_receiver(&self, span: Span) -> bool {
+        self.consuming_receivers.get(&span) == Some(&true)
     }
 
     pub fn register_call_target(&mut self, span: Span, ty: Type) {
@@ -244,6 +260,7 @@ impl TypeRegistry {
     pub fn clear(&mut self) {
         self.expr_types.clear();
         self.call_targets.clear();
+        self.consuming_receivers.clear();
         self.var_types.clear();
         self.func_return_types.clear();
     }
