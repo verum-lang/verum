@@ -19,7 +19,6 @@
     lifecycle: Lifecycle.Definition
 )
 module core.async.task;
-mount sync.*;
 mount super.poll.*;
 mount super.waker.*;
 mount super.future.*;
@@ -31,7 +30,7 @@ mount core.base.memory.replace;
 mount core.runtime.pool.{ThreadPool};
 // Mounted rather than inherited: §4ter — the prelude carries only what
 // the LANGUAGE requires, and this is library API.
-mount core.sync.{Mutex, AtomicInt, AtomicBool};
+mount core.sync.{Mutex, AtomicInt, AtomicBool, MemoryOrdering, Send};
 
 // =============================================================================
 // Task State
@@ -363,11 +362,11 @@ implement<T: Send> Future for BlockingFuture<T> {
             // task has no panic-sensitive invariant on the
             // result slot, so a poisoned/Ok lock is operationally
             // identical here.
-            let mut g = match self.state.result.lock() {
-                Result.Ok(g)  => g,
-                Result.Err(p) => p.into_inner(),
+            let value: Maybe<T> = {
+                let mut guard = self.state.result.lock().unwrap_or_else(|p| p.into_inner());
+                guard.take()
             };
-            match g.take() {
+            match value {
                 Maybe.Some(v) => Poll.Ready(v),
                 Maybe.None    => panic("BlockingFuture polled after completion"),
             }
