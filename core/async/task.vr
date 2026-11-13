@@ -23,6 +23,7 @@ mount sync.*;
 mount super.poll.*;
 mount super.waker.*;
 mount super.future.*;
+mount core.base.memory.replace;
 // `spawn_blocking` routes through the dedicated blocking thread
 // pool (`core.runtime.pool.ThreadPool`) rather than the async
 // executor's worker pool — see the BlockingState/BlockingFuture
@@ -36,12 +37,57 @@ mount core.sync.{Mutex, AtomicInt, AtomicBool};
 // Task State
 // =============================================================================
 
-// Internal state of a task.
-type TaskState<T> is
-    | Pending           // Not yet started
-    | Running           // Currently executing
-    | Completed(T)      // Finished with result
-    | Cancelled;        // Was cancelled
+// Cancellation is a request until the scheduler has destroyed the future and
+// any result it produced concurrently.
+type TaskOutcome<T> is Pending | CancelRequested | Ready(Result<T, JoinError>) | Consumed(Bool);
+
+implement<T> TaskOutcome<T> {
+    fn is_finished(&self) -> Bool {
+        match self {
+            TaskOutcome.Ready(_) | TaskOutcome.Consumed(_) => true,
+            _ => false,
+        }
+    }
+
+    fn was_cancelled(&self) -> Bool {
+        match self {
+            TaskOutcome.Ready(Result.Err(JoinError.Cancelled)) | TaskOutcome.Consumed(true) => true,
+            _ => false,
+        }
+    }
+
+    fn request_cancel(&mut self) -> Bool {
+        if !(*self is TaskOutcome.Pending) { return false; }
+        *self = TaskOutcome.CancelRequested;
+        true
+    }
+
+    // Refusing a racing producer transfers the losing output back to it.
+    fn publish(&mut self, value: T) -> Result<(), T> {
+        if *self is TaskOutcome.CancelRequested { return Result.Err(value); }
+        if !(*self is TaskOutcome.Pending) { panic("task completed twice"); }
+        *self = TaskOutcome.Ready(Result.Ok(value));
+        Result.Ok(())
+    }
+
+    fn fail(&mut self, error: JoinError) {
+        if self.is_finished() { panic("task completed twice"); }
+        *self = TaskOutcome.Ready(Result.Err(error));
+    }
+
+    fn take_result(&mut self) -> Poll<Result<T, JoinError>> {
+        let cancelled = match self {
+            TaskOutcome.Pending | TaskOutcome.CancelRequested => return Poll.Pending,
+            TaskOutcome.Consumed(_) => panic("JoinHandle polled after completion"),
+            TaskOutcome.Ready(Result.Err(JoinError.Cancelled)) => true,
+            TaskOutcome.Ready(_) => false,
+        };
+        match replace(self, TaskOutcome.Consumed(cancelled)) {
+            TaskOutcome.Ready(value) => Poll.Ready(value),
+            _ => unreachable(),
+        }
+    }
+}
 
 // =============================================================================
 // Task<T>
