@@ -4,7 +4,7 @@
 use super::*;
 use crate::{
     mono::TypeSubstitution,
-    types::{TypeKind, TypeRef},
+    types::{Mutability, TypeKind, TypeRef},
 };
 use std::borrow::Cow;
 use verum_ast::{Expr, ExprKind};
@@ -480,8 +480,21 @@ impl VbcCodegen {
         info.type_param_ids.iter().map(|id| bindings.get(*id).cloned()).collect()
     }
 
-    fn bind_declared_operand(&self, function: &FunctionInfo, index: usize, formal: &TypeRef,
+    pub(super) fn bind_declared_operand(&self, function: &FunctionInfo, index: usize, formal: &TypeRef,
         actual: &TypeRef, bindings: &mut TypeSubstitution) -> Option<()> {
+        // A checked call can adapt the outer reference carrier. Its witness
+        // still describes the same pointee. Keep nested qualifiers exact and
+        // never infer write capability from an immutable argument.
+        let (formal, actual) = match (formal, actual) {
+            (TypeRef::Reference { inner: expected, mutability: expected_access, .. },
+             TypeRef::Reference { inner: supplied, mutability: supplied_access, .. }) => {
+                if *expected_access == Mutability::Mutable && *supplied_access != Mutability::Mutable {
+                    return None;
+                }
+                (expected.as_ref(), supplied.as_ref())
+            }
+            _ => (formal, actual),
+        };
         self.bind_source_declaration(formal, actual, bindings).then_some(())?;
         if matches!(formal, TypeRef::Generic(_)) && matches!(actual, TypeRef::Function { .. })
             && let Some(bound) = self.callable_parameter_bound(function, index)
@@ -611,11 +624,15 @@ impl VbcCodegen {
         }
         for (index, (formal, argument)) in params.iter().zip(args).enumerate() {
             let contextual = bindings.apply(formal).ok()?;
-            let actual = self.compiled_callable_signature(argument).cloned().or_else(|| self.source_expression_declaration(
-                argument,
-                fully_bound(formal, &bindings).then_some(&contextual),
-                depth + 1,
-            ))?;
+            let expected = fully_bound(formal, &bindings).then_some(&contextual);
+            let actual = self.compiled_callable_signature(argument).cloned().or_else(|| {
+                // Reference adaptation belongs to the selected call. Recover
+                // the operand's own declaration before contextual matching.
+                let supplied = matches!(formal, TypeRef::Reference { .. })
+                    .then(|| self.source_expression_declaration(argument, None, depth + 1))
+                    .flatten();
+                supplied.or_else(|| self.source_expression_declaration(argument, expected, depth + 1))
+            })?;
             self.bind_declared_operand(function, index, formal, &actual, &mut bindings)?;
         }
         fully_bound(return_type, &bindings).then(|| bindings.apply(return_type).ok()).flatten()
@@ -772,3 +789,7 @@ mod binder_tests {
         assert!(fully_bound(&quantified(1), &bindings));
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/codegen/call_operand_bindings.rs"]
+mod call_operand_bindings;

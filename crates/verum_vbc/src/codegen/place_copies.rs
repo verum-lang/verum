@@ -282,7 +282,7 @@ impl VbcCodegen {
                 if !matches!(formal, TypeRef::Concrete(_) | TypeRef::Instantiated { .. }) { return None; }
                 (formal, actual)
             } else { (formal, &actual) };
-            if !self.bind_source_declaration(formal, actual, &mut substitution) { return None; }
+            self.bind_declared_operand(info, offset, formal, actual, &mut substitution)?;
         }
         if let Instruction::CallG { type_args: witnesses, .. } = op
             && let Some(roster) = self.callable_generic_roster(info)
@@ -302,6 +302,19 @@ impl VbcCodegen {
                 ) { return None; }
             }
         }
+        // A representation-preserving cast can reuse an operand register.
+        // Its old binding cannot contradict the actual selected call's
+        // witness, even when it appears to bind every result parameter.
+        let witnesses = match op {
+            Instruction::CallG { type_args, .. } => {
+                if info.type_param_ids.len() != type_args.len() { return None; }
+                for (id, witness) in info.type_param_ids.iter().zip(type_args) {
+                    if substitution.get(*id).is_some_and(|bound| bound != witness) { return None; }
+                }
+                Some(type_args)
+            }
+            _ => None,
+        };
         // Layout-only archive returns and unbound slots remain unknown. In
         // particular, CallG's ABI witnesses cannot reconstruct reference layers.
         if super::constructor_types::fully_bound(return_type, &substitution) {
@@ -310,17 +323,11 @@ impl VbcCodegen {
         // Temporaries such as literal arguments have no lexical binding. For a
         // direct call, independently instantiate the selected source signature
         // from its operands and require agreement with the emitted call.
-        let Instruction::CallG { type_args: witnesses, .. } = op else { return None; };
-        if info.type_param_ids.len() != witnesses.len() || params.len() != source_args.len() {
-            return None;
-        }
+        let witnesses = witnesses?;
+        if params.len() != source_args.len() { return None; }
         let result = self.source_call_result(info, type_args, source_args, None, depth)?;
         for (id, witness) in info.type_param_ids.iter().zip(witnesses) {
-            if let Some(bound) = substitution.get(*id) {
-                if bound != witness { return None; }
-            } else {
-                substitution.bind(*id, witness.clone());
-            }
+            substitution.bind(*id, witness.clone());
         }
         (super::constructor_types::fully_bound(return_type, &substitution)
             && result == substitution.apply(return_type).ok()?).then_some(result)
