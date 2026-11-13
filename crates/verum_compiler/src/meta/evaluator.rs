@@ -336,23 +336,6 @@ fn path_to_type(path: &Path) -> Option<Type> {
 }
 
 impl MetaContext {
-    /// Construct an aggregate through the selected evaluator, preserving source
-    /// order, the first error, and the shared allocation budget.
-    fn eval_meta_aggregate(
-        &mut self,
-        elements: &List<MetaExpr>,
-        construct: fn(List<ConstValue>) -> ConstValue,
-        evaluate: fn(&mut Self, &MetaExpr) -> Result<ConstValue, MetaError>,
-    ) -> Result<ConstValue, MetaError> {
-        let values = elements
-            .iter()
-            .map(|element| evaluate(self, element))
-            .collect::<Result<List<_>, _>>()?;
-        let value = construct(values);
-        self.track_allocation(const_value_alloc_size(&value))?;
-        Ok(value)
-    }
-
     /// Convert AST statement to MetaStmt
     fn ast_stmt_to_meta_stmt(&self, stmt: &verum_ast::stmt::Stmt) -> Result<MetaStmt, MetaError> {
         match &stmt.kind {
@@ -430,8 +413,78 @@ impl MetaContext {
         }
     }
 
-    /// Convert AST Expr to MetaExpr
+    /// Lower strict operands in source order. Pending operations carry compact
+    /// references on an explicit stack, so nesting a tuple or an operator
+    /// does not recursively allocate the frame for all source-language forms.
     pub fn ast_expr_to_meta_expr(&self, expr: &Expr) -> Result<MetaExpr, MetaError> {
+        enum Step<'a> {
+            Visit(&'a Expr),
+            Binary(BinOp),
+            Unary(UnOp),
+            Elements {
+                rest: &'a [Expr],
+                base: usize,
+                make: fn(List<MetaExpr>) -> MetaExpr,
+            },
+        }
+
+        let mut work: smallvec::SmallVec<[Step<'_>; 8]> = smallvec::smallvec![Step::Visit(expr)];
+        let mut values = List::new();
+        while let Some(step) = work.pop() {
+            match step {
+                Step::Visit(node) => match &node.kind {
+                    ExprKind::Paren(inner) => work.push(Step::Visit(inner)),
+                    ExprKind::MetaFunction { name, args, .. }
+                        if name.as_str() == "const" && args.len() == 1 =>
+                    {
+                        work.push(Step::Visit(&args[0]));
+                    }
+                    ExprKind::Binary { op, left, right } => {
+                        work.push(Step::Binary(*op));
+                        work.push(Step::Visit(right));
+                        work.push(Step::Visit(left));
+                    }
+                    ExprKind::Unary { op, expr } => {
+                        work.push(Step::Unary(*op));
+                        work.push(Step::Visit(expr));
+                    }
+                    ExprKind::Tuple(items) if items.is_empty() => {
+                        values.push(MetaExpr::Literal(ConstValue::Unit));
+                    }
+                    ExprKind::Tuple(items) => work.push(Step::Elements {
+                        rest: items, base: values.len(), make: MetaExpr::Tuple,
+                    }),
+                    ExprKind::Array(verum_ast::ArrayExpr::List(items)) => work.push(Step::Elements {
+                        rest: items, base: values.len(), make: MetaExpr::Array,
+                    }),
+                    _ if work.is_empty() => return self.lower_meta_form(node),
+                    _ => values.push(self.lower_meta_form(node)?),
+                },
+                Step::Elements { rest, base, make } => match rest.split_first() {
+                    Some((next, rest)) => {
+                        work.push(Step::Elements { rest, base, make });
+                        work.push(Step::Visit(next));
+                    }
+                    None => {
+                        let items = values.split_off(base);
+                        values.push(make(items));
+                    }
+                },
+                Step::Binary(op) => {
+                    let right = values.pop().expect("lowered right operand");
+                    let left = values.pop().expect("lowered left operand");
+                    values.push(MetaExpr::Binary { op, left: Heap::new(left), right: Heap::new(right) });
+                }
+                Step::Unary(op) => {
+                    let inner = values.pop().expect("lowered unary operand");
+                    values.push(MetaExpr::Unary { op, expr: Heap::new(inner) });
+                }
+            }
+        }
+        Ok(values.pop().expect("one lowered root"))
+    }
+
+    fn lower_meta_form(&self, expr: &Expr) -> Result<MetaExpr, MetaError> {
         if self.source_constants.materializing && matches!(&expr.kind,
             ExprKind::Return(_) | ExprKind::Break { .. } | ExprKind::Continue { .. }
             | ExprKind::For { .. } | ExprKind::While { .. } | ExprKind::Loop { .. }) {
@@ -443,9 +496,7 @@ impl MetaContext {
             ExprKind::Cast { .. } if self.source_constants.materializing => Err(MetaError::MetaEvaluationFailed {
                 message: "typed cast carrier is unsupported by compile-time runtime-value materialization".into(),
             }),
-            ExprKind::Paren(inner) => self.ast_expr_to_meta_expr(inner),
             ExprKind::TypeProperty { ty, property } => self.eval_type_property(ty, *property).map(MetaExpr::Literal),
-            ExprKind::MetaFunction { name, args, .. } if name.as_str() == "const" && args.len() == 1 => self.ast_expr_to_meta_expr(&args[0]),
             ExprKind::Quote { .. } => Ok(MetaExpr::Quote(expr.clone())),
             ExprKind::Literal(lit) => {
                 if self.source_constants.materializing && !matches!(&lit.kind,
@@ -489,15 +540,6 @@ impl MetaContext {
             // TypeExpr: generic type expressions like List<Int>, Maybe<Text>, etc.
             // These are parsed as ExprKind::TypeExpr(Type) and should produce a Type literal.
             ExprKind::TypeExpr(ty) => Ok(MetaExpr::Literal(ConstValue::Type(ty.clone()))),
-            ExprKind::Binary { op, left, right } => {
-                let left_meta = self.ast_expr_to_meta_expr(left)?;
-                let right_meta = self.ast_expr_to_meta_expr(right)?;
-                Ok(MetaExpr::Binary {
-                    op: *op,
-                    left: Heap::new(left_meta),
-                    right: Heap::new(right_meta),
-                })
-            }
             ExprKind::Call { func, args, .. } => {
                 if let ExprKind::Path(path) = &func.kind {
                     if let Some(ident) = path.as_ident() {
@@ -570,48 +612,22 @@ impl MetaContext {
                     else_branch: else_expr,
                 })
             }
-            ExprKind::Unary { op, expr: inner } => {
-                let inner_meta = self.ast_expr_to_meta_expr(inner)?;
-                Ok(MetaExpr::Unary {
-                    op: *op,
-                    expr: Heap::new(inner_meta),
-                })
-            }
-            ExprKind::Tuple(elements) if elements.is_empty() => {
-                Ok(MetaExpr::Literal(ConstValue::Unit))
-            }
-            ExprKind::Tuple(elements) => Ok(MetaExpr::Tuple(
-                elements
-                    .iter()
-                    .map(|element| self.ast_expr_to_meta_expr(element))
-                    .collect::<Result<List<_>, _>>()?,
-            )),
-            ExprKind::Array(array_expr) => {
-                match array_expr {
-                    verum_ast::ArrayExpr::List(elements) => Ok(MetaExpr::Array(
-                        elements
-                            .iter()
-                            .map(|element| self.ast_expr_to_meta_expr(element))
-                            .collect::<Result<List<_>, _>>()?,
-                    )),
-                    verum_ast::ArrayExpr::Repeat { value, count } => {
-                        // For repeat syntax [value; count], evaluate count
-                        let val = self.ast_expr_to_meta_expr(value)?;
-                        let count_val = self.ast_expr_to_meta_expr(count)?;
-                        // A repeat must be evaluated; it is not an implicit quotation.
-                        if let (MetaExpr::Literal(v), MetaExpr::Literal(ConstValue::UInt(n))) =
-                            (&val, &count_val)
-                        {
-                            let arr: List<ConstValue> = (0..*n).map(|_| v.clone()).collect();
-                            Ok(MetaExpr::Literal(ConstValue::Array(arr)))
-                        } else {
-                            Err(MetaError::MetaEvaluationFailed {
-                                message: Text::from(
-                                    "Array repeat is not supported by this meta evaluator",
-                                ),
-                            })
-                        }
-                    }
+            ExprKind::Array(verum_ast::ArrayExpr::Repeat { value, count }) => {
+                // For repeat syntax [value; count], evaluate count
+                let val = self.ast_expr_to_meta_expr(value)?;
+                let count_val = self.ast_expr_to_meta_expr(count)?;
+                // A repeat must be evaluated; it is not an implicit quotation.
+                if let (MetaExpr::Literal(v), MetaExpr::Literal(ConstValue::UInt(n))) =
+                    (&val, &count_val)
+                {
+                    let arr: List<ConstValue> = (0..*n).map(|_| v.clone()).collect();
+                    Ok(MetaExpr::Literal(ConstValue::Array(arr)))
+                } else {
+                    Err(MetaError::MetaEvaluationFailed {
+                        message: Text::from(
+                            "Array repeat is not supported by this meta evaluator",
+                        ),
+                    })
                 }
             }
             // Priority 1: MethodCall
@@ -894,6 +910,90 @@ impl MetaContext {
 
     /// Evaluate a meta expression
     pub fn eval_meta_expr(&mut self, expr: &MetaExpr) -> Result<ConstValue, MetaError> {
+        self.eval_value_expr(expr, Self::eval_scoped_form)
+    }
+
+    /// Evaluate value expressions using one work stack in both ordinary meta
+    /// execution and quote splices. Scoped forms retain their own evaluator.
+    fn eval_value_expr(
+        &mut self,
+        root: &MetaExpr,
+        eval_form: fn(&mut Self, &MetaExpr) -> Result<ConstValue, MetaError>,
+    ) -> Result<ConstValue, MetaError> {
+        enum Step<'a> {
+            Visit(&'a MetaExpr),
+            AfterLeft(BinOp, &'a MetaExpr),
+            Binary(BinOp),
+            Unary(UnOp),
+            Elements {
+                rest: &'a [MetaExpr],
+                base: usize,
+                make: fn(List<ConstValue>) -> ConstValue,
+            },
+        }
+
+        let mut work: smallvec::SmallVec<[Step<'_>; 8]> = smallvec::smallvec![Step::Visit(root)];
+        let mut values = List::new();
+        while let Some(step) = work.pop() {
+            match step {
+                Step::Visit(node) => {
+                    self.check_evaluation_deadline()?;
+                    match node {
+                        MetaExpr::Literal(value) if work.is_empty() => return Ok(value.clone()),
+                        MetaExpr::Literal(value) => values.push(value.clone()),
+                        MetaExpr::Binary { op, left, right } => {
+                            work.push(Step::AfterLeft(*op, right));
+                            work.push(Step::Visit(left));
+                        }
+                        MetaExpr::Unary { op, expr } => {
+                            work.push(Step::Unary(*op));
+                            work.push(Step::Visit(expr));
+                        }
+                        MetaExpr::Tuple(items) => work.push(Step::Elements {
+                            rest: items, base: values.len(), make: ConstValue::Tuple,
+                        }),
+                        MetaExpr::Array(items) => work.push(Step::Elements {
+                            rest: items, base: values.len(), make: ConstValue::Array,
+                        }),
+                        _ if work.is_empty() => return eval_form(self, node),
+                        _ => values.push(eval_form(self, node)?),
+                    }
+                }
+                Step::AfterLeft(op, right) => {
+                    if !matches!((op, values.last()),
+                        (BinOp::And, Some(ConstValue::Bool(false))) |
+                        (BinOp::Or, Some(ConstValue::Bool(true))))
+                    {
+                        work.push(Step::Binary(op));
+                        work.push(Step::Visit(right));
+                    }
+                }
+                Step::Binary(op) => {
+                    let right = values.pop().expect("evaluated right operand");
+                    let left = values.pop().expect("evaluated left operand");
+                    values.push(self.eval_binary_op(op, left, right)?);
+                }
+                Step::Unary(op) => {
+                    let value = values.pop().expect("evaluated unary operand");
+                    values.push(self.eval_unary_op(op, value)?);
+                }
+                Step::Elements { rest, base, make } => match rest.split_first() {
+                    Some((next, rest)) => {
+                        work.push(Step::Elements { rest, base, make });
+                        work.push(Step::Visit(next));
+                    }
+                    None => {
+                        let value = make(values.split_off(base));
+                        self.track_allocation(const_value_alloc_size(&value))?;
+                        values.push(value);
+                    }
+                },
+            }
+        }
+        Ok(values.pop().expect("one evaluated root"))
+    }
+
+    fn check_evaluation_deadline(&mut self) -> Result<(), MetaError> {
         // Deadline check — closes #241. `MetaContext.timeout_ms`
         // (default 30_000ms, settable via `SecurityContext::set_timeout_ms`)
         // becomes load-bearing here. The deadline is established
@@ -933,16 +1033,13 @@ impl MetaContext {
             }
         }
 
+        Ok(())
+    }
+
+    fn eval_scoped_form(&mut self, expr: &MetaExpr) -> Result<ConstValue, MetaError> {
         match expr {
-            MetaExpr::Literal(val) => Ok(val.clone()),
-
-            MetaExpr::Tuple(elements) => self.eval_meta_aggregate(
-                elements, ConstValue::Tuple, Self::eval_meta_expr,
-            ),
-            MetaExpr::Array(elements) => self.eval_meta_aggregate(
-                elements, ConstValue::Array, Self::eval_meta_expr,
-            ),
-
+            MetaExpr::Literal(_) | MetaExpr::Tuple(_) | MetaExpr::Array(_)
+            | MetaExpr::Binary { .. } | MetaExpr::Unary { .. } => unreachable!("handled by value evaluation"),
             MetaExpr::Variable(name) => self.eval_source_variable(name),
 
             MetaExpr::Call(func_name, args) => {
@@ -1099,22 +1196,6 @@ impl MetaContext {
                 // Infer type from the AST expression structure
                 let ty = self.infer_type_from_expr(expr);
                 Ok(ConstValue::Type(ty))
-            }
-
-            MetaExpr::Binary { op, left, right } => {
-                let left_val = self.eval_meta_expr(left)?;
-                match (op, &left_val) {
-                    (BinOp::And, ConstValue::Bool(false)) => return Ok(ConstValue::Bool(false)),
-                    (BinOp::Or, ConstValue::Bool(true)) => return Ok(ConstValue::Bool(true)),
-                    _ => {}
-                }
-                let right_val = self.eval_meta_expr(right)?;
-                self.eval_binary_op(*op, left_val, right_val)
-            }
-
-            MetaExpr::Unary { op, expr: inner } => {
-                let val = self.eval_meta_expr(inner)?;
-                self.eval_unary_op(*op, val)
             }
 
             MetaExpr::ListComp {
@@ -2966,6 +3047,10 @@ impl MetaContext {
     /// - Field access, indexing, and tuple indexing
     /// - Simple method calls on known types (len, is_empty, etc.)
     fn evaluate_simple_meta_expr(&mut self, expr: &MetaExpr) -> Result<ConstValue, MetaError> {
+        self.eval_value_expr(expr, Self::eval_splice_form)
+    }
+
+    fn eval_splice_form(&mut self, expr: &MetaExpr) -> Result<ConstValue, MetaError> {
         match expr {
             MetaExpr::Variable(name) => self.get(name).ok_or_else(|| {
                 MetaError::Other(Text::from(format!(
@@ -2973,28 +3058,6 @@ impl MetaContext {
                     name.as_str()
                 )))
             }),
-            MetaExpr::Literal(val) => Ok(val.clone()),
-            MetaExpr::Tuple(elements) => self.eval_meta_aggregate(
-                elements, ConstValue::Tuple, Self::evaluate_simple_meta_expr,
-            ),
-            MetaExpr::Array(elements) => self.eval_meta_aggregate(
-                elements, ConstValue::Array, Self::evaluate_simple_meta_expr,
-            ),
-
-            // Binary operations - evaluate both sides and apply operator
-            MetaExpr::Binary { op, left, right } => {
-                let left_val = self.evaluate_simple_meta_expr(left)?;
-                let right_val = self.evaluate_simple_meta_expr(right)?;
-                self.eval_binary_op(*op, left_val, right_val)
-            }
-
-            // Unary operations - evaluate inner and apply operator
-            MetaExpr::Unary { op, expr: inner } => {
-                let val = self.evaluate_simple_meta_expr(inner)?;
-                self.eval_unary_op(*op, val)
-            }
-
-            // Tuple index - access tuple element by numeric index
             MetaExpr::TupleIndex { expr: inner, index } => {
                 let val = self.evaluate_simple_meta_expr(inner)?;
                 match &val {

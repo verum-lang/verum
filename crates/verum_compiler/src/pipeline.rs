@@ -2009,12 +2009,10 @@ impl<'s> CompilationPipeline<'s> {
 
         // Actual entrypoints already supplied materialized ASTs. Standalone
         // validation uses the same lowering contract, not a second evaluator.
-        let mut lowered = module.clone();
-        let mut lowering = crate::meta::const_lowering::ConstLowering::new(
+        let lowering = crate::meta::const_lowering::ConstLowering::new(
             self.fresh_meta_ctx_with_version_stamp(),
         );
-        if let Err(error) = lowering.register(module_path, &lowered)
-            .and_then(|()| lowering.lower(module_path, &mut lowered)) {
+        for error in lowering.validate(module_path, module) {
             errors.push((format!("@const materialization in {} at {:?}", error.owner, error.span), error.error));
         }
 

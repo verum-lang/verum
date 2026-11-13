@@ -103,7 +103,7 @@ fn isolated_const_child() -> bool {
     false
 }
 
-fn phase_check(source: &str, failures: usize) {
+fn phase_check(source: &str, failures: usize) -> String {
     let module = Parser::new(source).parse_module().unwrap();
     let mut session = Session::new(Default::default());
     let mut pipeline = CompilationPipeline::new(&mut session);
@@ -114,6 +114,7 @@ fn phase_check(source: &str, failures: usize) {
     let result = pipeline.phase_meta_evaluation(&module, &owner);
     assert_eq!(result.is_err(), failures != 0, "{source}: {result:?}");
     assert_eq!(pipeline.session.error_count(), failures, "{source}");
+    pipeline.session.format_diagnostics()
 }
 
 #[test]
@@ -135,10 +136,12 @@ fn const_phase_reports_other_and_unsupported_errors() {
     for source in [
         "fn probe() { @const { ((2 + 5) * 6) } }",
         "fn probe() { @const { let value = 41; [value + 1][0] } }",
-        "fn probe() { @const { quote { 1 / 0 } } }",
     ] {
         phase_check(source, 0);
     }
+    let quote = phase_check("fn probe() { @const { quote { 1 / 0 } } }", 1);
+    assert!(quote.contains("does not splice syntax"), "{quote}");
+    assert!(!quote.contains("Division by zero"), "{quote}");
     println!("CONST_PHASE_CHECKED");
 }
 
@@ -216,6 +219,26 @@ fn quote_splice_aggregate_values_and_bindings_are_preserved() {
 }
 
 #[test]
+fn ordinary_evaluation_and_splices_short_circuit_inside_aggregates() {
+    let condition = "false && (1 / 0 == 0)";
+    let source = format!("meta fn probe() {{ [{condition}][0] }}");
+    assert_eq!(evaluate_body(&source).unwrap(), ConstValue::Bool(false));
+    quote_scalar(
+        &format!("meta fn probe() {{ quote {{ ${{[{condition}][0]}} }} }}"),
+        "false",
+    );
+}
+
+#[test]
+fn arithmetic_spines_lower_and_evaluate_on_an_ordinary_stack() {
+    let sum = std::iter::repeat_n("1", 96).collect::<List<_>>().join(" + ");
+    let source = format!("meta fn probe() {{ [{sum}][0] }}");
+    assert_eq!(evaluate_body(&source).unwrap(), ConstValue::Int(96));
+    let source = format!("meta fn probe() {{ [({sum}) / 0][0] }}");
+    assert!(matches!(evaluate_body(&source), Err(MetaError::DivisionByZero)));
+}
+
+#[test]
 fn quote_splice_aggregate_errors_follow_source_order() {
     for source in [
         "meta fn probe() { quote { ${[1 / (1 - 1)][0]} } }",
@@ -259,12 +282,9 @@ fn quote_splice_aggregate_actual_phase_controls() {
     if !isolated_const_child() {
         return;
     }
-    for source in [
-        "meta fn probe() { quote { ${[1, 2][0]} } }",
-        "fn probe() { @const { quote { ${[40 + 2][0]} } } }",
-    ] {
-        phase_check(source, 0);
-    }
+    phase_check("meta fn probe() { quote { ${[1, 2][0]} } }", 0);
+    let runtime = phase_check("fn probe() { @const { quote { ${[40 + 2][0]} } } }", 1);
+    assert!(runtime.contains("does not splice syntax"), "{runtime}");
     for source in [
         "meta fn probe() { quote { ${[1 / (1 - 1)][0]} } }",
         "fn probe() { @const { quote { ${(1 / (1 - 1),).0} } } }",

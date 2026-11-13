@@ -158,6 +158,15 @@ impl std::error::Error for ConstLoweringError {}
 pub struct ConstLowering {
     context: MetaContext,
     failure_span: Option<Span>,
+    diagnostics: Option<ValidationErrors>,
+}
+
+#[derive(Default)]
+struct ValidationErrors {
+    errors: List<ConstLoweringError>,
+    /// An attempted @const still exists in the private AST after its error.
+    /// The structural coverage check must distinguish it from an unvisited one.
+    attempted: Set<Span>,
 }
 impl ConstLowering {
     pub fn new(mut context: MetaContext) -> Self {
@@ -165,14 +174,15 @@ impl ConstLowering {
         Self {
             context,
             failure_span: None,
+            diagnostics: None,
         }
     }
     pub(crate) fn required(module: &Module) -> bool {
-        let mut pending = PendingConst(false);
+        let mut pending = PendingConst::default();
         for item in &module.items {
             pending.visit_item(item);
         }
-        pending.0
+        pending.found
     }
     pub fn into_context(mut self) -> MetaContext {
         self.context.source_constants.materializing = false;
@@ -257,6 +267,25 @@ impl ConstLowering {
         }
         Ok(())
     }
+
+    /// Validate the original syntax in source order. Recovery is confined to
+    /// this private AST; a partially materialized module cannot be published.
+    pub(crate) fn validate(mut self, owner: &str, source: &Module) -> List<ConstLoweringError> {
+        if let Err(error) = self.register(owner, source) {
+            return List::from_iter([error]);
+        }
+        self.diagnostics = Some(ValidationErrors::default());
+        let mut module = source.clone();
+        for item in &mut module.items {
+            self.failure_span = None;
+            if let Err(error) = self.item(owner, item) {
+                self.diagnostics.as_mut().expect("validation collector").errors.push(ConstLoweringError {
+                    owner: owner.into(), span: self.failure_span.unwrap_or(item.span), error,
+                });
+            }
+        }
+        self.diagnostics.take().expect("validation collector").errors
+    }
     fn item(&mut self, owner: &str, item: &mut Item) -> Result<(), MetaError> {
         match &mut item.kind {
             ItemKind::Function(f) => self.function(owner, f)?,
@@ -298,9 +327,12 @@ impl ConstLowering {
         }
         // Types/defaults/proof carriers without a staging rule are explicit
         // refusals. Adding a new AST child cannot silently skip an occurrence.
-        let mut pending = PendingConst(false);
+        let mut pending = PendingConst {
+            attempted: self.diagnostics.as_ref().map(|validation| &validation.attempted),
+            ..Default::default()
+        };
         pending.visit_item(item);
-        if pending.0 {
+        if pending.found {
             return Err(failure(format!(
                 "unmaterialized @const in unsupported declaration carrier (owner {owner})"
             )));
@@ -389,9 +421,9 @@ impl ConstLowering {
                     self.expr(owner, block, &inner)?;
                 }
                 StmtKind::Item(item) => {
-                    let mut pending = PendingConst(false);
+                    let mut pending = PendingConst::default();
                     pending.visit_item(item);
-                    if pending.0 {
+                    if pending.found {
                         return Err(failure(
                             "@const in a local declaration requires a lexical constant scope",
                         ));
@@ -422,19 +454,32 @@ impl ConstLowering {
             ExprKind::Quote { .. } => return Ok(()),
             ExprKind::MetaFunction { name, args, .. } if name.as_str() == "const" => {
                 self.failure_span = Some(expr.span);
-                if args.len() != 1 {
-                    return Err(MetaError::ArityMismatch {
+                let result = if args.len() != 1 {
+                    Err(MetaError::ArityMismatch {
                         expected: 1,
                         got: args.len(),
-                    });
+                    })
+                } else {
+                    self.context.current_module = Text::from(owner);
+                    self.context.bindings.clear();
+                    self.context.source_constants.runtime_bindings = bound.clone();
+                    self.context.current_stage = 1;
+                    self.context.ast_expr_to_meta_expr(&args[0])
+                        .and_then(|ir| self.context.eval_meta_expr(&ir))
+                        .and_then(|value| materialize_runtime_value(value, expr.span))
+                };
+                match result {
+                    Ok(lowered) => *expr = lowered,
+                    Err(error) => match &mut self.diagnostics {
+                        Some(validation) => {
+                            validation.attempted.insert(expr.span);
+                            validation.errors.push(ConstLoweringError {
+                                owner: owner.into(), span: expr.span, error,
+                            });
+                        }
+                        None => return Err(error),
+                    },
                 }
-                self.context.current_module = Text::from(owner);
-                self.context.bindings.clear();
-                self.context.source_constants.runtime_bindings = bound.clone();
-                self.context.current_stage = 1;
-                let ir = self.context.ast_expr_to_meta_expr(&args[0])?;
-                let value = self.context.eval_meta_expr(&ir)?;
-                *expr = materialize_runtime_value(value, expr.span)?;
                 self.failure_span = None;
                 return Ok(());
             }
@@ -550,9 +595,9 @@ impl ConstLowering {
             _ => {}
         }
         if let Some(binder) = verum_ast::visit_mut::binder_name(&expr.kind) {
-            let mut pending = PendingConst(false);
+            let mut pending = PendingConst::default();
             pending.visit_expr(expr);
-            if pending.0 {
+            if pending.found {
                 return Err(failure(format!(
                     "@const inside unsupported scoped carrier `{binder}` (owner {owner})"
                 )));
@@ -620,8 +665,12 @@ fn add_pattern(pattern: &Pattern, names: &mut Set<Text>) {
     }
     Names(names).visit_pattern(pattern);
 }
-struct PendingConst(bool);
-impl Visitor for PendingConst {
+#[derive(Default)]
+struct PendingConst<'a> {
+    found: bool,
+    attempted: Option<&'a Set<Span>>,
+}
+impl Visitor for PendingConst<'_> {
     fn visit_function(&mut self, f: &FunctionDecl) {
         if !f.is_meta && f.generics.is_empty() {
             visitor::walk_function(self, f);
@@ -643,7 +692,7 @@ impl Visitor for PendingConst {
             return;
         }
         if matches!(&expr.kind, ExprKind::MetaFunction { name, .. } if name.as_str() == "const") {
-            self.0 = true;
+            self.found |= !self.attempted.is_some_and(|spans| spans.contains(&expr.span));
             return;
         }
         visitor::walk_expr(self, expr);
