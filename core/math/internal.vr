@@ -204,7 +204,7 @@ public fn cbgr_epoch_caps<T>(t: &DynTensor<T>) -> U16 {
 
 // Bypass CBGR checks (EXTREMELY DANGEROUS)
 // Safety: All safety guarantees are void. Use only for benchmarking.
-public fn cbgr_bypass<T, F: Fn() -> T>(f: F) -> T {
+public fn cbgr_bypass<T, F: fn() -> T>(f: F) -> T {
     @vbc(CBGR_BYPASS_BEGIN);
     let result = f();
     @vbc(CBGR_BYPASS_END);

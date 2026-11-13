@@ -1102,7 +1102,7 @@ fn associative_scan<T, F>(
     dim: USize,
 ) -> DynTensor<Float>
 where
-    F: Fn(&T, (&DynTensor<Float>, &DynTensor<Float>)) -> T,
+    F: fn(&T, (&DynTensor<Float>, &DynTensor<Float>)) -> T,
 {
     @vbc(SSM_SCAN, op, init, elements, dim)
 }

@@ -41,7 +41,7 @@ mount super.linalg.{Vector, Matrix, solve, lu, lu_solve};
 // Error: O(h)
 @inline(always)
 public fn diff_forward<F>(f: F, x: Float, h: Float) -> Float
-where F: Fn(Float) -> Float
+where F: fn(Float) -> Float
 {
     (f(x + h) - f(x)) / h
 }
@@ -50,7 +50,7 @@ where F: Fn(Float) -> Float
 // Error: O(h)
 @inline(always)
 public fn diff_backward<F>(f: F, x: Float, h: Float) -> Float
-where F: Fn(Float) -> Float
+where F: fn(Float) -> Float
 {
     (f(x) - f(x - h)) / h
 }
@@ -59,7 +59,7 @@ where F: Fn(Float) -> Float
 // Error: O(h²)
 @inline(always)
 public fn diff_central<F>(f: F, x: Float, h: Float) -> Float
-where F: Fn(Float) -> Float
+where F: fn(Float) -> Float
 {
     (f(x + h) - f(x - h)) / (2.0 * h)
 }
@@ -68,7 +68,7 @@ where F: Fn(Float) -> Float
 // Error: O(h²)
 @inline(always)
 public fn diff2_central<F>(f: F, x: Float, h: Float) -> Float
-where F: Fn(Float) -> Float
+where F: fn(Float) -> Float
 {
     (f(x + h) - 2.0 * f(x) + f(x - h)) / (h * h)
 }
@@ -76,7 +76,7 @@ where F: Fn(Float) -> Float
 // Higher-order central difference (5-point stencil)
 // Error: O(h⁴)
 public fn diff_central_5pt<F>(f: F, x: Float, h: Float) -> Float
-where F: Fn(Float) -> Float
+where F: fn(Float) -> Float
 {
     (-f(x + 2.0 * h) + 8.0 * f(x + h) - 8.0 * f(x - h) + f(x - 2.0 * h)) / (12.0 * h)
 }
@@ -91,7 +91,7 @@ public fn optimal_h(x: Float) -> Float {
 
 // Derivative with automatic optimal step size
 public fn derivative<F>(f: F, x: Float) -> Float
-where F: Fn(Float) -> Float
+where F: fn(Float) -> Float
 {
     let h = optimal_h(x);
     diff_central(f, x, h)
@@ -100,7 +100,7 @@ where F: Fn(Float) -> Float
 // Richardson extrapolation for improved accuracy
 // Builds Romberg-style table to eliminate lower-order error terms
 public fn richardson<F>(f: F, x: Float, h: Float, order: USize) -> Float
-where F: Fn(Float) -> Float
+where F: fn(Float) -> Float
 {
     assert(order > 0 && order <= 10, "order must be between 1 and 10");
 
@@ -128,7 +128,7 @@ where F: Fn(Float) -> Float
 // Gradient of a scalar function: ∇f(x)
 // Uses central differences
 public fn gradient<F>(f: F, x: &Vector<Float>, h: Float) -> Vector<Float>
-where F: Fn(&Vector<Float>) -> Float
+where F: fn(&Vector<Float>) -> Float
 {
     let n = x.len();
     let mut grad = Vector.zeros(n);
@@ -146,7 +146,7 @@ where F: Fn(&Vector<Float>) -> Float
 
 // Jacobian of a vector function: J[i,j] = ∂fᵢ/∂xⱼ
 public fn jacobian<F>(f: F, x: &Vector<Float>, h: Float) -> Matrix<Float>
-where F: Fn(&Vector<Float>) -> Vector<Float>
+where F: fn(&Vector<Float>) -> Vector<Float>
 {
     let fx = f(x);
     let m = fx.len();
@@ -172,7 +172,7 @@ where F: Fn(&Vector<Float>) -> Vector<Float>
 
 // Hessian of a scalar function: H[i,j] = ∂²f/∂xᵢ∂xⱼ
 public fn hessian<F>(f: F, x: &Vector<Float>, h: Float) -> Matrix<Float>
-where F: Fn(&Vector<Float>) -> Float
+where F: fn(&Vector<Float>) -> Float
 {
     let n = x.len();
     let mut hess = Matrix.zeros(n, n);
@@ -212,7 +212,7 @@ where F: Fn(&Vector<Float>) -> Float
 // Trapezoidal rule: ∫f(x)dx ≈ h/2 * (f(a) + 2Σf(xᵢ) + f(b))
 // Error: O(h²)
 public fn trapezoid<F>(f: F, a: Float, b: Float, n: USize) -> Float
-where F: Fn(Float) -> Float
+where F: fn(Float) -> Float
 {
     assert(n > 0, "n must be positive");
     let h = (b - a) / (n as Float);
@@ -226,7 +226,7 @@ where F: Fn(Float) -> Float
 // Simpson's rule: ∫f(x)dx ≈ h/3 * (f(a) + 4Σf(x₂ᵢ₋₁) + 2Σf(x₂ᵢ) + f(b))
 // Error: O(h⁴)
 public fn simpson<F>(f: F, a: Float, b: Float, n: USize) -> Float
-where F: Fn(Float) -> Float
+where F: fn(Float) -> Float
 {
     assert(n > 0 && n % 2 == 0, "Simpson requires positive even n");
     let h = (b - a) / (n as Float);
@@ -242,7 +242,7 @@ where F: Fn(Float) -> Float
 // Simpson's 3/8 rule (cubic interpolation)
 // Error: O(h⁴)
 public fn simpson38<F>(f: F, a: Float, b: Float, n: USize) -> Float
-where F: Fn(Float) -> Float
+where F: fn(Float) -> Float
 {
     assert(n > 0 && n % 3 == 0, "Simpson 3/8 requires n divisible by 3");
     let h = (b - a) / (n as Float);
@@ -258,7 +258,7 @@ where F: Fn(Float) -> Float
 // Romberg integration (successive refinement with Richardson extrapolation)
 // Achieves high accuracy with adaptive refinement
 public fn romberg<F>(f: F, a: Float, b: Float, max_iter: USize, tol: Float) -> Float
-where F: Fn(Float) -> Float
+where F: fn(Float) -> Float
 {
     let mut r = Matrix.zeros(max_iter, max_iter);
 
@@ -320,7 +320,7 @@ fn gauss_legendre_5() -> (List<Float>, List<Float>) {
 
 // Gauss-Legendre integration on [a, b]
 public fn gauss_legendre<F>(f: F, a: Float, b: Float, n: USize) -> Float
-where F: Fn(Float) -> Float
+where F: fn(Float) -> Float
 {
     let (nodes, weights) = match n {
         2 => gauss_legendre_2(),
@@ -342,7 +342,7 @@ where F: Fn(Float) -> Float
 
 // Adaptive Simpson's rule with error control
 public fn adaptive_simpson<F>(f: F, a: Float, b: Float, tol: Float, max_depth: USize) -> Float
-where F: Fn(Float) -> Float
+where F: fn(Float) -> Float
 {
     let whole = simpson(&f, a, b, 2);
     adaptive_simpson_impl(&f, a, b, tol, max_depth, 0, whole)
@@ -357,7 +357,7 @@ fn adaptive_simpson_impl<F>(
     depth: USize,
     whole: Float,
 ) -> Float
-where F: Fn(Float) -> Float
+where F: fn(Float) -> Float
 {
     let mid = (a + b) / 2.0;
     let left = simpson(f, a, mid, 2);
@@ -636,7 +636,7 @@ public type RootResult is
 // Bisection method for finding roots in [a, b]
 // Requires f(a) and f(b) to have opposite signs
 public fn bisection<F>(f: F, a: Float, b: Float, tol: Float, max_iter: USize) -> RootResult
-where F: Fn(Float) -> Float
+where F: fn(Float) -> Float
 {
     let mut a = a;
     let mut b = b;
@@ -677,8 +677,8 @@ public fn newton_raphson<F, G>(
     max_iter: USize,
 ) -> RootResult
 where
-    F: Fn(Float) -> Float,
-    G: Fn(Float) -> Float,
+    F: fn(Float) -> Float,
+    G: fn(Float) -> Float,
 {
     let mut x = x0;
 
@@ -705,7 +705,7 @@ where
 
 // Newton-Raphson with automatic differentiation
 public fn newton<F>(f: F, x0: Float, tol: Float, max_iter: USize) -> RootResult
-where F: Fn(Float) -> Float
+where F: fn(Float) -> Float
 {
     let mut x = x0;
 
@@ -733,7 +733,7 @@ where F: Fn(Float) -> Float
 
 // Secant method (no derivative required)
 public fn secant<F>(f: F, x0: Float, x1: Float, tol: Float, max_iter: USize) -> RootResult
-where F: Fn(Float) -> Float
+where F: fn(Float) -> Float
 {
     let mut x_prev = x0;
     let mut x = x1;
@@ -766,7 +766,7 @@ where F: Fn(Float) -> Float
 // Brent's method (combines bisection, secant, and inverse quadratic interpolation)
 // Robust and efficient
 public fn brent<F>(f: F, a: Float, b: Float, tol: Float, max_iter: USize) -> RootResult
-where F: Fn(Float) -> Float
+where F: fn(Float) -> Float
 {
     let mut a = a;
     let mut b = b;
@@ -880,8 +880,8 @@ public fn gradient_descent<F, G>(
     max_iter: USize,
 ) -> OptimResult
 where
-    F: Fn(&Vector<Float>) -> Float,
-    G: Fn(&Vector<Float>) -> Vector<Float>,
+    F: fn(&Vector<Float>) -> Float,
+    G: fn(&Vector<Float>) -> Vector<Float>,
 {
     let mut x = x0.clone();
     let mut f_val = f(&x);
@@ -921,8 +921,8 @@ public fn gradient_descent_bt<F, G>(
     max_iter: USize,
 ) -> OptimResult
 where
-    F: Fn(&Vector<Float>) -> Float,
-    G: Fn(&Vector<Float>) -> Vector<Float>,
+    F: fn(&Vector<Float>) -> Float,
+    G: fn(&Vector<Float>) -> Vector<Float>,
 {
     let mut x = x0.clone();
     let mut f_val = f(&x);
@@ -989,9 +989,9 @@ public fn newton_optimize<F, G, H>(
     max_iter: USize,
 ) -> OptimResult
 where
-    F: Fn(&Vector<Float>) -> Float,
-    G: Fn(&Vector<Float>) -> Vector<Float>,
-    H: Fn(&Vector<Float>) -> Matrix<Float>,
+    F: fn(&Vector<Float>) -> Float,
+    G: fn(&Vector<Float>) -> Vector<Float>,
+    H: fn(&Vector<Float>) -> Matrix<Float>,
 {
     let mut x = x0.clone();
     let mut f_val = f(&x);
@@ -1066,8 +1066,8 @@ public fn bfgs<F, G>(
     max_iter: USize,
 ) -> OptimResult
 where
-    F: Fn(&Vector<Float>) -> Float,
-    G: Fn(&Vector<Float>) -> Vector<Float>,
+    F: fn(&Vector<Float>) -> Float,
+    G: fn(&Vector<Float>) -> Vector<Float>,
 {
     let n = x0.len();
     let mut x = x0.clone();

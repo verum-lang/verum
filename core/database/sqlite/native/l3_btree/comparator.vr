@@ -157,7 +157,7 @@ public fn binary_search_cells<F>(
     target: &SeekKey,
     cell_at: F,
 ) -> Result<BinarySearchResult, Text>
-where F: Fn(Int) -> CellKey
+where F: fn(Int) -> CellKey
 {
     let mut lo: Int = 0;
     let mut hi: Int = cell_count;

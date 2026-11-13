@@ -301,7 +301,7 @@ implement Workspace {
 //  hot_loop(&checked tensor);
 // });
 // ```
-public fn with_tier1<T, F: Fn() -> T>(f: F) -> T {
+public fn with_tier1<T, F: fn() -> T>(f: F) -> T {
     // VBC intrinsic: execute with CBGR Tier 1 (checked) references
     f()
 }
@@ -325,7 +325,7 @@ public fn with_tier1<T, F: Fn() -> T>(f: F) -> T {
 //  @unsafe { performance_critical_loop(tensor.raw_ptr()) }
 // });
 // ```
-public fn with_tier2<T, F: Fn() -> T>(f: F) -> T {
+public fn with_tier2<T, F: fn() -> T>(f: F) -> T {
     // VBC intrinsic: execute with CBGR Tier 2 (unsafe) references
     f()
 }
@@ -495,7 +495,7 @@ public fn checkpoint<T, F>(
 ) -> DynTensor<T>
     using [GradientTape]
 where
-    F: Fn(&[&DynTensor<T>]) -> DynTensor<T>,
+    F: fn(&[&DynTensor<T>]) -> DynTensor<T>,
     T: RealField,
 {
     // Forward: compute without saving intermediate activations
@@ -526,7 +526,7 @@ where
 
 // # Returns
 // Final output with optimal checkpointing
-public fn optimal_checkpoint<T: RealField, F: Fn(&DynTensor<T>) -> DynTensor<T>>(
+public fn optimal_checkpoint<T: RealField, F: fn(&DynTensor<T>) -> DynTensor<T>>(
     layers: &[F],
     input: &DynTensor<T>,
 ) -> DynTensor<T>
@@ -578,8 +578,8 @@ public fn register_vjp<F, V>(
     forward: F,
     vjp: V,
 ) where
-    F: Fn(&DynTensor<Float>, Float) -> DynTensor<Float>,
-    V: Fn(&DynTensor<Float>, Float, &DynTensor<Float>) -> DynTensor<Float>,
+    F: fn(&DynTensor<Float>, Float) -> DynTensor<Float>,
+    V: fn(&DynTensor<Float>, Float, &DynTensor<Float>) -> DynTensor<Float>,
 {
     @vbc(GRAD_REGISTER_VJP, name, forward, vjp)
 }
@@ -606,14 +606,14 @@ public fn register_vjp<F, V>(
 //  flash_attention(&q, &k, &v)
 // });
 // ```
-public fn profile<T, F: Fn() -> T>(label: Text, f: F) -> T {
+public fn profile<T, F: fn() -> T>(label: Text, f: F) -> T {
     // VBC intrinsic: TIMER_NOW, PROFILER_RECORD
     let _ = label;
     f()
 }
 
 // Profile with CBGR tier tracking
-public fn profile_cbgr<T, F: Fn() -> T>(label: Text, sample_rate: Float, f: F) -> T {
+public fn profile_cbgr<T, F: fn() -> T>(label: Text, sample_rate: Float, f: F) -> T {
     let _ = label;
     let _ = sample_rate;
     f()
@@ -624,7 +624,7 @@ public fn profile_cbgr<T, F: Fn() -> T>(label: Text, sample_rate: Float, f: F) -
 // =============================================================================
 
 // Execute operations on a specific stream
-public fn with_stream<T, F: Fn() -> T>(stream: &GpuStream, f: F) -> T
+public fn with_stream<T, F: fn() -> T>(stream: &GpuStream, f: F) -> T
     using [ComputeDevice]
 {
     @vbc(STREAM_PUSH, stream);

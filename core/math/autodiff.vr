@@ -203,7 +203,7 @@ public type VJPResult<In: Differentiable, Out: Differentiable> is {
 // ```
 public fn vjp<F, In, Out>(f: F, x: In) -> VJPResult<In, Out>
 where
-    F: Fn(In) -> Out,
+    F: fn(In) -> Out,
     In: Differentiable,
     Out: Differentiable,
 {
@@ -248,7 +248,7 @@ public type JVPResult<Out: Differentiable> is {
 // ```
 public fn jvp<F, In, Out>(f: F, x: In, tangent: In.Tangent) -> JVPResult<Out>
 where
-    F: Fn(In) -> Out,
+    F: fn(In) -> Out,
     In: Differentiable,
     Out: Differentiable,
 {
@@ -276,7 +276,7 @@ where
 // ```
 public fn grad<F, In>(f: F) -> fn(In) -> In.Cotangent
 where
-    F: Fn(In) -> Float,
+    F: fn(In) -> Float,
     In: Differentiable,
 {
     // Drives the tape directly instead of going through `vjp`'s VJPResult.
@@ -305,7 +305,7 @@ where
 // ```
 public fn value_and_grad<F, In>(f: F) -> fn(In) -> (Float, In.Cotangent)
 where
-    F: Fn(In) -> Float,
+    F: fn(In) -> Float,
     In: Differentiable,
 {
     // Same direct-tape form as `grad`, keeping the primal that the forward
@@ -324,7 +324,7 @@ where
 // Useful when only gradients for some arguments are needed.
 public fn grad_argnums<F, Args>(f: F, argnums: &[USize]) -> fn(Args) -> List<Args.Cotangent>
 where
-    F: Fn(Args) -> Float,
+    F: fn(Args) -> Float,
     Args: Differentiable,
 {
     |args| {
@@ -350,8 +350,8 @@ public fn stop_gradient<T: Differentiable>(x: T) -> T {
 // non-standard gradient behavior.
 public fn custom_vjp<F, VJP, In, Out>(f: F, vjp_fn: VJP) -> fn(In) -> Out
 where
-    F: Fn(In) -> Out,
-    VJP: Fn(In, Out.Cotangent) -> In.Cotangent,
+    F: fn(In) -> Out,
+    VJP: fn(In, Out.Cotangent) -> In.Cotangent,
     In: Differentiable,
     Out: Differentiable,
 {
@@ -369,7 +369,7 @@ where
 // Uses forward mode AD (one pass per input dimension).
 public fn jacobian<F>(f: F, x: &Vector<Float>) -> Matrix<Float>
 where
-    F: Fn(&Vector<Float>) -> Vector<Float>,
+    F: fn(&Vector<Float>) -> Vector<Float>,
 {
     let n = x.len();
     let fx = f(x);
@@ -395,7 +395,7 @@ where
 // Computed as Jacobian of gradient.
 public fn hessian<F>(f: F) -> fn(&Vector<Float>) -> Matrix<Float>
 where
-    F: Fn(&Vector<Float>) -> Float,
+    F: fn(&Vector<Float>) -> Float,
 {
     |x| {
         let grad_f = grad(f);
@@ -411,7 +411,7 @@ where
 // Memory: O(n) instead of O(n²)
 public fn hvp<F>(f: F, x: &Vector<Float>, v: &Vector<Float>) -> Vector<Float>
 where
-    F: Fn(&Vector<Float>) -> Float,
+    F: fn(&Vector<Float>) -> Float,
 {
     // H*v = grad(grad(f)(x) · v)
     // Use VBC intrinsic for Hessian-vector product
@@ -425,7 +425,7 @@ where
 // Used in second-order optimization (Levenberg-Marquardt).
 public fn gnvp<F>(f: F, x: &Vector<Float>, v: &Vector<Float>) -> Vector<Float>
 where
-    F: Fn(&Vector<Float>) -> Vector<Float>,
+    F: fn(&Vector<Float>) -> Vector<Float>,
 {
     // J^T J v = J^T (J v) using two JVP/VJP passes
     let jv = jvp(f, x.clone(), v.clone()).tangent;  // J v
@@ -846,13 +846,13 @@ implement Drop for GradientScope {
 //  model.forward(&input)
 // });
 // ```
-public fn with_no_grad<T, F: Fn() -> T>(f: F) -> T using [AutodiffContext] {
+public fn with_no_grad<T, F: fn() -> T>(f: F) -> T using [AutodiffContext] {
     let _scope = GradientScope.no_grad();
     f()
 }
 
 // Execute function in inference mode
-public fn with_inference<T, F: Fn() -> T>(f: F) -> T using [AutodiffContext] {
+public fn with_inference<T, F: fn() -> T>(f: F) -> T using [AutodiffContext] {
     let _scope = GradientScope.inference_mode();
     f()
 }
@@ -878,7 +878,7 @@ public fn with_inference<T, F: Fn() -> T>(f: F) -> T using [AutodiffContext] {
 // ```
 public fn checkpoint<F, In, Out>(f: F, x: In) -> Out
 where
-    F: Fn(In) -> Out,
+    F: fn(In) -> Out,
     In: Differentiable,
     Out: Differentiable,
 {
