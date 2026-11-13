@@ -65,12 +65,12 @@ public type TableMeta is {
 };
 
 public type IndexMeta is {
-    schema: Text,
-    name: Text,
-    table_name: Text,
-    root_page: Int,
-    columns: List<Text>,
-    unique: Bool,
+    public(in core.database.sqlite.native) schema: Text,
+    public(in core.database.sqlite.native) name: Text,
+    public(in core.database.sqlite.native) table_name: Text,
+    public(in core.database.sqlite.native) root_page: Int,
+    public(in core.database.sqlite.native) columns: List<Text>,
+    public(in core.database.sqlite.native) unique: Bool,
 };
 
 public type SessionSchemaError is

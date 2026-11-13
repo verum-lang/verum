@@ -54,9 +54,9 @@ public type UnOp is
       UNot | UNeg | UPlus | UBitNot;
 
 public type TableRef is {
-    schema: Text,    // may be empty
-    name: Text,
-    alias: Text,     // may be empty
+    public(in core.database.sqlite.native) schema: Text,    // may be empty
+    public(in core.database.sqlite.native) name: Text,
+    public(in core.database.sqlite.native) alias: Text,     // may be empty
 };
 
 public type Expr is
@@ -194,9 +194,9 @@ public type TableConstraint is
     | TcForeignKey(List<Text>, TableRef, List<Text>);
 
 public type ColumnDef is {
-    name: Text,
-    declared_type: Text,        // empty if untyped
-    constraints: List<ColumnConstraint>,
+    public(in core.database.sqlite.native) name: Text,
+    public(in core.database.sqlite.native) declared_type: Text,        // empty if untyped
+    public(in core.database.sqlite.native) constraints: List<ColumnConstraint>,
 };
 
 public type ColumnConstraint is
@@ -209,36 +209,36 @@ public type ColumnConstraint is
     | CcForeignKey(TableRef, List<Text>);
 
 public type CreateTableStmt is {
-    if_not_exists: Bool,
-    temporary: Bool,
-    table: TableRef,
-    columns: List<ColumnDef>,
-    constraints: List<TableConstraint>,
-    strict: Bool,
-    without_rowid: Bool,
+    public(in core.database.sqlite.native) if_not_exists: Bool,
+    public(in core.database.sqlite.native) temporary: Bool,
+    public(in core.database.sqlite.native) table: TableRef,
+    public(in core.database.sqlite.native) columns: List<ColumnDef>,
+    public(in core.database.sqlite.native) constraints: List<TableConstraint>,
+    public(in core.database.sqlite.native) strict: Bool,
+    public(in core.database.sqlite.native) without_rowid: Bool,
 };
 
 public type CreateIndexStmt is {
-    if_not_exists: Bool,
-    unique: Bool,
-    index: TableRef,
-    table: TableRef,
-    columns: List<IndexedColumn>,
-    where_clause: Maybe<Expr>,
+    public(in core.database.sqlite.native) if_not_exists: Bool,
+    public(in core.database.sqlite.native) unique: Bool,
+    public(in core.database.sqlite.native) index: TableRef,
+    public(in core.database.sqlite.native) table: TableRef,
+    public(in core.database.sqlite.native) columns: List<IndexedColumn>,
+    public(in core.database.sqlite.native) where_clause: Maybe<Expr>,
 };
 
 public type IndexedColumn is {
-    expr: Expr,            // EColumn(table, name) in simple cases
-    collation: Maybe<Text>,
-    direction: OrderDirection,
+    public(in core.database.sqlite.native) expr: Expr,            // EColumn(table, name) in simple cases
+    public(in core.database.sqlite.native) collation: Maybe<Text>,
+    public(in core.database.sqlite.native) direction: OrderDirection,
 };
 
 public type CreateViewStmt is {
-    if_not_exists: Bool,
-    temporary: Bool,
-    view: TableRef,
-    columns: List<Text>,   // explicit column list, empty → infer
-    query: Heap<SelectStmt>,
+    public(in core.database.sqlite.native.l5_sql) if_not_exists: Bool,
+    public(in core.database.sqlite.native.l5_sql) temporary: Bool,
+    public(in core.database.sqlite.native.l5_sql) view: TableRef,
+    public(in core.database.sqlite.native.l5_sql) columns: List<Text>,   // explicit column list, empty → infer
+    public(in core.database.sqlite.native.l5_sql) query: Heap<SelectStmt>,
 };
 
 public type DropTargetKind is DtkTable | DtkIndex | DtkView | DtkTrigger;
