@@ -41,8 +41,7 @@
     lifecycle: Lifecycle.Definition
 )
 module core.async.executor;
-mount collections.*;
-mount sync.*;
+mount core.collections.list.List;
 mount core.intrinsics.atomic.{atomic_fence, MemoryOrder};
 mount super.poll.*;
 mount super.waker.*;
@@ -70,21 +69,12 @@ mount sys.common.{
     MAX_CONTEXT_SLOTS, SysContextError,
 };
 
-// Platform-specific time functions
-@cfg(target_os = "linux")
-mount sys.linux.time.{monotonic_nanos, Duration as SysDuration};
-
-@cfg(target_os = "macos")
-mount sys.darwin.time.{monotonic_nanos, Duration as SysDuration};
-
-@cfg(target_os = "windows")
-mount sys.windows.time.{monotonic_nanos, Duration as SysDuration};
+mount core.intrinsics.runtime.time.{monotonic_nanos, sleep_ns};
 
 // Platform-specific I/O engine
 // Mounted rather than inherited: §4ter — the prelude carries only what
 // the LANGUAGE requires, and this is library API.
-mount core.time.{Duration};
-mount core.sync.{Mutex, AtomicInt, AtomicBool};
+mount core.sync.{Mutex, Condvar, AtomicInt, AtomicBool, MemoryOrdering, Send};
 
 mount sys.io_engine.{
     IOEngine, CompletionOp, CompletionResult, EngineDuration,
@@ -911,12 +901,12 @@ type ParkAction is | Stop | Continue;
 
 /// Phase 1B (#325): default park timeout when no producer-side
 /// notify integration is in place. Workers wake every
-/// `WORKER_PARK_TIMEOUT_MS` to re-check the queues and shutdown
+/// `WORKER_PARK_TIMEOUT_NS` to re-check the queues and shutdown
 /// flag, providing a safety net against any lost-wakeup edge
 /// case AND giving graceful shutdown an upper bound on
 /// worker-exit latency. 50 ms is a balance between idle-wake
 /// overhead (~20 wakes/sec/worker) and shutdown responsiveness.
-const WORKER_PARK_TIMEOUT_MS: Int = 50;
+const WORKER_PARK_TIMEOUT_NS: Int = 50_000_000;
 
 // =============================================================================
 // AsyncRuntime
@@ -1182,7 +1172,7 @@ implement AsyncRuntime {
 
     /// Phase 1B (#325): park the calling worker until either a
     /// queue becomes non-empty (re-checked after wake), shutdown
-    /// is signalled, or `WORKER_PARK_TIMEOUT_MS` elapses.
+    /// is signalled, or `WORKER_PARK_TIMEOUT_NS` elapses.
     ///
     /// **Hazard 1 (lock ordering)**: this method acquires
     /// `worker_pool` briefly to read `park_cv` / `park_mu`
@@ -1245,12 +1235,7 @@ implement AsyncRuntime {
             return ParkAction.Stop;
         }
 
-        // Park with timeout — bounded shutdown latency.
-        let timeout = SysDuration.from_millis(WORKER_PARK_TIMEOUT_MS);
-        let _woken_guard = park_cv
-            .wait_timeout(mu_guard, timeout)
-            .map(|(g, _)| g)
-            .unwrap_or_else(|p| p.into_inner());
+        let _wait = park_cv.wait_timeout(mu_guard, WORKER_PARK_TIMEOUT_NS);
 
         self.decrement_parked_count();
         if self.shutdown.load(MemoryOrdering.Acquire) {
@@ -1782,7 +1767,7 @@ implement AsyncRuntime {
                     // Runs unconditionally (whether I/O is enabled or
                     // not, whether wait returned early or via timeout)
                     // so registered timer wakers fire promptly.
-                    self.drain_expired_timers(time_now_ns());
+                    self.drain_expired_timers(monotonic_nanos());
                 }
             }
         }
@@ -1994,7 +1979,7 @@ implement AsyncRuntime {
             // fall back to the default 1ms tick. Closes the
             // busy-spin gap that timer-bound futures historically
             // patched over with `cx.waker().wake_by_ref()`.
-            let now_ns = time_now_ns();
+            let now_ns = monotonic_nanos();
             let timeout = match self.next_timer_deadline() {
                 Maybe.Some(deadline_ns) if deadline_ns > now_ns => {
                     let remaining_ns = deadline_ns - now_ns;
@@ -2031,34 +2016,12 @@ implement AsyncRuntime {
                         }
                         i = i + 1;
                     }
+                    return;
                 }
-                Result.Err(_) => {
-                    // IOEngine error — fall back to brief sleep.
-                    self.brief_sleep();
-                }
+                Result.Err(_) => {},
             }
-        } else {
-            self.brief_sleep();
         }
-    }
-
-    /// Brief OS sleep to yield CPU without burning cycles.
-    fn brief_sleep(&self) {
-        @cfg(target_os = "linux") {
-            let _ = super.super.sys.linux.time.sleep(
-                super.super.sys.linux.time.Duration.from_micros(100)
-            );
-        }
-        @cfg(target_os = "macos") {
-            let _ = super.super.sys.darwin.time.sleep(
-                super.super.sys.darwin.time.Duration.from_micros(100)
-            );
-        }
-        @cfg(target_os = "windows") {
-            let _ = super.super.sys.windows.time.sleep(
-                super.super.sys.windows.time.Duration.from_micros(100)
-            );
-        }
+        sleep_ns(100_000);
     }
 
     /// Register a timer-driven wakeup.
@@ -2199,22 +2162,7 @@ public fn block_on<F: Future>(future: F) -> F.Output {
     loop {
         match fut.poll(&mut cx) {
             Poll.Ready(res) => return res,
-            Poll.Pending => {
-                // Brief sleep to avoid CPU burn while polling
-                @cfg(target_os = "linux") {
-                    let _ = sys.linux.time.sleep(
-                        sys.linux.time.Duration.from_micros(50)
-                    );
-                }
-                @cfg(target_os = "macos") {
-                    let _ = sys.darwin.time.sleep(
-                        sys.darwin.time.Duration.from_micros(50)
-                    );
-                }
-                @cfg(target_os = "windows") {
-                    spin_hint();
-                }
-            }
+            Poll.Pending => sleep_ns(50_000),
         }
     }
 }
@@ -2525,13 +2473,6 @@ public type ExecutorTimeout<F: Future> is {
     started: Bool,
 };
 
-/// Get current monotonic time in nanoseconds.
-/// Uses native V-LLSI time functions instead of FFI.
-@inline
-fn time_now_ns() -> UInt64 {
-    monotonic_nanos()
-}
-
 // =============================================================================
 // Phase 1B (#325) — Worker main loop
 // =============================================================================
@@ -2737,13 +2678,13 @@ implement<F: Future> Future for ExecutorTimeout<F> {
     fn poll(&mut self, cx: &mut Context) -> Poll<Result<F.Output, ExecutorTimeoutError>> {
         // Initialize deadline on first poll
         if !self.started {
-            let now = time_now_ns();
+            let now = monotonic_nanos();
             self.deadline_ns = now + self.timeout_ns;
             self.started = true;
         }
 
         // Check if deadline has passed
-        let now = time_now_ns();
+        let now = monotonic_nanos();
         if now >= self.deadline_ns {
             return Poll.Ready(Result.Err(ExecutorTimeoutError));
         }

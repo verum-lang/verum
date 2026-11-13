@@ -129,12 +129,21 @@ const PROBE: &str = r#"
         let driver: TaskState<YieldReceipt> = TaskState.new(YieldReceipt { base: 1, increase: 2, polls: 0 });
         driver.into_result()
     }
+    fn pending_wait() -> Int {
+        let start = monotonic_nanos();
+        let receipt = block_on(YieldReceipt { base: 37, increase: 36, polls: 0 });
+        if receipt.base + receipt.increase != 73 { return -1; }
+        (monotonic_nanos() - start) as Int
+    }
 "#;
 
 #[test]
 fn task_driver_preserves_the_pending_future_and_its_concrete_output() {
     let maybe = declarations(include_str!("../../../core/base/maybe.vr"), &["Maybe"], &[]);
     let poll = declarations(include_str!("../../../core/async/poll.vr"), &["Poll"], &[]);
+    let clock = declarations(
+        include_str!("../../../core/intrinsics/runtime/time.vr"), &["monotonic_nanos", "sleep_ns"], &[],
+    );
     let waker = declarations(
         include_str!("../../../core/async/waker.vr"),
         &[
@@ -164,13 +173,15 @@ fn task_driver_preserves_the_pending_future_and_its_concrete_output() {
     );
     let mut executor = declarations(
         include_str!("../../../core/async/executor.vr"),
-        &["TaskState"],
+        &["TaskState", "block_on"],
         &["TaskState"],
     );
+    executor.items.extend(Parser::new("mount core.intrinsics.runtime.time.{monotonic_nanos, sleep_ns};")
+        .parse_module().unwrap().items);
     executor
         .items
         .extend(Parser::new(PROBE).parse_module().unwrap().items);
-    let sources = [&maybe, &poll, &waker, &future, &executor];
+    let sources = [&maybe, &poll, &waker, &future, &clock, &executor];
     for module in compiled_and_archived(&sources) {
         let drive = module
             .find_function_by_name("core.async.executor.drive")
@@ -178,6 +189,15 @@ fn task_driver_preserves_the_pending_future_and_its_concrete_output() {
         let premature = module
             .find_function_by_name("core.async.executor.premature")
             .unwrap();
+        let pending_wait = module.find_function_by_name("core.async.executor.pending_wait").unwrap();
+        let block_on = module.find_function_by_name("core.async.executor.block_on").unwrap();
+        let descriptor = module.get_function(block_on).unwrap();
+        let start = descriptor.bytecode_offset as usize;
+        let body = verum_vbc::bytecode::decode_instructions(
+            &module.bytecode[start..start + descriptor.bytecode_length as usize],
+        ).unwrap();
+        assert!(body.iter().any(|op| matches!(op, verum_vbc::Instruction::TimeExtended { sub_op, .. }
+            if *sub_op == verum_vbc::instruction::TimeSubOpcode::SleepNanos as u8)), "{body:?}");
         let mut vm = Interpreter::new(module.into());
         for (base, increase) in [(37, 36), (-9, 12)] {
             let arguments = [
@@ -194,5 +214,7 @@ fn task_driver_preserves_the_pending_future_and_its_concrete_output() {
                 .contains("task result requested before completion"),
             "{error}"
         );
+        let elapsed = vm.execute_function(pending_wait).unwrap().try_as_i64().unwrap();
+        assert!(elapsed >= 50_000, "50 microsecond poll backoff took {elapsed}ns");
     }
 }
