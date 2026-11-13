@@ -14917,50 +14917,36 @@ impl VbcCodegen {
         let receiver_result_declaration = self.declared_expression_result(
             receiver, Some(receiver_reg), receiver_start, self.ctx.instructions.len(),
         );
+        let reference_receiver = matches!(
+            &receiver_result_declaration,
+            Some(crate::types::TypeRef::Reference { .. })
+        )
+            || (receiver_result_declaration.is_none() && self.ctx.is_raw_pointer(receiver_reg));
 
-        // Raw-pointer method interception — when the receiver register is
-        // tagged `raw_pointer` (set by `compile_cast` for `… as &unsafe T`,
-        // `… as *const T`, `… as *mut T`, propagated through
-        // `compile_pattern_bind`'s Mov), route a small set of bare method
-        // names directly to the matching stdlib intrinsic instead of
-        // emitting CallM. Without this, CallM keyed by the bare name
-        // `is_null` resolves to the user-defined `FatRef.is_null` function
-        // (registered when `core/mem/fat_ref.vr` was processed) — that
-        // method reads `self.generation` at offset 0, but a raw pointer
-        // has no generation field, so its u64 address is reinterpreted
-        // as a generation counter and the runtime panics with a null-
-        // pointer dereference at pc=0 inside `FatRef.is_null`. Same
-        // class as the `Heap.new` / `Shared.new` interception above: a
-        // built-in behaviour must always win over a stdlib `.method` of
-        // the same bare name when the receiver kind statically
-        // determines it.
+        // The source reference determines this operation before auto-deref,
+        // as in type checking. Calls and blocks preserve the declaration even
+        // when their temporary registers no longer carry a raw-pointer flag.
+        // Resolve the intrinsic by registry identity, independently of any
+        // same-named free function or pointee method in the source namespace.
         if args.is_empty()
-            && self.ctx.is_raw_pointer(receiver_reg)
+            && reference_receiver
             && method.name == "is_null"
-            && let Some(func_info) = self.ctx.lookup_function_in_scope("is_null").cloned()
         {
-            // Fresh consecutive arg register (Call instruction expects
-            // args in a contiguous range starting at `start`).
-            let arg_reg = self.ctx.registers.alloc_fresh();
-            if receiver_reg != arg_reg {
-                self.ctx.emit(Instruction::Mov {
-                    dst: arg_reg,
-                    src: receiver_reg,
-                });
-                // Carry the raw-pointer flag onto the new register so
-                // any subsequent operation on it remains correct.
-                self.ctx.mark_raw_pointer(arg_reg);
-                self.ctx.free_temp(receiver_reg);
-            }
-            let result = self.ctx.alloc_temp();
-            self.ctx.emit(Instruction::Call {
-                dst: result,
-                func_id: func_info.id.0,
-                args: crate::instruction::RegRange {
-                    start: arg_reg,
-                    count: 1,
-                },
+            let intrinsic = lookup_intrinsic("ptr_is_null")
+                .or_internal("null-pointer operation is absent from the intrinsic registry")?;
+            let address = self.ctx.alloc_temp();
+            let mut operands = Vec::new();
+            Self::write_reg(&mut operands, address.0);
+            Self::write_reg(&mut operands, receiver_reg.0);
+            self.ctx.emit(Instruction::CbgrExtended {
+                sub_op: crate::instruction::CbgrSubOpcode::ToRawPtr as u8,
+                operands,
             });
+            let result = self.ctx.alloc_temp();
+            let stride = self.ptr_intrinsic_byte_stride(intrinsic.intrinsic.name, Some(receiver));
+            self.emit_intrinsic_instructions(&intrinsic, &[address], result, stride, None)?;
+            self.ctx.free_temp(address);
+            self.ctx.free_temp(receiver_reg);
             return Ok(Some(result));
         }
 
