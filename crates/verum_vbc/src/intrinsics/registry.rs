@@ -53,6 +53,82 @@ const fn signal_watch(name: &'static str, op: crate::signal_watch::SignalWatchOp
     }
 }
 
+/// Blocking worker operations use declaration-owned calls. Both execution tiers
+/// validate the semantic callback ABI before treating a register as a callable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PoolOperation {
+    /// Create a local worker pool.
+    Create,
+    /// Schedule work on the specified pool.
+    Submit,
+    /// Schedule work on the global pool.
+    GlobalSubmit,
+    /// Collect one result.
+    Await,
+    /// Shut down a local pool.
+    Destroy,
+}
+
+impl PoolOperation {
+    /// Largest positive count whose native u64 worker-handle array fits the
+    /// signed machine-word allocation size.
+    pub const MAX_WORKERS: i64 = i64::MAX / std::mem::size_of::<u64>() as i64;
+
+    /// A callback's visible signature alone grants no ownership of captured state.
+    pub const CAPTURE_REFUSAL: &'static str = "blocking pool callback captures have no transferable owner";
+
+    /// Operations with runtime bodies emitted by the target.
+    pub const ALL: [Self; 5] = [Self::Create, Self::Submit, Self::GlobalSubmit, Self::Await, Self::Destroy];
+
+    /// Canonical identity recorded in a source or archive declaration.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Create => "pool_create",
+            Self::Submit => "pool_submit",
+            Self::GlobalSubmit => "pool_global_submit",
+            Self::Await => "pool_await",
+            Self::Destroy => "pool_destroy",
+        }
+    }
+
+    /// Number of VBC arguments supplied to this operation.
+    pub const fn parameter_count(self) -> u8 {
+        match self { Self::Submit => 3, Self::GlobalSubmit => 2, _ => 1 }
+    }
+
+    const fn entry(self) -> Intrinsic {
+        Intrinsic {
+            name: self.name(),
+            category: IntrinsicCategory::Async,
+            hints: &[IntrinsicHint::SideEffect],
+            param_count: self.parameter_count(),
+            return_count: if matches!(self, Self::Destroy) { 0 } else { 1 },
+            strategy: CodegenStrategy::BlockingPool(self),
+            mlir_op: None,
+            doc: "Operate on a blocking worker pool or its completion handle",
+        }
+    }
+
+    /// A word used to pass a callback still carries a function signature.
+    pub fn accepts_declaration(self, declaration: &crate::module::FunctionDescriptor) -> bool {
+        use crate::types::{TypeRef, TypeId};
+        let int = TypeRef::Concrete(TypeId::INT);
+        let param = |index: usize| declaration.params.get(index).map(|p| &p.type_ref);
+        let callback = |ty: Option<&TypeRef>| matches!(ty,
+            Some(TypeRef::Function { is_async: false, params, return_type, contexts })
+            if matches!(params.as_slice(), [arg] if arg == &int) && return_type.as_ref() == &int && contexts.is_empty());
+        let returns = if self == Self::Destroy { TypeId::UNIT } else { TypeId::INT };
+        !declaration.is_generic && declaration.contexts.is_empty()
+            && declaration.return_type == TypeRef::Concrete(returns)
+            && declaration.params.len() == usize::from(self.parameter_count())
+            && match self {
+                Self::Create | Self::Await | Self::Destroy => param(0) == Some(&int),
+                Self::Submit => param(0) == Some(&int) && callback(param(1)) && param(2) == Some(&int),
+                Self::GlobalSubmit => callback(param(0)) && param(1) == Some(&int),
+            }
+    }
+}
+
 /// Intrinsic category for dispatch optimization.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum IntrinsicCategory {
@@ -210,6 +286,8 @@ pub enum CodegenStrategy {
     /// Preserve the selected FunctionId; neither host constant folding nor an
     /// invented inline instruction supplies an implementation of this contract.
     RuntimeCall,
+    /// A declaration-owned blocking worker operation.
+    BlockingPool(PoolOperation),
 
     /// Maps to ArithExtended opcode (0xBD) with a sub-opcode.
     /// Used for checked, overflowing, and polymorphic arithmetic operations.
@@ -5704,6 +5782,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         mlir_op: None,
         doc: "Get number of CPU cores",
     },
+    PoolOperation::Create.entry(),
+    PoolOperation::Submit.entry(),
+    PoolOperation::GlobalSubmit.entry(),
+    PoolOperation::Await.entry(),
+    PoolOperation::Destroy.entry(),
     // =========================================================================
     // Execution Tier Intrinsics
     // =========================================================================

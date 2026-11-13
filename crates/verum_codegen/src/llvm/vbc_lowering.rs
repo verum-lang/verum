@@ -1513,6 +1513,14 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             let target = self.functions.get(&descriptor.id.0).copied();
             let intrinsic = vbc_module.strings.get(intrinsic_id).unwrap_or("<invalid intrinsic name>");
             if let (Some(target), Some(implementation)) = (target, native_intrinsics.get(intrinsic)) {
+                if let Some(info) = verum_vbc::intrinsics::lookup_intrinsic(intrinsic)
+                    && let verum_vbc::intrinsics::registry::CodegenStrategy::BlockingPool(op) = info.intrinsic.strategy
+                    && !op.accepts_declaration(descriptor)
+                {
+                    return Err(LlvmLoweringError::type_lowering(format!(
+                        "intrinsic '{intrinsic}' has an incompatible worker pool signature"
+                    )));
+                }
                 if target.get_type() != implementation.get_type() {
                     return Err(LlvmLoweringError::TypeLowering(format!(
                         "Intrinsic declaration '{}' has an ABI incompatible with native intrinsic '{}'",
@@ -1779,6 +1787,9 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             // - If instructions not available, default to i64 (most functions return values)
             // - User-defined types in return position → i64 (heap pointer representation)
             let effective_return_type = match &func_desc.return_type {
+                TypeRef::Concrete(TypeId::UNIT) if func_desc.requires_intrinsic_implementation() => {
+                    TypeRef::Concrete(TypeId::UNIT)
+                }
                 TypeRef::Concrete(TypeId::UNIT) => {
                     match func_desc.instructions.as_ref() {
                         Some(instrs) => {

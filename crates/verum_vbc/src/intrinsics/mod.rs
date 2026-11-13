@@ -76,7 +76,7 @@ pub struct IntrinsicInfo {
 impl IntrinsicInfo {
     /// This intrinsic must retain its declaration-owned runtime call.
     pub fn is_runtime_call(&self) -> bool {
-        matches!(self.intrinsic.strategy, registry::CodegenStrategy::RuntimeCall)
+        matches!(self.intrinsic.strategy, registry::CodegenStrategy::RuntimeCall | registry::CodegenStrategy::BlockingPool(_))
     }
 }
 

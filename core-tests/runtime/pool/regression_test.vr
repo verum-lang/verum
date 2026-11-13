@@ -71,6 +71,16 @@ fn regression_pool_double_await_is_defensive_zero() {
     assert_eq(h.join(), 0, "drained handle must read defensive 0");
 }
 
+@test
+fn collected_handle_cannot_read_a_later_jobs_result() {
+    let pool = ThreadPool.new(1);
+    let mut first = pool.submit(pool_identity, 13);
+    assert_eq(first.join(), 13);
+    let mut second = pool.submit(pool_identity, 97);
+    assert_eq(first.join(), 0);
+    assert_eq(second.join(), 97);
+}
+
 fn main() {
     // `verum test` synthesises a per-test main.
 }

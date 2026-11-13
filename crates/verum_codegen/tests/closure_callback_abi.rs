@@ -78,6 +78,11 @@ fn with_source_ir(check: impl FnOnce(&Context, &str)) {
         assert!(function.verify(true), "{name}");
         definitions.push_str(function.print_to_string().to_str().expect("UTF-8 IR"));
         definitions.push('\n');
+        if let Some(adapter) = lower.module().get_function(&format!("{name}$trampoline$")) {
+            assert!(adapter.verify(true), "{name} callable adapter must verify");
+            definitions.push_str(adapter.print_to_string().to_str().expect("UTF-8 IR"));
+            definitions.push('\n');
+        }
     }
     check(&context, &definitions);
 }

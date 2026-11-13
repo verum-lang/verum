@@ -533,7 +533,7 @@ impl<'ctx> PlatformIR<'ctx> {
 
         // Thread Pool
         if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_pool_ir"); }
-        self.emit_pool_ir(module, &intrinsics)?;
+        self.emit_pool_ir(module, &mut intrinsics)?;
 
         // Async I/O (submit + poll + syscall)
         if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() { eprintln!("[platform-ir] emit_async_io_ir"); }
@@ -10997,7 +10997,7 @@ impl<'ctx> PlatformIR<'ctx> {
 
     fn emit_pool_ir(
         &self, module: &Module<'ctx>,
-        intrinsics: &super::native_intrinsic::NativeIntrinsicImplementations<'ctx>,
+        intrinsics: &mut super::native_intrinsic::NativeIntrinsicImplementations<'ctx>,
     ) -> super::error::Result<()> {
         self.emit_pool_worker_entry(module)?;
         self.emit_pool_create(module)?;
@@ -11006,6 +11006,26 @@ impl<'ctx> PlatformIR<'ctx> {
         self.emit_pool_destroy(module)?;
         self.emit_pool_global(module, intrinsics)?;
         self.emit_pool_global_submit(module)?;
+
+        // The current native worker uses Darwin's system threading ABI.
+        // A target with no equivalent implementation cannot claim the operation.
+        if !target_is_darwin(module) {
+            return Ok(());
+        }
+        let word = self.context.i64_type();
+        for op in verum_vbc::intrinsics::registry::PoolOperation::ALL {
+            let entry = verum_vbc::intrinsics::lookup_intrinsic(op.name())
+                .or_internal("missing registered pool operation")?.intrinsic;
+            let symbol = format!("verum_{}", entry.name);
+            let params = vec![word.into(); usize::from(entry.param_count)];
+            let abi = if entry.return_count == 0 {
+                self.context.void_type().fn_type(&params, false)
+            } else {
+                word.fn_type(&params, false)
+            };
+            let body = module.get_function(&symbol).or_internal("missing emitted pool function")?;
+            intrinsics.register(entry, body, abi)?;
+        }
         Ok(())
     }
 
@@ -11358,21 +11378,7 @@ impl<'ctx> PlatformIR<'ctx> {
             .build_load(ptr_type, closure_obj_ptr, "closure_fn")
             .or_llvm_err()?
             .into_pointer_value();
-        // SAFETY: GEP into the 16-byte closure struct {fn_ptr, env_ptr}
-        // at offset 8 (environment pointer).
-        let closure_env_slot = unsafe {
-            builder
-                .build_gep(
-                    i8_type,
-                    closure_obj_ptr,
-                    &[i64_type.const_int(8, false)],
-                    "closure_env_slot",
-                )
-                .or_llvm_err()?
-        };
-        let closure_env = builder
-            .build_load(ptr_type, closure_env_slot, "closure_env")
-            .or_llvm_err()?;
+        let closure_env = super::runtime::RuntimeLowering::closure_environment(ctx, &builder, closure_obj_ptr)?;
         let closure_fn_type =
             i64_type.fn_type(&[ptr_type.into(), i64_type.into()], false);
         let closure_result = builder
@@ -11474,6 +11480,18 @@ impl<'ctx> PlatformIR<'ctx> {
             .get_first_param()
             .or_internal("missing first param")?
             .into_int_value();
+
+        // Reject workless and overflowing allocations before creating any resources.
+        let valid = ctx.append_basic_block(func, "valid_workers");
+        let invalid = ctx.append_basic_block(func, "invalid_workers");
+        let positive = builder.build_int_compare(IntPredicate::SGT, num_workers, i64_type.const_zero(), "positive").or_llvm_err()?;
+        let fits = builder.build_int_compare(IntPredicate::SLE, num_workers,
+            i64_type.const_int(verum_vbc::intrinsics::registry::PoolOperation::MAX_WORKERS as u64, false), "fits_thread_array").or_llvm_err()?;
+        let count_ok = builder.build_and(positive, fits, "count_ok").or_llvm_err()?;
+        builder.build_conditional_branch(count_ok, valid, invalid).or_llvm_err()?;
+        builder.position_at_end(invalid);
+        self.emit_runtime_failure(module, &builder, "invalid blocking worker count")?;
+        builder.position_at_end(valid);
 
         // Alloc pool struct (80 bytes), zero-init
         // Layout: queue_ptr(0), cap(8), head(16), tail(24), len(32),
@@ -11581,7 +11599,7 @@ impl<'ctx> PlatformIR<'ctx> {
         // spawn_loop: for i in 0..num_workers
         builder.position_at_end(spawn_loop);
         let i_phi = builder.build_phi(i64_type, "i").or_llvm_err()?;
-        i_phi.add_incoming(&[(&i64_type.const_zero(), entry)]);
+        i_phi.add_incoming(&[(&i64_type.const_zero(), valid)]);
         let i_val = i_phi.as_basic_value().into_int_value();
         let done = builder
             .build_int_compare(IntPredicate::SGE, i_val, num_workers, "done")
@@ -11683,6 +11701,30 @@ impl<'ctx> PlatformIR<'ctx> {
             .get_nth_param(2)
             .or_internal("missing param 2")?
             .into_int_value();
+
+        // Only the compiler's raw code callback or an environment-free Verum
+        // function may cross this word-only boundary. Check before enqueue:
+        // the originating frame is still live even for an indirect callback.
+        let inspect = ctx.append_basic_block(func, "inspect_callback");
+        let admitted = ctx.append_basic_block(func, "admitted");
+        let refused = ctx.append_basic_block(func, "refused_callback");
+        let nonnull = builder.build_int_compare(IntPredicate::NE, func_arg,
+            i64_type.const_zero(), "has_callback").or_llvm_err()?;
+        let tagged = builder.build_and(func_arg, i64_type.const_int(1, false), "raw_tag").or_llvm_err()?;
+        let raw = builder.build_int_compare(IntPredicate::NE, tagged,
+            i64_type.const_zero(), "raw_function").or_llvm_err()?;
+        let classify = ctx.append_basic_block(func, "classify_callback");
+        builder.build_conditional_branch(nonnull, classify, refused).or_llvm_err()?;
+        builder.position_at_end(classify);
+        builder.build_conditional_branch(raw, admitted, inspect).or_llvm_err()?;
+        builder.position_at_end(inspect);
+        let closure = builder.build_int_to_ptr(func_arg, ptr_type, "callback").or_llvm_err()?;
+        let environment = super::runtime::RuntimeLowering::closure_environment(ctx, &builder, closure)?;
+        let captureless = builder.build_is_null(environment, "captureless").or_llvm_err()?;
+        builder.build_conditional_branch(captureless, admitted, refused).or_llvm_err()?;
+        builder.position_at_end(refused);
+        self.emit_runtime_failure(module, &builder, verum_vbc::intrinsics::registry::PoolOperation::CAPTURE_REFUSAL)?;
+        builder.position_at_end(admitted);
 
         let pool_ptr = builder
             .build_int_to_ptr(pool_i64, ptr_type, "pool_ptr")
@@ -12116,10 +12158,6 @@ impl<'ctx> PlatformIR<'ctx> {
                 .build_gep(i8_type, pool_ptr, &[i64_type.const_int(64, false)], "sd_p")
                 .or_llvm_err()?
         };
-        builder
-            .build_store(shutdown_p, i64_type.const_int(1, false))
-            .or_llvm_err()?;
-
         // Lock, broadcast condvar, unlock to wake workers
         // SAFETY: GEP at a known offset within an allocated object; the pointer is valid and the offset does not exceed the allocation size
         let mtx_p = unsafe {
@@ -12136,6 +12174,10 @@ impl<'ctx> PlatformIR<'ctx> {
         builder
             .build_call(mutex_lock, &[mtx_p.into()], "")
             .or_llvm_err()?;
+        builder
+            .build_store(shutdown_p, i64_type.const_int(1, false))
+            .or_llvm_err()?;
+
         builder
             .build_call(cond_broadcast, &[cv_p.into()], "")
             .or_llvm_err()?;

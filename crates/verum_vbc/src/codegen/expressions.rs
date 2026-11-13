@@ -35845,7 +35845,7 @@ impl VbcCodegen {
                 };
                 self.ctx.emit(op.instruction(dest, *operand));
             }
-            CodegenStrategy::RuntimeCall => {
+            CodegenStrategy::RuntimeCall | CodegenStrategy::BlockingPool(_) => {
                 return Err(CodegenError::unsupported_expr(format!(
                     "runtime intrinsic '{}' requires a declaration-owned callable",
                     intrinsic.name,

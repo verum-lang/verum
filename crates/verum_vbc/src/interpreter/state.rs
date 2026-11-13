@@ -386,6 +386,7 @@ pub struct HostCallContext {
 /// Mutable execution state of one interpreter instance: registers, frames, heap, contexts and the CBGR bookkeeping shared by every dispatch handler.
 pub struct InterpreterState {
     linux_signal_watches: super::linux_signal::OwnedWatches,
+    pub(super) blocking_pools: super::task_pool::TaskPools,
     /// Current module being executed.
     pub module: Arc<VbcModule>,
 
@@ -2734,6 +2735,7 @@ impl InterpreterState {
             global_instruction_count: 0,
             coop_pump_depth: 0,
             linux_signal_watches: Default::default(),
+            blocking_pools: Default::default(),
             permission_router: Box::new(
                 crate::interpreter::permission::PermissionRouter::allow_all(),
             ),
@@ -3217,6 +3219,7 @@ impl InterpreterState {
         // whatever the previous test left behind.
         self.static_mut_cells.clear();
         self.linux_signal_watches = Default::default();
+        self.blocking_pools.clear();
         self.cbgr_epoch = 1;
         self.cbgr_bypass_depth = 0;
         self.cbgr_allocations.clear();

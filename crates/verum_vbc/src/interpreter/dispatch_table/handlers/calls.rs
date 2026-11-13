@@ -1467,6 +1467,13 @@ fn try_dispatch_intrinsic_function(
                 let arg = state.registers.get(caller_base, args_start);
                 return state.execute_signal_watch(op, arg).map(Some);
             }
+            if let crate::intrinsics::registry::CodegenStrategy::BlockingPool(op) = intrinsic.strategy {
+                if !op.accepts_declaration(descriptor) {
+                    return Err(InterpreterError::InvalidBytecode { pc: state.pc() as usize,
+                        message: format!("intrinsic '{name}' has an incompatible worker pool signature") });
+                }
+                return execute_pool_operation(state, op, caller_base, args_start).map(Some);
+            }
             if let Some((scope, operand)) =
                 crate::interpreter::permission::intrinsic_permission_request(intrinsic).map_err(
                     |message| InterpreterError::InvalidBytecode {
@@ -1527,6 +1534,55 @@ fn try_dispatch_intrinsic_function(
         });
     }
     Ok(result)
+}
+
+/// Pool calls are reached only after the descriptor's exact identity and ABI
+/// have been checked, on both direct and first-class invocation paths.
+fn execute_pool_operation(
+    state: &mut InterpreterState,
+    op: crate::intrinsics::registry::PoolOperation,
+    caller_base: u32,
+    args: Reg,
+) -> InterpreterResult<Value> {
+    use crate::intrinsics::registry::PoolOperation;
+    let operand = |state: &InterpreterState, index| state.registers.get(caller_base, Reg(args.0 + index));
+    let integer = |value: Value| value.try_as_i64().ok_or(InterpreterError::TypeMismatch {
+        expected: "Int", got: "non-integer", operation: "blocking worker pool",
+    });
+    match op {
+        PoolOperation::Create => {
+            if !(1..=PoolOperation::MAX_WORKERS).contains(&integer(operand(state, 0))?) {
+                return Err(InterpreterError::Panic { message: "invalid blocking worker count".into() });
+            }
+            state.blocking_pools.create().map(Value::from_i64)
+        }
+        PoolOperation::Destroy => {
+            state.blocking_pools.destroy(integer(operand(state, 0))?)?;
+            Ok(Value::unit())
+        }
+        PoolOperation::Await => state.blocking_pools.take(integer(operand(state, 0))?).map(Value::from_i64),
+        PoolOperation::Submit | PoolOperation::GlobalSubmit => {
+            let index = if op == PoolOperation::Submit {
+                state.blocking_pools.require(integer(operand(state, 0))?)?;
+                1
+            } else { 0 };
+            let function = operand(state, index);
+            let (_, captures) = super::super::synchronous_callable(state, function)?;
+            if captures != 0 {
+                return Err(InterpreterError::Panic {
+                    message: PoolOperation::CAPTURE_REFUSAL.into(),
+                });
+            }
+            let argument = operand(state, index + 1);
+            integer(argument)?;
+            let result = integer(super::super::call_closure_sync(state, function, &[argument])?)?;
+            let receipt = state.blocking_pools.complete(result)?;
+            if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TracePool) {
+                eprintln!("[pool] {op:?} completed task {receipt} with {result}");
+            }
+            Ok(Value::from_i64(receipt))
+        }
+    }
 }
 
 /// Attribute identities and unresolved external symbol spellings have
@@ -2408,100 +2464,6 @@ fn try_dispatch_intrinsic_named(
             let fd = get_i64_arg(state, 1);
             let flags = get_i64_arg(state, 2);
             Ok(Some(Value::from_i64(crate::interpreter::io_engine::take_ready(h, fd, flags))))
-        }
-
-        // --- Thread Pool (POOL-INTERP-STUB-1) ---
-        // Tier-0 runs submitted tasks EAGERLY on the interpreter
-        // thread: same observable contract as the Tier-1 native pool
-        // (`verum_pool_*`) — every task runs exactly once, `await()`
-        // returns its result — only the interleaving differs.  The
-        // historical arms here returned 0 without ever CALLING the
-        // submitted function: `pool.submit(f, x).await()` was a silent
-        // constant-zero, a cross-tier soundness divergence.  When the
-        // worker_pool V1 (dispatch-on-workers) lands, it swaps in
-        // behind the same `task_pool` handle table.
-        "__pool_create_raw" => Ok(Some(Value::from_i64(1))),
-        "__pool_destroy_raw" => Ok(Some(Value::from_i64(0))),
-        "__pool_submit_raw" | "__pool_global_submit_raw" => {
-            // submit(pool, func, arg) / global_submit(func, arg).
-            // Compare the NORMALIZED name (the same key that selected
-            // this arm) — the raw `func_name` arrives module-qualified
-            // ("pool.__pool_submit_raw"), so an equality check against
-            // the bare spelling silently mis-shaped submit as
-            // global_submit: func_idx=0 read the POOL HANDLE (1) as the
-            // function id, and the eager call dialled FunctionId(1)
-            // (whose heap-object result then leaked out of join()).
-            let (func_idx, arg_idx) = if name == "__pool_submit_raw" {
-                (1, 2)
-            } else {
-                (0, 1)
-            };
-            let func_val = get_arg(state, func_idx);
-            let arg_val = get_arg(state, arg_idx);
-            if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TracePool) {
-                eprintln!(
-                    "[pool] submit func_val tag={:?} bits={:#x} is_ptr={} is_func_ref={} is_int={} arg tag={:?}",
-                    func_val.tag(),
-                    func_val.to_bits(),
-                    func_val.is_ptr(),
-                    func_val.is_func_ref(),
-                    func_val.is_int(),
-                    arg_val.tag(),
-                );
-            }
-            // `func as Int` reaches us as a FuncRef, as a plain Int
-            // holding the function id, or as a zero-capture closure
-            // object (NewClosure is how codegen passes named fns to
-            // higher-order sites) — classify explicitly, never guess
-            // bits.
-            let result = if func_val.is_ptr() && !func_val.is_nil() {
-                super::super::call_closure_sync(state, func_val, &[arg_val])?
-            } else if func_val.is_func_ref() {
-                super::super::call_function_sync(
-                    state,
-                    func_val.as_func_id(),
-                    &[arg_val],
-                )?
-            } else {
-                // `func as Int` collapsed the closure POINTER into an
-                // Int payload — an address-magnitude value, NOT a
-                // function id.  Truncating it to u32 dialled a random
-                // function (whose heap-object result then leaked out of
-                // join() as raw pointer bits).  Re-tag address-sized
-                // values as the closure pointer they are; only
-                // small-magnitude ints are genuine function ids.
-                let raw = func_val.as_i64();
-                if raw > u32::MAX as i64 {
-                    let closure = Value::from_ptr(raw as *mut u8);
-                    super::super::call_closure_sync(state, closure, &[arg_val])?
-                } else {
-                    super::super::call_function_sync(
-                        state,
-                        FunctionId(raw as u32),
-                        &[arg_val],
-                    )?
-                }
-            };
-            if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TracePool) {
-                eprintln!(
-                    "[pool] submit result tag={:?} bits={:#x} as_int={}",
-                    result.tag(),
-                    result.to_bits(),
-                    result.as_integer_compatible(),
-                );
-            }
-            // The task contract is fn(Int) -> Int; the callee's return
-            // may arrive as a BOXED int (uniform-i64 register slots) —
-            // normalize through the canonical unboxer, never raw bits.
-            Ok(Some(Value::from_i64(
-                crate::interpreter::task_pool::store(result.as_integer_compatible()),
-            )))
-        }
-        "__pool_await_raw" => {
-            let h = get_i64_arg(state, 0);
-            Ok(Some(Value::from_i64(crate::interpreter::task_pool::take(
-                h,
-            ))))
         }
 
         // --- Socket Options (VBC-IO-ENGINE-1: real syscalls,

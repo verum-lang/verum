@@ -864,6 +864,26 @@ fn run_sync_frame(
     result
 }
 
+/// Resolve a function reference or a live closure before reading its captures.
+pub(crate) fn synchronous_callable(state: &InterpreterState, value: Value) -> InterpreterResult<(FunctionId, usize)> {
+    if value.is_func_ref() { return Ok((value.as_func_id(), 0)); }
+    if !value.is_ptr() || value.is_nil() || !state.heap.contains(value.as_ptr()) {
+        return Err(InterpreterError::TypeMismatch {
+            expected: "live closure", got: "non-closure value", operation: "call_closure_sync",
+        });
+    }
+    // SAFETY: exact allocation membership precedes every header read.
+    let header = unsafe { &*value.as_ptr::<super::heap::ObjectHeader>() };
+    if header.type_id != crate::types::TypeId(0xC000) || header.size < 8 || !header.is_valid() {
+        return Err(InterpreterError::TypeMismatch {
+            expected: "live closure", got: "non-closure object", operation: "call_closure_sync",
+        });
+    }
+    // SAFETY: the closure tag and allocation size establish the two-word header.
+    let (function, count) = unsafe { super::heap::closure_header(value.as_ptr()) };
+    Ok((FunctionId(function), count as usize))
+}
+
 /// Call a closure synchronously, returning its result.
 /// Sets up a call frame for the closure and runs a nested dispatch loop.
 pub(crate) fn call_closure_sync(
@@ -871,29 +891,12 @@ pub(crate) fn call_closure_sync(
     closure_val: Value,
     args: &[Value],
 ) -> InterpreterResult<Value> {
+    let (func_id, capture_count) = synchronous_callable(state, closure_val)?;
     if closure_val.is_func_ref() {
-        let id = closure_val.as_func_id();
-        state.closure_generic_witnesses(closure_val, id)?;
-        return call_function_sync(state, id, args);
+        state.closure_generic_witnesses(closure_val, func_id)?;
+        return call_function_sync(state, func_id, args);
     }
-    if !closure_val.is_ptr() || closure_val.is_nil() {
-        return Err(InterpreterError::TypeMismatch {
-            expected: "closure",
-            got: "non-pointer",
-            operation: "call_closure_sync",
-        });
-    }
-
     let base_ptr = closure_val.as_ptr::<u8>();
-
-    // SAFETY: closure_val.is_ptr() + !is_nil() check above + the
-    // closure layout produced by `handle_make_closure` guarantees
-    // `closure_header` reads valid (func_id, capture_count) at the
-    // canonical offsets pinned by `verum_common::layout`.
-    let (raw_func_id, capture_count_u32) = unsafe { super::heap::closure_header(base_ptr) };
-    let func_id = FunctionId(raw_func_id);
-    let capture_count = capture_count_u32 as usize;
-
     let func = state
         .module
         .get_function(func_id)

@@ -11670,11 +11670,6 @@ fn lower_call<'ctx>(
     || bare_name == "__io_poll_raw"
     || bare_name == "__io_remove_raw"
     || bare_name == "__io_modify_raw"
-    || bare_name == "__pool_create_raw"
-    || bare_name == "__pool_submit_raw"
-    || bare_name == "__pool_await_raw"
-    || bare_name == "__pool_destroy_raw"
-    || bare_name == "__pool_global_submit_raw"
     || bare_name == "__socket_set_nonblocking_raw"
     || bare_name == "__socket_set_blocking_raw"
     || bare_name == "__socket_set_reuseaddr_raw"
@@ -13280,101 +13275,6 @@ fn lower_call<'ctx>(
                         modify_fn,
                         &[engine_val.into(), fd_val.into(), events_val.into()],
                         "io_modify",
-                    )
-                    .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .unwrap_or_else(|| i64_type.const_int(0, false).into());
-                ctx.set_register(dst.0, result);
-                return Ok(());
-            }
-
-            // ============================================================
-            // Thread Pool
-            // ============================================================
-            "__pool_create_raw" => {
-                // __pool_create_raw(num_workers: Int) -> Int (pool handle)
-                let nw_val = if args.count > 0 {
-                    ctx.get_register(args.start.0)?
-                } else {
-                    i64_type.const_int(4, false).into()
-                };
-                let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-        let create_fn = super::error::get_or_declare_function(module, "verum_pool_create", fn_type);
-                let result = ctx
-                    .builder()
-                    .build_call(create_fn, &[nw_val.into()], "pool")
-                    .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .unwrap_or_else(|| i64_type.const_int(0, false).into());
-                ctx.set_register(dst.0, result);
-                return Ok(());
-            }
-
-            "__pool_submit_raw" => {
-                // __pool_submit_raw(pool: Int, func: Int, arg: Int) -> Int (handle)
-                let pool_val = ctx.get_register(args.start.0)?;
-                let func_val = ctx.get_register(args.start.0 + 1)?;
-                let arg_val = ctx.get_register(args.start.0 + 2)?;
-                let fn_type = i64_type
-                        .fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false);
-        let submit_fn = super::error::get_or_declare_function(module, "verum_pool_submit", fn_type);
-                let result = ctx
-                    .builder()
-                    .build_call(
-                        submit_fn,
-                        &[pool_val.into(), func_val.into(), arg_val.into()],
-                        "pool_task",
-                    )
-                    .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .unwrap_or_else(|| i64_type.const_int(0, false).into());
-                ctx.set_register(dst.0, result);
-                return Ok(());
-            }
-
-            "__pool_await_raw" => {
-                // __pool_await_raw(handle: Int) -> Int (result)
-                let handle_val = ctx.get_register(args.start.0)?;
-                let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-        let await_fn = super::error::get_or_declare_function(module, "verum_pool_await", fn_type);
-                let result = ctx
-                    .builder()
-                    .build_call(await_fn, &[handle_val.into()], "pool_result")
-                    .or_llvm_err()?
-                    .try_as_basic_value()
-                    .basic()
-                    .unwrap_or_else(|| i64_type.const_int(0, false).into());
-                ctx.set_register(dst.0, result);
-                return Ok(());
-            }
-
-            "__pool_destroy_raw" => {
-                let pool_val = ctx.get_register(args.start.0)?;
-                let void_type = ctx.types().void_type();
-                let fn_type = void_type.fn_type(&[i64_type.into()], false);
-        let destroy_fn = super::error::get_or_declare_function(module, "verum_pool_destroy", fn_type);
-                ctx.builder()
-                    .build_call(destroy_fn, &[pool_val.into()], "")
-                    .or_llvm_err()?;
-                ctx.set_register(dst.0, i64_type.const_int(0, false).into());
-                return Ok(());
-            }
-
-            "__pool_global_submit_raw" => {
-                // __pool_global_submit_raw(func: Int, arg: Int) -> Int (handle)
-                let func_val = ctx.get_register(args.start.0)?;
-                let arg_val = ctx.get_register(args.start.0 + 1)?;
-                let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-        let submit_fn = super::error::get_or_declare_function(module, "verum_pool_global_submit", fn_type);
-                let result = ctx
-                    .builder()
-                    .build_call(
-                        submit_fn,
-                        &[func_val.into(), arg_val.into()],
-                        "pool_global_task",
                     )
                     .or_llvm_err()?
                     .try_as_basic_value()

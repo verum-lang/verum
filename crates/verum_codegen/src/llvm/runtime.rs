@@ -1455,6 +1455,22 @@ impl<'ctx> RuntimeLowering<'ctx> {
     /// Native closures are headerless pairs, unlike ordinary heap records.
     const CLOSURE_ENV_OFFSET: u64 = verum_common::layout::POINTER_SIZE;
 
+    /// Load the environment from the canonical native two-pointer closure.
+    pub(super) fn closure_environment(
+        context: &'ctx Context,
+        builder: &Builder<'ctx>,
+        closure: PointerValue<'ctx>,
+    ) -> Result<PointerValue<'ctx>> {
+        // SAFETY: lower_new_closure allocates CLOSURE_SIZE and stores the
+        // environment at CLOSURE_ENV_OFFSET; callers provide that carrier.
+        let slot = unsafe {
+            builder.build_in_bounds_gep(context.i8_type(), closure,
+                &[context.i64_type().const_int(Self::CLOSURE_ENV_OFFSET, false)], "env_slot").or_llvm_err()?
+        };
+        Ok(builder.build_load(context.ptr_type(AddressSpace::default()), slot, "closure_env")
+            .or_llvm_err()?.into_pointer_value())
+    }
+
     /// Invoke the carrier produced by `lower_new_closure` with the value-slot
     /// convention used by CallClosure: `i64 (ptr environment, i64 args...)`.
     /// Unit callbacks also return a slot. Typed ABI adaptation is separate
@@ -1471,21 +1487,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
             .build_load(ptr_type, closure, "closure_fn")
             .or_llvm_err()?
             .into_pointer_value();
-        // SAFETY: lower_new_closure allocates CLOSURE_SIZE bytes and stores
-        // the separate environment pointer at CLOSURE_ENV_OFFSET.
-        let env_slot = unsafe {
-            builder
-                .build_in_bounds_gep(
-                    self.context.i8_type(),
-                    closure,
-                    &[i64_type.const_int(Self::CLOSURE_ENV_OFFSET, false)],
-                    "env_slot",
-                )
-                .or_llvm_err()?
-        };
-        let environment = builder
-            .build_load(ptr_type, env_slot, "closure_env")
-            .or_llvm_err()?;
+        let environment = Self::closure_environment(self.context, builder, closure)?;
         let mut call_args: verum_common::List<BasicMetadataValueEnum<'ctx>> =
             verum_common::List::with_capacity(args.len() + 1);
         let mut param_types: verum_common::List<verum_llvm::types::BasicMetadataTypeEnum<'ctx>> =

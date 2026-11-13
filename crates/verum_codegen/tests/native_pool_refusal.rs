@@ -178,6 +178,31 @@ fn contended_exchange_that_observes_unlock_acquires_the_mutex() {
     }
 }
 
+#[test]
+fn pool_binding_refuses_foreign_abi_or_unsupported_target() {
+    use verum_fast_parser::Parser;
+    use verum_vbc::codegen::{CodegenConfig, VbcCodegen};
+
+    for (triple, callback, expected) in [
+        ("aarch64-apple-darwin", "Int", "incompatible worker pool signature"),
+        ("aarch64-unknown-linux-gnu", "fn(Int) -> Int", "pool_global_submit"),
+    ] {
+        let source = format!(r#"
+            module app;
+            @intrinsic("pool_global_submit") fn queue(callback: {callback}, value: Int) -> Int;
+            public fn probe(callback: {callback}) -> Int {{ queue(callback, 27) }}
+        "#);
+        let ast = Parser::new(&source).parse_module().unwrap();
+        let vbc = VbcCodegen::with_config(CodegenConfig::new("app")).compile_module(&ast).unwrap();
+        let context = Context::create();
+        let mut config = LoweringConfig::debug("app").with_debug_info(false);
+        config.target_triple = Some(triple.into());
+        let mut lower = VbcToLlvmLowering::new(&context, config);
+        let error = lower.lower_module(&vbc).expect_err("unsupported binding must refuse");
+        assert!(error.to_string().contains(expected), "{triple}: {error}");
+    }
+}
+
 fn runtime<'ctx>(
     context: &'ctx Context,
     name: &str,
@@ -428,6 +453,66 @@ mod native {
             function.instructions = Some(body);
         }
         loaded
+    }
+
+    fn run_declared_pool(callback: &str) -> std::process::Output {
+        let source = format!(r#"
+            module app;
+            @intrinsic("pool_create") fn open(n: Int) -> Int;
+            @intrinsic("pool_submit") fn schedule(p: Int, callback: fn(Int) -> Int, value: Int) -> Int;
+            @intrinsic("pool_global_submit") fn schedule_global(callback: fn(Int) -> Int, value: Int) -> Int;
+            @intrinsic("pool_await") fn take(id: Int) -> Int;
+            @intrinsic("pool_destroy") fn close(id: Int);
+            fn times_three(x: Int) -> Int {{ x * 3 }}
+            fn queue(f: fn(Int) -> Int) -> Int {{ schedule_global(f, 9) }}
+            {callback}
+            fn probe() -> Int {{
+                let pool = open(2);
+                let first = schedule(pool, times_three, 15);
+                let second = submit_from_caller();
+                close(pool);
+                take(second) + take(first) + 1
+            }}
+        "#);
+        let source = Parser::new(&source).parse_module().unwrap();
+        let vbc = VbcCodegen::with_config(CodegenConfig::new("app")).compile_module(&source).unwrap();
+        let context = Context::create();
+        let mut config = LoweringConfig::debug("app").with_debug_info(false);
+        config.panic_strategy = PanicStrategy::Abort;
+        let mut lowering = VbcToLlvmLowering::new(&context, config);
+        lowering.lower_module(&vbc).expect("declaration-owned callback ABI");
+        let module = lowering.module();
+        let main = module.add_function("main", context.i32_type().fn_type(&[], false), None);
+        let builder = context.create_builder();
+        builder.position_at_end(context.append_basic_block(main, "entry"));
+        let result = builder.build_call(module.get_function("app.probe").unwrap(), &[], "result")
+            .unwrap().try_as_basic_value().basic().unwrap().into_int_value();
+        let status = builder.build_int_truncate(result, context.i32_type(), "status").unwrap();
+        builder.build_return(Some(&status)).unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        run_binary(&emit_binary(module, directory.path()))
+    }
+
+    #[test]
+    fn declared_blocking_pool_operations_run_the_selected_callbacks() {
+        let _serial = NATIVE.lock().unwrap();
+        let child = run_declared_pool("fn submit_from_caller() -> Int { let f = times_three; queue(f) }");
+        assert_eq!(child.status.code(), Some(73), "{}", String::from_utf8_lossy(&child.stderr));
+    }
+
+    #[test]
+    fn indirect_and_escaping_captures_refuse_before_native_worker_admission() {
+        let _serial = NATIVE.lock().unwrap();
+        for (owner, body) in [
+            ("let bias = 3;", "x + bias"),
+            ("let mut local = 2; let reference = &mut local;", "*reference += x; *reference"),
+        ] {
+            let callback = format!("fn submit_from_caller() -> Int {{ {owner} let f = |x| {{ {body} }}; queue(f) }}");
+            let child = run_declared_pool(&callback);
+            assert_eq!(child.status.code(), Some(1), "{}", String::from_utf8_lossy(&child.stderr));
+            assert_eq!(String::from_utf8_lossy(&child.stderr).trim(),
+                format!("PANIC: {}", verum_vbc::intrinsics::registry::PoolOperation::CAPTURE_REFUSAL));
+        }
     }
 
     #[test]
