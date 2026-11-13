@@ -3,7 +3,7 @@
 // =============================================================================
 //
 // Regression pins for `core/net/tls.vr`. Live TLS operations
-// (`TlsConnector.connect` / `TlsAcceptor.accept` / PEM parsing /
+// (`TlsConnector.connect` / `TlsAcceptor.accept` /
 // ALPN negotiation) require a real TLS backend (rustls-ktls /
 // openssl-fips / hacl-star / SChannel / SecureTransport) which is
 // not yet wired up — see `audit.md §3.1`. The @ignore'd pins below
@@ -44,25 +44,8 @@ fn regression_tls_acceptor_accept_on_tcp_listener() {
     assert(true);
 }
 
-// =============================================================================
-// TLS-3 — Certificate.from_pem with sample fixture
-// =============================================================================
-
-@ignore("TLS-3: Certificate.from_pem needs a sample PEM fixture model. See audit.md §3.1.")
-@test
-fn regression_certificate_from_pem_sample() {
-    assert(true);
-}
-
-// =============================================================================
-// TLS-4 — PrivateKey.from_pem with sample fixture
-// =============================================================================
-
-@ignore("TLS-4: PrivateKey.from_pem needs a sample PEM fixture model. See audit.md §3.1.")
-@test
-fn regression_private_key_from_pem_sample() {
-    assert(true);
-}
+// PEM parsing is exercised by core-tests/security/x509/credential/unit_test.vr.
+// Error conversion is exercised by credential_error_test.vr in this directory.
 
 // =============================================================================
 // TLS-5 — ALPN negotiation h2 / http/1.1

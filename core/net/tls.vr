@@ -123,7 +123,7 @@ implement Display for TlsVersion {
 // that needs nothing from the network — mount `core.net.tls` to name
 // its own credential type. That was the last edge of the
 // net <-> security cycle.
-public mount core.security.x509.credential.{Certificate, PrivateKey, KeyType};
+public mount core.security.x509.credential.{Certificate, PrivateKey, KeyType, CredentialError};
 
 // =============================================================================
 // TLS Configuration
@@ -711,8 +711,7 @@ implement TlsConnector {
 
     /// Connect to a TLS server.
     public async fn connect(&self, host: &Text, port: Int) -> Result<TlsStream, LegacyTlsError> {
-        let addr = f"{host}:{port}";
-        let tcp = TcpStream.connect(&addr).await
+        let tcp = TcpStream.connect_async((host, port)).await
             .map_err(|e| LegacyTlsError.IoFailure(f"TCP connect failed: {e}"))?;
         TlsStream.connect(tcp, host, &self.config).await
     }
@@ -820,6 +819,16 @@ public type LegacyTlsError is
     | UnsupportedVersion(TlsVersion)
     /// No shared cipher suites.
     | NoCipherSuites;
+
+// Credential parsing belongs to security; TLS owns this conversion.
+implement From<CredentialError> for LegacyTlsError {
+    fn from(error: CredentialError) -> LegacyTlsError {
+        match error {
+            CredentialError.InvalidCertificate(message) => LegacyTlsError.InvalidCertificate(message),
+            CredentialError.InvalidKey(message) => LegacyTlsError.InvalidKey(message),
+        }
+    }
+}
 
 implement Debug for LegacyTlsError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
