@@ -123,10 +123,8 @@ fn dereferenced_arguments_forward_the_declared_protocol_target() {
     }
 }
 
-#[test]
-fn canonical_allocation_supplies_the_nested_receiver_constructor_result() {
+fn canonical_allocation_declarations() -> verum_ast::Module {
     use verum_ast::{ItemKind, TypeKind, decl::{ImplItemKind, ImplKind}};
-    use verum_vbc::{Instruction, bytecode::decode_instructions, types::TypeRef};
 
     // Only signatures of the intercepted .new functions are needed here; source
     // declaration collection keeps their actual stdlib owner and entire type roster.
@@ -147,6 +145,14 @@ fn canonical_allocation_supplies_the_nested_receiver_constructor_result() {
         }
         _ => false,
     });
+    declarations
+}
+
+#[test]
+fn canonical_allocation_supplies_the_nested_receiver_constructor_result() {
+    use verum_vbc::{Instruction, bytecode::decode_instructions, types::TypeRef};
+
+    let declarations = canonical_allocation_declarations();
     let source = r#"
         module allocation_client;
         mount core.base.memory.{Heap, Shared};
@@ -185,5 +191,74 @@ fn canonical_allocation_supplies_the_nested_receiver_constructor_result() {
             Instruction::CallG { func_id, type_args, .. }
                 if *func_id == ticket.0 && type_args.as_slice() == [TypeRef::Concrete(receipt.id)]
         )), "{name}: {body:?}");
+    }
+}
+
+fn list_dispatch_declarations() -> verum_ast::Module {
+    use verum_ast::{ItemKind, TypeKind, decl::{ImplItemKind, ImplKind}};
+
+    let mut owner = Parser::new(include_str!("../../../core/collections/list.vr")).parse_module().unwrap();
+    owner.items.retain_mut(|item| match &mut item.kind {
+        ItemKind::Module(_) => true,
+        ItemKind::Type(declaration) => declaration.name.as_str() == "List",
+        ItemKind::Impl(implementation) => {
+            let ImplKind::Inherent(ty) = &implementation.kind else { return false };
+            let TypeKind::Generic { base, .. } = &ty.kind else { return false };
+            let TypeKind::Path(path) = &base.kind else { return false };
+            if !path.as_ident().is_some_and(|name| name.as_str() == "List") { return false; }
+            implementation.items.retain(|member| matches!(&member.kind,
+                ImplItemKind::Function(method) if matches!(method.name.as_str(), "new" | "push" | "pop")));
+            !implementation.items.is_empty()
+        }
+        _ => false,
+    });
+    owner
+}
+
+#[test]
+fn a_named_unique_allocation_survives_the_submitting_frame() {
+    use verum_ast::ItemKind;
+    use verum_common::ResourceDiscipline;
+    use verum_vbc::types::{TypeId, TypeRef};
+
+    let memory = canonical_allocation_declarations();
+    let list = list_dispatch_declarations();
+    let mut maybe = Parser::new(include_str!("../../../core/base/maybe.vr")).parse_module().unwrap();
+    maybe.items.retain(|item| matches!(&item.kind, ItemKind::Module(_) | ItemKind::Type(_)));
+    for annotation in ["", ": Heap<Receipt>"] {
+        let source = format!(r#"
+            module forwarding;
+            mount core.base.memory.Heap;
+            mount core.collections.list.List;
+            mount core.base.maybe.Maybe;
+            type Receipt is {{ base: Int }};
+            fn enqueue(queue: &mut List<Heap<Receipt>>) {{
+                let item{annotation} = Heap.new(Receipt {{ base: 37 }});
+                queue.push(item);
+            }}
+            fn check() -> Int {{
+                let mut queue: List<Heap<Receipt>> = List.new();
+                enqueue(&mut queue);
+                match queue.pop() {{
+                    Maybe.Some(item) => (*item).base + 36,
+                    Maybe.None => -1,
+                }}
+            }}
+        "#);
+        let client = Parser::new(&source).parse_module().unwrap();
+        let mut cg = VbcCodegen::with_config(CodegenConfig::new("forwarding"));
+        // Native dispatch reads the real declared parameter/owner metadata.
+        // Its built-in operation executes the canonical List and Heap carriers.
+        cg.collect_unit_declarations(&[&memory, &list, &maybe, &client]).unwrap();
+        cg.resolve_pending_imports();
+        cg.compile_unit_items(&[&client], ItemFailurePolicy::Strict).unwrap();
+        let archive = cg.finalize_module_from_state().unwrap();
+        let wire = verum_vbc::serialize::serialize_module(&archive).unwrap();
+        let archive = verum_vbc::deserialize::deserialize_module(&wire).unwrap();
+        let owner = TypeRef::Instantiated { base: TypeId::HEAP, args: vec![TypeRef::Concrete(TypeId::INT)] };
+        assert_eq!(archive.resource_discipline(&owner), ResourceDiscipline::Affine);
+        let entry = archive.find_function_by_name("forwarding.check").unwrap();
+        let returned = Interpreter::new(Arc::new(archive)).execute_function(entry).unwrap();
+        assert_eq!(returned.try_as_i64(), Some(73), "{annotation}");
     }
 }

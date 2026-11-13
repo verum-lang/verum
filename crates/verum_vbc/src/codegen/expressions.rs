@@ -12504,7 +12504,7 @@ impl VbcCodegen {
 
     /// Retain method identity when a nominal has both qualified and short
     /// registry keys. A short key is usable only for the same registered type.
-    fn registered_receiver_method(&self, type_name: &str, method: &str) -> Option<String> {
+    pub(super) fn registered_receiver_method(&self, type_name: &str, method: &str) -> Option<String> {
         let base = Self::strip_generic_args(Self::method_receiver_type_name(type_name));
         if self.ctx.generic_type_params.contains(base) {
             return None;
@@ -13691,9 +13691,7 @@ impl VbcCodegen {
                     // Text<small>".  This blocked `get_heap()` /
                     // `get_segment_stats()` and every observer that reaches a
                     // record-typed thread-local via a method call.
-                    if self.ctx.get_var_reg(&name).is_ok()
-                        || self.ctx.is_thread_local(&name).is_some()
-                    {
+                    if self.is_value_receiver_binding(&name) {
                         None
                     } else {
                         Some(name)
@@ -23457,9 +23455,14 @@ impl VbcCodegen {
         };
         Some(AstType::new(kind, expression.span))
     }
-    /// Helper to flatten nested Field expressions into a qualified path.
-    /// For example: `Field(Field(Path[super], "sys"), "linux")` → Some(["super", "sys", "linux"])
-    /// Returns None if the expression isn't a pure module path.
+    /// Locals, TLS slots and declared constants retain value-receiver semantics.
+    pub(super) fn is_value_receiver_binding(&self, name: &str) -> bool {
+        self.ctx.lookup_var(name).is_some()
+            || self.ctx.is_thread_local(name).is_some()
+            || self.ctx.lookup_function_in_scope(name).is_some_and(|declaration| declaration.is_const)
+    }
+
+    /// Flatten a namespace path while preserving value-binding precedence.
     fn try_flatten_module_path(&self, expr: &Expr) -> Option<Vec<String>> {
         match &expr.kind {
             ExprKind::Path(path) => {
@@ -23477,18 +23480,7 @@ impl VbcCodegen {
                             // free function can consume the call before the value
                             // receiver is loaded. Use the declaration registry,
                             // not the binding's spelling or initializer shape.
-                            let is_local_var = self.ctx.get_var_reg(&ident.name).is_ok()
-                                || self.ctx.is_thread_local(&ident.name).is_some();
-                            // Constants have explicit declaration metadata.
-                            // A zero-argument function is not a value binding
-                            // and cannot hide an imported module namespace.
-                            let is_static_or_const = self
-                                .ctx
-                                .lookup_function_in_scope(&ident.name)
-                                .map(|f| f.is_const)
-                                .unwrap_or(false);
-
-                            if !is_local_var && !is_static_or_const && !is_type_name(&ident.name) {
+                            if !self.is_value_receiver_binding(&ident.name) && !is_type_name(&ident.name) {
                                 // Bare-mount module-alias expansion. When the
                                 // user wrote `mount X.Y.Z;` at module top, the
                                 // import processor registered `Z` →

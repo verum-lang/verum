@@ -166,15 +166,15 @@ public fn is_null<T>(ptr: &unsafe T) -> Bool {
 // Heap<T> - Unique owned heap allocation
 // =============================================================================
 
-/// Heap-allocated value with unique ownership and CBGR tracking.
-/// Similar to Box<T> in Rust but with generation-based memory safety.
+/// Heap-allocated value with a single owner and CBGR tracking.
+/// Passing the owner by value transfers it.
 ///
 
 /// The generation and epoch fields are used for CBGR validation:
 /// - On dereference, the stored generation is compared to the header
 /// - If they don't match, use-after-free is detected at ~15ns cost
 @opaque
-public type Heap<T> is {
+public type affine Heap<T> is {
     ptr: &unsafe T,
     generation: UInt32,
     epoch: UInt16,

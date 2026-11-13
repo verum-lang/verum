@@ -296,3 +296,46 @@ fn mounted_generic_alias_unifies_with_its_qualified_target() {
         assert!(errors.is_empty(), "{errors:?}");
     }
 }
+
+#[test]
+fn canonical_heap_is_single_owner_and_unrelated_heap_stays_reusable() {
+    let mut owner = parse(include_str!("../../../core/base/memory.vr"));
+    owner.items.retain(|item| matches!(&item.kind, ItemKind::Type(decl) if decl.name.as_str() == "Heap"));
+    assert_eq!(owner.items.len(), 1);
+
+    for (source, refused) in [
+        ("fn take(item: core.base.memory.Heap<Int>) {} fn probe(item: core.base.memory.Heap<Int>) { take(item); take(item); }", true),
+        ("fn read(item: &core.base.memory.Heap<Int>) {} fn take(item: core.base.memory.Heap<Int>) {} fn probe(item: core.base.memory.Heap<Int>) { read(&item); read(&item); take(item); }", false),
+        ("fn take(item: foreign.Heap<Int>) {} fn probe(item: foreign.Heap<Int>) { take(item); take(item); }", false),
+    ] {
+        for reverse in [false, true] {
+            let mut checker = TypeChecker::new();
+            let other = parse("public type Heap<T> is { value: T };");
+            for (module, path) in if reverse {
+                [(&other, "foreign"), (&owner, "core.base.memory")]
+            } else {
+                [(&owner, "core.base.memory"), (&other, "foreign")]
+            } {
+                declarations(&mut checker, module, path);
+            }
+            let client = parse(source);
+            checker.set_current_module_path("consumer");
+            for item in &client.items {
+                if let ItemKind::Function(decl) = &item.kind {
+                    checker.register_function_signature(decl).unwrap();
+                }
+            }
+            let mut errors = verum_common::List::new();
+            for item in &client.items {
+                if let Err(error) = checker.check_item(item) { errors.push(format!("{error:?}")); }
+            }
+            errors.extend(checker.take_deferred_errors().iter().map(|error| format!("{error:?}")));
+            errors.extend(checker.diagnostic_sources().iter().map(|error| format!("{error:?}")));
+            if refused {
+                assert!(errors.iter().any(|error| error.contains("MovedValueUsed")), "{source}: {errors:?}");
+            } else {
+                assert!(errors.is_empty(), "{source}: {errors:?}");
+            }
+        }
+    }
+}

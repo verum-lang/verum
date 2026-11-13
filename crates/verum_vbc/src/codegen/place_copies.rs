@@ -177,6 +177,9 @@ impl VbcCodegen {
                 let selected = emitted.and_then(|(reg, start, end)|
                     self.copy_selected_call_result(reg, start, end, type_args, args, depth));
                 if selected.is_some() { return selected; }
+                if emitted.is_some() && let Some(result) = self.source_call_declaration(expr, None, depth + 1) {
+                    return Some(result);
+                }
                 let owner = self.extract_expr_type_name(receiver)?;
                 if let Some(result) = self.dynamic_call_result(&owner, method.name.as_str(), args.len(), type_args) {
                     return result;

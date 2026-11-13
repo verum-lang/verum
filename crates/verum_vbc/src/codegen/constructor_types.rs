@@ -557,6 +557,18 @@ impl VbcCodegen {
                 type_args,
                 args,
             } => {
+                if let ExprKind::Path(path) = &receiver.kind
+                    && let Some(ident) = path.as_ident()
+                    && !self.is_value_receiver_binding(ident.as_str())
+                    && self.nominal_type_id(ident.as_str()).is_some()
+                {
+                    let key = self.registered_receiver_method(ident.as_str(), method.name.as_str())?;
+                    let callable = self.ctx.lookup_qualified_function(&key)?;
+                    if callable.param_names.first().is_some_and(|name| name == "self") {
+                        return None;
+                    }
+                    return self.source_call_result(callable, type_args, args, expected, depth);
+                }
                 // Dotted free functions and static methods use the same source
                 // namespace grammar. Flatten only namespace paths; a value
                 // receiver needs a separately established self declaration.
