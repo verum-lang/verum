@@ -61,6 +61,7 @@ mount core.async.executor.{AsyncRuntime, AsyncRuntimeConfig};
 mount core.async.future.Future;
 mount core.async.task.JoinHandle;
 mount core.base.protocols.Send;
+mount core.runtime.pool.ThreadPool;
 mount mem.{Alloc, Layout, AllocError, TieredAllocator, SimpleAllocator};
 // `StackAllocator` is `core.runtime.stack_alloc`'s, not `core.mem`'s —
 // mounting it from `mem` never resolved. It is const-generic, so a
@@ -70,14 +71,6 @@ mount mem.{Alloc, Layout, AllocError, TieredAllocator, SimpleAllocator};
 // `StackAllocator<4096>.new()` returns `cap=4096 used=0`. (T1296)
 mount .stack_alloc.{StackAllocator};
 mount core.{Result, Text};
-mount core.sync.atomic.{AtomicU32, MemoryOrdering};
-// Note: do NOT alias `Ordering = MemoryOrdering` here — it collides with
-// `core.base.ordering.Ordering` (`Less | Equal | Greater`), which is the
-// name every caller means when they write a bare `Ordering` in a function
-// signature. The atomic form is always spelled `MemoryOrdering` inside
-// this file (grep `MemoryOrdering.` for confirmation), so the alias was
-// dead weight that caused L1 variance specs to resolve the wrong type.
-
 // =============================================================================
 // Initialization Errors
 // =============================================================================
@@ -570,7 +563,7 @@ public type SyncRuntime is {
     allocator: TieredAllocator,
 
     /// Thread pool for parallel work
-    thread_pool: RuntimeConfigThreadPool,
+    thread_pool: Maybe<ThreadPool>,
 };
 
 @cfg(runtime = "no_async")
@@ -589,17 +582,16 @@ implement RuntimeConfig for SyncRuntime {
             .map_err(|e| RuntimeInitError.AllocatorInitFailed(e))?;
 
         // 3. Initialize thread pool
-        let thread_pool = RuntimeConfigThreadPool.init(num_cpus())
-            .map_err(|e| RuntimeInitError.ExecutorInitFailed(f"RuntimeConfigThreadPool: {e}"))?;
+        let thread_pool = ThreadPool.new(num_cpus());
 
         Result.Ok(Self {
             allocator,
-            thread_pool,
+            thread_pool: Maybe.Some(thread_pool),
         })
     }
 
     fn shutdown(&mut self) {
-        self.thread_pool.shutdown();
+        drop(self.thread_pool.take());
         self.allocator.shutdown();
     }
 
@@ -616,6 +608,12 @@ implement RuntimeConfig for SyncRuntime {
     fn io_driver_ref(&self) -> &NoopDriver {
         &NoopDriver
     }
+}
+
+@cfg(runtime = "no_async")
+implement SyncRuntime {
+    /// The configured pool remains available until profile shutdown.
+    public fn thread_pool(&self) -> Maybe<&ThreadPool> { self.thread_pool.as_ref() }
 }
 
 // =============================================================================
@@ -767,120 +765,6 @@ public type PollDriver is {
     pending: &Map<IoHandle, IoOp>,
 };
 
-// =============================================================================
-// Thread Pool (for sync runtime)
-// =============================================================================
-
-/// Thread pool for parallel work in sync runtime
-@cfg(runtime = "no_async")
-public type RuntimeConfigThreadPool is {
-    /// Worker threads
-    workers: &[Thread],
-
-    /// Job queue
-    job_queue: &JobQueue,
-
-    /// Shutdown flag
-    shutdown: RuntimeAtomicBool,
-};
-
-@cfg(runtime = "no_async")
-implement RuntimeConfigThreadPool {
-    public fn init(worker_count: Int) -> Result<Self, Text> {
-        let job_queue = &JobQueue.new();
-        let workers = allocate_thread_pool(worker_count, job_queue)?;
-
-        Result.Ok(Self {
-            workers,
-            job_queue,
-            shutdown: RuntimeAtomicBool.new(false),
-        })
-    }
-
-    public fn submit<F: FnOnce() + Send>(&self, job: F) {
-        self.job_queue.push(Job.new(job));
-    }
-
-    public fn shutdown(&self) {
-        self.shutdown.store(true, MemoryOrdering.SeqCst);
-        for worker in self.workers {
-            worker.join();
-        }
-    }
-}
-
-// =============================================================================
-// Supporting Type Definitions for @cfg-gated Runtime Configurations
-// =============================================================================
-/// OS thread handle wrapper.
-type Thread is {
-    /// Native thread handle (pthread_t / HANDLE)
-    handle: Int,
-};
-
-implement Thread {
-    fn join(&self) {
-        @cfg(target_os = "linux") {
-            __syscall_join_thread(self.handle);
-        }
-        @cfg(target_os = "macos") {
-            __pthread_join(self.handle);
-        }
-        @cfg(target_os = "windows") {
-            __wait_for_single_object(self.handle);
-        }
-    }
-}
-
-/// Bounded job queue for the synchronous thread pool.
-///
-
-/// Similar to TaskQueue but for blocking jobs (FnOnce closures).
-type JobQueue is {
-    /// Ring buffer of jobs
-    buffer: &[Job],
-    /// Capacity
-    capacity: Int,
-    /// Atomic head/tail
-    head: AtomicU64,
-    tail: AtomicU64,
-};
-
-implement JobQueue {
-    fn new() -> JobQueue {
-        let cap = 4096;
-        JobQueue {
-            buffer: alloc_array<Job>(cap),
-            capacity: cap,
-            head: AtomicU64.new(0),
-            tail: AtomicU64.new(0),
-        }
-    }
-
-    fn push(&self, job: Job) {
-        let tail = self.tail.fetch_add(1, MemoryOrdering.AcqRel) as Int;
-        let idx = tail % self.capacity;
-        self.buffer[idx] = job;
-    }
-}
-
-/// Job wrapper for thread pool (type-erased FnOnce closure).
-type Job is {
-    /// Pointer to the closure data
-    closure_ptr: Int,
-    /// Function pointer to invoke the closure
-    invoke_fn: Int,
-};
-
-implement Job {
-    fn new<F: FnOnce() + Send>(f: F) -> Job {
-        Job {
-            closure_ptr: f as Int,
-            invoke_fn: 0,
-        }
-    }
-}
-
 /// Poll file descriptor for poll-based I/O.
 ///
 
@@ -894,51 +778,3 @@ type PollFd is {
     /// Returned events
     revents: Int16,
 };
-
-/// Atomic boolean flag.
-///
-
-/// Backed by an atomic 32-bit integer (0=false, 1=true).
-type RuntimeAtomicBool is {
-    value: AtomicU32,
-};
-
-implement RuntimeAtomicBool {
-    fn new(initial: Bool) -> RuntimeAtomicBool {
-        RuntimeAtomicBool { value: AtomicU32.new(if initial { 1 } else { 0 }) }
-    }
-
-    fn load(&self, ordering: Ordering) -> Bool {
-        self.value.load(ordering) != 0
-    }
-
-    fn store(&self, val: Bool, ordering: Ordering) {
-        self.value.store(if val { 1 } else { 0 }, ordering);
-    }
-
-    fn compare_exchange(&self, expected: Bool, new_val: Bool, ordering: Ordering) -> Bool {
-        let exp = if expected { 1 } else { 0 };
-        let nv = if new_val { 1 } else { 0 };
-        self.value.compare_exchange(exp, nv, ordering) == exp
-    }
-}
-
-// OS thread intrinsics (wired to sys layer)
-@cfg(target_os = "linux")
-@intrinsic("syscall_join_thread")
-fn __syscall_join_thread(handle: Int);
-
-@cfg(target_os = "macos")
-@intrinsic("pthread_join")
-fn __pthread_join(handle: Int);
-
-@cfg(target_os = "windows")
-@intrinsic("wait_for_single_object")
-fn __wait_for_single_object(handle: Int);
-
-// Array allocation helper
-fn alloc_array<T>(count: Int) -> &[T] {
-    let size = count * T.stride;
-    let ptr = mem.alloc(size, T.alignment);
-    unsafe { slice_from_raw_parts(ptr as &T, count) }
-}
