@@ -7791,10 +7791,11 @@ impl VbcCodegen {
             // concrete TypeId in the heap header to disambiguate).
             self.emit_make_variant(result, final_tag, args.len() as u32, parent.as_deref());
             for (i, arg) in args.iter().enumerate() {
+                let copy_start = self.ctx.instructions.len();
                 let arg_val = self.compile_expr(arg)?.ok_or_else(|| {
                     CodegenError::internal("variant constructor arg has no value")
                 })?;
-                self.emit_variant_argument(result, i as u32, arg, arg_val);
+                self.emit_variant_argument(result, i as u32, arg, arg_val, copy_start)?;
                 self.ctx.free_temp(arg_val);
             }
             return Ok(Some(result));
@@ -11073,7 +11074,10 @@ impl VbcCodegen {
     }
 
     /// All source constructor routes share the same payload ownership boundary.
-    fn emit_variant_argument(&mut self, variant: Reg, field: u32, expr: &Expr, value: Reg) {
+    fn emit_variant_argument(
+        &mut self, variant: Reg, field: u32, expr: &Expr, value: Reg, copy_start: usize,
+    ) -> CodegenResult<()> {
+        let copy_type = self.copy_source_type(expr, value, copy_start, self.ctx.instructions.len());
         let store = Instruction::SetVariantData { variant, field, value };
         if self.consumes_named_place(expr, value) {
             self.ctx.emit_transferring_store(store, value);
@@ -11081,9 +11085,15 @@ impl VbcCodegen {
             let received = self.emit_generic_value_handoff(value, ty, true);
             self.ctx.emit(Instruction::SetVariantData { variant, field, value: received });
             self.ctx.free_temp(received);
+        } else if self.binds_a_copy_of_a_place(expr, value, copy_type.as_ref())? {
+            let copied = self.ctx.alloc_temp();
+            self.ctx.emit(Instruction::Clone { dst: copied, src: value });
+            self.ctx.emit(Instruction::SetVariantData { variant, field, value: copied });
+            self.ctx.free_temp(copied);
         } else {
             self.ctx.emit(store);
         }
+        Ok(())
     }
 
     /// Compiles a variant constructor call (e.g., Some(v), Ok(v), None, Err(e)).
@@ -11665,22 +11675,24 @@ impl VbcCodegen {
                 })
             });
 
+            let copy_start = self.ctx.instructions.len();
             let data_val = self
                 .compile_expr(&args[0])?
                 .or_internal("variant constructor arg has no value")?;
             if let Some(key) = variant_key.as_deref() {
                 self.emit_field_refinement_assert(data_val, key, "0");
             }
-            self.emit_variant_argument(result, 0, &args[0], data_val);
+            self.emit_variant_argument(result, 0, &args[0], data_val, copy_start)?;
             self.ctx.free_temp(data_val);
             for i in 1..args.len() {
+                let copy_start = self.ctx.instructions.len();
                 let next_val = self.compile_expr(&args[i])?.ok_or_else(|| {
                     CodegenError::internal("variant constructor arg has no value")
                 })?;
                 if let Some(key) = variant_key.as_deref() {
                     self.emit_field_refinement_assert(next_val, key, &i.to_string());
                 }
-                self.emit_variant_argument(result, i as u32, &args[i], next_val);
+                self.emit_variant_argument(result, i as u32, &args[i], next_val, copy_start)?;
                 self.ctx.free_temp(next_val);
             }
         }
@@ -12110,6 +12122,7 @@ impl VbcCodegen {
             } else {
                 None
             };
+            let copy_start = self.ctx.instructions.len();
             let data_val = self
                 .compile_expr(&args[0])?
                 .or_internal("variant constructor arg has no value")?;
@@ -12117,7 +12130,7 @@ impl VbcCodegen {
                 self.ctx.current_return_type_name = prev;
             }
 
-            self.emit_variant_argument(result, 0, &args[0], data_val);
+            self.emit_variant_argument(result, 0, &args[0], data_val, copy_start)?;
 
             self.ctx.free_temp(data_val);
 
@@ -12134,6 +12147,7 @@ impl VbcCodegen {
                 } else {
                     None
                 };
+                let copy_start = self.ctx.instructions.len();
                 let arg_val = self.compile_expr(arg)?.ok_or_else(|| {
                     CodegenError::internal("variant constructor arg has no value")
                 })?;
@@ -12141,7 +12155,7 @@ impl VbcCodegen {
                     self.ctx.current_return_type_name = prev;
                 }
 
-                self.emit_variant_argument(result, (i + 1) as u32, arg, arg_val);
+                self.emit_variant_argument(result, (i + 1) as u32, arg, arg_val, copy_start)?;
 
                 self.ctx.free_temp(arg_val);
             }
@@ -18056,10 +18070,11 @@ impl VbcCodegen {
                 func_info.parent_type_name.as_deref(),
             );
             for (i, arg) in args.iter().enumerate() {
+                let copy_start = self.ctx.instructions.len();
                 let arg_val = self.compile_expr(arg)?.ok_or_else(|| {
                     CodegenError::internal("variant constructor arg has no value")
                 })?;
-                self.emit_variant_argument(result, i as u32, arg, arg_val);
+                self.emit_variant_argument(result, i as u32, arg, arg_val, copy_start)?;
                 self.ctx.free_temp(arg_val);
             }
             return Ok(Some(result));

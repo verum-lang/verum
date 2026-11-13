@@ -33,9 +33,8 @@ the others were right.
 
 ## 1. Where the copy happens
 
-Seven syntactic positions duplicate a value. Each was measured against a
-probe before and after; each now copies when — and only when — its source
-is a place.
+The following source positions apply the value-copy rule at their owning
+emitter.
 
 | Position | Example | Emitter |
 |----------|---------|---------|
@@ -43,9 +42,23 @@ is a place.
 | Assignment | `b = a` | `compile_assignment` |
 | Record field | `Mat3 { r0: z, r1: z, r2: z }` | `compile_record` |
 | Record shorthand | `Point { x, y }` | `compile_record` |
+| Sum payload | `Choice.Value(value)` | `emit_variant_argument` |
 | By-value `mut` parameter | `fn f(mut h: Holder)` | `compile_function` prologue |
 | Container insert | `xs.push(item)` | `compile_method_call` |
 | Repeat literal | `[slot; 256]` | `compile_array_repeat` |
+
+Sum payloads use the same declared-place rule as record fields. An
+unrestricted named value or explicit dereference receives a value copy.
+An affine or linear local transfers its obligation into the payload. A
+reference keeps its referent, and a fresh temporary becomes the payload
+directly. `variant_payload_ownership` checks these boundaries through both
+source entry points and serialized VBC, including rejection of an attempted
+copy from a borrowed affine owner.
+
+The native lowering still loses allocation authority for a record copied
+through an explicit dereference. `Choice.Value(*borrowed)` can therefore
+retain the original storage under native execution. T2688 tracks this
+remaining producer-boundary defect separately from the sum-payload emitter.
 
 Two of these deserve their reasons stated, because both were once
 "fixed" in the wrong direction:
