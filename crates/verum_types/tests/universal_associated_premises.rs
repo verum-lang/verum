@@ -58,6 +58,34 @@ fn source(first: &str, second: &str, result: &str) -> String {
 #[test] fn missing_equality_is_not_inferred_from_the_requested_result() {
     reject(&source(":Stream", ":Stream", "T"));
 }
+
+#[test]
+fn methods_see_both_inline_and_where_bounds_on_the_same_parameter() {
+    let declarations = r#"
+        type Left is protocol { fn left(&self) -> Int; };
+        type Right is protocol { fn right(&self) -> Int; };
+        type Pair<T> is { item: T };
+    "#;
+    let implementation = r#"
+        implement<T: Left> Pair<T> where T: Right {
+            fn sum(&self) -> Int { self.item.left() + self.item.right() }
+        }
+    "#;
+    accept(&format!("{declarations}{implementation}"));
+    for missing in [": Left", " where T: Right"] {
+        reject(&format!("{declarations}{}", implementation.replace(missing, "")));
+    }
+}
+
+#[test]
+fn a_later_binder_must_still_belong_to_the_implementation() {
+    let program = source(":Stream<Item=T>", ":Stream<Item=T>", "T")
+        .replace("implement<T,A:Stream<Item=T>,B:Stream<Item=T>> Stream",
+                 "implement<A:Stream<Item=Missing>,T,B:Stream<Item=T>> Stream");
+    let diagnostics = errors(&program);
+    assert!(diagnostics.iter().any(|error| error.contains("E101") && error.contains("Missing")),
+        "{diagnostics:#?}");
+}
 #[test] fn another_required_protocol_premise_is_still_checked() {
     reject(&source(":Stream<Item=T>", "", "T"));
 }

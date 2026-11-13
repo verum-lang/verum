@@ -4371,7 +4371,6 @@ impl TypeChecker {
     /// This should be called before `check_impl_block` (which type-checks method bodies).
     /// Register method signatures from an implementation block.
     ///
-    /// Relies on RUST_MIN_STACK=16MB for stack safety on deep recursion.
     pub fn register_impl_block(&mut self, impl_decl: &verum_ast::decl::ImplDecl) -> Result<()> {
         self.register_impl_block_expected(impl_decl, None)
     }
@@ -4463,8 +4462,8 @@ impl TypeChecker {
                 code: "E405".into(), msg: "associated-family metadata requires a protocol implementation".into(), span: declaration.span,
             });
         }
-        self.with_impl_parameter_scope(declaration, |checker, implicit|
-            checker.register_impl_block_inner(declaration, expected, implicit)
+        self.with_impl_parameter_scope(declaration, |checker, owner|
+            checker.register_impl_block_inner(declaration, expected, owner)
         )?;
         if matches!(expected, Some(ExpectedImplementation::Protocol(_, _)))
             && self.protocol_checker.read().source_impl(&self.current_module_path, declaration)?.is_none()
@@ -4679,7 +4678,7 @@ impl TypeChecker {
     fn with_impl_parameter_scope<T>(
         &mut self,
         declaration: &verum_ast::ImplDecl,
-        operation: impl FnOnce(&mut Self, &[Text]) -> Result<T>,
+        operation: impl FnOnce(&mut Self, &indexmap::IndexMap<Text, Type>) -> Result<T>,
     ) -> Result<T> {
         use verum_ast::ty::GenericParamKind;
         let implicit = self.implicit_impl_receiver_parameters(declaration)?;
@@ -4697,7 +4696,30 @@ impl TypeChecker {
             .collect();
         let previous_self = self.current_self_type.clone();
         let previous_mode = (self.in_impl_block, self.in_inherent_impl);
-        let result = operation(self, &implicit);
+        // Meta parameter sorts see preceding binders; inline bounds and where
+        // clauses are elaborated after the entire declaration frame is present.
+        self.push_decl_param_frame(indexmap::IndexMap::new());
+        let result = self.in_impl_proof_scope(|checker| {
+            for parameter in &declaration.generics {
+                let (name, ty) = match &parameter.kind {
+                    GenericParamKind::Type { name, .. } => (name, Type::Var(TypeVar::fresh())),
+                    GenericParamKind::Meta { name, .. } | GenericParamKind::Const { name, .. } =>
+                        (name, checker.source_value_parameter(parameter)?),
+                    _ => continue,
+                };
+                checker.ctx.define_type(name.name.clone(), ty.clone());
+                checker.decl_param_frames.last_mut().expect("implementation frame")
+                    .insert(name.name.clone(), ty);
+            }
+            for name in implicit {
+                let ty = Type::Var(TypeVar::fresh());
+                checker.ctx.define_type(name.clone(), ty.clone());
+                checker.decl_param_frames.last_mut().expect("implementation frame").insert(name, ty);
+            }
+            let owner = checker.decl_param_frames.last().expect("implementation frame").clone();
+            operation(checker, &owner)
+        });
+        self.pop_decl_param_frame();
         for (name, prior) in saved {
             if let Some(ty) = prior {
                 self.ctx.type_defs.insert(name, ty);
@@ -4710,109 +4732,31 @@ impl TypeChecker {
         result
     }
 
-    /// Inner implementation of register_impl_block
     fn register_impl_block_inner(
         &mut self,
         impl_decl: &verum_ast::decl::ImplDecl,
         expected: Option<ExpectedImplementation<'_>>,
-        implicit: &[Text],
+        owner: &indexmap::IndexMap<Text, Type>,
     ) -> Result<()> {
-        use verum_ast::decl::{FunctionParamKind, ImplItemKind, ImplKind};
-
-        if let ImplKind::Protocol {
-            protocol, for_type, ..
-        } = &impl_decl.kind
-        {
-            let proto_name = protocol
-                .as_ident()
-                .map(|i| i.as_str().to_string())
-                .unwrap_or_default();
-            if proto_name == "Into" || proto_name.contains("Into") {
-                // #[cfg(debug_assertions)]
-                // eprintln!("[DEBUG impl_block_inner] Processing Into impl, for_type AST: {:?}", for_type);
-                // #[cfg(debug_assertions)]
-                // eprintln!("[DEBUG impl_block_inner] Generics: {:?}", impl_decl.generics.iter().map(|g| {
-                // if let verum_ast::ty::GenericParamKind::Type { name, .. } = &g.kind {
-                // name.name.as_str().to_string()
-                // } else {
-                // "?".to_string()
-                // }
-                // }).collect::<Vec<_>>());
+        use verum_ast::decl::ImplKind;
+        let names = owner.keys().cloned().collect();
+        let (clauses, callables) = self.enter_source_impl_conditions(impl_decl, owner)?;
+        match &impl_decl.kind {
+            ImplKind::Inherent(target) => {
+                if let Some(ExpectedImplementation::Inherent(expected)) = expected {
+                    let actual = self.ast_to_type(target)?;
+                    self.validate_impl_target(&actual, expected, impl_decl.span)?;
+                }
+                self.register_inherent_impl_methods(impl_decl, &names, &clauses, &callables)
             }
+            ImplKind::Protocol { .. } => self.register_protocol_impl_methods(
+                impl_decl, &names, owner, clauses, callables,
+                match expected {
+                    Some(ExpectedImplementation::Protocol(protocol, target)) => Some((protocol, target)),
+                    _ => None,
+                },
+            ),
         }
-
-        // Register generic type parameters from the impl block
-        let mut type_param_names = List::new();
-        let mut owner_frame = indexmap::IndexMap::new();
-        for generic_param in &impl_decl.generics {
-            use verum_ast::ty::GenericParamKind;
-            match &generic_param.kind {
-                GenericParamKind::Type { name, .. } => {
-                    let type_var = Type::Var(TypeVar::fresh());
-                    let name_text: Text = name.name.clone();
-                    owner_frame.insert(name_text.clone(), type_var.clone());
-                    self.ctx.define_type(name_text.clone(), type_var);
-                    type_param_names.push(name_text);
-                }
-                GenericParamKind::Const { name, ty } => {
-                    // For const generics like `const SIZE: Int`, register them as their declared type.
-                    // This prevents "type not found" errors when used in type arguments like StackAllocator<SIZE>.
-                    let name_text: Text = name.name.clone();
-                    let value_type = self.source_value_parameter(generic_param)?;
-                    owner_frame.insert(name_text.clone(), value_type.clone());
-                    self.ctx.define_type(name_text.clone(), value_type);
-                    type_param_names.push(name_text);
-                }
-                GenericParamKind::Meta { name, ty, .. } => {
-                    // For meta parameters like `N: meta usize`, similar handling as const generics
-                    let name_text: Text = name.name.clone();
-                    let value_type = self.source_value_parameter(generic_param)?;
-                    owner_frame.insert(name_text.clone(), value_type.clone());
-                    self.ctx.define_type(name_text.clone(), value_type);
-                    type_param_names.push(name_text);
-                }
-                _ => {}
-            }
-        }
-
-        for name in implicit.iter().cloned() {
-            let variable = Type::Var(TypeVar::fresh());
-            self.ctx.define_type(name.clone(), variable.clone());
-            owner_frame.insert(name.clone(), variable);
-            type_param_names.push(name);
-        }
-
-        // Imported source signatures resolve parameters through the lexical
-        // declaration frame, just as ordinary declarations do. The receiver,
-        // protocol arguments and members must share this exact telescope.
-        self.decl_param_frames.push(owner_frame.clone());
-        let result = self.in_impl_proof_scope(|checker| {
-            let (clauses, callables) =
-                checker.enter_source_impl_conditions(impl_decl, &owner_frame)?;
-            match &impl_decl.kind {
-                ImplKind::Inherent(target) => {
-                    if let Some(ExpectedImplementation::Inherent(expected)) = expected {
-                        let actual = checker.ast_to_type(target)?;
-                        checker.validate_impl_target(&actual, expected, impl_decl.span)?;
-                    }
-                    checker.register_inherent_impl_methods(impl_decl, &type_param_names, &clauses, &callables)
-                }
-                ImplKind::Protocol { .. } => checker.register_protocol_impl_methods(
-                    impl_decl,
-                    &type_param_names,
-                    &owner_frame,
-                    clauses,
-                    callables,
-                    match expected {
-                        Some(ExpectedImplementation::Protocol(protocol, target)) => Some((protocol, target)),
-                        _ => None,
-                    },
-                ),
-            }
-        });
-        self.decl_param_frames.pop();
-
-        result
     }
 
     /// Register a function signature without type-checking the body
@@ -6698,20 +6642,18 @@ impl TypeChecker {
     /// Check an implementation block and register methods
     /// Protocol system: method resolution, associated types, default implementations, protocol objects (&dyn Protocol) — .6 - Protocol implementations
     ///
-    /// Relies on RUST_MIN_STACK=16MB for stack safety on deeply nested impl blocks.
     pub(super) fn check_impl_block(&mut self, impl_decl: &verum_ast::decl::ImplDecl) -> Result<()> {
         if matches!(impl_decl.kind, verum_ast::decl::ImplKind::Protocol { .. }) {
             self.register_impl_block(impl_decl)?;
         }
-        self.push_decl_param_frame(indexmap::IndexMap::new());
-        let result = self.in_impl_proof_scope(|checker| {
-            let filtered = checker.cfg_filtered_impl(impl_decl);
-            let declaration = filtered.as_ref().unwrap_or(impl_decl);
-            checker.with_impl_parameter_scope(declaration, |checker, implicit|
-                checker.check_impl_block_inner(declaration, implicit)
-            )
-        });
-        self.pop_decl_param_frame();
+        let filtered = self.cfg_filtered_impl(impl_decl);
+        let declaration = filtered.as_ref().unwrap_or(impl_decl);
+        let depth = self.ctx.env.scope_depth();
+        self.ctx.env.push_scope();
+        let result = self.with_impl_parameter_scope(declaration, |checker, owner|
+            checker.check_impl_block_inner(declaration, owner)
+        );
+        self.ctx.env.restore_scope_depth(depth);
         result
     }
 
@@ -6728,11 +6670,11 @@ impl TypeChecker {
     ///
     /// The probe prints on EVERY method, pinned or not, so silence means the
     /// loop was never reached — it cannot be read as "nothing was pinned".
-    fn trace_impl_param_pinning(&mut self, param_names: &List<Text>, method: &str) {
+    fn trace_impl_param_pinning(&mut self, owner: &indexmap::IndexMap<Text, Type>, method: &str) {
         if std::env::var_os("VERUM_TRACE_IMPL_PARAM").is_none() {
             return;
         }
-        for name in param_names.iter() {
+        for name in owner.keys() {
             let bound = self.ctx.lookup_type(name.as_str()).cloned();
             let resolved = bound.as_ref().map(|b| self.unifier.apply(b));
             eprintln!(
@@ -6744,116 +6686,29 @@ impl TypeChecker {
         }
     }
 
-    fn check_impl_block_inner(&mut self, impl_decl: &verum_ast::decl::ImplDecl, implicit: &[Text]) -> Result<()> {
+    fn check_impl_block_inner(
+        &mut self,
+        impl_decl: &verum_ast::decl::ImplDecl,
+        owner: &indexmap::IndexMap<Text, Type>,
+    ) -> Result<()> {
         use verum_ast::decl::{ImplItemKind, ImplKind};
 
-        // CRITICAL FIX: Register generic type parameters from the impl block FIRST
-        // This allows T to be resolved in: implement<T> List<T> { fn push(&self, value: T) { ... } }
-        let mut type_param_names = List::new();
-
-        for generic_param in &impl_decl.generics {
-            use verum_ast::ty::GenericParamKind;
-            match &generic_param.kind {
-                GenericParamKind::Type { name, bounds, .. } => {
-                    let type_var = Type::Var(TypeVar::fresh());
-                    let name_text: Text = name.name.clone();
-                    self.ctx.define_type(name_text.clone(), type_var.clone());
-                    self.decl_param_frames.last_mut().expect("implementation body parameter scope")
-                        .insert(name_text.clone(), type_var.clone());
-
-                    // Register bounds from generic parameter declaration
-                    // Example: implement<T: Clone> List<T> { ... }
-                    if !bounds.is_empty() {
-                        let protocol_bounds =
-                            self.convert_type_bounds_to_protocol_bounds(bounds)?;
-
-                        // Add to local type context for type checking
-                        let type_param =
-                            crate::context::TypeParam::new(name_text.clone(), name.span)
-                                .with_bounds(protocol_bounds.clone());
-                        self.ctx.env.add_type_param(type_param);
-
-                        // CRITICAL: Also register bounds in type_var_bounds for method resolution.
-                        // Without this, calling methods on bounded type params (e.g., E: Module<Text, Out>)
-                        // fails because get_type_var_bounds returns empty, and the wrong method type is used.
-                        if let Type::Var(tvar) = &type_var {
-                            self.register_type_var_bounds(*tvar, protocol_bounds.clone());
-                        }
-
-                    }
-
-                    type_param_names.push(name_text);
-                }
-                GenericParamKind::Meta { name, .. } | GenericParamKind::Const { name, .. } => {
-                    let value_type = self.source_value_parameter(generic_param)?;
-                    let name_text = name.name.clone();
-                    self.ctx.define_type(name_text.clone(), value_type.clone());
-                    self.decl_param_frames.last_mut().expect("implementation body parameter scope")
-                        .insert(name_text.clone(), value_type);
-                    type_param_names.push(name_text);
-                }
-                _ => {} // Lifetime, Context, Level params handled elsewhere
+        // Inline bounds and where clauses can constrain the same parameter.
+        // Install all of its proved premises together for body method lookup.
+        let (clauses, _) = self.enter_source_impl_conditions(impl_decl, owner)?;
+        let mut bounds_by_variable: Map<TypeVar, List<crate::protocol::ProtocolBound>> = Map::new();
+        for clause in clauses {
+            if let Type::Var(variable) = clause.ty {
+                bounds_by_variable.entry(variable).or_default().extend(clause.bounds);
             }
         }
-
-        for name in implicit.iter().cloned() {
-            let variable = Type::Var(TypeVar::fresh());
-            self.ctx.define_type(name.clone(), variable.clone());
-            self.decl_param_frames.last_mut().expect("implementation body parameter scope")
-                .insert(name.clone(), variable);
-            type_param_names.push(name);
-        }
-
-        let frame = self
-            .decl_param_frames
-            .last()
-            .expect("implementation body parameter scope")
-            .clone();
-        self.enter_source_impl_conditions(impl_decl, &frame)?;
-
-        // Process where clause constraints: where type T: Clone, type E: Clone
-        // Generic bounds tracking: type parameters carry protocol constraints (e.g., T: Ord) that are checked at instantiation sites
-        if let Some(ref where_clause) = impl_decl.generic_where_clause {
-            for predicate in &where_clause.predicates {
-                use verum_ast::ty::WherePredicateKind;
-                match &predicate.kind {
-                    WherePredicateKind::Type { ty, bounds } => {
-                        // Extract type parameter name from the type
-                        if let verum_ast::ty::TypeKind::Path(path) = &ty.kind
-                            && let Some(ident) = path.as_ident()
-                        {
-                            let param_name: Text = ident.name.clone();
-
-                            // Convert AST bounds to protocol bounds
-                            let protocol_bounds =
-                                self.convert_type_bounds_to_protocol_bounds(bounds)?;
-
-                            // Add or update type parameter with bounds (for local type checking)
-                            let type_param =
-                                crate::context::TypeParam::new(param_name.clone(), predicate.span)
-                                    .with_bounds(protocol_bounds.clone());
-                            self.ctx.env.add_type_param(type_param);
-
-                            // Convert the constrained type to Type
-                            let constrained_ty = self.ast_to_type(ty)?;
-
-                            // CRITICAL: Register the protocol bounds on the TypeVar so
-                            // method dispatch inside method bodies of this impl can find
-                            // protocol methods through `I: Iterator` style where-clauses.
-                            // Without this, `self.iter.next()` fails with "no method named
-                            // `next` found for type `I`" because the bound-first dispatch
-                            // in `infer_method_call_inner_impl` calls `get_type_var_bounds`
-                            // which returns empty.
-                            if let Type::Var(tv) = &constrained_ty {
-                                self.register_type_var_bounds(*tv, protocol_bounds.clone());
-                            }
-
-                        }
-                    }
-                    _ => {
-                        // Other where predicate kinds (Meta, Value, Ensures) handled elsewhere
-                    }
-                }
+        for (name, ty) in owner {
+            if let Type::Var(variable) = ty {
+                let bounds = bounds_by_variable.remove(variable).unwrap_or_default();
+                let parameter = crate::context::TypeParam::new(name.clone(), impl_decl.span)
+                    .with_bounds(bounds.clone());
+                self.ctx.env.add_type_param(parameter);
+                self.register_type_var_bounds(*variable, bounds);
             }
         }
 
@@ -6898,7 +6753,7 @@ impl TypeChecker {
                         if let Some(checked) = self.check_function(func)? {
                             self.publish_checked_method_contract(impl_decl, func, &checked)?;
                         }
-                        self.trace_impl_param_pinning(&type_param_names, &func.name.name);
+                        self.trace_impl_param_pinning(owner, &func.name.name);
                         tracing::debug!("Type-checked method {}.{}", ty, func.name.name);
                     }
                 }
