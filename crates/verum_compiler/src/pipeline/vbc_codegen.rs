@@ -59,12 +59,13 @@ impl<'s> CompilationPipeline<'s> {
             }).collect();
             let source_refs: Vec<_> = originals.iter().map(|(owner, path, module)|
                 (owner.as_str(), path.as_str(), module)).collect();
+            let selected = crate::owned_source_semantics::select_source_roster(&source_refs, &target)?;
             let mut semantic = crate::phases::semantic_analysis::SemanticAnalysisPhase::new()
                 .with_language_features(self.session.language_features()).with_target(target);
             if let Some(metadata) = self.stdlib_metadata.get() {
                 semantic = semantic.with_core_metadata(Arc::clone(metadata));
             }
-            semantic.admit_owned_source_roster(&source_refs, self.session)?;
+            semantic.admit_selected_sources(&selected, self.session)?;
             let mut lowering = ConstLowering::new(self.fresh_meta_ctx_with_version_stamp());
             for (owner, _, module) in &units { lowering.register(owner, module)?; }
             for (owner, _, module) in &mut units {

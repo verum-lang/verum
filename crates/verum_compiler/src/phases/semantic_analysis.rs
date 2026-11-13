@@ -153,17 +153,16 @@ impl SemanticAnalysisPhase {
     /// Admit original staged source before any value materialization. The
     /// temporary graph preserves the caller's aliases and external modules;
     /// it is shared across all checkers and never published as lowered metadata.
-    pub(crate) fn admit_owned_source_roster(
+    pub(crate) fn admit_selected_sources(
         &self,
-        sources: &[(&str, &str, &verum_ast::Module)],
+        selected: &[(Text, Text, verum_ast::Module)],
         session: &crate::Session,
     ) -> anyhow::Result<()> {
-        let selected = crate::owned_source_semantics::select_source_roster(sources, &self.target)?;
         let graph = verum_common::Shared::new(parking_lot::RwLock::new(session.module_registry().read().clone()));
         crate::owned_source_semantics::register_sources(&graph,
             selected.iter().map(|(owner, path, module)| (owner.as_str(), path.as_str(), module)))?;
         let outcomes = self.check_source_roster(
-            &selected, &graph, session.options().num_threads,
+            selected, &graph, session.options().num_threads,
             |error| error.to_diagnostic_with_span(Some(|span| session.convert_span(span))),
         )?;
         let mut failures: List<Text> = List::new();

@@ -586,6 +586,7 @@ impl CfgEvaluator {
         attrs: &'a [crate::attr::Attribute],
     ) -> (bool, Vec<&'a crate::attr::Attribute>) {
         let mut failures: Vec<&'a crate::attr::Attribute> = Vec::new();
+        let mut include = true;
         for attr in attrs {
             if attr.name.as_str() == "cfg" {
                 let parsed = match &attr.args {
@@ -597,9 +598,7 @@ impl CfgEvaluator {
                 };
                 match parsed {
                     Maybe::Some(predicate) => {
-                        if !self.evaluate(&predicate) {
-                            return (false, failures);
-                        }
+                        include &= self.evaluate(&predicate);
                     }
                     Maybe::None => {
                         failures.push(attr);
@@ -607,7 +606,16 @@ impl CfgEvaluator {
                 }
             }
         }
-        (true, failures)
+        (include, failures)
+    }
+
+    /// Select declarations only when all their conditions are well formed.
+    pub fn checked_attributes(&self, attributes: &[crate::Attribute]) -> Result<bool, crate::Span> {
+        let (include, failures) = self.should_include_with_failures(attributes);
+        match failures.first() {
+            Some(attribute) => Err(attribute.span),
+            None => Ok(include),
+        }
     }
 
     /// Filter a list of declarations, keeping only those that pass cfg checks.
@@ -707,22 +715,13 @@ impl CfgEvaluator {
         module: &crate::Module,
         owner: &str,
     ) -> Result<SourceModuleSelection, crate::Span> {
-        let include = |attributes: &[crate::Attribute]| -> Result<bool, crate::Span> {
-            let mut selected = true;
-            for attribute in attributes {
-                let (active, failures) = self.should_include_with_failures(std::slice::from_ref(attribute));
-                if !failures.is_empty() { return Err(attribute.span); }
-                selected &= active;
-            }
-            Ok(selected)
-        };
         let mut selection = SourceModuleSelection::unrestricted();
-        selection.include = include(&module.attributes)?;
+        selection.include = self.checked_attributes(&module.attributes)?;
         let header = module.file_header_index();
         for (index, item) in module.items.iter().enumerate() {
             let crate::ItemKind::Module(declaration) = &item.kind else { continue };
             if declaration.items.is_some() { continue; }
-            let selected = include(&item.attributes)?;
+            let selected = self.checked_attributes(&item.attributes)?;
             if Some(index) == header {
                 selection.include &= selected;
             } else {

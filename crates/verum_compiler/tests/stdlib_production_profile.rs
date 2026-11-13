@@ -37,6 +37,10 @@ fn complete_production_reports_publication_and_non_overlapping_intervals() {
         .collect();
     for expected in [
         "Stdlib source snapshot",
+        "Stdlib file mounts",
+        "Stdlib target selection",
+        "Stdlib source admission",
+        "Stdlib materialization",
         "Stdlib body compilation",
         "Stdlib core metadata",
         "Stdlib symbol graph",
@@ -85,6 +89,10 @@ fn refusal_keeps_the_active_phase_without_publishing_an_archive() {
     assert!(result.is_err(), "an unresolved carrier must be refused");
     assert!(!output.exists());
     let report = session.current_metrics();
+    assert_eq!(
+        report.phase_metrics.last().unwrap().phase_name.as_str(),
+        "Stdlib source admission"
+    );
     assert!(
         !report.phase_metrics.is_empty(),
         "early return lost measured work"

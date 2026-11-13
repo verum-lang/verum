@@ -85,9 +85,9 @@ fn register_source_entries(
     registry: &SourceRegistry,
     sources: &[(&str, &str, &Module)],
 ) -> anyhow::Result<()> {
-    ensure_unique_owners(sources.iter().copied())?;
+    let sources = unique_source_entries(sources)?;
     let mut registry = registry.write();
-    for &(owner, source, module) in sources {
+    for (owner, source, module) in sources {
         let id = if let Some(existing) = registry.get_by_path(owner) {
             anyhow::ensure!(
                 existing.ast == *module || existing.ast.items.is_empty(),
@@ -115,21 +115,23 @@ fn register_source_entries(
 
 /// Multiple distinct source parts need an explicit merge contract. A registry's
 /// first-registration-wins behavior must not silently decide their declarations.
-pub(crate) fn ensure_unique_owners<'a>(
-    sources: impl IntoIterator<Item = (&'a str, &'a str, &'a Module)>,
-) -> anyhow::Result<()> {
-    let mut seen: Map<Text, (&str, &Module)> = Map::new();
-    for (owner, source, module) in sources {
-        if let Some((previous_source, previous)) = seen.get(&Text::from(owner)) {
+fn unique_source_entries<'a>(
+    sources: &[(&'a str, &'a str, &'a Module)],
+) -> anyhow::Result<List<(&'a str, &'a str, &'a Module)>> {
+    let mut seen = Map::with_capacity(sources.len());
+    let mut entries = List::with_capacity(sources.len());
+    for &(owner, source, module) in sources {
+        if let Some(&(previous_source, previous)) = seen.get(&owner) {
             anyhow::ensure!(
-                *previous_source == source && *previous == module,
+                previous_source == source && previous == module,
                 "conflicting source parts for owner {owner}: {previous_source} and {source}"
             );
         } else {
-            seen.insert(owner.into(), (source, module));
+            seen.insert(owner, (source, module));
+            entries.push((owner, source, module));
         }
     }
-    Ok(())
+    Ok(entries)
 }
 
 /// Apply file and ancestor restrictions before registering declarations or checking bodies.
@@ -137,28 +139,30 @@ pub(crate) fn select_source_roster(
     sources: &[(&str, &str, &Module)],
     target: &TargetConfig,
 ) -> anyhow::Result<List<(Text, Text, Module)>> {
-    ensure_unique_owners(sources.iter().copied())?;
+    let sources = unique_source_entries(sources)?;
     let evaluator = CfgEvaluator::with_config(target.clone());
-    let mut selections = Map::new();
-    for (owner, _, module) in sources {
+    let mut selections = Map::with_capacity(sources.len());
+    for &(owner, _, module) in &sources {
         let selection = evaluator
             .source_module_selection(module, owner)
             .map_err(|span| anyhow::anyhow!("invalid module @cfg in {owner} at {span:?}"))?;
-        selections.insert(Text::from(*owner), selection);
+        selections.insert(owner, selection);
     }
-    let mut selected = List::new();
+    let mut selected = List::with_capacity(sources.len());
     for (owner, path, module) in sources {
-        let mut enabled = true;
-        let mut ancestor = *owner;
-        while let Some((parent, _)) = ancestor.rsplit_once('.') {
-            if let Some(selection) = selections.get(&Text::from(parent)) {
-                enabled &=
-                    selection.include && selection.includes_child(&owner[parent.len() + 1..]);
+        let mut enabled = selections[&owner].include;
+        let mut ancestor = owner;
+        while enabled && let Some((parent, _)) = ancestor.rsplit_once('.') {
+            if let Some(selection) = selections.get(&parent) {
+                enabled = selection.include && selection.includes_child(&owner[parent.len() + 1..]);
             }
             ancestor = parent;
         }
-        if enabled && let Some(module) = select_source_module(owner, module, target)? {
-            selected.push((Text::from(*owner), Text::from(*path), module));
+        if enabled {
+            let mut module = module.clone();
+            select_members(&mut module.items, &evaluator)
+                .map_err(|span| anyhow::anyhow!("invalid @cfg in {owner} ({path}) at {span:?}"))?;
+            selected.push((owner.into(), path.into(), module));
         }
     }
     Ok(selected)
@@ -282,122 +286,82 @@ fn enclosing_function(module: &Module, span: verum_ast::span::Span) -> Option<&s
     None
 }
 
-/// Select the same source declarations for registration and body checking.
-/// Selection changes no visibility or owner and cannot turn a parse failure
-/// into an unavailable symbol later in the pipeline.
-pub(crate) fn select_source_module(
-    owner: &str,
-    module: &Module,
-    target: &TargetConfig,
-) -> anyhow::Result<Option<Module>> {
-    let evaluator = CfgEvaluator::with_config(target.clone());
-    let selection = evaluator
-        .source_module_selection(module, owner)
-        .map_err(|span| anyhow::anyhow!("invalid @cfg in {owner} at {span:?}"))?;
-    if !selection.include {
-        return Ok(None);
-    }
-    fn attributes(
-        evaluator: &CfgEvaluator,
-        attrs: &[verum_ast::Attribute],
-    ) -> anyhow::Result<bool> {
-        let mut include = true;
-        for attribute in attrs {
-            let (enabled, failures) =
-                evaluator.should_include_with_failures(std::slice::from_ref(attribute));
-            anyhow::ensure!(failures.is_empty(), "invalid @cfg at {:?}", attribute.span);
-            include &= enabled;
+/// Project a list in place, preserving order and the allocation. On error the
+/// caller discards the entire unpublished roster.
+fn select_in_place<T>(
+    items: &mut List<T>,
+    mut include: impl FnMut(&mut T) -> Result<bool, verum_ast::Span>,
+) -> Result<(), verum_ast::Span> {
+    let mut result = Ok(());
+    items.retain_mut(|item| {
+        if result.is_err() {
+            return true;
         }
-        Ok(include)
-    }
-    fn protocol_items(
-        items: &mut List<verum_ast::decl::ProtocolItem>,
-        evaluator: &CfgEvaluator,
-    ) -> anyhow::Result<()> {
-        let mut selected = List::new();
-        for item in std::mem::take(items) {
-            let include = match &item.kind {
-                verum_ast::decl::ProtocolItemKind::Function { decl, .. } => {
-                    attributes(evaluator, &decl.attributes)?
-                }
-                _ => true,
-            };
-            if include {
-                selected.push(item);
+        match include(item) {
+            Ok(enabled) => enabled,
+            Err(span) => {
+                result = Err(span);
+                true
             }
         }
-        *items = selected;
-        Ok(())
-    }
-    fn select_items(
-        items: &List<verum_ast::Item>,
-        evaluator: &CfgEvaluator,
-        target: &TargetConfig,
-    ) -> anyhow::Result<List<verum_ast::Item>> {
-        let mut selected = List::new();
-        for item in items {
-            let mut include = attributes(evaluator, &item.attributes)?;
-            let inner = match &item.kind {
-                ItemKind::Type(declaration) => Some(&declaration.attributes),
-                ItemKind::Function(declaration) => Some(&declaration.attributes),
-                _ => None,
-            };
-            if let Some(inner_attributes) = inner {
-                include &= attributes(evaluator, inner_attributes)?;
+    });
+    result
+}
+
+fn select_members(
+    items: &mut List<verum_ast::Item>,
+    evaluator: &CfgEvaluator,
+) -> Result<(), verum_ast::Span> {
+    use verum_ast::decl::{ImplItemKind, ProtocolItem, ProtocolItemKind, RecordField, TypeDeclBody, VariantData};
+
+    let select_fields = |fields: &mut List<RecordField>| {
+        select_in_place(fields, |field| evaluator.checked_attributes(&field.attributes))
+    };
+    let select_protocol = |items: &mut List<ProtocolItem>| {
+        select_in_place(items, |item| match &item.kind {
+            ProtocolItemKind::Function { decl, .. } => evaluator.checked_attributes(&decl.attributes),
+            _ => Ok(true),
+        })
+    };
+
+    select_in_place(items, |item| {
+        let mut enabled = evaluator.checked_attributes(&item.attributes)?;
+        match &mut item.kind {
+            ItemKind::Module(module) => {
+                if let Some(children) = &mut module.items {
+                    select_members(children, evaluator)?;
+                }
             }
-            let mut item = item.clone();
-            match &mut item.kind {
-                ItemKind::Module(declaration) => {
-                    if let Some(items) = &mut declaration.items {
-                        *items = select_items(items, evaluator, target)?;
+            ItemKind::Function(function) => enabled &= evaluator.checked_attributes(&function.attributes)?,
+            ItemKind::Type(declaration) => {
+                enabled &= evaluator.checked_attributes(&declaration.attributes)?;
+                match &mut declaration.body {
+                    TypeDeclBody::Record(fields) => select_fields(fields)?,
+                    TypeDeclBody::Variant(cases) | TypeDeclBody::Inductive(cases) => select_in_place(cases, |case| {
+                        let keep = evaluator.checked_attributes(&case.attributes)?;
+                        if let Some(VariantData::Record(fields)) = &mut case.data {
+                            select_fields(fields)?;
+                        }
+                        Ok(keep)
+                    })?,
+                    TypeDeclBody::Protocol(protocol) | TypeDeclBody::Coinductive(protocol) => {
+                        select_protocol(&mut protocol.items)?
                     }
+                    _ => {}
                 }
-                ItemKind::Type(declaration) => {
-                    match &mut declaration.body {
-                        verum_ast::decl::TypeDeclBody::Record(fields) => {
-                            let mut selected = List::new();
-                            for field in std::mem::take(fields) {
-                                if attributes(evaluator, &field.attributes)? {
-                                    selected.push(field);
-                                }
-                            }
-                            *fields = selected;
-                        }
-                        verum_ast::decl::TypeDeclBody::Protocol(protocol) => {
-                            protocol_items(&mut protocol.items, evaluator)?
-                        }
-                        _ => {}
-                    }
-                    *declaration =
-                        crate::module_utils::filter_type_decl_for_target(declaration, target);
-                }
-                ItemKind::Protocol(declaration) => {
-                    protocol_items(&mut declaration.items, evaluator)?
-                }
-                ItemKind::Impl(declaration) => {
-                    let mut selected = List::new();
-                    for member in std::mem::take(&mut declaration.items) {
-                        let mut enabled = attributes(evaluator, &member.attributes)?;
-                        if let verum_ast::decl::ImplItemKind::Function(function) = &member.kind {
-                            enabled &= attributes(evaluator, &function.attributes)?;
-                        }
-                        if enabled {
-                            selected.push(member);
-                        }
-                    }
-                    declaration.items = selected;
-                }
-                _ => {}
             }
-            if include {
-                selected.push(item);
-            }
+            ItemKind::Protocol(protocol) => select_protocol(&mut protocol.items)?,
+            ItemKind::Impl(declaration) => select_in_place(&mut declaration.items, |member| {
+                let mut keep = evaluator.checked_attributes(&member.attributes)?;
+                if let ImplItemKind::Function(function) = &member.kind {
+                    keep &= evaluator.checked_attributes(&function.attributes)?;
+                }
+                Ok(keep)
+            })?,
+            _ => {}
         }
-        Ok(selected)
-    }
-    let mut selected = module.clone();
-    selected.items = select_items(&module.items, &evaluator, target)?;
-    Ok(Some(selected))
+        Ok(enabled)
+    })
 }
 
 pub(crate) fn declared_owner(module: &Module, fallback: &str) -> Text {

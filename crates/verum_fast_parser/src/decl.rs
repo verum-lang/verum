@@ -3701,19 +3701,18 @@ impl<'a> RecursiveParser<'a> {
             )
         }
 
-        let mut i = 0usize;
-        loop {
-            // Must start with `@`
-            if !matches!(
-                self.stream.peek_nth(i).map(|t| &t.kind),
-                Some(TokenKind::At)
-            ) {
-                break;
-            }
+        self.after_attribute_prefix(0)
+            .is_some_and(|i| is_variant_start(self.stream.peek_nth(i).map(|t| &t.kind)))
+    }
+
+    /// Return the first token after stacked attributes without consuming an
+    /// expression. In particular, a meta-call alone is not a field declaration.
+    fn after_attribute_prefix(&self, mut i: usize) -> Option<usize> {
+        while matches!(self.stream.peek_nth(i).map(|t| &t.kind), Some(TokenKind::At)) {
             i += 1;
-            // Attribute name (ident-or-keyword).
-            if !is_variant_start(self.stream.peek_nth(i).map(|t| &t.kind)) {
-                return false;
+            let name = &self.stream.peek_nth(i)?.kind;
+            if !(matches!(name, TokenKind::Ident(_)) || name.is_keyword_like()) {
+                return None;
             }
             i += 1;
             // Optional `(args)` — balanced-paren skip.
@@ -3727,16 +3726,14 @@ impl<'a> RecursiveParser<'a> {
                     match self.stream.peek_nth(i).map(|t| &t.kind) {
                         Some(TokenKind::LParen) => depth += 1,
                         Some(TokenKind::RParen) => depth -= 1,
-                        None => return false,
+                        None | Some(TokenKind::Eof) => return None,
                         _ => {}
                     }
                     i += 1;
                 }
             }
-            // Continue the loop: another `@` begins a stacked attribute;
-            // anything else is the variant name (or meta-body terminator).
         }
-        is_variant_start(self.stream.peek_nth(i).map(|t| &t.kind))
+        Some(i)
     }
 
     fn looks_like_variant(&self) -> bool {
@@ -3820,6 +3817,14 @@ impl<'a> RecursiveParser<'a> {
                             Some(TokenKind::Pipe) => false,
                             // Empty braces could be either - conservatively assume record
                             Some(TokenKind::RBrace) => true,
+                            Some(TokenKind::Public | TokenKind::Pub | TokenKind::Internal
+                                | TokenKind::Protected | TokenKind::Private) => true,
+                            Some(TokenKind::At) => self.after_attribute_prefix(2).is_some_and(|i| {
+                                let next = self.stream.peek_nth(i).map(|token| &token.kind);
+                                matches!(next, Some(TokenKind::Public | TokenKind::Pub | TokenKind::Internal
+                                    | TokenKind::Protected | TokenKind::Private))
+                                    || matches!(self.stream.peek_nth(i + 1).map(|token| &token.kind), Some(TokenKind::Colon))
+                            }),
                             // Identifier might be:
                             // - Record field: Error { code: Int } (ident followed by : then TYPE)
                             // - Refinement expression: Type{is_valid} (ident not followed by :)

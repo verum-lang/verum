@@ -35,7 +35,17 @@ fn parallel_admission_preserves_lexical_owners_and_cross_module_calls() {
     let core = root.path().join("core");
     std::fs::create_dir(&core).unwrap();
     std::fs::write(core.join("mod.vr"), "module core; public module first; public module second; public module consumer;").unwrap();
-    std::fs::write(core.join("first.vr"), "module core.first; public type Cell is { public value: Int }; public fn make() -> Cell { Cell { value: 73 } }").unwrap();
+    std::fs::write(core.join("first.vr"), r#"
+        module core.first;
+        public type Cell is { public value: Int };
+        public type Reply is Data { value: Int, @cfg(any()) absent: Unavailable }
+            | @cfg(all()) @cfg(any()) Hidden(Unavailable) | Empty;
+        public fn make() -> Cell {
+            let reply = Reply.Data { value: 73 };
+            let value = match reply { Reply.Data { value } => value, Reply.Empty => 0 };
+            Cell { value }
+        }
+    "#).unwrap();
     std::fs::write(core.join("second.vr"), "module core.second; public type Cell is { public value: Bool }; public fn make() -> Cell { Cell { value: true } }").unwrap();
     std::fs::write(core.join("consumer.vr"), "module core.consumer; mount core.first.make; public fn answer() -> Int { make().value }").unwrap();
     let mut serial_archive = None;

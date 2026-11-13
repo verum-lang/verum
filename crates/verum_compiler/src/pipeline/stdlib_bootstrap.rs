@@ -197,11 +197,19 @@ impl<'s> CompilationPipeline<'s> {
             }]));
         }
         // Registration and checking share the target-selected source declarations.
+        phase.next("Stdlib target selection");
         let target = self.session.cfg_evaluator().config().clone();
         let identities: Vec<_> = all_parsed_modules.iter().flat_map(|(_, files)| files)
             .map(|file| (file.owner.as_str(), file.path.to_string_lossy().into_owned(), &file.ast)).collect();
         let refs: Vec<_> = identities.iter().map(|(owner, path, ast)| (*owner, path.as_str(), *ast)).collect();
         let selected = crate::owned_source_semantics::select_source_roster(&refs, &target)?;
+        phase.next("Stdlib source admission");
+        let semantic = crate::phases::semantic_analysis::SemanticAnalysisPhase::new()
+            .with_language_features(self.session.language_features())
+            .with_target(target);
+        semantic.admit_selected_sources(&selected, self.session)?;
+
+        phase.next("Stdlib materialization");
         let mut selected: verum_common::Map<_, _> = selected.into_iter().map(|(owner, _, ast)| (owner, ast)).collect();
         for (_, files) in &mut all_parsed_modules {
             files.retain_mut(|file| {
@@ -211,19 +219,6 @@ impl<'s> CompilationPipeline<'s> {
                 } else { false }
             });
         }
-        let source_identities: Vec<_> = all_parsed_modules.iter().flat_map(|(_, files)| files)
-            .map(|file| (file.owner.as_str(), file.path.to_string_lossy().into_owned(), &file.ast)).collect();
-        crate::owned_source_semantics::ensure_unique_owners(source_identities.iter()
-            .map(|(owner, path, ast)| (*owner, path.as_str(), *ast)))?;
-        // Check the original staged bodies before materialization can erase
-        // annotations. This single admission graph retains session aliases and
-        // external declarations; all file checkers share the same handle.
-        let semantic = crate::phases::semantic_analysis::SemanticAnalysisPhase::new()
-            .with_language_features(self.session.language_features())
-            .with_target(target.clone());
-        let admission_sources: Vec<_> = source_identities.iter()
-            .map(|(owner, path, ast)| (*owner, path.as_str(), *ast)).collect();
-        semantic.admit_owned_source_roster(&admission_sources, self.session)?;
         // Materialization follows successful original-source admission. Registry
         // and interface snapshots below must then use the transformed roster.
         // A single owned roster feeds declarations and bodies. @const results
@@ -1566,9 +1561,7 @@ one module and therefore never seeded",
                 type_checker.set_alias_scope_from_items(&ast_module.items);
                 for item in &ast_module.items {
                     if let verum_ast::ItemKind::Type(type_decl) = &item.kind {
-                        let filtered_decl =
-                            module_utils::filter_type_decl_for_target(type_decl, &target);
-                        if let Err(e) = type_checker.register_type_declaration(&filtered_decl) {
+                        if let Err(e) = type_checker.register_type_declaration(type_decl) {
                             let warning = verum_diagnostics::DiagnosticBuilder::warning()
                                 .code("W0910")
                                 .message(format!(

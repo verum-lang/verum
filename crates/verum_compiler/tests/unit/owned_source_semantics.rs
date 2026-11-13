@@ -7,6 +7,15 @@ use verum_fast_parser::Parser;
 #[path = "source_protocol_registration.rs"]
 mod source_protocol_registration;
 
+fn select_source_module(
+    owner: &str,
+    module: &Module,
+    target: &TargetConfig,
+) -> anyhow::Result<Option<Module>> {
+    Ok(select_source_roster(&[(owner, "example.vr", module)], target)?
+        .pop().map(|(_, _, module)| module))
+}
+
 fn check(
     owner: &str,
     visibility: &str,
@@ -169,11 +178,14 @@ fn distinct_source_parts_cannot_silently_share_a_registry_owner() {
             "{error}"
         );
     }
-    source_registry([
+    let repeated = [
         ("realm.owner", "first.vr", &first),
         ("realm.owner", "first.vr", &first),
-    ])
-    .unwrap();
+    ];
+    source_registry(repeated).unwrap();
+    let selected = select_source_roster(&repeated, &TargetConfig::host()).unwrap();
+    assert_eq!(selected.len(), 1);
+    assert_eq!(selected[0].2, first);
 }
 
 #[test]
@@ -253,6 +265,8 @@ fn malformed_cfg_after_false_is_never_hidden_by_selection() {
         "type Packet is { @cfg(target_os = \"windows\") @cfg(not()) value: Int };",
         "type Packet is (); implement Packet { @cfg(target_os = \"windows\") @cfg(not()) fn probe() -> Int { 42 } }",
         "type Rules is protocol { @cfg(target_os = \"windows\") @cfg(not()) fn probe() -> Int; };",
+        "type Packet is Visible | @cfg(target_os = \"windows\") @cfg(not()) Hidden;",
+        "type Packet is Data { @cfg(target_os = \"windows\") @cfg(not()) hidden: Int } | Empty;",
     ] {
         let module = Parser::new(&format!("module realm.cfg; {body}"))
             .parse_module()
@@ -266,6 +280,32 @@ fn malformed_cfg_after_false_is_never_hidden_by_selection() {
             .is_err(),
             "malformed condition hidden: {body}"
         );
+    }
+}
+
+#[test]
+fn variant_layout_uses_all_target_conditions_on_cases_and_payload_fields() {
+    use verum_ast::{TypeDeclBody, decl::VariantData};
+    let source = r#"module realm.cfg;
+        public type Packet is Data { always: Int, @cfg(target_os = "windows") extra: Bool }
+            | @cfg(target_arch = "aarch64") @cfg(target_os = "windows") ArmWindows
+            | @cfg(target_os = "macos") Darwin;
+    "#;
+    let module = Parser::new(source).parse_module().unwrap();
+    for (target, want_cases, want_fields) in [
+        ("aarch64-apple-darwin", &["Data", "Darwin"][..], &["always"][..]),
+        ("aarch64-pc-windows-msvc", &["Data", "ArmWindows"][..], &["always", "extra"][..]),
+        ("x86_64-pc-windows-msvc", &["Data"][..], &["always", "extra"][..]),
+    ] {
+        let selected = select_source_module("realm.cfg", &module, &TargetConfig::for_target(target))
+            .unwrap().unwrap();
+        let ItemKind::Type(decl) = &selected.items[1].kind else { panic!("type declaration") };
+        let TypeDeclBody::Variant(cases) = &decl.body else { panic!("sum declaration") };
+        let names: List<_> = cases.iter().map(|case| case.name.as_str()).collect();
+        assert_eq!(names.as_slice(), want_cases, "{target}");
+        let Some(VariantData::Record(fields)) = &cases[0].data else { panic!("record payload") };
+        let names: List<_> = fields.iter().map(|field| field.name.as_str()).collect();
+        assert_eq!(names.as_slice(), want_fields, "{target}");
     }
 }
 #[test]
