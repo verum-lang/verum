@@ -1,5 +1,34 @@
 use serde_json::{Value, json};
-use verum_proof::lean_export::source;
+use verum_proof::{lean_export::source, proof_checker::Term};
+
+#[path = "support/dependent_reflexivity.rs"]
+mod dependent_reflexivity;
+
+fn wire(term: Term, claim: Term) -> String {
+    json!({"profile": "verum-native/1", "statement": &claim,
+           "certificate": {"term": term, "claimed_type": claim}})
+    .to_string()
+}
+
+fn local_pair() -> String {
+    let value = Term::universe(0);
+    let term = Term::Let {
+        value: Box::new(value.clone()),
+        body: Box::new(Term::Let {
+            value: Box::new(value.clone()),
+            body: Box::new(Term::pair(Term::var(1), value)),
+        }),
+    };
+    wire(term, Term::sigma(Term::universe(1), Term::universe(1)))
+}
+
+#[test]
+fn only_lexically_referenced_binders_receive_a_name() {
+    let source = source(local_pair().as_bytes()).unwrap();
+    assert!(source.contains("Sigma (fun (_ : (Type 1))"));
+    assert!(source.contains("let x0 := (Type 0); (let _ := (Type 0); (⟨(x0), (Type 0)⟩)"));
+    assert!(source.contains("set_option warningAsError true"));
+}
 
 const FIBER: &str = include_str!("fixtures/decoder_fiber.json");
 
@@ -57,11 +86,18 @@ fn kernel_accepts_polymorphic_transport_and_rejects_a_changed_endpoint() {
         std::env::var_os("VERUM_LEAN_BIN").expect("explicit pinned Lean executable required");
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("Certificate.lean");
-    for (wire, valid) in [
+    let mut cases = vec![
         (FIBER.to_owned(), true),
         (renamed(), true),
         (mismatched_endpoint().to_string(), false),
-    ] {
+        (local_pair(), true),
+    ];
+    cases.extend(
+        dependent_reflexivity::cases()
+            .into_iter()
+            .map(|(_, term, claim, valid)| (wire(term, claim), valid)),
+    );
+    for (wire, valid) in cases {
         std::fs::write(&path, source(wire.as_bytes()).unwrap()).unwrap();
         let output = std::process::Command::new(&lean)
             .arg("--json")

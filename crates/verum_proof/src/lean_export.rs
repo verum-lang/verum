@@ -4,7 +4,7 @@ use crate::{
     admission::{AdmissionLimits, decode_judgment},
     proof_checker::{Foundation, Level, Term},
 };
-use std::{collections::HashMap, fmt::Write};
+use std::{collections::HashMap, fmt::Write, ops::Range};
 
 const PRELUDE: &str = "import Init
 set_option autoImplicit false
@@ -28,6 +28,10 @@ struct Encoder {
     // order makes a consistent alpha-renaming produce identical output.
     levels: HashMap<String, usize>,
     in_statement: bool,
+    // Lexical de Bruijn slots point into the ordered list of generated names.
+    // A reference claims its binder. All others print as ordinary anonymous binders.
+    bindings: Vec<usize>,
+    unused_names: Vec<Option<Range<usize>>>,
     out: String,
 }
 
@@ -68,15 +72,47 @@ impl Encoder {
         Ok(())
     }
 
-    fn term(&mut self, term: &Term, depth: usize) -> Result<(), String> {
+    fn binder_name(&mut self) -> usize {
+        let start = self.out.len();
+        write!(self.out, "x{}", self.bindings.len()).unwrap();
+        let slot = self.unused_names.len();
+        self.unused_names.push(Some(start..self.out.len()));
+        slot
+    }
+
+    fn binder_body(&mut self, slot: usize, body: &Term) -> Result<(), String> {
+        self.bindings.push(slot);
+        let result = self.term(body);
+        self.bindings.pop();
+        result
+    }
+
+    fn render(&mut self, term: &Term) -> Result<String, String> {
+        self.term(term)?;
+        let named = std::mem::take(&mut self.out);
+        let mut result = String::with_capacity(named.len());
+        let mut cursor = 0;
+        for range in self.unused_names.drain(..).flatten() {
+            result.push_str(&named[cursor..range.start]);
+            result.push('_');
+            cursor = range.end;
+        }
+        result.push_str(&named[cursor..]);
+        Ok(result)
+    }
+
+    fn term(&mut self, term: &Term) -> Result<(), String> {
         self.out.push('(');
         match term {
-            Term::Var(i) => write!(
-                self.out,
-                "x{}",
-                depth.checked_sub(i + 1).ok_or("unbound term variable")?
-            )
-            .unwrap(),
+            Term::Var(i) => {
+                let depth = self
+                    .bindings
+                    .len()
+                    .checked_sub(i.checked_add(1).ok_or("unbound term variable")?)
+                    .ok_or("unbound term variable")?;
+                self.unused_names[self.bindings[depth]] = None;
+                write!(self.out, "x{depth}").unwrap();
+            }
             Term::Universe(u) => {
                 self.out.push_str("Type ");
                 self.level(u)?;
@@ -87,34 +123,39 @@ impl Encoder {
                     Term::Lam(..) => ("fun ", ") => "),
                     _ => ("Sigma (fun ", ") => "),
                 };
-                write!(self.out, "{open}(x{depth} : ").unwrap();
-                self.term(a, depth)?;
+                self.out.push_str(open);
+                self.out.push('(');
+                let slot = self.binder_name();
+                self.out.push_str(" : ");
+                self.term(a)?;
                 self.out.push_str(close);
-                self.term(b, depth + 1)?;
+                self.binder_body(slot, b)?;
                 if matches!(term, Term::Sigma(..)) {
                     self.out.push(')');
                 }
             }
             Term::Let { value, body } => {
-                write!(self.out, "let x{depth} := ").unwrap();
-                self.term(value, depth)?;
+                self.out.push_str("let ");
+                let slot = self.binder_name();
+                self.out.push_str(" := ");
+                self.term(value)?;
                 self.out.push_str("; ");
-                self.term(body, depth + 1)?;
+                self.binder_body(slot, body)?;
             }
             Term::App(f, a) => {
-                self.term(f, depth)?;
+                self.term(f)?;
                 self.out.push(' ');
-                self.term(a, depth)?;
+                self.term(a)?;
             }
             Term::Pair(a, b) => {
                 self.out.push('⟨');
-                self.term(a, depth)?;
+                self.term(a)?;
                 self.out.push_str(", ");
-                self.term(b, depth)?;
+                self.term(b)?;
                 self.out.push('⟩');
             }
             Term::Fst(p) | Term::Snd(p) => {
-                self.term(p, depth)?;
+                self.term(p)?;
                 self.out.push_str(if matches!(term, Term::Fst(_)) {
                     ".1"
                 } else {
@@ -123,15 +164,15 @@ impl Encoder {
             }
             Term::Id { ty, lhs, rhs } => {
                 self.out.push_str("@Identity ");
-                self.term(ty, depth)?;
+                self.term(ty)?;
                 self.out.push(' ');
-                self.term(lhs, depth)?;
+                self.term(lhs)?;
                 self.out.push(' ');
-                self.term(rhs, depth)?;
+                self.term(rhs)?;
             }
             Term::Refl(x) => {
                 self.out.push_str("Identity.refl (x := ");
-                self.term(x, depth)?;
+                self.term(x)?;
                 self.out.push(')');
             }
             Term::J {
@@ -151,7 +192,7 @@ impl Encoder {
                 });
                 for t in [motive, base, scrutinee] {
                     self.out.push(' ');
-                    self.term(t, depth)?;
+                    self.term(t)?;
                 }
             }
             Term::FunExt { .. } => {
@@ -178,12 +219,13 @@ pub fn source(bytes: &[u8]) -> Result<String, String> {
     let mut encoder = Encoder {
         levels: HashMap::new(),
         in_statement: true,
+        bindings: Vec::new(),
+        unused_names: Vec::new(),
         out: String::new(),
     };
-    encoder.term(&judgment.statement, 0)?;
-    let statement = std::mem::take(&mut encoder.out);
+    let statement = encoder.render(&judgment.statement)?;
     encoder.in_statement = false;
-    encoder.term(&judgment.certificate.term, 0)?;
+    let proof = encoder.render(&judgment.certificate.term)?;
     let mut source = String::from(PRELUDE);
     if !encoder.levels.is_empty() {
         source.push_str("universe");
@@ -194,8 +236,7 @@ pub fn source(bytes: &[u8]) -> Result<String, String> {
     }
     writeln!(
         source,
-        "def checked : {statement} :=\n{}\n#print axioms checked\nend VerumCertificate",
-        encoder.out
+        "def checked : {statement} :=\n{proof}\n#print axioms checked\nend VerumCertificate"
     )
     .unwrap();
     Ok(source)
