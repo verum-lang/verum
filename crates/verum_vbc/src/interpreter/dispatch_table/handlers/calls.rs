@@ -338,12 +338,7 @@ pub(in super::super) fn handle_call(
                 state.set_reg(dst, result);
                 return Ok(DispatchResult::Continue);
             }
-            // Heap<T>/Shared<T> wrapper methods over their runtime reprs
-            // — statically-resolved `Call` twin of the CallM intercepts
-            // (HEAP-INTORAW-1 / SHARED-STRONGCOUNT-1).  Shape-guarded:
-            // fires only when the receiver carries the runtime repr, so
-            // stdlib-internal record-shaped wrappers still reach their
-            // compiled bodies.
+            // A Heap cell carries its allocation header across a raw transfer.
             if let Some(result) = super::wrapper_runtime::try_intercept_wrapper_call(
                 state,
                 &func_name,
@@ -823,6 +818,14 @@ pub(in super::super) fn handle_call_generic(
             "[trace-callG] func_id={} name='{}' descriptor.id={} args.count={} bytecode_length={}",
             func_id.0, func_name, func.id.0, args.count, bytecode_length
         );
+    }
+
+    if let Some(result) = super::wrapper_runtime::try_intercept_wrapper_call(
+        state, state.module.strings.get(func_name_id).unwrap_or_default(),
+        args.start.0, args.count, state.reg_base(),
+    )? {
+        state.set_reg(dst, result);
+        return Ok(DispatchResult::Continue);
     }
 
     // Use the same declaration-owned dispatch as ordinary calls.
