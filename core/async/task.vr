@@ -421,7 +421,7 @@ public fn spawn_blocking<F: fn() -> T + Send, T: Send>(f: F) -> JoinHandle<T> {
     let pool_fn: fn(Int) -> Int = |arg: Int| -> Int {
         // Reconstruct the box (takes ownership).
         let boxed = unsafe {
-            Heap.from_raw(arg as &mut BlockingArg<F, T>)
+            Heap.from_raw(arg as &unsafe BlockingArg<F, T>)
         };
         let result = (boxed.f)();
         // Acquire mutex, write result, release.

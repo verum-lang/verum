@@ -262,3 +262,88 @@ fn a_named_unique_allocation_survives_the_submitting_frame() {
         assert_eq!(returned.try_as_i64(), Some(73), "{annotation}");
     }
 }
+
+#[test]
+fn canonical_raw_owner_recovery_retains_declared_call_witnesses() {
+    use verum_ast::{
+        decl::{ImplItemKind, ImplKind},
+        ItemKind, TypeKind,
+    };
+
+    let mut memory = Parser::new(include_str!("../../../core/base/memory.vr"))
+        .parse_module()
+        .unwrap();
+    memory.items.retain_mut(|item| match &mut item.kind {
+        ItemKind::Module(_) => true,
+        ItemKind::Type(owner) => owner.name.as_str() == "Heap",
+        ItemKind::Impl(implementation) => {
+            let owner = match &implementation.kind {
+                ImplKind::Inherent(owner) | ImplKind::Protocol { for_type: owner, .. } => owner,
+            };
+            let TypeKind::Generic { base, .. } = &owner.kind else { return false };
+            let TypeKind::Path(path) = &base.kind else { return false };
+            if !path.as_ident().is_some_and(|name| name.as_str() == "Heap") { return false; }
+            match &implementation.kind {
+                ImplKind::Inherent(_) => implementation.items.retain(|member| matches!(&member.kind,
+                    ImplItemKind::Function(method) if matches!(method.name.as_str(), "new" | "from_raw" | "into_raw"))),
+                ImplKind::Protocol { protocol, .. } if matches!(protocol.last_segment_name(), "Deref" | "DerefMut") => {},
+                _ => return false,
+            }
+            !implementation.items.is_empty()
+        }
+        _ => false,
+    });
+    let mut protocols = Parser::new(include_str!("../../../core/base/protocols.vr"))
+        .parse_module()
+        .unwrap();
+    protocols.items.retain(|item| matches!(&item.kind, ItemKind::Module(_))
+        || matches!(&item.kind, ItemKind::Type(owner) if matches!(owner.name.as_str(), "Deref" | "DerefMut")));
+    let client = Parser::new(
+        r#"
+        module raw_owner;
+        mount core.base.memory.Heap;
+        type Receipt<T> is { value: T };
+        implement<T> Receipt<T> {
+            fn width(&mut self) -> Int { let read = || T.size; read() as Int }
+        }
+        fn release<T>(raw: &unsafe Byte) -> Int {
+            let mut owner = unsafe { Heap.from_raw(raw as &unsafe Receipt<T>) };
+            owner.width()
+        }
+        fn check() -> Int {
+            let number = Heap.new(Receipt { value: 37 });
+            let flag = Heap.new(Receipt { value: true });
+            let number_raw = number.into_raw() as &unsafe Byte;
+            let flag_raw = flag.into_raw() as &unsafe Byte;
+            release<Int>(number_raw) * 10 + release<Bool>(flag_raw)
+        }
+    "#,
+    )
+    .parse_module()
+    .unwrap();
+    let mut cg = VbcCodegen::with_config(CodegenConfig::new("raw_owner"));
+    cg.collect_unit_declarations(&[&protocols, &memory, &client])
+        .unwrap();
+    cg.resolve_pending_imports();
+    cg.compile_unit_items(&[&client], ItemFailurePolicy::Strict)
+        .unwrap();
+    let archive = cg.finalize_module_from_state().unwrap();
+    let wire = verum_vbc::serialize::serialize_module(&archive).unwrap();
+    let archive = verum_vbc::deserialize::deserialize_module(&wire).unwrap();
+    // Signature collection deliberately leaves the source implementation external.
+    // Pin the ownership recovery's selected receiver before archive linking.
+    let selected = archive.find_function_by_name("Receipt.width").unwrap();
+    let entry = archive.find_function_by_name("raw_owner.release").unwrap();
+    let function = archive.get_function(entry).unwrap();
+    let start = function.bytecode_offset as usize;
+    let end = start + function.bytecode_length as usize;
+    let body = verum_vbc::bytecode::decode_instructions(&archive.bytecode[start..end]).unwrap();
+    let expected = verum_vbc::types::TypeRef::Generic(function.type_params[0].id);
+    assert!(
+        body.iter().any(|operation| matches!(operation,
+            verum_vbc::Instruction::CallG { func_id, type_args, .. }
+                if *func_id == selected.0 && type_args.as_slice() == [expected.clone()]
+        )),
+        "{body:?}"
+    );
+}
