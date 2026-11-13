@@ -50,10 +50,21 @@ pub fn mount_paths(tree: &MountTree) -> MountPaths<'_> {
     }
 }
 
-impl<'a> Iterator for MountPaths<'a> {
-    type Item = MountPath<'a>;
+impl<'a> MountPaths<'a> {
+    /// Visit leaves satisfying the predicate before constructing their full paths.
+    /// The predicate sees the original leaf path, kind and rename; prefixes and
+    /// source spans on every yielded path are identical to unfiltered iteration.
+    pub fn filter_leaves(
+        mut self,
+        mut include: impl FnMut(&Path, MountPathKind, Option<&Ident>) -> bool,
+    ) -> impl Iterator<Item = MountPath<'a>> {
+        std::iter::from_fn(move || self.next_where(&mut include))
+    }
 
-    fn next(&mut self) -> Maybe<Self::Item> {
+    fn next_where(
+        &mut self,
+        include: &mut impl FnMut(&Path, MountPathKind, Option<&Ident>) -> bool,
+    ) -> Maybe<MountPath<'a>> {
         while let Some(step) = self.work.pop() {
             let tree = match step {
                 Step::Tree(tree) => tree,
@@ -73,6 +84,9 @@ impl<'a> Iterator for MountPaths<'a> {
                 }
                 MountTreeKind::File { .. } => continue,
             };
+            if !include(leaf, kind, tree.alias.as_ref()) {
+                continue;
+            }
             let path = if self.prefixes.is_empty() {
                 leaf.clone()
             } else {
@@ -94,5 +108,13 @@ impl<'a> Iterator for MountPaths<'a> {
             });
         }
         None
+    }
+}
+
+impl<'a> Iterator for MountPaths<'a> {
+    type Item = MountPath<'a>;
+
+    fn next(&mut self) -> Maybe<Self::Item> {
+        self.next_where(&mut |_, _, _| true)
     }
 }

@@ -76,17 +76,17 @@ pub(super) fn source_mount_targets(
         MountTreeKind::Path(_) => mount.alias.as_ref(),
         _ => None,
     };
-    for leaf in mount_paths(&mount.tree) {
+    let leaves = mount_paths(&mount.tree).filter_leaves(|leaf, kind, alias| {
+        if kind == MountPathKind::Glob {
+            return true;
+        }
+        // A grouped self leaf selects a module, never an individual type or callable.
+        matches!(leaf.segments.last(), Some(PathSegment::Name(original))
+            if alias.or(root_alias).unwrap_or(original).name == name)
+    });
+    for leaf in leaves {
         let kind = match leaf.kind {
-            MountPathKind::Named => {
-                let Some(PathSegment::Name(original)) = leaf.path.segments.last() else {
-                    continue;
-                };
-                if leaf.alias.or(root_alias).unwrap_or(original).name != name {
-                    continue;
-                }
-                MountTargetKind::Named
-            }
+            MountPathKind::Named => MountTargetKind::Named,
             MountPathKind::Glob => MountTargetKind::Glob,
         };
         visit(path_to_module_path_resolved(&leaf.path, owner), kind);
@@ -454,6 +454,9 @@ impl TypeChecker {
             &module.ast, name, &Text::from(module.path.to_string()),
             &registry, &mut Set::new(), true, true,
         );
+        if declared.is_some() {
+            return declared;
+        }
         // Written bindings remain authoritative even when their target is
         // missing or inaccessible; the prelude cannot repair an invalid mount.
         let explicitly_bound = module.ast.items.iter()
@@ -463,7 +466,7 @@ impl TypeChecker {
                 if mount.alias.as_ref().is_some_and(|alias| alias.name.as_str() == name)
                 || source_mount_binds_name(&mount.tree, name)
         ));
-        if declared.is_some() || explicitly_bound { return declared; }
+        if explicitly_bound { return None; }
         let prelude = verum_ast::prelude::implicit_prelude_path(&module.ast)?;
         let prelude = self.get_module_with_path_aliases(prelude, &registry)?;
         self.find_type_declaration_with_source_module_inner(

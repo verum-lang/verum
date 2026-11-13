@@ -134,3 +134,47 @@ fn missing_and_private_nested_leaves_cannot_borrow_parent_or_child_homonyms() {
         assert_eq!(item.original_name.as_deref(), Some("answer"));
     }
 }
+
+#[test]
+fn choosing_named_or_glob_leaves_preserves_complete_paths_aliases_and_spans() {
+    use verum_ast::mount_paths::{MountPathKind, mount_paths};
+    for prefix in ["packages", ".packages", "super.packages", "cog.packages"] {
+        let source = format!(
+            "mount {prefix}.{{p.{{thing as Chosen, other, self as space}}, q.{{r.{{other, thing}}, surface.*}}}};"
+        );
+        let ast = VerumParser::new()
+            .parse_module_str(&source, FileId::new(1))
+            .unwrap();
+        let ItemKind::Mount(mount) = &ast.items[0].kind else {
+            panic!("expected grouped mount")
+        };
+        for (spelling, count) in [
+            ("Chosen", 2),
+            ("thing", 2),
+            ("other", 3),
+            ("space", 2),
+            ("absent", 1),
+        ] {
+            let include =
+                |path: &verum_ast::Path, kind: MountPathKind, alias: Option<&verum_ast::Ident>| {
+                    kind == MountPathKind::Glob
+                        || alias
+                            .or_else(|| match path.segments.last() {
+                                Some(verum_ast::ty::PathSegment::Name(id)) => Some(id),
+                                _ => None,
+                            })
+                            .is_some_and(|id| id.name == spelling)
+                };
+            let expected: verum_common::List<_> = mount_paths(&mount.tree)
+                .filter(|leaf| include(&leaf.path, leaf.kind, leaf.alias))
+                .map(|leaf| (leaf.path, leaf.kind, leaf.alias, leaf.span))
+                .collect();
+            let chosen: verum_common::List<_> = mount_paths(&mount.tree)
+                .filter_leaves(include)
+                .map(|leaf| (leaf.path, leaf.kind, leaf.alias, leaf.span))
+                .collect();
+            assert_eq!(expected.len(), count, "{source}: {spelling}");
+            assert_eq!(chosen, expected, "{source}: {spelling}");
+        }
+    }
+}
