@@ -263,6 +263,100 @@ fn check_with_source_core(core: &Path, entry: &Path, source: &str) -> Output {
 }
 
 #[test]
+fn glob_imports_preserve_generic_declarations_when_arguments_are_aliases() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    let core = write_source_core(root, &[(
+        "source",
+        "module core.source;
+         public type Parcel<T> is { public item: T };
+         implement<T> Parcel<T> {
+             public fn fetch(&self)->T {self.item}
+             fn hidden(&self)->T {self.item}
+         }
+         public type Secret<T> is { public value: T };
+         type Internal<T> is { public value: T };",
+    )]);
+    std::fs::write(
+        core.join("mod.vr"),
+        "module core; public module base; public module source;
+         public module prelude {
+             public mount super.source.{Parcel, Parcel as Package};
+             mount super.source.Secret;
+         }",
+    )
+    .unwrap();
+    let project = root.join("project");
+    std::fs::create_dir_all(project.join("src")).unwrap();
+    std::fs::write(project.join("verum.toml"), "[cog]\nname='fixture'\nversion='0.1.0'\n").unwrap();
+    let cases = [
+        (
+            "",
+            "fn take(a: Package<Atom>, b: Parcel<Atom>)->Int {a.fetch() + b.fetch()}",
+            None,
+        ),
+        (
+            "mount core.prelude.*;",
+            "fn take(a: Package<Atom>, b: Parcel<Atom>)->Int {a.fetch() + b.fetch()}",
+            None,
+        ),
+        (
+            "mount core.prelude.{Package as Delivery};",
+            "fn take(a: Delivery<Atom>)->Int {a.fetch()}",
+            None,
+        ),
+        (
+            "",
+            "type Parcel<T> is { public local: T };
+             fn take(a: Parcel<Atom>, b: Package<Atom>)->Int {a.local + b.fetch()}",
+            None,
+        ),
+        (
+            "",
+            "type Parcel<T> is { public local: T };
+             fn wrong(a: Parcel<Atom>)->Int {a.fetch()}",
+            Some("no method named `fetch`"),
+        ),
+        ("", "fn wrong(a: Package<Atom>)->Bool {a.fetch()}", Some("Type mismatch: expected 'Bool', found 'Int'")),
+        ("", "fn wrong(a: Package<Atom>)->Int {a.hidden()}", Some("no method named `hidden`")),
+        (
+            "mount core.prelude.Missing;",
+            "fn wrong(a: Missing<Atom>)->Int {0}",
+            Some("Missing"),
+        ),
+        (
+            "mount core.prelude.Secret;",
+            "fn wrong(a: Secret<Atom>)->Int {0}",
+            Some("cannot find `Secret` in module `core.prelude`"),
+        ),
+        (
+            "",
+            "fn wrong(a: core.source.Internal<Atom>)->Int {a.value}",
+            Some("visibility error: 'Internal' is Private"),
+        ),
+        (
+            "",
+            "fn wrong(a: Package<Atom, Bool>)->Int {0}",
+            Some("type `core.source.Parcel` takes 1 type argument(s), but 2 were supplied"),
+        ),
+        (
+            "",
+            "fn wrong(a: Parcel<Package<Atom>>)->Int {a.fetch()}",
+            Some("Type mismatch: expected 'Int'"),
+        ),
+    ];
+    for (mount, body, expected) in cases {
+        let source = format!("module fixture.main; {mount} type Atom is Int; {body} fn main() {{}}");
+        let out = check_with_source_core(&core, &project, &source);
+        let log = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(out.status.success(), expected.is_none(), "{source}\n{log}");
+        if let Some(needle) = expected {
+            assert!(log.contains(needle), "{source}\n{log}");
+        }
+    }
+}
+
+#[test]
 fn recursive_protocol_bounds_use_the_selected_source_parameters() {
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path();

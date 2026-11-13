@@ -4305,61 +4305,22 @@ impl TypeChecker {
                                 self.publish_context_protocol_binding(
                                     &type_decl, &declaration_key, register_name.into(),
                                 );
-
-                                // CRITICAL FIX: Also import implement block methods for the type.
-                                // This enables cross-file method resolution for calls like
-                                // RegistryError.validation_error(...) where the method is defined
-                                // in an `implement RegistryError { ... }` block in the source module.
-                                //
-
-                                // We need to find the source module (following re-exports if necessary)
-                                // and import all public methods from its implement blocks.
-                                if let Some((_, source_path)) = self
-                                    .find_type_declaration_with_source_module(
-                                        &module_info.ast,
-                                        item_name,
-                                        &resolved_module_path,
-                                        registry,
-                                    )
+                                if import_span.is_none()
+                                    && let Some(binding) = self.glob_import_provenance.get_mut(register_name)
+                                    && binding.module_path == *resolved_module_path
                                 {
-                                    // Get the source module and import its implement blocks.
-                                    // Pin the checker's module path to the resolved source
-                                    // module so bare type references inside impl blocks
-                                    // resolve against that module's qualified-name layer
-                                    // first (avoids same-name collisions via the flat map).
-                                    let src_path = source_path.as_str().to_string();
-                                    if let Some(source_module) = self.get_module_with_path_aliases(
-                                        source_path.as_str(),
-                                        registry,
-                                    ) && let Err(e) = self.import_impl_blocks_for_type_in_module(
-                                        &source_module.ast,
-                                        true_name,
-                                        &src_path,
-                                    ) {
-                                        tracing::debug!(
-                                            "Failed to import implement blocks for '{}' from '{}': {}",
-                                            item_name,
-                                            source_path.as_str(),
-                                            e
-                                        );
-                                        return Err(e);
-                                    }
-                                } else {
-                                    // Fallback: try to import from the direct module.
-                                    let direct_path = resolved_module_path.as_str().to_string();
-                                    if let Err(e) = self.import_impl_blocks_for_type_in_module(
-                                        &module_info.ast,
-                                        true_name,
-                                        &direct_path,
-                                    ) {
-                                        tracing::debug!(
-                                            "Failed to import implement blocks for '{}' from '{}': {}",
-                                            item_name,
-                                            resolved_module_path.as_str(),
-                                            e
-                                        );
-                                        return Err(e);
-                                    }
+                                    binding.source_type = Some(declaration_key);
+                                }
+
+                                // Methods and the companion namespace belong to the same
+                                // source already selected for this type, including re-exports.
+                                let source_module = self.get_module_with_path_aliases(
+                                    &source_module_path, registry,
+                                );
+                                if let Some(module) = &source_module {
+                                    self.import_impl_blocks_for_type_in_module(
+                                        &module.ast, true_name, &source_module_path,
+                                    )?;
                                 }
 
                                 // After successful type registration, also check if there is a
@@ -4383,11 +4344,6 @@ impl TypeChecker {
                                 let short_name = verum_common::Text::from(register_name);
                                 if !self.inline_modules.contains_key(&short_name) {
                                     // First check the source module's AST for an inline module
-                                    let source_module = self
-                                        .get_module_with_path_aliases(
-                                            source_module_path.as_str(),
-                                            registry,
-                                        );
                                     let inline_mod_found =
                                         source_module.as_ref().and_then(|module| {
                                             module.ast.items.iter().find_map(|ast_item| {

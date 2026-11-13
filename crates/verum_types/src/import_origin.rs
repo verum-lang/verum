@@ -104,6 +104,8 @@ impl ImportOrigin {
 pub struct ImportProvenance {
     pub origin: ImportOrigin,
     pub module_path: Text,
+    /// Exact telescope selected by this export after successful source registration.
+    pub(crate) source_type: Option<Text>,
 }
 
 impl ImportProvenance {
@@ -111,6 +113,7 @@ impl ImportProvenance {
         Self {
             origin,
             module_path,
+            source_type: None,
         }
     }
 

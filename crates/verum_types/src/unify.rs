@@ -996,6 +996,18 @@ impl Unifier {
         current
     }
 
+    /// Instantiate only the selected declaration when its head is a
+    /// transparent alias. A reducible argument cannot make its parent an alias.
+    pub(crate) fn expand_alias_head(&self, key: &Text, args: &List<Type>) -> Option<Type> {
+        let target = self.type_aliases.get(key)?;
+        if args.is_empty() {
+            return Some(target.clone());
+        }
+        let parameters = self.type_alias_params.get(key)?;
+        (!parameters.is_empty() && args.len() <= parameters.len())
+            .then(|| self.substitute_alias_params(target, parameters, args))
+    }
+
     pub fn try_expand_alias(&self, ty: &Type) -> Option<Type> {
         self.try_expand_alias_impl(ty, 0)
     }
@@ -1019,20 +1031,8 @@ impl Unifier {
                     .collect();
                 if let Some(parts) = parts {
                     let key: Text = parts.join(".").into();
-                    if let Some(target) = self.type_aliases.get(&key) {
-                        if args.is_empty() {
-                            // Simple alias: Byte -> UInt8
-                            return Some(target.clone());
-                        }
-                        // Generic alias: IoResult<Text> -> Result<Text, StreamError>
-                        // Substitute positional type arguments into the alias target.
-                        if let Some(param_names) = self.type_alias_params.get(&key) {
-                            if !param_names.is_empty() && args.len() <= param_names.len() {
-                                let substituted =
-                                    self.substitute_alias_params(target, param_names, args);
-                                return Some(substituted);
-                            }
-                        }
+                    if let Some(expanded) = self.expand_alias_head(&key, args) {
+                        return Some(expanded);
                     }
                 }
                 // Try expanding aliases in type arguments (e.g., List<Byte> -> List<UInt8>)
@@ -1081,18 +1081,8 @@ impl Unifier {
             }
             // Handle Generic type aliases (e.g., IoResult<Text> as Generic { name: "IoResult", args: [Text] })
             Type::Generic { name, args } => {
-                let key = name.clone();
-                if let Some(target) = self.type_aliases.get(&key) {
-                    if args.is_empty() {
-                        return Some(target.clone());
-                    }
-                    if let Some(param_names) = self.type_alias_params.get(&key) {
-                        if !param_names.is_empty() && args.len() <= param_names.len() {
-                            let substituted =
-                                self.substitute_alias_params(target, param_names, args);
-                            return Some(substituted);
-                        }
-                    }
+                if let Some(expanded) = self.expand_alias_head(name, args) {
+                    return Some(expanded);
                 }
                 // Try expanding aliases in type arguments
                 let mut changed = false;

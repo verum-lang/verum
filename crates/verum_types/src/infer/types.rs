@@ -1446,29 +1446,8 @@ fn substitute_refinement_binder(
                 }
         }
 
-        // APPLYING TYPE ARGUMENTS TO A TYPE ALIAS IS A SUBSTITUTION,
-        // NOT A REPLACEMENT.  This is the seam where the third
-        // implementation of that rule used to live.
-        //
-        // `ast_to_type(base)` has ALREADY expanded an alias, so for
-        // `IoResult<()>` the base arrives as `Result<T, StreamError>`.
-        // The `Type::Named` arm below then replaced the base's own
-        // arguments with the surface ones and produced
-        // `Result<Unit>` — a `Result` with ONE argument, which the
-        // language has no such thing as.  Nothing rejected it; it
-        // travelled as a well-typed value until `?` asked
-        // `resolve_try_protocol` for a two-argument Result and was
-        // told the function "returns Result<Unit>" (6 core/ files,
-        // and every user alias of Result reproduces it — T0774).
-        //
-        // The unifier already implements this rule correctly
-        // (`try_expand_alias` -> `substitute_alias_params`
-        // substitutes positionally into the alias's parameters).
-        // So the fix is to DELETE the duplicate rather than repair
-        // it: build the application on the UNEXPANDED name and let
-        // the one correct implementation do the work.  For anything
-        // that is not an alias `try_expand_alias` returns None and
-        // the arms below run unchanged.
+        // A transparent alias substitutes its own slots into its target. A
+        // nominal head retains its declaration when an argument contains an alias.
         if let Some(key) = parameter_key.as_ref() {
             if matches!(form, ApplicationForm::DeclaredSum)
                 && let Some(owner) = self.declared_sum_key(key)
@@ -1490,11 +1469,7 @@ fn substitute_refinement_binder(
                     args: type_args,
                 });
             }
-            let unexpanded = Type::Named {
-                path: Self::text_to_path(key),
-                args: type_args.clone(),
-            };
-            if let Some(expanded) = self.unifier.try_expand_alias(&unexpanded) {
+            if let Some(expanded) = self.unifier.expand_alias_head(key, &type_args) {
                 return expanded.try_apply_subst(&argument_scope).map_err(|msg|
                     TypeError::OtherWithCodeSpanned { code: "E407".into(), msg, span: ast_ty.span });
             }

@@ -214,12 +214,21 @@ impl TypeChecker {
         if !lexical_binder
             && self.imports_in_progress.is_empty()
             && self.glob_imports_in_progress.is_empty()
-            && self.imported_names.contains_key(&Text::from(name))
-            && let Some((declaration, owner)) = self.declaring_source_type_declaration(name)
         {
-            return self
-                .load_source_type_declaration_with_parameter_key(&declaration, &owner, span)
-                .map(|(ty, key)| (ty, Some(key)));
+            if self.imported_names.contains_key(&Text::from(name)) {
+                if let Some((declaration, owner)) = self.declaring_source_type_declaration(name) {
+                    return self
+                        .load_source_type_declaration_with_parameter_key(&declaration, &owner, span)
+                        .map(|(ty, key)| (ty, Some(key)));
+                }
+            } else if let Some(key) = self.glob_import_provenance.get(name)
+                .and_then(|binding| binding.source_type.clone())
+            {
+                self.require_source_dependencies(&key, span)?;
+                let ty = self.ctx.lookup_type(&key).cloned()
+                    .ok_or_else(|| TypeError::TypeNotFound { name: key.clone(), span })?;
+                return Ok((ty, Some(key)));
+            }
         }
         if let Some((ty, key)) = self.resolve_type_name_mount_scoped_with_parameter_key(name) {
             if std::env::var("VERUM_TRACE_MOUNT_AUTH")
