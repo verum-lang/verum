@@ -109,6 +109,8 @@ impl Goal {
 #[derive(Default)]
 struct Premises {
     goals: List<Goal>,
+    // Each pair is a semantic subject and its declared structural callable bound.
+    callables: List<(TypeRef, TypeRef)>,
     impossible: bool,
     unknown: Maybe<Text>,
 }
@@ -308,13 +310,16 @@ impl VbcCodegen {
                     scope,
                     &declaration.generics,
                 )?),
-                TypeBoundKind::GenericProtocol(ty)
+                TypeBoundKind::Equality(ty) | TypeBoundKind::GenericProtocol(ty)
                     if matches!(ty.kind, TypeKind::Function { .. }) =>
                 {
                     // A callable bound is a structural contract, not a nominal protocol.
-                    let expected = self.resolve_signature_type_ref(ty, scope)?;
-                    if !subject.semantic || subject.ty != expected {
-                        premises.unknown = Some("unproved callable bound".into());
+                    let ids: List<_> = scope.values().copied().map(TypeParamId).collect();
+                    let signature = self.resolve_source_type_witness(ty, scope, &ids)?;
+                    if subject.semantic && signature.semantic {
+                        premises.callables.push((subject.ty.clone(), signature.ty));
+                    } else {
+                        premises.unknown = Some("callable bound lacks its semantic witness".into());
                     }
                 }
                 TypeBoundKind::GenericProtocol(ty) => {
@@ -401,6 +406,7 @@ impl VbcCodegen {
         &mut self,
         header: &ImplementationHeader,
         goal: &Goal,
+        assumptions: &Premises,
     ) -> CodegenResult<Maybe<Premises>> {
         self.with_protocol_source_scope(
             Some(header.source.origin_module().into()),
@@ -441,14 +447,28 @@ impl VbcCodegen {
                         break;
                     }
                 }
-                let Some(bindings) = matched else {
+                let Some(mut bindings) = matched else {
                     return Ok(None);
                 };
+                // The receiver and protocol arguments can leave parameters that
+                // are functionally determined by a callable bound, e.g. the
+                // result T of F: fn(Input) -> T. Resolve the declaration's
+                // symbolic requirements before crossing into the caller space.
+                if scope.values().any(|id| bindings.get(TypeParamId(*id)).is_none()) {
+                    let symbolic = cg.implementation_premises(declaration, &scope)?;
+                    infer_callable_bindings(&symbolic.callables, &assumptions.callables,
+                        &mut bindings, declaration.span)?;
+                }
                 let mut substitution = SourceTypeSubstitution::default();
                 for (name, id) in &scope {
                     let Some(actual) = bindings.get(TypeParamId(*id)) else {
                         return Ok(Some(Premises {
-                            unknown: Some("implementation has an undetermined parameter".into()),
+                            unknown: Some(format!(
+                                "implementation has an undetermined parameter '{name}' in '{}' for '{}'",
+                                header.source.origin_module(),
+                                cg.extract_impl_type_name(&declaration.kind)
+                                    .unwrap_or_else(|| format!("{:?}", receiver.ty)),
+                            ).into()),
                             ..Default::default()
                         }));
                     };
@@ -513,7 +533,7 @@ impl VbcCodegen {
         let assumptions = self.with_protocol_source_scope(
             self.ctx.current_source_module.clone(), source_bindings, Some(receiver.clone()),
             |cg| cg.implementation_premises(implementation, scope),
-        )?.goals;
+        )?;
         let requirements = self.with_protocol_source_scope(
             blanket.source_module.clone(),
             SourceTypeSubstitution::receiver(blanket.receiver_parameter.clone(), receiver.clone()),
@@ -526,6 +546,9 @@ impl VbcCodegen {
         if let Some(reason) = requirements.unknown {
             return Err(invalid(reason, blanket.declaration.span));
         }
+        if !requirements.callables.iter().all(|bound| callable_is_proven(bound, &assumptions.callables)) {
+            return Err(invalid("unproved callable bound", blanket.declaration.span));
+        }
         self.prove_implementation_goals(requirements.goals, &assumptions, blanket.declaration.span)
     }
 
@@ -534,7 +557,7 @@ impl VbcCodegen {
     fn prove_implementation_goals(
         &mut self,
         required: List<Goal>,
-        assumptions: &[Goal],
+        assumptions: &Premises,
         span: Span,
     ) -> CodegenResult<bool> {
         const MAX_GOALS: usize = 4096;
@@ -565,7 +588,7 @@ impl VbcCodegen {
             let goal = goals[cursor].clone();
             let mut choices = List::new();
             let mut reason = None;
-            if assumptions.iter().any(|fact| fact.entails(&goal)) {
+            if assumptions.goals.iter().any(|fact| fact.entails(&goal)) {
                 choices.push(List::new());
             }
             let imported: List<_> = goal
@@ -594,7 +617,7 @@ impl VbcCodegen {
                 }
             }
             for header in &headers {
-                let Some(premises) = self.implementation_alternative(header, &goal)? else {
+                let Some(premises) = self.implementation_alternative(header, &goal, assumptions)? else {
                     continue;
                 };
                 if premises.impossible {
@@ -602,6 +625,10 @@ impl VbcCodegen {
                 }
                 if let Some(message) = premises.unknown {
                     reason = Some(message);
+                    continue;
+                }
+                if !premises.callables.iter().all(|bound| callable_is_proven(bound, &assumptions.callables)) {
+                    reason = Some("unproved callable bound".into());
                     continue;
                 }
                 let mut dependencies = List::new();
@@ -672,6 +699,49 @@ impl VbcCodegen {
             return Err(invalid(reason, span));
         }
         Ok(false)
+    }
+}
+
+fn callable_is_proven(bound: &(TypeRef, TypeRef), assumptions: &[(TypeRef, TypeRef)]) -> bool {
+    bound.0 == bound.1 || assumptions.contains(bound)
+}
+
+/// A function type fixes all its input and result positions. Matching against
+/// concrete signatures or the caller's lexical hypotheses may therefore extend
+/// the header substitution. Matching always uses the original header pattern:
+/// actual generics belong to the caller and cannot become pattern variables.
+fn infer_callable_bindings(
+    requirements: &[(TypeRef, TypeRef)],
+    assumptions: &[(TypeRef, TypeRef)],
+    bindings: &mut TypeSubstitution,
+    span: Span,
+) -> CodegenResult<()> {
+    loop {
+        let before = bindings.len();
+        for (subject, signature) in requirements {
+            let subject = match subject {
+                TypeRef::Generic(id) => bindings.get(*id).cloned(),
+                _ if !subject.is_generic() => Some(subject.clone()),
+                _ => None,
+            };
+            let Some(subject) = subject else { continue };
+            let actuals = std::iter::once(&subject).filter(|ty| matches!(ty, TypeRef::Function { .. }))
+                .chain(assumptions.iter().filter(|(ty, _)| *ty == subject).map(|(_, actual)| actual));
+            let mut accepted = None;
+            for actual in actuals {
+                let mut candidate = bindings.clone();
+                if match_declared_types(signature, actual, &mut candidate)
+                    && candidate.apply(signature).map_err(|error| invalid(error.to_string(), span))? == *actual
+                {
+                    if accepted.as_ref().is_some_and(|previous| previous != &candidate) {
+                        return Err(invalid("conflicting implementation parameter witnesses", span));
+                    }
+                    accepted = Some(candidate);
+                }
+            }
+            if let Some(candidate) = accepted { *bindings = candidate; }
+        }
+        if before == bindings.len() { return Ok(()); }
     }
 }
 

@@ -8,7 +8,7 @@ use crate::types::{TypeParamDescriptor, TypeParamId, TypeRef};
 /// Type substitution environment for monomorphization.
 ///
 /// Maps type parameters to concrete types.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct TypeSubstitution {
     /// Type parameter bindings: TypeParamId -> concrete TypeRef.
     bindings: HashMap<TypeParamId, TypeRef>,
