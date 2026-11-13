@@ -388,16 +388,27 @@ impl VbcCodegen {
                 let Some(ty) = ty else { return Ok(false); };
                 if matches!(ty, crate::types::TypeRef::Reference { .. }) { return Ok(false); }
                 if self.ctx.is_raw_pointer(reg) { return Ok(false); }
-                match crate::resource_discipline::resource_discipline_with(ty, |id| self.type_by_id(id)) {
-                    verum_common::ResourceDiscipline::Unrestricted => Ok(self.copy_type_is_value(ty)),
-                    verum_common::ResourceDiscipline::Affine | verum_common::ResourceDiscipline::Linear =>
-                        Err(CodegenError::with_span(super::error::CodegenErrorKind::UnsupportedExpr(
-                            "dereference copy requires an unrestricted value; an exclusive borrowed owner cannot be copied or transferred".into(),
-                        ), init.span)),
-                    verum_common::ResourceDiscipline::Unknown => Ok(false),
-                }
+                self.borrowed_value_needs_copy(ty, init.span)
             }
             _ => Ok(false),
+        }
+    }
+
+    /// Both written dereferences and implicit value assignments preserve the
+    /// pointee's declared duplication discipline.
+    pub(super) fn borrowed_value_needs_copy(
+        &self, ty: &crate::types::TypeRef, span: verum_ast::Span,
+    ) -> CodegenResult<bool> {
+        if matches!(ty, crate::types::TypeRef::Reference { .. }) {
+            return Ok(false);
+        }
+        match crate::resource_discipline::resource_discipline_with(ty, |id| self.type_by_id(id)) {
+            verum_common::ResourceDiscipline::Unrestricted => Ok(self.copy_type_is_value(ty)),
+            verum_common::ResourceDiscipline::Affine | verum_common::ResourceDiscipline::Linear =>
+                Err(CodegenError::with_span(super::error::CodegenErrorKind::UnsupportedExpr(
+                    "dereference copy requires an unrestricted value; an exclusive borrowed owner cannot be copied or transferred".into(),
+                ), span)),
+            verum_common::ResourceDiscipline::Unknown => Ok(false),
         }
     }
 

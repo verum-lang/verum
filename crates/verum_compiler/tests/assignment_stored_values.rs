@@ -1,4 +1,4 @@
-//! Checked scalar assignment preserves values across archive serialization.
+//! Checked assignments preserve declared storage across archive serialization.
 use std::{fs, sync::Arc};
 use verum_common::Text;
 use verum_compiler::{CompilationPipeline, CompilerOptions, CoreConfig, Session};
@@ -89,6 +89,130 @@ fn borrowed_variant_payloads_update_successive_fields() {
 }
 
 #[test]
+fn borrowed_scalar_assignment_keeps_the_value_independent_of_later_input_writes() {
+    execute(
+        r#"
+        module core;
+        public fn probe()->Int {
+            let mut source:Int64=37_i64;
+            let mut copied:Int64=0_i64;
+            { let borrowed=&source; copied=borrowed; }
+            source=99_i64;
+            copied as Int
+        }
+    "#,
+        37,
+    );
+}
+
+#[test]
+fn reference_assignment_preserves_the_selected_reference() {
+    execute(
+        r#"
+        module core;
+        public fn probe()->Int {
+            let first:Int64=37_i64;
+            let second:Int64=99_i64;
+            let mut selected:&Int64=&first;
+            selected=&second;
+            (*selected) as Int
+        }
+    "#,
+        99,
+    );
+}
+
+#[test]
+fn projected_assignment_copies_the_borrowed_value() {
+    execute(
+        r#"
+        module core;
+        type Pair is {first:Int64, second:Int64};
+        implement Pair {
+            fn set(&mut self, value:&Int64) {
+                self.first=value;
+                self.second=value;
+            }
+        }
+        public fn probe()->Int {
+            let mut input:Int64=37_i64;
+            let mut pair=Pair {first:0_i64,second:0_i64};
+            pair.set(&input);
+            input=99_i64;
+            (pair.first+pair.second) as Int
+        }
+    "#,
+        74,
+    );
+}
+
+#[test]
+fn borrowed_record_assignment_copies_the_record_storage() {
+    execute(
+        r#"
+        module core;
+        type Cell is {value:Int};
+        public fn probe()->Int {
+            let mut source=Cell {value:37};
+            let mut copied=Cell {value:0};
+            { let borrowed=&source; copied=borrowed; }
+            source.value=99;
+            copied.value
+        }
+    "#,
+        37,
+    );
+}
+
+#[test]
+fn returned_reference_assignment_evaluates_its_source_once() {
+    execute(
+        r#"
+        module core;
+        fn select(value:&Int64,calls:&mut Int)->&Int64 {
+            *calls+=1;
+            value
+        }
+        public fn probe()->Int {
+            let source:Int64=37_i64;
+            let mut calls=0;
+            let mut copied:Int64=0_i64;
+            copied=select(&source,&mut calls);
+            (copied as Int)+calls
+        }
+    "#,
+        38,
+    );
+}
+
+#[test]
+fn unconstrained_generic_assignment_requires_a_value_copy_contract() {
+    let error = produce(
+        r#"
+        module core;
+        fn replace<T>(destination:&mut T, source:&T) { *destination=source; }
+    "#,
+    )
+    .expect_err("an arbitrary borrowed parameter cannot provide value-copy evidence");
+    assert!(error.contains("E400"), "{error}");
+}
+
+#[test]
+fn equal_record_layouts_do_not_authorize_reference_assignment() {
+    let error = produce(
+        r#"
+        module core;
+        type Packet is {value:Int};
+        type Parcel is {value:Int};
+        fn replace(destination:&mut Packet, source:&Parcel) { *destination=source; }
+    "#,
+    )
+    .expect_err("a matching layout does not identify the declared type");
+    assert!(error.contains("E400"), "{error}");
+}
+
+
+#[test]
 fn copied_reference_payload_survives_its_intermediate_owner() {
     execute(
         r#"
@@ -102,6 +226,72 @@ fn copied_reference_payload_survives_its_intermediate_owner() {
             let n = 71;
             let copied = forward(Sample { ptr: &n, total: 2 });
             *copied.ptr + copied.total
+        }
+        "#,
+        73,
+    );
+}
+
+
+#[test]
+fn borrowed_assignment_preserves_the_declared_alias_after_storage_and_return() {
+    execute(
+        r#"
+        module core;
+        type Packet is { value: Int };
+        type Selected is Packet;
+        implement Packet { fn read(&self) -> Int { self.value } }
+        fn forward(value: &Packet) -> Selected {
+            let mut copied: Selected = Packet { value: 0 };
+            copied = value;
+            copied.value += 2;
+            copied
+        }
+        public fn probe() -> Int {
+            let owner = Packet { value: 7 };
+            let copied = forward(&owner);
+            owner.read() * 10 + copied.read()
+        }
+        "#,
+        79,
+    );
+}
+
+#[test]
+fn implicit_assignment_after_explicit_dereference_evaluates_the_call_once() {
+    execute(
+        r#"
+        module core;
+        type Packet is { value: Int };
+        type Pointer is &Packet;
+        fn choose(count: &mut Int, value: &Pointer) -> &Pointer { *count += 1; value }
+        public fn probe() -> Int {
+            let owner = Packet { value: 7 };
+            let first = &owner;
+            let mut count = 0;
+            let mut copied: Packet = Packet { value: 0 };
+            copied = *choose(&mut count, &first);
+            copied.value = 9;
+            count * 100 + owner.value * 10 + copied.value
+        }
+        "#,
+        179,
+    );
+}
+
+
+#[test]
+fn assigned_callable_reference_keeps_its_declared_call_signature() {
+    execute(
+        r#"
+        module core;
+        fn increment(value: Int) -> Int { value + 1 }
+        fn decrement(value: Int) -> Int { value - 1 }
+        public fn probe() -> Int {
+            let chosen: fn(Int) -> Int = increment;
+            let mut selected: fn(Int) -> Int = decrement;
+            selected = &chosen;
+            selected(72)
         }
         "#,
         73,

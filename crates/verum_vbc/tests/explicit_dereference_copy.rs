@@ -614,3 +614,53 @@ fn container_copy_authority_comes_from_real_source_declarations() {
         }
     }
 }
+
+#[test]
+fn implicit_assignment_cannot_copy_an_affine_or_linear_owner() {
+    for qualifier in ["affine", "linear"] {
+        for wrapper in [false, true] {
+            let owner = if wrapper { "Holder" } else { "Token" };
+            let source: Text = format!(
+                "module explicit_copy; type {qualifier} Token is {{ value: Int }}; \
+                 type Holder is {{ token: Token }}; \
+                 fn replace(destination: &mut {owner}, original: &{owner}) {{ \
+                     *destination = original; \
+                 }}"
+            ).into();
+            let ast = Parser::new(source.as_str()).parse_module().expect("resource grammar");
+            let error = VbcCodegen::with_config(CodegenConfig::new("explicit_copy"))
+                .compile_module(&ast)
+                .expect_err("assignment cannot duplicate a borrowed exclusive owner");
+            assert!(
+                format!("{error:?}").contains("dereference copy requires an unrestricted value"),
+                "{qualifier}, wrapper={wrapper}: {error:?}"
+            );
+        }
+    }
+}
+
+
+#[test]
+fn implicit_assignment_after_explicit_dereference_materializes_once() {
+    for declaration in ["Packet", "Selected"] {
+        let body = format!(r#"
+            type Packet is {{ value: Int }};
+            type Selected is Packet;
+            fn probe() -> Int {{
+                let owner = Packet {{ value: 7 }};
+                let first = &owner;
+                let second = &first;
+                let mut copied: {declaration} = Packet {{ value: 0 }};
+                copied = *second;
+                copied.value = 9;
+                owner.value * 10 + copied.value
+            }}
+        "#);
+        for (route, module) in source_and_wire(&body) {
+            let emitted = operations(&module);
+            assert_eq!(emitted.iter().filter(|operation| matches!(operation, Instruction::Clone { .. })).count(), 1,
+                "{declaration}/{route}: a single reference-to-value boundary: {emitted:?}");
+        }
+        check(&body, 79);
+    }
+}

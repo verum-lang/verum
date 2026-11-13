@@ -3945,12 +3945,52 @@ impl VbcCodegen {
             let base = hint.split('<').next().unwrap_or(&hint).to_string();
             self.ctx.push_disambig_context(Some(base))
         });
-        // Evaluate value first
+        // A reference-to-value conversion is owned by the exact destination
+        // declaration. Reuse ordinary dereference lowering, including its
+        // narrow-scalar and reference-tier handling, and evaluate the RHS once.
+        let destination_declaration = self.projection_operand_declaration(target);
+        let copied_pointee = match (
+            destination_declaration.as_ref(),
+            self.projection_operand_declaration(value),
+        ) {
+            (Some(destination), Some(crate::types::TypeRef::Reference { inner, .. }))
+                if inner.as_ref() == destination
+                    && !destination.is_generic()
+                    && crate::resource_discipline::resource_discipline_with(
+                        destination, |id| self.type_by_id(id),
+                    ) != verum_common::ResourceDiscipline::Unknown => Some(destination.clone()),
+            _ => None,
+        };
         let copy_start = self.ctx.instructions.len();
-        let value_reg = self
-            .compile_expr(value)?
-            .or_internal("assignment value has no value")?;
-        let copy_type = self.copy_source_type(value, value_reg, copy_start, self.ctx.instructions.len());
+        let value_reg = if copied_pointee.is_some() {
+            self.compile_unary(UnOp::Deref, value)?
+        } else {
+            self.compile_expr(value)?
+        }.or_internal("assignment value has no value")?;
+        let copy_type = copied_pointee.clone().or_else(||
+            self.copy_source_type(value, value_reg, copy_start, self.ctx.instructions.len()));
+        let local_destination = match &target.kind {
+            ExprKind::Path(path) => match path.segments.as_slice() {
+                [PathSegment::Name(name)] => self.ctx.lookup_var(&name.name).is_some(),
+                [PathSegment::SelfValue] => self.ctx.lookup_var("self").is_some(),
+                _ => false,
+            },
+            _ => false,
+        };
+        // A source dereference can also undergo an implicit conversion. Make
+        // one copy decision for the final stored value before selecting storage.
+        let needs_copy = match &copied_pointee {
+            Some(pointee) => self.borrowed_value_needs_copy(pointee, value.span)?,
+            None if local_destination =>
+                self.binds_a_copy_of_a_place(value, value_reg, copy_type.as_ref())?,
+            None => false,
+        };
+        let value_reg = if needs_copy {
+            let owned = self.ctx.alloc_temp();
+            self.ctx.emit(Instruction::Clone { dst: owned, src: value_reg });
+            self.ctx.free_temp(value_reg);
+            owned
+        } else { value_reg };
         if let Some(saved) = saved_assign_rt {
             self.ctx.pop_disambig_context(saved);
         }
@@ -3989,43 +4029,28 @@ impl VbcCodegen {
                         info.is_initialized = true;
                     }
 
-                    // `dst = src` duplicates a value that keeps living
-                    // under its own name, exactly as `let dst = src`
-                    // does, and copies for the same reason (T0832).
-                    let stored = if self.binds_a_copy_of_a_place(value, value_reg, copy_type.as_ref())? {
-                        let owned = self.ctx.alloc_temp();
-                        self.ctx.emit(Instruction::Clone {
-                            dst: owned,
-                            src: value_reg,
-                        });
-                        owned
-                    } else {
-                        value_reg
-                    };
-
                     if var_is_cell {
                         // Cell-wrapped mutable capture: store through SetF
                         self.ctx.emit(Instruction::SetF {
                             obj: target_reg,
                             field_idx: 0,
-                            value: stored,
+                            value: value_reg,
                         });
                     } else {
                         self.ctx.emit(Instruction::Mov {
                             dst: target_reg,
-                            src: stored,
+                            src: value_reg,
                         });
                     }
                     self.ctx.free_temp(value_reg);
 
-                    // Propagate RHS type to the reassigned variable.
-                    // This is critical for variant match dispatch: after
-                    // `state = transition(state, "ack")`, the match on `state`
-                    // must know the scrutinee type to resolve variant tags.
-                    if let Some(rhs_type) = self.extract_expr_type_name(value) {
-                        self.ctx
-                            .variable_type_names
-                            .insert(name.to_string(), rhs_type);
+                    // A declared destination keeps its stored type after a
+                    // conversion. An inferred destination can still acquire a
+                    // result hint for subsequent variant or method dispatch.
+                    if let Some(declared) = destination_declaration.as_ref() {
+                        self.publish_resolved_binding_type(name, declared);
+                    } else if let Some(rhs_type) = self.extract_expr_type_name(value) {
+                        self.ctx.variable_type_names.insert(name.to_string(), rhs_type);
                     }
 
                     return Ok(Some(target_reg));
