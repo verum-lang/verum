@@ -80,6 +80,7 @@ mod cfg_selection;
 mod protocol_results;
 mod residuals;
 mod constructor_types;
+mod nominal_constructors;
 mod declaration_interface;
 mod forward_declarations;
 mod default_arguments;
@@ -1069,6 +1070,7 @@ pub struct VbcCodegen {
     /// None is a known unsupported header; an empty roster is a nongeneric type.
     source_generic_rosters: HashMap<TypeId, impl_generic_rosters::SourceGenericRoster>,
     source_callable_rosters: Map<FunctionId, Option<impl_generic_rosters::GenericRoster>>,
+    constructor_generic_rosters: Map<TypeId, impl_generic_rosters::GenericRoster>,
     /// Complete implementation facts awaiting their already claimed source target.
     pending_implementation_attachments: Map<TypeId, verum_common::List<protocol_attachments::ImplementationAttachment>>,
     /// Exact local declarations reached through a cyclic bootstrap dependency.
@@ -2452,6 +2454,7 @@ impl VbcCodegen {
             source_context_declarations: Default::default(),
             source_generic_rosters: Default::default(),
             source_callable_rosters: Default::default(),
+            constructor_generic_rosters: Default::default(),
             pending_implementation_attachments: Default::default(),
             bootstrap_local_forwards: Default::default(),
             type_name_claim_owner: std::collections::HashMap::new(),
@@ -9671,6 +9674,7 @@ impl VbcCodegen {
         self.source_context_declarations.clear();
         self.source_generic_rosters.clear();
         self.source_callable_rosters.clear();
+        self.constructor_generic_rosters.clear();
         self.declared_callable_descriptors.clear();
         self.declared_callable_defaults.clear();
         self.pending_implementation_attachments.clear();
@@ -16403,40 +16407,7 @@ impl VbcCodegen {
 
                 self.push_declared_type(type_desc);
 
-                let id = FunctionId(u32::MAX / 2);
-
-                let param_names: Vec<String> =
-                    fields.iter().map(|f| f.name.name.to_string()).collect();
-
-                let info = FunctionInfo {
-                    has_source_body: false,
-                    foreign_declaration: None,
-                    callable_signature: None,
-                    type_param_ids: Vec::new(),
-                    explicit_type_param_ids: Vec::new(),
-                    id,
-                    param_count: fields.len(),
-                    param_names,
-                    param_type_names: vec![],
-                    is_async: false,
-                    is_generator: false,
-                    contexts: vec![],
-                    return_type: None,
-                    yield_type: None,
-                    intrinsic_name: None,
-                    variant_tag: None,
-                    parent_type_name: None,
-                    variant_payload_types: None,
-                    is_partial_pattern: false,
-                    takes_self_mut_ref: false,
-                    return_type_name: Some(type_name.clone()),
-                    return_type_inner: None,
-                    is_const: false,
-                is_transparent_wrapper: false,
-                param_closure_return_type_names: Vec::new(),
-                };
-
-                self.ctx.register_function(type_name, info);
+                self.register_nominal_constructor(type_id, &type_name)?;
             }
 
             // Protocol types: create TypeDescriptor with super-protocol and method metadata
@@ -16716,42 +16687,7 @@ impl VbcCodegen {
                 type_desc.size = 8; // single inner value (one Value-slot)
                 self.push_declared_type(type_desc);
 
-                let id = FunctionId(u32::MAX / 2);
-
-                let info = FunctionInfo {
-                    has_source_body: false,
-                    foreign_declaration: None,
-                    callable_signature: None,
-                    type_param_ids: Vec::new(),
-                    explicit_type_param_ids: Vec::new(),
-                    id,
-                    param_count: 1,
-                    param_names: vec!["_0".to_string()],
-                    param_type_names: vec![],
-                    is_async: false,
-                    is_generator: false,
-                    contexts: vec![],
-                    return_type: None,
-                    yield_type: None,
-                    intrinsic_name: None,
-                    variant_tag: None,
-                    parent_type_name: None,
-                    variant_payload_types: None,
-                    is_partial_pattern: false,
-                    takes_self_mut_ref: false,
-                    return_type_name: Some(type_name.clone()),
-                    return_type_inner: None,
-                    is_const: false,
-                    // Newtype constructors are pure transparent
-                    // wrappers — `type X is T;` makes `X(t)` an
-                    // identity Mov.  This flag is the canonical
-                    // discriminator that the codegen passthrough
-                    // arms gate on.
-                    is_transparent_wrapper: true,
-                    param_closure_return_type_names: Vec::new(),
-                };
-
-                self.ctx.register_function(type_name.clone(), info);
+                self.register_nominal_constructor(type_id, &type_name)?;
             }
 
             TypeDeclBody::Tuple(types) => {
@@ -16826,46 +16762,7 @@ impl VbcCodegen {
                 type_desc.size = (types.len() as u32) * 8;
                 self.push_declared_type(type_desc);
 
-                let id = FunctionId(u32::MAX / 2);
-
-                let param_names: Vec<String> =
-                    (0..types.len()).map(|i| format!("_{}", i)).collect();
-
-                let info = FunctionInfo {
-                    has_source_body: false,
-                    foreign_declaration: None,
-                    callable_signature: None,
-                    type_param_ids: Vec::new(),
-                    explicit_type_param_ids: Vec::new(),
-                    id,
-                    param_count: types.len(),
-                    param_names,
-                    param_type_names: vec![],
-                    is_async: false,
-                    is_generator: false,
-                    contexts: vec![],
-                    return_type: None,
-                    yield_type: None,
-                    intrinsic_name: None,
-                    variant_tag: None,
-                    parent_type_name: None,
-                    variant_payload_types: None,
-                    is_partial_pattern: false,
-                    takes_self_mut_ref: false,
-                    return_type_name: Some(type_name.clone()),
-                    return_type_inner: None,
-                    is_const: false,
-                    // Single-element tuple `type FileDesc is (Int)` IS
-                    // a transparent wrapper (zero-cost — the value is
-                    // the inner value at runtime).  Multi-element
-                    // tuples are boxed records — pass-through would
-                    // drop the other elements, so the flag stays
-                    // false there.
-                    is_transparent_wrapper: is_transparent,
-                    param_closure_return_type_names: Vec::new(),
-                };
-
-                self.ctx.register_function(type_name, info);
+                self.register_nominal_constructor(type_id, &type_name)?;
             }
 
             // Unit type has no constructor arguments
@@ -16900,37 +16797,7 @@ impl VbcCodegen {
                 };
                 self.push_declared_type(type_desc);
 
-                let id = FunctionId(u32::MAX / 2);
-
-                let info = FunctionInfo {
-                    has_source_body: false,
-                    foreign_declaration: None,
-                    callable_signature: None,
-                    type_param_ids: Vec::new(),
-                    explicit_type_param_ids: Vec::new(),
-                    id,
-                    param_count: 0,
-                    param_names: vec![],
-                    param_type_names: vec![],
-                    is_async: false,
-                    is_generator: false,
-                    contexts: vec![],
-                    return_type: None,
-                    yield_type: None,
-                    intrinsic_name: None,
-                    variant_tag: None,
-                    parent_type_name: None,
-                    variant_payload_types: None,
-                    is_partial_pattern: false,
-                    takes_self_mut_ref: false,
-                    return_type_name: Some(type_name.clone()),
-                    return_type_inner: None,
-                    is_const: false,
-                is_transparent_wrapper: false,
-                param_closure_return_type_names: Vec::new(),
-                };
-
-                self.ctx.register_function(type_name, info);
+                self.register_nominal_constructor(type_id, &type_name)?;
             }
 
             // SigmaTuple types: similar to tuple types

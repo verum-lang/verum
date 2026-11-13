@@ -7879,6 +7879,10 @@ impl VbcCodegen {
             return Ok(Some(dest));
         }
 
+        if func_info.nominal_constructor_type().is_some() {
+            return self.compile_nominal_constructor_call(&func_info, args, type_args);
+        }
+
         // Handle type constructors with sentinel IDs.  These are
         // registered by `compile_type_decl` at `FunctionId(u32::MAX / 2)`
         // and have no compiled body — their semantics are encoded by
@@ -8445,9 +8449,8 @@ impl VbcCodegen {
             } else {
                 None
             };
-            let type_args = self.apply_explicit_generic_args(
-                (final_func_id != UNRESOLVED_FN_ID).then_some(final_func_id), type_args, type_args_inferred,
-            )?;
+            let selected = (final_func_id != UNRESOLVED_FN_ID).then(|| self.ctx.lookup_function_by_id(crate::module::FunctionId(final_func_id)).cloned()).flatten();
+            let type_args = self.apply_explicit_generic_args(selected.as_ref(), type_args, type_args_inferred)?;
             match type_args {
                 Some(type_args) if !type_args.is_empty() => {
                     self.ctx.emit(Instruction::CallG {
@@ -9047,12 +9050,31 @@ impl VbcCodegen {
         Ok(Some(arguments))
     }
 
+    fn compile_nominal_constructor_call(
+        &mut self, function: &FunctionInfo, args: &verum_common::List<Expr>,
+        explicit: &verum_common::List<verum_ast::ty::GenericArg>,
+    ) -> CodegenResult<Option<Reg>> {
+        if args.len() != function.param_count {
+            return Err(CodegenError::new(CodegenErrorKind::WrongArgumentCount {
+                expected: function.param_count, found: args.len(), function: function.return_type_name.clone().unwrap_or_default(),
+            }));
+        }
+        self.prepare_nominal_constructor(function)?;
+        let inferred = self.selected_argument_witnesses(function, args.len(), args.iter(), None).map(CallInstantiation::known);
+        let _witnesses = self.apply_explicit_generic_args(Some(function), explicit, inferred)?;
+        if function.is_transparent_wrapper && args.len() == 1 {
+            return self.compile_expr(&args[0]);
+        }
+        let name = function.return_type_name.as_deref().ok_or_else(|| CodegenError::internal("constructor has no declared name"))?;
+        self.compile_record_call_form(name, function, args)
+    }
+
     /// Apply source arguments to their declaration-owned slots after inference.
     /// Explicit arguments win over enclosing return hints; holes can only use
     /// the matching structural expected type, never an unrelated positional slot.
     fn apply_explicit_generic_args(
         &mut self,
-        func_id: Option<u32>,
+        selected: Option<&FunctionInfo>,
         explicit: &verum_common::List<verum_ast::ty::GenericArg>,
         inferred: Option<CallInstantiation>,
     ) -> CodegenResult<Option<Vec<crate::types::TypeRef>>> {
@@ -9068,13 +9090,8 @@ impl VbcCodegen {
                 "array generic argument requires declaration-owned slot metadata".into(),
             ))
         };
-        let Some(info) = func_id
-            .and_then(|id| {
-                self.ctx
-                    .lookup_function_by_id(crate::module::FunctionId(id))
-            })
-            .cloned()
-        else {
+        let func_id = selected.filter(|function| function.nominal_constructor_type().is_none()).map(|function| function.id.0);
+        let Some(info) = selected else {
             return if explicit.is_empty() { self.call_witnesses_for(func_id, inferred) } else { Err(missing_slots()) };
         };
         let mut bindings: std::collections::BTreeMap<u16, TypeRef> = info.type_param_ids.iter()
@@ -13730,7 +13747,8 @@ impl VbcCodegen {
             let inferred = inferred.or_else(|| {
                 self.generic_named_place(&args[0], inner).map(|ty| CallInstantiation::known([ty]))
             });
-            let witnesses = self.apply_explicit_generic_args(constructor, type_args, inferred)?;
+            let selected = constructor.and_then(|id| self.ctx.lookup_function_by_id(crate::module::FunctionId(id))).cloned();
+            let witnesses = self.apply_explicit_generic_args(selected.as_ref(), type_args, inferred)?;
 
             // Load receiver type name as a small string the interpreter recognizes.
             let receiver_reg = self.ctx.alloc_temp();
@@ -16760,7 +16778,8 @@ impl VbcCodegen {
             }
         };
 
-        let sidecar_args = self.apply_explicit_generic_args(resolvable_fid, type_args, sidecar_args)?;
+        let selected = resolvable_fid.and_then(|id| self.ctx.lookup_function_by_id(crate::module::FunctionId(id))).cloned();
+        let sidecar_args = self.apply_explicit_generic_args(selected.as_ref(), type_args, sidecar_args)?;
 
         if std::env::var_os("VERUM_TRACE_TPCALL").is_some() {
             eprintln!(
@@ -18032,6 +18051,10 @@ impl VbcCodegen {
             return Ok(Some(result));
         }
 
+        if func_info.nominal_constructor_type().is_some() {
+            return self.compile_nominal_constructor_call(func_info, args, type_args);
+        }
+
         // Handle synthetic body-less constructors (newtype / single-tuple
         // / quotient / unit type) by their EXPLICIT discriminator flags
         // — never by the bare `id.0 == u32::MAX/2` sentinel check.
@@ -18219,7 +18242,7 @@ impl VbcCodegen {
             let inferred = inferred_type_args.get_or_insert_with(CallInstantiation::default);
             for (index, value) in staged.into_iter().enumerate() { inferred.fill(index, value); }
         }
-        match self.apply_explicit_generic_args(Some(func_info.id.0), type_args, inferred_type_args)?
+        match self.apply_explicit_generic_args(Some(func_info), type_args, inferred_type_args)?
         {
             Some(type_args) if !type_args.is_empty() => {
                 self.ctx.emit(Instruction::CallG {
@@ -26368,24 +26391,11 @@ impl VbcCodegen {
         let resolved_key: Option<String> = self.resolve_record_type_key(type_name)?;
         let type_name: &str = resolved_key.as_deref().unwrap_or(type_name);
 
-        // Resolve TypeId for the New instruction.  Fallback to 0 when
-        // the type isn't yet in `type_name_to_id` — preserves the
-        // pre-existing tolerant-walk behaviour for cross-module record
-        // ctors loaded via archive metadata before the local type
-        // table is fully populated.
-        let type_id = self
-            .type_name_to_id
-            .get(type_name)
-            .map(|id| id.0)
-            .unwrap_or(0);
-
-        // Use the type's declared field count when available; this
-        // lets New allocate the correct slot count even when the call
-        // omits trailing default-valued fields.  Fallback to args.len()
-        // for types whose layout hasn't been registered.
-        let alloc_slots = self
-            .type_field_count(type_name)
-            .unwrap_or(args.len() as u32);
+        let nominal = func_info.nominal_constructor_type().or_else(|| self.type_name_to_id.get(type_name).copied())
+            .ok_or_else(|| CodegenError::new(CodegenErrorKind::TypeInference(format!("constructor type `{type_name}` is not declared"))))?;
+        let descriptor = self.type_by_id(nominal).or_internal("constructor target has no descriptor")?;
+        let type_id = nominal.0;
+        let alloc_slots = descriptor.fields.len() as u32;
 
         self.ctx.emit(Instruction::New {
             dst: result,

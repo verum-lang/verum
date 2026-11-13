@@ -7673,6 +7673,12 @@ impl TypeChecker {
         let Type::Named { ref path, .. } = func_ty else {
             unreachable!()
         };
+        let canonical = self.path_to_string(path);
+        if self.source_type_registration.completed.get(&canonical)
+            .is_some_and(|declaration| matches!(declaration.body, verum_ast::TypeDeclBody::Unit))
+        {
+            return self.check_constructor_call(args, &[], &func_ty, expr.span);
+        }
         let mut type_name = path.last_segment_name().to_string();
         // SELF-NEWTYPE-CTOR-1: `Self(v)` inside an
         // `implement <Newtype>` block is the same constructor
@@ -11118,7 +11124,7 @@ impl TypeChecker {
                 }
             }
             // Handle named tuple structs and newtypes
-            Type::Named { path, .. } => {
+            Type::Named { path, args } => {
                 let type_name = self.path_to_string(path);
                 let simple_name = Self::path_type_name(path).unwrap_or(&type_name);
 
@@ -11133,7 +11139,7 @@ impl TypeChecker {
 
                 if let Option::Some(Type::Tuple(types)) = found_tuple {
                     if idx < types.len() {
-                        let element_ty = types[idx].clone();
+                        let element_ty = self.instantiate_declared_type(&type_name, &types[idx], args)?;
 
                         // Track affine element access for tuple structs
                         if !borrowed && let Some((var_name, var_name_str)) = var_name_opt {
@@ -11199,7 +11205,7 @@ impl TypeChecker {
 
                     if let Some(inner_ty) = found_inner {
                         if idx == 0 {
-                            Ok(InferResult::new(inner_ty))
+                            Ok(InferResult::new(self.instantiate_declared_type(&type_name, &inner_ty, args)?))
                         } else {
                             Err(TypeError::Other(verum_common::Text::from(format!(
                                 "Newtype {} only has index 0, not {}",

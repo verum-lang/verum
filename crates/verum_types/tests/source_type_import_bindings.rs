@@ -258,3 +258,70 @@ fn lazy_sum_load_retains_every_qualified_constructor_form() {
         assert!(errors.is_empty(), "{source}: {errors:?}");
     }
 }
+
+#[test]
+fn namespace_qualified_tuple_constructors_keep_the_selected_owner() {
+    let providers = [("provider", "public type Wrapped is (Int); public type Marker is ();")];
+    for (mount, namespace) in [
+        ("mount provider;", "provider"),
+        ("mount provider as api;", "api"),
+    ] {
+        let source = format!(r#"
+            {mount}
+            mount provider.{{Wrapped, Marker}};
+            fn wrapped()->Wrapped {{ {namespace}.Wrapped(7) }}
+            fn marker()->Marker {{ {namespace}.Marker() }}
+        "#);
+        let errors = check(&source, &providers);
+        assert!(errors.is_empty(), "{source}: {errors:?}");
+    }
+}
+
+#[test]
+fn namespace_constructor_parameters_are_fresh_and_declaration_owned() {
+    for (mount, namespace) in [("mount provider;", "provider"), ("mount provider as api;", "api")] {
+        let source = format!(r#"
+            {mount} mount provider.Wrapped;
+            fn integer()->Wrapped<Int> {{ {namespace}.Wrapped<Int>(7) }}
+            fn boolean()->Wrapped<Bool> {{ {namespace}.Wrapped<Bool>(true) }}
+        "#);
+        let errors = check(&source, &[("provider", "public type Wrapped<T> is (T);")]);
+        assert!(errors.is_empty(), "{source}: {errors:?}");
+        let errors = check(&source.replace("Wrapped<Bool>(true)", "Wrapped<Int>(true)"), &[("provider", "public type Wrapped<T> is (T);")]);
+        assert!(errors.iter().any(|error| error.contains("Mismatch")), "explicit constructor argument lost: {errors:?}");
+    }
+}
+
+#[test]
+fn local_tuple_constructor_retains_nominal_type_arguments() {
+    let source = "type Wrapped<T> is (T); fn integer()->Wrapped<Int> { Wrapped<Int>(7) } fn boolean()->Wrapped<Bool> { Wrapped<Bool>(true) }";
+    let errors = check(source, &[]);
+    assert!(errors.is_empty(), "{errors:?}");
+    let errors = check(&source.replace("Wrapped<Bool>(true)", "Wrapped<Int>(true)"), &[]);
+    assert!(errors.iter().any(|error| error.contains("Mismatch")), "{errors:?}");
+}
+
+#[test]
+fn constructor_calls_check_parameter_bounds_without_a_result_annotation() {
+    let declarations = "type Allowed is protocol {}; type Good is {}; type Bad is {}; implement Allowed for Good {} type Wrapped<T: Allowed> is (T);";
+    let valid = check(&format!("{declarations} fn good() {{let value=Wrapped(Good {{}});}}"), &[]);
+    assert!(valid.is_empty(), "{valid:?}");
+    let errors = check(&format!("{declarations} fn bad() {{let value=Wrapped(Bad {{}});}}"), &[]);
+    assert!(!errors.is_empty(), "an inferred constructor cannot bypass its declaration bound");
+}
+
+#[test]
+fn explicit_constructor_arguments_do_not_disable_value_arity_checks() {
+    let declarations = "type Wrapped<T> is (T);";
+    for expression in ["Wrapped<Int>()", "Wrapped<Int>(7, 8)"] {
+        let errors = check(&format!("{declarations} fn bad()->Wrapped<Int> {{{expression}}}"), &[]);
+        assert!(!errors.is_empty(), "constructor arity was not checked: {expression}");
+    }
+}
+
+#[test]
+fn inferred_generic_newtype_preserves_owned_scalar_result() {
+    let source = "type Packed<T> is (T); fn copy_count(x:&Int)->Packed<Int> { Packed(*x) } fn owned()->Packed<Int> { let x=7; copy_count(&x) }";
+    let errors = check(source, &[]);
+    assert!(errors.is_empty(), "{errors:?}");
+}

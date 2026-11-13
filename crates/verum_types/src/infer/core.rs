@@ -1527,7 +1527,7 @@ impl TypeChecker {
 
     /// Replay a carried declaration through the source checker in its owner's
     /// scope. Rendered runtime fields cannot substitute for this authority.
-    fn load_metadata_source_type(
+    pub(super) fn load_metadata_source_type(
         &mut self,
         descriptor: &crate::core_metadata::TypeDescriptor,
     ) -> Result<(Type, Text)> {
@@ -1559,8 +1559,10 @@ impl TypeChecker {
         match self.load_metadata_source_type(descriptor) {
             Ok((ty, key)) => {
                 if !self.current_module_declared_types.contains(name.as_str()) {
-                    self.ctx.define_type(name.clone(), ty.clone());
-                    self.ctx.env.insert(name.clone(), TypeScheme::mono(ty.clone()));
+                    self.bind_source_type_import(
+                        descriptor.source_declaration.as_ref().expect("checked source declaration").name.name.as_str(),
+                        ty.clone(), &key, name.as_str(),
+                    );
                     if let Some(target) = self.ctx.type_aliases.get(&key).cloned() {
                         self.ctx.define_alias(name.clone(), target);
                         let binding = self.unifier.alias_binding(key.as_str());

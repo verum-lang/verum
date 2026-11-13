@@ -302,6 +302,9 @@ impl VbcCodegen {
         &self,
         function: &FunctionInfo,
     ) -> Option<Cow<'_, [DeclaredGenericParameter]>> {
+        if let Some(owner) = function.nominal_constructor_type() {
+            return self.constructor_generic_rosters.get(&owner).map(|roster| Cow::Borrowed(roster.as_slice()));
+        }
         if let Some(roster) = self.source_callable_rosters.get(&function.id) {
             return roster
                 .as_ref()

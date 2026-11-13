@@ -411,6 +411,15 @@ impl VbcCodegen {
         captured: Option<&[Option<TypeRef>]>,
     ) -> Option<Vec<TypeRef>> {
         let info = self.ctx.lookup_function_by_id(crate::module::FunctionId(id))?;
+        self.selected_argument_witnesses(info, count, args, captured)
+    }
+
+    /// Synthetic constructors share no executable ID. Bind the callable that
+    /// was actually selected, preserving its nominal target and parameters.
+    pub(super) fn selected_argument_witnesses<'a>(
+        &self, info: &FunctionInfo, count: usize, args: impl Iterator<Item = &'a Expr>,
+        captured: Option<&[Option<TypeRef>]>,
+    ) -> Option<Vec<TypeRef>> {
         if info.type_param_ids.is_empty() {
             return None;
         }

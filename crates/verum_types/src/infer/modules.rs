@@ -1201,14 +1201,18 @@ impl TypeChecker {
 
     /// A mount publishes a spelling for an existing declaration. It never
     /// creates a nominal declaration in the consumer, including for renames.
-    fn bind_source_type_import(
+    pub(super) fn bind_source_type_import(
         &mut self,
         declared_name: &str,
         registered_type: Type,
         declaration_key: &Text,
         register_name: &str,
     ) {
-        let binding = if register_name == declared_name {
+        // The declaration key owns its elaborated body. Replacing that
+        // entry with a reference to itself erases the authority needed to
+        // inspect variants and other nominal representations. Only additional
+        // import spellings are references to the declaration.
+        let binding = if register_name == declared_name || register_name == declaration_key.as_str() {
             registered_type
         } else {
             Type::Named {
@@ -2988,7 +2992,7 @@ impl TypeChecker {
                         // #[cfg(debug_assertions)]
                         // eprintln!("[DEBUG] About to extract_function_type_from_module for '{}'", item_name);
                         if let Some(scheme) =
-                            self.source_qualified_function(module_info.clone(), item_name.into())
+                            self.source_qualified_callable(module_info.clone(), item_name.into())
                         {
                             if std::env::var("VERUM_TRACE_TASK20").is_ok() {
                                 eprintln!("[task20] AST direct: mod='{}' item='{}' type={:?}",
@@ -17547,13 +17551,10 @@ impl TypeChecker {
             if path.segments.len() == 1
                 && matches!(path.segments.first(), Some(verum_ast::ty::PathSegment::Name(ident))
                     if self.module_aliases.contains_key(&ident.name)));
-        let base_is_inline_namespace = matches!(&current_receiver.kind, ExprKind::Path(path)
+        let base_is_declared_namespace = matches!(&current_receiver.kind, ExprKind::Path(path)
             if path.segments.len() == 1
                 && matches!(path.segments.first(), Some(verum_ast::ty::PathSegment::Name(ident))
-                    if (self.inline_namespace_owner(ident.name.as_str()).is_some()
-                        || self.inline_modules.contains_key(&ident.name))
-                        && self.ctx.env.lookup(ident.name.as_str()).is_none()
-                        && self.ctx.lookup_type(ident.name.as_str()).is_none()));
+                    if self.declared_namespace_owner(&ident.name).is_some()));
         let base_is_module_path = !base_is_module_alias && {
             let root_name: Option<&str> = match &current_receiver.kind {
                 ExprKind::Path(path) if path.segments.len() >= 2 => {
@@ -17575,7 +17576,7 @@ impl TypeChecker {
             }
         };
         self.with_place_types(current_receiver, |tc| {
-            let mut namespace_first = if base_is_rooted_path || base_is_module_alias || base_is_module_path || base_is_inline_namespace {
+            let mut namespace_first = if base_is_rooted_path || base_is_module_alias || base_is_module_path || base_is_declared_namespace {
                 let (_, first_method, first_type_args, first_args, first_span) =
                     chain.last().expect("method chain is nonempty");
                 // A dotted qualifier can denote a value (a variant or an
@@ -23854,6 +23855,24 @@ bake to have this verified.",
     }
 
 
+    /// A namespace has a declared alias, lexical module or registry identity.
+    /// A value or type binding keeps receiver ownership even if a module has
+    /// the same name; no callable suffix is used to invent a namespace.
+    fn declared_namespace_owner(&self, name: &Text) -> Option<Text> {
+        if self.ctx.env.is_locally_bound(name.as_str()) { return None; }
+        if let Some(owner) = self.module_aliases.get(name) { return Some(owner.clone()); }
+        if self.ctx.env.lookup(name.as_str()).is_some() || self.ctx.lookup_type(name.as_str()).is_some() {
+            return None;
+        }
+        self.inline_namespace_owner(name.as_str()).or_else(|| {
+            self.inline_modules.contains_key(name)
+                .then(|| self.inline_module_declaration_path(name.as_str()).into())
+        }).or_else(|| {
+            self.module_registry.read().get_by_path_aliased(name.as_str())
+                .map(|module| module.path.to_string().into())
+        })
+    }
+
     /// Auto-dereference for method calls on references and Heap<T>
     ///
     /// This enables method calls like `ref.len()` where `ref: &List<Int>` to work
@@ -23918,11 +23937,7 @@ bake to have this verified.",
             }
             Some(PathSegment::Name(ident))
                 if !self.ctx.env.is_locally_bound(ident.name.as_str()) => {
-                let owner = self.module_aliases.get(&ident.name).cloned().or_else(|| {
-                    self.ctx.lookup_type(ident.name.as_str()).is_none()
-                        .then(|| self.inline_namespace_owner(ident.name.as_str())).flatten()
-                });
-                let Some(owner) = owner else { return Ok(None); };
+                let Some(owner) = self.declared_namespace_owner(&ident.name) else { return Ok(None); };
                 let mut segments: List<_> = owner.as_str().split('.')
                     .map(|name| PathSegment::Name(Ident::new(name, span))).collect();
                 segments.extend(path.segments.iter().skip(1).cloned());
@@ -23947,7 +23962,7 @@ bake to have this verified.",
                 .map(|module| (module, Text::from(member)))
         });
         if let Some((module, member)) = source {
-            let scheme = self.source_qualified_function(module, member)
+            let scheme = self.source_qualified_callable(module, member)
                 .ok_or_else(|| TypeError::UnboundVariable { name: written_path.clone(), span })?;
             // Publish only this qualified callable, never the namespace's bare
             // items. Ordinary call inference then retains its generic bounds.
@@ -24568,7 +24583,7 @@ bake to have this verified.",
         }
     }
 
-    pub(super) fn source_qualified_function(
+    pub(super) fn source_qualified_callable(
         &mut self,
         module: Shared<verum_modules::ModuleInfo>,
         name: Text,
@@ -24580,6 +24595,16 @@ bake to have this verified.",
             let metadata = self.core_metadata.clone()?;
             let owner = module.path.to_string();
             let qualified: Text = format!("{owner}.{name}").into();
+            if let Some(descriptor) = Self::metadata_type_with_declaring_key(&metadata, &qualified)
+                && descriptor.source_declaration.as_ref().is_some_and(|declaration|
+                    matches!(&declaration.body, TypeDeclBody::Tuple(_) | TypeDeclBody::Newtype(_) | TypeDeclBody::Unit))
+            {
+                if !descriptor.is_public && owner != self.current_module_path.as_str() { return None; }
+                return match self.load_metadata_source_type(descriptor) {
+                    Ok((_, key)) => self.ctx.env.lookup(key.as_str()).cloned(),
+                    Err(error) => { self.deferred_soundness_errors.push(error); None }
+                };
+            }
             let declares = |descriptor: &crate::core_metadata::FunctionDescriptor| {
                 let origin = descriptor.origin_module_path.as_ref()
                     .filter(|origin| !origin.is_empty()).unwrap_or(&descriptor.module_path);
@@ -24610,6 +24635,16 @@ bake to have this verified.",
             let registry = self.module_registry.read();
             self.source_export_declaration(module, name, &registry)?
         };
+        if let Some(declaration) = self.local_source_type_declaration(&source.ast, &original)
+            && matches!(&declaration.body, TypeDeclBody::Tuple(_) | TypeDeclBody::Newtype(_) | TypeDeclBody::Unit)
+        {
+            return match self.load_source_type_declaration_with_parameter_key(
+                declaration, &source.path.to_string().into(), declaration.span,
+            ) {
+                Ok((_, key)) => self.ctx.env.lookup(key.as_str()).cloned(),
+                Err(error) => { self.deferred_soundness_errors.push(error); None }
+            };
+        }
         if let Some(function) = source.ast.items.iter().find_map(|item| self.imported_function(item, &original)) {
             return match self.scheme_from_source_function(function, &source.path.to_string()) {
                 Ok(scheme) => Some(scheme),
@@ -24698,7 +24733,7 @@ bake to have this verified.",
             // An exact source namespace owns this spelling even when its
             // member is absent or private. Do not retry a shorter namespace.
             candidates.truncate(1);
-            Some(self.source_qualified_function(module, method.name.clone()))
+            Some(self.source_qualified_callable(module, method.name.clone()))
         } else {
             None
         };

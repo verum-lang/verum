@@ -113,6 +113,13 @@ pub(crate) struct ValueDeclaration {
     pub visibility: verum_ast::Visibility,
 }
 
+/// Well-formedness required by one exact nominal declaration application.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct NominalApplication {
+    pub owner: Text,
+    pub arguments: List<Type>,
+}
+
 /// A type scheme represents a polymorphic type: ∀α β. T
 ///
 /// This enables let-polymorphism where bound variables can
@@ -146,6 +153,9 @@ pub struct TypeScheme {
     pub var_protocol_bounds: Map<TypeVar, List<ProtocolBound>>,
     /// Conditional obligations on arbitrary declared subjects, including Self.Item.
     pub where_clauses: List<crate::protocol::WhereClause>,
+    /// Constructor applications retain the selected nominal and its argument
+    /// telescope; bounds are discharged after the caller has inferred arguments.
+    pub(crate) nominal_applications: List<NominalApplication>,
     /// Number of leading type variables that come from the implement block.
     /// Used for instance methods to distinguish impl-level vars (bound from
     /// receiver type args) from method-level vars (inferred from arguments).
@@ -182,6 +192,7 @@ pub struct InstantiatedScheme {
     pub type_bounds: Map<TypeVar, List<Type>>,
     pub protocol_bounds: Map<TypeVar, List<ProtocolBound>>,
     pub where_clauses: List<crate::protocol::WhereClause>,
+    pub(crate) nominal_applications: List<NominalApplication>,
     pub impl_self_type: Option<Type>,
     pub explicit_method_vars: Option<List<Option<GenericBinder>>>,
 }
@@ -302,6 +313,13 @@ impl TypeScheme {
                 .iter()
                 .map(|clause| clause.try_apply_subst(&subst))
                 .collect::<Result<_, _>>()?,
+            nominal_applications: self.nominal_applications.iter().map(|application| {
+                Ok(NominalApplication {
+                    owner: application.owner.clone(),
+                    arguments: application.arguments.iter().map(|argument|
+                        argument.try_apply_subst(&subst)).collect::<Result<List<_>, Text>>()?,
+                })
+            }).collect::<Result<List<_>, Text>>()?,
             impl_self_type: self
                 .impl_self_type
                 .as_ref()
@@ -323,6 +341,7 @@ impl TypeScheme {
             var_type_bounds: Map::new(),
             var_protocol_bounds: Map::new(),
             where_clauses: List::new(),
+            nominal_applications: List::new(),
             impl_var_count: 0,
             impl_self_type: None,
             receiver_kind: None,
@@ -344,6 +363,7 @@ impl TypeScheme {
             var_type_bounds: Map::new(),
             var_protocol_bounds: Map::new(),
             where_clauses: List::new(),
+            nominal_applications: List::new(),
             impl_var_count: 0,
             impl_self_type: None,
             receiver_kind: None,
@@ -366,6 +386,7 @@ impl TypeScheme {
             var_type_bounds: Map::new(),
             var_protocol_bounds: Map::new(),
             where_clauses: List::new(),
+            nominal_applications: List::new(),
             impl_var_count: 0,
             impl_self_type: None,
             receiver_kind: None,
@@ -393,6 +414,7 @@ impl TypeScheme {
             var_type_bounds,
             var_protocol_bounds: Map::new(),
             where_clauses: List::new(),
+            nominal_applications: List::new(),
             impl_var_count: 0,
             impl_self_type: None,
             receiver_kind: None,

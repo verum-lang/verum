@@ -827,7 +827,7 @@ fn ordinary_nominal_bounds_retain_their_source_telescope() {
     }
     let mut unconstrained = type_declaration(TypeDeclBody::Unit);
     unconstrained.generics.push(ordinary("T"));
-    assert!(source_type_declaration(&unconstrained).unwrap().is_none());
+    assert_eq!(source_type_declaration(&unconstrained).unwrap(), Some(unconstrained.clone()));
 }
 
 #[test]
@@ -859,5 +859,17 @@ fn ordinary_nominal_where_predicates_survive_source_carrier_roundtrip() {
             serde_json::from_slice(&serde_json::to_vec(&carrier).unwrap()).unwrap();
         validate_source_type_declaration(&decoded).unwrap();
         assert_eq!(decoded, declaration);
+    }
+}
+
+#[test]
+fn ordinary_nominal_constructors_retain_source_authority() {
+    let inner = Type::new(TypeKind::Path(Path::single(ident("T"))), Span::dummy());
+    for body in [TypeDeclBody::Unit, TypeDeclBody::Tuple(List::from_single(inner.clone())), TypeDeclBody::Newtype(inner)] {
+        let mut declaration = type_declaration(body);
+        declaration.generics.push(ordinary("T"));
+        let carried = source_type_declaration(&declaration).unwrap().unwrap();
+        assert_eq!(carried, declaration);
+        validate_source_type_declaration(&carried).unwrap();
     }
 }
