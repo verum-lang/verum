@@ -27,7 +27,8 @@ fn registry(source: &str) -> ProtocolChecker {
     checker.register_primitives();
     checker.set_current_cog("fixture");
     checker.set_current_module_path("fixture.owner");
-    assert!(checker.prepare_module_declarations(&module).is_empty());
+    let admission = checker.prepare_module_declarations(&module);
+    assert!(admission.is_empty(), "{admission:?}");
     for item in &module.items {
         checker.check_item(item).unwrap();
     }
@@ -155,4 +156,58 @@ fn active_cycle_is_refused_before_reusing_a_completed_branch() {
             )
             .is_err()
     );
+}
+
+#[test]
+fn inherited_evidence_reuses_declared_argument_kinds_and_domains() {
+    let checker = registry(
+        "type Parent<A,N:meta Int> is protocol {};
+         type Child is protocol extends Parent<Int,7> {};",
+    );
+    let receiver = object("fixture.owner.Child");
+    let mut remaining = PROTOCOL_OBLIGATION_BUDGET;
+    assert!(
+        checker
+            .dynamic_protocol_premises(&receiver, &mut remaining)
+            .is_ok()
+    );
+    for case in 0..3 {
+        let mut invalid = checker.clone();
+        let child = invalid
+            .protocols
+            .get_mut(&Text::from("fixture.owner.Child"))
+            .unwrap();
+        let arguments = &mut child.super_protocols[0].args;
+        match case {
+            0 => arguments.swap(0, 1),
+            1 => arguments[1] = Type::Bool,
+            _ => arguments[1] = Type::meta_value(verum_common::ConstValue::Bool(true), Type::Bool),
+        }
+        let mut remaining = PROTOCOL_OBLIGATION_BUDGET;
+        assert!(
+            invalid
+                .dynamic_protocol_premises(&receiver, &mut remaining)
+                .is_err()
+        );
+    }
+    for unsupported in [
+        crate::context::GenericBinder::ErasedLifetime,
+        crate::context::GenericBinder::Universe(crate::ty::UniverseLevel::Concrete(0)),
+    ] {
+        let mut invalid = checker.clone();
+        let parent = invalid
+            .protocols
+            .get_mut(&Text::from("fixture.owner.Parent"))
+            .unwrap();
+        let ProtocolConstraints::Declared { parameters, .. } = &mut parent.constraints else {
+            panic!("source protocol has no declared telescope");
+        };
+        parameters[0] = unsupported;
+        let mut remaining = PROTOCOL_OBLIGATION_BUDGET;
+        assert!(
+            invalid
+                .dynamic_protocol_premises(&receiver, &mut remaining)
+                .is_err()
+        );
+    }
 }

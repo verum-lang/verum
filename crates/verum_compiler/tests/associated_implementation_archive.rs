@@ -811,3 +811,22 @@ fn generic_mutable_object_methods_execute_after_wire_reload() {
         assert_eq!(actual.try_as_i64(), Some(73));
     }
 }
+
+#[test]
+fn published_dynamic_inheritance_keeps_type_and_value_arguments() {
+    let provider = "module core.family_archive;
+        public type Parent<A,N:meta Int> is protocol { fn read(&self) -> A; };
+        public type Middle<A,N:meta Int> is protocol extends Parent<A,N> {};
+        public type Child is protocol extends Middle<Int,7> {};
+        public fn read<T:Parent<Int,7>>(value:&T)->Int {value.read()}";
+    let metadata = publish(&source_module(provider)).unwrap();
+    for eager in [false, true] {
+        for (required, accepted) in [(7, true), (8, false)] {
+            let source = format!("mount core.family_archive.{{Parent,Child,read}};
+                fn need<T:Parent<Int,{required}>>(value:&T) {{}}
+                fn probe(value:&dyn Child)->Int {{need(value);read(value)}}");
+            let diagnostics = consumer_errors(&metadata, &source, eager);
+            assert_eq!(diagnostics.is_empty(), accepted, "eager={eager}, {source}: {diagnostics:?}");
+        }
+    }
+}

@@ -707,3 +707,33 @@ fn unverified_dynamic_telescope_cannot_reuse_prior_evidence() {
         );
     }
 }
+
+#[test]
+fn inherited_dynamic_evidence_preserves_mixed_type_and_value_binders() {
+    let declarations = "type Parent<A, N:meta Int> is protocol { fn read(&self) -> A; };
+        type Middle<A, N:meta Int> is protocol extends Parent<A,N> {};
+        type Child is protocol extends Middle<Int,7> {};";
+    for (parent, result, valid) in [
+        ("Parent<Int,7>", "Int", true),
+        ("Parent<Int,8>", "Int", false),
+        ("Parent<Bool,7>", "Bool", false),
+    ] {
+        let source = format!("{declarations}
+            fn read<T: {parent}>(value: &T) -> {result} {{value.read()}}
+            fn probe(value: &dyn Child) -> {result} {{read(value)}}");
+        let diagnostics = errors(&source);
+        assert_eq!(diagnostics.is_empty(), valid, "{source}: {diagnostics:?}");
+    }
+}
+
+#[test]
+fn dynamic_inheritance_cannot_erase_an_unproved_refined_value_domain() {
+    let source = "type Parent<N:meta Int{>=0}> is protocol {};
+        type Child is protocol extends Parent<7> {};
+        fn need<T:Parent<7>>(value:&T) {}
+        fn probe(value:&dyn Child) {need(value)}";
+    let diagnostics = errors(source);
+    assert!(diagnostics.iter().any(|error|
+        error.contains("refined protocol values require a checked refinement witness")),
+        "{diagnostics:?}");
+}
