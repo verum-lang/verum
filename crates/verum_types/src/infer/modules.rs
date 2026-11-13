@@ -2947,10 +2947,7 @@ impl TypeChecker {
             // module_info.exports.len()
             // );
 
-            // Pre-register all function signatures from this module to enable forward references
-            // within the imported module itself. This is critical for cases where a function
-            // calls another function defined later in the same module.
-            self.preregister_module_function_signatures(&module_info, registry);
+            self.import_module_implementations(&module_info, registry);
 
             // Find the exported item
             // Note: ExportTable.get expects &Text (verum_common::Text)
@@ -2985,37 +2982,12 @@ impl TypeChecker {
 
                 match actual_kind {
                     ExportKind::Function | ExportKind::Meta => {
-                        // For functions, we need to look up the actual type from the module's AST.
-                        // If not found directly (e.g., for re-exported variant constructors),
-                        // follow the re-export chain to find the original definition.
-                        // Use TypeScheme::poly() for generic functions, TypeScheme::mono() for non-generic.
-                        // #[cfg(debug_assertions)]
-                        // eprintln!("[DEBUG] About to extract_function_type_from_module for '{}'", item_name);
-                        if let Some(scheme) =
-                            self.source_qualified_callable(module_info.clone(), item_name.into())
-                        {
-                            if std::env::var("VERUM_TRACE_TASK20").is_ok() {
-                                eprintln!("[task20] AST direct: mod='{}' item='{}' type={:?}",
-                                    resolved_module_path.as_str(), item_name, scheme.ty);
-                            }
-                            // T0231: guarded — a prelude/mount import
-                            // must not downgrade a builtin's poly scheme.
-                            self.insert_fn_scheme_guarded(register_name, scheme);
-                        } else if let Some((scheme, _source_path)) = self
-                            .find_function_with_source_module(
-                                &module_info.ast,
-                                item_name,
-                                &resolved_module_path,
-                                registry,
-                            )
-                        {
-                            if std::env::var("VERUM_TRACE_TASK20").is_ok() {
-                                eprintln!("[task20] AST reexport: mod='{}' item='{}' type={:?}",
-                                    resolved_module_path.as_str(), item_name, scheme.ty);
-                            }
-                            // T0231: guarded — a prelude/mount import
-                            // must not downgrade a builtin's poly scheme.
-                            self.insert_fn_scheme_guarded(register_name, scheme);
+                        let selected = self.source_qualified_callable(module_info.clone(), item_name.into())
+                            .or_else(|| self.find_function_with_source_module(
+                                &module_info.ast, item_name, &resolved_module_path, registry,
+                            ));
+                        if let Some((scheme, key)) = selected {
+                            self.bind_imported_callable(register_name, scheme, key);
                         } else if let Some((scheme, resolved_key)) = {
                             let s = self.resolve_value_via_metadata_reexports(
                                 resolved_module_path.as_str(),
@@ -4482,7 +4454,7 @@ impl TypeChecker {
                             // because the env-lookup hits the
                             // self-referential placeholder before the
                             // function lookup gets a chance.
-                            if let Some((scheme, _src)) = self
+                            if let Some((scheme, key)) = self
                                 .find_function_with_source_module(
                                     &module_info.ast,
                                     item_name,
@@ -4490,25 +4462,7 @@ impl TypeChecker {
                                     registry,
                                 )
                             {
-                                // Drain any function-type bounds that
-                                // `extract_function_type_from_module` stashed
-                                // during this resolution.  Carrying them
-                                // through the scheme is what enables
-                                // closure-shape recovery at the call site
-                                // for stdlib HOFs like `from_fn` / `unfold`
-                                // / `successors`.  Mirrors the source-
-                                // driven plumbing in `register_function_
-                                // signature` (decls.rs:~6286 — same
-                                // `with_type_bounds` attachment).
-                                let extracted_bounds = std::mem::take(
-                                    &mut self.pending_extracted_type_bounds,
-                                );
-                                let scheme = if extracted_bounds.is_empty() {
-                                    scheme
-                                } else {
-                                    scheme.with_type_bounds(extracted_bounds)
-                                };
-                                self.ctx.env.insert_value(register_name, scheme);
+                                self.bind_imported_callable(register_name, scheme, key);
                                 registered_successfully = true;
                             } else {
                                 if let Some(metadata) = self.core_metadata.clone() {
@@ -7034,57 +6988,25 @@ impl TypeChecker {
         ).map(|(declaration, _)| (*declaration).clone())
     }
 
-    /// Find a function or constructor definition, following re-export chains.
-    ///
-    /// This is similar to `find_type_declaration_with_source_module` but for
-    /// functions and variant constructors. When a module re-exports a function
-    /// via `pub import`, we need to trace back to the original definition.
-    ///
-    /// For variant constructors (e.g., `Some` from `type Maybe<T> is None | Some(T)`),
-    /// this will find the variant type definition and extract the constructor type.
-    /// Find a function and its source module, following re-export chains.
-    /// Returns (Type, List<TypeVar>, Text) where:
-    /// Task #20 — resolve a `mount X.{item}` re-export through
-    /// `metadata.module_reexports` when the AST-based walkers in
-    /// [`Self::extract_function_type_from_module`] /
-    /// [`Self::find_function_with_source_module`] miss.
-    ///
-    /// The archive-driven `load_stdlib_from_embedded` path builds
-    /// every stdlib `ModuleInfo` from a *synthetic empty AST* — the
-    /// type info lives in `metadata.functions` and the re-export
-    /// chains live in `metadata.module_reexports`, both populated at
-    /// precompile time.  Without this fallback, `mount core.base.{var}`
-    /// successfully resolves `var` in `core.base.exports` (Task #20
-    /// loading.rs change) but the typechecker has no way to extract
-    /// `var`'s function type because the source AST is empty.
-    ///
-    /// Algorithm:
-    ///   1. Probe `metadata.functions` under `<module_path>.<item_name>`
-    ///      for the direct-declaring case
-    ///      (`mount core.base.memory.{replace}` — `replace` is declared
-    ///      in `core.base.memory`).  The synthetic empty AST has no
-    ///      `ItemKind::Function` to walk, so the AST-based extractors
-    ///      both miss; the descriptor still lives in
-    ///      `metadata.functions` under the canonical qualified key
-    ///      emitted by `archive_metadata::register_module_metadata`.
-    ///   2. Otherwise look up `metadata.module_reexports[module_path]`
-    ///      for the `(item_name, source_module_path)` pair captured at
-    ///      precompile (`mount core.base.{replace}` — `replace` is
-    ///      re-exported from `core.base.memory` via `core/base/mod.vr`'s
-    ///      `public mount .memory.{replace}`).
-    ///   3. Convert `FunctionDescriptor.params` / `return_type` from
-    ///      their string-encoded form into [`Type`] via the same
-    ///      `parse_descriptor_type_string` helper used by
-    ///      [`Self::register_stdlib_static_methods_from_metadata`].
-    ///   4. Wrap in a [`TypeScheme`] — `poly` when generic vars are
-    ///      present, `mono` otherwise.
-    /// Record which function a mounted bare name denotes, for consumers
-    /// that cannot resolve it themselves (MOUNT-BINDING-CARRY-1, T0148).
-    ///
-    /// LAST-WINS, matching mount shadowing: a later `mount` of the same
-    /// bare name is the one the call site means. The map is written only
-    /// where a metadata resolution SUCCEEDED, so an entry is always a key
-    /// that named a real descriptor at the moment it was recorded.
+    /// Bind the selected callable's complete contract to both spellings.
+    fn bind_imported_callable(&mut self, local: &str, scheme: TypeScheme, key: Text) {
+        if self.insert_fn_scheme_guarded(local, scheme.clone()) {
+            let local = Text::from(local);
+            if let Some(&required) = self.function_required_params.get(&key) {
+                self.function_required_params.insert(local.clone(), required);
+            }
+            if let Some(names) = self.function_param_names.get(&key).cloned() {
+                self.function_param_names.insert(local.clone(), names);
+            }
+            if let Some(levels) = self.function_param_classifications.get(&key).cloned() {
+                self.function_param_classifications.insert(local.clone(), levels);
+            }
+            self.ctx.env.insert_value(key.clone(), scheme);
+            self.record_mount_binding(&local, &key);
+        }
+    }
+
+    /// A successful import carries its declaring key to name resolution and VBC.
     fn record_mount_binding(&mut self, bare_name: &str, resolved_key: &Text) {
         self.resolved_mount_bindings
             .insert(Text::from(bare_name), resolved_key.clone());
@@ -7649,9 +7571,7 @@ impl TypeChecker {
         Some((cur_name, cur_mod))
     }
 
-    /// - Type: the function type
-    /// - List<TypeVar>: quantified type variables (for generic functions)
-    /// - Text: the source module path
+    /// Resolve a callable scheme and its complete declaring key through source re-exports.
     fn find_function_with_source_module(
         &mut self,
         ast: &verum_ast::Module,
@@ -7691,7 +7611,7 @@ impl TypeChecker {
         // First, try to find the function directly in this module (including variant constructors)
         if let Some(scheme) = self.extract_function_type_from_module(ast, func_name, current_module_path.as_str())
         {
-            return Some((scheme, current_module_path.clone()));
+            return Some((scheme, verum_common::qualified_name::qualify_module_name(current_module_path, func_name)));
         }
 
         // Helper to check if path starts with relative marker
@@ -7833,10 +7753,7 @@ impl TypeChecker {
                         }
                     }
                     MountTreeKind::Nested { prefix, trees } => {
-                        // Nested import: `pub import .module.{func1, func2}`
-                        // Check if func_name is in the trees (by name or alias)
-                        // Also track the original name if matched via alias
-                        let mut original_name: Option<String> = None;
+                        // An exported alias must retain the selected declaration's name.
                         let has_item = trees.iter().any(|tree| {
                             // Check alias first: `safe_read as read` - match on alias `read`
                             if let Some(ref alias) = tree.alias {
@@ -7911,7 +7828,8 @@ impl TypeChecker {
                         if let Some(scheme) =
                             self.extract_function_type_from_module(&source_module.ast, lookup_name, &source_module.path.to_string())
                         {
-                            return Some((scheme, Text::from(source_path.clone())));
+                            let key = verum_common::qualified_name::qualify_module_name(&source_module.path.to_string(), lookup_name);
+                            return Some((scheme, key));
                         } else {
                             // Function not found directly - recurse to check if it's re-exported
                             if let Some(result) = self.find_function_with_source_module(
@@ -8255,119 +8173,17 @@ impl TypeChecker {
         None
     }
 
-    /// Pre-register all function signatures from a module's AST to enable forward references.
-    ///
-    /// This method performs a lightweight Pass 4 (register function signatures) for an
-    /// imported module. This is critical for handling forward references within the imported
-    /// module itself - for example, if `get_stdin_handle()` is called before it's defined
-    /// in the file.
-    ///
-    /// Without this pre-registration, when we try to extract a function type via
-    /// `extract_function_type_from_module`, it might fail if that function references
-    /// other functions defined later in the same module.
-    ///
-    /// Import and re-export system: "mount module.{item1, item2}" for imports, pub use for re-exports, glob imports — Cross-module resolution
-    fn preregister_module_function_signatures(
+    /// Import the implementation surface contributed by a module. Callable
+    /// signatures are admitted on selection in their own declaration scope.
+    fn import_module_implementations(
         &mut self,
         module: &verum_modules::ModuleInfo,
         registry: &verum_modules::ModuleRegistry,
     ) {
-        use verum_ast::ItemKind;
-        // An import alias may resolve to this file. Only the registry entry
-        // that owns its AST can supply the namespace for its declarations.
-        let ast = &module.ast;
         let owner = module.path.to_string();
-        let module_path = owner.as_str();
-
-        // Check if we've already pre-registered this module
-        if self.preregistered_modules.contains(module_path) {
-            return;
-        }
-
-        // #[cfg(debug_assertions)]
-        // eprintln!(
-        // "[DEBUG] Pre-registering function signatures from module '{}'",
-        // module_path
-        // );
-
-        // CRITICAL: Mark module as pre-registered BEFORE processing to prevent
-        // re-entrant infinite recursion. If register_function_signature triggers
-        // any code that re-enters this function for the same module, the early
-        // return check (line 23658) will catch it.
-        // Bug fix: Previously the insert was at the END of the function, allowing
-        // infinite recursion when processing large modules like sys.intrinsics.
-        self.preregistered_modules.insert(module_path.to_string());
-
-        // CRITICAL: switch `current_module_path` while resolving the
-        // pre-registered function signatures so that unqualified type
-        // names in their parameter / return positions resolve against
-        // the SOURCE module's locally-defined types first. Without
-        // this, a function declared in M as
-        //
-
-        //  // module M; type Foo is { ... }; fn make() -> Foo { ... }
-        //
-
-        // would have its signature registered with `Foo` resolving
-        // against the *consumer's* flat-name table — picking up any
-        // same-named type that happens to be in scope (notably the
-        // stdlib `core.runtime.stack_alloc::ConnectionPool` alias when
-        // a sibling module locally defines `ConnectionPool`). The
-        // saved value is restored unconditionally after the loop.
-        let saved_module_path_pre = self.current_module_path.clone();
-        self.current_module_path = Text::from(module_path);
-
-        // Register all function signatures to enable forward references
-        for item in &ast.items {
-            if let ItemKind::Function(func) = &item.kind {
-                // Ignore errors - we just want the signatures registered
-                // The actual type checking will happen later if needed
-                let qualified = format!("{module_path}.{}", func.name.name).into();
-                let _ = self.register_function_signature_as(func, &qualified);
-            }
-            // A NAME DECLARED IN `@ffi(...) extern { }` IS A FUNCTION
-            // SIGNATURE TOO (T1085). Two sibling walks in this file
-            // already say so — the module-items pass at ~line 512 and
-            // the one at ~333 — and this one did not, so a mounted
-            // extern name reached its call site unbound:
-            //
-            //     mount lib.{getpid};        resolves, no E401
-            //     unsafe { getpid() }        error<E100>: unbound variable
-            //
-            // Measured with `VERUM_TRACE_TASK21`: at the mount gate the
-            // extern and a plain sibling are INDISTINGUISHABLE —
-            // `export_hit=true raw_kind=Some(Function)` for both — and
-            // only the extern falls through to the one-hop descriptor
-            // search, which answers `candidates=0` because it searches
-            // stdlib metadata a user module was never in.
-            //
-            // Being in the module surface is not being bound (T1088);
-            // the surface said yes and nothing defined the name.
-            if let ItemKind::ExternBlock(extern_block) = &item.kind {
-                for func in &extern_block.functions {
-                    let qualified = format!("{module_path}.{}", func.name.name).into();
-                    let _ = self.register_function_signature_as(func, &qualified);
-                }
-            }
-        }
-
-        self.current_module_path = saved_module_path_pre;
-
-        // CRITICAL: Register protocol TYPE DEFINITIONS from this module.
-        // The protocol definitions (like `type Into<T> is protocol { ... }`) must be
-        // registered BEFORE their implementations can be used.
-        self.register_module_protocols(ast, module_path);
-
-        // CRITICAL: Also register blanket protocol impls from this module.
-        // Blanket impls like `implement<T, U: From<T>> Into<U> for T` apply globally
-        // and must be registered when ANY item from the module is imported.
-        self.register_module_blanket_impls_with_registry(ast, module_path, Some(registry));
-
-        // CRITICAL: Also import inherent impl methods for primitive types.
-        // Modules like core.primitives define `implement Int { ... }` blocks that
-        // add methods to built-in primitive types (Int, Float, Bool, etc.).
-        // These must be imported when ANY item from the module is imported.
-        if let Err(error) = self.import_primitive_impl_blocks(module_path, &ast.items) {
+        self.register_module_protocols(&module.ast, &owner);
+        self.register_module_blanket_impls_with_registry(&module.ast, &owner, Some(registry));
+        if let Err(error) = self.import_primitive_impl_blocks(&owner, &module.ast.items) {
             self.deferred_soundness_errors.push(error);
         }
     }
@@ -8377,8 +8193,7 @@ impl TypeChecker {
     /// This ensures protocol definitions like `type Into<T> is protocol { fn into(self) -> T; }`
     /// are available for method lookup when blanket impls reference them.
     pub fn register_module_protocols(&mut self, ast: &verum_ast::Module, module_path: &str) {
-        let protocols_key = format!("{}_protocols", module_path);
-        if !self.preregistered_modules.insert(protocols_key.clone()) {
+        if !self.registered_protocol_modules.insert(module_path.to_owned()) {
             return;
         }
         let owner: Text = module_path.into();
@@ -8402,7 +8217,7 @@ impl TypeChecker {
         // This key also prevents recursive module scans while declarations are
         // being loaded. A failed scan is not a completed registration.
         if !complete {
-            self.preregistered_modules.remove(&protocols_key);
+            self.registered_protocol_modules.remove(module_path);
         }
     }
 
@@ -8953,8 +8768,7 @@ impl TypeChecker {
     /// This is called to ensure protocol definitions from stdlib override hardcoded fallbacks.
     fn try_load_protocol_module(&mut self, module_path: &str) {
         // Check if already processed
-        let protocols_key = format!("{}_protocols", module_path);
-        if self.preregistered_modules.contains(&protocols_key) {
+        if self.registered_protocol_modules.contains(module_path) {
             return;
         }
 
@@ -9264,9 +9078,7 @@ impl TypeChecker {
         // Look up the source module in the registry
         if let Some(module_info) = registry.get_by_path(module_path.as_str()) {
             self.import_structural_methods(module_path, &module_info.ast.items)?;
-            // Pre-register all function signatures to enable forward references
-            // within the imported module itself
-            self.preregister_module_function_signatures(&module_info, registry);
+            self.import_module_implementations(&module_info, registry);
 
             // A glob imports the same visible surface as named imports, which
             // includes cog/path-restricted declarations for eligible callers.
@@ -9515,9 +9327,10 @@ impl TypeChecker {
     /// A function declared inside an extern block participates in the same
     /// source import and alias binding as a function with a Verum body.
     pub(super) fn imported_function<'a>(&self, item: &'a verum_ast::Item, name: &str) -> Option<&'a verum_ast::FunctionDecl> {
+        if !self.cfg_evaluator.should_include_item(item) { return None; }
         match &item.kind {
             verum_ast::ItemKind::Function(function) if function.name.as_str() == name => Some(function),
-            verum_ast::ItemKind::ExternBlock(block) if self.cfg_evaluator.should_include(&item.attributes) => {
+            verum_ast::ItemKind::ExternBlock(block) => {
                 block.functions.iter().find(|function| function.name.as_str() == name
                     && self.cfg_evaluator.should_include(&function.attributes))
             }
@@ -9526,36 +9339,40 @@ impl TypeChecker {
     }
 
 
-    /// Extract the type of a function from a module's AST.
-    ///
-    /// This creates a function type from the function declaration's signature.
-    /// Also handles variant constructors (e.g., `Some` from `type Maybe<T> is None | Some(T)`).
-    /// Extract function type from module.
-    /// Retains ordinary and universe quantifiers and their extracted bounds in
-    /// one scheme, including when the signature crosses a re-export chain.
+    /// Elaborate a selected source declaration through the same function
+    /// registrar for direct imports and re-exports. Axioms and sum
+    /// constructors have distinct declaration kinds and telescope rules.
     fn extract_function_type_from_module(
         &mut self,
         ast: &verum_ast::Module,
         func_name: &str,
         source_module: &str,
     ) -> Option<TypeScheme> {
+        if let Some(function) = ast.items.iter().find_map(|item| self.imported_function(item, func_name)) {
+            return match self.scheme_from_source_function(function, source_module) {
+                Ok(scheme) => Some(scheme),
+                Err(error) => {
+                    self.deferred_soundness_errors.push(error);
+                    None
+                }
+            };
+        }
         let saved_owner = std::mem::replace(&mut self.current_module_path, source_module.into());
         let saved_scope = std::mem::replace(&mut self.resolving_source_signature, true);
         self.push_decl_param_frame(indexmap::IndexMap::new());
         // Signature extraction is isolated from the caller's level binders.
         // Validate before its lenient nominal-type fallback can run.
         let generics = ast.items.iter().find_map(|item| match &item.kind {
-            verum_ast::ItemKind::Axiom(axiom) if axiom.name.name.as_str() == func_name => Some(&axiom.generics),
-            _ => self.imported_function(item, func_name).map(|function| &function.generics),
+            verum_ast::ItemKind::Axiom(axiom)
+                if self.cfg_evaluator.should_include_item(item) && axiom.name.name == func_name =>
+                Some(&axiom.generics),
+            _ => None,
         }).cloned().unwrap_or_default();
         let result = self.with_declared_universe_scope("function", &func_name.into(), &generics, |checker| {
             for item in &ast.items {
-                if let Some(function) = checker.imported_function(item, func_name)
-                {
-                    checker.validate_function_universes(function)?;
-                }
                 if let verum_ast::ItemKind::Axiom(axiom) = &item.kind
-                    && axiom.name.name.as_str() == func_name
+                    && checker.cfg_evaluator.should_include_item(item)
+                    && axiom.name.name == func_name
                 {
                     for parameter in &axiom.params {
                         if let verum_ast::decl::FunctionParamKind::Regular { ty, .. } = &parameter.kind {
@@ -9572,7 +9389,7 @@ impl TypeChecker {
             // obligations. Publish these with exactly the variables used in
             // the imported callable signature, just as for a local function.
             let mut protocols = Map::new();
-            let mut type_bounds = std::mem::take(&mut checker.pending_extracted_type_bounds);
+            let mut type_bounds = Map::new();
             for parameter in &generics {
                 let (name, bounds) = match &parameter.kind {
                     verum_ast::ty::GenericParamKind::Type { name, bounds, .. }
@@ -9581,21 +9398,16 @@ impl TypeChecker {
                 };
                 if let Some(Type::Var(variable)) = checker.lookup_decl_param(&name.name).cloned() {
                     let constraints = checker.convert_type_bounds_for_receiver(bounds, Some(&Type::Var(variable)))?;
-                    if !constraints.is_empty() {
-                        protocols.insert(variable, constraints);
-                    }
+                    if !constraints.is_empty() { protocols.insert(variable, constraints); }
+                    let constraints = checker.extract_type_bounds_from_ast(bounds);
+                    if !constraints.is_empty() { type_bounds.insert(variable, constraints); }
                 }
             }
-            let conditions = match ast.items.iter().find_map(|item| checker.imported_function(item, func_name)) {
-                Some(function) => checker.collect_where_clause_bounds(function, &mut protocols, &mut type_bounds)?,
-                None => List::new(),
-            };
-            let mut scheme = TypeScheme::poly(vars, ty)
+            let scheme = TypeScheme::poly(vars, ty)
                 .with_type_bounds(type_bounds)
                 .with_protocol_bounds(protocols)
                 .with_universe_parameters(checker.current_universe_parameters())
                 .map_err(|message| TypeError::UniverseBinding { message, span: Span::dummy() })?;
-            scheme.where_clauses = conditions;
             Ok(Some(scheme))
         });
         let result = match result {
@@ -9623,202 +9435,8 @@ impl TypeChecker {
         use verum_ast::ty::GenericParamKind;
         use verum_ast::ty::TypeBoundKind;
 
-        // Reset the function-type-bound side channel before each lookup
-        // so leftover entries from earlier resolutions don't leak into
-        // this scheme.  Callers that want to consume the bounds drain
-        // `pending_extracted_type_bounds` AFTER the successful return.
-        self.pending_extracted_type_bounds.clear();
-
         for item in &ast.items {
-            // Check for function declarations
-            if let Some(func) = self.imported_function(item, func_name)
-            {
-                // CRITICAL: Register generic type parameters BEFORE resolving param types
-                // For functions like `add<T: Numeric>(a: T, b: T) -> T`, we need T in scope
-                // so that ast_to_type can resolve parameter types correctly.
-                //
-
-                // Implementation follows best practices for generic intrinsics:
-                // 1. Create fresh type variables for each generic parameter
-                // 2. Register them in the type context for resolution
-                // 3. Extract protocol bounds from AST for proper constraint tracking
-                // 4. Build TypeParam structs for the function type signature
-                // 5. Collect TypeVars for polymorphic TypeScheme creation
-                let mut type_param_map: std::collections::HashMap<Text, Type> =
-                    std::collections::HashMap::new();
-                let mut type_param_list: List<ContextTypeParam> = List::new();
-                let mut quantified_vars: List<TypeVar> = List::new();
-
-                for generic_param in &func.generics {
-                    if let GenericParamKind::Type { name, bounds, .. } = &generic_param.kind {
-                        let fresh_var = TypeVar::fresh();
-                        quantified_vars.push(fresh_var);
-                        let type_var = Type::Var(fresh_var);
-                        let name_text: Text = name.name.clone();
-
-                        // Register in type context so ast_to_type can find it
-                        type_param_map.insert(name_text.clone(), type_var.clone());
-                        self.decl_param_frames.last_mut()?.insert(name_text.clone(), type_var);
-
-                        // Extract protocol bounds from AST
-                        // e.g., T: Numeric, T: Atomic + Integer
-                        // TypeBound.kind is TypeBoundKind::Protocol(Path) for protocol bounds
-                        let protocol_bounds: List<ProtocolBound> = bounds
-                            .iter()
-                            .filter_map(|bound| {
-                                // Convert AST TypeBound to protocol::ProtocolBound
-                                if let TypeBoundKind::Protocol(path) = &bound.kind {
-                                    Some(ProtocolBound::positive(path.clone(), List::new()))
-                                } else if let TypeBoundKind::NegativeProtocol(path) = &bound.kind {
-                                    Some(ProtocolBound::negative(path.clone(), List::new()))
-                                } else {
-                                    // Skip equality bounds and other non-protocol bounds
-                                    None
-                                }
-                            })
-                            .collect();
-
-                        // **Function-type bound extraction** (closes the
-                        // stdlib-side gap for HOF closure-shape inference).
-                        // Equality bounds like `F: fn() -> Maybe<T>` carry the
-                        // closure's expected shape — the caller wraps the
-                        // function as a polymorphic `TypeScheme`, and the
-                        // call-site instantiation path in `infer_expr_call`
-                        // registers these bounds on the fresh TypeVars via
-                        // `register_type_var_type_bound` so
-                        // `check_closure_expr::get_function_type_bound(F)`
-                        // recovers the closure shape for bidirectional
-                        // checking of the body.
-                        //
-                        // Mirrors the source-driven plumbing in
-                        // `register_function_signature`
-                        // (decls.rs:~6286) — the same `extract_type_
-                        // bounds_from_ast` helper is reused here so user-
-                        // side cross-module HOF mounts get the same
-                        // closure-shape inference power as user-side
-                        // direct HOF definitions.
-                        let type_bounds = self.extract_type_bounds_from_ast(bounds);
-                        if !type_bounds.is_empty() {
-                            self.pending_extracted_type_bounds
-                                .insert(fresh_var, type_bounds);
-                        }
-
-                        // Create TypeParam with bounds
-                        let type_param = ContextTypeParam {
-                            name: name_text,
-                            bounds: protocol_bounds,
-                            default: verum_common::Maybe::None,
-                            variance: Variance::Invariant,
-                            is_meta: false, // Regular generic params are not meta (compile-time)
-                            span: generic_param.span,
-                        };
-                        type_param_list.push(type_param);
-                    }
-                }
-
-                // Build parameter types - now generic type params are in scope
-                // CRITICAL FIX: When ast_to_type fails for parameter types (e.g., types using
-                // Result, Maybe that aren't in scope during extraction), use lenient conversion
-                // to preserve type structure for later resolution during actual type checking.
-                let param_types: List<Type> = func
-                    .params
-                    .iter()
-                    .filter_map(|p| match &p.kind {
-                        FunctionParamKind::Regular { pattern: _, ty, .. } => {
-                            // Try to resolve the type
-                            match self.declared_type(ty) {
-                                Ok(t) => Some(t),
-                                Err(_) => {
-                                    // Fallback: check if it's a direct type parameter reference
-                                    if let verum_ast::ty::TypeKind::Path(path) = &ty.kind
-                                        && path.segments.len() == 1
-                                        && let Some(verum_ast::ty::PathSegment::Name(ident)) =
-                                            path.segments.first()
-                                    {
-                                        type_param_map.get(&ident.name).cloned().or_else(|| {
-                                            // Not a type param - create Named reference
-                                            Some(Type::Named {
-                                                path: path.clone(),
-                                                args: List::new(),
-                                            })
-                                        })
-                                    } else {
-                                        // For complex types, use lenient conversion
-                                        Some(self.ast_to_type_lenient(ty))
-                                    }
-                                }
-                            }
-                        }
-                        _ => None,
-                    })
-                    .collect();
-
-                // Build return type
-                // CRITICAL FIX: When ast_to_type fails (e.g., Result<T,E> where Result isn't
-                // in scope), we must NOT fall back to Unit. Instead, use ast_to_type_lenient
-                // which creates a Type::Named reference that can be resolved during actual
-                // type checking when prelude types are available.
-                let return_type = if let Some(ref ret_ty) = func.return_type {
-                    match self.declared_type(ret_ty) {
-                        Ok(t) => t,
-                        Err(_) => {
-                            // Fallback: check if it's a direct type parameter reference
-                            if let verum_ast::ty::TypeKind::Path(path) = &ret_ty.kind
-                                && path.segments.len() == 1
-                                && let Some(verum_ast::ty::PathSegment::Name(ident)) =
-                                    path.segments.first()
-                            {
-                                type_param_map.get(&ident.name).cloned().unwrap_or_else(|| {
-                                    // Not a type param - create Named reference for later resolution
-                                    Type::Named {
-                                        path: path.clone(),
-                                        args: List::new(),
-                                    }
-                                })
-                            } else {
-                                // For complex types (Generic, etc.), use lenient conversion
-                                // which preserves type structure for later resolution
-                                self.ast_to_type_lenient(ret_ty)
-                            }
-                        }
-                    }
-                } else {
-                    Type::unit()
-                };
-
-                // Wrap return type via the unified helper so this
-                // cross-module function-signature extraction path
-                // produces the SAME shape as `infer_function_type`
-                // (line 8295) and `register_function_signature`
-                // (line 53011): throws → generator → async, in that
-                // order. Pre-fix this path manually applied throws +
-                // async but DROPPED the generator wrap, so a mounted
-                // `async fn* foo() -> Y` registered as `Future<Y>`
-                // instead of `Future<Generator<Y, Unit>>`. Manifested
-                // at every cross-module `for await x in foo()` call
-                // site as "for await requires AsyncIterator … got
-                // Future<Y>" (SHELL-5a, closes the gap left by the
-                // partial fix in commit e09e6d5a).
-                let final_return_type = self.wrap_return_type_for_sig_full(
-                    return_type,
-                    &func.throws_clause,
-                    func.is_async,
-                    func.is_generator,
-                );
-
-                return Some((
-                    Type::Function {
-                        property_requirement: self.source_callable_requirement(func),
-                        params: param_types,
-                        return_type: Box::new(final_return_type),
-                        contexts: None,
-                        type_params: type_param_list,
-                        properties: None,
-                    },
-                    quantified_vars,
-                ));
-            }
-
+            if !self.cfg_evaluator.should_include_item(item) { continue; }
             // Axioms with a callable signature (e.g. `axiom ua<A, B>(e: Equiv<A, B>)
             // -> Path<Type>(A, B)` in `core.math.hott`) must be resolvable across
             // modules the same way as `fn`. They're trusted declarations — the
@@ -15816,7 +15434,9 @@ impl TypeChecker {
         if canonical.is_empty() {
             return None;
         }
-        let qualified = format!("{}.{}", canonical, name);
+        let local = Text::from(name);
+        let qualified = self.resolved_mount_bindings.get(&local).cloned()
+            .unwrap_or_else(|| verum_common::qualified_name::qualify_module_name(canonical, name));
         if let Some(s) = self.ctx.env.lookup(qualified.as_str()) {
             if crate::ctor_trace_enabled() {
                 eprintln!("[ctor-trace] mount-auth '{}' -> env '{}'", name, qualified);
@@ -23834,7 +23454,7 @@ bake to have this verified.",
                 .map(|module| (module, Text::from(member)))
         });
         if let Some((module, member)) = source {
-            let scheme = self.source_qualified_callable(module, member)
+            let (scheme, _) = self.source_qualified_callable(module, member)
                 .ok_or_else(|| TypeError::UnboundVariable { name: written_path.clone(), span })?;
             // Publish only this qualified callable, never the namespace's bare
             // items. Ordinary call inference then retains its generic bounds.
@@ -24459,7 +24079,7 @@ bake to have this verified.",
         &mut self,
         module: Shared<verum_modules::ModuleInfo>,
         name: Text,
-    ) -> Option<TypeScheme> {
+    ) -> Option<(TypeScheme, Text)> {
         // A namespace record without source definitions does not erase the
         // archive declaration. A real source body keeps authority below,
         // including changed signatures and private or missing members.
@@ -24473,7 +24093,7 @@ bake to have this verified.",
             {
                 if !descriptor.is_public && owner != self.current_module_path.as_str() { return None; }
                 return match self.load_metadata_source_type(descriptor) {
-                    Ok((_, key)) => self.ctx.env.lookup(key.as_str()).cloned(),
+                    Ok((_, key)) => self.ctx.env.lookup(key.as_str()).cloned().map(|scheme| (scheme, key)),
                     Err(error) => { self.deferred_soundness_errors.push(error); None }
                 };
             }
@@ -24501,7 +24121,7 @@ bake to have this verified.",
             if !descriptor.is_public && owner != self.current_module_path.as_str() { return None; }
             let scheme = self.scheme_from_function_descriptor(descriptor, &metadata)?;
             self.register_required_params_from_descriptor(qualified.as_str(), descriptor);
-            return Some(scheme);
+            return Some((scheme, qualified));
         }
         let (source, original) = {
             let registry = self.module_registry.read();
@@ -24513,20 +24133,13 @@ bake to have this verified.",
             return match self.load_source_type_declaration_with_parameter_key(
                 declaration, &source.path.to_string().into(), declaration.span,
             ) {
-                Ok((_, key)) => self.ctx.env.lookup(key.as_str()).cloned(),
+                Ok((_, key)) => self.ctx.env.lookup(key.as_str()).cloned().map(|scheme| (scheme, key)),
                 Err(error) => { self.deferred_soundness_errors.push(error); None }
             };
         }
-        if let Some(function) = source.ast.items.iter().find_map(|item| self.imported_function(item, &original)) {
-            return match self.scheme_from_source_function(function, &source.path.to_string()) {
-                Ok(scheme) => Some(scheme),
-                Err(error) => {
-                    self.deferred_soundness_errors.push(error);
-                    None
-                }
-            };
-        }
-        self.extract_function_type_from_module(&source.ast, &original, &source.path.to_string())
+        let owner = source.path.to_string();
+        let key = verum_common::qualified_name::qualify_module_name(&owner, &original);
+        self.extract_function_type_from_module(&source.ast, &original, &owner).map(|scheme| (scheme, key))
     }
 
     /// Select a dotted namespace's declaration before applying the ordinary
@@ -24605,7 +24218,7 @@ bake to have this verified.",
             // An exact source namespace owns this spelling even when its
             // member is absent or private. Do not retry a shorter namespace.
             candidates.truncate(1);
-            Some(self.source_qualified_callable(module, method.name.clone()))
+            Some(self.source_qualified_callable(module, method.name.clone()).map(|(scheme, _)| scheme))
         } else {
             None
         };

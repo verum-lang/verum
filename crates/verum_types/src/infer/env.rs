@@ -640,11 +640,12 @@ impl TypeChecker {
         source: &verum_ast::FunctionDecl,
         owner: &str,
     ) -> crate::Result<crate::context::TypeScheme> {
+        let key = verum_common::qualified_name::qualify_module_name(owner, &source.name.name);
         self.with_source_signature_scope(owner, |checker| {
             checker.push_decl_param_frame(indexmap::IndexMap::new());
             checker.ctx.enter_scope();
-            let result = checker.register_function_signature(source).and_then(|()| {
-                checker.ctx.env.lookup(source.name.name.as_str()).cloned().ok_or_else(||
+            let result = checker.register_function_signature_as(source, &key).and_then(|()| {
+                checker.ctx.env.lookup(&key).cloned().ok_or_else(||
                     crate::TypeError::UniverseBinding {
                         message: "source signature did not produce a callable scheme".into(),
                         span: source.span,
@@ -1021,7 +1022,7 @@ impl TypeChecker {
             module_aliases: Map::new(),
             resolved_mount_bindings: Map::new(),
             meta_builtin_names: std::collections::HashSet::new(),
-            preregistered_modules: std::collections::HashSet::new(),
+            registered_protocol_modules: std::collections::HashSet::new(),
             blanket_impls_registered_modules: std::collections::HashSet::new(),
             primitive_impls_registered_modules: std::collections::HashSet::new(),
             module_context: Maybe::None,
@@ -1077,7 +1078,6 @@ impl TypeChecker {
             metadata_own_surface: std::cell::RefCell::new(None),
             metadata_declaring_modules: std::cell::OnceCell::new(),
             reexport_resolution_in_progress: std::collections::HashSet::new(),
-            pending_extracted_type_bounds: Map::new(),
             imported_names: Map::new(),
             constants_being_evaluated: std::collections::HashSet::new(),
             constant_dependencies: Map::new(),
@@ -1187,7 +1187,7 @@ impl TypeChecker {
             module_aliases: Map::new(),
             resolved_mount_bindings: Map::new(),
             meta_builtin_names: std::collections::HashSet::new(),
-            preregistered_modules: std::collections::HashSet::new(),
+            registered_protocol_modules: std::collections::HashSet::new(),
             blanket_impls_registered_modules: std::collections::HashSet::new(),
             primitive_impls_registered_modules: std::collections::HashSet::new(),
             module_context: Maybe::None,
@@ -1243,7 +1243,6 @@ impl TypeChecker {
             metadata_own_surface: std::cell::RefCell::new(None),
             metadata_declaring_modules: std::cell::OnceCell::new(),
             reexport_resolution_in_progress: std::collections::HashSet::new(),
-            pending_extracted_type_bounds: Map::new(),
             imported_names: Map::new(),
             constants_being_evaluated: std::collections::HashSet::new(),
             constant_dependencies: Map::new(),
@@ -1354,7 +1353,7 @@ impl TypeChecker {
             module_aliases: Map::new(),
             resolved_mount_bindings: Map::new(),
             meta_builtin_names: std::collections::HashSet::new(),
-            preregistered_modules: std::collections::HashSet::new(),
+            registered_protocol_modules: std::collections::HashSet::new(),
             blanket_impls_registered_modules: std::collections::HashSet::new(),
             primitive_impls_registered_modules: std::collections::HashSet::new(),
             module_context: Maybe::None,
@@ -1410,7 +1409,6 @@ impl TypeChecker {
             metadata_own_surface: std::cell::RefCell::new(None),
             metadata_declaring_modules: std::cell::OnceCell::new(),
             reexport_resolution_in_progress: std::collections::HashSet::new(),
-            pending_extracted_type_bounds: Map::new(),
             imported_names: Map::new(),
             constants_being_evaluated: std::collections::HashSet::new(),
             constant_dependencies: Map::new(),

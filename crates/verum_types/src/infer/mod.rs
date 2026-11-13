@@ -894,32 +894,9 @@ pub struct TypeChecker {
     /// stdlib function and `.get(0)` attempted method dispatch on a
     /// function value.
     pub(crate) module_aliases: Map<Text, Text>,
-    /// MOUNT-BINDING-CARRY-1 (T0148): bare name -> the QUALIFIED KEY the
-    /// mount actually resolved to.
-    ///
-    /// `resolve_function_via_metadata_reexports` already computes this key
-    /// — it probes `<declaring module>.<true name>` in the metadata and
-    /// only succeeds when a descriptor is there — and then keeps only the
-    /// TYPE SCHEME, discarding WHICH function it found. VBC codegen has no
-    /// CoreMetadata handle and the VBC archive carries no re-export table,
-    /// so it re-derives the callee by manipulating the mount PATH
-    /// (`core.prelude.sqrt`, `core.prelude::sqrt`, `core.sqrt`,
-    /// `prelude.sqrt`), none of which can reach a name that arrives
-    /// through a re-export. Its mount authority then installs NOTHING and
-    /// the call falls to bare-name resolution.
-    ///
-    /// Measured cost of that gap: `mount core.prelude.*` served 14 of its
-    /// 20 math functions from SQLite's SQL builtins — `sqrt(16.0)`
-    /// answered `Relaxed`, a variant of an unrelated type. Traced end to
-    /// end: VERUM_TRACE_TASK20 shows this resolver finding
-    /// `core.math.elementary.sqrt` with `functions_has=true`, and
-    /// VERUM_TRACE_CALLS shows the interpreter calling
-    /// `core.database.sqlite.native.builtins.math_fns.sqrt`.
-    ///
-    /// So this map carries the ANSWER to the consumer rather than making
-    /// the consumer guess it again — the same direction as T0691. It is
-    /// written where the resolution succeeds and read once, by the
-    /// pipeline, into `codegen.import_mount_bindings`.
+    /// Local value spelling to the exact source or archive declaration selected
+    /// by its mount. The checker and VBC consume the same binding for renamed
+    /// and re-exported functions.
     pub(crate) resolved_mount_bindings: Map<Text, Text>,
     /// Names registered by [`TypeChecker::register_meta_builtins`] —
     /// the AMBIENT compiler-provided surface (`env`, `is_debug`,
@@ -932,9 +909,8 @@ pub struct TypeChecker {
     /// that exists only because it is a meta builtin must not be
     /// treated as a real occupant of the name.
     pub(crate) meta_builtin_names: std::collections::HashSet<Text>,
-    /// Tracks which modules have had their function signatures pre-registered
-    /// to avoid redundant pre-registration when importing multiple items from the same module
-    preregistered_modules: std::collections::HashSet<String>,
+    /// Source owners whose protocol headers are being admitted or have completed.
+    registered_protocol_modules: std::collections::HashSet<String>,
     /// Tracks which modules have had their blanket protocol impls registered
     /// Blanket impls like `implement<T, U: From<T>> Into<U> for T` must be registered
     /// globally when ANY item from the module is imported, not just when a specific type is imported.
@@ -1183,19 +1159,6 @@ pub struct TypeChecker {
     /// `find_function_with_source_module`). Prevents unbounded recursion when
     /// A re-exports via B and B re-exports via A for the same item name.
     reexport_resolution_in_progress: std::collections::HashSet<(Text, Text)>,
-    /// Side-channel for function-type bounds extracted by
-    /// `extract_function_type_from_module` during cross-module re-export
-    /// resolution.  Populated per generic param fresh `TypeVar` with the
-    /// per-bound `fn(A) -> B` shapes (and other equality bounds).
-    /// Drained by the call site that wraps the function as a
-    /// `TypeScheme` — see `mount` re-export resolution in `modules.rs`.
-    /// Keeps the signature of `extract_function_type_from_module` stable
-    /// (called from many sites) while threading the bounds through.
-    /// Stdlib-agnostic — the bound source is the function's own AST
-    /// `generics[i].bounds` list, surfaced through
-    /// `extract_type_bounds_from_ast`.
-    pending_extracted_type_bounds:
-        Map<TypeVar, List<Type>>,
     /// Tracks imported names and their source modules for ambiguity detection.
     /// Maps name -> list of source module paths.
     /// If a name has more than one source, it's ambiguous.

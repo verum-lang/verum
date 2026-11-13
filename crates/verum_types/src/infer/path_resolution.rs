@@ -1708,7 +1708,7 @@ impl TypeChecker {
         if let (Some(owner), Some(name)) = (target.parent(), target.segments().last()) {
             let source = self.module_registry.read().get_by_path(&owner.to_string());
             if let Some(module) = source
-                && let Some(scheme) = self.source_qualified_callable(module, name.clone())
+                && let Some((scheme, _)) = self.source_qualified_callable(module, name.clone())
             {
                 return Ok(InferResult::new(self.instantiate_value_scheme(&scheme, span)?));
             }

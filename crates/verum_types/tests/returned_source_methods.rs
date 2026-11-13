@@ -531,24 +531,56 @@ fn source_function_return_keeps_the_declaring_owner_without_a_type_mount() {
 }
 
 fn check_generic_factory(entry: &str) {
-    let model = "public type Receipt<T> is { value: T }; implement<T> Receipt<T> { public fn read(&self) -> T { self.value } }";
-    let factory = "mount demo.model.{Receipt as Issued}; public fn issue<T>(value: T) -> Issued<T> { Issued { value: value } }";
+    let model = "public type Receipt<T> is { value: T }; implement<T> Receipt<T> { public fn read(&self) -> T { self.value } private fn hidden(&self) -> T { self.value } }";
+    let factory = "mount demo.model.{Receipt as Issued}; public fn issue<T>(value: T) -> Issued<T> { Issued { value } } public fn deliver(decoy: Int) -> Bool { true }";
     let other = "public type Issued<T> is { value: Bool }; implement<T> Issued<T> { public fn read(&self) -> Bool { self.value } }";
-    {
-        let consumer = format!(
-            "mount demo.other.Issued; mount {entry}.issue; fn probe() -> Int {{ issue(37).read() }}"
-        );
-        let errors = check(
-            &consumer,
-            &[
-                ("demo.model", model),
-                ("demo.factory", factory),
-                ("demo.other", other),
-                ("demo.api", "public mount demo.factory.issue;"),
-            ],
-        );
-        assert!(errors.is_empty(), "entry={entry}: {errors:?}");
+    let mut modules = [
+        ("demo.model", model),
+        ("demo.factory", factory),
+        ("demo.other", other),
+        ("demo.api", "public mount demo.factory.issue;"),
+    ];
+    for reverse in [false, true] {
+        if reverse { modules.reverse(); }
+        for (import, call) in [
+            (format!("mount {entry}.issue;"), "issue"),
+            (format!("mount {entry}.{{issue as deliver}};"), "deliver"),
+        ] {
+            let imports = format!("mount demo.other.Issued; {import}");
+            for (method, result, expected) in [
+                ("read", "Int", None),
+                ("read", "Bool", Some("Mismatch")),
+                ("hidden", "Int", Some("MethodNotFound")),
+            ] {
+                let source = format!("{imports} fn probe() -> {result} {{ {call}(37).{method}() }}");
+                let (mut checker, errors) = check_with_checker(&source, &modules);
+                match expected {
+                    None => {
+                        assert!(errors.is_empty(), "{source}: {errors:?}");
+                        assert_eq!(
+                            checker.take_resolved_mount_bindings().get(&Text::from(call)).map(Text::as_str),
+                            Some("demo.factory.issue"), "{source}",
+                        );
+                    }
+                    Some(kind) => {
+                        assert_eq!(errors.len(), 1, "{source}: {errors:?}");
+                        assert!(errors[0].contains(kind), "{source}: {errors:?}");
+                    }
+                }
+            }
+        }
     }
+}
+
+#[test]
+fn renamed_callable_retains_its_own_default_argument_count() {
+    let modules = [("demo.provider", "public fn issue(value: Int = 73) -> Int { value } public fn deliver(left: Int, right: Int) -> Bool { true }")];
+    let mount = "mount demo.provider.{issue as deliver};";
+    let ok = check(&format!("{mount} fn read() -> Int {{ deliver() }}"), &modules);
+    assert!(ok.is_empty(), "{ok:?}");
+    let wrong = check(&format!("{mount} fn read() -> Int {{ deliver(1, 2) }}"), &modules);
+    assert_eq!(wrong.len(), 1, "{wrong:?}");
+    assert!(wrong[0].contains("E102") && wrong[0].contains("at most 1 argument"), "{wrong:?}");
 }
 
 #[test]
