@@ -1,0 +1,45 @@
+mount core.collections.list.List;
+mount core.io.{IoError, IoErrorKind};
+mount core.net.addr.SocketAddr;
+mount core.net.resolve.ToSocketAddrs;
+
+fn addresses<A: ToSocketAddrs>(endpoint: &A) -> Result<List<SocketAddr>, IoError> {
+    endpoint.to_socket_addrs()
+}
+
+fn invalid_input<A: ToSocketAddrs>(endpoint: A) -> Bool {
+    match addresses(&endpoint) {
+        Result.Err(error) => error.kind() is IoErrorKind.InvalidInput,
+        Result.Ok(_) => false,
+    }
+}
+
+@test
+fn numeric_endpoints_preserve_family_and_port() {
+    let host: Text = "127.0.0.1";
+    let v4 = addresses(&(&host, 0)).unwrap();
+    assert_eq(v4.len(), 1);
+    assert(v4[0].is_ipv4());
+    assert_eq(v4[0].port(), 0);
+
+    let v6 = addresses(&"[::1]:65535").unwrap();
+    assert_eq(v6.len(), 1);
+    assert(v6[0].is_ipv6());
+    assert_eq(v6[0].port(), 65535);
+    let resolved = addresses(&v6[0]).unwrap();
+    assert_eq(resolved.len(), 1);
+    assert_eq(resolved[0], v6[0]);
+}
+
+@test
+fn malformed_endpoints_report_invalid_input_before_dns() {
+    let host: Text = "invalid.example";
+    assert(invalid_input((&host, -1)));
+    assert(invalid_input((&host, 65536)));
+    assert(invalid_input("invalid.example"));
+    assert(invalid_input("invalid.example:abc"));
+    assert(invalid_input("invalid.example:65536"));
+    assert(invalid_input(":443"));
+    assert(invalid_input("[::1:443"));
+    assert(invalid_input("[invalid.example]:443"));
+}
