@@ -166,3 +166,49 @@ fn probe() -> Int {
         assert_eq!(run(source, bootstrap), 49);
     }
 }
+
+#[test]
+fn by_value_methods_transfer_the_callers_cleanup() {
+    for method in ["finish", "into_raw", "inspect"] {
+        let source = format!(r#"
+            implement Socket {{
+                fn {method}(self) {{ drop(self); }}
+            }}
+            fn probe() -> Int {{
+                let mut counter = Count {{ value: 0 }};
+                {{
+                    let socket: Socket = Socket {{ counter: &mut counter, digit: 7 }};
+                    socket.{method}();
+                    if counter.value != 7 {{ return 99; }}
+                }}
+                counter.value
+            }}
+        "#);
+        for bootstrap in [false, true] {
+            assert_eq!(run(&source, bootstrap), 7, "{method}, bootstrap={bootstrap}");
+        }
+    }
+}
+
+#[test]
+fn borrowed_methods_keep_the_callers_cleanup() {
+    let source = r#"
+        implement Socket {
+            fn inspect(&self) -> Int { self.digit }
+            fn set(&mut self, value: Int) { self.digit = value; }
+        }
+        fn probe() -> Int {
+            let mut counter = Count { value: 0 };
+            {
+                let mut socket: Socket = Socket { counter: &mut counter, digit: 7 };
+                if socket.inspect() != 7 { return 98; }
+                socket.set(4);
+                if counter.value != 0 || socket.inspect() != 4 { return 99; }
+            }
+            counter.value
+        }
+    "#;
+    for bootstrap in [false, true] {
+        assert_eq!(run(source, bootstrap), 4);
+    }
+}

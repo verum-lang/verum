@@ -16653,6 +16653,17 @@ impl VbcCodegen {
                 receiver_reg
             };
 
+        // A by-value self parameter consumes the same declared owner as an
+        // ordinary argument. Borrow adjustments preserve the caller's binding.
+        let actual_receiver = if actual_receiver == receiver_reg && !receiver_is_borrowed
+            && let Some(callable) = resolved_method.as_ref()
+            && (devirt_func_id.is_some() || type_prefix_intercepted_by_runtime(&effective_method_name))
+        {
+            self.emit_owned_call_argument(callable, 0, receiver, actual_receiver)
+        } else {
+            actual_receiver
+        };
+
         // **Devirtualization shortcut** (#99 perf parity sub-task).
         //
         // When the receiver type is statically known and the resolved
