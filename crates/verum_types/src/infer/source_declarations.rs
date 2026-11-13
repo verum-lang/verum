@@ -6,6 +6,32 @@ use verum_ast::{Span, decl::ImplItemKind};
 use verum_common::{Set, Shared, Text};
 use verum_modules::{ModuleInfo, ModulePath, visibility::VisibilityChecker};
 
+/// An immutable declaration location, not a memoized lookup result. Registered
+/// modules and active lexical scopes already own their syntax: retain that exact
+/// snapshot until registration finishes instead of copying its complete body.
+#[derive(Clone, Debug)]
+pub(super) enum SourceTypeDeclaration {
+    Registered { module: Shared<ModuleInfo>, item: usize },
+    Lexical { module: Shared<verum_ast::Module>, item: usize },
+    Owned(Shared<verum_ast::TypeDecl>),
+}
+
+impl std::ops::Deref for SourceTypeDeclaration {
+    type Target = verum_ast::TypeDecl;
+
+    fn deref(&self) -> &Self::Target {
+        let (items, index) = match self {
+            Self::Registered { module, item } => (&module.ast.items, *item),
+            Self::Lexical { module, item } => (&module.items, *item),
+            Self::Owned(declaration) => return declaration,
+        };
+        let verum_ast::ItemKind::Type(declaration) = &items[index].kind else {
+            unreachable!("declaration locations select a type in an immutable snapshot")
+        };
+        declaration
+    }
+}
+
 /// A named source mount owns its local binding even when its target cannot be
 /// resolved. Renaming replaces the original spelling; a glob does not itself
 /// declare every possible name.
@@ -118,13 +144,20 @@ impl TypeChecker {
         ast: &'a verum_ast::Module,
         name: &str,
     ) -> Option<&'a verum_ast::TypeDecl> {
-        ast.items.iter()
-            .filter(|item| self.cfg_evaluator.should_include_item(item))
-            .find_map(|item| match &item.kind {
-            verum_ast::ItemKind::Type(declaration) if declaration.name.name.as_str() == name => {
-                Some(declaration)
-            }
-            _ => None,
+        let index = self.local_source_type_declaration_index(ast, name)?;
+        let verum_ast::ItemKind::Type(declaration) = &ast.items[index].kind else {
+            unreachable!("type declaration index")
+        };
+        Some(declaration)
+    }
+
+    pub(super) fn local_source_type_declaration_index(
+        &self, ast: &verum_ast::Module, name: &str,
+    ) -> Option<usize> {
+        ast.items.iter().position(|item| {
+            self.cfg_evaluator.should_include_item(item)
+                && matches!(&item.kind, verum_ast::ItemKind::Type(declaration)
+                    if declaration.name.name.as_str() == name)
         })
     }
 
@@ -386,11 +419,11 @@ impl TypeChecker {
     pub(super) fn declaring_source_type_declaration(
         &self,
         name: &str,
-    ) -> Option<(verum_ast::TypeDecl, Text)> {
+    ) -> Option<(SourceTypeDeclaration, Text)> {
         for (owner, module) in self.source_type_registration.local_declarations.iter().rev() {
             if owner == &self.current_module_path {
-                if let Some(declaration) = self.local_source_type_declaration(module, name) {
-                    return Some((declaration.clone(), owner.clone()));
+                if let Some(item) = self.local_source_type_declaration_index(module, name) {
+                    return Some((SourceTypeDeclaration::Lexical { module: module.clone(), item }, owner.clone()));
                 }
             }
         }
@@ -406,7 +439,7 @@ impl TypeChecker {
                 _ => None,
             })
         {
-            return Some((declaration.clone(), self.current_module_path.clone()));
+            return Some((SourceTypeDeclaration::Owned(Shared::new(declaration.clone())), self.current_module_path.clone()));
         }
         let registry = self.module_registry.read();
         let Some(module) = self.get_module_with_path_aliases(self.current_module_path.as_str(), &registry) else {
@@ -416,7 +449,7 @@ impl TypeChecker {
             let key = self.declared_type_key(name);
             return self.source_type_registration.pending.get(&key)
                 .or_else(|| self.source_type_registration.completed.get(&key))
-                .map(|declaration| (declaration.clone(), self.current_module_path.clone()));
+                .map(|declaration| (SourceTypeDeclaration::Owned(Shared::new(declaration.clone())), self.current_module_path.clone()));
         };
         let declared = self.find_type_declaration_with_source_module_inner(
             &module.ast, name, &Text::from(module.path.to_string()),
@@ -463,7 +496,8 @@ impl TypeChecker {
                 return Ok(None);
             }
             let owner: Text = module.path.to_string().into();
-            let declaration = if let Some(declaration) = self.local_source_type_declaration(&module.ast, type_name) {
+            let declaration = if let Some(item) = self.local_source_type_declaration_index(&module.ast, type_name) {
+                let declaration = SourceTypeDeclaration::Registered { module: module.clone(), item };
                 let visibility = declaration.visibility.resolve_declared_scope(owner.as_str())
                     .map_err(|message| TypeError::VisibilityError {
                         name: type_name.into(), visibility: message,
@@ -478,7 +512,7 @@ impl TypeChecker {
                         module_path: owner, span,
                     });
                 }
-                Some((declaration.clone(), owner.clone()))
+                Some((declaration, owner.clone()))
             } else {
                 // Reuse the exact re-export walker, with no parent-module
                 // fallback. Only the declaring file may follow private mounts.
@@ -583,7 +617,7 @@ impl TypeChecker {
     pub(super) fn source_receiver_declaration(
         &self,
         receiver: &Type,
-    ) -> Option<(Shared<ModuleInfo>, verum_ast::TypeDecl)> {
+    ) -> Option<(Shared<ModuleInfo>, SourceTypeDeclaration)> {
         let key = self.get_type_name(receiver)?;
         let (owner, name) = key.rsplit_once('.')?;
         let registry = self.module_registry.read();
@@ -591,7 +625,8 @@ impl TypeChecker {
         if module.path.to_string() != owner {
             return None;
         }
-        let declaration = self.local_source_type_declaration(&module.ast, name)?.clone();
+        let item = self.local_source_type_declaration_index(&module.ast, name)?;
+        let declaration = SourceTypeDeclaration::Registered { module: module.clone(), item };
         Some((module, declaration))
     }
 
@@ -614,7 +649,7 @@ impl TypeChecker {
         let (key_name, names) = if let Some((module, declaration)) =
             self.source_receiver_declaration(receiver)
         {
-            let name = declaration.name.name;
+            let name = declaration.name.name.clone();
             let key = Self::source_type_declaration_key(module.path.to_string().as_str(), &name);
             owners.push(module);
             (key, vec![name])
@@ -688,7 +723,7 @@ impl TypeChecker {
         let Some((module, declaration)) = self.source_receiver_declaration(receiver) else {
             return Ok(());
         };
-        let name = declaration.name.name;
+        let name = declaration.name.name.clone();
         let owner = module.path.to_string();
         let key: Text = format!("{owner}.{name}").into();
         if !self.loaded_source_receiver_methods.insert(key.clone()) {
@@ -773,7 +808,7 @@ impl TypeChecker {
         let Some((module, declaration)) = self.source_receiver_declaration(receiver) else {
             return Ok(());
         };
-        let name = declaration.name.name;
+        let name = declaration.name.name.clone();
         let caller = ModulePath::from_str(self.current_module_path.as_str());
         let visibility = VisibilityChecker::new();
         for implementation in self.find_impl_blocks_for_type(&module.ast, name.as_str()) {

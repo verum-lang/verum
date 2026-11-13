@@ -110,13 +110,13 @@ impl TypeChecker {
                 }
             }
             if let Some((module, declaration)) = self.source_receiver_declaration(&current) {
-                match declaration.body {
+                match &declaration.body {
                     TypeDeclBody::Record(fields) => {
                         return Ok(Some(RecordVisibility {
                             owner: module.path.to_string().into(),
                             fields: fields
                                 .into_iter()
-                                .map(|field| (field.name.name, Some(field.visibility)))
+                                .map(|field| (field.name.name.clone(), Some(field.visibility.clone())))
                                 .collect(),
                         }));
                     }

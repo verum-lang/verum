@@ -4705,7 +4705,7 @@ impl TypeChecker {
             .or_else(|| {
                 path.as_ident().and_then(|name| {
                     self.declaring_source_type_declaration(name.as_str())
-                        .map(|(declaration, _)| declaration.generics)
+                        .map(|(declaration, _)| declaration.generics.clone())
                 })
             });
         let type_slots: Vec<Option<Text>> = if let Some(parameters) = parameters {

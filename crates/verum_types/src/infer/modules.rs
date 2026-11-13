@@ -4987,10 +4987,20 @@ impl TypeChecker {
         ast: &verum_ast::Module,
         type_name: &str,
     ) -> Option<verum_ast::decl::TypeDecl> {
+        let item = self.find_public_source_type_declaration_index(ast, type_name)?;
+        let verum_ast::ItemKind::Type(declaration) = &ast.items[item].kind else {
+            unreachable!("type declaration index")
+        };
+        Some(declaration.clone())
+    }
+
+    fn find_public_source_type_declaration_index(
+        &self, ast: &verum_ast::Module, type_name: &str,
+    ) -> Option<usize> {
         use verum_ast::ItemKind;
         use verum_ast::decl::Visibility as AstVisibility;
 
-        for item in &ast.items {
+        for (index, item) in ast.items.iter().enumerate() {
             if let ItemKind::Type(type_decl) = &item.kind
                 && type_decl.name.name.as_str() == type_name
                 && self.cfg_evaluator.should_include(&item.attributes)
@@ -5010,7 +5020,7 @@ impl TypeChecker {
                 if type_decl.visibility != AstVisibility::Public {
                     return None;
                 }
-                return Some(type_decl.clone());
+                return Some(index);
             }
         }
         None
@@ -6861,7 +6871,7 @@ impl TypeChecker {
         self.find_type_declaration_with_source_module_inner(
             &module.ast, type_name, &Text::from(module.path.to_string()), registry,
             &mut visited, true, false,
-        )
+        ).map(|(declaration, owner)| ((*declaration).clone(), owner))
     }
 
     /// Find a type declaration and its source module, following re-export chains if needed.
@@ -6874,13 +6884,13 @@ impl TypeChecker {
     ///
     /// The graph walk uses explicit continuations and does not consume stack
     /// proportional to the number of re-exporting modules.
-    pub(crate) fn find_type_declaration_with_source_module(
+    pub(super) fn find_type_declaration_with_source_module(
         &self,
         ast: &verum_ast::Module,
         type_name: &str,
         current_module_path: &Text,
         registry: &verum_modules::ModuleRegistry,
-    ) -> Option<(verum_ast::decl::TypeDecl, Text)> {
+    ) -> Option<(super::source_declarations::SourceTypeDeclaration, Text)> {
         // A fresh visited set bounds ring-shaped
         // `public mount` re-exports (e.g., `core.pkg` re-exports `core.pkg.sub`
         // whose last segment matches a type `sub` being searched for — the
@@ -6910,9 +6920,10 @@ impl TypeChecker {
         visited: &mut Set<(Text, Text)>,
         require_exported_source: bool,
         allow_local_mounts: bool,
-    ) -> Option<(verum_ast::decl::TypeDecl, Text)> {
+    ) -> Option<(super::source_declarations::SourceTypeDeclaration, Text)> {
         use verum_ast::ItemKind;
         use verum_ast::decl::Visibility as AstVisibility;
+        use super::source_declarations::SourceTypeDeclaration;
 
         // The entry AST can be a lexical source scope rather than the registry
         // module's AST. Later scopes retain immutable owners, never AST copies.
@@ -6925,6 +6936,17 @@ impl TypeChecker {
                 match self {
                     Self::Borrowed(ast) => ast,
                     Self::Registered(module) => &module.ast,
+                }
+            }
+            fn select(self, item: usize) -> SourceTypeDeclaration {
+                match self {
+                    Self::Registered(module) => SourceTypeDeclaration::Registered { module, item },
+                    Self::Borrowed(ast) => {
+                        let ItemKind::Type(declaration) = &ast.items[item].kind else {
+                            unreachable!("type declaration index")
+                        };
+                        SourceTypeDeclaration::Owned(Shared::new(declaration.clone()))
+                    }
                 }
             }
         }
@@ -6940,9 +6962,14 @@ impl TypeChecker {
             Mount { path: Text, name: Text },
         }
 
+        // Retain a registry owner only when this is its actual AST, never an
+        // unrelated lexical AST that happens to use the same module spelling.
+        let source = self.get_module_with_path_aliases(current_module_path, registry)
+            .filter(|module| std::ptr::eq(&module.ast, ast))
+            .map(Source::Registered).unwrap_or(Source::Borrowed(ast));
         let mut work = List::new();
         work.push(Work::Enter(Scope {
-            source: Source::Borrowed(ast),
+            source,
             owner: current_module_path.clone(),
             name: type_name.into(),
             allow_local_mounts,
@@ -6995,13 +7022,13 @@ impl TypeChecker {
                 }
                 Work::Body(scope) => {
                     let ast = scope.source.ast();
-                    let declaration = if scope.allow_local_mounts {
-                        self.local_source_type_declaration(ast, &scope.name).cloned()
+                    let item = if scope.allow_local_mounts {
+                        self.local_source_type_declaration_index(ast, &scope.name)
                     } else {
-                        self.find_type_declaration_in_module(ast, &scope.name)
+                        self.find_public_source_type_declaration_index(ast, &scope.name)
                     };
-                    if let Some(declaration) = declaration {
-                        return Some((declaration, scope.owner));
+                    if let Some(item) = item {
+                        return Some((scope.source.select(item), scope.owner));
                     }
 
                     let owner = verum_modules::ModulePath::from_str(&scope.owner);
@@ -7056,10 +7083,11 @@ impl TypeChecker {
                         // source checker; public archive lookup requires each hop.
                         if let Some((parent, _)) = path.rsplit_once('.')
                             && let Some(module) = self.get_module_with_path_aliases(parent, registry)
-                            && let Some(declaration) =
-                                self.find_type_declaration_in_module(&module.ast, &name)
+                            && let Some(item) =
+                                self.find_public_source_type_declaration_index(&module.ast, &name)
                         {
-                            return Some((declaration, Text::from(module.path.to_string())));
+                            let owner = Text::from(module.path.to_string());
+                            return Some((SourceTypeDeclaration::Registered { module, item }, owner));
                         }
                     }
                 }
@@ -7082,7 +7110,7 @@ impl TypeChecker {
     ) -> Option<verum_ast::decl::TypeDecl> {
         self.find_type_declaration_with_source_module_inner(
             ast, type_name, current_module_path, registry, &mut Set::new(), false, false,
-        ).map(|(declaration, _)| declaration)
+        ).map(|(declaration, _)| (*declaration).clone())
     }
 
     /// Find a function or constructor definition, following re-export chains.

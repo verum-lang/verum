@@ -609,7 +609,7 @@ impl TypeChecker {
                 format!("{declared_owner}.{}", declaration.name.name).into()
             };
             if declared_key == *key {
-                return Ok((declaration.generics, declared_owner));
+                return Ok((declaration.generics.clone(), declared_owner));
             }
         }
         if let Some(declaration) = self
