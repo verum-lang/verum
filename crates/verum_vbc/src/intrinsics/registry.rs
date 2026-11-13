@@ -63,6 +63,10 @@ pub enum PoolOperation {
     Submit,
     /// Schedule work on the global pool.
     GlobalSubmit,
+    /// Schedule work that owns its completion on the specified pool.
+    Dispatch,
+    /// Schedule work that owns its completion on the global pool.
+    GlobalDispatch,
     /// Collect one result.
     Await,
     /// Shut down a local pool.
@@ -78,7 +82,10 @@ impl PoolOperation {
     pub const CAPTURE_REFUSAL: &'static str = "blocking pool callback captures have no transferable owner";
 
     /// Operations with runtime bodies emitted by the target.
-    pub const ALL: [Self; 5] = [Self::Create, Self::Submit, Self::GlobalSubmit, Self::Await, Self::Destroy];
+    pub const ALL: [Self; 7] = [
+        Self::Create, Self::Submit, Self::GlobalSubmit, Self::Dispatch, Self::GlobalDispatch,
+        Self::Await, Self::Destroy,
+    ];
 
     /// Canonical identity recorded in a source or archive declaration.
     pub const fn name(self) -> &'static str {
@@ -86,6 +93,8 @@ impl PoolOperation {
             Self::Create => "pool_create",
             Self::Submit => "pool_submit",
             Self::GlobalSubmit => "pool_global_submit",
+            Self::Dispatch => "pool_dispatch",
+            Self::GlobalDispatch => "pool_global_dispatch",
             Self::Await => "pool_await",
             Self::Destroy => "pool_destroy",
         }
@@ -93,7 +102,21 @@ impl PoolOperation {
 
     /// Number of VBC arguments supplied to this operation.
     pub const fn parameter_count(self) -> u8 {
-        match self { Self::Submit => 3, Self::GlobalSubmit => 2, _ => 1 }
+        match self {
+            Self::Submit | Self::Dispatch => 3,
+            Self::GlobalSubmit | Self::GlobalDispatch => 2,
+            _ => 1,
+        }
+    }
+
+    /// The callback itself publishes completion; the pool keeps no result.
+    pub const fn is_dispatch(self) -> bool {
+        matches!(self, Self::Dispatch | Self::GlobalDispatch)
+    }
+
+    /// A global submission omits the local pool operand.
+    pub const fn is_global_submission(self) -> bool {
+        matches!(self, Self::GlobalSubmit | Self::GlobalDispatch)
     }
 
     const fn entry(self) -> Intrinsic {
@@ -102,7 +125,7 @@ impl PoolOperation {
             category: IntrinsicCategory::Async,
             hints: &[IntrinsicHint::SideEffect],
             param_count: self.parameter_count(),
-            return_count: if matches!(self, Self::Destroy) { 0 } else { 1 },
+            return_count: if self.is_dispatch() || matches!(self, Self::Destroy) { 0 } else { 1 },
             strategy: CodegenStrategy::BlockingPool(self),
             mlir_op: None,
             doc: "Operate on a blocking worker pool or its completion handle",
@@ -113,18 +136,20 @@ impl PoolOperation {
     pub fn accepts_declaration(self, declaration: &crate::module::FunctionDescriptor) -> bool {
         use crate::types::{TypeRef, TypeId};
         let int = TypeRef::Concrete(TypeId::INT);
+        let unit = TypeRef::Concrete(TypeId::UNIT);
+        let callback_result = if self.is_dispatch() { &unit } else { &int };
         let param = |index: usize| declaration.params.get(index).map(|p| &p.type_ref);
         let callback = |ty: Option<&TypeRef>| matches!(ty,
             Some(TypeRef::Function { is_async: false, params, return_type, contexts })
-            if matches!(params.as_slice(), [arg] if arg == &int) && return_type.as_ref() == &int && contexts.is_empty());
-        let returns = if self == Self::Destroy { TypeId::UNIT } else { TypeId::INT };
+            if matches!(params.as_slice(), [arg] if arg == &int) && return_type.as_ref() == callback_result && contexts.is_empty());
+        let returns = if self.is_dispatch() || self == Self::Destroy { &unit } else { &int };
         !declaration.is_generic && declaration.contexts.is_empty()
-            && declaration.return_type == TypeRef::Concrete(returns)
+            && &declaration.return_type == returns
             && declaration.params.len() == usize::from(self.parameter_count())
             && match self {
                 Self::Create | Self::Await | Self::Destroy => param(0) == Some(&int),
-                Self::Submit => param(0) == Some(&int) && callback(param(1)) && param(2) == Some(&int),
-                Self::GlobalSubmit => callback(param(0)) && param(1) == Some(&int),
+                Self::Submit | Self::Dispatch => param(0) == Some(&int) && callback(param(1)) && param(2) == Some(&int),
+                Self::GlobalSubmit | Self::GlobalDispatch => callback(param(0)) && param(1) == Some(&int),
             }
     }
 }
@@ -5787,6 +5812,8 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     PoolOperation::Create.entry(),
     PoolOperation::Submit.entry(),
     PoolOperation::GlobalSubmit.entry(),
+    PoolOperation::Dispatch.entry(),
+    PoolOperation::GlobalDispatch.entry(),
     PoolOperation::Await.entry(),
     PoolOperation::Destroy.entry(),
     // =========================================================================

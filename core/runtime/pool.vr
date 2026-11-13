@@ -42,6 +42,12 @@ fn __pool_destroy_raw(pool: Int);
 @intrinsic("pool_global_submit")
 fn __pool_global_submit_raw(func: fn(Int) -> Int, arg: Int) -> Int;
 
+@intrinsic("pool_dispatch")
+fn __pool_dispatch_raw(pool: Int, func: fn(Int), arg: Int);
+
+@intrinsic("pool_global_dispatch")
+fn __pool_global_dispatch_raw(func: fn(Int), arg: Int);
+
 implement ThreadPool {
     /// Create a new thread pool with the given number of worker threads.
     /// If num_workers <= 0, defaults to 4.
@@ -61,6 +67,16 @@ implement ThreadPool {
     public fn global_submit(func: fn(Int) -> Int, arg: Int) -> PoolTaskHandle {
         let h = __pool_global_submit_raw(func, arg);
         PoolTaskHandle { handle: h, awaited: false }
+    }
+
+    /// Enqueue an environment-free job whose callback handles its own completion.
+    public fn dispatch(&self, func: fn(Int), arg: Int) {
+        __pool_dispatch_raw(self.handle, func, arg);
+    }
+
+    /// Dispatch a completion-owning job on the global pool.
+    public fn global_dispatch(func: fn(Int), arg: Int) {
+        __pool_global_dispatch_raw(func, arg);
     }
 }
 

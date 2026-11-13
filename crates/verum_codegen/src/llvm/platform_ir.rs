@@ -31,6 +31,10 @@ use verum_llvm::{AddressSpace, IntPredicate};
 /// Zero/one use the pool fast path; two through this bound use counted packs.
 pub(super) const SPAWN_MAX_ARGS: u8 = 8;
 
+// A pool queue slot holds the callable, argument and optional completion pointer.
+const POOL_QUEUE_CAPACITY: u64 = 1024;
+const POOL_ENTRY_BYTES: u64 = 3 * 8;
+
 /// Manifest-driven runtime configuration values that flow from
 /// `LanguageFeatures.runtime` through `LoweringConfig` into
 /// LLVM-IR globals. Each field corresponds to a `[runtime].*`
@@ -11001,11 +11005,11 @@ impl<'ctx> PlatformIR<'ctx> {
     ) -> super::error::Result<()> {
         self.emit_pool_worker_entry(module)?;
         self.emit_pool_create(module)?;
-        self.emit_pool_submit(module)?;
+        self.emit_pool_enqueue(module)?;
         self.emit_pool_await(module)?;
         self.emit_pool_destroy(module)?;
         self.emit_pool_global(module, intrinsics)?;
-        self.emit_pool_global_submit(module)?;
+        self.emit_pool_submissions(module)?;
 
         // The current native worker uses Darwin's system threading ABI.
         // A target with no equivalent implementation cannot claim the operation.
@@ -11204,9 +11208,9 @@ impl<'ctx> PlatformIR<'ctx> {
             .or_llvm_err()?
             .into_int_value();
 
-        // task_ptr = queue_ptr + head * 32
+        // task_ptr = queue_ptr + head * sizeof(entry)
         let task_off = builder
-            .build_int_mul(head, i64_type.const_int(32, false), "toff")
+            .build_int_mul(head, i64_type.const_int(POOL_ENTRY_BYTES, false), "toff")
             .or_llvm_err()?;
         // SAFETY: GEP to access a struct field at a fixed offset; the struct was allocated with sufficient size for all fields
         let task_p = unsafe {
@@ -11215,12 +11219,12 @@ impl<'ctx> PlatformIR<'ctx> {
                 .or_llvm_err()?
         };
 
-        // Load task fields: func_ptr(+0), arg(+8), result_ptr(+16), done_ptr(+24)
+        // Load the callable, argument and the optional completion owner.
         let func_ptr_val = builder
             .build_load(i64_type, task_p, "func_ptr")
             .or_llvm_err()?
             .into_int_value();
-        // SAFETY: GEP into the 32-byte task struct at offset 8 (arg field)
+        // SAFETY: offset 8 is the argument field of this queue slot.
         let arg_p = unsafe {
             builder
                 .build_gep(i8_type, task_p, &[i64_type.const_int(8, false)], "arg_p")
@@ -11230,7 +11234,7 @@ impl<'ctx> PlatformIR<'ctx> {
             .build_load(i64_type, arg_p, "arg")
             .or_llvm_err()?
             .into_int_value();
-        // SAFETY: GEP into the 32-byte task struct at offset 16 (result_ptr field)
+        // SAFETY: offset 16 is the completion pointer field of this queue slot.
         let rp_p = unsafe {
             builder
                 .build_gep(i8_type, task_p, &[i64_type.const_int(16, false)], "rp_p")
@@ -11240,17 +11244,6 @@ impl<'ctx> PlatformIR<'ctx> {
             .build_load(i64_type, rp_p, "result_ptr")
             .or_llvm_err()?
             .into_int_value();
-        // SAFETY: GEP into the 32-byte task struct at offset 24 (done_ptr field)
-        let dp_p = unsafe {
-            builder
-                .build_gep(i8_type, task_p, &[i64_type.const_int(24, false)], "dp_p")
-                .or_llvm_err()?
-        };
-        let done_ptr_val = builder
-            .build_load(i64_type, dp_p, "done_ptr")
-            .or_llvm_err()?
-            .into_int_value();
-
         // head = (head + 1) % cap (unsigned rem — head/cap are always non-negative)
         let head_inc = builder
             .build_int_add(head, i64_type.const_int(1, false), "hi")
@@ -11404,16 +11397,23 @@ impl<'ctx> PlatformIR<'ctx> {
         ]);
         let result = result_phi.as_basic_value().into_int_value();
 
-        // Store result at result_ptr
+        let publish_bb = ctx.append_basic_block(func, "publish_result");
+        let has_receipt = builder.build_int_compare(
+            IntPredicate::NE, result_ptr_val, i64_type.const_zero(), "has_receipt",
+        ).or_llvm_err()?;
+        builder.build_conditional_branch(has_receipt, publish_bb, loop_bb).or_llvm_err()?;
+        builder.position_at_end(publish_bb);
         let result_p = builder
             .build_int_to_ptr(result_ptr_val, ptr_type, "rp")
             .or_llvm_err()?;
         builder.build_store(result_p, result).or_llvm_err()?;
 
         // Set done flag at done_ptr (atomic store release)
-        let done_p_ptr = builder
-            .build_int_to_ptr(done_ptr_val, ptr_type, "dp")
-            .or_llvm_err()?;
+        // SAFETY: a receipt owns two consecutive words, result then done.
+        let done_p_ptr = unsafe {
+            builder.build_in_bounds_gep(i64_type, result_p, &[i64_type.const_int(1, false)], "dp")
+                .or_llvm_err()?
+        };
         let store = builder
             .build_store(done_p_ptr, i64_type.const_int(1, false))
             .or_llvm_err()?;
@@ -11511,8 +11511,7 @@ impl<'ctx> PlatformIR<'ctx> {
             )
             .or_llvm_err()?;
 
-        // Alloc task queue: 1024 * 32 = 32768 bytes
-        let queue_sz = i64_type.const_int(32768, false);
+        let queue_sz = i64_type.const_int(POOL_QUEUE_CAPACITY * POOL_ENTRY_BYTES, false);
         let queue_ptr = builder
             .build_call(alloc_fn, &[queue_sz.into()], "queue")
             .or_llvm_err()?
@@ -11536,7 +11535,7 @@ impl<'ctx> PlatformIR<'ctx> {
                 .or_llvm_err()?
         };
         builder
-            .build_store(cap_p, i64_type.const_int(1024, false))
+            .build_store(cap_p, i64_type.const_int(POOL_QUEUE_CAPACITY, false))
             .or_llvm_err()?;
 
         // head=0, tail=0, len=0 already zeroed (offsets 16, 24, 32)
@@ -11646,9 +11645,8 @@ impl<'ctx> PlatformIR<'ctx> {
         Ok(())
     }
 
-    /// verum_pool_submit(pool: i64, func_ptr: i64, arg: i64) -> i64
-    /// Lock, store task at queue[tail], alloc result+done, signal, unlock. Return handle.
-    fn emit_pool_submit(&self, module: &Module<'ctx>) -> super::error::Result<()> {
+    /// Enqueue a callback; only a submission whose caller owns a result creates a receipt.
+    fn emit_pool_enqueue(&self, module: &Module<'ctx>) -> super::error::Result<()> {
         let ctx = self.context;
         let i64_type = ctx.i64_type();
         let i8_type = ctx.i8_type();
@@ -11658,9 +11656,10 @@ impl<'ctx> PlatformIR<'ctx> {
         self.ensure_sync_helpers_declared(module)?;
         let func = self.get_or_declare_fn(
             module,
-            "verum_pool_submit",
-            i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false),
+            "verum_pool_enqueue",
+            i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into(), ctx.bool_type().into()], false),
         );
+        func.set_linkage(verum_llvm::module::Linkage::Internal);
         if func.count_basic_blocks() > 0 {
             return Ok(());
         }
@@ -11701,6 +11700,7 @@ impl<'ctx> PlatformIR<'ctx> {
             .get_nth_param(2)
             .or_internal("missing param 2")?
             .into_int_value();
+        let wants_receipt = func.get_nth_param(3).or_internal("missing completion policy")?.into_int_value();
 
         // Only the compiler's raw code callback or an environment-free Verum
         // function may cross this word-only boundary. Check before enqueue:
@@ -11755,7 +11755,11 @@ impl<'ctx> PlatformIR<'ctx> {
                 .or_llvm_err()?
         };
 
-        // Alloc handle: 16 bytes = [result: i64, done: i64]
+        let allocate = ctx.append_basic_block(func, "allocate_receipt");
+        let enqueue = ctx.append_basic_block(func, "enqueue");
+        builder.build_conditional_branch(wants_receipt, allocate, enqueue).or_llvm_err()?;
+        builder.position_at_end(allocate);
+        // A joinable receipt owns two words, result and release-published done.
         let handle_ptr = builder
             .build_call(alloc_fn, &[i64_type.const_int(16, false).into()], "handle")
             .or_llvm_err()?
@@ -11770,25 +11774,14 @@ impl<'ctx> PlatformIR<'ctx> {
             )
             .or_llvm_err()?;
 
-        let handle_i64 = builder
+        let allocated = builder
             .build_ptr_to_int(handle_ptr, i64_type, "hi64")
             .or_llvm_err()?;
-        // result_ptr = handle + 0, done_ptr = handle + 8
-        let result_i64 = handle_i64;
-        // SAFETY: GEP into the 16-byte handle struct {result, done} at offset 8 (done flag)
-        let done_p = unsafe {
-            builder
-                .build_gep(
-                    i8_type,
-                    handle_ptr,
-                    &[i64_type.const_int(8, false)],
-                    "done_p",
-                )
-                .or_llvm_err()?
-        };
-        let done_i64 = builder
-            .build_ptr_to_int(done_p, i64_type, "di64")
-            .or_llvm_err()?;
+        builder.build_unconditional_branch(enqueue).or_llvm_err()?;
+        builder.position_at_end(enqueue);
+        let receipt = builder.build_phi(i64_type, "receipt").or_llvm_err()?;
+        receipt.add_incoming(&[(&allocated, allocate), (&i64_type.const_zero(), admitted)]);
+        let handle_i64 = receipt.as_basic_value().into_int_value();
 
         // SAFETY: GEP into the pool struct at offset 8 (queue capacity)
         let cap_p = unsafe {
@@ -11869,9 +11862,9 @@ impl<'ctx> PlatformIR<'ctx> {
             .or_llvm_err()?
             .into_int_value();
 
-        // Store task at queue[tail]: {func_ptr, arg, result_ptr, done_ptr} = 32 bytes
+        // Store the callable, argument and optional receipt in one queue slot.
         let task_off = builder
-            .build_int_mul(tail, i64_type.const_int(32, false), "toff")
+            .build_int_mul(tail, i64_type.const_int(POOL_ENTRY_BYTES, false), "toff")
             .or_llvm_err()?;
         // SAFETY: GEP into the task queue ring buffer at task[tail]; tail < cap, within allocated buffer
         let task_p = unsafe {
@@ -11882,7 +11875,7 @@ impl<'ctx> PlatformIR<'ctx> {
         // task.func_ptr at +0
         builder.build_store(task_p, func_arg).or_llvm_err()?;
         // task.arg at +8
-        // SAFETY: GEP into the 32-byte task struct at offset 8 (arg field)
+        // SAFETY: offset 8 is the argument field of this queue slot.
         let arg_p = unsafe {
             builder
                 .build_gep(i8_type, task_p, &[i64_type.const_int(8, false)], "arg_p")
@@ -11890,21 +11883,13 @@ impl<'ctx> PlatformIR<'ctx> {
         };
         builder.build_store(arg_p, arg).or_llvm_err()?;
         // task.result_ptr at +16
-        // SAFETY: GEP into the 32-byte task struct at offset 16 (result_ptr field)
+        // SAFETY: offset 16 is the completion pointer field of this queue slot.
         let rp_p = unsafe {
             builder
                 .build_gep(i8_type, task_p, &[i64_type.const_int(16, false)], "rp_p")
                 .or_llvm_err()?
         };
-        builder.build_store(rp_p, result_i64).or_llvm_err()?;
-        // task.done_ptr at +24
-        // SAFETY: GEP into the 32-byte task struct at offset 24 (done_ptr field)
-        let dp_p = unsafe {
-            builder
-                .build_gep(i8_type, task_p, &[i64_type.const_int(24, false)], "dp_p")
-                .or_llvm_err()?
-        };
-        builder.build_store(dp_p, done_i64).or_llvm_err()?;
+        builder.build_store(rp_p, handle_i64).or_llvm_err()?;
 
         // tail = (tail + 1) % cap (unsigned rem — always non-negative)
         let tail_inc = builder
@@ -12265,7 +12250,7 @@ impl<'ctx> PlatformIR<'ctx> {
         builder
             .build_call(
                 dealloc_fn,
-                &[queue_ptr.into(), i64_type.const_int(32768, false).into()],
+                &[queue_ptr.into(), i64_type.const_int(POOL_QUEUE_CAPACITY * POOL_ENTRY_BYTES, false).into()],
                 "",
             )
             .or_llvm_err()?;
@@ -12431,56 +12416,36 @@ impl<'ctx> PlatformIR<'ctx> {
         Ok(())
     }
 
-    /// verum_pool_global_submit(func: i64, arg: i64) -> i64
-    /// Call pool_global() then pool_submit().
-    fn emit_pool_global_submit(&self, module: &Module<'ctx>) -> super::error::Result<()> {
+    /// Adapt the declaration-owned local/global submission ABIs to one queue.
+    fn emit_pool_submissions(&self, module: &Module<'ctx>) -> super::error::Result<()> {
+        use verum_vbc::intrinsics::registry::PoolOperation;
         let ctx = self.context;
-        let i64_type = ctx.i64_type();
-
-        let func = self.get_or_declare_fn(
-            module,
-            "verum_pool_global_submit",
-            i64_type.fn_type(&[i64_type.into(), i64_type.into()], false),
-        );
-        if func.count_basic_blocks() > 0 {
-            return Ok(());
-        }
-
-        let global_fn = module
-            .get_function("verum_pool_global")
-            .or_missing_fn("verum_pool_global")?;
-        let submit_fn = module
-            .get_function("verum_pool_submit")
-            .or_missing_fn("verum_pool_submit")?;
-
+        let word = ctx.i64_type();
+        let global = module.get_function("verum_pool_global").or_missing_fn("verum_pool_global")?;
+        let enqueue = module.get_function("verum_pool_enqueue").or_missing_fn("verum_pool_enqueue")?;
         let builder = ctx.create_builder();
-        let entry = ctx.append_basic_block(func, "entry");
-        builder.position_at_end(entry);
-
-        let func_arg = func
-            .get_nth_param(0)
-            .or_internal("missing param 0")?
-            .into_int_value();
-        let arg = func
-            .get_nth_param(1)
-            .or_internal("missing param 1")?
-            .into_int_value();
-
-        let pool = builder
-            .build_call(global_fn, &[], "pool")
-            .or_llvm_err()?
-            .basic_value_or("expected basic value")?
-            .into_int_value();
-        let handle = builder
-            .build_call(
-                submit_fn,
-                &[pool.into(), func_arg.into(), arg.into()],
-                "handle",
-            )
-            .or_llvm_err()?
-            .basic_value_or("expected basic value")?
-            .into_int_value();
-        builder.build_return(Some(&handle)).or_llvm_err()?;
+        for op in [PoolOperation::Submit, PoolOperation::GlobalSubmit, PoolOperation::Dispatch, PoolOperation::GlobalDispatch] {
+            let params = [word.into(); 3];
+            let params = &params[..usize::from(op.parameter_count())];
+            let abi = if op.is_dispatch() { ctx.void_type().fn_type(params, false) } else { word.fn_type(params, false) };
+            let function = self.get_or_declare_fn(module, &format!("verum_{}", op.name()), abi);
+            if function.count_basic_blocks() > 0 { continue; }
+            builder.position_at_end(ctx.append_basic_block(function, "entry"));
+            let mut arguments = verum_common::List::with_capacity(4);
+            if op.is_global_submission() {
+                let pool = builder.build_call(global, &[], "pool").or_llvm_err()?.basic_value_or("missing global pool")?;
+                arguments.push(pool.into());
+            }
+            arguments.extend(function.get_param_iter().map(verum_llvm::values::BasicMetadataValueEnum::from));
+            arguments.push(ctx.bool_type().const_int(u64::from(!op.is_dispatch()), false).into());
+            let receipt = builder.build_call(enqueue, &arguments, "receipt").or_llvm_err()?;
+            if op.is_dispatch() {
+                builder.build_return(None).or_llvm_err()?;
+            } else {
+                let receipt = receipt.basic_value_or("missing pool receipt")?;
+                builder.build_return(Some(&receipt)).or_llvm_err()?;
+            }
+        }
         Ok(())
     }
 

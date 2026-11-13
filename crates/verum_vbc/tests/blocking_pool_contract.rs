@@ -221,3 +221,63 @@ fn invalid_worker_counts_cannot_publish_a_live_pool() {
         );
     }
 }
+
+#[test]
+fn dispatch_runs_each_callback_without_allocating_a_receipt() {
+    let (protocols, pool) = standard_pool();
+    let app = parse(r#"
+        module app;
+        mount core.runtime.pool.ThreadPool;
+        static mut TOTAL: Int = 0;
+        fn record(n: Int) { unsafe { TOTAL = TOTAL + n; } }
+        fn read(_: Int) -> Int { unsafe { TOTAL } }
+        fn dispatch(f: fn(Int)) { ThreadPool.global_dispatch(f, 36); }
+        fn probe() -> Int {
+            let pool = ThreadPool.new(1);
+            pool.dispatch(record, 37);
+            dispatch(record);
+            let mut handle = pool.submit(read, 0);
+            handle.join()
+        }
+    "#);
+    assert_eq!(execute(compiled(&[&protocols, &pool, &app])).unwrap(), 73);
+
+    let no_receipt = parse(r#"
+        module app;
+        @intrinsic("pool_create") fn open(n: Int) -> Int;
+        @intrinsic("pool_global_dispatch") fn dispatch(f: fn(Int), n: Int);
+        fn observe(_: Int) {}
+        fn probe() -> Int {
+            let before = open(1);
+            dispatch(observe, 73);
+            open(1) - before
+        }
+    "#);
+    assert_eq!(execute(compiled(&[&no_receipt])).unwrap(), 1);
+}
+
+#[test]
+fn dispatch_preserves_callback_signature_and_capture_refusals() {
+    let (protocols, pool) = standard_pool();
+    let captured = parse(r#"
+        module app;
+        mount core.runtime.pool.ThreadPool;
+        fn dispatch(f: fn(Int)) { ThreadPool.global_dispatch(f, 37); }
+        fn probe() -> Int {
+            let mut value = 1;
+            let reference = &mut value;
+            dispatch(|n| { *reference = n; });
+            value
+        }
+    "#);
+    assert!(matches!(execute(compiled(&[&protocols, &pool, &captured])),
+        Err(InterpreterError::Panic { message }) if message == verum_vbc::intrinsics::registry::PoolOperation::CAPTURE_REFUSAL));
+    let wrong_result = parse(r#"
+        module app;
+        @intrinsic("pool_global_dispatch") fn dispatch(f: fn(Int) -> Int, n: Int);
+        fn identity(n: Int) -> Int { n }
+        fn probe() -> Int { dispatch(identity, 37); 73 }
+    "#);
+    assert!(matches!(execute(compiled(&[&wrong_result])),
+        Err(InterpreterError::InvalidBytecode { message, .. }) if message.contains("incompatible worker pool signature")));
+}

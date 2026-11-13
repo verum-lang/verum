@@ -1654,6 +1654,8 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     || name == "verum_pool_destroy"
                     || name == "verum_pool_global"
                     || name == "verum_pool_global_submit"
+                    || name == "verum_pool_dispatch"
+                    || name == "verum_pool_global_dispatch"
                     || name == "verum_async_accept"
                     || name == "verum_async_read"
                     || name == "verum_async_write"

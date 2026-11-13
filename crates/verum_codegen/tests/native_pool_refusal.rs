@@ -353,18 +353,14 @@ mod native {
         let i64_type = context.i64_type();
         let zero = i64_type.const_zero();
         let one = i64_type.const_int(1, false);
-        let result = array(
+        let receipt = array(
             &context,
             &builder,
-            &[i64_type.const_int(-713_i64 as u64, true)],
-            "result",
+            &[i64_type.const_int(-713_i64 as u64, true), zero],
+            "receipt",
         );
-        let done = array(&context, &builder, &[zero], "done");
-        let result_address = builder
-            .build_ptr_to_int(result, i64_type, "result_address")
-            .unwrap();
-        let done_address = builder
-            .build_ptr_to_int(done, i64_type, "done_address")
+        let receipt_address = builder
+            .build_ptr_to_int(receipt, i64_type, "receipt_address")
             .unwrap();
         // Deliberately malformed low-level input, not a well-typed source
         // program: one null callable, argument 37, live completion slots.
@@ -374,8 +370,7 @@ mod native {
             &[
                 zero,
                 i64_type.const_int(37, false),
-                result_address,
-                done_address,
+                receipt_address,
             ],
             "queue",
         );
@@ -474,7 +469,11 @@ mod native {
                 take(second) + take(first) + 1
             }}
         "#);
-        let source = Parser::new(&source).parse_module().unwrap();
+        run_pool_program(&source)
+    }
+
+    fn run_pool_program(source: &str) -> std::process::Output {
+        let source = Parser::new(source).parse_module().unwrap();
         let vbc = VbcCodegen::with_config(CodegenConfig::new("app")).compile_module(&source).unwrap();
         let context = Context::create();
         let mut config = LoweringConfig::debug("app").with_debug_info(false);
@@ -498,6 +497,61 @@ mod native {
         let _serial = NATIVE.lock().unwrap();
         let child = run_declared_pool("fn submit_from_caller() -> Int { let f = times_three; queue(f) }");
         assert_eq!(child.status.code(), Some(73), "{}", String::from_utf8_lossy(&child.stderr));
+    }
+
+    #[test]
+    fn dispatch_returns_before_the_worker_is_permitted_to_finish() {
+        let _serial = NATIVE.lock().unwrap();
+        for submit in ["dispatch(pool, work, 73);", "global_dispatch(work, 73);"] {
+            let source = format!(r#"
+                module app;
+                @intrinsic("pool_create") fn open(n: Int) -> Int;
+                @intrinsic("pool_destroy") fn close(pool: Int);
+                @intrinsic("pool_dispatch") fn dispatch(pool: Int, f: fn(Int), n: Int);
+                @intrinsic("pool_global_dispatch") fn global_dispatch(f: fn(Int), n: Int);
+                fn read(p: *const Int64, order: UInt8) -> Int64 {{ @intrinsic("atomic_load_i64", p, order) }}
+                fn write(p: *mut Int64, n: Int64, order: UInt8) {{ @intrinsic("atomic_store_i64", p, n, order); }}
+                static mut RELEASE: Int64 = 0;
+                static mut DONE: Int64 = 0;
+                fn work(n: Int) {{
+                    unsafe {{
+                        while read(&RELEASE as *const Int64, 1) == 0 {{}}
+                        write(&mut DONE as *mut Int64, n as Int64, 2);
+                    }}
+                }}
+                fn probe() -> Int {{
+                    let pool = open(1);
+                    {submit}
+                    unsafe {{
+                        write(&mut RELEASE as *mut Int64, 1, 2);
+                        while read(&DONE as *const Int64, 1) == 0 {{}}
+                    }}
+                    close(pool);
+                    unsafe {{ read(&DONE as *const Int64, 1) as Int }}
+                }}
+            "#);
+            let child = run_pool_program(&source);
+            assert_eq!(child.status.code(), Some(73), "{submit}: {}", String::from_utf8_lossy(&child.stderr));
+        }
+    }
+
+    #[test]
+    fn dispatch_refuses_an_indirect_borrowed_capture() {
+        let _serial = NATIVE.lock().unwrap();
+        let child = run_pool_program(r#"
+            module app;
+            @intrinsic("pool_global_dispatch") fn enqueue(f: fn(Int), n: Int);
+            fn delegate(f: fn(Int)) { enqueue(f, 73); }
+            fn probe() -> Int {
+                let mut value = 3;
+                let reference = &mut value;
+                delegate(|n| { *reference = n; });
+                value
+            }
+        "#);
+        assert_eq!(child.status.code(), Some(1));
+        assert_eq!(String::from_utf8_lossy(&child.stderr).trim(),
+            format!("PANIC: {}", verum_vbc::intrinsics::registry::PoolOperation::CAPTURE_REFUSAL));
     }
 
     #[test]

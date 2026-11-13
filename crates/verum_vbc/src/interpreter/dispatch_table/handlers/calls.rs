@@ -1561,11 +1561,11 @@ fn execute_pool_operation(
             Ok(Value::unit())
         }
         PoolOperation::Await => state.blocking_pools.take(integer(operand(state, 0))?).map(Value::from_i64),
-        PoolOperation::Submit | PoolOperation::GlobalSubmit => {
-            let index = if op == PoolOperation::Submit {
+        PoolOperation::Submit | PoolOperation::GlobalSubmit | PoolOperation::Dispatch | PoolOperation::GlobalDispatch => {
+            let index = if op.is_global_submission() { 0 } else {
                 state.blocking_pools.require(integer(operand(state, 0))?)?;
                 1
-            } else { 0 };
+            };
             let function = operand(state, index);
             let (_, captures) = super::super::synchronous_callable(state, function)?;
             if captures != 0 {
@@ -1575,7 +1575,17 @@ fn execute_pool_operation(
             }
             let argument = operand(state, index + 1);
             integer(argument)?;
-            let result = integer(super::super::call_closure_sync(state, function, &[argument])?)?;
+            let result = super::super::call_closure_sync(state, function, &[argument])?;
+            if op.is_dispatch() {
+                return if result.is_unit() {
+                    Ok(result)
+                } else {
+                    Err(InterpreterError::TypeMismatch {
+                        expected: "Unit", got: "non-unit", operation: "blocking pool dispatch callback",
+                    })
+                };
+            }
+            let result = integer(result)?;
             let receipt = state.blocking_pools.complete(result)?;
             if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TracePool) {
                 eprintln!("[pool] {op:?} completed task {receipt} with {result}");
