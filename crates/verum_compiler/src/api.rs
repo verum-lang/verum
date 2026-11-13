@@ -167,6 +167,9 @@ impl CompilationError {
 /// Configuration for the common pipeline (Source → TypedAST)
 #[derive(Debug, Clone)]
 pub struct CommonPipelineConfig {
+    /// Maximum independent source-check workers. Defaults to one so embedding
+    /// applications can coordinate their own concurrent compilation requests.
+    pub source_threads: std::num::NonZeroUsize,
     /// Enable SMT verification of contracts
     pub verify_contracts: bool,
     /// SMT solver timeout in milliseconds
@@ -271,6 +274,7 @@ pub struct CommonPipelineConfig {
 impl Default for CommonPipelineConfig {
     fn default() -> Self {
         Self {
+            source_threads: std::num::NonZeroUsize::MIN,
             verify_contracts: true,
             smt_timeout_ms: 5000,
             check_refinements: true,
@@ -306,6 +310,7 @@ impl CommonPipelineConfig {
     /// Create minimal config (fast, no verification)
     pub fn minimal() -> Self {
         Self {
+            source_threads: std::num::NonZeroUsize::MIN,
             verify_contracts: false,
             smt_timeout_ms: 0,
             check_refinements: false,
@@ -339,6 +344,7 @@ impl CommonPipelineConfig {
     /// Create strict config (full verification)
     pub fn strict() -> Self {
         Self {
+            source_threads: std::num::NonZeroUsize::MIN,
             verify_contracts: true,
             smt_timeout_ms: 10000,
             check_refinements: true,
@@ -931,8 +937,7 @@ pub fn run_common_pipeline(
     }
 
     // Phase 4: Semantic Analysis (Type Checking)
-    // When core sources are prepended, tell the semantic phase how many user modules
-    // there are so it can treat stdlib registration errors as non-fatal.
+    // Every selected body is checked, including explicitly supplied core sources.
     // All [types] flags forward through CommonPipelineConfig — closes the
     // inert-defense gap where six builders
     // (with_higher_kinded_enabled / with_universe_poly_enabled /
@@ -971,7 +976,8 @@ pub fn run_common_pipeline(
             .with_protocol_higher_kinded_protocols(config.protocol_higher_kinded_protocols)
             .with_protocol_generic_associated_types(config.protocol_generic_associated_types)
     };
-    let semantic_phase = semantic_phase.with_source_owners(source_owners.clone());
+    let semantic_phase = semantic_phase.with_source_owners(source_owners.clone())
+        .with_source_threads(config.source_threads);
     let semantic_input = PhaseInput {
         data: current_data,
         context: context.clone(),

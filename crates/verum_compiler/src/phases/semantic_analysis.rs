@@ -12,6 +12,7 @@
 //! Supports both normal compilation (pre-loaded stdlib) and bootstrap mode.
 
 use anyhow::Result;
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Instant;
 use verum_common::{List, Map, Text};
@@ -27,6 +28,7 @@ pub struct SemanticAnalysisPhase {
     /// Verified contracts from Phase 3a (if available)
     verified_contracts: Option<VerifiedContractRegistry>,
     source_owners: Map<verum_ast::FileId, (Text, Text)>,
+    source_threads: NonZeroUsize,
     target: verum_ast::cfg::TargetConfig,
     module_registry: Option<crate::owned_source_semantics::SourceRegistry>,
     /// Stdlib metadata for type checking (None = StdlibBootstrap mode)
@@ -70,7 +72,39 @@ pub struct SemanticAnalysisPhase {
     protocol_generic_associated_types: bool,
 }
 
+#[derive(Default)]
+struct SourceCheckOutcome {
+    diagnostics: List<Diagnostic>,
+    metrics: verum_types::TypeCheckMetrics,
+}
+
+fn diagnostic_details(errors: &[Diagnostic]) -> Text {
+    errors.iter().map(|diagnostic| {
+        let mut line = Text::new();
+        if let Some(span) = diagnostic.primary_span() {
+            line.push_str(&format!("{span}: "));
+        }
+        if let Some(code) = diagnostic.code() {
+            line.push_str(code);
+            line.push(' ');
+        }
+        line.push_str(diagnostic.message());
+        for note in diagnostic.notes() {
+            line.push_str("\n  note: ");
+            line.push_str(&note.message);
+        }
+        line
+    }).collect::<List<_>>().join("\n").into()
+}
+
 impl SemanticAnalysisPhase {
+    /// Bound independent source checks. The default is serial for callers
+    /// that already schedule multiple compilation requests themselves.
+    pub fn with_source_threads(mut self, threads: NonZeroUsize) -> Self {
+        self.source_threads = threads;
+        self
+    }
+
     pub(crate) fn with_source_owners(mut self, owners: Map<verum_ast::FileId, (Text, Text)>) -> Self {
         self.source_owners = owners;
         self
@@ -128,51 +162,62 @@ impl SemanticAnalysisPhase {
         let graph = verum_common::Shared::new(parking_lot::RwLock::new(session.module_registry().read().clone()));
         crate::owned_source_semantics::register_sources(&graph,
             selected.iter().map(|(owner, path, module)| (owner.as_str(), path.as_str(), module)))?;
-        let check = |(owner, path, module): &(Text, Text, verum_ast::Module)| {
-            let _scope = tracing::debug_span!("source_admission",
-                module = owner.as_str(), source = path.as_str(),
-                worker = std::thread::current().name().unwrap_or("caller"),
-            ).entered();
-            tracing::debug!("checking original source declarations");
-            let mut checker = self.configured_checker();
-            if let Err(errors) = crate::owned_source_semantics::check_source_types(
-                &mut checker, owner, module, &graph,
-                |error| error.to_diagnostic_with_span(Some(|span| session.convert_span(span))),
-            ) {
-                let details = errors.iter().map(|diagnostic| {
-                    let mut line = Text::new();
-                    if let Some(span) = diagnostic.primary_span() {
-                        line.push_str(&format!("{span}: "));
-                    }
-                    if let Some(code) = diagnostic.code() {
-                        line.push_str(code);
-                        line.push(' ');
-                    }
-                    line.push_str(diagnostic.message());
-                    for note in diagnostic.notes() {
-                        line.push_str("\n  note: ");
-                        line.push_str(&note.message);
-                    }
-                    line
-                }).collect::<List<_>>().join("\n");
-                tracing::warn!(module = owner.as_str(), source = path.as_str(), errors = errors.len(), diagnostics = %details,
-                    "source admission failed; checking remaining independent modules");
-                Some((Text::from(format!("{owner} ({path}): {details}")), errors))
-            } else {
-                None
+        let outcomes = self.check_source_roster(
+            &selected, &graph, session.options().num_threads,
+            |error| error.to_diagnostic_with_span(Some(|span| session.convert_span(span))),
+        )?;
+        let mut failures: List<Text> = List::new();
+        for ((owner, path, _), outcome) in selected.iter().zip(outcomes) {
+            if !outcome.diagnostics.is_empty() {
+                failures.push(format!("{owner} ({path}): {}", diagnostic_details(&outcome.diagnostics)).into());
+                session.emit_diagnostics(outcome.diagnostics);
             }
+        }
+        // A failed owner cannot poison a sibling's inference state, and no
+        // source may proceed to lowering until the complete roster is admitted.
+        if !failures.is_empty() {
+            anyhow::bail!("semantic checking failed in {} module(s):\n{}", failures.len(), failures.join("\n"));
+        }
+        Ok(())
+    }
+
+    /// Both production entry points share this runner. The graph is complete
+    /// before workers start; each checker and solver stays on its own ordinary
+    /// worker stack. Indexed slots preserve source order on success and refusal.
+    fn check_source_roster(
+        &self,
+        selected: &[(Text, Text, verum_ast::Module)],
+        graph: &crate::owned_source_semantics::SourceRegistry,
+        threads: usize,
+        render: impl Fn(&verum_types::TypeError) -> Diagnostic + Sync,
+    ) -> anyhow::Result<List<SourceCheckOutcome>> {
+        let dispatch = tracing::dispatcher::get_default(Clone::clone);
+        let check = |(owner, path, module): &(Text, Text, verum_ast::Module)| {
+            tracing::dispatcher::with_default(&dispatch, || {
+                let _scope = tracing::debug_span!("source_admission",
+                    module = owner.as_str(), source = path.as_str(),
+                    worker = std::thread::current().name().unwrap_or("caller"),
+                ).entered();
+                tracing::debug!("checking source declarations");
+                let mut checker = self.configured_checker();
+                let diagnostics = crate::owned_source_semantics::check_source_types(
+                    &mut checker, owner, module, graph, &render,
+                ).err().unwrap_or_default();
+                if !diagnostics.is_empty() {
+                    tracing::warn!(module = owner.as_str(), source = path.as_str(), errors = diagnostics.len(), diagnostics = %diagnostic_details(&diagnostics),
+                        "source admission failed; checking remaining independent modules");
+                }
+                SourceCheckOutcome { diagnostics, metrics: checker.metrics }
+            })
         };
-        let workers = session.options().num_threads.max(1).min(selected.len());
-        tracing::info!(workers, sources = selected.len(), "admitting original source roster");
+        let workers = threads.max(1).min(selected.len());
+        tracing::info!(workers, sources = selected.len(), "admitting source roster");
         let outcomes = if workers > 1 {
             use rayon::prelude::*;
-            // The declaration graph is complete before workers start. Each
-            // checker (including its solver) is created and dropped on its
-            // own ordinary worker stack; no inference state crosses owners.
             let pool = rayon::ThreadPoolBuilder::new().num_threads(workers)
                 .thread_name(|index| format!("verum-source-{index}"))
                 .build()?;
-            let mut outcomes: List<_> = selected.iter().map(|_| None).collect();
+            let mut outcomes: List<_> = selected.iter().map(|_| SourceCheckOutcome::default()).collect();
             pool.install(|| {
                 selected.par_iter().zip(outcomes.par_iter_mut())
                     .for_each(|(source, outcome)| *outcome = check(source));
@@ -181,20 +226,7 @@ impl SemanticAnalysisPhase {
         } else {
             selected.iter().map(check).collect()
         };
-        let mut failures: List<Text> = List::new();
-        // Indexed result slots retain source order, regardless of completion
-        // order. Only progress tracing is emitted by the workers themselves.
-        for (failure, errors) in outcomes.into_iter().flatten() {
-            failures.push(failure);
-            session.emit_diagnostics(errors);
-        }
-        // Each owner uses its own checker. A failed module cannot poison a
-        // sibling's local inference state, and none may proceed to lowering
-        // until the entire original-source roster has been admitted.
-        if !failures.is_empty() {
-            anyhow::bail!("semantic checking failed in {} module(s):\n{}", failures.len(), failures.join("\n"));
-        }
-        Ok(())
+        Ok(outcomes)
     }
 
     pub(crate) fn configured_checker(&self) -> TypeChecker {
@@ -270,6 +302,7 @@ impl SemanticAnalysisPhase {
         Self {
             verified_contracts: None,
             source_owners: Map::new(),
+            source_threads: NonZeroUsize::MIN,
             module_registry: None,
             target: verum_ast::cfg::TargetConfig::host(),
             stdlib_metadata: None,
@@ -297,6 +330,7 @@ impl SemanticAnalysisPhase {
         Self {
             verified_contracts: None,
             source_owners: Map::new(),
+            source_threads: NonZeroUsize::MIN,
             module_registry: None,
             target: verum_ast::cfg::TargetConfig::host(),
             stdlib_metadata: Some(stdlib),
@@ -459,7 +493,7 @@ impl CompilationPhase for SemanticAnalysisPhase {
     }
 
     fn description(&self) -> &str {
-        "Bidirectional type checking (3x faster than Hindley-Milner)"
+        "Bidirectional type checking in isolated source namespaces"
     }
 
     fn execute(&self, input: PhaseInput) -> Result<PhaseOutput, List<Diagnostic>> {
@@ -517,25 +551,30 @@ impl CompilationPhase for SemanticAnalysisPhase {
         ]);
         let selected = self.select_owned_sources(modules).map_err(semantic_error)?;
         let registry = self.module_registry.clone()
-            .unwrap_or_else(|| self.configured_checker().module_registry().clone());
+            .unwrap_or_else(|| verum_common::Shared::new(parking_lot::RwLock::new(verum_modules::ModuleRegistry::new())));
         crate::owned_source_semantics::register_sources(&registry,
             selected.iter().map(|(owner, path, ast)| (owner.as_str(), path.as_str(), ast)),
         ).map_err(semantic_error)?;
         let mut type_metrics = verum_types::TypeCheckMetrics::new();
-        for (owner, _, module) in &selected {
-            let mut checker = self.configured_checker();
-            crate::owned_source_semantics::check_source_module(
-                &mut checker, owner, module, &registry,
-            )?;
-            type_metrics.synth_count += checker.metrics.synth_count;
-            type_metrics.check_count += checker.metrics.check_count;
-            type_metrics.unify_count += checker.metrics.unify_count;
-            type_metrics.refinement_checks += checker.metrics.refinement_checks;
-            type_metrics.protocol_checks += checker.metrics.protocol_checks;
+        let outcomes = self.check_source_roster(
+            &selected, &registry, self.source_threads.get(), verum_types::TypeError::to_diagnostic,
+        ).map_err(semantic_error)?;
+        let mut errors = List::new();
+        for outcome in outcomes {
+            errors.extend(outcome.diagnostics);
+            type_metrics.synth_count += outcome.metrics.synth_count;
+            type_metrics.check_count += outcome.metrics.check_count;
+            type_metrics.unify_count += outcome.metrics.unify_count;
+            type_metrics.refinement_checks += outcome.metrics.refinement_checks;
+            type_metrics.protocol_checks += outcome.metrics.protocol_checks;
+        }
+        if !errors.is_empty() {
+            return Err(errors);
         }
 
         let duration = start.elapsed();
         let mut metrics = PhaseMetrics::new(self.name()).with_duration(duration);
+        metrics.add_custom_metric("source_worker_limit", self.source_threads.get().min(selected.len()).to_string());
 
         // Add type checker metrics
         metrics.add_custom_metric("synth_count", type_metrics.synth_count.to_string());

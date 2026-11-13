@@ -167,6 +167,7 @@ pub(crate) fn select_source_roster(
 /// The caller provides a fresh checker with its language and backend policy.
 /// Registry declarations retain their owner; only mounts populate local names.
 /// Recovered/deferred errors are failures, just like direct `check_item` errors.
+#[cfg(test)]
 pub(crate) fn check_source_module(
     checker: &mut TypeChecker,
     owner: &str,
