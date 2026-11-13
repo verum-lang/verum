@@ -247,8 +247,15 @@ fn invalid_application_in_a_bound_cannot_be_silently_removed() {
 
 #[test]
 fn symbolic_or_refined_values_require_their_own_evidence() {
+    // A declaration-owned integer can be instantiated for two independent calls.
+    acceptance(r#"
+        type P<N:meta Int> is protocol {}; type Item is {id:Int};
+        implement<N:meta Int> P<N> for Item {}
+        fn at_two<S:P<2>>(item:S)->Int {2}
+        fn at_three<S:P<3>>(item:S)->Int {3}
+        fn run(first:Item,second:Item)->Int {at_two(first)+at_three(second)}
+    "#, true);
     for source in [
-        "type P<N:meta Int> is protocol {}; type Item is {id:Int}; implement<N:meta Int> P<N> for Item {}",
         "type P<N:meta Bool> is protocol {}; type Item is {id:Int}; implement P<true> for Item {}",
         "type P<T> is protocol {}; type Item is {id:Int}; implement<N:meta Int> P<N> for Item {}",
     ] {
@@ -465,4 +472,67 @@ fn imported_meta_alias_uses_its_own_declared_slots() {
         let found = errors(&source, &[("demo.provider", provider)]);
         assert_eq!(found.is_empty(), accepted, "{source}\n{found:?}");
     }
+}
+
+#[test]
+fn protocol_headers_forward_an_exact_declared_integer_index() {
+    let provider = r#"
+        public type Dimension<N:meta Int> is protocol {};
+        public type Indexed<N:meta Int> is protocol extends Dimension<N> {};
+        public type Observation<N:meta Int,S:Dimension<N>> is protocol {};
+    "#;
+    for (required, expected) in [(3,true),(4,false)] {
+        let consumer = format!(r#"
+            mount demo.model.{{Dimension, Indexed, Observation}};
+            type Sample is {{ id:Int }};
+            implement Dimension<3> for Sample {{}}
+            implement Indexed<3> for Sample {{}}
+            implement Observation<3,Sample> for Sample {{}}
+            fn need<S:Dimension<{required}>>(value:S)->Int {{7}}
+            fn through<S:Indexed<3>>(value:S)->Int {{need(value)}}
+            fn run(value:Sample)->Int {{through(value)}}
+        "#);
+        let found = errors(&consumer, &[("demo.model",provider)]);
+        assert_eq!(found.is_empty(),expected,"required {required}: {found:?}");
+    }
+}
+
+#[test]
+fn symbolic_protocol_indices_reject_unproved_domains_and_unbound_names() {
+    for source in [
+        "type P<N:meta Int> is protocol {}; type Q<T> is protocol extends P<T> {};",
+        "type P<N:meta Int> is protocol {}; type Q<N:meta Int> is protocol extends P<N> {}; type Db is {}; implement P<2> for Db {} implement Q<3> for Db {}",
+        "type P<N:meta Int> is protocol {}; type Q<N:meta Bool> is protocol extends P<N> {};",
+        "type P<N:meta Int> is protocol {}; type Q<M:meta Int> is protocol extends P<N> {};",
+        "type P<N:meta Int> is protocol {}; type Q<N:meta Int> is protocol extends P<(N+1)> {};",
+        "type P<N:meta Int> is protocol {}; type Q<N:meta Int,S:P<N>> is protocol {}; type Db is {}; implement P<2> for Db {} implement Q<3,Db> for Db {}",
+    ] {
+        acceptance(source, false);
+    }
+}
+
+#[test]
+fn universally_indexed_implementation_only_proves_its_declared_relation() {
+    for (first,second,ok) in [(3,3,true),(4,4,true),(3,4,false)] {
+        acceptance(&format!(r#"
+            type Equal<A: meta Int,B:meta Int> is protocol {{}};
+            type Item is {{ id:Int }};
+            implement<N:meta Int> Equal<N,N> for Item {{}}
+            fn need<S:Equal<{first},{second}>>(item:S)->Int {{2}}
+            fn probe(item:Item)->Int {{need(item)}}
+        "#),ok);
+    }
+}
+
+#[test]
+fn default_method_body_uses_the_same_protocol_value_owner() {
+    acceptance(r#"
+        type Origin<N:meta Int> is protocol {};
+        type Indexed<N:meta Int> is protocol extends Origin<N> {
+            fn id(&self)->Int {7}
+        };
+        type Db is {slot:Int}; implement Origin<4> for Db {} implement Indexed<4> for Db {}
+        fn use_index<S:Indexed<4>>(item:S)->Int { item.id() }
+        fn probe(item:Db)->Int { use_index(item) }
+    "#, true);
 }

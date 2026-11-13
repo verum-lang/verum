@@ -106,7 +106,7 @@ fn assert_telescope(checker: &TypeChecker, owner: &str, bound_owner: &str, shado
     else {
         panic!("source declaration must retain its telescope");
     };
-    assert_eq!(verum_types::context::GenericBinder::Type(parameters[0]), associated.binders.owner[0].1);
+    assert_eq!(parameters[0], associated.binders.owner[0].1);
     assert_eq!(associated.binders.self_type, Some(*self_type));
     let as_type = |binder: &verum_types::context::GenericBinder| match binder {
         verum_types::context::GenericBinder::Type(variable) => Type::Var(*variable),

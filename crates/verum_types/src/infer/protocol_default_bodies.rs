@@ -91,22 +91,27 @@ impl TypeChecker {
         let mut arguments = List::new();
         let mut rigid = List::new();
         for (parameter, original) in parameters.iter().zip(variables) {
-            let GenericParamKind::Type { name, .. } = &parameter.kind else {
-                return Err(invalid(
-                    parameter.span,
-                    "default body owner binder has no represented type domain",
-                ));
+            let (name, ty) = match (&parameter.kind, original) {
+                (GenericParamKind::Type { name, .. }, crate::context::GenericBinder::Type(_)) => {
+                    let variable = TypeVar::fresh();
+                    rigid.push((variable, name.name.clone(), false, None));
+                    let ty = Type::Var(variable);
+                    original.bind_argument(&ty, &mut substitution)
+                        .map_err(|message| invalid(function.span, message))?;
+                    self.ctx.env.insert_type_parameter_mirror(name.name.clone(), TypeScheme::mono(ty.clone()));
+                    (name, ty)
+                }
+                (GenericParamKind::Meta { name, .. } | GenericParamKind::Const { name, .. }, crate::context::GenericBinder::Value(declared)) => {
+                    let ty = declared.try_apply_subst(&substitution)
+                        .map_err(|message| invalid(function.span, message))?;
+                    self.ctx.env.insert_meta_parameter(name.name.clone(), TypeScheme::mono(ty.clone()));
+                    (name, ty)
+                }
+                _ => return Err(invalid(parameter.span, "default body owner parameter differs from its declared role")),
             };
-            let variable = TypeVar::fresh();
-            let ty = Type::Var(variable);
-            substitution.insert(*original, ty.clone());
             frame.insert(name.name.clone(), ty.clone());
-            arguments.push(ty.clone());
             self.ctx.define_type(name.name.clone(), ty.clone());
-            self.ctx
-                .env
-                .insert_type_parameter_mirror(name.name.clone(), TypeScheme::mono(ty));
-            rigid.push((variable, name.name.clone(), false, None));
+            arguments.push(ty);
         }
         self.push_decl_param_frame(frame);
         self.set_current_self_type(Some(Type::Var(receiver)));

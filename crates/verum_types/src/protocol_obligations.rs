@@ -38,13 +38,11 @@ impl ProtocolChecker {
         }
         if let Some(protocol) = self.get_protocol(&key)
             && let ProtocolConstraints::Declared {
-                self_type, parameters, parameter_bounds, ..
+                parameters, parameter_bounds, ..
             } = &protocol.constraints
             && parameters.len() == bound.args.len()
         {
-            let mut substitution: Substitution = parameters.iter().zip(&bound.args)
-                .map(|(parameter, argument)| (*parameter, argument.clone())).collect();
-            substitution.insert(*self_type, source_receiver.clone());
+            let substitution = protocol.constraints.application(source_receiver, &bound.args)?;
             for clause in parameter_bounds {
                 requirements.push(clause.try_apply_subst(&substitution)?);
             }
@@ -191,7 +189,6 @@ impl<'a> Obligations<'a> {
                 continue;
             };
             let ProtocolConstraints::Declared {
-                self_type,
                 parameters,
                 parameter_bounds,
                 ..
@@ -202,12 +199,7 @@ impl<'a> Obligations<'a> {
             if parameters.len() != actual.args.len() {
                 continue;
             }
-            let mut substitution: Substitution = parameters
-                .iter()
-                .zip(&actual.args)
-                .map(|(var, ty)| (*var, ty.clone()))
-                .collect();
-            substitution.insert(*self_type, subject.clone());
+            let substitution = protocol.constraints.application(&subject, &actual.args)?;
             for inherited in &protocol.super_protocols {
                 let mut inherited = inherited.try_apply_subst(&substitution)?;
                 self.checker.inherit_associated_equalities(&subject, &actual, &mut inherited)?;
@@ -317,7 +309,6 @@ impl<'a> Obligations<'a> {
             .get_protocol(&key)
             .ok_or_else(|| Text::from("protocol declaration is unavailable"))?;
         let ProtocolConstraints::Declared {
-            self_type,
             parameters,
             parameter_bounds,
             ..
@@ -328,12 +319,7 @@ impl<'a> Obligations<'a> {
         if parameters.len() != bound.args.len() {
             return Err("protocol obligation has incomplete type arguments".into());
         }
-        let mut substitution: Substitution = parameters
-            .iter()
-            .zip(&bound.args)
-            .map(|(var, ty)| (*var, ty.clone()))
-            .collect();
-        substitution.insert(*self_type, ty.clone());
+        let substitution = protocol.constraints.application(ty, &bound.args)?;
         for clause in parameter_bounds {
             let subject = clause.ty.try_apply_subst(&substitution)?;
             for required in &clause.bounds {
@@ -361,7 +347,6 @@ impl<'a> Obligations<'a> {
                     .get_protocol(&key)
                     .ok_or_else(|| Text::from("protocol declaration is unavailable"))?;
                 let ProtocolConstraints::Declared {
-                    self_type,
                     parameters,
                     ..
                 } = &protocol.constraints
@@ -382,14 +367,10 @@ impl<'a> Obligations<'a> {
                         "implementation omits the associated type `{name}` required by an equality"
                     ))
                 })?;
-                let mut owner = Substitution::new();
-                owner.insert(
-                    *self_type,
-                    implementation.for_type.try_apply_subst(substitution)?,
-                );
-                for (var, ty) in parameters.iter().zip(&implementation.protocol_args) {
-                    owner.insert(*var, ty.try_apply_subst(substitution)?);
-                }
+                let receiver = implementation.for_type.try_apply_subst(substitution)?;
+                let arguments = implementation.protocol_args.iter().map(|arg| arg.try_apply_subst(substitution))
+                    .collect::<Result<List<_>, _>>()?;
+                let owner = protocol.constraints.application(&receiver, &arguments)?;
                 default.try_apply_subst(&owner)?
             };
             let expected = expected.try_apply_subst(substitution)?;

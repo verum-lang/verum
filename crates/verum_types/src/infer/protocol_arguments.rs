@@ -576,6 +576,8 @@ impl TypeChecker {
                 refinement: None,
                 ..
             } if ty.as_ref() == carrier && i64::try_from(*value).is_ok() => Ok(()),
+            Type::Meta { value: crate::ty::ValueTerm::Parameter(_), ty, .. }
+                if self.normalize_type(ty).base() == carrier => Ok(()),
             _ => Err(invalid(
                 span,
                 "value argument lacks its exact declared scalar evidence",
@@ -647,19 +649,19 @@ impl TypeChecker {
         span: Span,
     ) -> Result<Type> {
         self.check_protocol_value_carrier(carrier, span)?;
-        let expression = match argument {
-            GenericArg::Const(expression) => expression.as_ref().clone(),
-            GenericArg::Type(annotation) => {
-                let verum_ast::TypeKind::Path(path) = &annotation.kind else {
-                    return Err(invalid(
-                        annotation.span,
-                        "a value parameter requires a value argument",
-                    ));
-                };
-                verum_ast::Expr::new(verum_ast::ExprKind::Path(path.clone()), annotation.span)
+        let expression = argument.value_for_declared_slot()
+            .ok_or_else(|| invalid(span, "a value parameter requires a value argument"))?;
+        if let verum_ast::ExprKind::Path(path) = &expression.kind
+            && let Some(name) = path.as_ident()
+            && let Some(parameter @ Type::Meta { ty, value: crate::ty::ValueTerm::Parameter(_), .. }) = self.lookup_decl_param(&name.name)
+            && (self.resolving_source_signature || (!self.const_eval.has_local_source_binding(&name.name, &self.current_module_path)
+                && !self.ctx.env.shadows_meta_parameter(&name.name, parameter)))
+        {
+            if self.normalize_type(ty).base() != carrier {
+                return Err(invalid(expression.span, "symbolic value argument has a different declared scalar sort"));
             }
-            _ => return Err(invalid(span, "a value parameter requires a value argument")),
-        };
+            return Ok(parameter.clone());
+        }
         verum_ast::checked_const::validate_i64_expression(&expression).map_err(|span| {
             invalid(
                 span,

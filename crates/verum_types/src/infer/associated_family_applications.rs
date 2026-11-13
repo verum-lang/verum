@@ -86,8 +86,10 @@ impl TypeChecker {
         };
         let owner: List<_> = parameters
             .iter()
-            .map(|variable| Type::Var(*variable))
-            .collect();
+            .map(|binder| binder.declaration_type().map_err(|message| TypeError::OtherWithCodeSpanned {
+                code: "E405".into(), msg: message, span: protocol.span,
+            }))
+            .collect::<Result<_>>()?;
         let header = super::source_protocol_header::SourceProtocolHeader {
             dyn_required: List::new(),
             identity: protocol.name.clone(), parameters: protocol.source_parameters.clone().unwrap_or_default(),

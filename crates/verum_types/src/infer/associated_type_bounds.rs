@@ -50,13 +50,11 @@ impl TypeChecker {
     ) -> (ProtocolConstraints, Option<List<ProtocolBound>>) {
         let saved_self = self.current_self_type.clone();
         let self_type = TypeVar::fresh();
-        let mut frame = indexmap::IndexMap::new();
-        let mut variables = List::new();
         for parameter in parameters {
-            let GenericParamKind::Type { name, .. } = &parameter.kind else {
-                // An unavailable universal telescope is not an elaboration error.
-                // Keep ordinary unconstrained value/kind protocols usable; any
-                // actual constraint remains an explicit unsupported obligation.
+            if !matches!(parameter.kind, GenericParamKind::Type { .. }
+                | GenericParamKind::Meta { .. } | GenericParamKind::Const { .. }) {
+                // Kinds without a represented binder may describe an unconstrained
+                // protocol, but cannot establish any universal obligation.
                 let has_constraints = !supers.is_empty()
                     || where_clauses
                         .iter()
@@ -77,7 +75,7 @@ impl TypeChecker {
                 return (
                     if has_constraints {
                         ProtocolConstraints::Unsupported(
-                        "universal protocol constraints currently require ordinary type parameters"
+                        "universal protocol constraints require declaration-owned type or value parameters"
                             .into(),
                     )
                     } else {
@@ -85,33 +83,26 @@ impl TypeChecker {
                     },
                     None,
                 );
-            };
-            let variable = TypeVar::fresh();
-            variables.push(variable);
-            frame.insert(name.name.clone(), Type::Var(variable));
+            }
         }
-        self.push_decl_param_frame(frame);
+        self.push_decl_param_frame(indexmap::IndexMap::new());
         self.set_current_self_type(Some(Type::Var(self_type)));
         let result = (|| -> Result<_> {
+            let (frame, variables) = self.associated_parameter_frame(parameters)?;
+            *self.decl_param_frames.last_mut().expect("protocol declaration scope") = frame;
             let mut defaults = List::new();
             let mut parameter_bounds = List::new();
             for (parameter, variable) in parameters.iter().zip(&variables) {
-                let GenericParamKind::Type {
-                    bounds, default, ..
-                } = &parameter.kind
-                else {
-                    unreachable!()
-                };
-                defaults.push(
-                    default
-                        .as_ref()
-                        .map(|ty| self.ast_to_type(ty))
-                        .transpose()?,
-                );
-                parameter_bounds.push(WhereClause {
-                    ty: Type::Var(*variable),
-                    bounds: self.elaborate_family_bounds(bounds)?,
-                });
+                if let GenericParamKind::Type { bounds, default, .. } = &parameter.kind {
+                    defaults.push(default.as_ref().map(|ty| self.ast_to_type(ty)).transpose()?);
+                    parameter_bounds.push(WhereClause {
+                        ty: variable.declaration_type()
+                            .map_err(|message| unsupported(parameter.span, &message))?,
+                        bounds: self.elaborate_family_bounds(bounds)?,
+                    });
+                } else {
+                    defaults.push(None);
+                }
             }
             for clause in where_clauses.iter().flatten() {
                 for predicate in &clause.predicates {
@@ -177,12 +168,16 @@ impl TypeChecker {
                     "associated family owner requires a checked protocol telescope",
                 ));
             };
-            let var = match scope {
-                ProtocolConstraints::Declared { parameters, .. } => parameters[position],
-                _ => TypeVar::fresh(),
+            let binder = match scope {
+                ProtocolConstraints::Declared { parameters, .. } => parameters[position].clone(),
+                _ if matches!(parameter.kind, GenericParamKind::Type { .. }
+                    | GenericParamKind::HigherKinded { .. } | GenericParamKind::KindAnnotated { .. }) => {
+                    GenericBinder::Type(TypeVar::fresh())
+                }
+                _ => return Err(unsupported(parameter.span, "associated family owner lacks its declared value identity")),
             };
-            frame.insert(name.clone(), Type::Var(var));
-            binders.owner.push((position, GenericBinder::Type(var)));
+            frame.insert(name.clone(), binder.declaration_type().map_err(|message| unsupported(parameter.span, &message))?);
+            binders.owner.push((position, binder));
         }
         if let ProtocolConstraints::Declared { self_type, .. } = scope {
             binders.self_type = Some(*self_type);
@@ -368,14 +363,14 @@ impl TypeChecker {
                         || args.iter().any(|arg| {
                             !matches!(
                                 arg,
-                                verum_ast::ty::GenericArg::Type(_)
+                                verum_ast::ty::GenericArg::Type(_) | verum_ast::ty::GenericArg::Const(_)
                                     | verum_ast::ty::GenericArg::Binding(_)
                             )
                         })
                     {
                         return Err(unsupported(
                             bound.span,
-                            "associated family protocol bounds require type arguments or associated type equalities",
+                            "associated family protocol bounds require type/value arguments or associated type equalities",
                         ));
                     }
                 }
@@ -394,6 +389,7 @@ impl TypeChecker {
 fn type_parameter_name(parameter: &GenericParam) -> Option<&Text> {
     match &parameter.kind {
         GenericParamKind::Type { name, .. }
+        | GenericParamKind::Meta { name, .. } | GenericParamKind::Const { name, .. }
         | GenericParamKind::HigherKinded { name, .. }
         | GenericParamKind::KindAnnotated { name, .. } => Some(&name.name),
         _ => None,

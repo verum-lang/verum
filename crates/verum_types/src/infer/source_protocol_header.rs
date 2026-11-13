@@ -93,12 +93,13 @@ impl TypeChecker {
                 }
             }
         }
+        let span = items.first().map(|item| item.span).unwrap_or_default();
         let owner = match constraints {
             ProtocolConstraints::Declared { parameters, .. } => Some(
                 parameters
                     .iter()
-                    .map(|variable| Type::Var(*variable))
-                    .collect(),
+                    .map(|binder| binder.declaration_type().map_err(|message| invalid(span, message)))
+                    .collect::<Result<_>>()?,
             ),
             _ if parameters.is_empty() => Some(List::new()),
             _ => None,
@@ -112,7 +113,6 @@ impl TypeChecker {
             supers: supers.iter().cloned().collect(),
             dyn_required: List::new(),
         };
-        let span = items.first().map(|item| item.span).unwrap_or_default();
         let self_bound = header.self_bound(span);
         self.source_type_registration.headers.push(header);
         let result = (|| {

@@ -440,10 +440,28 @@ pub enum ProtocolConstraints {
     Unsupported(Text),
     Declared {
         self_type: crate::ty::TypeVar,
-        parameters: List<crate::ty::TypeVar>,
+        parameters: List<crate::context::GenericBinder>,
         defaults: List<Maybe<Type>>,
         parameter_bounds: List<WhereClause>,
     },
+}
+
+impl ProtocolConstraints {
+    /// Instantiate the declaring Self and the exact type/value identities in source order.
+    pub(crate) fn application(&self, receiver: &Type, arguments: &[Type]) -> Result<Substitution, Text> {
+        let Self::Declared { self_type, parameters, .. } = self else {
+            return Err("protocol application lacks a declaration-owned telescope".into());
+        };
+        if parameters.len() != arguments.len() {
+            return Err("protocol application has incomplete owner arguments".into());
+        }
+        let mut scope = Substitution::new();
+        scope.insert(*self_type, receiver.clone());
+        for (binder, argument) in parameters.iter().zip(arguments) {
+            binder.bind_argument(argument, &mut scope)?;
+        }
+        Ok(scope)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -565,7 +583,6 @@ pub struct ProtocolMethod {
 #[derive(Debug, Clone, Default)]
 pub struct ProtocolMethodScope {
     pub binders: DeclarationBinders,
-    pub owner_values: List<(usize, Text)>,
     pub protocol_bounds: Map<crate::ty::TypeVar, List<ProtocolBound>>,
     pub where_clauses: List<WhereClause>,
 }
@@ -577,7 +594,7 @@ impl ProtocolMethod {
             return Err("protocol method lacks its declaration-owned signature telescope".into());
         }
         if let Some(scope) = &self.scope {
-            let expected = scope.binders.owner.len() + scope.owner_values.len();
+            let expected = scope.binders.owner.len();
             if arguments.len() != expected {
                 return Err(format!(
                     "protocol method expects {expected} owner arguments, received {}",
@@ -590,17 +607,11 @@ impl ProtocolMethod {
         let mut substitution = crate::ty::Substitution::new();
         let mut values = Map::new();
         if let Some(scope) = &self.scope {
-            for (position, variable) in &scope.binders.owner {
+            for (position, binder) in &scope.binders.owner {
                 let argument = arguments.get(*position).ok_or_else(|| {
                     Text::from("protocol method application lacks a declared owner argument")
                 })?;
-                substitution.insert(*variable, argument.clone());
-            }
-            for (position, name) in &scope.owner_values {
-                let argument = arguments.get(*position).ok_or_else(|| {
-                    Text::from("protocol method application lacks a declared value argument")
-                })?;
-                values.insert(name.clone(), argument.clone());
+                binder.bind_argument(argument, &mut substitution)?;
             }
         }
         values.insert("Self".into(), receiver.clone());
@@ -632,7 +643,6 @@ impl ProtocolMethod {
                 }
             }
             scope.binders.owner.clear();
-            scope.owner_values.clear();
             for bounds in scope.protocol_bounds.values_mut() {
                 for bound in bounds {
                     for argument in &mut bound.args {
@@ -762,7 +772,7 @@ impl ProtocolMethod {
 pub struct DeclarationBinders {
     pub self_type: Maybe<crate::ty::TypeVar>,
     /// Protocol parameter positions; value parameters do not become type variables.
-    pub owner: List<(usize, crate::ty::TypeVar)>,
+    pub owner: List<(usize, crate::context::GenericBinder)>,
     /// Family parameters in declaration order, independently of their spelling.
     pub local: List<crate::ty::TypeVar>,
 }
@@ -775,51 +785,6 @@ pub struct AssociatedFamilyBinders {
     pub local: List<crate::context::GenericBinder>,
 }
 
-impl AssociatedFamilyBinders {
-    pub(crate) fn binder_type(binder: &crate::context::GenericBinder) -> Result<Type, Text> {
-        use crate::{context::GenericBinder, ty::ValueTerm};
-        match binder {
-            GenericBinder::Type(variable) => Ok(Type::Var(*variable)),
-            GenericBinder::Value(value @ Type::Meta { value: ValueTerm::Parameter(_), .. }) => Ok(value.clone()),
-            _ => Err("associated family requires an owned type or value binder".into()),
-        }
-    }
-
-    /// Check the declared role and domain before publishing a simultaneous binding.
-    pub(crate) fn bind_argument(
-        binder: &crate::context::GenericBinder,
-        argument: &Type,
-        scope: &mut Substitution,
-    ) -> Result<(), Text> {
-        Self::bind_argument_normalized(binder, argument, scope, Type::clone)
-    }
-
-    pub(crate) fn bind_argument_normalized(
-        binder: &crate::context::GenericBinder,
-        argument: &Type,
-        scope: &mut Substitution,
-        normalize: impl FnMut(&Type) -> Type,
-    ) -> Result<(), Text> {
-        use crate::{context::GenericBinder, ty::ValueTerm};
-        match binder {
-            GenericBinder::Type(variable) => {
-                if matches!(argument, Type::Meta { .. } | Type::TypeConstructor { .. } | Type::Lifetime { .. }) {
-                    return Err("an associated type parameter requires an ordinary type argument".into());
-                }
-                scope.insert(*variable, argument.clone());
-            }
-            GenericBinder::Value(parameter @ Type::Meta { value: ValueTerm::Parameter(id), .. }) => {
-                let parameter = parameter.try_apply_subst(scope)?;
-                if !crate::value_parameter_domain::argument_satisfies_domain(&parameter, argument, normalize) {
-                    return Err("associated value argument does not establish its declared sort and domain".into());
-                }
-                scope.value_bindings.insert(*id, argument.clone());
-            }
-            _ => return Err("associated family requires an owned type or value binder".into()),
-        }
-        Ok(())
-    }
-}
 
 #[derive(Debug, Clone)]
 pub struct AssociatedType {

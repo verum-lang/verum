@@ -43,6 +43,48 @@ impl GenericBinder {
             _ => Err("implementation parameter lacks a declaration-owned identity".into()),
         }
     }
+
+    pub(crate) fn declaration_type(&self) -> Result<Type, Text> {
+        match self {
+            GenericBinder::Type(variable) => Ok(Type::Var(*variable)),
+            GenericBinder::Value(value @ Type::Meta { value: ValueTerm::Parameter(_), .. }) => Ok(value.clone()),
+            _ => Err("declaration requires an owned type or value binder".into()),
+        }
+    }
+
+    /// Check the declared role and domain before publishing a simultaneous binding.
+    pub(crate) fn bind_argument(
+        &self,
+        argument: &Type,
+        scope: &mut Substitution,
+    ) -> Result<(), Text> {
+        self.bind_argument_normalized(argument, scope, Type::clone)
+    }
+
+    pub(crate) fn bind_argument_normalized(
+        &self,
+        argument: &Type,
+        scope: &mut Substitution,
+        normalize: impl FnMut(&Type) -> Type,
+    ) -> Result<(), Text> {
+        match self {
+            GenericBinder::Type(variable) => {
+                if matches!(argument, Type::Meta { .. } | Type::TypeConstructor { .. } | Type::Lifetime { .. }) {
+                    return Err("a type parameter requires an ordinary type argument".into());
+                }
+                scope.insert(*variable, argument.clone());
+            }
+            GenericBinder::Value(parameter @ Type::Meta { value: ValueTerm::Parameter(id), .. }) => {
+                let parameter = parameter.try_apply_subst(scope)?;
+                if !crate::value_parameter_domain::argument_satisfies_domain(&parameter, argument, normalize) {
+                    return Err("value argument does not establish its declared sort and domain".into());
+                }
+                scope.value_bindings.insert(*id, argument.clone());
+            }
+            _ => return Err("declaration requires an owned type or value binder".into()),
+        }
+        Ok(())
+    }
 }
 
 /// Freshen a declaration-owned mixed telescope once. Names remain diagnostic;

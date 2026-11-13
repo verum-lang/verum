@@ -3617,6 +3617,14 @@ impl TypeChecker {
                     self.unifier.restore_substitution(saved);
                 }
                 if !satisfied {
+                    // A declared child bound also proves its instantiated parent.
+                    // Traverse only this receiver's premises; impl lookup cannot bind a rigid caller.
+                    let premise = crate::protocol::WhereClause { ty: actual.clone(), bounds: candidates };
+                    satisfied = self.protocol_checker.read().bound_follows_from_assumptions(
+                        &actual, bound, std::slice::from_ref(&premise),
+                    ).map_err(|message| TypeError::OtherWithCodeSpanned { code: "E405".into(), msg: message, span })?;
+                }
+                if !satisfied {
                     return Err(TypeError::OtherWithCodeSpanned {
                         code: "E405".into(),
                         msg: format!("cannot establish protocol argument and equality evidence for `{actual}: {}`", bound.protocol).into(),

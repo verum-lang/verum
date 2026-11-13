@@ -1,6 +1,6 @@
 //! Family application uses its declared local telescope, never RHS variable order.
 use super::{
-    AssociatedFamilyBinders, AssociatedType, ProtocolBound, ProtocolChecker, ProtocolImpl, WhereClause,
+    AssociatedType, ProtocolBound, ProtocolChecker, ProtocolImpl, WhereClause,
     implementation_match::CandidateMatch,
 };
 use crate::{
@@ -414,7 +414,7 @@ impl ProtocolChecker {
             let argument = owner_arguments
                 .get(*position)
                 .ok_or_else(|| Text::from("associated family owner application is incomplete"))?;
-            AssociatedFamilyBinders::bind_argument_normalized(binder, argument, &mut declaration_scope,
+            binder.bind_argument_normalized( argument, &mut declaration_scope,
                 |ty| self.normalize_projection_type(ty))?;
         }
         let mut arguments = List::new();
@@ -432,7 +432,7 @@ impl ProtocolChecker {
                     .ok_or_else(|| Text::from("missing required associated family argument"))?
                     .try_apply_subst(&declaration_scope)?,
             };
-            AssociatedFamilyBinders::bind_argument_normalized(binder, &argument, &mut declaration_scope,
+            binder.bind_argument_normalized( &argument, &mut declaration_scope,
                 |ty| self.normalize_projection_type(ty))?;
             arguments.push(argument);
         }
@@ -573,7 +573,7 @@ impl ProtocolChecker {
             let argument = owner_arguments
                 .get(*position)
                 .ok_or_else(|| Text::from("associated owner application is incomplete"))?;
-            AssociatedFamilyBinders::bind_argument_normalized(binder, argument, &mut scope,
+            binder.bind_argument_normalized( argument, &mut scope,
                 |ty| self.normalize_projection_type(ty))?;
         }
         if declaration.binders.local.len() != assignment.parameters().len() {
@@ -596,9 +596,9 @@ impl ProtocolChecker {
                 }
                 _ => return Err("associated assignment parameter role differs from its declaration".into()),
             };
-            AssociatedFamilyBinders::bind_argument_normalized(implemented, &argument, &mut implementation_locals,
+            implemented.bind_argument_normalized( &argument, &mut implementation_locals,
                 |ty| self.normalize_projection_type(ty))?;
-            AssociatedFamilyBinders::bind_argument_normalized(declared, &argument, &mut scope,
+            declared.bind_argument_normalized( &argument, &mut scope,
                 |ty| self.normalize_projection_type(ty))?;
             arguments.push(argument);
         }
@@ -686,7 +686,6 @@ impl ProtocolChecker {
                 return Ok(None);
             }
             let super::ProtocolConstraints::Declared {
-                self_type,
                 parameters,
                 ..
             } = constraints
@@ -698,12 +697,7 @@ impl ProtocolChecker {
                     "inherited associated declaration owner arguments are incomplete".into(),
                 );
             }
-            let mut scope: Substitution = parameters
-                .iter()
-                .zip(arguments)
-                .map(|(variable, argument)| (*variable, argument.clone()))
-                .collect();
-            scope.insert(*self_type, receiver.clone());
+            let scope = constraints.application(receiver, arguments)?;
             for bound in supers {
                 if bound.is_negative {
                     continue;

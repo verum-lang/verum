@@ -3,13 +3,13 @@ use super::TypeChecker;
 use crate::{
     Result, TypeError,
     context::GenericBinder,
-    protocol::{AssociatedFamilyBinders, ProtocolBound, ProtocolConstraints, WhereClause},
+    protocol::{ProtocolBound, ProtocolConstraints, WhereClause},
     ty::{Substitution, Type, TypeVar},
 };
 use verum_ast::{
     Span,
     decl::{ImplDecl, ImplItemKind, ImplKind},
-    ty::{GenericArg, GenericParamKind},
+    ty::GenericParamKind,
 };
 use verum_common::{List, Map, Text};
 
@@ -29,13 +29,14 @@ impl TypeChecker {
         declaration: &ImplDecl,
         identity: &Text,
     ) -> Result<()> {
-        let (constraints, associated_types, super_protocols, has_parameter_bounds) = {
+        let (constraints, source_parameters, associated_types, super_protocols, has_parameter_bounds) = {
             let registry = self.protocol_checker.read();
             let protocol = registry
                 .get_protocol(identity)
                 .ok_or_else(|| refusal(declaration.span, "protocol declaration is unavailable"))?;
             (
                 protocol.constraints.clone(),
+                protocol.source_parameters.clone(),
                 protocol.associated_types.clone(),
                 protocol.super_protocols.clone(),
                 protocol
@@ -118,10 +119,7 @@ impl TypeChecker {
             return Err(refusal(declaration.span, reason.clone()));
         }
         let ProtocolConstraints::Declared {
-            self_type: self_variable,
-            parameters: owner_variables,
-            defaults,
-            parameter_bounds,
+            parameter_bounds, ..
         } = &constraints
         else {
             return if has_associated_bounds
@@ -161,34 +159,21 @@ impl TypeChecker {
             let (assumptions, callables) = self.enter_source_impl_conditions(declaration, &frame)?;
             let self_type = self.ast_to_type(for_type)?;
             self.set_current_self_type(Some(self_type.clone()));
-            let mut substitution = Substitution::new();
-            substitution.insert(*self_variable, self_type);
-            for (position, variable) in owner_variables.iter().enumerate() {
-                let argument = match protocol_args.get(position) {
-                    Some(GenericArg::Type(ty)) => self.ast_to_type(ty)?,
-                    Some(_) => {
-                        return Err(refusal(
-                            declaration.span,
-                            "protocol type argument is not represented as a type",
-                        ));
-                    }
-                    None => defaults
-                        .get(position)
-                        .and_then(|default| default.as_ref())
-                        .ok_or_else(|| {
-                            refusal(declaration.span, "protocol type argument is missing")
-                        })?
-                        .try_apply_subst(&substitution)
-                        .map_err(|error| refusal(declaration.span, error))?,
-                };
-                substitution.insert(*variable, argument);
-            }
-            if protocol_args.len() > owner_variables.len() {
-                return Err(refusal(
-                    declaration.span,
-                    "too many protocol type arguments",
-                ));
-            }
+            let arguments = match source_parameters.as_deref() {
+                Some(parameters) => {
+                    let owner = identity.as_str().rsplit_once('.').map_or("", |(owner, _)| owner);
+                    self.elaborate_declared_arguments(parameters, owner, protocol_args, Some(&self_type), declaration.span)?
+                }
+                None if protocol_args.is_empty() => List::new(),
+                None => return Err(refusal(declaration.span, "protocol arguments lack their declaration-owned source header")),
+            };
+            let substitution = constraints.application(&self_type, &arguments)
+                .map_err(|message| refusal(declaration.span, message))?;
+            let inherited = super_protocols.iter()
+                .map(|bound| bound.try_apply_subst(&substitution))
+                .collect::<std::result::Result<List<_>, _>>()
+                .map_err(|message| refusal(declaration.span, message))?;
+            self.prove_associated_bounds(&self_type, &inherited, &assumptions, &callables, declaration.span)?;
             for clause in parameter_bounds {
                 let ty = clause
                     .ty
@@ -258,8 +243,7 @@ impl TypeChecker {
                             ));
                         }
                     };
-                    AssociatedFamilyBinders::bind_argument(
-                        source_binder,
+                    source_binder.bind_argument(
                         &argument,
                         &mut family_substitution,
                     )
@@ -285,8 +269,7 @@ impl TypeChecker {
                         &parameter.name
                     };
                     if let Some(parameter) = implementation_parameters.get(index) {
-                        AssociatedFamilyBinders::bind_argument_normalized(
-                            parameter,
+                        parameter.bind_argument_normalized(
                             &argument,
                             &mut implementation_scope,
                             |ty| self.normalize_type(ty),

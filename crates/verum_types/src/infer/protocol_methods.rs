@@ -88,26 +88,18 @@ impl TypeChecker {
         let mut frame = indexmap::IndexMap::new();
         let mut scope = ProtocolMethodScope::default();
         for (position, parameter) in owner.iter().enumerate() {
-            match &parameter.kind {
-                GenericParamKind::Type { name, .. } => {
-                    let variable = match constraints {
-                        ProtocolConstraints::Declared { parameters, .. } => parameters[position],
-                        _ => TypeVar::fresh(),
-                    };
-                    frame.insert(name.name.clone(), Type::Var(variable));
-                    scope.binders.owner.push((position, variable));
-                }
-                GenericParamKind::Meta { name, .. } | GenericParamKind::Const { name, .. } => {
-                    frame.insert(name.name.clone(), self.source_value_parameter(parameter)?);
-                    scope.owner_values.push((position, name.name.clone()));
-                }
-                _ => {
-                    return Err(invalid(
-                        parameter.span,
-                        "protocol method owner parameter has no supported signature representation",
-                    ));
-                }
-            }
+            let name = match &parameter.kind {
+                GenericParamKind::Type { name, .. } | GenericParamKind::Meta { name, .. }
+                | GenericParamKind::Const { name, .. } => name,
+                _ => return Err(invalid(parameter.span, "protocol method owner parameter has no supported signature representation")),
+            };
+            let binder = match constraints {
+                ProtocolConstraints::Declared { parameters, .. } => parameters[position].clone(),
+                _ if matches!(parameter.kind, GenericParamKind::Type { .. }) => crate::context::GenericBinder::Type(TypeVar::fresh()),
+                _ => crate::context::GenericBinder::Value(self.source_value_parameter(parameter)?),
+            };
+            frame.insert(name.name.clone(), binder.declaration_type().map_err(|message| invalid(parameter.span, message))?);
+            scope.binders.owner.push((position, binder));
         }
         let mut names = List::new();
         for parameter in &method.generics {
@@ -440,32 +432,12 @@ impl TypeChecker {
             if protocol.super_protocols.is_empty() {
                 return Ok(List::new());
             }
-            let mut substitution = crate::ty::Substitution::new();
-            match &protocol.constraints {
-                ProtocolConstraints::Declared {
-                    self_type,
-                    parameters,
-                    ..
-                } => {
-                    if parameters.len() != arguments.len() {
-                        return Err(invalid(
-                            span,
-                            "super-protocol application lacks its complete owner arguments",
-                        ));
-                    }
-                    substitution.insert(*self_type, owner_receiver.clone());
-                    for (variable, argument) in parameters.iter().zip(arguments) {
-                        substitution.insert(*variable, argument.clone());
-                    }
-                }
-                _ if !protocol.type_params.is_empty() => {
-                    return Err(invalid(
-                        span,
-                        "super-protocol application lacks its declaration-owned telescope",
-                    ));
-                }
-                _ => {}
-            }
+            let substitution = match &protocol.constraints {
+                ProtocolConstraints::Declared { .. } => protocol.constraints.application(owner_receiver, arguments)
+                    .map_err(|message| invalid(span, message))?,
+                _ if protocol.type_params.is_empty() => crate::ty::Substitution::new(),
+                _ => return Err(invalid(span, "super-protocol application lacks its declaration-owned telescope")),
+            };
             active.push(name.clone());
             let mut methods: List<AppliedProtocolMethod> = List::new();
             for super_bound in &protocol.super_protocols {

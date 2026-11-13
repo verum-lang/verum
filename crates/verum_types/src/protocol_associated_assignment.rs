@@ -1,6 +1,5 @@
 //! Implementation-owned associated type expressions. A family's local binders
 //! belong to its definition, independently of later protocol elaboration.
-use super::AssociatedFamilyBinders;
 use crate::{
     context::GenericBinder,
     ty::{Substitution, Type, TypeVar, ValueId, ValueTerm},
@@ -93,7 +92,7 @@ impl AssociatedTypeAssignment {
             }
         }
         for (parameter, argument) in self.parameters.iter().zip(arguments) {
-            AssociatedFamilyBinders::bind_argument(parameter, argument, &mut substitution)?;
+            parameter.bind_argument( argument, &mut substitution)?;
         }
         self.body.try_apply_subst(&substitution)
     }
