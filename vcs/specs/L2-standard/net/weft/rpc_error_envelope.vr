@@ -1,0 +1,16 @@
+// @test: run
+// @tier: 0
+// @level: L2
+// @tags: net, weft, rpc, json, utf8
+// @timeout: 10000
+// @expected-exit: 0
+
+mount core.net.weft.rpc.{RpcError, RpcStatus};
+
+fn main() {
+    let failure = RpcError.new(RpcStatus.InvalidArgument, "a\r\n\t\"\\\0Ж");
+    let plain = failure.to_json_envelope();
+    assert_eq(plain, "{\"code\":\"invalid_argument\",\"message\":\"a\\r\\n\\t\\\"\\\\\\u0000Ж\"}");
+    let detailed = failure.with_details_json("[{\"kind\":\"input\"}]").to_json_envelope();
+    assert_eq(detailed, "{\"code\":\"invalid_argument\",\"message\":\"a\\r\\n\\t\\\"\\\\\\u0000Ж\",\"details\":[{\"kind\":\"input\"}]}");
+}

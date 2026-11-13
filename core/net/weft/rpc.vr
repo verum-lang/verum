@@ -57,7 +57,7 @@
 )
 module core.net.weft.rpc;
 
-mount core.text.builder.{TextBuilder};
+mount core.encoding.json.{emit_string};
 mount core.collections.list.{List};
 mount core.collections.map.{Map};
 mount core.net.http.{Method, Headers, Response};
@@ -212,13 +212,14 @@ implement RpcError {
     /// Render as the Connect error envelope:
     ///  { "code": "<status.name>", "message": "<text>", "details": [...] }
     public fn to_json_envelope(&self) -> Text {
-        let details = match &self.details_json {
-            Some(d) => f",\"details\":{d}",
-            None    => "",
-        };
-        // Escape the message — minimal (no U+0000..U+001F other than \n/\t).
-        let msg = json_escape(&self.message);
-        f"{{\"code\":\"{self.status.name()}\",\"message\":\"{msg}\"{details}}}"
+        let mut out = f"{{\"code\":\"{self.status.name()}\",\"message\":";
+        emit_string(&self.message, &mut out);
+        if let Some(details) = &self.details_json {
+            out.push_str(",\"details\":");
+            out.push_str(details);
+        }
+        out.push_str("}");
+        out
     }
 }
 
@@ -254,26 +255,6 @@ implement IntoResponse for RpcError {
             &"content-type", &"application/json",
         )
     }
-}
-
-/// Minimal JSON-string escape: `"` → `\"`, `\\` → `\\\\`, control
-/// chars as `\uXXXX`. Full RFC 8259 coverage lives in core.encoding.json.
-fn json_escape(s: &Text) -> Text {
-    let bytes = s.as_bytes();
-    let mut out = TextBuilder.new();
-    let mut i: Int = 0;
-    while i < bytes.len() {
-        let b = bytes[i];
-        if b == 0x22 { out.push_str("\\\""); }
-        else if b == 0x5C { out.push_str("\\\\"); }
-        else if b == 0x0A { out.push_str("\\n"); }
-        else if b == 0x0D { out.push_str("\\"); }
-        else if b == 0x09 { out.push_str("\\t"); }
-        else if b < 0x20 { out.push_str(f"\\u{b:04x}"); }
-        else { out.push_byte(b); }
-        i = i + 1;
-    }
-    out.finish()
 }
 
 // =============================================================================
@@ -326,7 +307,7 @@ implement<R: UnaryRpcHandler> Handler for RpcAdapter<R> {
         // Connect requires POST for unary. RFC-compatible check.
         match req.method {
             Method.Post => {}
-            _ => return Err(WeftError.BadRequest("RPC requires POST".into())),
+            _ => return Err(WeftError.BadRequest("RPC requires POST")),
         }
         let meta = RpcMeta {
             path: req.path.clone(),
@@ -371,7 +352,7 @@ implement Router {
         path: Text,
         handler: R,
     ) -> Router {
-        self.rpc_unary_with_ct(path, handler, "application/json".into())
+        self.rpc_unary_with_ct(path, handler, "application/json")
     }
 
     public fn rpc_unary_with_ct<R: UnaryRpcHandler + Send + Sync + 'static>(

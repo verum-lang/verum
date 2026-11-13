@@ -943,7 +943,8 @@ fn indent(out: &mut Text, depth: Int) {
     }
 }
 
-fn emit_string(s: &Text, out: &mut Text) {
+/// Append one quoted JSON string, escaping control characters and preserving UTF-8.
+public(cog) fn emit_string(s: &Text, out: &mut Text) {
     out.push_byte(0x22_u8);
     let bytes = s.as_bytes();
     let mut i = 0;
