@@ -290,14 +290,14 @@ public fn script_set_float(name: Text, value: Float);
 @intrinsic("script_global_list")
 public fn script_global_list<T>(name: Text) -> List<T>;
 @intrinsic("script_global_map")
-public fn script_global_map<K, V>(name: Text) -> Map<K, V>;
+public fn script_global_map<K: Hash + Eq, V>(name: Text) -> Map<K, V>;
 
 /// Script: share a `List` / `Map` into the world/host table (read back by the
 /// host or another script via `script_global_list` / `script_global_map`).
 @intrinsic("script_set_list")
 public fn script_set_list<T>(name: Text, value: List<T>);
 @intrinsic("script_set_map")
-public fn script_set_map<K, V>(name: Text, value: Map<K, V>);
+public fn script_set_map<K: Hash + Eq, V>(name: Text, value: Map<K, V>);
 
 // =============================================================================
 // SECTION 9: Structural marshaling of a `List` outcome value
