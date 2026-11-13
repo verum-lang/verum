@@ -424,15 +424,17 @@ impl TypeChecker {
             let name = self.path_to_string(&bound.protocol);
             self.ensure_stdlib_type_loaded_transitive(&name);
             self.load_source_bound_implementations(&subject, &bound, assumptions, callables, span)?;
+            let expanded = self.staged_proof_receiver(&subject, span)?;
+            let proof_receiver = expanded.as_ref().unwrap_or(&subject);
             // A declaration assumption can already prove this goal. Otherwise
             // follow only the actual matched implementation's owned telescope,
             // never guessed protocols for a nominal argument's spelling.
-            if self.protocol_checker.read().check_universal_bounds_with_callables(&subject, std::slice::from_ref(&bound), assumptions, callables).is_ok() {
+            if self.protocol_checker.read().check_universal_bounds_with_callables(proof_receiver, std::slice::from_ref(&bound), assumptions, callables).is_ok() {
                 continue;
             }
             self.load_protocol_owner_blankets(&name)?;
             let registry = self.protocol_checker.read();
-            let requirements = registry.source_bound_requirements(&subject, &bound, assumptions, callables)
+            let requirements = registry.source_bound_requirements(&subject, proof_receiver, &bound, assumptions, callables)
                 .map_err(|error| refusal(span, error))?;
             for clause in requirements {
                 for required in clause.bounds {
@@ -440,9 +442,10 @@ impl TypeChecker {
                 }
             }
         }
+        let expanded = self.staged_proof_receiver(ty, span)?;
         self.protocol_checker
             .read()
-            .check_universal_bounds_with_callables(ty, bounds, assumptions, callables)
+            .check_universal_bounds_with_callables(expanded.as_ref().unwrap_or(ty), bounds, assumptions, callables)
             .map_err(|error| refusal(span, error))
     }
 }

@@ -25,6 +25,9 @@ pub(crate) struct SourceTypeRegistration {
     pub constructor_values: Map<Text, crate::context::TypeScheme>,
     completed: Map<Text, AcceptedSourceType>,
     pub pending: Map<Text, TypeDecl>,
+    /// Completed alias bodies usable by this transaction's own proof queries.
+    /// Other checkers see them only after the entire registration commits.
+    staged_aliases: Map<Text, crate::protocol::AssociatedTypeAssignment>,
     pub depth: usize,
     pub failure: Option<Text>,
     pub aliases: Map<Text, (Option<Type>, Option<verum_common::List<Text>>)>,
@@ -217,8 +220,13 @@ impl super::TypeChecker {
         self.source_type_registration.depth -= 1;
         if let Err(error) = &result {
             self.source_type_registration.failure = Some(error.to_string().into());
+        } else if !outermost && matches!(declaration.body, verum_ast::TypeDeclBody::Alias(_)) {
+            if let (_, Some(alias)) = self.completed_protocol_type_authority(&key, declaration) {
+                self.source_type_registration.staged_aliases.insert(key.clone(), alias);
+            }
         }
         if outermost {
+            self.source_type_registration.staged_aliases.clear();
             let pending = std::mem::take(&mut self.source_type_registration.pending);
             let aliases = std::mem::take(&mut self.source_type_registration.aliases);
             let constructors = std::mem::take(&mut self.source_type_registration.constructor_values);
@@ -294,6 +302,37 @@ impl super::TypeChecker {
             }));
         }
         result
+    }
+
+    /// Normalize only a fully checked alias, preserving its predicate, binder roles
+    /// and exact owner. Keep the named subject separately for implementation lookup.
+    pub(super) fn staged_proof_receiver(&self, subject: &Type, span: verum_ast::Span)
+        -> Result<Option<Type>>
+    {
+        use crate::ty::{Substitution, nominal_path_name};
+        if self.source_type_registration.staged_aliases.is_empty() {
+            return Ok(None);
+        }
+        let mut expanded = None;
+        let mut visited = verum_common::Set::new();
+        loop {
+            let (key, arguments) = match expanded.as_ref().unwrap_or(subject) {
+                Type::Named { path, args } => match nominal_path_name(path) {
+                    Some(name) => (Text::from(name.as_ref()), args),
+                    None => break,
+                },
+                Type::Generic { name, args } => (name.clone(), args),
+                _ => break,
+            };
+            let Some(alias) = self.source_type_registration.staged_aliases.get(&key) else { break };
+            if !visited.insert(key.clone()) {
+                return Err(TypeError::OtherWithCodeSpanned { code: "E405".into(),
+                    msg: format!("cyclic alias `{key}` in a protocol obligation").into(), span });
+            }
+            expanded = Some(alias.instantiate(arguments, &Substitution::new())
+                .map_err(|msg| TypeError::OtherWithCodeSpanned { code: "E405".into(), msg, span })?);
+        }
+        Ok(expanded)
     }
 
     /// Canonicalize only slots listed by the selected declaration. The same

@@ -17,7 +17,8 @@ impl ProtocolChecker {
     /// candidates, equalities, callable bounds and overlapping specializations.
     pub(crate) fn source_bound_requirements(
         &self,
-        ty: &Type,
+        source_receiver: &Type,
+        proof_receiver: &Type,
         bound: &ProtocolBound,
         assumptions: &[WhereClause],
         callables: &verum_common::Map<TypeVar, Type>,
@@ -25,10 +26,10 @@ impl ProtocolChecker {
         let key = self.make_protocol_key(&bound.protocol);
         let mut requirements = List::new();
         if let Some(index) = self.impls_by_protocol.get(&key) {
-            for index in index.candidates(ty, self.requires_unfiltered_type_candidates(ty)) {
+            for index in index.candidates(proof_receiver, self.requires_unfiltered_type_candidates(proof_receiver)) {
                 let implementation = &self.impls[index];
                 if let CandidateMatch::Matched(substitution) = self.match_implementation_candidate_in_environment(
-                    implementation, ty, Some(&bound.args), true, &ConstraintEnvironment { protocols: assumptions, callables },
+                    implementation, proof_receiver, Some(&bound.args), true, &ConstraintEnvironment { protocols: assumptions, callables },
                 ) {
                     for clause in &implementation.where_clauses {
                         requirements.push(clause.try_apply_subst(&substitution)?);
@@ -44,13 +45,14 @@ impl ProtocolChecker {
         {
             let mut substitution: Substitution = parameters.iter().zip(&bound.args)
                 .map(|(parameter, argument)| (*parameter, argument.clone())).collect();
-            substitution.insert(*self_type, ty.clone());
+            substitution.insert(*self_type, source_receiver.clone());
             for clause in parameter_bounds {
                 requirements.push(clause.try_apply_subst(&substitution)?);
             }
             if !protocol.super_protocols.is_empty() {
                 requirements.push(WhereClause {
-                    ty: ty.clone(),
+                    // Loading an inherited witness needs the same declaring module.
+                    ty: source_receiver.clone(),
                     bounds: protocol.super_protocols.iter()
                         .map(|bound| bound.try_apply_subst(&substitution))
                         .collect::<Result<List<_>, _>>()?,

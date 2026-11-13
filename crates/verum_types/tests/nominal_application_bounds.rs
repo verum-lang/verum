@@ -408,3 +408,53 @@ fn a_conditional_default_uses_its_own_rigid_receiver_as_a_premise() {
     }
     refused(&format!("{declarations} type Cursor is protocol {{ fn save(self) -> Saved<Self> {{ Saved {{ value:self }} }} }};"));
 }
+
+const REFINED_POLICY: &str = "public type Observe is protocol { type Output; };
+    implement Observe for Text { type Output = Int; }
+    public type Table<K:Observe<Output=Bool>> is { value: K };";
+const REFINED_KEY: &str = "mount demo.main.Observe; public type Identifier is Text { self.len() > 0 };
+    implement Observe for Identifier { type Output = Bool; }";
+const NESTED_SETTINGS: &str = "mount demo.lib.Identifier; mount demo.main.Table;
+    public type Settings is { value: Table<Identifier> };";
+
+fn nested_settings(policy: &str, key: &str, settings: &str) -> Vec<String> {
+    let source = format!("{policy} type Environment is {{ config: demo.other.Settings }};");
+    mounted(&source, key, Some(settings))
+}
+
+#[test]
+fn nested_source_loads_use_the_checked_refined_receiver() {
+    let found = nested_settings(REFINED_POLICY, REFINED_KEY, NESTED_SETTINGS);
+    assert!(found.is_empty(), "{found:#?}");
+    let renamed = NESTED_SETTINGS.replace("lib.Identifier;", "lib.Identifier as Key;")
+        .replace("Table<Identifier>", "Table<Key>");
+    let found = nested_settings(REFINED_POLICY, REFINED_KEY, &renamed);
+    assert!(found.is_empty(), "{found:#?}");
+    let inherited = REFINED_POLICY.replace("public type Observe is protocol",
+        "public type Inspect is protocol {}; implement Inspect for Text {} public type Observe is protocol extends Inspect");
+    let witnesses = REFINED_KEY.to_owned() + " mount demo.main.Inspect; implement Inspect for Identifier {}";
+    let found = nested_settings(&inherited, &witnesses, NESTED_SETTINGS);
+    assert!(found.is_empty(), "{found:#?}");
+    let missing = nested_settings(&inherited, REFINED_KEY, NESTED_SETTINGS);
+    assert!(missing.iter().any(|error| error.contains("Inspect")), "{missing:#?}");
+}
+
+#[test]
+fn nested_refined_contracts_refuse_missing_or_foreign_evidence() {
+    let without_impl = REFINED_KEY.split("implement Observe").next().unwrap();
+    let foreign = REFINED_POLICY.to_owned() + " public type Identifier is Int { self > 0 };
+        implement Observe for Identifier { type Output = Bool; }";
+    for (policy, key, settings) in [
+        (REFINED_POLICY.to_owned(), without_impl.to_owned(), NESTED_SETTINGS.to_owned()),
+        (REFINED_POLICY.to_owned(), REFINED_KEY.replace("Output = Bool", "Output = Int"), NESTED_SETTINGS.to_owned()),
+        (foreign, without_impl.to_owned(), NESTED_SETTINGS.to_owned()),
+        (REFINED_POLICY.to_owned(), REFINED_KEY.to_owned(), NESTED_SETTINGS.replace("Table<Identifier>", "Table<Text>")),
+    ] {
+        let found = nested_settings(&policy, &key, &settings);
+        assert!(found.iter().any(|error| error.contains("implementation") || error.contains("associated")),
+            "{key}\n{settings}\n{found:#?}");
+    }
+    let bad_source = REFINED_KEY.replace("is Text {", "is Undeclared {");
+    let found = nested_settings(REFINED_POLICY, &bad_source, NESTED_SETTINGS);
+    assert!(found.iter().any(|error| error.contains("Undeclared")), "{found:#?}");
+}

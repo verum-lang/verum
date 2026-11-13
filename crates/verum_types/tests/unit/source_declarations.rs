@@ -538,3 +538,26 @@ fn replacing_the_exact_dependency_body_invalidates_an_unchanged_carrier() {
     );
     assert!(errors.is_empty(), "{errors:?}");
 }
+
+#[test]
+fn checked_nested_aliases_stay_private_and_expire_with_their_transaction() {
+    use verum_ast::Span;
+    use crate::{Type, TypeError};
+    let ast = Parser::new("type Key is Int { self > 0 }; type Outer is { key: Key };")
+        .parse_module().unwrap();
+    let ItemKind::Type(key) = &ast.items[0].kind else { panic!("expected Key declaration") };
+    let ItemKind::Type(outer) = &ast.items[1].kind else { panic!("expected Outer declaration") };
+    for commit in [false, true] {
+        let mut checker = TypeChecker::with_minimal_context();
+        checker.register_primitives();
+        checker.set_current_module_path("sample");
+        let subject = Type::Named { path: TypeChecker::text_to_path(&"sample.Key".into()), args: Default::default() };
+        let result = checker.with_source_type_registration(outer, "sample.Outer".into(), |checker| {
+            checker.register_type_declaration(key)?;
+            assert!(matches!(checker.staged_proof_receiver(&subject, key.span)?, Some(Type::Refined { .. })));
+            if commit { Ok(()) } else { Err(TypeError::TypeNotFound { name: "Missing".into(), span: Span::default() }) }
+        });
+        assert_eq!(result.is_ok(), commit);
+        assert!(checker.staged_proof_receiver(&subject, key.span).unwrap().is_none());
+    }
+}
