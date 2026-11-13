@@ -46,7 +46,7 @@ mount core.math.gpu.{DeviceId, with_device, current_device};
 mount core.time.{Duration};
 mount core.time.instant.{Instant};
 mount core.async.channel.{Channel};
-mount core.async.{Future};
+mount core.collections.slice.*;
 mount core.base.coercion.{IntCoercible};
 
 // =============================================================================
@@ -922,11 +922,13 @@ implement<A: Actor, DIMS: meta MeshDims> ActorMesh<A, DIMS> {
         }
     }
 
-    // Broadcast message to all actors in mesh
-    public fn broadcast<M: Clone>(&self, msg: M) -> List<Future<M>> {
-        self.actors.iter().map(|actor| {
-            actor.mailbox.send(DistributedMessage(msg.clone()))
-        }).collect()
+    /// Try each mailbox in handle order. A full or closed mailbox returns false.
+    public fn broadcast(&mut self, msg: A) -> List<Bool> where type A: Clone {
+        let mut accepted: List<Bool> = List.with_capacity(self.actors.len());
+        for actor in self.actors.iter_mut() {
+            accepted.push(actor.mailbox.send(DistributedMessage(msg.clone())));
+        }
+        accepted
     }
 
     // Call function on all actors
