@@ -713,12 +713,7 @@ impl TypeChecker {
 
         // Archive metadata owns imports even without source registry entries.
         if !registry.is_empty() || self.core_metadata.is_some() {
-            // Ignore errors for now - in single-file mode, modules may not be registered
-            let result = self.process_import(import, current_path.as_str(), &registry);
-            if let Err(ref e) = result {
-                tracing::debug!("process_import error (ignored): {:?}", e);
-            }
-            let _ = result;
+            self.process_import(import, current_path.as_str(), &registry)?;
         }
 
         // Bare-mount module-alias registration.
@@ -796,15 +791,9 @@ impl TypeChecker {
                             || occupant_is_ambient_builtin
                         {
                             let written = segments.join(".");
-                            let binding = self.get_module_with_path_aliases(&written, &registry)
-                                .map(|module| Text::from(module.path.to_string()))
-                                .or_else(|| {
-                                    let (parent, name) = written.rsplit_once('.')?;
-                                    let (declaration, owner) = self.resolve_public_source_type(parent, name, &registry)?;
-                                    Some(Self::source_type_declaration_key(&owner, &declaration.name.name))
-                                })
-                                .unwrap_or_else(|| written.into());
-                            self.module_aliases.insert(alias_text, binding);
+                            if let Some(owner) = self.mount_module_target(&written, &registry) {
+                                self.module_aliases.insert(alias_text, owner);
+                            }
                         }
                     }
                 }
@@ -24338,6 +24327,17 @@ bake to have this verified.",
                     });
                 let type_name = nominal_owner.unwrap_or_else(|| type_name.into());
                 let canonical = self.canonical_alias_target(type_name.as_str());
+                if canonical != type_name {
+                    // A transparent alias can import its target's type without
+                    // importing its inherent implementations. The target owns
+                    // both the static signature and its visibility.
+                    let owner = Type::Named {
+                        path: Self::text_to_path(&canonical),
+                        args: List::new(),
+                    };
+                    self.load_source_receiver_methods(&owner)?;
+                    self.check_source_method_visibility(&owner, method.name.as_str(), span)?;
+                }
                 let type_name: &str = if canonical.as_str() != type_name.as_str() {
                     canonical.as_str()
                 } else {
@@ -24467,7 +24467,12 @@ bake to have this verified.",
 
                 // Try to look up the qualified variant constructor or static method.
                 let mut env_resolved = false;
-                if let Some(scheme) = self.lookup_static_or_load_from_metadata(&qualified_name) {
+                let declared = self.lookup_static_or_load_from_metadata(&qualified_name)
+                    .or_else(|| self.inherent_methods.read().get(&type_name_text)
+                        .and_then(|methods| methods.get(&Text::from(format!("$static${method_name}"))))
+                        .filter(|scheme| scheme.callable_source.is_some())
+                        .cloned());
+                if let Some(scheme) = declared {
                     let instance = scheme.try_instantiate()
                         .map_err(|message| TypeError::UniverseBinding { message, span })?;
 

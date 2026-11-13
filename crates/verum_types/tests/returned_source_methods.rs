@@ -953,6 +953,57 @@ fn inherent_calls_must_prove_the_declaring_implementations_conditions() {
 }
 
 #[test]
+fn a_public_type_alias_uses_its_targets_static_method_owner() {
+    let modules = [
+        ("demo.model", r#"
+            public type Signal is { public code: Int };
+            public type Kind is | First | Second;
+            implement Signal {
+                public fn make(code: Int) -> Signal { Signal { code: code } }
+                public fn from_kind(kind: Kind) -> Signal { Signal { code: 1 } }
+                private fn hidden() -> Int { 41 }
+            }
+        "#),
+        ("demo.facade", r#"
+            public mount demo.model.Signal;
+            public type Notice is Signal;
+        "#),
+        ("demo.foreign", r#"
+            public type Signal is { public code: Int };
+            implement Signal {
+                public fn make(code: Bool) -> Signal { Signal { code: 0 } }
+                public fn foreign() -> Int { 17 }
+            }
+        "#),
+    ];
+    for mounts in [
+        "mount demo.facade.{Notice}; mount demo.foreign.{Signal}; mount demo.model.{Kind};",
+        "mount demo.facade.Notice; mount demo.foreign.Signal; mount demo.model.Kind;",
+    ] {
+        let source = |body: &str| format!("{mounts} {body}");
+        let errors = check(&source("fn use_it() -> Notice { Notice.make(7) }"), &modules);
+        assert!(errors.is_empty(), "{mounts}: {errors:?}");
+        let branch = "fn select_kind(flag: Bool) -> Notice {
+            if flag { return Notice.from_kind(Kind.First); }
+            Notice.from_kind(Kind.Second)
+        }";
+        let errors = check(&source(branch), &modules);
+        assert!(errors.is_empty(), "{mounts}: {errors:?}");
+        for bad in [
+            "fn wrong() -> Notice { Notice.make(true) }",
+            "fn wrong() -> Signal { Notice.make(7) }",
+        ] {
+            let errors = check(&source(bad), &modules);
+            assert!(errors.iter().any(|error| error.contains("Mismatch")), "{bad}: {errors:?}");
+        }
+        for method in ["foreign", "missing", "hidden"] {
+            let body = format!("fn wrong() -> Int {{ Notice.{method}() }}");
+            assert_missing_method(&check(&source(&body), &modules), method);
+        }
+    }
+}
+
+#[test]
 fn a_type_mounted_through_a_module_alias_keeps_its_static_method_owner() {
     let modules = [
         ("demo.tickets", r#"
