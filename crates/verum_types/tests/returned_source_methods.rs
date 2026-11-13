@@ -19,6 +19,43 @@ const PROVIDER: &str = r#"
 "#;
 
 #[test]
+fn imported_generic_pointer_payloads_preserve_the_pointee_and_access_mode() {
+    let modules = [
+        (
+            "demo.device",
+            "public type Address<T> is (*mut T); public type Register<T> is (*volatile T);",
+        ),
+        ("demo.host", "public type Address<T> is (*const T);"),
+    ];
+    let mounts = "mount demo.device.{Address as Device, Register}; mount demo.host.Address as Host;";
+    for (carrier, pointee) in [
+        ("Device", "*mut Int"),
+        ("Host", "*const Int"),
+        ("Register", "*volatile Int"),
+    ] {
+        let source = format!("{mounts} fn read(value: {carrier}<Int>) -> {pointee} {{ value.0 }}");
+        let (checker, errors) = check_with_checker(&source, &modules);
+        assert!(errors.is_empty(), "{source}: {errors:?}");
+        let projection = "value.0";
+        let start = source.find(projection).unwrap() as u32;
+        let span = verum_ast::Span::new(
+            start, start + projection.len() as u32, FileId::new(modules.len() as u32),
+        );
+        let ty = checker.type_registry.lookup_expr(span).expect("inferred field projection");
+        assert_eq!(ty.to_string(), pointee);
+    }
+    for (carrier, wrong) in [
+        ("Device", "*mut Bool"),
+        ("Host", "*const Bool"),
+        ("Register", "*volatile mut Int"),
+    ] {
+        let source = format!("{mounts} fn wrong(value: {carrier}<Int>) -> {wrong} {{ value.0 }}");
+        let errors = check(&source, &modules);
+        assert!(errors.iter().any(|error| error.contains("Mismatch")), "{source}: {errors:?}");
+    }
+}
+
+#[test]
 fn plain_call_bounds_load_the_returned_values_own_implementation() {
     let modules = [
         ("demo.capability", "public type Stamp is protocol { fn stamp(&self) -> Int; };"),

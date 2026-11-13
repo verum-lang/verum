@@ -108,6 +108,20 @@ fn an_unrepresented_carrier_shape_is_refused_without_a_partial_result() {
     assert_eq!(error.as_str(), "declared carrier has no supported named-slot traversal");
 }
 
+#[test]
+fn nested_pointer_slots_preserve_each_access_mode_and_reject_an_unknown_inner_shape() {
+    let checker = TypeChecker::new();
+    let pointer = |inner| Type::Pointer {
+        mutable: false,
+        inner: Box::new(Type::VolatilePointer { mutable: true, inner: Box::new(inner) }),
+    };
+    let parameters = mapping("T", Type::Bool);
+    assert_eq!(checker.substitute_declared_named_slots(&pointer(named("T")), &parameters),
+        Ok(pointer(Type::Bool)));
+    let unknown = Type::Generator { yield_ty: Box::new(named("T")), return_ty: Box::new(Type::Unit) };
+    assert!(checker.substitute_declared_named_slots(&pointer(unknown), &parameters).is_err());
+}
+
 fn function_parameter(function: Type) -> Type { Type::meta("F".into(), function, None) }
 
 #[test]

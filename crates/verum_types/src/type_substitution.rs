@@ -25,8 +25,14 @@ impl Node<'_> {
 enum Scope<'a> {
     Borrowed(&'a Substitution),
     Owned(Rc<Substitution>),
-    Names(&'a Map<Text, Type>),
-    ScopedNames(Rc<Map<Text, Type>>),
+    Names(&'a Map<Text, Type>, NameAuthority),
+    ScopedNames(Rc<Map<Text, Type>>, NameAuthority),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum NameAuthority {
+    Alias,
+    DeclaredSlot,
 }
 
 impl Scope<'_> {
@@ -34,22 +40,24 @@ impl Scope<'_> {
         match self {
             Self::Borrowed(substitution) => Some(substitution),
             Self::Owned(substitution) => Some(substitution),
-            Self::Names(_) | Self::ScopedNames(_) => None,
+            Self::Names(..) | Self::ScopedNames(..) => None,
         }
     }
 
-    fn names(&self) -> Option<&Map<Text, Type>> {
+    fn names(&self) -> Option<(&Map<Text, Type>, NameAuthority)> {
         match self {
-            Self::Names(names) => Some(names),
-            Self::ScopedNames(names) => Some(names),
+            Self::Names(names, authority) => Some((names, *authority)),
+            Self::ScopedNames(names, authority) => Some((names, *authority)),
             _ => None,
         }
     }
 
     fn replacement(&self, ty: &Type) -> Option<&Type> {
-        if let Some(names) = self.names() {
+        if let Some((names, authority)) = self.names() {
             return match ty {
-                Type::Var(variable) => names.get(&Text::from(format!("{variable}"))),
+                Type::Var(variable) if authority == NameAuthority::Alias => {
+                    names.get(&Text::from(format!("{variable}")))
+                }
                 Type::Generic { name, args } if args.is_empty() => names.get(name),
                 Type::Named { path, args } if args.is_empty() => {
                     path.as_ident().and_then(|name| names.get(&name.name))
@@ -74,10 +82,15 @@ impl Scope<'_> {
         body: &Type,
         depth: usize,
     ) -> Result<(List<TypeVar>, Self), Text> {
-        if let Some(names) = self.names() {
+        if let Some((names, authority)) = self.names() {
+            // Declaration slots become fresh variables. Only the following
+            // simultaneous substitution inserts the caller's actual arguments.
+            if authority == NameAuthority::DeclaredSlot {
+                return Ok((binders.iter().copied().collect(), self.clone()));
+            }
             let (renamed, scoped) =
                 Type::named_substitution_under_binders(binders, body, names, depth)?;
-            Ok((renamed, Self::ScopedNames(Rc::new(scoped))))
+            Ok((renamed, Self::ScopedNames(Rc::new(scoped), authority)))
         } else {
             let (renamed, scoped) = body.substitution_under_binders(
                 binders,
@@ -86,6 +99,86 @@ impl Scope<'_> {
             )?;
             Ok((renamed, Self::Owned(Rc::new(scoped))))
         }
+    }
+
+    /// Scope a declaration's named slots over this node. The common child
+    /// visitor transports type operands. Separate obligations need their own
+    /// checked representation before they may cross this boundary.
+    fn enter_declaration(&mut self, ty: &Type) -> Result<(), Text> {
+        let Some((names, NameAuthority::DeclaredSlot)) = self.names() else {
+            return Ok(());
+        };
+        match ty {
+            Type::Function {
+                type_params,
+                contexts,
+                ..
+            } => {
+                if type_params.iter().any(|parameter| {
+                    parameter.is_meta || !parameter.bounds.is_empty() || parameter.default.is_some()
+                }) {
+                    return Err("declared function carrier requires checked transport of generic parameter obligations".into());
+                }
+                if contexts.as_ref().is_some_and(|context| match context {
+                    crate::di::requirement::ContextExpr::Variable(_) => true,
+                    crate::di::requirement::ContextExpr::Concrete(requirements) => {
+                        requirements.iter().any(|context| {
+                            !context.type_args.is_empty()
+                                || context.condition.is_some()
+                                || context
+                                    .transforms
+                                    .iter()
+                                    .any(|transform| !transform.args.is_empty())
+                        })
+                    }
+                }) {
+                    return Err("declared function carrier requires checked transport of context dependencies".into());
+                }
+                if type_params
+                    .iter()
+                    .any(|local| names.contains_key(&local.name))
+                {
+                    let mut scoped = names.clone();
+                    for local in type_params {
+                        scoped.remove(&local.name);
+                    }
+                    *self = Self::ScopedNames(Rc::new(scoped), NameAuthority::DeclaredSlot);
+                }
+            }
+            Type::Meta { .. }
+            | Type::Refined { .. }
+            | Type::Named { .. }
+            | Type::Generic { .. }
+            | Type::Record(_)
+            | Type::Tuple(_)
+            | Type::Variant(_)
+            | Type::Reference { .. }
+            | Type::CheckedReference { .. }
+            | Type::UnsafeReference { .. }
+            | Type::Pointer { .. }
+            | Type::VolatilePointer { .. }
+            | Type::Future { .. }
+            | Type::Array { .. }
+            | Type::Slice { .. }
+            | Type::Forall { .. }
+            | Type::Exists { .. }
+            | Type::TypeApp { .. }
+            | Type::Unit
+            | Type::Never
+            | Type::Unknown
+            | Type::Bool
+            | Type::Int
+            | Type::Float
+            | Type::Char
+            | Type::Text
+            | Type::Var(_)
+            | Type::Lifetime { .. }
+            | Type::Universe { .. }
+            | Type::Prop
+            | Type::Interval => {}
+            _ => return Err("declared carrier has no supported named-slot traversal".into()),
+        }
+        Ok(())
     }
 }
 
@@ -116,7 +209,27 @@ pub(super) fn apply_named(
     names: &Map<Text, Type>,
     max_depth: usize,
 ) -> Result<Type, Text> {
-    apply_scoped(ty, Scope::Names(names), max_depth)
+    apply_scoped(ty, Scope::Names(names, NameAuthority::Alias), max_depth)
+}
+
+pub(super) fn apply_declared_slots(
+    ty: &Type,
+    parameters: &indexmap::IndexMap<Text, Type>,
+    max_depth: usize,
+) -> Result<Type, Text> {
+    let mut slots = Map::new();
+    let mut arguments = Substitution::new();
+    for (name, actual) in parameters {
+        let variable = TypeVar::fresh();
+        slots.insert(name.clone(), Type::Var(variable));
+        arguments.insert(variable, actual.clone());
+    }
+    let bound = apply_scoped(
+        ty,
+        Scope::Names(&slots, NameAuthority::DeclaredSlot),
+        max_depth,
+    )?;
+    bound.try_apply_subst(&arguments)
 }
 
 fn apply_scoped<'a>(ty: &'a Type, scope: Scope<'a>, max_depth: usize) -> Result<Type, Text> {
@@ -136,6 +249,7 @@ fn apply_scoped<'a>(ty: &'a Type, scope: Scope<'a>, max_depth: usize) -> Result<
                 if depth >= max_depth {
                     return Err("type substitution exceeds its structural depth budget".into());
                 }
+                scope.enter_declaration(node.ty())?;
                 // Replacement ranges remain untouched: this is simultaneous
                 // substitution, including value-indexed type replacements.
                 if let Some(replacement) = scope.replacement(node.ty()) {

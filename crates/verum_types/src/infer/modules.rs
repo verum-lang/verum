@@ -15076,8 +15076,7 @@ impl TypeChecker {
         ty: &Type,
         param_subst: &indexmap::IndexMap<verum_common::Text, Type>,
     ) -> Type {
-        self.substitute_type_params_impl(ty, param_subst, 0, true)
-            .expect("legacy name substitution does not refuse carriers")
+        self.substitute_type_params_impl(ty, param_subst, 0)
     }
 
     /// Substitute only named type slots listed by the selected declaration.
@@ -15088,17 +15087,7 @@ impl TypeChecker {
         ty: &Type,
         parameters: &indexmap::IndexMap<verum_common::Text, Type>,
     ) -> std::result::Result<Type, Text> {
-        let mut named = indexmap::IndexMap::new();
-        let mut substitution = crate::ty::Substitution::new();
-        for (name, actual) in parameters {
-            let temporary = TypeVar::fresh();
-            named.insert(name.clone(), Type::Var(temporary));
-            substitution.insert(temporary, actual.clone());
-        }
-        // Fresh placeholders cannot capture an existing local. The canonical
-        // simultaneous substitution then protects binders from actual ranges.
-        self.substitute_type_params_impl(ty, &named, 0, false)?
-            .try_apply_subst(&substitution)
+        ty.try_substitute_declared_slots(parameters)
     }
 
     /// Inner implementation with depth tracking to prevent infinite recursion.
@@ -15107,27 +15096,25 @@ impl TypeChecker {
         ty: &Type,
         param_subst: &indexmap::IndexMap<verum_common::Text, Type>,
         depth: usize,
-        substitute_variable_keys: bool,
-    ) -> std::result::Result<Type, Text> {
+    ) -> Type {
         // Prevent infinite recursion with a reasonable depth limit
         const MAX_DEPTH: usize = 100;
         if depth > MAX_DEPTH {
-            return if substitute_variable_keys { Ok(ty.clone()) }
-                else { Err("declared carrier substitution exceeds its structural depth budget".into()) };
+            return ty.clone();
         }
         let d = depth + 1;
 
-        Ok(match ty {
+        match ty {
             // Names may replace type slots inside a carrier, but never the
             // identity of the value whose diagnostic name happens to match.
             Type::Meta { name, ty, refinement, value } => Type::Meta {
                 name: name.clone(),
-                ty: Box::new(self.substitute_type_params_impl(ty, param_subst, d, substitute_variable_keys)?),
+                ty: Box::new(self.substitute_type_params_impl(ty, param_subst, d)),
                 refinement: refinement.clone(),
                 value: value.clone(),
             },
             Type::Refined { base, predicate } => Type::Refined {
-                base: Box::new(self.substitute_type_params_impl(base, param_subst, d, substitute_variable_keys)?),
+                base: Box::new(self.substitute_type_params_impl(base, param_subst, d)),
                 predicate: predicate.clone(),
             },
 
@@ -15141,7 +15128,7 @@ impl TypeChecker {
             // different arg (the async future_poll_sync suite: an `Int` test
             // poisons the shared payload var, then the `Text`/`Bool` tests fail
             // `expected 'Int', found 'Text'` on the correctly-typed scrutinee).
-            Type::Var(tv) if substitute_variable_keys => {
+            Type::Var(tv) => {
                 let var_key: verum_common::Text = format!("T{}", tv.id()).into();
                 if let Some(replacement) = param_subst.get(&var_key) {
                     replacement.clone()
@@ -15162,8 +15149,8 @@ impl TypeChecker {
             Type::Named { path, args } => {
                 let substituted_args: List<_> = args
                     .iter()
-                    .map(|arg| self.substitute_type_params_impl(arg, param_subst, d, substitute_variable_keys))
-                    .collect::<std::result::Result<_, Text>>()?;
+                    .map(|arg| self.substitute_type_params_impl(arg, param_subst, d))
+                    .collect();
                 Type::Named {
                     path: path.clone(),
                     args: substituted_args,
@@ -15174,38 +15161,38 @@ impl TypeChecker {
                 let substituted_fields: indexmap::IndexMap<_, _> = fields
                     .iter()
                     .map(|(k, v)| {
-                        Ok((
+                        (
                             k.clone(),
-                            self.substitute_type_params_impl(v, param_subst, d, substitute_variable_keys)?,
-                        ))
+                            self.substitute_type_params_impl(v, param_subst, d),
+                        )
                     })
-                    .collect::<std::result::Result<_, Text>>()?;
+                    .collect();
                 Type::Record(substituted_fields)
             }
             // Tuple type: substitute in elements
             Type::Tuple(elements) => {
                 let substituted: List<_> = elements
                     .iter()
-                    .map(|e| self.substitute_type_params_impl(e, param_subst, d, substitute_variable_keys))
-                    .collect::<std::result::Result<_, Text>>()?;
+                    .map(|e| self.substitute_type_params_impl(e, param_subst, d))
+                    .collect();
                 Type::Tuple(substituted)
             }
             // Reference types: substitute in inner type
             Type::Reference { inner, mutable } => Type::Reference {
-                inner: Box::new(self.substitute_type_params_impl(inner, param_subst, d, substitute_variable_keys)?),
+                inner: Box::new(self.substitute_type_params_impl(inner, param_subst, d)),
                 mutable: *mutable,
             },
             Type::CheckedReference { inner, mutable } => Type::CheckedReference {
-                inner: Box::new(self.substitute_type_params_impl(inner, param_subst, d, substitute_variable_keys)?),
+                inner: Box::new(self.substitute_type_params_impl(inner, param_subst, d)),
                 mutable: *mutable,
             },
             Type::UnsafeReference { inner, mutable } => Type::UnsafeReference {
-                inner: Box::new(self.substitute_type_params_impl(inner, param_subst, d, substitute_variable_keys)?),
+                inner: Box::new(self.substitute_type_params_impl(inner, param_subst, d)),
                 mutable: *mutable,
             },
             // Future type
             Type::Future { output } => Type::Future {
-                output: Box::new(self.substitute_type_params_impl(output, param_subst, d, substitute_variable_keys)?),
+                output: Box::new(self.substitute_type_params_impl(output, param_subst, d)),
             },
             // Generic type (List<T>, Map<K, V>, etc.): substitute in type arguments
             // CRITICAL FIX: This was missing, causing Map<K, V> to not be substituted
@@ -15221,12 +15208,12 @@ impl TypeChecker {
                 if args.is_empty()
                     && let Some(replacement) = param_subst.get(name)
                 {
-                    return Ok(replacement.clone());
+                    return replacement.clone();
                 }
                 let substituted_args: List<_> = args
                     .iter()
-                    .map(|arg| self.substitute_type_params_impl(arg, param_subst, d, substitute_variable_keys))
-                    .collect::<std::result::Result<_, Text>>()?;
+                    .map(|arg| self.substitute_type_params_impl(arg, param_subst, d))
+                    .collect();
                 Type::Generic {
                     name: name.clone(),
                     args: substituted_args,
@@ -15234,12 +15221,12 @@ impl TypeChecker {
             }
             // Array type: substitute element type
             Type::Array { element, size } => Type::Array {
-                element: Box::new(self.substitute_type_params_impl(element, param_subst, d, substitute_variable_keys)?),
+                element: Box::new(self.substitute_type_params_impl(element, param_subst, d)),
                 size: *size,
             },
             // Slice type: substitute element type
             Type::Slice { element } => Type::Slice {
-                element: Box::new(self.substitute_type_params_impl(element, param_subst, d, substitute_variable_keys)?),
+                element: Box::new(self.substitute_type_params_impl(element, param_subst, d)),
             },
             // Function type: substitute in params and return type
             Type::Function {
@@ -15250,34 +15237,10 @@ impl TypeChecker {
                 type_params,
                 properties,
             } => {
-                if !substitute_variable_keys {
-                    // Canonical type substitution does not yet transport these
-                    // local obligations or the separate context representation.
-                    // Cloning them could retain an outer parameter as evidence.
-                    if type_params.iter().any(|parameter| parameter.is_meta
-                        || !parameter.bounds.is_empty() || parameter.default.is_some()) {
-                        return Err("declared function carrier requires checked transport of generic parameter obligations".into());
-                    }
-                    if contexts.as_ref().is_some_and(|context| match context {
-                        crate::di::requirement::ContextExpr::Variable(_) => true,
-                        crate::di::requirement::ContextExpr::Concrete(requirements) => requirements.iter().any(|context|
-                            !context.type_args.is_empty() || context.condition.is_some()
-                                || context.transforms.iter().any(|transform| !transform.args.is_empty())),
-                    }) {
-                        return Err("declared function carrier requires checked transport of context dependencies".into());
-                    }
-                }
-                let scoped;
-                let param_subst = if !substitute_variable_keys && !type_params.is_empty() {
-                    scoped = param_subst.iter().filter(|(name, _)|
-                        !type_params.iter().any(|local| local.name == **name))
-                        .map(|(name, value)| (name.clone(), value.clone())).collect();
-                    &scoped
-                } else { param_subst };
                 let substituted_params: List<_> = params
                     .iter()
-                    .map(|p| self.substitute_type_params_impl(p, param_subst, d, substitute_variable_keys))
-                    .collect::<std::result::Result<_, Text>>()?;
+                    .map(|p| self.substitute_type_params_impl(p, param_subst, d))
+                    .collect();
                 Type::Function {
                     property_requirement: property_requirement.clone(),
                     params: substituted_params,
@@ -15285,8 +15248,7 @@ impl TypeChecker {
                         return_type,
                         param_subst,
                         d,
-                        substitute_variable_keys,
-                    )?),
+                    )),
                     contexts: contexts.clone(),
                     type_params: type_params.clone(),
                     properties: properties.clone(),
@@ -15298,12 +15260,12 @@ impl TypeChecker {
                 let substituted_variants: indexmap::IndexMap<_, _> = variants
                     .iter()
                     .map(|(name, payload_ty)| {
-                        Ok((
+                        (
                             name.clone(),
-                            self.substitute_type_params_impl(payload_ty, param_subst, d, substitute_variable_keys)?,
-                        ))
+                            self.substitute_type_params_impl(payload_ty, param_subst, d),
+                        )
                     })
-                    .collect::<std::result::Result<_, Text>>()?;
+                    .collect();
                 Type::Variant(substituted_variants)
             }
             // Forall type (rank-2 polymorphic): substitute in body
@@ -15312,7 +15274,7 @@ impl TypeChecker {
             // When instantiating Transducer<Int, Int>, A and B need to be substituted in the body
             Type::Forall { vars, body } => {
                 let substituted_body =
-                    Box::new(self.substitute_type_params_impl(body, param_subst, d, substitute_variable_keys)?);
+                    Box::new(self.substitute_type_params_impl(body, param_subst, d));
                 Type::Forall {
                     vars: vars.clone(),
                     body: substituted_body,
@@ -15321,7 +15283,7 @@ impl TypeChecker {
             // Exists type: substitute in body (for existential types)
             Type::Exists { var, body } => {
                 let substituted_body =
-                    Box::new(self.substitute_type_params_impl(body, param_subst, d, substitute_variable_keys)?);
+                    Box::new(self.substitute_type_params_impl(body, param_subst, d));
                 Type::Exists {
                     var: *var,
                     body: substituted_body,
@@ -15334,28 +15296,18 @@ impl TypeChecker {
             // Without this, Named("T") inside TypeApp args is never substituted.
             Type::TypeApp { constructor, args } => {
                 let substituted_constructor =
-                    self.substitute_type_params_impl(constructor, param_subst, d, substitute_variable_keys)?;
+                    self.substitute_type_params_impl(constructor, param_subst, d);
                 let substituted_args: List<_> = args
                     .iter()
-                    .map(|arg| self.substitute_type_params_impl(arg, param_subst, d, substitute_variable_keys))
-                    .collect::<std::result::Result<_, Text>>()?;
+                    .map(|arg| self.substitute_type_params_impl(arg, param_subst, d))
+                    .collect();
                 Type::TypeApp {
                     constructor: Box::new(substituted_constructor),
                     args: substituted_args,
                 }
             }
-            // A13: the `Type::Var(tv)` substitution is handled by the FIRST
-            // arm of this match (see above — the poison-avoidance comment).
-            // A duplicate `Type::Var` arm here was unreachable dead code with
-            // an identical body; removed so the match's substitution logic has
-            // a single source of truth.
-            // Primitive and other types: return as-is
-            Type::Unit | Type::Never | Type::Unknown | Type::Bool | Type::Int
-            | Type::Float | Type::Char | Type::Text | Type::Var(_)
-            | Type::Lifetime { .. } | Type::Universe { .. } | Type::Prop | Type::Interval => ty.clone(),
-            _ if substitute_variable_keys => ty.clone(),
-            _ => return Err("declared carrier has no supported named-slot traversal".into()),
-        })
+            _ => ty.clone(),
+        }
     }
 
     /// Substitute type parameters from receiver type into a method's return type.

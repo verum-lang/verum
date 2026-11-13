@@ -1402,10 +1402,19 @@ impl Type {
     /// Substitute named declaration parameters without returning a partial type
     /// when traversal or capture-avoiding binder renaming fails.
     pub fn try_substitute_params(&self, subst: &Map<Text, Type>) -> Result<Type, Text> {
-        // Root plus the historically admitted 100 nested edges. Resource
-        // admission remains explicit; this limit no longer budgets Rust frames.
-        const MAX_NAMED_SUBSTITUTION_DEPTH: usize = 101;
-        type_substitution::apply_named(self, subst, MAX_NAMED_SUBSTITUTION_DEPTH)
+        type_substitution::apply_named(self, subst, Self::MAX_NAMED_SUBSTITUTION_DEPTH)
+    }
+
+    // Root plus the admitted 100 nested edges, independent of the Rust stack.
+    const MAX_NAMED_SUBSTITUTION_DEPTH: usize = 101;
+
+    /// Replace only named slots from the selected declaration's telescope.
+    /// An equally spelled inference variable or value binder is independent.
+    pub(crate) fn try_substitute_declared_slots(
+        &self,
+        parameters: &indexmap::IndexMap<Text, Type>,
+    ) -> Result<Type, Text> {
+        type_substitution::apply_declared_slots(self, parameters, Self::MAX_NAMED_SUBSTITUTION_DEPTH)
     }
 
     fn named_substitution_under_binders(
