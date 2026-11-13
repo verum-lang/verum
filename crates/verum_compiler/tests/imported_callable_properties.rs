@@ -207,3 +207,65 @@ fn inline_calls_preserve_the_selected_bound() {
         }
     }
 }
+
+#[test]
+fn calculus_callback_keeps_its_declared_signature_across_archive_execution() {
+    let calculus = include_str!("../../../core/math/calculus.vr");
+    let module = Parser::new(calculus)
+        .parse_module()
+        .expect("actual calculus grammar");
+    let span = module
+        .items
+        .iter()
+        .find_map(|item| match &item.kind {
+            verum_ast::ItemKind::Function(function) if function.name.name == "diff_central" => {
+                Some(item.span)
+            }
+            _ => None,
+        })
+        .expect("calculus differentiation function");
+    // Item spans begin at the function keyword. Include its source visibility.
+    let start = calculus[..span.start as usize]
+        .rfind('\n')
+        .map_or(0, |newline| newline + 1);
+    let function = &calculus[start..span.end as usize];
+    let accepted = "mount core.raw.diff_central;
+        pure fn square(x: Float) -> Float { x * x }
+        public fn probe() -> Int {
+            let factor: Float = 3.0;
+            let scaled: fn(Float) -> Float = |x| factor * x * x;
+            let named = diff_central(square, 3.0, 1.0);
+            let captured = diff_central(scaled, 3.0, 1.0);
+            if named == 6.0 && captured == 18.0 { 73 } else { 0 }
+        }";
+    contract(function, accepted).expect("named and capturing callbacks preserve their signatures");
+    for (callback, expected) in [
+        (
+            "pure fn wrong(x:Bool)->Float { 1.0 }",
+            "expected 'Bool', found 'Float'",
+        ),
+        (
+            "pure fn wrong(x:Float)->Bool { true }",
+            "expected 'Float', found 'Bool'",
+        ),
+        (
+            "pure fn wrong(x:Float, y:Float)->Float { x+y }",
+            "expected 'fn(Float) -> Float', found 'fn(Float, Float) -> Float'",
+        ),
+    ] {
+        let consumer = format!(
+            "mount core.raw.diff_central; {callback}
+            public fn probe()->Int {{ if diff_central(wrong,3.0,1.0)==6.0 {{73}} else {{0}} }}"
+        );
+        let error = contract(function, &consumer)
+            .expect_err("contradictory callback passed its declared bound");
+        assert!(
+            error.contains("E400") && error.contains(expected),
+            "{error}"
+        );
+        assert!(
+            !error.contains("type not found"),
+            "wrong rejection: {error}"
+        );
+    }
+}
