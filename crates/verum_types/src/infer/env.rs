@@ -9963,7 +9963,7 @@ impl TypeChecker {
                     // Without this, type variables like τ39 (unified with Handle) would be
                     // quantified over, causing instantiate() to create new fresh variables
                     // that lose the unification information.
-                    let resolved_ty = self.unifier.apply(&actual_ty);
+                    let resolved_ty = self.unifier.try_apply(&actual_ty, val.span)?;
                     if let ExprKind::Path(path) = &val.kind && let Some(ident) = path.as_ident()
                         && !self.is_reference_type(&resolved_ty)
                     {
