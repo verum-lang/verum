@@ -32,6 +32,40 @@ fn wire(module: &VbcModule) -> VbcModule {
     .expect("decode archive module")
 }
 
+#[test]
+fn declared_smart_pointer_carriers_survive_source_and_archive_shadowing() {
+    const MEMORY: &str = "core.base.memory";
+    let source = include_str!("../../../core/base/memory.vr");
+    let declarations = |owner: &str| {
+        let source = source.replace("module core.base.memory;", &format!("module {owner};"));
+        let mut ast = Parser::new(&source).parse_module().unwrap();
+        ast.items.retain(|item| match &item.kind {
+            ItemKind::Module(_) => true,
+            ItemKind::Type(decl) => matches!(decl.name.name.as_str(), "Heap" | "Shared" | "SharedInner"),
+            _ => false,
+        });
+        wire(&VbcCodegen::with_config(CodegenConfig::new(owner)).compile_module(&ast).unwrap())
+    };
+    let canonical = declarations(MEMORY);
+    let foreign = declarations("other.memory");
+    let check = |module: &VbcModule, owner: &str| {
+        for &(name, id) in TypeId::SMART_POINTER_TYPE_IDS {
+            let record = module.types.iter().find(|ty| {
+                module.get_string(ty.name).and_then(|n| n.rsplit('.').next()) == Some(name)
+                    && ty.origin_module.and_then(|origin| module.get_string(origin)) == Some(owner)
+            }).expect("source owner must survive admission");
+            assert_eq!(record.id == id, owner == MEMORY, "{owner}.{name}");
+        }
+    };
+    check(&canonical, MEMORY);
+    check(&foreign, "other.memory");
+    for order in [[&foreign, &canonical], [&canonical, &foreign]] {
+        let imported = wire(&import(&order));
+        check(&imported, MEMORY);
+        check(&imported, "other.memory");
+    }
+}
+
 fn declaration(owner: &str) -> VbcModule {
     declaration_with_protocol(owner, "")
 }

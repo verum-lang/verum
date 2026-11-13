@@ -25545,9 +25545,11 @@ impl VbcCodegen {
                             // registration would be unreachable anyway.
                             None => return,
                         }
-                    } else if TypeId::from_well_known_scalar_name(&name_str) == Some(existing_id) {
-                        // A nominal same-name type cannot adopt a reserved
-                        // scalar ID before the first impl carrier arrives.
+                    } else if existing_id.is_smart_pointer()
+                        || TypeId::from_well_known_scalar_name(&name_str) == Some(existing_id)
+                    {
+                        // Only the canonical declaration can fill its reserved
+                        // carrier slot, even before a descriptor is installed.
                         (self.alloc_user_type_id(), false)
                     } else {
                         // Case (b).
