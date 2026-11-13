@@ -130,23 +130,7 @@ impl VbcCodegen {
                 // The receiver's semantic declaration owns this projection.
                 // A layout offset or a same-named field on another type cannot
                 // supply its ownership or replace missing archive evidence.
-                let mut receiver = nested(receiver, None)?;
-                while let TypeRef::Reference { inner, .. } = receiver { receiver = *inner; }
-                let (id, arguments) = match receiver {
-                    TypeRef::Concrete(id) => (id, Vec::new()),
-                    TypeRef::Instantiated { base, args } => (base, args),
-                    _ => return None,
-                };
-                let declaration = self.type_by_id(id)?;
-                if declaration.kind != crate::types::TypeKind::Record
-                    || declaration.type_params.len() != arguments.len() { return None; }
-                let member = declaration.fields.iter().find(|member|
-                    self.ctx.strings.get(member.name.0 as usize)
-                        .is_some_and(|name| name == field.name.as_str()))?;
-                let ty = member.declaration_type.as_ref()?;
-                let ids: verum_common::List<_> = declaration.type_params.iter().map(|p| p.id).collect();
-                if !super::formal_parameters::resolved(ty, &ids, 0) { return None; }
-                crate::mono::TypeSubstitution::new(&declaration.type_params, &arguments).apply(ty).ok()
+                self.projected_field_declaration(nested(receiver, None)?, &field.name)
             }
             ExprKind::Index { expr: base, index } => self.indexed_element_declaration(base, index),
             ExprKind::Unary { op: UnOp::Deref, expr: inner } => {

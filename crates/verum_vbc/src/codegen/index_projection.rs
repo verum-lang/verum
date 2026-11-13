@@ -1,4 +1,4 @@
-//! A single declaration-owned projection plan for index types and storage.
+//! Resolve record and index projections against the declarations that own their storage.
 use super::*;
 
 pub(super) struct ProjectionMethod {
@@ -8,13 +8,19 @@ pub(super) struct ProjectionMethod {
     result: crate::types::TypeRef,
 }
 
-enum IndexAdjustment {
+enum ReceiverAdjustment {
     Native(usize),
     Method(ProjectionMethod),
 }
 
+struct FieldProjection {
+    owner: crate::types::TypeRef,
+    ordinal: u32,
+    adjustments: Vec<ReceiverAdjustment>,
+}
+
 struct IndexProjection {
-    adjustments: Vec<IndexAdjustment>,
+    adjustments: Vec<ReceiverAdjustment>,
     element: Option<crate::types::TypeRef>,
     method: Option<ProjectionMethod>,
 }
@@ -88,9 +94,13 @@ impl VbcCodegen {
             borrowed = true;
         }
         match &base.kind {
-            ExprKind::Field { expr, .. } | ExprKind::TupleIndex { expr, .. } => {
+            ExprKind::Field { expr, field } => {
                 self.mutable_projection_place(expr, depth + 1)
+                    && self.projection_operand_declaration(expr)
+                        .and_then(|owner| self.field_projection(owner, &field.name, true))
+                        .is_some()
             }
+            ExprKind::TupleIndex { expr, .. } => self.mutable_projection_place(expr, depth + 1),
             ExprKind::Index { expr, index } => self.index_projection(expr, index, true).is_some(),
             ExprKind::Unary {
                 op: UnOp::Deref,
@@ -218,20 +228,127 @@ impl VbcCodegen {
         let TypeRef::Reference { inner, mutability, .. } = &method.result else {
             return None;
         };
-        if mutable {
-            let protocol = verum_common::well_known_types::WellKnownProtocol::DerefMut;
-            let descriptor = owner.base_type_id().and_then(|id| self.type_by_id(id))?;
-            if *mutability != Mutability::Mutable || !descriptor.protocols.iter().any(|row| {
-                row.methods.contains(&method.id.0)
-                    && self.type_by_id(crate::types::TypeId(row.protocol.0))
-                        .and_then(|ty| self.ctx.strings.get(ty.name.0 as usize))
-                        .is_some_and(|name| protocol.matches(name.rsplit('.').next().unwrap_or(name)))
-            }) {
-                return None;
-            }
+        use verum_common::well_known_types::WellKnownProtocol;
+        if mutable && *mutability != Mutability::Mutable {
+            return None;
+        }
+        let protocol = if mutable { WellKnownProtocol::DerefMut } else { WellKnownProtocol::Deref };
+        let descriptor = owner.base_type_id().and_then(|id| self.type_by_id(id))?;
+        let implements_projection = descriptor.protocols.iter().any(|row| {
+            row.methods.contains(&method.id.0)
+                && self.type_by_id(crate::types::TypeId(row.protocol.0))
+                    .and_then(|ty| self.ctx.strings.get(ty.name.0 as usize))
+                    .is_some_and(|name| protocol.matches(name.rsplit('.').next().unwrap_or(name)))
+        });
+        if !implements_projection {
+            return None;
         }
         let target = (**inner).clone();
         Some((method, target))
+    }
+
+    /// A record's own field takes precedence over implicit dereference. The
+    /// declaration supplies both the final field slot and every storage step.
+    fn field_projection(
+        &self,
+        mut owner: crate::types::TypeRef,
+        field: &str,
+        mutable: bool,
+    ) -> Option<FieldProjection> {
+        use crate::types::{Mutability, TypeRef};
+        let mut adjustments = Vec::new();
+        let mut seen = Vec::new();
+        for _ in 0..64 {
+            owner = self.expand_declared_alias(owner)?;
+            let mut references = 0;
+            while let TypeRef::Reference { inner, mutability, .. } = owner {
+                if mutable && mutability != Mutability::Mutable {
+                    return None;
+                }
+                owner = self.expand_declared_alias(*inner)?;
+                references += 1;
+            }
+            let id = owner.base_type_id()?;
+            let descriptor = self.type_by_id(id)?;
+            if let Some(ordinal) = descriptor.fields.iter().position(|member| {
+                self.ctx.strings.get(member.name.0 as usize).is_some_and(|name| name == field)
+            }) {
+                return Some(FieldProjection {
+                    owner,
+                    ordinal: ordinal.try_into().ok()?,
+                    adjustments,
+                });
+            }
+            if seen.contains(&owner) {
+                return None;
+            }
+            seen.push(owner.clone());
+            if let Some(carrier) = self.declared_runtime_carrier(id).filter(|kind| kind.is_smart_pointer()) {
+                if mutable && carrier != WKT::Heap {
+                    return None;
+                }
+                let TypeRef::Instantiated { args, .. } = owner else { return None };
+                let [target] = args.as_slice() else { return None };
+                owner = target.clone();
+                adjustments.push(ReceiverAdjustment::Native(references + 1));
+            } else {
+                let (method, target) = self.dereference_projection(&owner, mutable)?;
+                owner = target;
+                if self.declaration_type_name(&owner, 0)?.len() > 65536 {
+                    return None;
+                }
+                adjustments.push(ReceiverAdjustment::Method(method));
+            }
+        }
+        None
+    }
+
+    pub(in crate::codegen) fn projected_field_declaration(
+        &self, owner: crate::types::TypeRef, field: &str,
+    ) -> Option<crate::types::TypeRef> {
+        let projection = self.field_projection(owner, field, false)?;
+        let descriptor = self.type_by_id(projection.owner.base_type_id()?)?;
+        let arguments = match &projection.owner {
+            crate::types::TypeRef::Instantiated { args, .. } => args.as_slice(),
+            _ => &[],
+        };
+        if descriptor.type_params.len() != arguments.len() {
+            return None;
+        }
+        let member = descriptor.fields.get(projection.ordinal as usize)?.declaration_type.as_ref()?;
+        let ids: verum_common::List<_> = descriptor.type_params.iter().map(|parameter| parameter.id).collect();
+        if !crate::codegen::formal_parameters::resolved(member, &ids, 0) {
+            return None;
+        }
+        crate::mono::TypeSubstitution::new(&descriptor.type_params, arguments).apply(member).ok()
+    }
+
+    pub(super) fn compile_field_storage(
+        &mut self, base: &Expr, field: &str, mutable: bool,
+    ) -> CodegenResult<(Reg, String, u32)> {
+        let refusal = || CodegenError::with_span(CodegenErrorKind::TypeInference(format!(
+            "cannot access field `{field}`: no declared {} projection",
+            if mutable { "mutable" } else { "read" },
+        )), base.span);
+        if mutable && !self.mutable_projection_place(base, 0) { return Err(refusal()); }
+        let owner = self.projection_operand_declaration(base).ok_or_else(refusal)?;
+        let projection = self.field_projection(owner, field, mutable).ok_or_else(refusal)?;
+        let name = self.declaration_type_name(&projection.owner, 0).ok_or_else(refusal)?;
+        let value = self.compile_projection_base(base, mutable)?;
+        let value = self.emit_receiver_adjustments(value, projection.adjustments, true);
+        Ok((value, name, projection.ordinal))
+    }
+
+    fn compile_projection_base(&mut self, base: &Expr, mutable: bool) -> CodegenResult<Reg> {
+        if mutable && let ExprKind::Field { expr, field } = &Self::normalized_place(base).kind {
+            let (owner, _, ordinal) = self.compile_field_storage(expr, &field.name, true)?;
+            let value = self.ctx.alloc_temp();
+            self.ctx.emit(Instruction::GetF { dst: value, obj: owner, field_idx: ordinal });
+            self.ctx.free_temp(owner);
+            Ok(value)
+        } else {
+            self.compile_expr(base)?.or_internal("projection base has no value")
+        }
     }
 
     /// Resolve the complete receiver before emitting any adjustment. Element
@@ -318,7 +435,7 @@ impl VbcCodegen {
                     return None;
                 };
                 let target = target.clone();
-                adjustments.push(IndexAdjustment::Native(references + 1));
+                adjustments.push(ReceiverAdjustment::Native(references + 1));
                 owner = target;
                 continue;
             }
@@ -328,7 +445,7 @@ impl VbcCodegen {
             if self.declaration_type_name(&owner, 0)?.len() > 65536 {
                 return None;
             }
-            adjustments.push(IndexAdjustment::Method(method));
+            adjustments.push(ReceiverAdjustment::Method(method));
         }
         None
     }
@@ -415,12 +532,17 @@ impl VbcCodegen {
                 if mutable { "mutable" } else { "read" },
             )), base.span)
         })?;
-        let mut value = self
-            .compile_expr(base)?
-            .or_internal("index base has no value")?;
-        for adjustment in projection.adjustments {
+        let value = self.compile_projection_base(base, mutable)?;
+        Ok((self.emit_receiver_adjustments(value, projection.adjustments, false), projection.method))
+    }
+
+    fn emit_receiver_adjustments(
+        &mut self, mut value: Reg, adjustments: Vec<ReceiverAdjustment>, keep_final_reference: bool,
+    ) -> Reg {
+        let count = adjustments.len();
+        for (index, adjustment) in adjustments.into_iter().enumerate() {
             match adjustment {
-                IndexAdjustment::Native(count) => {
+                ReceiverAdjustment::Native(count) => {
                     for _ in 0..count {
                         let next = self.ctx.alloc_temp();
                         self.ctx.emit(Instruction::Deref {
@@ -431,18 +553,19 @@ impl VbcCodegen {
                         value = next;
                     }
                 }
-                IndexAdjustment::Method(method) => {
+                ReceiverAdjustment::Method(method) => {
                     let reference = self.emit_projection_method(value, method, None);
                     self.ctx.free_temp(value);
-                    value = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::Deref {
-                        dst: value,
-                        ref_reg: reference,
-                    });
-                    self.ctx.free_temp(reference);
+                    if keep_final_reference && index + 1 == count {
+                        value = reference;
+                    } else {
+                        value = self.ctx.alloc_temp();
+                        self.ctx.emit(Instruction::Deref { dst: value, ref_reg: reference });
+                        self.ctx.free_temp(reference);
+                    }
                 }
             }
         }
-        Ok((value, projection.method))
+        value
     }
 }

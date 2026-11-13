@@ -667,3 +667,71 @@ fn probe() -> Int {
         17,
     );
 }
+
+#[test]
+fn projected_field_borrows_and_writes_use_the_selected_storage() {
+    value(
+        r#"
+type Mark is { count: Int };
+implement Mark { fn increment(&mut self) { self.count += 1; } }
+type Pocket is { cells: List<Int>, offset: Int, mark: Mark };
+type Switch is { read_side: Pocket, write_side: Pocket };
+implement Deref for Switch {
+    type Target = Pocket;
+    fn deref(&self) -> &Pocket { &self.read_side }
+}
+implement DerefMut for Switch {
+    fn deref_mut(&mut self) -> &mut Pocket { &mut self.write_side }
+}
+fn advance(value: &mut Int) { *value = *value + 1; }
+fn probe() -> Int {
+    let mut gate = Switch {
+        read_side: Pocket { cells: [11], offset: 13, mark: Mark { count: 5 } },
+        write_side: Pocket { cells: [17], offset: 19, mark: Mark { count: 7 } },
+    };
+    let original = &gate.offset;
+    let before = *original;
+    advance(&mut gate.offset);
+    gate.offset += 3;
+    gate.cells[0] = 37;
+    gate.offset = gate.write_side.offset + 2;
+    gate.mark.increment();
+    before + gate.read_side.cells[0] + gate.write_side.cells[0] + gate.write_side.offset
+        + gate.write_side.mark.count + gate.read_side.mark.count
+}
+"#,
+        99,
+    );
+}
+
+#[test]
+fn mutable_outer_reference_cannot_upgrade_a_shared_record_field() {
+    for body in [
+        "fn probe(g: &mut Shared<Cell>) { g.count = 1; }",
+        "fn probe(g: &mut Shared<Cell>) { g.count += 1; }",
+        "fn probe(g: &mut Shared<Cell>) -> &mut Int { &mut g.count }",
+        "fn probe(g: &mut Shared<Cell>) { g.items[0] = 1; }",
+        "fn probe(g: &mut Shared<Cell>) { g.inner.count = 1; }",
+        "fn probe(g: &mut Shared<Cell>) { g.inner.increment(); }",
+    ] {
+        let source = format!(
+            "type Inner is {{ count: Int }}; implement Inner {{ fn increment(&mut self) {{ self.count += 1; }} }} type Cell is {{ count: Int, items: List<Int>, inner: Inner }}; {body}"
+        );
+        let refusal = with_memory_declarations(&source).err().expect(body).to_string();
+        assert!(
+            refusal.contains("mutable") && (refusal.contains("field") || refusal.contains("index")),
+            "{body}: {refusal}"
+        );
+    }
+}
+
+#[test]
+fn a_same_named_method_does_not_declare_a_field_projection() {
+    let result = compile(r#"
+type Lens is { target: Cell };
+implement Lens { fn deref(&self) -> &Cell { &self.target } }
+fn probe(lens: Lens) -> &Int { &lens.padding }
+"#);
+    let refusal = result.err().expect("the record has no Deref implementation");
+    assert!(refusal.to_string().contains("field `padding`"), "{refusal}");
+}

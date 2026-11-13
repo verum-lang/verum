@@ -4044,27 +4044,9 @@ impl VbcCodegen {
             }
 
             ExprKind::Field { expr: base, field } => {
-                let base_type = self.infer_expr_type_name(base);
-                let base_reg = self
-                    .compile_expr(base)?
-                    .or_internal("field base has no value")?;
-
-                // FIELD-DEREF-CHASE-1: writes share the read-side Deref
-                // chase — `guard.permits = …` peels MutexGuard →
-                // SemaphoreInner before the field index resolves.
-                let (base_reg, base_type) =
-                    self.chase_deref_for_field(base_reg, base_type, &field.name);
-
-                // REFINE-FIELD-DYNAMIC-BYPASS-1: refined fields get a
-                // runtime Assert on the incoming value before the write
-                // (T1-F parity for fields; fail-open on key miss).
-                if let Some(bt) = base_type.as_deref() {
-                    self.emit_field_refinement_assert(value_reg, bt, &field.name);
-                }
-
-                let (field_idx, idx_guessed) =
-                    self.resolve_field_index_flagged(base_type.as_deref(), &field.name);
-                self.emit_field_write(base_reg, field_idx, value_reg, idx_guessed, &field.name);
+                let (base_reg, owner, ordinal) = self.compile_field_storage(base, &field.name, true)?;
+                self.emit_field_refinement_assert(value_reg, &owner, &field.name);
+                self.emit_field_write(base_reg, ordinal, value_reg, false, &field.name);
 
                 self.ctx.free_temp(base_reg);
                 self.ctx.free_temp(value_reg);
@@ -4556,21 +4538,10 @@ impl VbcCodegen {
 
             // Field access: obj.field += value
             ExprKind::Field { expr: obj, field } => {
-                // Load object into register
-                let obj_type = self.infer_expr_type_name(obj);
-                let obj_reg = self
-                    .compile_expr(obj)?
-                    .or_internal("field access object has no value")?;
-
-                // FIELD-DEREF-CHASE-1: compound assignment reads AND
-                // writes through the same peeled receiver.
-                let (obj_reg, obj_type) =
-                    self.chase_deref_for_field(obj_reg, obj_type, &field.name);
-
-                // Get current field value
                 let field_name = &field.name;
-                let (field_idx, idx_guessed) =
-                    self.resolve_field_index_flagged(obj_type.as_deref(), field_name);
+                let (obj_reg, owner, field_idx) = self.compile_field_storage(obj, field_name, true)?;
+                let obj_type = Some(owner);
+                let idx_guessed = false;
                 let current_val = self.ctx.alloc_temp();
                 {
                     let fname = field_name.clone();
@@ -5705,36 +5676,11 @@ impl VbcCodegen {
                 field,
             } = &inner.kind
         {
-            let receiver_type = self.infer_expr_type_name(receiver);
-            // #42: flagged resolve — a GUESSED positional index under a
-            // `&`/`&mut` projection is an interior pointer into the
-            // WRONG field (memory-unsafe, the task's founding class);
-            // route through the runtime by-name door instead.
-            let (field_idx, ref_guessed) =
-                self.resolve_field_index_flagged(receiver_type.as_deref(), &field.name);
-            let base_reg = self
-                .compile_expr(receiver)?
-                .or_internal("field-ref base has no value")?;
+            let (base_reg, _, field_idx) = self.compile_field_storage(
+                receiver, &field.name, op == UnOp::RefMut,
+            )?;
             let dest = self.ctx.alloc_temp();
-
-            let mut operands = Vec::<u8>::with_capacity(6);
-            Self::write_reg(&mut operands, dest.0);
-            Self::write_reg(&mut operands, base_reg.0);
-            if ref_guessed && !Self::byname_fields_legacy() {
-                let name = self.intern_string(&field.name);
-                crate::encoding::encode_varint(name as u64, &mut operands);
-                self.ctx.emit(Instruction::CbgrExtended {
-                    sub_op: crate::instruction::CbgrSubOpcode::RefFieldNamed as u8,
-                    operands,
-                });
-            } else {
-                crate::encoding::encode_varint(field_idx as u64, &mut operands);
-                self.ctx.emit(Instruction::CbgrExtended {
-                    sub_op: crate::instruction::CbgrSubOpcode::RefField as u8,
-                    operands,
-                });
-            }
-
+            self.emit_field_reference(dest, base_reg, field_idx);
             self.ctx.free_temp(base_reg);
             return Ok(Some(dest));
         }
@@ -13331,37 +13277,32 @@ impl VbcCodegen {
             }
         }
 
-        // An indexed Value receiver borrows its element slot, not the
-        // temporary produced by GetE. Reuse explicit-borrow lowering so base
-        // and index expressions run once and storage layout stays authoritative.
-        if (matches!(&array_receiver.kind, ExprKind::Index { expr: base, index }
-            if !matches!(index.kind, ExprKind::Range { .. })
-                && self.packed_index_element_size(base).is_none())
-            || matches!(&array_receiver.kind, ExprKind::TupleIndex { expr: base, index: 0 }
-                if self.extract_expr_type_name(base)
-                    .and_then(|name| self.transparent_inner_type_name(&name)).is_some()))
-            && let Some(receiver_type) = self.extract_expr_type_name(array_receiver)
-            && let Some(key) = self.registered_receiver_method(&receiver_type, method.name.as_str())
-            && self.ctx.lookup_qualified_function(&key).is_some_and(|info| info.takes_self_mut_ref)
-        {
-            let borrowed = self.compile_unary(UnOp::RefMut, array_receiver)?
-                .or_internal("indexed method receiver has no borrow")?;
-            let target = format!("&mut {}", Self::method_receiver_type_name(&receiver_type));
-            return self.compile_method_on_adjusted_value(
-                borrowed, &target, receiver.span, method, args, resolved_target, type_args, true,
-            );
-        }
-
-        // Resolve the complete receiver chain before lowering it. Own
-        // methods win at each hop and cycles cannot recursively expand calls.
-        // A field descriptor retains the caller's associated members across
-        // Deref. Its archive display spelling is not a source type expression.
+        // Associated members retained by a field descriptor belong to the caller's telescope.
         let field_declaration = matches!(array_receiver.kind, ExprKind::Field { .. })
             .then(|| self.declared_expression_result(array_receiver, None, 0, 0))
             .flatten()
             .and_then(|ty| self.scoped_callable_type_name(&ty, Some(&self.ctx.current_generic_param_ids)));
         let receiver_declaration = field_declaration.map(String::from)
             .or_else(|| self.extract_expr_type_name(receiver));
+        // A mutable method on a projected place borrows its storage directly.
+        if (matches!(&array_receiver.kind, ExprKind::Field { .. })
+            || matches!(&array_receiver.kind, ExprKind::Index { expr: base, index }
+            if !matches!(index.kind, ExprKind::Range { .. })
+                && self.packed_index_element_size(base).is_none())
+            || matches!(&array_receiver.kind, ExprKind::TupleIndex { expr: base, index: 0 }
+                if self.extract_expr_type_name(base)
+                    .and_then(|name| self.transparent_inner_type_name(&name)).is_some()))
+            && let Some(receiver_type) = receiver_declaration.as_deref()
+            && let Some(key) = self.registered_receiver_method(receiver_type, method.name.as_str())
+            && self.ctx.lookup_qualified_function(&key).is_some_and(|info| info.takes_self_mut_ref)
+        {
+            let borrowed = self.compile_unary(UnOp::RefMut, array_receiver)?
+                .or_internal("projected method receiver has no borrow")?;
+            let target = format!("&mut {}", Self::method_receiver_type_name(receiver_type));
+            return self.compile_method_on_adjusted_value(
+                borrowed, &target, receiver.span, method, args, resolved_target, type_args, true,
+            );
+        }
         if let Some(receiver_type) = receiver_declaration.as_deref() {
             let depth = self.method_receiver_deref_count(receiver_type, method.name.as_str());
             if depth > 0 {
