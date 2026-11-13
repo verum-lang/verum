@@ -243,6 +243,28 @@ fn unbounded_instantiation_cannot_establish_reference_free_storage() {
 }
 
 #[test]
+fn a_match_retains_the_value_selected_by_each_live_arm() {
+    for source in [
+        "fn project(stable: &Int) -> Sample { let scratch = 42; match &scratch { _ => Sample { ptr: stable, total: 7 } } }",
+        "fn project(stable: &Int) -> Sample { let scratch = 42; let result = match &scratch { _ => Sample { ptr: stable, total: 7 } }; result }",
+    ] {
+        assert_eq!(errors(source), List::<Text>::new(), "{source}");
+    }
+    for source in [
+        "fn invalid(stable: &Int) -> Sample { let scratch = 42; match &scratch { actual => Sample { ptr: actual, total: 7 } } }",
+        "fn invalid(stable: &Int) -> Sample { let scratch = 42; let result = match &scratch { actual => Sample { ptr: actual, total: 7 } }; result }",
+        "fn invalid(stable: &Int, c: Bool) -> Sample { let scratch = 42; match &scratch { actual if c => Sample { ptr: actual, total: 7 }, _ => Sample { ptr: stable, total: 7 } } }",
+        "fn retain(value: &Int) -> Sample { Sample { ptr: value, total: 1 } }
+         fn invalid() -> Sample { let local = 7; match &local { value => retain(value) } }",
+        "type Deferred is { public read: fn() -> Int };
+         fn invalid() -> Deferred { let local = 7; match &local { value => Deferred { read: || *value } } }",
+    ] {
+        let diagnostics = errors(source);
+        assert!(diagnostics.iter().any(|error| error.contains("does not live long enough")), "{source}: {diagnostics:?}");
+    }
+}
+
+#[test]
 fn borrowing_a_projected_field_preserves_every_possible_referent() {
     let declarations = "
         fn select(a: &Node, b: &Node, c: Bool) -> &Node { if c { a } else { b } }

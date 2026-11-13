@@ -3,6 +3,7 @@
 use super::TypeChecker;
 use crate::context::ReferenceOrigin;
 use crate::ty::{RecordReceiver, Type};
+use verum_common::List;
 use verum_ast::{
     Expr, ExprKind, FunctionBody, FunctionDecl, FunctionParamKind, PatternKind, StmtKind, UnOp,
 };
@@ -333,6 +334,75 @@ impl TypeChecker {
             .then(|| ReferenceOrigin::Candidates(candidates.into_boxed_slice())))
     }
 
+    pub(super) fn observe_match_arm_origins(&mut self, body: &Expr, needed: bool) {
+        if body.span.is_empty() {
+            return;
+        }
+        if !needed {
+            // A shared expansion site cannot authenticate a different binding.
+            if let Some(previous) = self.match_arm_origins.get_mut(&body.span) {
+                *previous = None;
+            }
+            return;
+        }
+        let origins = self.match_value_origins(body);
+        self.match_arm_origins.entry(body.span).and_modify(|previous| {
+            match (previous.as_mut(), origins.as_ref()) {
+                (Some(known), Some(observed)) => {
+                    for origin in observed {
+                        if !known.contains(origin) {
+                            known.push(origin.clone());
+                        }
+                    }
+                }
+                _ => *previous = None,
+            }
+        }).or_insert(origins);
+    }
+
+    /// Prove which lexical origins a value can carry while its pattern bindings
+    /// are live. A missing observation preserves the scrutinee as a candidate.
+    fn match_value_origins(&mut self, body: &Expr) -> Option<List<RecordReceiver>> {
+        let mut pending = List::from_iter([body]);
+        let mut origins = List::new();
+        while let Some(value) = pending.pop() {
+            if !value.span.is_empty()
+                && self.type_registry.lookup_expr(value.span)
+                    .is_some_and(|ty| !self.carries_stored_loan(ty))
+            {
+                continue;
+            }
+            match &unparen(value).kind {
+                ExprKind::Path(path) => {
+                    let binding = &path.as_ident()?.name;
+                    let sources = self.ctx.env.reference_candidates(binding);
+                    if sources.is_empty() {
+                        return None;
+                    }
+                    for source in sources {
+                        if !origins.contains(&source) {
+                            origins.push(source);
+                        }
+                    }
+                }
+                ExprKind::Tuple(parts) | ExprKind::Array(verum_ast::expr::ArrayExpr::List(parts)) => {
+                    pending.extend(parts.iter());
+                }
+                ExprKind::Record { fields, base, .. } => {
+                    for field in fields {
+                        pending.push(field.value.as_ref()?);
+                    }
+                    pending.extend(base.as_deref());
+                }
+                ExprKind::Field { expr, .. } | ExprKind::TupleIndex { expr, .. } => {
+                    pending.push(expr);
+                }
+                _ => return None,
+            }
+        }
+        Some(origins)
+    }
+
     fn collect_reference_candidates(&mut self, value: &Expr, found: &mut Vec<RecordReceiver>) {
         fn add(found: &mut Vec<RecordReceiver>, source: RecordReceiver) {
             if !found.contains(&source) {
@@ -444,9 +514,19 @@ impl TypeChecker {
                 }
             }
             ExprKind::Match { expr, arms } => {
-                self.collect_reference_candidates(expr, found);
+                let mut uncertain = false;
                 for arm in arms {
-                    self.collect_reference_candidates(&arm.body, found);
+                    if let Some(origins) = self.match_arm_origins.get(&arm.body.span).and_then(Option::as_ref) {
+                        for origin in origins {
+                            add(found, origin.clone());
+                        }
+                    } else {
+                        uncertain = true;
+                        self.collect_reference_candidates(&arm.body, found);
+                    }
+                }
+                if uncertain {
+                    self.collect_reference_candidates(expr, found);
                 }
             }
             ExprKind::NamedArg { value, .. } => self.collect_reference_candidates(value, found),

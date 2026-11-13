@@ -5684,9 +5684,12 @@ impl TypeChecker {
                 None => self.synth_expr(&arm.body),
             }
         })();
+        let carries_loans = result.as_ref()
+            .is_ok_and(|inferred| self.carries_stored_loan(&self.unifier.apply(&inferred.ty)));
+        self.observe_match_arm_origins(&arm.body, carries_loans && !sources.is_empty());
         let linear_errors = self.affine_tracker.exit_pattern_scope(ownership, arm.body.span);
         self.refinement_evidence.pop_scope();
-        if result.as_ref().is_ok_and(|result| self.carries_stored_loan(&self.unifier.apply(&result.ty))) {
+        if carries_loans {
             self.borrow_tracker.exit_scope_retaining_loans();
         } else {
             self.borrow_tracker.exit_scope();
