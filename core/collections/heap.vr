@@ -981,11 +981,13 @@ implement<T: Ord> Ord for Reverse<T> {
     }
 }
 
-implement<T: Ord> Eq for Reverse<T> {
+implement<T: Ord> PartialEq for Reverse<T> {
     fn eq(&self, other: &Reverse<T>) -> Bool {
         self.value == other.value
     }
 }
+
+implement<T: Ord> Eq for Reverse<T> {}
 
 implement<T: Ord + Clone> Clone for Reverse<T> {
     fn clone(&self) -> Reverse<T> {

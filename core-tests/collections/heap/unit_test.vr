@@ -20,7 +20,8 @@
 // =============================================================================
 
 mount core.prelude.*;
-mount core.collections.heap.BinaryHeap;
+mount core.base.ordering.{Less, Equal, Greater};
+mount core.collections.heap.{BinaryHeap, Reverse};
 
 // =============================================================================
 // Section 1: BinaryHeap.new — construction
@@ -310,6 +311,18 @@ fn test_heap_singleton_peek_returns_value() {
 // =============================================================================
 // Section 11: Reverse / in-order insert both yield descending drain
 // =============================================================================
+
+@test
+fn test_reverse_preserves_equality_and_inverts_order() {
+    let low: Reverse<Int> = Reverse.new(7);
+    let high: Reverse<Int> = Reverse.new(11);
+    let same: Reverse<Int> = Reverse.new(7);
+    assert(low.eq(&same));
+    assert(!low.eq(&high));
+    assert(low.cmp(&high) is Greater);
+    assert(high.cmp(&low) is Less);
+    assert(low.cmp(&same) is Equal);
+}
 
 @test
 fn test_heap_inserted_in_increasing_order_drains_descending() {
