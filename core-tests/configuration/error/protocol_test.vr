@@ -1,5 +1,6 @@
 mount core.configuration.error.{format_id_toml, format_id_json};
-mount core.base.protocols.{PartialEq, Eq, Hash};
+mount core.base.protocols.{PartialEq, Eq, Hash, Debug, Formatter};
+mount core.base.result.Result;
 
 fn equal_identifier<T: Eq>(left: &T, right: &T) -> Bool {
     left.eq(right)
@@ -20,4 +21,18 @@ fn test_identifier_protocols_observe_the_same_carrier() {
     assert(first.ne(&other));
     assert_eq(identifier_hash(&first), identifier_hash(&"toml"));
     assert_eq(identifier_hash(&other), identifier_hash(&"json"));
+}
+
+@test
+fn test_identifier_debug_uses_text_formatting() {
+    let id = format_id_toml();
+    let mut output = Text.new();
+    {
+        let mut formatter = Formatter.new(&mut output);
+        match id.fmt_debug(&mut formatter) {
+            Result.Ok(_) => (),
+            Result.Err(_) => panic("identifier debug formatting failed"),
+        }
+    };
+    assert_eq(output, "\"toml\"");
 }

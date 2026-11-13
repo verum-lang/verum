@@ -40,7 +40,7 @@
 module core.configuration.error;
 
 mount base.{Result, Ok, Err, Maybe, Some, None, Text};
-mount core.base.protocols.{PartialEq, Eq, Hash, Hasher};
+mount core.base.protocols.{PartialEq, Eq, Hash, Hasher, Debug, Formatter, FormatError};
 
 // =============================================================================
 // Format identifier — stable across all configuration modules
@@ -66,6 +66,13 @@ implement Hash for FormatId {
     fn hash(&self, hasher: &mut Hasher) {
         let value: &Text = self;
         value.hash(hasher);
+    }
+}
+
+implement Debug for FormatId {
+    fn fmt_debug(&self, formatter: &mut Formatter) -> Result<(), FormatError> {
+        let value: &Text = self;
+        value.fmt_debug(formatter)
     }
 }
 
