@@ -2731,9 +2731,7 @@ fn substitute_refinement_binder(
                 span: expr.span,
             });
         }
-        let value = self.const_eval.eval_array_count_in_source(
-            expr, self.current_module_path.as_str(), !self.resolving_source_signature, &self.ctx.env.unavailable_constant_names(),
-        ).map_err(|error| TypeError::OtherWithCodeSpanned {
+        let value = self.checked_integer_in_scope(expr).map_err(|error| TypeError::OtherWithCodeSpanned {
             code: "E400".into(),
             msg: format!("array length requires a checked nonnegative constant or an exact declaration-owned integer parameter; compound symbolic lengths are not represented: {error}").into(),
             span: expr.span,
@@ -2763,9 +2761,7 @@ fn substitute_refinement_binder(
             match &ty.kind {
                 TypeKind::Array { element, size } => {
                     if let Some(size) = size {
-                        let length = self
-                            .const_eval
-                            .eval_array_count_in_source(size, self.current_module_path.as_str(), !self.resolving_source_signature, &self.ctx.env.unavailable_constant_names())
+                        let length = self.checked_integer_in_scope(size)
                             .ok()
                             .and_then(|value| usize::try_from(value).ok());
                         if length.is_none() {

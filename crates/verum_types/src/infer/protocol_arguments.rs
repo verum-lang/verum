@@ -666,9 +666,7 @@ impl TypeChecker {
                 "value argument has an unsupported literal type or exceeds its structural limit",
             )
         })?;
-        let value = self
-            .const_eval
-            .eval_array_count_in_source(&expression, self.current_module_path.as_str(), !self.resolving_source_signature, &self.ctx.env.unavailable_constant_names())
+        let value = self.checked_integer_in_scope(&expression)
             .map_err(|error| {
                 invalid(
                     expression.span,

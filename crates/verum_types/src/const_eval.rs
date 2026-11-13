@@ -491,6 +491,29 @@ impl ConstEvaluator {
             .ok_or(ConstEvalError::NotConstant)
     }
 
+    pub(crate) fn eval_array_count_in_declaration(
+        expr: &Expr, scope: &str, declarations: impl FnOnce() -> Option<Self>,
+    ) -> Result<i64> {
+        // Closed expressions require no source lookup. Consult the exact
+        // declaring snapshot only if the shared scalar evaluator needs a name.
+        let declarations = std::cell::LazyCell::new(declarations);
+        let unavailable = Set::new();
+        let mut active = List::new();
+        let mut remaining = 4096;
+        verum_ast::checked_const::evaluate(expr, 0, &mut |leaf, _| {
+            let Some(constants) = declarations.as_ref() else { return Ok(None); };
+            constants.resolve_checked_leaf(leaf, scope, false, &unavailable, &mut active, &mut remaining)
+        }).map_err(Self::checked_scalar_error)?
+            .as_i64().ok_or(ConstEvalError::NotConstant)
+    }
+
+    fn checked_scalar_error(error: verum_ast::checked_const::EvalError<ConstEvalError>) -> ConstEvalError {
+        match error {
+            verum_ast::checked_const::EvalError::Resolver(error) => error,
+            error => ConstEvalError::Other(Text::from(format!("checked array count: {error:?}"))),
+        }
+    }
+
     fn eval_checked_scalar(
         &self,
         expr: &Expr,
@@ -505,80 +528,83 @@ impl ConstEvaluator {
         &self, expr: &Expr, scope: &str, allow_locals: bool,
         unavailable: &Set<Text>, active: &mut List<Text>, remaining: &mut usize,
     ) -> Result<verum_ast::checked_const::Scalar> {
+        verum_ast::checked_const::evaluate(expr, 0, &mut |leaf, _| {
+            self.resolve_checked_leaf(leaf, scope, allow_locals, unavailable, active, remaining)
+        }).map_err(Self::checked_scalar_error)
+    }
+
+    fn resolve_checked_leaf(
+        &self, leaf: &Expr, scope: &str, allow_locals: bool,
+        unavailable: &Set<Text>, active: &mut List<Text>, remaining: &mut usize,
+    ) -> Result<Option<verum_ast::checked_const::Scalar>> {
+        fn name(expr: &Expr, depth: usize) -> Option<Text> {
+            if depth >= 128 {
+                return None;
+            }
+            match &expr.kind {
+                ExprKind::Path(path) => {
+                    let mut parts = List::new();
+                    for part in &path.segments {
+                        match part {
+                            PathSegment::Name(ident) => parts.push(ident.name.as_str()),
+                            PathSegment::Cog if parts.is_empty() => parts.push("cog"),
+                            _ => return None,
+                        }
+                    }
+                    Some(Text::from(parts.join(".")))
+                }
+                ExprKind::Field { expr, field } => Some(Text::from(format!(
+                    "{}.{}",
+                    name(expr, depth + 1)?,
+                    field.name
+                ))),
+                _ => None,
+            }
+        }
+        let Some(name) = name(leaf, 0) else {
+            return Ok(None);
+        };
         let scope = Self::count_scope(scope);
         let scope = scope.as_str();
-        verum_ast::checked_const::evaluate(expr, 0, &mut |leaf, _depth| {
-            fn name(expr: &Expr, depth: usize) -> Option<Text> {
-                if depth >= 128 {
-                    return None;
-                }
-                match &expr.kind {
-                    ExprKind::Path(path) => {
-                        let mut parts = List::new();
-                        for part in &path.segments {
-                            match part {
-                                PathSegment::Name(ident) => parts.push(ident.name.as_str()),
-                                PathSegment::Cog if parts.is_empty() => parts.push("cog"),
-                                _ => return None,
-                            }
-                        }
-                        Some(Text::from(parts.join(".")))
-                    }
-                    ExprKind::Field { expr, field } => Some(Text::from(format!(
-                        "{}.{}",
-                        name(expr, depth + 1)?,
-                        field.name
-                    ))),
-                    _ => None,
-                }
+        if allow_locals && unavailable.contains(&name) {
+            return Err(ConstEvalError::Other(format!("lexical binding `{name}` is not an evaluated constant").into()));
+        }
+        if allow_locals && let Some(binding) = self.local_binding(&name, Some(&Text::from(scope))) {
+            return binding.checked.clone().map(Some).map_err(ConstEvalError::Other);
+        }
+        // Source constants are keyed by their declaring module. Walk
+        // lexical ancestors, retaining every written path segment. A
+        // missing sibling/owner must never become a same-leaf lookup.
+        // Stop at the nearest recorded result even when it is an error;
+        // an invalid shadow cannot borrow a valid outer value (T1626).
+        let owner_key = self.count_modules.member(name.as_str(), scope, "cog");
+        let mut anchor = Some(scope);
+        let key = loop {
+            if let Some(key) = &owner_key { break key.clone(); }
+            let Some(current) = anchor else { break name.clone(); };
+            let key = Text::from(format!("{current}.{name}"));
+            if self.count_values.contains_key(&key) || self.count_sources.contains_key(&key) {
+                break key;
             }
-            let Some(name) = name(leaf, 0) else {
-                return Ok(None);
-            };
-            if allow_locals && unavailable.contains(&name) {
-                return Err(ConstEvalError::Other(format!("lexical binding `{name}` is not an evaluated constant").into()));
-            }
-            if allow_locals && let Some(binding) = self.local_binding(&name, Some(&Text::from(scope))) {
-                return binding.checked.clone().map(Some).map_err(ConstEvalError::Other);
-            }
-            // Source constants are keyed by their declaring module. Walk
-            // lexical ancestors, retaining every written path segment. A
-            // missing sibling/owner must never become a same-leaf lookup.
-            // Stop at the nearest recorded result even when it is an error;
-            // an invalid shadow cannot borrow a valid outer value (T1626).
-            let owner_key = self.count_modules.member(name.as_str(), scope, "cog");
-            let mut anchor = Some(scope);
-            let key = loop {
-                if let Some(key) = &owner_key { break key.clone(); }
-                let Some(current) = anchor else { break name.clone(); };
-                let key = Text::from(format!("{current}.{name}"));
-                if self.count_values.contains_key(&key) || self.count_sources.contains_key(&key) {
-                    break key;
-                }
-                anchor = current.rsplit_once('.').map(|(parent, _)| parent);
-            };
-            if let Some(value) = self.count_values.get(&key) {
-                return value.clone().map(Some).map_err(ConstEvalError::Other);
-            }
-            let Some((owner, source)) = self.count_sources.get(&key) else { return Ok(None); };
-            let Some(source) = source else {
-                return Err(ConstEvalError::Other(format!("generic constant `{key}` requires explicit instantiation").into()));
-            };
-            if active.contains(&key) || active.len() >= 64 || *remaining == 0 {
-                return Err(ConstEvalError::Other(format!("cyclic or over-budget array count declaration `{key}`").into()));
-            }
-            *remaining -= 1;
-            active.push(key);
-            // A referenced declaration is evaluated at its owner, without the
-            // caller's local bindings. Always restore the active lookup stack.
-            let result = self.eval_checked_scalar_in_source(source, owner, false, unavailable, active, remaining);
-            active.pop();
-            result.map(Some)
-        })
-        .map_err(|error| match error {
-            verum_ast::checked_const::EvalError::Resolver(error) => error,
-            error => ConstEvalError::Other(Text::from(format!("checked array count: {error:?}"))),
-        })
+            anchor = current.rsplit_once('.').map(|(parent, _)| parent);
+        };
+        if let Some(value) = self.count_values.get(&key) {
+            return value.clone().map(Some).map_err(ConstEvalError::Other);
+        }
+        let Some((owner, source)) = self.count_sources.get(&key) else { return Ok(None); };
+        let Some(source) = source else {
+            return Err(ConstEvalError::Other(format!("generic constant `{key}` requires explicit instantiation").into()));
+        };
+        if active.contains(&key) || active.len() >= 64 || *remaining == 0 {
+            return Err(ConstEvalError::Other(format!("cyclic or over-budget array count declaration `{key}`").into()));
+        }
+        *remaining -= 1;
+        active.push(key);
+        // A referenced declaration is evaluated at its owner, without the
+        // caller's local bindings. Always restore the active lookup stack.
+        let result = self.eval_checked_scalar_in_source(source, owner, false, unavailable, active, remaining);
+        active.pop();
+        result.map(Some)
     }
 
     fn lookup_binding(&self, name: &Text) -> Option<&ConstantBinding> {

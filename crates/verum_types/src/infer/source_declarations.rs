@@ -190,6 +190,44 @@ impl TypeChecker {
         result
     }
 
+    /// A declaration's integer arguments and array lengths use constants from
+    /// its source file. Inline declarations retain the file's lexical parents.
+    pub(super) fn checked_integer_in_scope(&self, expr: &verum_ast::Expr) -> crate::const_eval::Result<i64> {
+        let owner = self.current_module_path.as_str();
+        if !self.resolving_source_signature {
+            return self.const_eval.eval_array_count_in_source(
+                expr, owner, true, &self.ctx.env.unavailable_constant_names(),
+            );
+        }
+        crate::const_eval::ConstEvaluator::eval_array_count_in_declaration(expr, owner, || {
+            let from_items = |items: &[verum_ast::Item], file_owner: &str| {
+                let mut constants = crate::const_eval::ConstEvaluator::new();
+                constants.declare_count_file_selected(items, file_owner, &self.cfg_evaluator);
+                constants
+            };
+            let mut path = Some(owner);
+            while let Some(candidate) = path {
+                if let Some((_, file)) = self.source_type_registration.local_declarations.iter().rev()
+                    .find(|(name, file)| name.as_str() == candidate && file.file_id == expr.span.file_id)
+                {
+                    return Some(from_items(&file.items, candidate));
+                }
+                let registered = self.get_module_with_path_aliases(candidate, &self.module_registry.read());
+                if let Some(file) = registered
+                    && file.ast.file_id == expr.span.file_id && !file.ast.items.is_empty()
+                {
+                    return Some(from_items(&file.ast.items, candidate));
+                }
+                path = candidate.rsplit_once('.').map(|(parent, _)| parent);
+            }
+            // Standalone inline modules can be prepared without a registry.
+            self.inline_modules.get(&self.current_module_path)
+                .filter(|module| module.span.file_id == expr.span.file_id)
+                .and_then(|module| module.items.as_deref())
+                .map(|items| from_items(items, owner))
+        })
+    }
+
     /// An imported signature belongs to the declaring file, including its
     /// private mounts. Re-export targets still need their own public authority.
     pub(super) fn resolve_declaring_source_type(&mut self, name: &str, span: Span) -> Result<Type> {

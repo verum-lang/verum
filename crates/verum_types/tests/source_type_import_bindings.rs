@@ -325,3 +325,34 @@ fn inferred_generic_newtype_preserves_owned_scalar_result() {
     let errors = check(source, &[]);
     assert!(errors.is_empty(), "{errors:?}");
 }
+
+#[test]
+fn an_imported_record_extent_uses_its_own_private_constant() {
+    let owner = "const Base:Int=2; const Width:Int=Base+1; public type Frame is {public data:[Int;Width]};";
+    let provider = [("provider", owner)];
+    let consumer = "mount provider.Frame; const Width:Int=7; fn payload(value:Frame)->[Int;3] {value.data}";
+    let errors = check(consumer, &provider);
+    assert!(errors.is_empty(), "{errors:?}");
+
+    let wrong = check(&consumer.replace("->[Int;3]", "->[Int;7]"), &provider);
+    assert!(wrong.iter().any(|error| error.contains("ConstMismatch")), "{wrong:?}");
+    let private = check(
+        "mount provider.Frame; fn invalid(value:Frame)->[Int;provider.Width] {value.data}",
+        &provider,
+    );
+    assert!(private.iter().any(|error| error.contains("array length")), "{private:?}");
+}
+
+#[test]
+fn an_invalid_declaring_extent_cannot_use_the_consumers_constant() {
+    for declaration in [
+        "", "const Width:Int=-1;", "const Width:Bool=true;",
+        "const Width:Int=Width;", "const Width:Int=1/0;",
+        "const Width:Int=9223372036854775807+1;",
+    ] {
+        let owner = format!("{declaration} public type Frame is {{public data:[Int;Width]}};");
+        let consumer = "mount provider.Frame; const Width:Int=7; fn payload(value:Frame)->[Int;7] {value.data}";
+        let errors = check(consumer, &[("provider", &owner)]);
+        assert!(errors.iter().any(|error| error.contains("array length")), "{owner}: {errors:?}");
+    }
+}

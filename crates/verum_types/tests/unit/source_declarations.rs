@@ -366,6 +366,29 @@ fn unchanged_source_carrier_cannot_reuse_a_rebound_dependency_alias() {
 }
 
 #[test]
+fn source_record_extent_is_bound_to_the_constant_in_its_checked_snapshot() {
+    let provider = |width| registry_with("scope.carrier", &format!(
+        "public type Carrier is {{public data:[Int;Width]}}; const Width:Int={width};"
+    ));
+    let active = verum_common::Shared::new(parking_lot::RwLock::new(provider(3)));
+    let mut checker = dependency_checker(active.read().clone());
+    checker.set_module_registry(active.clone());
+    let extent = |checker: &TypeChecker| match checker.local_record_field("Carrier", "data") {
+        Some(crate::Type::Array { size, .. }) => *size,
+        other => panic!("expected checked array, got {other:?}"),
+    };
+    load_carrier(&mut checker).unwrap();
+    assert_eq!(extent(&checker), Some(3));
+
+    *active.write() = provider(7);
+    let mut fresh = dependency_checker(active.read().clone());
+    load_carrier(&mut fresh).unwrap();
+    assert_eq!(extent(&fresh), Some(7));
+    let stale = load_carrier(&mut checker).expect_err("an old field accepted a new constant");
+    assert!(stale.to_string().contains("source dependencies changed"), "{stale}");
+}
+
+#[test]
 fn unrelated_module_addition_preserves_a_completed_source_carrier() {
     let registry = source_dependency_registry();
     let mut checker = dependency_checker(registry.clone());
