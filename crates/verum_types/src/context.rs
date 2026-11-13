@@ -2751,45 +2751,25 @@ impl TypeContext {
     /// Returns None if name is not an alias
     pub fn resolve_alias(&self, name: &str) -> Option<&Type> {
         let mut current_name = Text::from(name);
-        let mut visited = std::collections::HashSet::new();
+        let mut target = self.type_aliases.get(&current_name)?;
+        let mut visited = Set::new();
         const MAX_ALIAS_DEPTH: usize = 100;
 
-        // Follow alias chain until we find a non-alias type
+        // Follow only alias edges. At a nominal declaration return the last
+        // named target, never its field/case representation from type_defs.
         for _ in 0..MAX_ALIAS_DEPTH {
-            // Check for cycles
-            if visited.contains(&current_name) {
-                // Cyclic alias detected - return None
-                return Option::None;
+            if !visited.insert(current_name) {
+                return None;
             }
-            visited.insert(current_name.clone());
-
-            // Look up the current name in aliases
-            if let Some(target_type) = self.type_aliases.get(&current_name) {
-                // Found an alias - check if the target is also an alias
-                match target_type {
-                    Type::Named { path, args } if args.is_empty() => {
-                        // Target is a simple named type - might be another alias
-                        if let Some(ident) = path.as_ident() {
-                            current_name = Text::from(ident.name.as_str());
-                            continue;
-                        } else {
-                            // Complex path - not a simple alias chain
-                            return Option::Some(target_type);
-                        }
-                    }
-                    _ => {
-                        // Target is not a named type - end of alias chain
-                        return Option::Some(target_type);
-                    }
-                }
-            } else {
-                // Not an alias - check if it's a regular type definition
-                return self.type_defs.get(&current_name);
-            }
+            let Type::Named { path, args } = target else { return Some(target); };
+            if !args.is_empty() { return Some(target); }
+            let Some(next_name) = crate::ty::nominal_path_name(path) else { return Some(target); };
+            current_name = Text::from(next_name.as_ref());
+            let Some(next) = self.type_aliases.get(&current_name) else { return Some(target); };
+            target = next;
         }
 
-        // Max depth exceeded - likely infinite loop
-        Option::None
+        None
     }
 
     /// Resolve a module-qualified alias

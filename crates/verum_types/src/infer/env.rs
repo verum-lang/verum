@@ -10541,7 +10541,7 @@ impl TypeChecker {
 
         // For Generic/Named types, try to resolve and wrap
         if let Type::Generic { .. } | Type::Named { .. } = &resolved_expected {
-            if let Some(expanded) = self.expand_type_alias(&resolved_expected) {
+            if let Some(expanded) = self.expand_type_representation(&resolved_expected) {
                 return self.wrap_in_success_type_impl(value_ty, &expanded, error_ty, depth + 1);
             }
         }
@@ -10566,62 +10566,25 @@ impl TypeChecker {
         value_ty.clone()
     }
 
-    /// Try to expand a type alias to its underlying definition.
-    /// Returns None if the type cannot be expanded (not an alias or definition not found).
-    /// Uses cycle detection to prevent infinite expansion of self-referential type aliases.
+    /// Expand only a declared transparent alias, retaining nominal identities.
+    /// A record or sum definition is a representation, not alias evidence.
     pub(super) fn expand_type_alias(&self, ty: &Type) -> Option<Type> {
-        match ty {
-            Type::Generic { name, args } => {
-                // Cycle detection: if we're already expanding this type, stop
-                let _cycle_guard = TypeResolutionCycleGuard::try_enter(name.to_string())?;
-                // First try the alias table (populated by `type X = Y;` declarations)
-                if let Some(alias_target) = self.ctx.resolve_alias(name.as_str()) {
-                    if args.is_empty() {
-                        return Some(alias_target.clone());
-                    }
-                    return Some(self.substitute_with_params(name.as_str(), alias_target, args));
-                }
-                // Fallback: look up the type definition table directly by name
-                if let Some(def) = self.ctx.lookup_type(name.as_str()) {
-                    // Only expand if the definition is a Record or Variant (structural type)
-                    if matches!(def, Type::Record(_) | Type::Variant(_)) {
-                        if args.is_empty() {
-                            return Some(def.clone());
-                        }
-                        return Some(self.substitute_with_params(name.as_str(), def, args));
-                    }
-                }
-                None
-            }
-            Type::Named { path, args } => {
-                // Alias expansion must preserve a resolved nominal owner.
-                // Looking up only the leaf can turn a sibling declaration
-                // into whichever same-named type was registered last.
-                let type_name = self.path_to_string(path);
+        let (name, args) = self.conversion_nominal_head(ty)?;
+        let _cycle_guard = TypeResolutionCycleGuard::try_enter(name.to_string())?;
+        let target = self.ctx.resolve_alias(name.as_str())?;
+        Some(self.substitute_with_params(name.as_str(), target, args))
+    }
 
-                // Cycle detection: if we're already expanding this type, stop
-                let _cycle_guard = TypeResolutionCycleGuard::try_enter(type_name.to_string())?;
-
-                // First try the alias table
-                if let Some(alias_target) = self.ctx.resolve_alias(type_name.as_str()) {
-                    if args.is_empty() {
-                        return Some(alias_target.clone());
-                    }
-                    return Some(self.substitute_with_params(type_name.as_str(), alias_target, args));
-                }
-                // Fallback: look up the type definition table directly by name
-                if let Some(def) = self.ctx.lookup_type(type_name.as_str()) {
-                    if matches!(def, Type::Record(_) | Type::Variant(_)) {
-                        if args.is_empty() {
-                            return Some(def.clone());
-                        }
-                        return Some(self.substitute_with_params(type_name.as_str(), def, args));
-                    }
-                }
-                None
-            }
-            _ => None,
+    /// Inspect declared fields/cases for operations on a value. This does not
+    /// establish equality between the owner and a same-shaped foreign type.
+    pub(super) fn expand_type_representation(&self, ty: &Type) -> Option<Type> {
+        if let Some(alias) = self.expand_type_alias(ty) {
+            return Some(alias);
         }
+        let (name, args) = self.conversion_nominal_head(ty)?;
+        let definition = self.ctx.lookup_type(name.as_str())?;
+        matches!(definition, Type::Record(_) | Type::Variant(_))
+            .then(|| self.substitute_with_params(name.as_str(), definition, args))
     }
 
     /// Instantiate a declaration's complete telescope, preserving rigid value

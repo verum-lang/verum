@@ -22152,7 +22152,7 @@ impl TypeChecker {
                     Type::Record(fields) => Some(fields.clone()),
                     // For Named/Generic types, try to expand to their underlying record definition
                     Type::Named { .. } | Type::Generic { .. } => self
-                        .expand_type_alias(&recv_ty)
+                        .expand_type_representation(&recv_ty)
                         .and_then(|expanded| match expanded {
                             Type::Record(fields) => Some(fields),
                             _ => None,

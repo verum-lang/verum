@@ -34,6 +34,13 @@ fn metadata_checker(eager: bool) -> TypeChecker {
         is_transparent_wrapper: false,
         resource_discipline: ResourceDiscipline::Unrestricted,
     };
+    let alias = TypeDescriptor {
+        name: "PairAlias".into(),
+        kind: TypeDescriptorKind::Alias { target: "alpha.Pair<First, Second>".into() },
+        ..descriptor.clone()
+    };
+    metadata.types.insert("PairAlias".into(), alias.clone());
+    metadata.types.insert("alpha.PairAlias".into(), alias);
     metadata.types.insert("Pair".into(), descriptor.clone());
     metadata.types.insert("alpha.Pair".into(), descriptor);
     let metadata = Shared::new(metadata).into_arc();
@@ -44,6 +51,8 @@ fn metadata_checker(eager: bool) -> TypeChecker {
     };
     checker.ensure_stdlib_type_loaded(&"Pair".into(), &mut List::new().into());
     checker.ensure_stdlib_type_loaded(&"alpha.Pair".into(), &mut List::new().into());
+    checker.ensure_stdlib_type_loaded(&"PairAlias".into(), &mut List::new().into());
+    checker.ensure_stdlib_type_loaded(&"alpha.PairAlias".into(), &mut List::new().into());
     checker
 }
 
@@ -51,23 +60,33 @@ fn metadata_checker(eager: bool) -> TypeChecker {
 fn alias_arguments_archive_template_keeps_distinct_slots_and_uses() {
     for eager in [false, true] {
         let checker = metadata_checker(eager);
-        for spelling in ["Pair", "alpha.Pair"] {
+        for spelling in ["PairAlias", "alpha.PairAlias"] {
             for (first, second) in [(Type::Text, Type::Bool), (Type::Bool, Type::Int)] {
                 let mut application = parse_type(spelling).unwrap();
                 let Type::Named { args, .. } = &mut application else {
                     panic!("named type")
                 };
                 args.extend([first.clone(), second.clone()]);
-                let expected = Type::Generic {
-                    name: "alpha.Pair".into(),
-                    args: List::from_iter([first, second]),
-                };
+                let mut expected = parse_type("alpha.Pair").unwrap();
+                let Type::Named { args, .. } = &mut expected else { panic!("named target") };
+                args.extend([first, second]);
                 assert_eq!(
                     checker.expand_type_alias(&application),
                     Some(expected),
                     "{spelling}, eager={eager}"
                 );
             }
+        }
+    }
+}
+
+#[test]
+fn a_nominal_archive_descriptor_does_not_authorize_alias_expansion() {
+    for eager in [false, true] {
+        let checker = metadata_checker(eager);
+        for spelling in ["Pair", "alpha.Pair"] {
+            let application = parse_type(&format!("{spelling}<Text, Bool>")).unwrap();
+            assert_eq!(checker.expand_type_alias(&application), None, "{spelling}, eager={eager}");
         }
     }
 }

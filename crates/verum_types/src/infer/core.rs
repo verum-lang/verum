@@ -4481,6 +4481,7 @@ impl TypeChecker {
             // Publish defaults before the generic-sum branch can finish this
             // descriptor. Eager and lazy registration share the same contract.
             self.register_metadata_parameters(name, type_desc);
+            self.register_metadata_alias(name, type_desc);
             // Convert core_metadata::TypeDescriptor to Type
             let ty = self.type_descriptor_to_type(type_desc);
             self.register_metadata_nominal_parameter_slots(name, type_desc, &ty);

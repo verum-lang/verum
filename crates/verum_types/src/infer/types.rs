@@ -5121,24 +5121,20 @@ fn substitute_refinement_binder(
                 if let Maybe::Some(underlying_ty) =
                     self.ctx.lookup_qualified_type(type_name.as_str())
                 {
-                    // Check if it's the same type (self-reference) to avoid infinite loop
-                    let is_self_referential = match underlying_ty {
+                    let preserve_nominal_identity = match underlying_ty {
                         Named { path: p2, .. } => {
                             let underlying_name = self.path_to_string(p2);
                             underlying_name == type_name
                         }
-                        // CRITICAL FIX: Variant types that contain recursive references
-                        // to the defining type (e.g., type Expr is | Lit(Int) | Add(Heap<Expr>, Heap<Expr>))
-                        // must NOT be expanded during normalization. Expanding them creates
-                        // exponential blowup: each level expands N recursive variants, leading to
-                        // O(N^depth) work. Instead, preserve the nominal Named type reference.
-                        Variant(_) | Record(_) => {
-                            Self::type_mentions_name(underlying_ty, &type_name)
-                        }
+                        // Definitions retain their identity even when their
+                        // payloads happen to match another declaration. Only
+                        // the alias table above authorizes transparent expansion;
+                        // field/pattern operations inspect representations explicitly.
+                        Variant(_) | Record(_) => true,
                         _ => false,
                     };
-                    if is_self_referential {
-                        // Self-referential type - preserve nominal identity but normalize args.
+                    if preserve_nominal_identity {
+                        // Resolve arguments without erasing the declaration.
                         let normalized_args: List<Type> = args
                             .iter()
                             .map(|a| self.normalize_type_impl(a, depth + 1))
