@@ -44,3 +44,11 @@ fn optimizer_purity_does_not_supply_a_missing_computational_contract() {
     intrinsic.name = "checked_add_u64";
     assert_eq!(intrinsic.call_bound(), IntrinsicCallBound::Unknown);
 }
+
+#[test]
+fn stored_text_length_bounds_only_its_own_lowering() {
+    let mut length = lookup_intrinsic("text_byte_len").unwrap().intrinsic.clone();
+    assert_eq!(length.call_bound(), IntrinsicCallBound::ValueConstruction);
+    length.strategy = lookup_intrinsic("text_as_bytes").unwrap().intrinsic.strategy.clone();
+    assert_eq!(length.call_bound(), IntrinsicCallBound::Synchronous);
+}

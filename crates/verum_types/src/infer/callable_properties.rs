@@ -26,6 +26,25 @@ fn intrinsic_requirement(name: &str) -> Option<PropertyRequirement> {
     }
 }
 
+/// Only a bodyless declaration can inherit its implementation's bound.
+/// Defaults, guards and context lookup can execute additional operations.
+fn intrinsic_declaration_bound(function: &FunctionDecl) -> Option<PropertyRequirement> {
+    if function.body.is_some() {
+        return None;
+    }
+    let name = crate::core_pipeline::extract_intrinsic_name(function)?;
+    let has_defaults = function.params.iter().any(|param| matches!(
+        &param.kind, verum_ast::FunctionParamKind::Regular { default_value: Some(_), .. }
+    ));
+    if function.is_async || function.is_generator || function.extern_abi.is_some()
+        || !function.contexts.is_empty() || function.std_attr.is_some()
+        || !function.requires.is_empty() || !function.ensures.is_empty() || has_defaults
+    {
+        return Some(PropertyRequirement::Unrestricted);
+    }
+    Some(intrinsic_requirement(&name).unwrap_or(PropertyRequirement::Unrestricted))
+}
+
 #[derive(Default)]
 struct SourceCalls {
     unresolved: List<verum_ast::Path>,
@@ -233,6 +252,9 @@ impl TypeChecker {
         &mut self,
         function: &FunctionDecl,
     ) -> PropertyRequirement {
+        if let Some(bound) = intrinsic_declaration_bound(function) {
+            return bound;
+        }
         let declared = PropertyRequirement::declared_function(function.is_pure, function.is_meta);
         if declared.may_be_async()
             && self.source_body_is_sync(function, &self.current_module_path.clone(), &mut List::new())
@@ -251,19 +273,16 @@ impl TypeChecker {
         if function.is_async || function.is_generator {
             return false;
         }
+        if let Some(bound) = intrinsic_declaration_bound(function) {
+            return !bound.may_be_async();
+        }
         // The ABI is carried by the declaration, including across imports and
         // metadata. Foreign calls return on the calling stack. They may perform
         // IO, mutate and fail; synchronous is not a promise of purity.
         if function.extern_abi.is_some() {
             return true;
         }
-        let Some(body) = &function.body else {
-            // Bodyless declarations execute the registered operation. An
-            // annotation on a source body cannot replace that body's evidence.
-            return crate::core_pipeline::extract_intrinsic_name(function)
-                .and_then(|name| intrinsic_requirement(name.as_str()))
-                .is_some_and(|bound| !bound.may_be_async());
-        };
+        let Some(body) = &function.body else { return false; };
         let key = (owner.clone(), function.span);
         if active.len() >= 32 || active.contains(&key) {
             return false;

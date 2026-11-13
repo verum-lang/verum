@@ -1342,13 +1342,15 @@ impl Intrinsic {
             | CodegenStrategy::InlineSequence(
                 InlineSequenceId::CheckedAdd | InlineSequenceId::CheckedSub
                 | InlineSequenceId::CheckedMul | InlineSequenceId::CheckedDiv,
-            ) => IntrinsicCallBound::ValueConstruction,
+            )
+            // Reading the stored length never visits the buffer. A full-width
+            // Int result may require boxing in the interpreter.
+            | CodegenStrategy::InlineSequence(InlineSequenceId::TextByteLen) => IntrinsicCallBound::ValueConstruction,
             // These lowerings cannot invoke a user callable or suspend a task.
             // This establishes only absence of suspension, not a complete
             // computational footprint or a proof of purity.
             CodegenStrategy::DirectOpcode(Opcode::Panic)
-            | CodegenStrategy::InlineSequence(InlineSequenceId::TextAsBytes
-                | InlineSequenceId::TextByteLen) => IntrinsicCallBound::Synchronous,
+            | CodegenStrategy::InlineSequence(InlineSequenceId::TextAsBytes) => IntrinsicCallBound::Synchronous,
             _ => IntrinsicCallBound::Unknown,
         }
     }

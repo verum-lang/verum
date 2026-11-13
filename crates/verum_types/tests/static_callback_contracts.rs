@@ -199,6 +199,29 @@ fn intrinsic_declarations_propagate_the_selected_lowering_bound() {
 }
 
 #[test]
+fn pure_observation_uses_the_imported_text_length_operation() {
+    let caller =
+        "mount platform.inspect as measure; pure fn probe(value: &Text) -> Int { measure(value) }";
+    let declaration = "@intrinsic(\"text_byte_len\") public fn inspect(value: &Text) -> Int;";
+    let accepted = errors_with_provider(caller, Some(declaration));
+    assert!(accepted.is_empty(), "{accepted:?}");
+    for provider in [
+        "public fn inspect(value: &Text) -> Int;",
+        "@intrinsic(\"missing_operation\") public pure fn inspect(value: &Text) -> Int;",
+        "@intrinsic(\"text_byte_len\") public fn inspect(value: &Text) -> Int { opaque(value) }
+         fn opaque(value: &Text) -> Int;",
+        "@intrinsic(\"text_byte_len\") public fn inspect(value: &Text = other()) -> Int;
+         fn other() -> &Text;",
+    ] {
+        let rejected = errors_with_provider(caller, Some(provider));
+        assert!(
+            rejected.iter().any(|error| error.contains("ImpurePureFunction")),
+            "{provider}: {rejected:?}"
+        );
+    }
+}
+
+#[test]
 fn forward_import_contracts_obey_source_cfg_selection() {
     let provider = "@intrinsic(\"text_byte_len\") public fn inspect(value: &Text) -> Int;
                     public async fn pending(value: &Text) -> Int { 7 }";
