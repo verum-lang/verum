@@ -270,3 +270,72 @@ fn renamed_inline_type_does_not_authorize_the_original_spelling() {
     let errors = check(source, "cog");
     assert!(errors.iter().any(|error| error.contains("TypeNotFound") && error.contains("Item")), "{errors:?}");
 }
+
+fn imported_factory_errors(file: &str, separate_child: Option<&str>, body: &str) -> List<Text> {
+    use verum_ast::{FileId, Module};
+    use verum_fast_parser::FastParser;
+    use verum_modules::{ModuleId, ModuleInfo, ModulePath, ModuleRegistry, extract_exports_from_module};
+
+    let parser = FastParser::new();
+    let parent = parser.parse_module_str(file, FileId::new(1)).unwrap();
+    let child = match separate_child {
+        Some(source) => parser.parse_module_str(source, FileId::new(2)).unwrap(),
+        None => parent.items.iter().find_map(|item| match &item.kind {
+            ItemKind::Module(decl) => Some(Module::new(decl.items.clone()?, parent.file_id, item.span)),
+            _ => None,
+        }).expect("inline body"),
+    };
+    let mut registry = ModuleRegistry::new();
+    for (index, (owner, ast)) in [("demo.family", parent), ("demo.family.Parcel", child)].into_iter().enumerate() {
+        let id = ModuleId::new(index as u32);
+        let path = ModulePath::from_str(owner);
+        let exports = extract_exports_from_module(&ast, id, &path).unwrap();
+        let file_id = ast.file_id;
+        let mut info = ModuleInfo::new(id, path, ast, file_id, Text::new());
+        info.exports = exports;
+        registry.register(info);
+    }
+
+    let source = format!("mount demo.family.Parcel.pack; type Batch<T> is {{ public foreign: T }}; fn consume() -> Int {{ {body} }}");
+    let ast = parser.parse_module_str(&source, FileId::new(3)).unwrap();
+    let mut checker = TypeChecker::new();
+    checker.register_primitives();
+    checker.set_current_module_path("demo.client");
+    checker.set_module_registry_direct(registry);
+    let mut errors = checker.prepare_module_declarations(&ast);
+    for item in &ast.items {
+        if let Err(error) = checker.check_item(item) { errors.push(error); }
+    }
+    errors.extend(checker.take_deferred_errors());
+    errors.iter().chain(checker.diagnostic_sources().iter()).map(|e| format!("{e:?}").into()).collect()
+}
+
+#[test]
+fn imported_factory_uses_its_enclosing_declarations_and_preserves_its_signature() {
+    let parent = "public type Parcel<T> is { public item: T }; public module Parcel {
+        public fn pack<T>(item: T) -> Batch<T> { Batch { item } }
+    } public type Batch<T> is { public item: T };";
+    for source in [
+        parent.to_owned(),
+        parent.replace("public fn pack", "mount super.Batch as Bundle; public fn pack")
+            .replace("-> Batch<T> { Batch", "-> Bundle<T> { Bundle"),
+    ] {
+        let valid = imported_factory_errors(&source, None, "pack(47).item");
+        assert!(valid.is_empty(), "{valid:?}");
+        let wrong = imported_factory_errors(&source, None, "pack(true).item");
+        assert!(wrong.iter().any(|e| e.contains("Mismatch") && e.contains("Bool")), "{wrong:?}");
+    }
+}
+
+#[test]
+fn enclosing_types_require_visibility_and_an_actual_inline_body() {
+    let function = "public fn pack<T>(item: T) -> Batch<T> { Batch { item } }";
+    let record = "public type Batch<T> is { public item: T };";
+    let private = format!("public module Parcel {{ {function} }} {}", record.replace("public type", "private type"));
+    let missing = format!("public module Parcel {{ mount demo.absent.Batch; {function} }} {record}");
+    let separate = format!("public module Parcel; {record}");
+    for (source, child) in [(&private, None), (&missing, None), (&separate, Some(function))] {
+        let errors = imported_factory_errors(source, child, "pack(47).item");
+        assert!(errors.iter().any(|e| (e.contains("TypeNotFound") || e.contains("VisibilityError")) && e.contains("Batch")), "{source}: {errors:?}");
+    }
+}

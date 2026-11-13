@@ -540,24 +540,32 @@ impl TypeChecker {
             return self.source_type_registration.declaration(&key)
                 .map(|declaration| (SourceTypeDeclaration::Owned(Shared::new(declaration.clone())), self.current_module_path.clone()));
         };
-        let declared = self.find_type_declaration_with_source_module_inner(
-            &module.ast, name, &Text::from(module.path.to_string()),
-            &registry, &mut Set::new(), true, true,
-        );
-        if declared.is_some() {
-            return declared;
+        let mut scope = module.clone();
+        loop {
+            if let Some((declaration, owner)) = self.find_type_declaration_with_source_module_inner(
+                &scope.ast, name, &Text::from(scope.path.to_string()), &registry, &mut Set::new(), true, true,
+            ) {
+                if scope.id == module.id || declaration.visibility.resolve_declared_scope(owner.as_str())
+                    .is_ok_and(|visibility| VisibilityChecker::new().is_visible(
+                        visibility, &ModulePath::from_str(owner.as_str()), &module.path,
+                    ))
+                {
+                    return Some((declaration, owner));
+                }
+                return None;
+            }
+            // A written mount shadows enclosing and prelude names even if the
+            // selected target is unavailable.
+            let explicitly_bound = scope.ast.items.iter()
+                .filter(|item| self.cfg_evaluator.should_include_item(item))
+                .any(|item| matches!(&item.kind, verum_ast::ItemKind::Mount(mount)
+                    if mount.alias.as_ref().is_some_and(|alias| alias.name.as_str() == name)
+                    || source_mount_binds_name(&mount.tree, name)));
+            if explicitly_bound { return None; }
+            let Some(parent) = registry.inline_parent(&scope) else { break; };
+            scope = parent;
         }
-        // Written bindings remain authoritative even when their target is
-        // missing or inaccessible; the prelude cannot repair an invalid mount.
-        let explicitly_bound = module.ast.items.iter()
-            .filter(|item| self.cfg_evaluator.should_include_item(item))
-            .any(|item| matches!(
-            &item.kind, verum_ast::ItemKind::Mount(mount)
-                if mount.alias.as_ref().is_some_and(|alias| alias.name.as_str() == name)
-                || source_mount_binds_name(&mount.tree, name)
-        ));
-        if explicitly_bound { return None; }
-        let prelude = verum_ast::prelude::implicit_prelude_path(&module.ast)?;
+        let prelude = verum_ast::prelude::implicit_prelude_path(&scope.ast)?;
         let prelude = self.get_module_with_path_aliases(prelude, &registry)?;
         self.find_type_declaration_with_source_module_inner(
             &prelude.ast, name, &Text::from(prelude.path.to_string()),

@@ -503,6 +503,23 @@ impl ModuleRegistry {
         self.data.lookup_by_path_aliased(path)
     }
 
+    /// Lexical enclosure exists only for a body declared inside the same file.
+    /// A file module can have the same path prefix without sharing that scope.
+    pub fn inline_parent(&self, module: &ModuleInfo) -> Maybe<Shared<ModuleInfo>> {
+        let parent = self.get_by_path(&module.path.parent()?.to_string())?;
+        if parent.file_id != module.file_id {
+            return None;
+        }
+        let is_inline = parent.ast.items.iter().any(|item| {
+            item.span == module.ast.span
+                && matches!(
+                    &item.kind, verum_ast::ItemKind::Module(decl)
+                        if decl.items.is_some() && decl.name.as_str() == module.name()
+                )
+        });
+        is_inline.then_some(parent)
+    }
+
     /// Get all modules
     pub fn all_modules(&self) -> impl Iterator<Item = (&ModuleId, &Shared<ModuleInfo>)> {
         self.observe(|reads| reads.all = true);
