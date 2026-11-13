@@ -342,6 +342,76 @@ fn len_opcode_reads_record_field() {
     assert_eq!(result.as_i64() as usize, HEAP_STR.len());
 }
 
+#[test]
+fn text_queries_measure_the_stored_bytes_of_each_representation() {
+    for text in ["", "a\0é", "Верум 🧮"] {
+        for byte_view in [false, true] {
+            for (query, expected) in [
+                (TextSubOpcode::ByteLen, Value::from_i64(text.len() as i64)),
+                (TextSubOpcode::IsEmpty, Value::from_bool(text.is_empty())),
+            ] {
+                let mut instructions = vec![Instruction::LoadK {
+                    dst: Reg(0),
+                    const_id: 0,
+                }];
+                let source: u8 = if byte_view {
+                    instructions.push(Instruction::TextExtended {
+                        sub_op: TextSubOpcode::AsBytes as u8,
+                        operands: vec![1, 0],
+                    });
+                    1
+                } else {
+                    0
+                };
+                instructions.push(Instruction::Ref {
+                    dst: Reg(3),
+                    src: Reg(source.into()),
+                });
+                instructions.push(Instruction::TextExtended {
+                    sub_op: query as u8,
+                    operands: vec![2, 3],
+                });
+                instructions.push(Instruction::Ret { value: Reg(2) });
+                let (value, _interpreter) = run_with_strings(&instructions, &[text]);
+                assert_eq!(
+                    value, expected,
+                    "{query:?}, byte_view={byte_view}, {text:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn text_queries_reject_an_integer_operand() {
+    for query in [TextSubOpcode::ByteLen, TextSubOpcode::IsEmpty] {
+        let (module, _) = create_module(
+            encode(&[
+                Instruction::LoadI {
+                    dst: Reg(0),
+                    value: 17,
+                },
+                Instruction::TextExtended {
+                    sub_op: query as u8,
+                    operands: vec![1, 0],
+                },
+                Instruction::Ret { value: Reg(1) },
+            ]),
+            &[],
+        );
+        let error = Interpreter::new(module)
+            .execute_function(FunctionId(0))
+            .unwrap_err();
+        assert!(
+            matches!(
+                error,
+                verum_vbc::interpreter::InterpreterError::InvalidOperand { .. }
+            ),
+            "{error}"
+        );
+    }
+}
+
 // =============================================================================
 // as_bytes composition (BYTE_SLICE over the record's inline bytes)
 // =============================================================================

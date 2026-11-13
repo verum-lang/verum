@@ -11846,6 +11846,66 @@ pub fn define_internal_calloc<'ctx>(context: &'ctx Context, module: &Module<'ctx
     Ok(())
 }
 
+/// Read a native Text record's byte count without visiting its buffer.
+pub(super) fn define_text_byte_len<'ctx>(
+    context: &'ctx Context,
+    module: &Module<'ctx>,
+) -> Result<FunctionValue<'ctx>> {
+    let word = context.i64_type();
+    let function = super::error::get_or_declare_function(
+        module,
+        "verum_text_byte_len",
+        word.fn_type(&[word.into()], false),
+    );
+    if function.get_first_basic_block().is_some() {
+        return Ok(function);
+    }
+    function.set_linkage(verum_llvm::module::Linkage::Internal);
+    let builder = context.create_builder();
+    let entry = context.append_basic_block(function, "entry");
+    let empty = context.append_basic_block(function, "empty");
+    let record = context.append_basic_block(function, "record");
+    builder.position_at_end(entry);
+    let text = function
+        .get_first_param()
+        .or_internal("missing Text parameter")?
+        .into_int_value();
+    let is_null = builder
+        .build_int_compare(
+            verum_llvm::IntPredicate::EQ,
+            text,
+            word.const_zero(),
+            "is_null",
+        )
+        .or_llvm_err()?;
+    builder
+        .build_conditional_branch(is_null, empty, record)
+        .or_llvm_err()?;
+    builder.position_at_end(empty);
+    builder
+        .build_return(Some(&word.const_zero()))
+        .or_llvm_err()?;
+
+    builder.position_at_end(record);
+    let ptr = builder
+        .build_int_to_ptr(text, context.ptr_type(AddressSpace::default()), "text")
+        .or_llvm_err()?;
+    // SAFETY: a non-null native Text points to a live {ptr, len, cap} record.
+    let slot = unsafe {
+        builder
+            .build_in_bounds_gep(
+                context.i8_type(),
+                ptr,
+                &[word.const_int(TEXT_LEN_OFFSET, false)],
+                "len_slot",
+            )
+            .or_llvm_err()?
+    };
+    let len = builder.build_load(word, slot, "len").or_llvm_err()?;
+    builder.build_return(Some(&len)).or_llvm_err()?;
+    Ok(function)
+}
+
 /// Emit LLVM IR function definitions for text helper functions.
 /// These replace the C runtime functions in verum_runtime.c.
 /// Call this once per module before lowering VBC instructions.
@@ -12570,70 +12630,23 @@ pub fn define_text_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
         builder.build_return(Some(&result)).or_llvm_err()?;
     }
 
-    // --- verum_text_byte_len(text_obj: i64) -> i64 ---
-    // Reads `len` from the 24-byte Text object {ptr, len, cap} at
-    // offset 8.  Mirrors the canonical layout used by
-    // `verum_text_alloc` / `verum_text_get_ptr` / `verum_text_concat`.
-    if module.get_function("verum_text_byte_len").is_none() {
-        let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-        let func = super::error::get_or_declare_function(module, "verum_text_byte_len", fn_type);
-        func.set_linkage(verum_llvm::module::Linkage::Internal);
-        let entry = context.append_basic_block(func, "entry");
-        let builder = context.create_builder();
-        builder.position_at_end(entry);
-        let obj_i64 = func
-            .get_nth_param(0)
-            .or_internal("missing param 0")?
-            .into_int_value();
-        let obj_ptr = builder
-            .build_int_to_ptr(obj_i64, ptr_type, "obj_ptr")
-            .or_llvm_err()?;
-        // SAFETY: GEP into the Text object at offset 8 (len field).
-        let len_p = unsafe {
-            builder
-                .build_gep(i8_type, obj_ptr, &[i64_type.const_int(8, false)], "len_p")
-                .or_llvm_err()?
-        };
-        let len = builder
-            .build_load(i64_type, len_p, "len")
-            .or_llvm_err()?
-            .into_int_value();
-        builder.build_return(Some(&len)).or_llvm_err()?;
-    }
+    let byte_len = define_text_byte_len(context, module)?;
 
-    // --- verum_text_is_empty(text_obj: i64) -> i64 ---
-    // Returns 1 if `len == 0`, 0 otherwise.  Single-load probe.
-    if module.get_function("verum_text_is_empty").is_none() {
-        let fn_type = i64_type.fn_type(&[i64_type.into()], false);
-        let func = super::error::get_or_declare_function(module, "verum_text_is_empty", fn_type);
-        func.set_linkage(verum_llvm::module::Linkage::Internal);
-        let entry = context.append_basic_block(func, "entry");
+    // This named entry shares the instruction's length-delimited Text ABI.
+    let is_empty = super::error::get_or_declare_function(
+        module, "verum_text_is_empty", i64_type.fn_type(&[i64_type.into()], false),
+    );
+    if is_empty.get_first_basic_block().is_none() {
+        is_empty.set_linkage(verum_llvm::module::Linkage::Internal);
         let builder = context.create_builder();
-        builder.position_at_end(entry);
-        let obj_i64 = func
-            .get_nth_param(0)
-            .or_internal("missing param 0")?
-            .into_int_value();
-        let obj_ptr = builder
-            .build_int_to_ptr(obj_i64, ptr_type, "obj_ptr")
+        builder.position_at_end(context.append_basic_block(is_empty, "entry"));
+        let text = is_empty.get_first_param().or_internal("missing Text parameter")?;
+        let len = builder.build_call(byte_len, &[text.into()], "len").or_llvm_err()?
+            .basic_value_or("Text byte length has no result")?.into_int_value();
+        let empty = builder.build_int_compare(verum_llvm::IntPredicate::EQ, len, i64_type.const_zero(), "empty")
             .or_llvm_err()?;
-        let len_p = unsafe {
-            builder
-                .build_gep(i8_type, obj_ptr, &[i64_type.const_int(8, false)], "len_p")
-                .or_llvm_err()?
-        };
-        let len = builder
-            .build_load(i64_type, len_p, "len")
-            .or_llvm_err()?
-            .into_int_value();
-        let zero = i64_type.const_zero();
-        let is_empty_bool = builder
-            .build_int_compare(verum_llvm::IntPredicate::EQ, len, zero, "is_empty_bool")
-            .or_llvm_err()?;
-        let is_empty = builder
-            .build_int_z_extend(is_empty_bool, i64_type, "is_empty")
-            .or_llvm_err()?;
-        builder.build_return(Some(&is_empty)).or_llvm_err()?;
+        let result = builder.build_int_z_extend(empty, i64_type, "result").or_llvm_err()?;
+        builder.build_return(Some(&result)).or_llvm_err()?;
     }
 
     // --- verum_text_is_utf8(text_obj: i64) -> i64 ---

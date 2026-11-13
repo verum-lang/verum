@@ -159,11 +159,26 @@ fn text_extended_body(
             let text_val = super::string_helpers::alloc_string_value(state, &s)?;
             state.set_reg(dst, text_val);
         }
-        Some(TextSubOpcode::ByteLen) => {
-            let text_reg = read_reg(state)?;
-            let text = state.get_reg(text_reg);
-            let s = super::string_helpers::extract_string(&text, state);
-            state.set_reg(dst, Value::from_i64(s.len() as i64));
+        Some(query @ (TextSubOpcode::ByteLen | TextSubOpcode::IsEmpty)) => {
+            let src = read_reg(state)?;
+            let text = super::cbgr_helpers::resolve_receiver(state, state.get_reg(src))?;
+            let len = if text.is_small_string() {
+                text.as_small_string().len() as u64
+            } else if let Some((_, len)) = crate::interpreter::heap::value_as_text_record(&text) {
+                len as u64
+            } else if let Some((_, len)) = crate::interpreter::heap::value_as_byte_slice(&text) {
+                len
+            } else {
+                return Err(InterpreterError::InvalidOperand {
+                    message: format!("{query:?} expects Text or a byte view"),
+                });
+            };
+            let result = if query == TextSubOpcode::IsEmpty {
+                Value::from_bool(len == 0)
+            } else {
+                Value::from_i64(len as i64)
+            };
+            state.set_reg(dst, result);
         }
         Some(TextSubOpcode::CharLen) => {
             // Get Text length in characters — canonical extraction, same
@@ -172,18 +187,6 @@ fn text_extended_body(
             let text = state.get_reg(text_reg);
             let s = super::string_helpers::extract_string(&text, state);
             state.set_reg(dst, Value::from_i64(s.chars().count() as i64));
-        }
-        Some(TextSubOpcode::IsEmpty) => {
-            // Check if Text is empty
-            let text_reg = read_reg(state)?;
-            let text = state.get_reg(text_reg);
-
-            let is_empty = if text.is_small_string() {
-                text.as_small_string().is_empty()
-            } else {
-                true
-            };
-            state.set_reg(dst, Value::from_bool(is_empty));
         }
         Some(TextSubOpcode::IsUtf8) => {
             // Text type is always valid UTF-8

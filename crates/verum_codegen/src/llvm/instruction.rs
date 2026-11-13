@@ -24786,52 +24786,26 @@ fn lower_text_extended<'ctx>(
             ctx.mark_text_register(dst);
             Ok(())
         }
-        0x30 => {
-            // ByteLen — the Text's STORED byte length at offset 8 of the
-            // {ptr@0, len@8, cap@16} struct (the layout `verum_text_get_ptr`
-            // itself assumes: it int_to_ptr's the text value and loads the
-            // char* from offset 0).  Pre-fix this called strlen, which walks
-            // to the first NUL — wrong for a len-bounded (non-NUL-terminated)
-            // buffer and for any multibyte content past an embedded NUL.
-            if operands.len() < 2 {
-                return Ok(());
+        0x30 | 0x32 => {
+            let mut cursor = 0;
+            let dst = read_reg_varlen(operands, &mut cursor)?;
+            let src = read_reg_varlen(operands, &mut cursor)?;
+            if cursor != operands.len() {
+                return Err(LlvmLoweringError::internal("unexpected trailing operands in Text length query"));
             }
-            let dst = op_reg(operands, 0);
-            let text_val = ctx.get_register(op_reg(operands, 1))?;
-            let i64_ty = ctx.types().i64_type();
-            let i8_ty = ctx.types().i8_type();
-            let ptr_ty = ctx.types().ptr_type();
-            let text_i64 = as_i64(ctx, text_val, "byte_len_text_i64")?;
-            // Null text → length 0 (mirrors verum_text_get_ptr's null guard).
-            let is_null = ctx
-                .builder()
-                .build_int_compare(IntPredicate::EQ, text_i64, i64_ty.const_zero(), "bl_null")
-                .or_llvm_err()?;
-            let text_ptr = ctx
-                .builder()
-                .build_int_to_ptr(text_i64, ptr_ty, "byte_len_text_ptr")
-                .or_llvm_err()?;
-            // SAFETY: Text layout {ptr:i64, len:i64, cap:i64}; offset 8 = len.
-            let len_slot = unsafe {
-                ctx.builder()
-                    .build_in_bounds_gep(
-                        i8_ty,
-                        text_ptr,
-                        &[i64_ty.const_int(8, false)],
-                        "byte_len_slot",
-                    )
-                    .or_llvm_err()?
+            let word = ctx.types().i64_type();
+            let text = as_i64(ctx, ctx.get_register(src)?, "text")?;
+            let helper = super::runtime::define_text_byte_len(ctx.llvm_context(), ctx.get_module())?;
+            let len = ctx.builder().build_call(helper, &[text.into()], "byte_len").or_llvm_err()?
+                .basic_value_or("Text byte length has no result")?.into_int_value();
+            let result = if sub_op == 0x32 {
+                let empty = ctx.builder().build_int_compare(IntPredicate::EQ, len, word.const_zero(), "is_empty")
+                    .or_llvm_err()?;
+                ctx.builder().build_int_z_extend(empty, word, "empty").or_llvm_err()?
+            } else {
+                len
             };
-            let raw_len = ctx
-                .builder()
-                .build_load(i64_ty, len_slot, "byte_len_raw")
-                .or_llvm_err()?
-                .into_int_value();
-            let len = ctx
-                .builder()
-                .build_select(is_null, i64_ty.const_zero(), raw_len, "byte_len")
-                .or_llvm_err()?;
-            ctx.set_register(dst, len);
+            ctx.set_register(dst, result.into());
             Ok(())
         }
         0x31 => {
@@ -24858,40 +24832,6 @@ fn lower_text_extended<'ctx>(
                 .or_llvm_err()?
                     .basic_value_or("CharLen: expected return value")?;
             ctx.set_register(dst, result);
-            Ok(())
-        }
-        0x32 => {
-            // IsEmpty — check if string length is 0
-            if operands.len() < 2 {
-                return Ok(());
-            }
-            let dst = op_reg(operands, 0);
-            let src = ctx.get_register(op_reg(operands, 1))?;
-            let module = ctx.get_module();
-            let i64_ty = ctx.types().i64_type();
-            let fn_type = i64_ty.fn_type(&[ctx.types().ptr_type().into()], false);
-            let strlen_fn = module
-                .get_function("verum_strlen_export")
-                .unwrap_or_else(|| module.add_function("verum_strlen_export", fn_type, None));
-            let len = ctx
-                .builder()
-                .build_call(strlen_fn, &[src.into()], "str_len")
-                .or_llvm_err()?
-                    .basic_value_or("IsEmpty: expected return value")?;
-            let is_zero = ctx
-                .builder()
-                .build_int_compare(
-                    IntPredicate::EQ,
-                    len.into_int_value(),
-                    i64_ty.const_zero(),
-                    "is_empty",
-                )
-                .or_llvm_err()?;
-            let extended = ctx
-                .builder()
-                .build_int_z_extend(is_zero, i64_ty, "empty_ext")
-                .or_llvm_err()?;
-            ctx.set_register(dst, extended.into());
             Ok(())
         }
         0x33 => {
