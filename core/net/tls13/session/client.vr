@@ -59,7 +59,7 @@ mount core.net.tls13.record.{AeadState, ContentType,
                               MAX_PLAINTEXT_SIZE};
 mount core.net.tls13.keyschedule.{TrafficSecret, TrafficKeys, TrafficDirection};
 mount core.net.tls13.handshake.client_sm.{
-    ClientConfig, ClientSm, StepOutput, PostHandshakeOutcome, Connected,
+    Tls13ClientConfig, ClientSm, StepOutput, PostHandshakeOutcome, Connected,
 };
 mount core.net.tls13.handshake.messages.{KeyUpdate, KeyUpdateRequest};
 mount core.net.tls13.handshake.resumption.{ClientSession};
@@ -106,7 +106,7 @@ public type TlsClient<S> is {
 implement TlsClient<Handshaking> {
     /// Create a client session + drive ClientHello emission.
     /// Returns (session, initial_clienthello_wire).
-    public fn new(config: ClientConfig) -> Result<(TlsClient<Handshaking>, List<Byte>), TlsError> {
+    public fn new(config: Tls13ClientConfig) -> Result<(TlsClient<Handshaking>, List<Byte>), TlsError> {
         let sm0 = ClientSm.new(config);
         let (sm1, wire) = sm0.start()?;
         let c = TlsClient {

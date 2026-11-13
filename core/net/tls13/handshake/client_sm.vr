@@ -45,7 +45,7 @@ mount core.hash.crypto.sha256.{Sha256};
 mount core.hash.crypto.sha384.{Sha384};
 mount core.hash.crypto.sha512.{Sha512};
 mount core.mac.hmac.{HmacSha256, HmacSha384, hmac_sha256, hmac_sha384};
-mount core.security.x509.{Certificate, TrustStore, ChainError, parse_certificate, validate_chain};
+mount core.security.x509.{X509Certificate, TrustStore, ChainError, parse_certificate, validate_chain};
 mount core.security.x509.spki.{SubjectPublicKey, EcPublicKeyBytes, Ed25519PublicKeyBytes};
 mount core.security.ecc.x25519.{X25519, X25519SecretKey, X25519PublicKey};
 mount core.security.ecc.p256.{P256, P256PrivateKey, P256PublicKey, P256Signature};
@@ -146,14 +146,14 @@ public type WaitCert is { inner: WaitEncryptedExtensions, cert_request: Maybe<Ce
 public type WaitCertVerify is {
     inner:            WaitEncryptedExtensions,
     cert_request:     Maybe<CertificateRequest>,
-    peer_certificate: Certificate,
+    peer_certificate: X509Certificate,
     peer_chain_der:   List<List<Byte>>,
 };
 
 public type WaitFinished is {
     inner:            WaitEncryptedExtensions,
     cert_request:     Maybe<CertificateRequest>,
-    peer_certificate: Certificate,
+    peer_certificate: X509Certificate,
 };
 
 public type Connected is {
@@ -165,7 +165,7 @@ public type Connected is {
     server_ap_traffic: TrafficSecret,
     resumption_master: SecretBytes,
     exporter_master:   SecretBytes,
-    peer_certificate:  Certificate,
+    peer_certificate:  X509Certificate,
 };
 
 // =============================================================================
@@ -793,7 +793,7 @@ fn build_cert_verify_signed_input(transcript_hash: &[Byte], is_server: Bool) -> 
 }
 
 fn verify_certificate_signature(
-    cert: &Certificate,
+    cert: &X509Certificate,
     cv: &CertificateVerify,
     signed: &[Byte],
 ) -> Result<(), TlsError> {
@@ -804,11 +804,8 @@ fn verify_certificate_signature(
         return Result.Err(TlsError.BadCertificate);
     }
 
-    // `Certificate` holds DER only (x509/credential.vr:44); the parsed
-    // view carries `tbs`.  Same parse-and-map idiom as :474 in this file.
-    let parsed = parse_certificate(cert.der_data.as_slice())
-        .map_err(|_| TlsError.BadCertificate)?;
-    let pk = &parsed.tbs.spki.public_key;
+    // The certificate was parsed on receipt and retained by the state machine.
+    let pk = &cert.tbs.spki.public_key;
     match cv.algorithm {
         // EdDSA — raw 64-byte signature, message is `signed`.
         SignatureScheme.Ed25519Scheme => match pk {
@@ -887,8 +884,8 @@ fn verify_rsa_pss_cv(
     }
 }
 
-fn parse_chain(der: &List<List<Byte>>) -> Result<List<Certificate>, TlsError> {
-    let mut out: List<Certificate> = [];
+fn parse_chain(der: &List<List<Byte>>) -> Result<List<X509Certificate>, TlsError> {
+    let mut out: List<X509Certificate> = [];
     let mut i: Int = 0;
     while i < der.len() {
         let c = parse_certificate(der[i].as_slice())
