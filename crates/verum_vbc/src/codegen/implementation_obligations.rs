@@ -19,6 +19,14 @@ pub(super) struct ImplementationHeader {
     declaration: Arc<ImplDecl>,
 }
 
+struct PreparedImplementation {
+    scope: std::collections::HashMap<String, u16>,
+    source_bindings: SourceTypeSubstitution,
+    receiver: ImplReceiverWitness,
+    // Inheritance is elaborated only after the exact receiver can match.
+    heads: Maybe<List<Goal>>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct Goal {
     subject: TypeRef,
@@ -405,6 +413,7 @@ impl VbcCodegen {
     fn implementation_alternative(
         &mut self,
         header: &ImplementationHeader,
+        prepared: &mut Maybe<PreparedImplementation>,
         goal: &Goal,
         assumptions: &Premises,
     ) -> CodegenResult<Maybe<Premises>> {
@@ -417,21 +426,28 @@ impl VbcCodegen {
                 if !matches!(declaration.kind, ImplKind::Protocol { .. }) {
                     return Ok(None);
                 }
-                let (_, _, names) = cg.resolve_impl_generics(declaration);
-                let scope = cg.declared_impl_generic_scope(&declaration.kind, &names);
-                // An alternative belongs to its own declaration. The querying
-                // implementation cannot supply or erase its value binders.
-                let source_bindings = cg.implementation_value_scope(declaration, &scope)?;
-                cg.current_source_substitution = source_bindings.clone();
-                let receiver = cg.resolve_impl_receiver(declaration, &scope, &names)?;
+                if prepared.is_none() {
+                    let (_, _, names) = cg.resolve_impl_generics(declaration);
+                    let scope = cg.declared_impl_generic_scope(&declaration.kind, &names);
+                    let source_bindings = cg.implementation_value_scope(declaration, &scope)?;
+                    cg.current_source_substitution = source_bindings.clone();
+                    let receiver = cg.resolve_impl_receiver(declaration, &scope, &names)?;
+                    *prepared = Some(PreparedImplementation { scope, source_bindings, receiver, heads: None });
+                }
+                let PreparedImplementation { scope, source_bindings, receiver, heads } = prepared.as_mut().expect("header was prepared above");
                 let mut bindings = TypeSubstitution::empty();
                 if !receiver.semantic
                     || !match_declared_types(&receiver.ty, &goal.subject, &mut bindings)
                 {
                     return Ok(None);
                 }
+                cg.current_source_substitution = source_bindings.clone();
+                let heads = match heads {
+                    Some(heads) => heads,
+                    slot @ None => slot.insert(cg.implementation_heads(declaration, receiver, scope)?),
+                };
                 let mut matched = None;
-                for head in cg.implementation_heads(declaration, &receiver, &scope)? {
+                for head in heads.iter() {
                     let mut candidate = bindings.clone();
                     if head.protocol == goal.protocol
                         && head.arguments.len() == goal.arguments.len()
@@ -455,11 +471,11 @@ impl VbcCodegen {
                 // result T of F: fn(Input) -> T. Resolve the declaration's
                 // symbolic requirements before crossing into the caller space.
                 if scope.values().any(|id| bindings.get(TypeParamId(*id)).is_none()) {
-                    let symbolic = cg.implementation_premises(declaration, &scope)?;
+                    let symbolic = cg.implementation_premises(declaration, scope)?;
                     infer_implementation_bindings(&symbolic, assumptions, &mut bindings, declaration.span)?;
                 }
                 let mut substitution = SourceTypeSubstitution::default();
-                for (name, id) in &scope {
+                for (name, id) in scope.iter() {
                     let Some(actual) = bindings.get(TypeParamId(*id)) else {
                         return Ok(Some(Premises {
                             unknown: Some(format!(
@@ -571,7 +587,11 @@ impl VbcCodegen {
             })?;
             self.obligation_blanket_cursor += 1;
         }
-        let mut headers = self.implementation_headers.clone();
+        // One proof runs against one declaration registry and lexical context.
+        // The cache dies with the proof, so a later registration or re-export
+        // cannot inherit an older receiver or protocol application.
+        let mut headers: List<_> = self.implementation_headers.iter().cloned()
+            .map(|header| (header, None)).collect();
         let mut goals = required.clone();
         let mut indices: Map<Goal, usize> = goals
             .iter()
@@ -588,7 +608,14 @@ impl VbcCodegen {
             let mut choices = List::new();
             let mut reason = None;
             if assumptions.goals.iter().any(|fact| fact.entails(&goal)) {
+                // This exact proposition is a lexical premise, including
+                // its protocol arguments and requested associated equalities.
+                // Its proof is complete without reopening other declarations.
                 choices.push(List::new());
+                alternatives.push(choices);
+                unknown.push(None);
+                cursor += 1;
+                continue;
             }
             let imported: List<_> = goal
                 .subject
@@ -606,17 +633,14 @@ impl VbcCodegen {
                     ));
                     continue;
                 };
-                if !headers.iter().any(|header| header.source == source) {
+                if !headers.iter().any(|(header, _)| header.source == source) {
                     let declaration =
                         Arc::new(source.declaration().map_err(|error| invalid(error, span))?);
-                    headers.push(ImplementationHeader {
-                        source,
-                        declaration,
-                    });
+                    headers.push((ImplementationHeader { source, declaration }, None));
                 }
             }
-            for header in &headers {
-                let Some(premises) = self.implementation_alternative(header, &goal, assumptions)? else {
+            for (header, prepared) in &mut headers {
+                let Some(premises) = self.implementation_alternative(header, prepared, &goal, assumptions)? else {
                     continue;
                 };
                 if premises.impossible {
