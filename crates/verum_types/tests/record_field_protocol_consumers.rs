@@ -13,7 +13,7 @@ use verum_types::TypeChecker;
 
 const OWNER: &str = "core.field_protocol";
 const DECLARATIONS: &str = r#"
-    public type Packet is { public visible: Int, hidden: Int };
+    public type Packet is { public visible: Int, hidden: Int, public id: Bool, name: Bool };
 "#;
 
 const DEREF_TYPES: &str = r#"
@@ -210,6 +210,27 @@ fn two_declared_deref_hops_keep_public_target_field() {
         &format!("{DEREF_TYPES} {DEREF_IMPLS}"),
         "fn probe(value: FieldGuard<Int, FieldGuard<Bool, Packet>>) -> Int { value.visible }",
     );
+}
+
+#[test]
+fn reflected_spelling_resolves_a_dereferenced_value_field() {
+    let helpers = format!("{DEREF_TYPES} {DEREF_IMPLS}");
+    for receiver in ["FieldGuard<Int, Packet>", "FieldGuard<Int, FieldGuard<Bool, Packet>>"] {
+        assert_public(&helpers, &format!("fn probe(value: {receiver}) -> Bool {{ value.id }}"));
+        let private = check(&helpers, &format!("fn probe(value: {receiver}) -> Text {{ value.name }}"));
+        assert!(private.iter().any(|e| e.contains("VisibilityError") && e.contains(OWNER)), "{private:?}");
+        let wrong = check(&helpers, &format!("fn probe(value: {receiver}) -> UInt64 {{ value.id }}"));
+        assert!(wrong.iter().any(|e| e.contains("Bool")), "{wrong:?}");
+    }
+}
+
+#[test]
+fn missing_value_field_cannot_be_supplied_by_type_metadata() {
+    let helpers = format!("{DEREF_TYPES} {DEREF_IMPLS}");
+    for receiver in ["Packet", "FieldGuard<Int, Packet>"] {
+        let errors = check(&helpers, &format!("fn probe(value: {receiver}) -> Int {{ value.size }}"));
+        assert!(errors.iter().any(|e| e.contains("size")), "{receiver}: {errors:?}");
+    }
 }
 
 #[test]

@@ -93,9 +93,13 @@ fn structural_type_properties_require_declared_element_operands() {
     ] {
         check(&format!("fn probe() -> Int {{ {receiver}.size }}"));
     }
-    // Byte here is a Bool value; the array's element type must remain Bool.
-    check("fn probe() -> Bool { let Byte = true; let values = (&[Byte]).min; values[0] }");
-    check("fn probe() -> Bool { let Byte = true; let values = (&[Byte; 3]).min; values[0] }");
+    // A value called Byte makes these arrays of Bool. Only a type operand
+    // denotes a reflection query.
+    for array in ["[Byte]", "[Byte; 3]"] {
+        check(&format!("fn probe() -> Bool {{ let Byte = true; let values = {array}; values[0] }}"));
+        let invalid = format!("fn probe() -> Bool {{ let Byte = true; let values = (&{array}).min; values[0] }}");
+        assert!(errors("fixture", &invalid).iter().any(|error| error.contains("min")), "{invalid}");
+    }
 }
 
 #[test]

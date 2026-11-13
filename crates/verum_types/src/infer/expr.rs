@@ -8193,35 +8193,15 @@ impl TypeChecker {
         Ok(InferResult::new(Type::tuple(types)))
     }
 
-    /// T0216-c — the single authority for built-in type-property RESULT TYPES.
-    /// These compile-time-metadata properties are valid on ALL receiver types;
-    /// every arm of `infer_expr_field`'s field-access match consults this one
-    /// function (after its own field / method lookups) so the property set can
-    /// never drift between arms — the drift that regressed `rec.is_signed` when
-    /// T0563 removed the record-field swallow. Returns `None` for a member that
-    /// is not a built-in property (the caller then continues its normal
-    /// resolution). Mirrors the codegen surface (compile_type_property).
-    fn builtin_type_property_result_type(prop: &str, self_ty: &Type) -> Option<Type> {
-        verum_ast::TypeProperty::from_str(prop)
-            .map(|p| Self::type_property_result_type(p, self_ty))
-    }
-
-    /// T0216 — property → result type, TOTAL over `TypeProperty`.
-    ///
-    /// Taking the enum rather than a string is what makes this the single
-    /// authority: adding a property to `TypeProperty` fails this match to
-    /// compile, whereas the previous `&str` signature returned `None` for
-    /// an unknown name and so accepted silently-diverging spellings. The
-    /// string-keyed wrapper above exists only for the field-access route,
-    /// where the member name has not yet been classified; it decides
-    /// membership with `TypeProperty::from_str`, never with its own list.
+    /// Result of a reflection query on a declared type operand.
     pub(super) fn type_property_result_type(
         prop: verum_ast::TypeProperty,
         self_ty: &Type,
     ) -> Type {
         use verum_ast::TypeProperty as P;
         match prop {
-            P::Size | P::Alignment | P::Stride | P::Bits | P::Id => Type::int(),
+            P::Size | P::Alignment | P::Stride | P::Bits => Type::int(),
+            P::Id => Type::uint64(),
             P::IsSigned => Type::bool(),
             P::Min | P::Max => self_ty.clone(),
             P::Name => Type::text(),
@@ -9241,16 +9221,6 @@ impl TypeChecker {
                             let ty = self.instantiate_value_scheme(&scheme, expr.span)?;
                             return Ok(InferResult::new(ty));
                         }
-                        // Built-in type properties (T0216-c): the single authority
-                        // resolves them for every receiver type, so the arms
-                        // cannot drift (the omission here regressed rec.is_signed
-                        // when T0563 removed the swallow below).
-                        if let Some(t) = Self::builtin_type_property_result_type(
-                            field.name.as_str(),
-                            &normalized_ty,
-                        ) {
-                            return Ok(InferResult::new(t));
-                        }
                         // T0563 / G1 (docs/architecture/diagnostic-totality.md §3):
                         // loud undefined field/member access. If the receiver's
                         // full field set is KNOWN (its struct definition resolved)
@@ -9353,15 +9323,6 @@ impl TypeChecker {
             // Handle associated constants on primitive types
             // e.g., Float.INFINITY, Int.MAX, f64.MIN
             Type::Float | Type::Int => {
-                // Built-in type properties first (T0216-c: one authority; this
-                // arm and the codegen once drifted — PROP-LAYER-DRIFT-1 — over
-                // is_signed/min/max/id on primitives).
-                if let Some(t) = Self::builtin_type_property_result_type(
-                    field.name.as_str(),
-                    &normalized_ty,
-                ) {
-                    return Ok(InferResult::new(t));
-                }
                 // Look up as "Type.field" in the environment
                 let const_name = format!("{}.{}", normalized_ty, field.name);
                 if let Some(scheme) = self.ctx.env.lookup(&const_name).cloned() {
@@ -9384,211 +9345,51 @@ impl TypeChecker {
                     field.name, normalized_ty
                 ))))
             }
-            Type::Text => {
-                // Built-in type properties (T0216-c: one authority), else E103.
-                if let Some(t) = Self::builtin_type_property_result_type(
-                    field.name.as_str(),
-                    &normalized_ty,
-                ) {
-                    Ok(InferResult::new(t))
-                } else if let Some((t, hops)) = self
-                    .field_type_through_deref(&normalized_ty, field.name.as_str(), expr.span)?
-                {
-                    self.record_deref_adjustment(obj.span, hops);
-                    // AUTO-DEREF, second of the two field-access paths.  A
-                    // receiver that is not a record reaches HERE rather than
-                    // the `UnknownField` site, which is why wiring that one
-                    // alone left every `core/` case untouched: a
-                    // `MutexGuard<PoolInner<_>>` is not a record, so
-                    // `guard.idle` came out as E103 "Cannot access field on
-                    // non-record type".  Both paths now ask the same
-                    // question of `Deref`, as method calls and indexing
-                    // already did.
-                    Ok(InferResult::new(t))
-                } else if let Some(Type::Record(fields)) =
-                    self.expand_generic_to_record(&normalized_ty)
-                {
-                    // THIRD field-access path, and the one a generic
-                    // record from the ARCHIVE needs. `Labeled<Text>`
-                    // resolves to `Type::Generic { name, args }` — never
-                    // to a record — so neither the record arm above nor
-                    // the deref arm sees it, and a parameter typed with
-                    // one reported E103 on a field it plainly has
-                    // (T1105). The variant side has had this expansion
-                    // since the archive gained generic payloads; the
-                    // record side had no counterpart.
-                    match fields.get(field.name.as_str()) {
-                        Some(t) => Ok(InferResult::new(t.clone())),
-                        None => Err(TypeError::OtherWithCode {
-                            code: verum_common::Text::from("E103"),
-                            msg: verum_common::Text::from(format!(
-                                "field '{}' not found in type: {}",
-                                field.name, normalized_ty
-                            )),
-                        }),
-                    }
-                } else {
-                    Err(TypeError::OtherWithCode {
-                        code: verum_common::Text::from("E103"),
-                        msg: verum_common::Text::from(format!(
-                            "Cannot access field '{}' on non-record type: {}",
-                            field.name, normalized_ty
-                        )),
-                    })
-                }
-            }
-            // Handle type properties for ALL types: T.size, T.align, T.alignment, T.stride, T.bits
-            // These are valid for any type as compile-time type metadata
             _ => {
-                match field.name.as_str() {
-                    "size" | "alignment" | "stride" | "bits" => {
-                        // Type properties return Int (the size/alignment value)
-                        Ok(InferResult::new(Type::int()))
-                    }
-                    "is_signed" => Ok(InferResult::new(Type::bool())),
-                    // min/max as compile-time type metadata return the type
-                    // itself (the bound value's type). A13: a second, Numeric-
-                    // guarded `"min" | "max"` arm below this one was unreachable
-                    // — this unconditional arm already matches every min/max,
-                    // and both had an identical body — so it was removed rather
-                    // than silenced with an allow.
-                    "min" | "max" => Ok(InferResult::new(normalized_ty.clone())),
-                    "id" => Ok(InferResult::new(Type::int())),
-                    "name" => {
-                        // Type name property returns Text
-                        Ok(InferResult::new(Type::text()))
-                    }
-                    _ => {
-                        // Try associated constant lookup via receiver Path
-                        // This handles newtypes and other types where the receiver
-                        // resolves to a function type (constructor) rather than Named
-                        if let ExprKind::Path(path) = &obj.kind {
-                            if let Some(verum_ast::ty::PathSegment::Name(id)) =
-                                path.segments.last()
-                            {
-                                let const_name = format!("{}.{}", id.name, field.name);
-                                if let Some(scheme) =
-                                    self.ctx.env.lookup(&const_name).cloned()
-                                {
-                                    let ty = self.instantiate_value_scheme(&scheme, expr.span)?;
-                                    return Ok(InferResult::new(ty));
-                                }
-                                // Static-method dispatch fallback: when the
-                                // receiver is a bare type-name path
-                                // (`List.new`, `IndexedList.from_list`,
-                                // …) and the field-name is not in env,
-                                // search the inherent_methods bucket for
-                                // `<TypeName>::<method_name>`.  Pre-fix
-                                // every body-position `List.new()` /
-                                // `IndexedList { items: List.new() }`
-                                // failed E103 "Cannot access field 'new'
-                                // on non-record type: List<_>" because
-                                // the dispatch path didn't try the
-                                // inherent-method bucket here — only the
-                                // env-side associated-constant lookup
-                                // above fired, and stdlib generic
-                                // methods aren't in `env`, they're in
-                                // `inherent_methods["List"]["new"]`.
-                                //
-                                // Also try the `$static$<method>` key
-                                // that `register_inherent_methods_from_metadata`
-                                // emits for static methods (no `self`
-                                // receiver) — same convention as the
-                                // AST-driven path.
-                                //
-                                // Stdlib-agnostic per AGENTS.md: lookup
-                                // is keyed by the user-written receiver
-                                // name, no per-stdlib-type special case.
-                                let type_name_str = id.name.as_str();
-                                let methods_guard = self.inherent_methods.read();
-                                if let Some(bucket) =
-                                    methods_guard.get(&Text::from(type_name_str))
-                                {
-                                    let static_key: Text =
-                                        format!("$static${}", field.name).into();
-                                    let bare_key: Text =
-                                        field.name.as_str().into();
-                                    let scheme = bucket
-                                        .get(&static_key)
-                                        .or_else(|| bucket.get(&bare_key))
-                                        .cloned();
-                                    drop(methods_guard);
-                                    if let Some(scheme) = scheme {
-                                        return Ok(InferResult::new(
-                                            self.instantiate_value_scheme(&scheme, expr.span)?,
-                                        ));
-                                    }
-                                } else {
-                                    drop(methods_guard);
-                                }
-                            }
-                        }
-                        {
-                            // An unconstrained receiver cannot establish a
-                            // field's type or declaration authority. Inventing
-                            // a result variable also admits private fields when
-                            // that generic function is later instantiated.
-                            if matches!(
-                                &normalized_ty,
-                                Type::Var(_) | Type::Unknown | Type::Placeholder { .. }
-                            ) {
-                                return Err(TypeError::OtherWithCode {
-                                    code: "E103".into(),
-                                    msg: format!(
-                                        "Cannot access field '{}' on an unresolved type; declare a record type or use a protocol method",
-                                        field.name
-                                    ).into(),
-                                });
-                            }
-                            // For Variant types, the field may be on the inner record
-                            if matches!(&normalized_ty, Type::Variant(_)) {
-                                return Ok(InferResult::new(Type::Var(
-                                    TypeVar::fresh(),
-                                )));
-                            }
-                            // AUTO-DEREF, third and last field-access site.
-                            // This file formats the E103 message TWICE; wiring
-                            // only the first one left `core/` untouched and the
-                            // deref trace silent, which is how the second copy
-                            // was found.  Same question, same authority.
-                            if let Some((t, hops)) = self
-                                .field_type_through_deref(
-                                    &normalized_ty,
-                                    field.name.as_str(),
-                                    expr.span,
-                                )?
-                            {
-                                self.record_deref_adjustment(obj.span, hops);
-                                return Ok(InferResult::new(t));
-                            }
-                            // SECOND E103 SITE, and the one an archive
-                            // generic record actually reaches. The
-                            // comment above says this file formats the
-                            // message twice and that wiring only the
-                            // first copy leaves `core/` untouched —
-                            // written by whoever wired deref. I repeated
-                            // it verbatim for T1105: the record
-                            // expansion went to the first site, changed
-                            // nothing, and the trace inside the helper
-                            // printed no line at all, because the helper
-                            // was never called from here.
-                            if let Some(Type::Record(rec)) =
-                                self.expand_generic_to_record(&normalized_ty)
-                            {
-                                if let Some(t) = rec.get(field.name.as_str()) {
-                                    return Ok(InferResult::new(t.clone()));
-                                }
-                            }
-                            Err(TypeError::OtherWithCode {
-                                code: verum_common::Text::from("E103"),
-                                msg: verum_common::Text::from(format!(
-                                    "Cannot access field '{}' on non-record type: {}",
-                                    field.name, normalized_ty
-                                )),
-                            })
-                        }
+                // A newtype constructor may carry a function type here. Static
+                // members still require the receiver to denote its declaration.
+                if let ExprKind::Path(path) = &obj.kind
+                    && let Some(verum_ast::ty::PathSegment::Name(id)) = path.segments.last()
+                    && !self.ctx.env.is_bound_value(id.name.as_str())
+                {
+                    let member = format!("{}.{}", id.name, field.name);
+                    let scheme = self.ctx.env.lookup(&member).cloned().or_else(|| {
+                        let methods = self.inherent_methods.read();
+                        let bucket = methods.get(&id.name)?;
+                        let static_key: Text = format!("$static${}", field.name).into();
+                        bucket.get(&static_key).or_else(|| bucket.get(&field.name)).cloned()
+                    });
+                    if let Some(scheme) = scheme {
+                        return Ok(InferResult::new(self.instantiate_value_scheme(&scheme, expr.span)?));
                     }
                 }
+                if matches!(&normalized_ty, Type::Var(_) | Type::Unknown | Type::Placeholder { .. }) {
+                    return Err(TypeError::OtherWithCode {
+                        code: "E103".into(),
+                        msg: format!(
+                            "Cannot access field '{}' on an unresolved type; declare a record type or use a protocol method",
+                            field.name
+                        ).into(),
+                    });
+                }
+                if matches!(&normalized_ty, Type::Variant(_)) {
+                    return Ok(InferResult::new(Type::Var(TypeVar::fresh())));
+                }
+                // A generic wrapper can declare its own field and also implement
+                // Deref to another record with a field of the same name.
+                if let Some(ty) = self.lookup_field_type(&normalized_ty, field.name.as_str()) {
+                    return Ok(InferResult::new(ty));
+                }
+                if let Some((ty, hops)) = self.field_type_through_deref(
+                    &normalized_ty, field.name.as_str(), expr.span,
+                )? {
+                    self.record_deref_adjustment(obj.span, hops);
+                    return Ok(InferResult::new(ty));
+                }
+                Err(TypeError::OtherWithCode {
+                    code: "E103".into(),
+                    msg: format!("Cannot access field '{}' on non-record type: {}", field.name, normalized_ty).into(),
+                })
             }
         }
     }

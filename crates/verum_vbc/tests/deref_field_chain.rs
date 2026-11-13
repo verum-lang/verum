@@ -241,6 +241,31 @@ fn declared_deref_field_chain_executes_without_dynamic_field_lookup() {
 }
 
 #[test]
+fn dereferenced_identity_field_survives_bytecode_serialization() {
+    let module = compile(&format!(
+        r#"{GUARD}
+        type Token is {{ value: Int }};
+        type Entry is {{ padding: Int, id: Token }};
+        fn probe() -> Int {{
+            let handle: Guard<Int, Entry> = Guard {{
+                noise: 91, value: Entry {{ padding: 83, id: Token {{ value: 47 }} }}
+            }};
+            handle.id.value
+        }}
+        "#
+    ));
+    exact_projection(&module, 0);
+    let wire = verum_vbc::serialize::serialize_module(&module).expect("encode");
+    let module = verum_vbc::deserialize::deserialize_module(&wire).expect("decode");
+    verum_vbc::validate::validate_module(&module).expect("valid reloaded bytecode");
+    let entry = module.find_function_by_name("field_chain.probe").expect("probe");
+    let value = verum_vbc::interpreter::Interpreter::new(module.into())
+        .execute_function(entry)
+        .expect("execute");
+    assert_eq!(value.try_as_i64(), Some(47));
+}
+
+#[test]
 fn qualified_field_segment_is_not_an_owner_parameter() {
     exact_projection(
         &compile(
