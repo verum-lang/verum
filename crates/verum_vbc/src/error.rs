@@ -107,6 +107,10 @@ pub enum VbcError {
         discriminant: u8,
     },
 
+    /// Malformed or unbounded declaration-carried associated assignment.
+    #[error("invalid associated type: {0}")]
+    AssociatedType(String),
+
     /// Circular type definition detected.
     #[error("circular type definition: {0:?}")]
     CircularType(TypeId),

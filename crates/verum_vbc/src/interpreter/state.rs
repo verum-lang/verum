@@ -3082,21 +3082,14 @@ impl InterpreterState {
             }
         };
         require_runtime_witness(ty)?;
-        if !ty.is_generic() {
-            return Ok(ty.clone());
-        }
-        let Some(args) = self.call_stack.current_generic_witnesses() else {
-            return Ok(ty.clone());
-        };
-        let Some(function) = self
-            .call_stack
-            .current()
-            .and_then(|frame| self.get_function(frame.function))
-        else {
-            return Ok(ty.clone());
-        };
-        let resolved = crate::mono::TypeSubstitution::from_function(function, args).apply(ty)
-            .map_err(|error| InterpreterError::Panic { message: format!("invalid generic witness substitution: {error}") })?;
+        let substitution = if ty.is_generic()
+            && let Some(args) = self.call_stack.current_generic_witnesses()
+            && let Some(function) = self.call_stack.current().and_then(|frame| self.get_function(frame.function))
+        {
+            crate::mono::TypeSubstitution::from_function(function, args)
+        } else { crate::mono::TypeSubstitution::empty() };
+        let resolved = crate::associated_types::instantiate_witness(&self.module, &substitution, ty)
+            .map_err(|error| InterpreterError::InvalidBytecode { pc: self.pc() as usize, message: error.to_string() })?;
         require_runtime_witness(&resolved)?;
         Ok(resolved)
     }

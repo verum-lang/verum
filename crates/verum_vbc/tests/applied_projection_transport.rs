@@ -158,3 +158,123 @@ fn truncated_applied_projection_bytecode_is_rejected_at_every_boundary() {
         assert!(decode_instruction(&bytes[..end], &mut 0).is_err(), "accepted truncation {end}");
     }
 }
+
+#[cfg(feature = "codegen")]
+fn projected_receiver() -> verum_vbc::VbcModule {
+    let source = r#"
+module app;
+type Measure is protocol { type Product; };
+type Numeric is ();
+type Logical is ();
+implement Measure for Numeric { type Product = Int; }
+implement Measure for Logical { type Product = Bool; }
+
+type Deref is protocol { type Target; fn deref(&self) -> &Self.Target; };
+type Envelope<T> is { slot: T };
+implement<T> Deref for Envelope<T> {
+    type Target = T;
+    fn deref(&self) -> &T { &self.slot }
+}
+type Cell<T> is { value: T };
+implement<T> Cell<T> {
+    fn identity(&self) -> UInt64 { T.id }
+}
+type Job<F: Measure> is { source: F, cell: Envelope<Cell<F.Product>> };
+implement<F: Measure> Job<F> {
+    fn identity(&self) -> UInt64 { self.cell.identity() }
+}
+fn main() -> Int {
+    let number: Job<Numeric> = Job {
+        source: Numeric(), cell: Envelope { slot: Cell { value: 73 } },
+    };
+    let flag: Job<Logical> = Job {
+        source: Logical(), cell: Envelope { slot: Cell { value: true } },
+    };
+    if number.identity() == Int.id && flag.identity() == Bool.id
+        && number.identity() != flag.identity() { 73 } else { -1 }
+}
+"#;
+    let ast = verum_fast_parser::Parser::new(source).parse_module().unwrap();
+    verum_vbc::codegen::VbcCodegen::with_config(verum_vbc::codegen::CodegenConfig::new("app"))
+        .compile_module(&ast).unwrap()
+}
+
+#[cfg(feature = "codegen")]
+fn replay_receiver(module: verum_vbc::VbcModule) -> verum_vbc::interpreter::InterpreterResult<verum_vbc::Value> {
+    let bytes = verum_vbc::serialize::serialize_module(&module).unwrap();
+    let module = verum_vbc::deserialize::deserialize_module(&bytes).unwrap();
+    verum_vbc::validate::validate_module(&module).unwrap();
+    let entry = module.find_function_by_name("app.main").unwrap();
+    verum_vbc::interpreter::Interpreter::new(module.into()).execute_function(entry)
+}
+
+#[test]
+#[cfg(feature = "codegen")]
+fn dereferenced_method_witness_selects_its_concrete_receivers_associated_member() {
+    let module = projected_receiver();
+    let fun = module.functions.iter().find(|f| module.get_string(f.name) == Some("Job.identity")).unwrap();
+    let start = fun.bytecode_offset as usize;
+    let body = &module.bytecode[start..start + fun.bytecode_length as usize];
+    let instructions = verum_vbc::bytecode::decode_instructions(body).unwrap();
+    assert!(instructions.iter().any(|op| match op {
+        verum_vbc::Instruction::SetCallWitness { type_args }
+        | verum_vbc::Instruction::CallG { type_args, .. } => matches!(type_args.as_slice(),
+            [TypeRef::AssociatedProjection { base, qualifier: None, assoc, args }]
+            if **base == parameter(0) && assoc == "Product" && args.is_empty()),
+        _ => false,
+    }));
+    assert_eq!(replay_receiver(module).unwrap().try_as_i64(), Some(73));
+}
+
+#[test]
+#[cfg(feature = "codegen")]
+fn erased_and_ambiguous_receiver_assignments_cannot_supply_witnesses() {
+    use verum_vbc::interpreter::InterpreterError;
+    for ambiguous in [false, true] {
+        let mut module = projected_receiver();
+        let index = module.types.iter().position(|ty| module.get_string(ty.name) == Some("Numeric")).unwrap();
+        let owner = &mut module.types[index];
+        if ambiguous {
+            let mut competing = owner.protocols.iter().find(|p| !p.associated_types.is_empty()).unwrap().clone();
+            let protocol = module.get_type(TypeId(competing.protocol.0)).unwrap().clone();
+            let alternate_id = TypeId(module.types.iter().map(|ty| ty.id.0).max().unwrap() + 1);
+            let name = module.intern_string("AlternateMeasure");
+            let source = verum_fast_parser::Parser::new("type AlternateMeasure is protocol { type Product; };")
+                .parse_module().unwrap();
+            let verum_ast::ItemKind::Type(declaration) = &source.items[0].kind else { panic!("protocol") };
+            module.types.push(verum_vbc::types::TypeDescriptor {
+                id: alternate_id, name, source_declaration: Some(declaration.clone()), ..protocol
+            });
+            competing.protocol = ProtocolId(alternate_id.0);
+            competing.associated_types[0].1 = TypeRef::Concrete(TypeId::BOOL);
+            module.types[index].protocols.push(competing);
+        } else {
+            owner.protocols.clear();
+        }
+        let error = replay_receiver(module).unwrap_err();
+        assert!(matches!(&error, InterpreterError::Panic { message } if message == "type reflection requires a resolved projection witness"), "{error}");
+    }
+}
+
+#[test]
+#[cfg(feature = "codegen")]
+fn nested_associated_witness_cycles_fail_before_loading_a_type_head() {
+    use verum_vbc::interpreter::{Interpreter, InterpreterError};
+    let mut module = load_projection(None, vec![]);
+    let member = module.intern_string("Item");
+    let projection = TypeRef::AssociatedProjection {
+        base: Box::new(TypeRef::Concrete(TypeId(3000))), qualifier: None,
+        assoc: "Item".into(), args: vec![],
+    };
+    let owner = module.types.iter_mut().find(|ty| ty.id == TypeId(3000)).unwrap();
+    owner.protocols.push(verum_vbc::types::ProtocolImpl {
+        source_implementation: None, protocol: ProtocolId(3100), methods: vec![],
+        associated_types: vec![(member, TypeRef::Tuple(vec![projection.clone(), projection]))],
+        protocol_args_text: vec![], type_param_fn_bounds: vec![],
+    });
+    let bytes = verum_vbc::serialize::serialize_module(&module).unwrap();
+    let restored = verum_vbc::deserialize::deserialize_module(&bytes).unwrap();
+    let error = Interpreter::new(restored.into()).execute_function(FunctionId(0)).unwrap_err();
+    assert!(matches!(&error, InterpreterError::InvalidBytecode { message, .. }
+        if message.contains("associated-type expansion") && message.contains("limit")), "{error}");
+}

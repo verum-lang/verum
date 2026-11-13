@@ -52,6 +52,7 @@ mod substitution;
 
 pub use cache::MonomorphizationCache;
 pub(crate) use discovery::concrete as is_concrete_type;
+pub(crate) use graph::MAX_TYPE_REF_DEPTH;
 pub use discovery::{canonical_type_args, discover_call_instantiations, record_concrete_instantiation};
 pub use graph::{
     CallSite, InstantiationGraph, InstantiationKey, InstantiationRequest, SourceLocation,

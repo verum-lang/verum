@@ -9244,6 +9244,9 @@ impl VbcCodegen {
                     contexts: Default::default(),
                 })
             }
+            TypeKind::AssociatedType { .. } | TypeKind::Qualified { .. } => {
+                self.source_type_in_current_scope(ty)
+            }
             TypeKind::Tuple(items) => {
                 let expected_items = match expected { Some(TypeRef::Tuple(items)) => Some(items), _ => None };
                 let items: Option<Vec<_>> = items.iter().enumerate().map(|(i, ty)| {
@@ -13351,7 +13354,14 @@ impl VbcCodegen {
 
         // Resolve the complete receiver chain before lowering it. Own
         // methods win at each hop and cycles cannot recursively expand calls.
-        let receiver_declaration = self.extract_expr_type_name(receiver);
+        // A field descriptor retains the caller's associated members across
+        // Deref. Its archive display spelling is not a source type expression.
+        let field_declaration = matches!(array_receiver.kind, ExprKind::Field { .. })
+            .then(|| self.declared_expression_result(array_receiver, None, 0, 0))
+            .flatten()
+            .and_then(|ty| self.scoped_callable_type_name(&ty, Some(&self.ctx.current_generic_param_ids)));
+        let receiver_declaration = field_declaration.map(String::from)
+            .or_else(|| self.extract_expr_type_name(receiver));
         if let Some(receiver_type) = receiver_declaration.as_deref() {
             let depth = self.method_receiver_deref_count(receiver_type, method.name.as_str());
             if depth > 0 {
@@ -31756,6 +31766,9 @@ impl VbcCodegen {
         match ty {
             TypeRef::Generic(id) => scope?.iter().find_map(|(name, value)|
                 (*value == id.0).then(|| name.as_str().into())),
+            TypeRef::AssociatedProjection { base, qualifier: None, assoc, args } if args.is_empty() => {
+                Some(format!("{}.{assoc}", render(base)?).into())
+            }
             TypeRef::Concrete(_) => self.render_field_type_ref(ty, scope.is_some()).map(Into::into),
             TypeRef::Instantiated { base, args } => Some(format!("{}<{}>",
                 render(&TypeRef::Concrete(*base))?,

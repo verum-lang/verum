@@ -536,9 +536,10 @@ impl ModuleMerger {
             // The specializer already applied the declaration's owner binders.
             // Resolve remaining projections from declared evidence in the merged
             // namespace; source-module IDs and method-name guesses are not evidence.
-            new_func.return_type = Self::resolve_ret_projections(
-                &new_func.return_type, output, 0,
-            )?;
+            crate::associated_types::normalize_projections(output, &mut new_func.return_type)
+                .map_err(|error| MergeError::AssociatedTypeResolution {
+                    projection: new_func.return_type.clone(), reason: error.to_string(),
+                })?;
 
             output.functions.push(new_func);
 
@@ -559,73 +560,6 @@ impl ModuleMerger {
         }
 
         Ok(())
-    }
-
-    /// Resolve declared associated types throughout the specialized result.
-    /// Unavailable evidence stays explicit; malformed evidence fails the merge.
-    fn resolve_ret_projections(
-        ty: &TypeRef,
-        module: &VbcModule,
-        depth: usize,
-    ) -> Result<TypeRef, MergeError> {
-        let fail = |reason: String| MergeError::AssociatedTypeResolution {
-            projection: ty.clone(), reason,
-        };
-        if depth > super::graph::MAX_TYPE_REF_DEPTH {
-            return Err(fail("associated-type expansion exceeds the type nesting limit".into()));
-        }
-        let resolve = |ty: &TypeRef| Self::resolve_ret_projections(ty, module, depth + 1);
-        Ok(match ty {
-            TypeRef::AssociatedProjection { base, qualifier, assoc, args } => {
-                let base = resolve(base)?;
-                let qualifier = qualifier.as_ref().map(|application| {
-                    Ok(crate::types::ProtocolApplication {
-                        protocol: application.protocol,
-                        args: application.args.iter().map(resolve).collect::<Result<_, MergeError>>()?,
-                    })
-                }).transpose()?;
-                let args = args.iter().map(resolve).collect::<Result<Vec<_>, _>>()?;
-                let result = crate::associated_types::resolve_projection(
-                    module, &base, qualifier.as_ref(), assoc, &args,
-                ).map_err(|error| fail(error.to_string()))?;
-                let projection = TypeRef::AssociatedProjection {
-                    base: Box::new(base), qualifier, assoc: assoc.clone(), args,
-                };
-                match result {
-                    Some(result) => {
-                        if result == projection {
-                            return Err(fail("cyclic associated-type binding".into()));
-                        }
-                        resolve(&result)?
-                    }
-                    None => projection,
-                }
-            }
-            TypeRef::Instantiated { base, args } => TypeRef::Instantiated {
-                base: *base, args: args.iter().map(resolve).collect::<Result<_, _>>()?,
-            },
-            TypeRef::Function { is_async,  params, return_type, contexts } => TypeRef::Function {
-                is_async: *is_async,
-                params: params.iter().map(resolve).collect::<Result<_, _>>()?,
-                return_type: Box::new(resolve(return_type)?), contexts: contexts.clone(),
-            },
-            TypeRef::Rank2Function { is_async,  type_param_count, params, return_type, contexts } => TypeRef::Rank2Function {
-                is_async: *is_async,
-                type_param_count: *type_param_count,
-                params: params.iter().map(resolve).collect::<Result<_, _>>()?,
-                return_type: Box::new(resolve(return_type)?), contexts: contexts.clone(),
-            },
-            TypeRef::Reference { inner, mutability, tier } => TypeRef::Reference {
-                inner: Box::new(resolve(inner)?), mutability: *mutability, tier: *tier,
-            },
-            TypeRef::Tuple(elements) => TypeRef::Tuple(elements.iter().map(resolve).collect::<Result<_, _>>()?),
-            TypeRef::Array { element, length } => TypeRef::Array {
-                element: Box::new(resolve(element)?), length: *length,
-            },
-            TypeRef::Slice(element) => TypeRef::Slice(Box::new(resolve(element)?)),
-            TypeRef::Concrete(_) | TypeRef::Generic(_) | TypeRef::ConstValue(_) | TypeRef::ConstSequence(_)
-                | TypeRef::RecordFieldProjection { .. } => ty.clone(),
-        })
     }
 
     /// Decode `instructions` for the functions in `[first_new_spec, len)` from

@@ -65,6 +65,8 @@ pub struct SpecializedFunction {
 #[derive(Debug, Clone)]
 pub enum SpecializationError {
     TypeSubstitution(super::SubstitutionError),
+    /// Invalid declaration-owned type witness.
+    InvalidWitness(String),
     /// Function not found.
     FunctionNotFound(FunctionId),
     /// Type not found.
@@ -99,6 +101,7 @@ impl std::fmt::Display for SpecializationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             SpecializationError::TypeSubstitution(error) => write!(f, "{error}"),
+            SpecializationError::InvalidWitness(reason) => write!(f, "{reason}"),
             SpecializationError::FunctionNotFound(id) => {
                 write!(f, "Function not found: {:?}", id)
             }
@@ -460,13 +463,13 @@ impl<'a> BytecodeSpecializer<'a> {
             .iter()
             .map(|p| {
                 let mut np = p.clone();
-                np.type_ref = self.substitution.apply(&p.type_ref)?;
-                Ok::<_, super::SubstitutionError>(np)
+                np.type_ref = self.instantiate_witness(&p.type_ref)?;
+                Ok::<_, SpecializationError>(np)
             })
             .collect::<Result<_, _>>()?;
         // task #39/#35: substitute the return type so the merged descriptor lets
         // the AOT float-mark the call result of a generic fn returning T.
-        let return_type = self.substitution.apply(&func.return_type)?;
+        let return_type = self.instantiate_witness(&func.return_type)?;
 
         Ok(SpecializedFunction {
             bytecode: output,
@@ -482,7 +485,7 @@ impl<'a> BytecodeSpecializer<'a> {
                         .iter()
                         .map(|ty| {
                             ty.as_ref()
-                                .map(|ty| self.substitution.apply(ty))
+                                .map(|ty| self.instantiate_witness(ty))
                                 .transpose()
                         })
                         .collect::<Result<_, _>>()
@@ -491,10 +494,15 @@ impl<'a> BytecodeSpecializer<'a> {
             semantic_return: func
                 .semantic_return
                 .as_ref()
-                .map(|ty| self.substitution.apply(ty))
+                .map(|ty| self.instantiate_witness(ty))
                 .transpose()?,
             return_type,
         })
+    }
+
+    fn instantiate_witness(&self, ty: &TypeRef) -> Result<TypeRef, SpecializationError> {
+        crate::associated_types::instantiate_witness(self.module, self.substitution, ty)
+            .map_err(|error| SpecializationError::InvalidWitness(error.to_string()))
     }
 
     /// Value-form specialization of one canonical instruction
@@ -513,10 +521,10 @@ impl<'a> BytecodeSpecializer<'a> {
                 ..
             } => {
                 for ty in capture_types.iter_mut().flatten().flatten() {
-                    *ty = self.substitution.apply(ty)?;
+                    *ty = self.instantiate_witness(ty)?;
                 }
                 for ty in lexical_types {
-                    *ty = self.substitution.apply(ty)?;
+                    *ty = self.instantiate_witness(ty)?;
                 }
             }
             I::CallG {
@@ -527,7 +535,7 @@ impl<'a> BytecodeSpecializer<'a> {
             } => {
                 let substituted: Vec<TypeRef> = type_args
                     .iter()
-                    .map(|t| self.substitution.apply(t))
+                    .map(|t| self.instantiate_witness(t))
                     .collect::<Result<_, _>>()?;
                 let key = InstantiationKey::new(FunctionId(*func_id), substituted.clone());
                 // This lookup ALWAYS misses — nothing outside a unit test
@@ -562,7 +570,7 @@ impl<'a> BytecodeSpecializer<'a> {
             }
             I::SetCallWitness { type_args } => {
                 for ty in type_args {
-                    *ty = self.substitution.apply(ty)?;
+                    *ty = self.instantiate_witness(ty)?;
                 }
             }
             I::BinaryG {
@@ -648,7 +656,7 @@ impl<'a> BytecodeSpecializer<'a> {
             | I::LoadT { type_ref, .. }
             | I::TypeIdentity { type_ref, .. } | I::TypeInspect { type_ref, .. }
             | I::TypeLayout { type_ref, .. } => {
-                *type_ref = self.substitution.apply(type_ref)?;
+                *type_ref = self.instantiate_witness(type_ref)?;
             }
             // NewG carries RUNTIME type-argument REGISTERS on the wire
             // (the old byte arm misread them as static TypeRefs and
@@ -702,7 +710,7 @@ impl<'a> BytecodeSpecializer<'a> {
         let mut reg_types: std::collections::HashMap<u16, TypeRef> =
             std::collections::HashMap::new();
         for (i, p) in func.params.iter().enumerate() {
-            let substituted = self.substitution.apply(&p.type_ref)?;
+            let substituted = self.instantiate_witness(&p.type_ref)?;
             // Param registers are written by the CALL frame, not the
             // body; a body write means reuse — drop the fact.
             if write_counts.get(&(i as u16)).copied().unwrap_or(0) == 0 {
@@ -1076,27 +1084,29 @@ impl<'a> BytecodeSpecializer<'a> {
         let mut variants = base_desc.map(|d| d.variants.clone()).unwrap_or_default();
         let mut alias_target = base_desc.and_then(|d| d.alias_target.clone());
         if let Some(substitution) = &type_substitution {
+            let instantiate = |ty: &TypeRef| crate::associated_types::instantiate_witness(self.module, substitution, ty)
+                .map_err(|error| SpecializationError::InvalidWitness(error.to_string()));
             for field in fields
                 .iter_mut()
                 .chain(variants.iter_mut().flat_map(|v| &mut v.fields))
             {
-                field.type_ref = substitution.apply(&field.type_ref)?;
+                field.type_ref = instantiate(&field.type_ref)?;
                 field.declaration_type = field
                     .declaration_type
                     .as_ref()
-                    .map(|ty| substitution.apply(ty))
+                    .map(instantiate)
                     .transpose()?;
             }
             for variant in &mut variants {
                 variant.payload = variant
                     .payload
                     .as_ref()
-                    .map(|ty| substitution.apply(ty))
+                    .map(instantiate)
                     .transpose()?;
             }
             alias_target = alias_target
                 .as_ref()
-                .map(|ty| substitution.apply(ty))
+                .map(instantiate)
                 .transpose()?;
         }
 
@@ -1189,7 +1199,7 @@ impl<'a> BytecodeSpecializer<'a> {
 
                 for field in &base_desc.fields {
                     // Substitute type params
-                    let field_type = self.substitution.apply(&field.type_ref)?;
+                    let field_type = self.instantiate_witness(&field.type_ref)?;
                     let field_size = self.get_type_size(&field_type)?;
                     let field_align = self.get_type_alignment(&field_type)?;
 

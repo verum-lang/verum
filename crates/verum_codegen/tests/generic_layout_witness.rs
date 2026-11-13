@@ -224,3 +224,17 @@ fn sequence_witnesses_execute_in_a_native_image_after_serialization() {
     let run = Command::new(executable).output().unwrap();
     assert_eq!(run.status.code(), Some(72), "{}", String::from_utf8_lossy(&run.stderr));
 }
+
+#[test]
+fn projected_member_layout_specializes_nested_generic_calls() {
+    assert_eq!(execute(r#"
+        type Measure is protocol { type Product; };
+        type Numeric is ();
+        type Logical is ();
+        implement Measure for Numeric { type Product = Int; }
+        implement Measure for Logical { type Product = Bool; }
+        fn size<T>() -> Int { T.size }
+        fn measured<F: Measure>() -> Int { size<F.Product>() }
+        fn probe() -> Int { 10 * measured<Numeric>() + measured<Logical>() }
+    "#), 81);
+}

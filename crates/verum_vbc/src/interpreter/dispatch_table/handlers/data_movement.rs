@@ -126,28 +126,24 @@ pub(in super::super) fn handle_loadt(
         state.set_reg(dst, value);
         return Ok(DispatchResult::Continue);
     }
-    fn dispatch_head(module: &crate::module::VbcModule, ty: &crate::types::TypeRef, depth: usize)
+    fn dispatch_head(ty: &crate::types::TypeRef, depth: usize)
         -> Result<Option<crate::types::TypeId>, String>
     {
         use crate::types::TypeRef;
         if depth >= 64 { return Err("cyclic or excessively deep associated type witness".into()); }
         match ty {
             TypeRef::Concrete(id) | TypeRef::Instantiated { base: id, .. } => Ok(Some(*id)),
-            TypeRef::Reference { inner, .. } | TypeRef::Slice(inner) => dispatch_head(module, inner, depth + 1),
-            TypeRef::Array { element, .. } => dispatch_head(module, element, depth + 1),
-            TypeRef::AssociatedProjection { base, qualifier, assoc, args } => {
-                let result = crate::associated_types::resolve_projection(module, base, qualifier.as_ref(), assoc, args)
-                    .map_err(|error| error.to_string())?
-                    .ok_or_else(|| "associated type requires an unambiguous declaration-owned binding and family telescope".to_owned())?;
-                dispatch_head(module, &result, depth + 1)
-            }
+            TypeRef::Reference { inner, .. } | TypeRef::Slice(inner) => dispatch_head(inner, depth + 1),
+            TypeRef::Array { element, .. } => dispatch_head(element, depth + 1),
+            TypeRef::AssociatedProjection { .. } => Err(
+                "associated type requires an unambiguous declaration-owned binding and family telescope".into()),
             TypeRef::Function { .. } | TypeRef::Rank2Function { .. } | TypeRef::Tuple(_) => Ok(Some(crate::types::TypeId::UNIT)),
             TypeRef::Generic(id) => Err(format!("unresolved generic witness slot {}", id.0)),
             TypeRef::RecordFieldProjection { .. } => Err("unresolved dependent field witness".into()),
             TypeRef::ConstValue(_) | TypeRef::ConstSequence(_) => Err("a value witness cannot be used as a type head".into()),
         }
     }
-    let resolved = dispatch_head(&state.module, &tr, 0).map_err(|message|
+    let resolved = dispatch_head(&tr, 0).map_err(|message|
         InterpreterError::InvalidBytecode { pc: state.pc() as usize, message })?;
     match resolved {
         Some(id) => state.set_reg(dst, Value::from_type(id)),
