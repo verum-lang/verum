@@ -1329,13 +1329,19 @@ impl TypeChecker {
         metadata: std::sync::Arc<crate::core_metadata::CoreMetadata>,
     ) -> Self {
         let mut checker = Self::with_minimal_context();
+        checker.load_core_eager(metadata);
+        checker
+    }
+
+    /// Admit archived declarations under this checker's configured language
+    /// features, before any consumer attempts to resolve their members.
+    pub fn load_core_eager(&mut self, metadata: std::sync::Arc<crate::core_metadata::CoreMetadata>) {
         // Retained source records must see their language carriers when first
         // elaborated, even if a consumer installs the remaining builtins later.
-        checker.register_primitives();
-        if checker.install_core_metadata(metadata.clone()) {
-            checker.load_stdlib_from_metadata(&metadata);
+        self.register_primitives();
+        if self.install_core_metadata(metadata.clone()) {
+            self.load_stdlib_from_metadata(&metadata);
         }
-        checker
     }
 
     /// Pre-scan a user module AST for every named type / protocol /

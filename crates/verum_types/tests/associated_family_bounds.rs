@@ -65,6 +65,8 @@ fn assert_telescope(checker: &TypeChecker, owner: &str, bound_owner: &str, shado
 #[test]
 fn source_family_arguments_and_equalities_keep_independent_binders() {
     let mut checker = TypeChecker::new();
+    checker.set_current_module_path("provider");
+    checker.set_generic_associated_types_enabled(true);
     checker.register_primitives();
     checker
         .register_type_declaration(&declaration(
@@ -74,11 +76,13 @@ fn source_family_arguments_and_equalities_keep_independent_binders() {
     checker
         .register_type_declaration(&declaration(SOURCE))
         .unwrap();
-    assert_telescope(&checker, "Family", "Stream", false);
+    assert_telescope(&checker, "provider.Family", "provider.Stream", false);
 }
 #[test]
 fn family_parameter_shadows_owner_without_reusing_its_identity() {
     let mut checker = TypeChecker::new();
+    checker.set_current_module_path("provider");
+    checker.set_generic_associated_types_enabled(true);
     checker.register_primitives();
     checker
         .register_type_declaration(&declaration(
@@ -90,7 +94,7 @@ fn family_parameter_shadows_owner_without_reusing_its_identity() {
             "type Family<A> is protocol { type Rows<A>: Stream<A, Item = A>; };",
         ))
         .unwrap();
-    assert_telescope(&checker, "Family", "Stream", true);
+    assert_telescope(&checker, "provider.Family", "provider.Stream", true);
 }
 #[test]
 fn complete_bound_survives_sidecar_and_eager_replay() {
@@ -155,7 +159,12 @@ fn complete_bound_survives_sidecar_and_eager_replay() {
             .as_ref(),
         Some(&saved)
     );
-    let mut checker = TypeChecker::new_with_core_eager(Arc::new(restored));
+    let restored = Arc::new(restored);
+    let mut disabled = TypeChecker::new_with_core_eager(Arc::clone(&restored));
+    assert!(disabled.take_deferred_errors().iter().any(|error| error.to_string().contains("generic_associated_types")));
+    let mut checker = TypeChecker::with_minimal_context();
+    checker.set_generic_associated_types_enabled(true);
+    checker.load_core_eager(restored);
     assert!(checker.take_deferred_errors().is_empty());
     assert!(checker.diagnostics().is_empty());
     assert_telescope(&checker, "provider.Family", "provider.Stream", false);

@@ -5,6 +5,7 @@ use verum_types::TypeChecker;
 fn errors(source: &str) -> Vec<String> {
     let module = Parser::new(source).parse_module().unwrap();
     let mut checker = TypeChecker::new();
+    checker.set_generic_associated_types_enabled(true);
     checker.register_primitives();
     checker.set_current_module_path("families");
     let mut errors: Vec<String> = checker
@@ -331,6 +332,7 @@ fn actual_registered_specialization_must_preserve_universal_item() {
     let source = source("T", "R", "R", "");
     let module = Parser::new(&source).parse_module().unwrap();
     let mut checker = TypeChecker::new();
+    checker.set_generic_associated_types_enabled(true);
     checker.register_primitives();
     checker.set_current_module_path("families");
     assert!(checker.prepare_module_declarations(&module).is_empty());

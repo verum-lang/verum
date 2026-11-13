@@ -6,6 +6,7 @@ fn errors(source: &str) -> Vec<String> {
         .parse_module()
         .expect("actual source parses");
     let mut checker = TypeChecker::new();
+    checker.set_generic_associated_types_enabled(true);
     checker.register_primitives();
     checker.set_current_module_path("families");
     let mut errors = checker
