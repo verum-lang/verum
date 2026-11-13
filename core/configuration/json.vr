@@ -1,0 +1,25 @@
+// Shared diagnostics for the JSON configuration format.
+module core.configuration.json;
+
+mount core.configuration.error.{ConfigError, ConfigErrorKind, config_err, format_id_json};
+mount core.encoding.json.{JsonError, JsonErrorKind};
+
+/// Translate the JSON diagnostic while preserving its original byte position.
+public fn from_json_error(error: JsonError) -> ConfigError {
+    let kind = match error.kind {
+        JsonErrorKind.UnexpectedEof => ConfigErrorKind.UnexpectedEof,
+        JsonErrorKind.UnexpectedChar => ConfigErrorKind.UnexpectedChar,
+        JsonErrorKind.InvalidEscape => ConfigErrorKind.InvalidEscape,
+        JsonErrorKind.InvalidNumber => ConfigErrorKind.InvalidNumber,
+        JsonErrorKind.InvalidUnicode => ConfigErrorKind.InvalidUnicode,
+        JsonErrorKind.DepthLimit => ConfigErrorKind.DepthLimit,
+        JsonErrorKind.StringTooLong => ConfigErrorKind.StringTooLong,
+        JsonErrorKind.ArrayTooLarge => ConfigErrorKind.ArrayTooLarge,
+        JsonErrorKind.ObjectTooLarge => ConfigErrorKind.TableTooLarge,
+        JsonErrorKind.TrailingGarbage => ConfigErrorKind.TrailingGarbage,
+        JsonErrorKind.DuplicateKey => ConfigErrorKind.DuplicateKey,
+        JsonErrorKind.DocumentTooLarge => ConfigErrorKind.TotalSizeExceeded,
+        JsonErrorKind.InvalidLimit => ConfigErrorKind.ValueOutOfRange,
+    };
+    config_err(format_id_json(), kind, error.line, error.column, error.byte_offset, error.message)
+}

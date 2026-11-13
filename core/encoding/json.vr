@@ -80,6 +80,7 @@ public type JsonError is {
     public kind: JsonErrorKind,
     public line: Int,       // 1-indexed
     public column: Int,     // 1-indexed, counting bytes (RFC 8259 input is UTF-8)
+    public byte_offset: Int, // 0-indexed from the first byte of the input
     public message: Text,
 };
 
@@ -154,7 +155,7 @@ implement Display for JsonError {
 
 implement Debug for JsonError {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str(f"JsonError {{ kind: {self.kind}, line: {self.line}, column: {self.column}, message: {self.message} }}".as_str())
+        f.write_str(f"JsonError {{ kind: {self.kind}, line: {self.line}, column: {self.column}, byte_offset: {self.byte_offset}, message: {self.message} }}".as_str())
     }
 }
 
@@ -163,6 +164,7 @@ implement Eq for JsonError {
         self.kind == other.kind
             && self.line == other.line
             && self.column == other.column
+            && self.byte_offset == other.byte_offset
             && self.message == other.message
     }
 }
@@ -210,13 +212,28 @@ fn new_parser(bytes: &[Byte]) -> Parser {
     }
 }
 
-fn mk_err(p: &Parser, kind: JsonErrorKind, msg: &Text) -> JsonError {
+type JsonPosition is {
+    line: Int,
+    column: Int,
+    byte_offset: Int,
+};
+
+fn parser_position(p: &Parser) -> JsonPosition {
+    JsonPosition { line: p.line, column: p.column, byte_offset: p.pos }
+}
+
+fn json_error_at(position: JsonPosition, kind: JsonErrorKind, message: Text) -> JsonError {
     JsonError {
         kind: kind,
-        line: p.line,
-        column: p.column,
-        message: msg.clone(),
+        line: position.line,
+        column: position.column,
+        byte_offset: position.byte_offset,
+        message: message,
     }
+}
+
+fn mk_err(p: &Parser, kind: JsonErrorKind, message: Text) -> JsonError {
+    json_error_at(parser_position(p), kind, message)
 }
 
 fn peek(p: &Parser) -> Maybe<Byte> {
@@ -252,7 +269,7 @@ fn skip_ws(p: &mut Parser) {
     }
 }
 
-fn expect_byte(p: &mut Parser, b: Byte, ctx: &Text) -> Result<(), JsonError> {
+fn expect_byte(p: &mut Parser, b: Byte, ctx: Text) -> Result<(), JsonError> {
     match peek(p) {
         Maybe.Some(c) => {
             if c == b {
@@ -423,16 +440,16 @@ public fn decode_bytes_strict(source: &[Byte], max_bytes: Int) -> Result<JsonVal
 fn parse_bounded_document(bytes: &[Byte], max_bytes: Int, validate_utf8: Bool) -> Result<JsonValue, JsonError> {
     let mut p = new_parser(bytes);
     if max_bytes < 0 {
-        return Result.Err(mk_err(&p, InvalidLimit, &"JSON document byte limit must be non-negative"));
+        return Result.Err(mk_err(&p, InvalidLimit, "JSON document byte limit must be non-negative"));
     }
     if bytes.len() > max_bytes {
-        return Result.Err(mk_err(&p, DocumentTooLarge, &"JSON document exceeds its byte limit"));
+        return Result.Err(mk_err(&p, DocumentTooLarge, "JSON document exceeds its byte limit"));
     }
     if validate_utf8 {
         let valid = utf8_valid_prefix_len(bytes);
         if valid != bytes.len() {
             while p.pos < valid { advance(&mut p); }
-            return Result.Err(mk_err(&p, InvalidUnicode, &"invalid UTF-8 sequence"));
+            return Result.Err(mk_err(&p, InvalidUnicode, "invalid UTF-8 sequence"));
         }
     }
     p.reject_duplicate_keys = true;
@@ -444,7 +461,7 @@ fn parse_document(p: &mut Parser) -> Result<JsonValue, JsonError> {
     let value = parse_value_impl(p)?;
     skip_ws(p);
     if p.pos < p.bytes.len() {
-        return Result.Err(mk_err(p, TrailingGarbage, &"unexpected content after JSON value"));
+        return Result.Err(mk_err(p, TrailingGarbage, "unexpected content after JSON value"));
     }
     Result.Ok(value)
 }
@@ -473,7 +490,7 @@ fn parse_value_impl(p: &mut Parser) -> Result<JsonValue, JsonError> {
             0x6E_u8 => parse_null(p),                  // 'n'
             _ => parse_number(p),
         },
-        Maybe.None => Result.Err(mk_err(p, UnexpectedEof, &"expected JSON value")),
+        Maybe.None => Result.Err(mk_err(p, UnexpectedEof, "expected JSON value")),
     }
 }
 
@@ -481,7 +498,7 @@ fn parse_null(p: &mut Parser) -> Result<JsonValue, JsonError> {
     if match_literal(p, &[0x6E_u8, 0x75_u8, 0x6C_u8, 0x6C_u8]) {
         Result.Ok(JsonNull)
     } else {
-        Result.Err(mk_err(p, UnexpectedChar, &"expected 'null'"))
+        Result.Err(mk_err(p, UnexpectedChar, "expected 'null'"))
     }
 }
 
@@ -491,7 +508,7 @@ fn parse_bool(p: &mut Parser) -> Result<JsonValue, JsonError> {
     } else if match_literal(p, &[0x66_u8, 0x61_u8, 0x6C_u8, 0x73_u8, 0x65_u8]) {
         Result.Ok(JsonBool(false))
     } else {
-        Result.Err(mk_err(p, UnexpectedChar, &"expected 'true' or 'false'"))
+        Result.Err(mk_err(p, UnexpectedChar, "expected 'true' or 'false'"))
     }
 }
 
@@ -516,10 +533,10 @@ fn match_literal(p: &mut Parser, expected: &[Byte]) -> Bool {
 
 fn parse_array(p: &mut Parser) -> Result<JsonValue, JsonError> {
     if p.depth >= MAX_JSON_DEPTH {
-        return Result.Err(mk_err(p, DepthLimit, &"array nesting too deep"));
+        return Result.Err(mk_err(p, DepthLimit, "array nesting too deep"));
     }
     p.depth = p.depth + 1;
-    expect_byte(p, 0x5B_u8, &"expected '['")?;
+    expect_byte(p, 0x5B_u8, "expected '['")?;
     let mut elems: List<JsonValue> = [];
     skip_ws(p);
     if peek(p) == Maybe.Some(0x5D_u8) {
@@ -536,14 +553,14 @@ fn parse_array(p: &mut Parser) -> Result<JsonValue, JsonError> {
         // hostile inputs with millions of trivial elements would
         // OOM the parser.
         if elems.len() > MAX_JSON_ARRAY_ITEMS {
-            return Result.Err(mk_err(p, ArrayTooLarge, &"array exceeds MAX_JSON_ARRAY_ITEMS (1M)"));
+            return Result.Err(mk_err(p, ArrayTooLarge, "array exceeds MAX_JSON_ARRAY_ITEMS (1M)"));
         }
         skip_ws(p);
         match peek(p) {
             Maybe.Some(0x2C_u8) => { advance(p); }               // ','
             Maybe.Some(0x5D_u8) => { advance(p); break; }         // ']'
-            Maybe.Some(_) => return Result.Err(mk_err(p, UnexpectedChar, &"expected ',' or ']'")),
-            Maybe.None => return Result.Err(mk_err(p, UnexpectedEof, &"unterminated array")),
+            Maybe.Some(_) => return Result.Err(mk_err(p, UnexpectedChar, "expected ',' or ']'")),
+            Maybe.None => return Result.Err(mk_err(p, UnexpectedEof, "unterminated array")),
         }
     }
     p.depth = p.depth - 1;
@@ -552,10 +569,10 @@ fn parse_array(p: &mut Parser) -> Result<JsonValue, JsonError> {
 
 fn parse_object(p: &mut Parser) -> Result<JsonValue, JsonError> {
     if p.depth >= MAX_JSON_DEPTH {
-        return Result.Err(mk_err(p, DepthLimit, &"object nesting too deep"));
+        return Result.Err(mk_err(p, DepthLimit, "object nesting too deep"));
     }
     p.depth = p.depth + 1;
-    expect_byte(p, 0x7B_u8, &"expected '{'")?;
+    expect_byte(p, 0x7B_u8, "expected '{'")?;
     let mut fields: Map<Text, JsonValue> = Map.new();
     skip_ws(p);
     if peek(p) == Maybe.Some(0x7D_u8) {
@@ -565,21 +582,17 @@ fn parse_object(p: &mut Parser) -> Result<JsonValue, JsonError> {
     }
     loop {
         skip_ws(p);
-        let key_line = p.line;
-        let key_column = p.column;
+        let key_position = parser_position(p);
         let key = parse_string_raw(p)?;
         // Compare after escape decoding, before insertion can discard evidence.
         // Each object owns its map, so equal keys in sibling objects are valid.
         if p.reject_duplicate_keys && fields.contains_key(&key) {
-            return Result.Err(JsonError {
-                kind: DuplicateKey,
-                line: key_line,
-                column: key_column,
-                message: f"duplicate object key: {key}",
-            });
+            return Result.Err(json_error_at(
+                key_position, DuplicateKey, f"duplicate object key: {key}",
+            ));
         }
         skip_ws(p);
-        expect_byte(p, 0x3A_u8, &"expected ':' after key")?;   // ':'
+        expect_byte(p, 0x3A_u8, "expected ':' after key")?;   // ':'
         skip_ws(p);
         let value = parse_value_impl(p)?;
         fields.insert(key, value);
@@ -587,14 +600,14 @@ fn parse_object(p: &mut Parser) -> Result<JsonValue, JsonError> {
         // cap — flat objects with millions of distinct keys allocate
         // O(N) hash-map storage and bypass the depth-limit check.
         if fields.len() > MAX_JSON_OBJECT_KEYS {
-            return Result.Err(mk_err(p, ObjectTooLarge, &"object exceeds MAX_JSON_OBJECT_KEYS (1M)"));
+            return Result.Err(mk_err(p, ObjectTooLarge, "object exceeds MAX_JSON_OBJECT_KEYS (1M)"));
         }
         skip_ws(p);
         match peek(p) {
             Maybe.Some(0x2C_u8) => { advance(p); }               // ','
             Maybe.Some(0x7D_u8) => { advance(p); break; }         // '}'
-            Maybe.Some(_) => return Result.Err(mk_err(p, UnexpectedChar, &"expected ',' or '}'")),
-            Maybe.None => return Result.Err(mk_err(p, UnexpectedEof, &"unterminated object")),
+            Maybe.Some(_) => return Result.Err(mk_err(p, UnexpectedChar, "expected ',' or '}'")),
+            Maybe.None => return Result.Err(mk_err(p, UnexpectedEof, "unterminated object")),
         }
     }
     p.depth = p.depth - 1;
@@ -616,13 +629,13 @@ fn parse_string_value(p: &mut Parser) -> Result<JsonValue, JsonError> {
 // before we surface the error — that's safe because Text is exact-
 // length and the over-cap delta is bounded by 1.
 fn parse_string_raw(p: &mut Parser) -> Result<Text, JsonError> {
-    expect_byte(p, 0x22_u8, &"expected '\"'")?;
+    expect_byte(p, 0x22_u8, "expected '\"'")?;
     // Heuristic 32-byte starting capacity for typical JSON strings
     // (field names, short values). Larger strings still grow log-many.
     let mut buf = Text.with_capacity(32);
     loop {
         match peek(p) {
-            Maybe.None => return Result.Err(mk_err(p, UnexpectedEof, &"unterminated string")),
+            Maybe.None => return Result.Err(mk_err(p, UnexpectedEof, "unterminated string")),
             Maybe.Some(b) => {
                 if b == 0x22_u8 {                               // '"'
                     advance(p);
@@ -631,13 +644,13 @@ fn parse_string_raw(p: &mut Parser) -> Result<Text, JsonError> {
                     advance(p);
                     parse_escape(p, &mut buf)?;
                 } else if b < 0x20_u8 {
-                    return Result.Err(mk_err(p, UnexpectedChar, &"unescaped control character"));
+                    return Result.Err(mk_err(p, UnexpectedChar, "unescaped control character"));
                 } else {
                     buf.push_byte(b);
                     advance(p);
                 }
                 if buf.len() > MAX_JSON_STRING_BYTES {
-                    return Result.Err(mk_err(p, StringTooLong, &"string exceeds MAX_JSON_STRING_BYTES (32 MiB)"));
+                    return Result.Err(mk_err(p, StringTooLong, "string exceeds MAX_JSON_STRING_BYTES (32 MiB)"));
                 }
             }
         }
@@ -646,7 +659,7 @@ fn parse_string_raw(p: &mut Parser) -> Result<Text, JsonError> {
 
 fn parse_escape(p: &mut Parser, out: &mut Text) -> Result<(), JsonError> {
     match peek(p) {
-        Maybe.None => Result.Err(mk_err(p, UnexpectedEof, &"incomplete escape")),
+        Maybe.None => Result.Err(mk_err(p, UnexpectedEof, "incomplete escape")),
         Maybe.Some(b) => {
             advance(p);
             match b {
@@ -659,7 +672,7 @@ fn parse_escape(p: &mut Parser, out: &mut Text) -> Result<(), JsonError> {
                 0x72_u8 => { out.push_byte(0x0D_u8); Result.Ok(()) }   // \r
                 0x74_u8 => { out.push_byte(0x09_u8); Result.Ok(()) }   // \t
                 0x75_u8 => parse_unicode_escape(p, out),        // \uXXXX
-                _ => Result.Err(mk_err(p, InvalidEscape, &"unknown escape")),
+                _ => Result.Err(mk_err(p, InvalidEscape, "unknown escape")),
             }
         }
     }
@@ -671,17 +684,17 @@ fn parse_unicode_escape(p: &mut Parser, out: &mut Text) -> Result<(), JsonError>
     // then low surrogate. Unpaired surrogates are rejected.
     if cp >= 0xD800 && cp <= 0xDBFF {
         // High surrogate — expect `\uXXXX` follow-up.
-        expect_byte(p, 0x5C_u8, &"expected low surrogate after high surrogate")?;
-        expect_byte(p, 0x75_u8, &"expected '\\u' for low surrogate")?;
+        expect_byte(p, 0x5C_u8, "expected low surrogate after high surrogate")?;
+        expect_byte(p, 0x75_u8, "expected '\\u' for low surrogate")?;
         let low = parse_hex4(p)?;
         if low < 0xDC00 || low > 0xDFFF {
-            return Result.Err(mk_err(p, InvalidUnicode, &"invalid low surrogate"));
+            return Result.Err(mk_err(p, InvalidUnicode, "invalid low surrogate"));
         }
         let combined = 0x10000 + ((cp - 0xD800) * 0x400) + (low - 0xDC00);
         push_utf8(out, combined);
         Result.Ok(())
     } else if cp >= 0xDC00 && cp <= 0xDFFF {
-        Result.Err(mk_err(p, InvalidUnicode, &"unpaired low surrogate"))
+        Result.Err(mk_err(p, InvalidUnicode, "unpaired low surrogate"))
     } else {
         push_utf8(out, cp);
         Result.Ok(())
@@ -693,12 +706,12 @@ fn parse_hex4(p: &mut Parser) -> Result<Int, JsonError> {
     let mut i = 0;
     while i < 4 {
         match peek(p) {
-            Maybe.None => return Result.Err(mk_err(p, UnexpectedEof, &"short unicode escape")),
+            Maybe.None => return Result.Err(mk_err(p, UnexpectedEof, "short unicode escape")),
             Maybe.Some(b) => {
                 let d = hex_digit(b);
                 match d {
                     Maybe.Some(n) => { v = v * 16 + n; advance(p); }
-                    Maybe.None => return Result.Err(mk_err(p, InvalidUnicode, &"non-hex in \\u escape")),
+                    Maybe.None => return Result.Err(mk_err(p, InvalidUnicode, "non-hex in \\u escape")),
                 }
             }
         }
@@ -750,7 +763,7 @@ fn parse_number(p: &mut Parser) -> Result<JsonValue, JsonError> {
             advance(p);
             while is_digit(peek(p)) { advance(p); }
         }
-        _ => return Result.Err(mk_err(p, InvalidNumber, &"expected digit")),
+        _ => return Result.Err(mk_err(p, InvalidNumber, "expected digit")),
     }
     let int_end = p.pos;
     let mut is_float = false;
@@ -759,7 +772,7 @@ fn parse_number(p: &mut Parser) -> Result<JsonValue, JsonError> {
         is_float = true;
         advance(p);
         if !is_digit(peek(p)) {
-            return Result.Err(mk_err(p, InvalidNumber, &"expected digit after '.'"));
+            return Result.Err(mk_err(p, InvalidNumber, "expected digit after '.'"));
         }
         while is_digit(peek(p)) { advance(p); }
     }
@@ -769,7 +782,7 @@ fn parse_number(p: &mut Parser) -> Result<JsonValue, JsonError> {
         advance(p);
         if peek(p) == Maybe.Some(0x2B_u8) || peek(p) == Maybe.Some(0x2D_u8) { advance(p); }
         if !is_digit(peek(p)) {
-            return Result.Err(mk_err(p, InvalidNumber, &"expected digit in exponent"));
+            return Result.Err(mk_err(p, InvalidNumber, "expected digit in exponent"));
         }
         while is_digit(peek(p)) { advance(p); }
     }
@@ -778,7 +791,7 @@ fn parse_number(p: &mut Parser) -> Result<JsonValue, JsonError> {
     if is_float {
         match repr.parse_float() {
             Result.Ok(f)  => Result.Ok(JsonFloat(f)),
-            Result.Err(_) => Result.Err(mk_err(p, InvalidNumber, &"float out of range")),
+            Result.Err(_) => Result.Err(mk_err(p, InvalidNumber, "float out of range")),
         }
     } else {
         // Integer path: attempt Int parse (Verum Int is 64-bit). On overflow,
@@ -787,7 +800,7 @@ fn parse_number(p: &mut Parser) -> Result<JsonValue, JsonError> {
             Result.Ok(i)  => Result.Ok(JsonInt(i)),
             Result.Err(_) => match repr.parse_float() {
                 Result.Ok(f)  => Result.Ok(JsonFloat(f)),
-                Result.Err(_) => Result.Err(mk_err(p, InvalidNumber, &"integer out of range")),
+                Result.Err(_) => Result.Err(mk_err(p, InvalidNumber, "integer out of range")),
             },
         }
     }

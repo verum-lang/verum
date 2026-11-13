@@ -202,10 +202,15 @@ fn test_strict_wire_json_rejects_invalid_bytes_at_their_position() {
     assert(error.kind is JsonErrorKind.InvalidUnicode);
     assert_eq(error.line, 2);
     assert_eq(error.column, 3);
-    assert(decode_bytes_strict(invalid.as_slice(), 6).unwrap_err().kind is JsonErrorKind.DocumentTooLarge);
+    assert_eq(error.byte_offset, 3);
+    let too_large = decode_bytes_strict(invalid.as_slice(), 6).unwrap_err();
+    assert(too_large.kind is JsonErrorKind.DocumentTooLarge);
+    assert_eq(too_large.byte_offset, 0);
     assert(decode_bytes_strict(invalid.as_slice(), -1).unwrap_err().kind is JsonErrorKind.InvalidLimit);
     let duplicate = "{\"k\":1,\"k\":2}";
-    assert(decode_bytes_strict(duplicate.as_bytes(), duplicate.len()).unwrap_err().kind is JsonErrorKind.DuplicateKey);
+    let repeated = decode_bytes_strict(duplicate.as_bytes(), duplicate.len()).unwrap_err();
+    assert(repeated.kind is JsonErrorKind.DuplicateKey);
+    assert_eq(repeated.byte_offset, 7);
     let valid = "\"é\"";
     assert_eq(decode_bytes_strict(valid.as_bytes(), valid.len()).unwrap().as_string().unwrap(), "é");
 }

@@ -24,6 +24,8 @@ mount core.configuration.error.{
     format_id_nestedtext, format_id_kdl, format_id_cue, format_id_dhall,
 };
 mount core.base.maybe.{Maybe, Some, None};
+mount core.configuration.json.from_json_error;
+mount core.encoding.json.{JsonError, JsonErrorKind};
 
 // =============================================================================
 // Section 1: format_id_* canonical IDs
@@ -349,4 +351,23 @@ fn test_json_error_keeps_source_location_and_path() {
         Maybe.Some(path) => assert_eq(path, "config[0]"),
         Maybe.None => panic("missing configuration path"),
     }
+}
+
+
+@test
+fn test_json_conversion_preserves_reported_byte_position() {
+    let reported = JsonError {
+        kind: JsonErrorKind.ObjectTooLarge,
+        line: 4,
+        column: 9,
+        byte_offset: 37,
+        message: "too many keys",
+    };
+    let mapped = from_json_error(reported);
+    assert(mapped.kind is ConfigErrorKind.TableTooLarge);
+    assert_eq(mapped.line, 4);
+    assert_eq(mapped.column, 9);
+    assert_eq(mapped.byte_offset, 37);
+    assert_eq(mapped.message, "too many keys");
+    assert(mapped.path is Maybe.None);
 }
