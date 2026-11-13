@@ -174,23 +174,7 @@ impl ProtocolChecker {
                     "dynamic protocol evidence lacks a required associated equality".into(),
                 );
             }
-            let ProtocolConstraints::Declared {
-                self_type,
-                parameters,
-                ..
-            } = &protocol.constraints
-            else {
-                return Err("dynamic protocol evidence lacks its declared telescope".into());
-            };
-            if parameters.len() != bound.args.len() {
-                return Err("dynamic protocol evidence has the wrong argument arity".into());
-            }
-            let mut substitution: Substitution = parameters
-                .iter()
-                .zip(&bound.args)
-                .map(|(parameter, argument)| (*parameter, argument.clone()))
-                .collect();
-            substitution.insert(*self_type, subject.clone());
+            let substitution = protocol.constraints.application(subject, &bound.args)?;
             pending.push(Visit::Leave(bound.clone()));
             for parent in &protocol.super_protocols {
                 let mut parent = parent.try_apply_subst(&substitution)?;
