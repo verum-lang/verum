@@ -1133,8 +1133,12 @@ async fn typecheck_fail_process_checks_counts_and_each_diagnostics_location() {
     };
     let located = "// @expected-error: E400 \"first failure\" at line 8, col 3";
     let mixed = format!("{first}{second}{warnings}error: compilation failed with 2 errors\n");
+    let repeated = format!("{first}error<E400>: first failure\n  --> source.vr:12:5\n");
+    let second_site = "// @expected-error: E400 \"first failure\" at line 12, col 5";
     for (source, count, expected, accepted) in [
         (mixed.as_str(), 2, located, true),
+        (repeated.as_str(), 2, second_site, true),
+        (repeated.as_str(), 1, second_site, false),
         (mixed.as_str(), 1, located, false),
         (mixed.as_str(), 3, "", false),
         (mixed.as_str(), 2, "", true),
