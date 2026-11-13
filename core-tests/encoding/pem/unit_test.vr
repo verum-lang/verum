@@ -33,7 +33,7 @@
 // documented on the stdlib reference and called by NOTHING that runs.
 // =============================================================================
 
-mount core.encoding.pem.{PemBlock, PemError, encode_block, decode_one, decode_all};
+mount core.encoding.pem.{PemBlock, PemError, PemReader, encode_block, decode_one, decode_all};
 mount core.base.maybe.{Maybe, Some, None};
 mount core.base.result.{Result, Ok, Err};
 
@@ -309,6 +309,34 @@ fn test_decode_all_on_input_with_no_marker_is_an_empty_list() {
         Result.Ok(bs) => assert_eq(bs.len(), 0),
         Result.Err(_) => panic("no marker must not be an error"),
     };
+}
+
+@test
+fn reader_stops_at_a_block_boundary_and_reports_the_next_error() {
+    let pem = "-----BEGIN ONE-----\nAQI=\n-----END ONE-----\n-----BEGIN TWO-----\nAw==\n-----END OTHER-----";
+    let mut reader = PemReader.new(&pem).unwrap();
+    assert(match reader.next_block() {
+        Result.Ok(Maybe.Some(first)) =>
+            first.label == "ONE" && first.contents.len() == 2 && first.contents[1] == 2_u8,
+        _ => false,
+    });
+    assert(match reader.next_block() {
+        Result.Err(PemError.MismatchedLabels(label)) => label == "TWO",
+        _ => false,
+    });
+    assert(match decode_one(&pem) {
+        Result.Err(PemError.MismatchedLabels(label)) => label == "TWO",
+        _ => false,
+    });
+}
+
+@test
+fn reader_reports_end_repeatedly() {
+    let pem = "preamble\n-----BEGIN ONE-----\nAQI=\n-----END ONE-----\ntrailing text";
+    let mut reader = PemReader.new(&pem).unwrap();
+    assert(reader.next_block().unwrap().is_some());
+    assert(reader.next_block().unwrap().is_none());
+    assert(reader.next_block().unwrap().is_none());
 }
 
 fn main() {}
