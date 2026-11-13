@@ -183,6 +183,21 @@ public type TensorHandle is {
     storage: TensorStorage,
 };
 
+// A scalar has one element. A zero-length axis makes the tensor empty.
+fn shape_element_count(shape: &[USize]) -> USize {
+    for axis in 0..shape.len() {
+        if shape[axis] == 0 { return 0; }
+    }
+    let max_count = ~(0 as USize);
+    let mut count: USize = 1;
+    for axis in 0..shape.len() {
+        let dimension = shape[axis];
+        assert(count <= max_count / dimension, "tensor shape exceeds USize");
+        count *= dimension;
+    }
+    count
+}
+
 // Storage backend
 type TensorStorage is
     | Owned(RawPtr, USize)           // Owned memory (ptr, size)
@@ -192,7 +207,7 @@ type TensorStorage is
 implement TensorHandle {
     // Allocate new handle on device
     fn allocate(dtype: DType, shape: &[USize], device: Device) -> Self {
-        let numel: USize = shape.iter().product();
+        let numel: USize = shape_element_count(shape);
         let size = numel * dtype.size_bytes();
         let layout = TensorLayout.RowMajor;
         let strides = layout.compute_strides(shape);
@@ -209,7 +224,7 @@ implement TensorHandle {
 
     // Total element count
     fn numel(&self) -> USize {
-        self.shape.iter().product()
+        shape_element_count(self.shape.as_slice())
     }
 
     // Number of dimensions
@@ -219,7 +234,7 @@ implement TensorHandle {
 
     // Check if contiguous (row-major)
     fn is_contiguous(&self) -> Bool {
-        let expected = TensorLayout.RowMajor.compute_strides(&self.shape);
+        let expected = TensorLayout.RowMajor.compute_strides(self.shape.as_slice());
         self.strides == expected
     }
 }
@@ -305,7 +320,7 @@ implement<T> DynTensor<T> {
 
     // Total element count
     public fn numel(&self) -> USize {
-        self.shape.iter().product()
+        shape_element_count(self.shape.as_slice())
     }
 
     // Number of dimensions
@@ -373,7 +388,7 @@ implement<T: RealField> DynTensor<T> {
 
     // Create tensor with the same shape as another, filled with zeros.
     public fn zeros_like(x: &DynTensor<T>) -> DynTensor<T> {
-        let data = TensorHandle.allocate(dtype_of<T>(), &x.shape, x.device());
+        let data = TensorHandle.allocate(dtype_of<T>(), x.shape.as_slice(), x.device());
         @vbc(TENSOR_FILL, data, T.zero());
         DynTensor { data, shape: x.shape.clone() }
     }
@@ -410,7 +425,7 @@ implement<T: RealField> DynTensor<T> {
     public fn from_slice(data: &[T], shape: &[USize]) -> DynTensor<T>
         using [ComputeDevice]
     {
-        let expected_numel: USize = shape.iter().product();
+        let expected_numel: USize = shape_element_count(shape);
         assert(data.len() == expected_numel, "data length must match shape");
         @vbc(TENSOR_FROM_DATA, data, shape, ComputeDevice.device())
     }
@@ -431,7 +446,7 @@ implement<T: RealField> DynTensor<T> {
 
     // Create tensor with the same shape as another, filled with ones.
     public fn ones_like(x: &DynTensor<T>) -> DynTensor<T> {
-        let data = TensorHandle.allocate(dtype_of<T>(), &x.shape, x.device());
+        let data = TensorHandle.allocate(dtype_of<T>(), x.shape.as_slice(), x.device());
         @vbc(TENSOR_FILL, data, T.one());
         DynTensor { data, shape: x.shape.clone() }
     }
@@ -632,7 +647,7 @@ implement<T: RealField> TensorView<T> {
 
     // Check if contiguous
     public fn is_contiguous(&self) -> Bool {
-        let expected = TensorLayout.RowMajor.compute_strides(&self.shape);
+        let expected = TensorLayout.RowMajor.compute_strides(self.shape.as_slice());
         self.strides == expected
     }
 
@@ -682,21 +697,21 @@ public fn full<T: RealField>(shape: &[USize], value: T) -> DynTensor<T>
 
 // Create tensor like another (same shape and device)
 public fn zeros_like<T: RealField>(x: &DynTensor<T>) -> DynTensor<T> {
-    let data = TensorHandle.allocate(dtype_of<T>(), &x.shape, x.device());
+    let data = TensorHandle.allocate(dtype_of<T>(), x.shape.as_slice(), x.device());
     @vbc(TENSOR_FILL, data, T.zero());
     DynTensor { data, shape: x.shape.clone() }
 }
 
 // Create ones tensor like another
 public fn ones_like<T: RealField>(x: &DynTensor<T>) -> DynTensor<T> {
-    let data = TensorHandle.allocate(dtype_of<T>(), &x.shape, x.device());
+    let data = TensorHandle.allocate(dtype_of<T>(), x.shape.as_slice(), x.device());
     @vbc(TENSOR_FILL, data, T.one());
     DynTensor { data, shape: x.shape.clone() }
 }
 
 // Create tensor filled with value like another
 public fn full_like<T: RealField>(x: &DynTensor<T>, value: T) -> DynTensor<T> {
-    let data = TensorHandle.allocate(dtype_of<T>(), &x.shape, x.device());
+    let data = TensorHandle.allocate(dtype_of<T>(), x.shape.as_slice(), x.device());
     @vbc(TENSOR_FILL, data, value);
     DynTensor { data, shape: x.shape.clone() }
 }
@@ -726,7 +741,7 @@ public fn eye<T: RealField>(n: USize) -> DynTensor<T>
 public fn from_list<T: RealField>(data: &[T], shape: &[USize]) -> DynTensor<T>
     using [ComputeDevice]
 {
-    let expected_numel: USize = shape.iter().product();
+    let expected_numel: USize = shape_element_count(shape);
     assert(data.len() == expected_numel, "data length must match shape");
     @vbc(TENSOR_FROM_DATA, data, shape, ComputeDevice.device())
 }
@@ -2031,7 +2046,7 @@ public fn any(x: &DynTensor<Bool>) -> Bool {
 
 // Reshape tensor (runtime shape check)
 public fn reshape<T: RealField>(x: &DynTensor<T>, new_shape: &[USize]) -> DynTensor<T> {
-    let new_numel: USize = new_shape.iter().product();
+    let new_numel: USize = shape_element_count(new_shape);
     assert(new_numel == x.numel(), "reshape: element count must match");
     @vbc(TENSOR_RESHAPE, x.data, new_shape)
 }
