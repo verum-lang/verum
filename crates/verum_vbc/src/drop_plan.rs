@@ -103,6 +103,10 @@ impl DropPlan {
 
 /// Refuse unresolved/legacy ownership instead of interpreting layout carriers.
 pub fn build(module: &VbcModule, ty: &TypeRef) -> Result<DropPlan, Text> {
+    // The ownership of a reference is known even in an unspecialized function.
+    if matches!(ty, TypeRef::Reference { .. }) {
+        return Ok(DropPlan::Ignore);
+    }
     if !crate::mono::is_concrete_type(ty) {
         return Err("typed destruction has unresolved declaration witnesses".into());
     }

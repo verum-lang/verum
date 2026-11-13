@@ -1301,6 +1301,10 @@ pub(in super::super) fn handle_ref_unsafe(
 pub(in super::super) fn handle_drop_typed(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     let src = read_reg(state)?;
     let ty = read_type_ref(state)?;
+    if matches!(ty, crate::types::TypeRef::Reference { .. }) {
+        retire_typed_slot(state, src);
+        return Ok(DispatchResult::Continue);
+    }
     let ty = state.resolve_generic_witness(&ty)?;
     let plan = crate::drop_plan::build(&state.module, &ty).map_err(|message| {
         InterpreterError::Panic {
@@ -1314,11 +1318,14 @@ pub(in super::super) fn handle_drop_typed(state: &mut InterpreterState) -> Inter
     let value = state.get_reg(src);
     validate_typed_drop(state, value, &plan)?;
     // Consume the owner before a destructor can reenter the interpreter.
-    state.set_reg(src, Value::unit());
-    let absolute = state.reg_base() + u32::from(src.0);
-    state.registers.bump_generation(absolute);
+    retire_typed_slot(state, src);
     execute_typed_drop(state, value, &plan)?;
     Ok(DispatchResult::Continue)
+}
+
+fn retire_typed_slot(state: &mut InterpreterState, src: Reg) {
+    state.set_reg(src, Value::unit());
+    state.registers.bump_generation(state.reg_base() + u32::from(src.0));
 }
 
 fn typed_drop_fields<'a>(state: &InterpreterState, value: Value, plan: &'a crate::drop_plan::DropPlan)

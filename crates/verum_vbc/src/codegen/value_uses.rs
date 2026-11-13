@@ -392,10 +392,12 @@ impl super::VbcCodegen {
     /// at construction. Semantic IDs retain their native runtime cleanup.
     /// An erased heap header only identifies the declaration.
     pub(super) fn emit_local_drop(&mut self, src: Reg, declared: Option<&TypeRef>) {
-        if let Some(ty @ TypeRef::Instantiated { base, .. }) = declared
-            && !base.is_semantic_type()
-            && self.type_by_id(*base).is_some_and(|descriptor| descriptor.drop_fn.is_some())
+        if let Some(ty) = declared
+            && (matches!(ty, TypeRef::Reference { .. })
+                || matches!(ty, TypeRef::Instantiated { base, .. } if !base.is_semantic_type()
+                    && self.type_by_id(*base).is_some_and(|descriptor| descriptor.drop_fn.is_some())))
         {
+            // The typed reference plan retires the binding slot and leaves its referent live.
             self.ctx.emit(Instruction::DropTyped { src, type_ref: ty.clone() });
         } else {
             self.ctx.emit(Instruction::DropRef { src });

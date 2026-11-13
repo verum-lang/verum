@@ -86,7 +86,9 @@ impl VbcCodegen {
         match &expr.kind {
             ExprKind::Return(_) | ExprKind::Break { .. } | ExprKind::Continue { .. } =>
                 Some(TypeRef::Concrete(crate::types::TypeId::NEVER)),
-            ExprKind::Block(block) => self.ctx.declared_result_types.get(&block.span).cloned().flatten(),
+            ExprKind::Block(block) | ExprKind::Unsafe(block) =>
+                self.ctx.declared_result_types.get(&block.span).cloned().flatten(),
+            ExprKind::Cast { ty, .. } => self.source_type_in_current_scope(ty),
             ExprKind::Match { .. } | ExprKind::Select { .. } | ExprKind::Await(_) | ExprKind::Try(_) => self.ctx.declared_result_types.get(&expr.span).cloned().flatten(),
             ExprKind::If { then_branch, else_branch, .. } => join_result_types(
                 self.ctx.declared_result_types.get(&then_branch.span).cloned().flatten(),

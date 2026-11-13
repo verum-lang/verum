@@ -146,6 +146,43 @@ fn probe() -> Int {
 }
 
 #[test]
+fn reborrowing_a_cast_pointer_keeps_the_original_owner_alive() {
+    use verum_vbc::{Instruction, bytecode::decode_instructions, types::TypeRef};
+    let source = watch(r#"
+fn advance(ptr: &mut Watch) {
+    let borrowed = unsafe { &mut *(ptr as &mut Watch) };
+    borrowed.digit += 1;
+}
+fn probe() -> Int {
+    let mut counter = Count { value: 0 };
+    {
+        let mut original = Watch { counter: &mut counter, digit: 1 };
+        advance(&mut original);
+        advance(&mut original);
+        if counter.value != 0 { return 99; }
+    }
+    counter.value
+}
+"#);
+    for bootstrap in [false, true] {
+        let module = compile(&source, bootstrap);
+        let body = module.get_function(module.find_function_by_name("transfer.advance").unwrap()).unwrap();
+        let start = body.bytecode_offset as usize;
+        let ops = decode_instructions(&module.bytecode[start..start + body.bytecode_length as usize]).unwrap();
+        assert!(ops.iter().any(|op| matches!(op, Instruction::DropTyped { type_ref: TypeRef::Reference { .. }, .. })),
+            "the local reference slot must be retired: {ops:?}");
+        assert!(!ops.iter().any(|op| matches!(op, Instruction::DropRef { .. })),
+            "the borrow cannot destroy its referent: {ops:?}");
+        let buffer = verum_vbc::serialize::serialize_module(&module).unwrap();
+        for module in [module, verum_vbc::deserialize::deserialize_module(&buffer).unwrap()] {
+            let id = module.find_function_by_name("transfer.probe").unwrap();
+            let value = Interpreter::new(Arc::new(module)).execute_function(id).unwrap();
+            assert_eq!(value.try_as_i64(), Some(3), "bootstrap={bootstrap}");
+        }
+    }
+}
+
+#[test]
 fn explicit_destination_drop_does_not_revive_the_source_cleanup() {
     let source = watch(
         r#"
@@ -179,12 +216,15 @@ fn probe() -> Int {
 }
 
 #[test]
-fn unresolved_shared_and_reference_inputs_do_not_get_source_clears() {
+fn unresolved_owner_is_rejected_and_reference_inputs_do_not_get_source_clears() {
     use verum_vbc::{Instruction, bytecode::decode_instructions, instruction::Reg};
-    // Shared here has no imported descriptor: this is an unknown-owner negative,
-    // not proof of the actual standard-library retain/release implementation.
+    let unknown = "fn probe(original: Shared<Int>) -> Shared<Int> { let copied = original; original }";
+    let ast = Parser::new(unknown).parse_module().unwrap();
+    let err = VbcCodegen::with_config(CodegenConfig::new("transfer")).compile_module(&ast).unwrap_err();
+    assert!(matches!(err.kind, verum_vbc::codegen::CodegenErrorKind::InvalidSourceSignature(message)
+        if message.contains("unresolved nominal type 'Shared'")));
     for source in [
-        "fn probe(original: Shared<Int>) -> Shared<Int> { let copied = original; original }",
+        "type Shared<T> is { value: T }; fn probe(original: Shared<Int>) -> Shared<Int> { let copied = original; original }",
         "type affine Token is { value: Int }; fn probe(original: &Token) -> &Token { let copied = original; original }",
         "type affine Token is { value: Int }; fn probe(original: *const Token) -> *const Token { let copied = original; original }",
     ] {
