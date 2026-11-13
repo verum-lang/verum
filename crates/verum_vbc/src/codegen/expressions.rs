@@ -13346,9 +13346,26 @@ impl VbcCodegen {
             && let Some(key) = self.registered_receiver_method(receiver_type, method.name.as_str())
             && self.ctx.lookup_qualified_function(&key).is_some_and(|info| info.takes_self_mut_ref)
         {
-            let borrowed = self.compile_unary(UnOp::RefMut, array_receiver)?
-                .or_internal("projected method receiver has no borrow")?;
-            let target = format!("&mut {}", Self::method_receiver_type_name(receiver_type));
+            let (borrowed, target) = if matches!(
+                self.projection_operand_declaration(array_receiver),
+                Some(crate::types::TypeRef::Reference { .. })
+            ) {
+                // A stored reference already identifies the receiver storage.
+                // Borrowing its field slot would introduce an extra reference
+                // layer while dispatch still expects the original pointee.
+                if !self.mutable_projection_place(array_receiver, 0) {
+                    return Err(CodegenError::with_span(CodegenErrorKind::TypeInference(
+                        "method receiver has no declared mutable projection".into(),
+                    ), receiver.span));
+                }
+                let value = self.compile_expr(array_receiver)?
+                    .or_internal("projected method receiver has no reference")?;
+                (value, receiver_type.to_owned())
+            } else {
+                let value = self.compile_unary(UnOp::RefMut, array_receiver)?
+                    .or_internal("projected method receiver has no borrow")?;
+                (value, format!("&mut {}", Self::method_receiver_type_name(receiver_type)))
+            };
             return self.compile_method_on_adjusted_value(
                 borrowed, &target, receiver.span, method, args, resolved_target, type_args, true,
             );
