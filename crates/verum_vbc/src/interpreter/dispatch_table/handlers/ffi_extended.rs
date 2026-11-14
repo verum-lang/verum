@@ -2224,6 +2224,8 @@ pub(super) fn cbgr_user_allocate(state: &mut InterpreterState, raw_size: i64, ra
         *((header_addr + l::ALLOCATION_HEADER_GENERATION_OFFSET as usize) as *mut u32) = 1;
         *((header_addr + l::ALLOCATION_HEADER_EPOCH_OFFSET as usize) as *mut u16) =
             state.cbgr_epoch as u16;
+        *((header_addr + l::ALLOCATION_HEADER_CAPABILITIES_OFFSET as usize) as *mut u16) =
+            verum_common::cbgr::caps::ALL as u16;
         *((header_addr + l::ALLOCATION_HEADER_FLAGS_OFFSET as usize) as *mut u32) = 0;
         *((header_addr + l::ALLOCATION_HEADER_REF_COUNT_OFFSET as usize) as *mut u32) = 1;
         *((header_addr + l::ALLOCATION_HEADER_TOTAL_OFFSET as usize) as *mut u32) =

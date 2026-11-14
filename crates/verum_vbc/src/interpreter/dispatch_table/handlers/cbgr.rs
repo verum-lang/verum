@@ -2038,55 +2038,20 @@ pub(in super::super) fn handle_cbgr_extended(
 /// sub-op byte, the operand-length envelope and the pc reposition — an arm may
 /// read any number of operands, and may `return` early, without desynchronising
 /// the instruction stream.
-/// Validate a ThinRef/FatRef STRUCTURE by its address (T0846) — the
-/// Tier-0 twin of the AOT's `verum_cbgr_check` / `verum_cbgr_check_write`
-/// / `verum_cbgr_check_fat` (a FatRef begins with its ThinRef, so the
-/// thin fields sit at the same offsets).
-///
-/// Layout at `ref_addr`: `{user_ptr@0: u64, generation@8: u32,
-/// epoch_caps@12: u32}` with `epoch_caps = epoch(low16) | caps(high16)`.
-/// The verdict is: the referenced allocation is live (tracked) AND its
-/// header's gen@8/epoch@12 match the ThinRef's — plus, when
-/// `require_write`, the WRITE bit (0x02) in the caps half.
-///
-/// Reading the structure itself is the caller's unsafe contract (the
-/// .vr intrinsics are `unsafe fn`); the HEADER read is gated on
-/// `cbgr_allocations` membership like every other header access here.
+/// Validate an unsafe caller-supplied ThinRef/FatRef structure. Both carriers
+/// share the canonical ThinRef prefix: pointer, generation, and high16 epoch /
+/// low16 capabilities. The allocation registry proves header lifetime before
+/// the shared validator compares its identity and intersects current rights.
 fn thin_ref_struct_check(state: &InterpreterState, ref_addr: i64, require_write: bool) -> bool {
-    use verum_common::layout as l;
     if ref_addr <= 0 {
         return false;
     }
-    // SAFETY: dereferencing the caller-supplied structure address is the
-    // documented contract of the `unsafe fn cbgr_check*` intrinsics.
-    let (user_ptr, ref_gen, epoch_caps) = unsafe {
-        let base = ref_addr as usize;
-        (
-            *(base as *const u64),
-            *((base + l::THIN_REF_GENERATION_OFFSET as usize) as *const u32),
-            *((base + l::THIN_REF_EPOCH_CAPS_OFFSET as usize) as *const u32),
-        )
-    };
-    let hdr = l::ALLOCATION_HEADER_SIZE as usize;
-    if user_ptr == 0 || (user_ptr as usize) < hdr {
-        return false;
-    }
-    let header_addr = user_ptr as usize - hdr;
-    if !state.cbgr_allocations.contains(&header_addr) {
-        return false;
-    }
-    // SAFETY: liveness gated by the membership check above.
-    let (actual_gen, actual_epoch) = unsafe {
-        (
-            *((header_addr + l::ALLOCATION_HEADER_GENERATION_OFFSET as usize) as *const u32),
-            *((header_addr + l::ALLOCATION_HEADER_EPOCH_OFFSET as usize) as *const u16),
-        )
-    };
-    let ref_epoch = (epoch_caps & 0xFFFF) as u16;
-    let caps = (epoch_caps >> 16) as u16;
-    actual_gen == ref_gen
-        && actual_epoch == ref_epoch
-        && (!require_write || caps & 0x02 != 0)
+    // SAFETY: the unsafe intrinsic requires a readable ThinRef prefix for the
+    // complete call. Allocation-header lifetime is checked independently below.
+    let reference = unsafe { (ref_addr as usize as *const crate::value::ThinRef).read_unaligned() };
+    let required = if require_write { Capabilities::WRITE } else { Capabilities::READ };
+    super::cbgr_helpers::bridge_reference_capabilities(state, reference)
+        .is_ok_and(|capabilities| capabilities.0 & required == required)
 }
 
 fn cbgr_extended_body(
@@ -3640,7 +3605,7 @@ fn cbgr_extended_body(
             // The operand is the ADDRESS of a ThinRef/FatRef STRUCTURE
             // (a FatRef begins with its ThinRef, so the thin fields sit
             // at the same offsets): {user_ptr@0, generation@8,
-            // epoch_caps@12 = epoch(low16) | caps(high16)}.  Mirrors
+            // epoch_caps@12 = epoch(high16) | caps(low16)}.  Mirrors
             // the AOT's verum_cbgr_check_fat / verum_cbgr_check_write:
             // validate generation+epoch against the allocation header;
             // CheckWrite additionally requires the WRITE bit (0x02) in

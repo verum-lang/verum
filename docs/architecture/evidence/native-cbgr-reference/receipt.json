@@ -50,5 +50,26 @@
     "exit_code": 139,
     "task": "T2719",
     "scope": "Actual native page allocator/free and generated reference snapshot/validator; no safe lifetime authority for the unmapped header is established."
+  },
+  "vm_bridge_followup": {
+    "base": "b51b4bc8b13e263508d6e06b970bd81e93d4b79a",
+    "passed": 25,
+    "failed": 0,
+    "scope": "Actual source intrinsic declarations, VBC serialization and VM checks; live allocation identity and capability revocation, plus released-header membership refusal. Allocation address reuse remains T2720; native released-page lifetime remains T2719.",
+    "logs": {
+      "before": {
+        "sha256": "78a9d892ef8e61ba37ee9eeea6d68b24389c1ff8ced50211ab64cbf3dbe061da"
+      },
+      "after": {
+        "sha256": "9a1260c4e7a92e486aee78ba6d89dad6550092c80a07d63c0004ea70a9a0561e"
+      }
+    },
+    "source_sha256": {
+      "core/intrinsics/runtime/cbgr.vr": "e2c5d9ce1a4fdf08cfaa8d55ae3713cd30fa388116d9ae523deedd0520f679ee",
+      "crates/verum_vbc/src/interpreter/dispatch_table/handlers/cbgr.rs": "c51bf4327b0716e366c9b15135392526d81a2d58fc17602b13804b4c562e6b6c",
+      "crates/verum_vbc/src/interpreter/dispatch_table/handlers/cbgr_helpers.rs": "c9b680e6d982992cbb0c38632f0b700f623d4f942e82861d8c8fff80bd9db154",
+      "crates/verum_vbc/src/interpreter/dispatch_table/handlers/ffi_extended.rs": "643b7a08f12b004c12ec877729731a32280a5a09280cdf1e237214ec557717af",
+      "crates/verum_vbc/tests/cbgr_source_encoding.rs": "ed747450bf997e14184e0f8986ed163bb106def58353c7339649ed45bd285bae"
+    }
   }
 }

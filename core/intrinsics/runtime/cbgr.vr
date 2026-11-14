@@ -152,12 +152,12 @@ public unsafe fn cbgr_revoke(user_ptr: Int);
 public unsafe fn cbgr_register_root(user_ptr: Int);
 
 /// Validate a thin reference (16-byte: ptr + generation + epoch_caps).
-/// Cheaper than `cbgr_validate_ref` — single 64-bit compare.
+/// Checks live allocation identity, epoch, and the retained read capability.
 @intrinsic("cbgr_check")
 public unsafe fn cbgr_check(thin_ref_ptr: Int) -> Int;
 
 /// Validate a fat reference (32-byte: thin + metadata + offset).
-/// Includes bounds-check on the slice metadata.
+/// Validates its ThinRef prefix; slice access checks metadata bounds separately.
 @intrinsic("cbgr_check_fat")
 public unsafe fn cbgr_check_fat(fat_ref_ptr: Int) -> Int;
 

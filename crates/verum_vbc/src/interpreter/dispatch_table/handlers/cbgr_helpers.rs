@@ -431,6 +431,43 @@ fn require_reference_capability(state: &InterpreterState, reference: Value, requ
     }
 }
 
+/// Validate a snapshot against a live CBGR bridge allocation. Membership is
+/// checked before header reads, so a released address is never dereferenced.
+/// Return the intersection with the owner's current rights, not fresh authority.
+pub(super) fn bridge_reference_capabilities(
+    state: &InterpreterState,
+    reference: crate::value::ThinRef,
+) -> InterpreterResult<Capabilities> {
+    use crate::interpreter::CbgrViolationKind;
+    use std::sync::atomic::{AtomicU16, AtomicU32, Ordering};
+    use verum_common::layout;
+
+    let address = reference.ptr as usize;
+    let invalid = |kind| InterpreterError::CbgrViolation { kind, ptr: address };
+    let header = address.checked_sub(layout::ALLOCATION_HEADER_SIZE as usize)
+        .filter(|header| state.cbgr_allocations.contains(header))
+        .ok_or_else(|| invalid(CbgrViolationKind::UseAfterFree))?;
+    // SAFETY: exact bridge membership establishes a live, aligned header. The
+    // snapshot is local; no allocation, callback or retirement occurs here.
+    let (generation, epoch, capabilities) = unsafe {
+        (
+            (&*((header + layout::ALLOCATION_HEADER_GENERATION_OFFSET as usize) as *const AtomicU32))
+                .load(Ordering::Acquire),
+            (&*((header + layout::ALLOCATION_HEADER_EPOCH_OFFSET as usize) as *const AtomicU16))
+                .load(Ordering::Relaxed),
+            (&*((header + layout::ALLOCATION_HEADER_CAPABILITIES_OFFSET as usize) as *const AtomicU16))
+                .load(Ordering::Acquire),
+        )
+    };
+    if reference.generation == 0 || reference.generation != generation {
+        return Err(invalid(CbgrViolationKind::GenerationMismatch));
+    }
+    if reference.epoch() != epoch {
+        return Err(invalid(CbgrViolationKind::EpochExpired));
+    }
+    Ok(reference.capabilities().intersect(&Capabilities(capabilities)))
+}
+
 /// A receiver value together with its original writeback place and the
 /// intersection of every reference capability traversed to reach it.
 pub(super) struct ReceiverPlace {
