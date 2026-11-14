@@ -97,7 +97,6 @@ SIG_ANY = re.compile(
 KNOWN: set[tuple[str, str, str]] = {
     ("Sieve", "ToposExampleMaximalSieve", "core/math/examples.vr"),
     ("InfPresheaf", "ConstantInfPresheaf", "core/math/examples.vr"),
-    ("InfSubobjectClassifier", "TrivialInfSubobjectClassifier", "core/math/examples.vr"),
 }
 
 

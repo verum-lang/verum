@@ -33,7 +33,7 @@ fn use_presheaf<C, P: InfPresheaf<C>>() -> Int { 0 }
 fn use_sheaf<C, S: InfSheaf<C>>() -> Int { 0 }
 fn use_inftopos<T: InfinityTopos>() -> Int { 0 }
 fn use_sheafinftopos<C, T: SheafInfinityTopos<C>>() -> Int { 0 }
-fn use_classifier<C: InfSubobjectClassifier>() -> Int { 0 }
+fn use_classifier<X: InfinityTopos, C: InfSubobjectClassifier<X>>() -> Int { 0 }
 fn use_geomorphism<X, Y, F: GeometricMorphism<X, Y>>() -> Int { 0 }
 
 fn main() {

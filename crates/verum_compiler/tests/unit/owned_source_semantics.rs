@@ -768,3 +768,6 @@ fn release_runtime_and_sync_source_admission() {
 
 #[path = "stdlib_local_file_readers.rs"]
 mod stdlib_local_file_readers;
+
+#[path = "infinity_classifier_contract.rs"]
+mod infinity_classifier_contract;

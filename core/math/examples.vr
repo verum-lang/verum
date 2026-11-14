@@ -53,7 +53,7 @@ mount core.math.infinity_category.{
 mount core.math.simplicial.{Horn};
 mount core.math.infinity_topos.{
     Sieve, GrothendieckTopology, Site, InfPresheaf, InfSheaf,
-    InfSubobjectClassifier, GeometricMorphism, id_geometric,
+    GeometricMorphism, id_geometric,
     InfinityTopos, SheafInfinityTopos,
 };
 mount core.math.fibration.{
@@ -2057,36 +2057,9 @@ public fn trivial_quillen_model() -> TrivialQuillenModel {
     TrivialQuillenModel { marker: 0 }
 }
 
-// =============================================================================
-// 2.29. TrivialInfSubobjectClassifier — concrete `InfSubobjectClassifier`
-// =============================================================================
-
-/// The **trivial ∞-subobject classifier** Ω = 1: the classifying map
-/// of every monomorphism is itself, and the pullback-of-true
-/// condition holds trivially. Concrete acid test for the ∞-topos
-/// subobject classifier protocol.
-public type TrivialInfSubobjectClassifier is {
-    marker: Int,
-};
-
-implement InfSubobjectClassifier for TrivialInfSubobjectClassifier {
-    fn omega(&self) -> Int {
-        1
-    }
-
-    fn classify(m: &Int) -> Int {
-        *m
-    }
-
-    fn pullback_of_true_is_m(m: &Int) -> Bool {
-        true
-    }
-}
-
-/// Smart constructor for the trivial ∞-subobject classifier.
-public fn trivial_inf_subobject_classifier() -> TrivialInfSubobjectClassifier {
-    TrivialInfSubobjectClassifier { marker: 0 }
-}
+// No infinity-topos subobject-classifier instance is provided here. Such an
+// instance needs an explicit ambient topos, its object/morphism carriers and
+// the pullback classification law; an integer identity is not that evidence.
 
 // =============================================================================
 // 2.37. IdentityGeometricMorphism — concrete `GeometricMorphism` instance

@@ -17,7 +17,7 @@
 /// HomotopyCategory, Opposite/Functor/Discrete ∞-Cat, InfTerminal/Initial,
 /// full functor equivalence hierarchy), ∞-topos (Sieve, GrothendieckTopology,
 /// Site, InfPresheaf/InfSheaf, InfinityTopos, SheafInfinityTopos,
-/// InfSubobjectClassifier, GeometricMorphism), fibrations
+/// GeometricMorphism), fibrations
 /// (Cartesian/CoCartesian morphisms, full Grothendieck/Opfibration/
 /// Bifibration/Left/RightFibration, Fibre, StraighteningEquivalence,
 /// BaseChange), model category (WeakEquiv/Cof/Fib classes, Trivial
@@ -74,7 +74,6 @@ mount core.math.examples.{
     DiscreteTopology, discrete_topology,
     TrivialSite, trivial_site,
     ConstantInfPresheaf, constant_inf_presheaf,
-    TrivialInfSubobjectClassifier, trivial_inf_subobject_classifier,
     IdentityGeometricMorphism, identity_geometric_morphism,
     TrivialCartesianMorphism, trivial_cartesian_morphism,
     TrivialCoCartesianMorphism, trivial_cocartesian_morphism,
@@ -158,12 +157,13 @@ fn touch_kan_contravariant() {
     let _ = trivial_right_kan();
 }
 
+// No concrete InfSubobjectClassifier is supplied by the examples; this
+// constructor coverage does not claim its classification law.
 fn touch_infinity_topos_primitives() {
     let _ = maximal_sieve();
     let _ = discrete_topology();
     let _ = trivial_site();
     let _ = constant_inf_presheaf();
-    let _ = trivial_inf_subobject_classifier();
     let _ = identity_geometric_morphism();
 }
 
