@@ -2696,8 +2696,9 @@ impl VbcCodegen {
     ///
     /// // Before compiling collections module
     /// let mut collections_codegen = VbcCodegen::new();
+    /// collections_codegen.initialize();
     /// collections_codegen.import_functions(&core_functions);
-    /// collections_codegen.compile_module(&collections_ast)?;
+    /// collections_codegen.compile_additional_module(&collections_ast)?;
     /// ```
     pub fn import_functions(
         &mut self,
@@ -9672,69 +9673,21 @@ impl VbcCodegen {
         self.build_module()
     }
 
-    /// Resets the codegen for a new module.
+    /// Starts a new compilation with the configured analysis and immutable inputs.
     fn reset(&mut self) {
-        self.ctx.reset();
-        self.functions.clear();
-        self.types.clear();
-        self.type_index.clear();
-        self.source_context_declarations.clear();
-        self.source_generic_rosters.clear();
-        self.source_callable_rosters.clear();
-        self.constructor_generic_rosters.clear();
-        self.declared_callable_descriptors.clear();
-        self.declared_callable_defaults.clear();
-        self.pending_implementation_attachments.clear();
-        self.source_declaration_slots.clear();
-        self.archive_data_sources.clear();
-        self.ineligible_record_carriers.clear();
-        self.next_func_id = 0;
-        self.next_type_id = 0;
-        self.closure_counter = 0;
-        self.nested_function_scope.clear();
-        self.current_source_callable_parent = None;
-        // Clear FFI tables
-        self.ffi_libraries.clear();
-        self.ffi_symbols.clear();
-        self.ffi_function_map.clear();
-        self.ffi_symbol_link_names.clear();
-        self.ffi_library_map.clear();
-        self.ffi_callback_signatures.clear();
-        self.ffi_contracts.clear();
-        self.ffi_contract_exprs.clear();
-        // Clear pending imports
-        self.pending_imports.clear();
-        self.source_exports = Default::default();
-        self.source_callable_names.clear();
-        self.mount_aliases_buffer.clear();
-        self.mount_installed_qualified_keys.clear();
-        self.decl_installed_qualified_keys.clear();
-        self.local_concrete_types.clear();
-        self.concrete_impl_bindings.clear();
-        // Constructor collisions belong to the same registration lifetime as ctx.
-        self.variant_collisions.clear();
-        // Clear field name indices
-        self.field_name_indices.clear();
-        self.next_field_id = 0;
-        self.type_field_layouts.clear();
-        self.type_field_type_names.clear();
-        self.type_field_refinements.clear();
-        // Clear pending constants
-        self.pending_constants.clear();
-        self.lexical_constant_scopes.clear();
-        self.constant_initializers.clear();
-        self.module_constant_bindings.clear();
-        self.source_module_owners = Default::default();
-        self.count_module_scope = None;
-        self.declared_count_bindings.clear();
-        self.scoped_count_imports.clear();
-        // Clear static init function tracking
-        self.static_init_functions.clear();
-        // Clear pending TLS initializations
-        self.pending_tls_inits.clear();
-        // Clear context name registry
-        self.context_name_to_id.clear();
-        self.context_names.clear();
+        let mut fresh = Self::with_config(self.config.clone());
+        let mut tier_context = std::mem::take(&mut self.ctx.tier_context);
+        tier_context.in_unsafe = false;
+        fresh.set_tier_context(tier_context);
+        fresh.set_prefer_existing_functions(self.ctx.prefer_existing_functions);
+        fresh.set_propagate_test_attr(self.propagate_test_attr);
+        fresh.set_foreign_interfaces(self.foreign_interfaces.clone());
+        if let Some(exports) = self.dependency_source_exports.clone() {
+            fresh.set_source_exports(exports);
+        }
+        // Every declaration, ID, scope and derived cache belongs to the old
+        // compilation. Additional source units deliberately bypass this reset.
+        *self = fresh;
     }
 
     /// Seeds sentinel variant constructors (`None`, `Some`, `Ok`, `Err`,
@@ -9974,7 +9927,9 @@ impl VbcCodegen {
             ItemKind::Impl(declaration) => Some(self.current_impl_ast_generics.replace(self.implementation_source_parameters(declaration)?)),
             _ => None,
         };
+        let previous_preference = self.ctx.prefer_existing_functions;
         let result = self.collect_declarations_in_source_scope(item);
+        self.ctx.prefer_existing_functions = previous_preference;
         if let Some(previous) = previous { self.current_impl_ast_generics = previous; }
         result
     }
@@ -10044,25 +9999,10 @@ impl VbcCodegen {
                     return Ok(());
                 }
 
-                // For protocol impls, inherent methods take priority.
-                // If "AppConfig.new" already exists from inherent impl,
-                // don't let protocol impl's methods overwrite it.
-                //
-
-                // Save the previous flag value so we can restore it after the
-                // impl. Without this save/restore, the unconditional `= false`
-                // at the end of this branch corrupts pipeline-set state — e.g.
-                // pipeline.rs's `set_prefer_existing_functions(true)` for the
-                // imported-stdlib loop gets overwritten the moment any imported
-                // module contains a protocol impl, after which the next
-                // ItemKind::Type registration (e.g. RecoveryStrategy) runs in
-                // user-mode, triggers cross-type collision detection, and
-                // unregisters bare `None`. That breaks every other stdlib
-                // body that legitimately uses the simple `Maybe.None` alias
-                // (BTreeMap, Receiver.poll, all Stream adapters, etc.).
-                let is_protocol_impl =
-                    matches!(&impl_decl.kind, verum_ast::decl::ImplKind::Protocol { .. });
-                let prev_prefer_existing = self.ctx.prefer_existing_functions;
+                // Inherent methods take priority over a protocol's defaults.
+                // collect_declarations restores the caller's policy on both
+                // successful registration and an invalid declaration.
+                let is_protocol_impl = matches!(&impl_decl.kind, verum_ast::decl::ImplKind::Protocol { .. });
                 if is_protocol_impl {
                     self.ctx.prefer_existing_functions = true;
                 }
@@ -10492,14 +10432,6 @@ impl VbcCodegen {
                             )?;
                         }
                     }
-                }
-
-                // Restore prefer_existing_functions to its prior value
-                // (instead of unconditionally false) so caller-set context
-                // — pipeline.rs's stdlib-loading `true` — survives across
-                // impl-block boundaries.
-                if is_protocol_impl {
-                    self.ctx.prefer_existing_functions = prev_prefer_existing;
                 }
             }
             // Type declarations - register variant constructors for sum types

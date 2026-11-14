@@ -130,3 +130,67 @@ fn malformed_source_name_cannot_leave_a_successful_full_import() {
     let error = consumer.finalize_module_from_state().unwrap_err().to_string();
     assert!(error.contains("semantic type has no name"), "{error}");
 }
+
+fn scoped_packet(selected: &str) -> verum_ast::Module {
+    Parser::new(&format!(r#"
+        module model;
+        public module first {{ public type Token is {{ value:Int }}; }}
+        public module second {{ public type Token is {{ value:Int }}; }}
+        mount self.{selected}.Token as Local;
+        public type Packet is {{ value:Local }};
+        implement Packet {{ public fn marker(&self)->Int {{73}} }}
+    "#)).parse_module().unwrap()
+}
+
+fn packet_archive(selected: &str) -> VbcModule {
+    wire(&VbcCodegen::with_config(CodegenConfig::new("model"))
+        .compile_module(&scoped_packet(selected)).unwrap())
+}
+
+fn assert_packet_scope(module: &VbcModule, selected: &str) {
+    let scope = module.declaration_type_bindings.get(&Text::from("model")).unwrap();
+    assert_eq!(scope.get(&Text::from("Local")).unwrap().as_deref(),
+        Some(format!("model.{selected}.Token").as_str()));
+}
+
+#[test]
+fn a_new_compilation_replaces_the_previous_source_type_scope() {
+    let mut codegen = VbcCodegen::with_config(CodegenConfig::new("model"));
+    for selected in ["first", "second", "first"] {
+        let module = codegen.compile_module(&scoped_packet(selected)).unwrap();
+        assert_packet_scope(&wire(&module), selected);
+    }
+}
+
+#[test]
+fn a_new_compilation_discards_the_previous_imported_type_scope() {
+    let mut codegen = VbcCodegen::with_config(CodegenConfig::new("consumer"));
+    let empty = Parser::new("module consumer; public fn main()->Int { 73 }")
+        .parse_module().unwrap();
+    for selected in ["first", "second", "first"] {
+        codegen.compile_module(&empty).unwrap();
+        codegen.import_archive_module_types(&packet_archive(selected));
+        let module = codegen.finalize_module_from_state().unwrap();
+        assert_packet_scope(&wire(&module), selected);
+    }
+}
+
+#[test]
+fn an_additional_module_keeps_imported_scope_and_conflict_checks() {
+    let first = packet_archive("first");
+    let second = packet_archive("second");
+    let mut codegen = VbcCodegen::with_config(CodegenConfig::new("consumer"));
+    codegen.initialize();
+    codegen.import_archive_module_types(&first);
+    let ast = Parser::new("module consumer; mount model.Packet; public fn retain(value:&Packet)->&Packet {value} public fn main()->Int {73}")
+        .parse_module().unwrap();
+    let module = wire(&codegen.compile_additional_module(&ast).unwrap());
+    assert_packet_scope(&module, "first");
+    let entry = module.find_function_by_name("consumer.main").unwrap();
+    let result = verum_vbc::interpreter::Interpreter::new(module.into())
+        .execute_function(entry).unwrap();
+    assert_eq!(result.try_as_i64(), Some(73));
+    codegen.import_archive_module_types(&second);
+    let error = codegen.finalize_module_from_state().unwrap_err().to_string();
+    assert!(error.contains("conflicting lexical type bindings for declaration owner model"), "{error}");
+}
