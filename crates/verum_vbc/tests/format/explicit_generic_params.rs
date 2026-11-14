@@ -41,6 +41,10 @@ fn function_bytes(minor: u16) -> Vec<u8> {
     if minor >= 43 {
         bytes.push(0); // v2.43 optional callable declaration identity
     }
+    if minor >= 58 {
+        bytes.push(0); // v2.58 optional declared receiver
+        bytes.push(0); // v2.58 optional source-definition identity
+    }
     bytes
 }
 
@@ -103,7 +107,8 @@ fn versioned_function_tails_stop_at_their_own_descriptor_boundary() {
             23..=26 => 44,
             27..=29 => 45,
             30..=42 => 46,
-            _ => 47,
+            43..=57 => 47,
+            _ => 49,
         };
         let mut bytes = function_bytes(minor);
         assert_eq!(bytes.len(), one_len);
@@ -120,8 +125,83 @@ fn versioned_function_tails_stop_at_their_own_descriptor_boundary() {
             assert!(descriptor.semantic_return.is_none());
             assert!(descriptor.source_signature.is_none());
             assert!(descriptor.declaration_identity.is_none());
+            assert!(descriptor.source_receiver.is_none());
+            assert!(descriptor.source_definition.is_none());
             assert_eq!(reader.offset, expected, "minor={minor}");
         }
+    }
+}
+
+// Frozen v2.58 suffix: receiver presence + Concrete(Int), then source
+// identity presence + u16 version + 32 digest bytes + scope presence + digest.
+// Deliberately independent of the production writer and source hash encoder.
+fn v258_definition_bytes() -> verum_common::List<u8> {
+    let mut bytes = verum_common::List::from_iter(function_bytes(57));
+    bytes[10] = 0x08; // has_source_body
+    bytes.extend([1, 1, 2, 0, 0, 0]); // present receiver, Concrete(Int)
+    bytes.extend([1, 1, 0]); // present source definition, version 1
+    bytes.extend([0x5a; 32]);
+    bytes.push(1); // present implementation scope
+    bytes.extend([0xa5; 32]);
+    bytes
+}
+
+#[test]
+fn v258_source_contract_tail_preserves_fields_and_next_descriptor() {
+    let mut bytes = v258_definition_bytes();
+    assert_eq!(bytes.len(), 121);
+    let mut next = function_bytes(58);
+    next[..4].copy_from_slice(&NEXT_ID.to_le_bytes());
+    bytes.extend(next);
+    let mut reader = Deserializer::new(&bytes);
+    reader.header = Some(VbcHeader {
+        version_minor: 58,
+        ..VbcHeader::default()
+    });
+    let first = reader.parse_function_descriptor().unwrap();
+    assert_eq!(first.id.0, FIRST_ID);
+    assert_eq!(first.source_receiver, Some(TypeRef::Concrete(TypeId::INT)));
+    assert!(first.has_source_body);
+    let identity = first.source_definition.unwrap();
+    assert_eq!(identity.version, 1);
+    assert_eq!(identity.digest, [0x5a; 32]);
+    assert_eq!(identity.implementation_scope, Some([0xa5; 32]));
+    assert_eq!(reader.offset, 121);
+    let next = reader.parse_function_descriptor().unwrap();
+    assert_eq!(next.id.0, NEXT_ID);
+    assert!(next.source_receiver.is_none());
+    assert!(next.source_definition.is_none());
+    assert_eq!(reader.offset, 170);
+}
+
+#[test]
+fn v258_source_contract_tail_refuses_truncation_and_invalid_authority() {
+    let bytes = v258_definition_bytes();
+    for length in 47..bytes.len() {
+        let mut reader = Deserializer::new(&bytes.as_slice()[..length]);
+        reader.header = Some(VbcHeader {
+            version_minor: 58,
+            ..VbcHeader::default()
+        });
+        assert!(
+            reader.parse_function_descriptor().is_err(),
+            "truncated at {length}"
+        );
+    }
+    // The source body's absence, invalid presence tags, unknown source hash
+    // version and malformed receiver type cannot be treated as absent metadata.
+    for (offset, value) in [(10, 0), (47, 2), (48, 255), (53, 2), (54, 2), (88, 2)] {
+        let mut malformed = bytes.clone();
+        malformed[offset] = value;
+        let mut reader = Deserializer::new(&malformed);
+        reader.header = Some(VbcHeader {
+            version_minor: 58,
+            ..VbcHeader::default()
+        });
+        assert!(
+            reader.parse_function_descriptor().is_err(),
+            "invalid byte at {offset}"
+        );
     }
 }
 
