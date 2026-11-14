@@ -96,6 +96,19 @@ impl VbcCodegen {
                 Mutability::Immutable,
                 CbgrTier::Tier0,
             )),
+            ExprKind::Array(verum_ast::ArrayExpr::List(elements)) => {
+                let element = nested(elements.first()?, None)?;
+                if !elements.iter().skip(1).all(|value| nested(value, None).as_ref() == Some(&element)) {
+                    return None;
+                }
+                Some(TypeRef::Array { element: Box::new(element), length: elements.len() as u64 })
+            }
+            ExprKind::Array(verum_ast::ArrayExpr::Repeat { value, count }) => {
+                let length = u64::try_from(self.const_eval_i64(count).ok()??).ok()?;
+                Some(TypeRef::Array { element: Box::new(nested(value, None)?), length })
+            }
+            ExprKind::Tuple(elements) => Some(TypeRef::Tuple(elements.iter()
+                .map(|element| nested(element, None)).collect::<Option<_>>()?)),
             ExprKind::Return(_) | ExprKind::Break { .. } | ExprKind::Continue { .. } =>
                 Some(TypeRef::Concrete(crate::types::TypeId::NEVER)),
             ExprKind::Block(block) | ExprKind::Unsafe(block) =>

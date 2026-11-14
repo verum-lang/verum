@@ -19246,7 +19246,9 @@ impl VbcCodegen {
                 } else if let Some(ty) = self.generic_named_binding(param_name, reg) {
                     self.emit_generic_parameter_copy(reg, ty);
                 } else {
-                    self.ctx.emit(Instruction::Clone { dst: reg, src: reg });
+                    self.ctx.emit(Instruction::CloneTyped { dst: reg, src: reg,
+                        type_ref: self.declared_named_binding_type(param_name, reg)
+                            .or_internal("parameter copy requires its source declaration")? });
                 }
             }
         }

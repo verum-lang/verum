@@ -3989,7 +3989,8 @@ impl VbcCodegen {
         };
         let value_reg = if needs_copy {
             let owned = self.ctx.alloc_temp();
-            self.ctx.emit(Instruction::Clone { dst: owned, src: value_reg });
+            self.ctx.emit(Instruction::CloneTyped { dst: owned, src: value_reg,
+                type_ref: copy_type.clone().or_internal("assignment copy requires its source declaration")? });
             self.ctx.free_temp(value_reg);
             owned
         } else { value_reg };
@@ -11143,7 +11144,8 @@ impl VbcCodegen {
             self.ctx.free_temp(received);
         } else if self.binds_a_copy_of_a_place(expr, value, copy_type.as_ref())? {
             let copied = self.ctx.alloc_temp();
-            self.ctx.emit(Instruction::Clone { dst: copied, src: value });
+            self.ctx.emit(Instruction::CloneTyped { dst: copied, src: value,
+                type_ref: copy_type.or_internal("variant payload copy requires its source declaration")? });
             self.ctx.emit(Instruction::SetVariantData { variant, field, value: copied });
             self.ctx.free_temp(copied);
         } else {
@@ -26130,6 +26132,7 @@ impl VbcCodegen {
                 let saved_field_type =
                     self.push_field_type_context(&variant_type_name, &field.name.name);
 
+                let copy_start = self.ctx.instructions.len();
                 let value_reg = if let Some(ref v) = field.value {
                     if matches!(v.kind, ExprKind::Closure { .. } | ExprKind::Paren(_))
                         && let Some(hint) = self.field_type_name(&variant_type_name, &field.name.name)
@@ -26143,6 +26146,10 @@ impl VbcCodegen {
                     self.ctx.get_var_reg(&field.name.name)?
                 };
 
+                let copy_type = match &field.value {
+                    Some(expr) => self.copy_source_type(expr, value_reg, copy_start, self.ctx.instructions.len()),
+                    None => self.declared_named_binding_type(field.name.name.as_str(), value_reg),
+                };
                 self.pop_field_type_context(saved_field_type);
 
                 let transfer = match &field.value {
@@ -26153,13 +26160,18 @@ impl VbcCodegen {
                     Some(expr) => self.generic_named_place(expr, value_reg),
                     None => self.generic_named_binding(field.name.name.as_str(), value_reg),
                 };
+                let is_place = !transfer && generic.is_none() && match &field.value {
+                    Some(expr) => self.binds_a_copy_of_a_place(expr, value_reg, copy_type.as_ref())?,
+                    None => self.copies_from_named_place(field.name.name.as_str(), value_reg),
+                };
                 let cloned_reg = if let Some(ty) = generic {
                     self.emit_generic_value_handoff(value_reg, ty, true)
-                } else if transfer { value_reg } else {
+                } else if is_place {
                     let owned = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::Clone { dst: owned, src: value_reg });
+                    self.ctx.emit(Instruction::CloneTyped { dst: owned, src: value_reg,
+                        type_ref: copy_type.or_internal("variant field copy requires its source declaration")? });
                     owned
-                };
+                } else { value_reg };
 
                 let field_name_str: &str = field.name.name.as_str();
                 let positional_idx = declared_order
@@ -26437,8 +26449,10 @@ impl VbcCodegen {
                     self.ctx.get_var_reg(&field.name.name)?
                 };
 
-                let copy_type = field.value.as_ref().and_then(|expr|
-                    self.copy_source_type(expr, value_reg, copy_start, self.ctx.instructions.len()));
+                let copy_type = match &field.value {
+                    Some(expr) => self.copy_source_type(expr, value_reg, copy_start, self.ctx.instructions.len()),
+                    None => self.declared_named_binding_type(field.name.name.as_str(), value_reg),
+                };
                 self.pop_field_type_context(saved_field_type);
 
                 // Field-write strategy:
@@ -26532,9 +26546,10 @@ impl VbcCodegen {
                     self.emit_generic_value_handoff(value_reg, ty, true)
                 } else if is_place {
                     let owned = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::Clone {
+                    self.ctx.emit(Instruction::CloneTyped {
                         dst: owned,
                         src: value_reg,
+                        type_ref: copy_type.or_internal("field copy requires its source declaration")?,
                     });
                     owned
                 } else {

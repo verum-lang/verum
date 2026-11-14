@@ -1,178 +1,137 @@
 # Value-Copy Contract
 
-Pinned architectural rules for the one question a language with value
-semantics has to answer the same way everywhere: **what does it mean to
-copy a value?**
+A value copy preserves the source and gives the destination ownership of its
+owned components. The declaration determines which components are owned,
+shared or borrowed; a pointer-shaped runtime value cannot establish that
+boundary.
 
-A record in Verum is a value. `let b = a` gives `b` a record of its own;
-`a` keeps its. Nothing in the surface language hints that these two names
-might denote one object — and yet, until T0832, they did, because a
-record lives in a heap object and a register holds the pointer to it.
+## Rules
 
-The defect this document closes was never one bug. It was one *unstated*
-contract implemented three times, each implementation wrong exactly where
-the others were right.
+1. **Owned components copy according to their declared types.** Records,
+   variants, tuples and supported collections preserve nested ownership.
+2. **Places copy, temporaries transfer.** A named value or an explicit
+   dereference remains available after a supported copy. A fresh temporary
+   needs no additional copy.
+3. **Shared ownership stays shared.** Copying a `Shared<T>` handle retains the
+   same allocation through its declared retain operation.
+4. **References stay references.** Copying a borrow does not duplicate or
+   prolong the lifetime of its referent.
+5. **Permission precedes copying.** An affine or linear owner, an unresolved
+   declaration or an unsupported carrier does not acquire copy permission
+   from its runtime representation.
 
----
+## Declaration authority
 
-## 0. TL;DR — the five rules
+`CloneTyped` carries a `TypeRef` through bytecode serialization, linking and
+specialization. Both execution tiers use the graph built by `copy_plan` from
+that declaration. The graph retains reference qualifiers, record field types,
+sum alternatives and owned container arguments. Its explicit work list permits
+recursive declarations without recursive host traversal.
 
-1. **A copy is one level deep.** The copy owns its own object and its own
-   backing store; the values inside are copied bit-wise. That is the same
-   ownership depth reading an element hands out.
-2. **Places copy, temporaries do not.** A value that keeps living under
-   its own name (a variable) is duplicated. A value nobody else can name
-   (a literal, a call result, an arithmetic expression) is taken as is.
-3. **`Shared<T>` copies by refcount bump**, never by forking the cell.
-4. **References copy as references.** Copying an alias yields an alias;
-   deep-copying the pointee would silently turn it into a snapshot.
-5. **One implementation.** `value_copy` is the single carrier. Every
-   spelling of "copy this" routes through it.
+The canonical runtime container registry establishes which declaration owns
+which backing storage. A foreign type with the same short name gains no
+special treatment. The declared `Shared<T>` Clone attachment must identify a
+complete body whose checked forwarding contract reaches `RetainCopy` with the
+same source, counter and result. Function identity, signature, field layout
+and bytecode are part of that check. Merely publishing a Clone name or a
+forward declaration is insufficient. Ordinary value copying does not execute
+an arbitrary user-defined Clone method.
 
----
+The resource query and the copy plan answer different questions. The first
+establishes whether a value may be duplicated; the second specifies how to
+preserve its ownership. A successful resource query does not compensate for a
+missing copy plan. Function captures, unresolved dynamic ownership and raw
+pointer fields without a semantic declaration are not guessed from memory.
 
-## 1. Where the copy happens
+## Source boundaries
 
-The following source positions apply the value-copy rule at their owning
-emitter.
+The following emitters carry declaration authority into `CloneTyped`:
 
 | Position | Example | Emitter |
 |----------|---------|---------|
 | Binding | `let b = a` | `compile_let` |
 | Assignment | `b = a` | `compile_assignment` |
-| Record field | `Mat3 { r0: z, r1: z, r2: z }` | `compile_record` |
-| Record shorthand | `Point { x, y }` | `compile_record` |
-| Sum payload | `Choice.Value(value)` | `emit_variant_argument` |
-| By-value `mut` parameter | `fn f(mut h: Holder)` | `compile_function` prologue |
-| Container insert | `xs.push(item)` | `compile_method_call` |
-| Repeat literal | `[slot; 256]` | `compile_array_repeat` |
+| Record field and shorthand | `Holder { value }` | `compile_record` |
+| Sum payload and named variant field | `Choice.Value(value)` | variant emitters |
+| By-value `mut` parameter | `fn f(mut value: Holder)` | function prologue |
+| Generic owned handoff | a place with a declared type parameter | value-use emitter |
 
-Sum payloads use the same declared-place rule as record fields. An
-unrestricted named value or explicit dereference receives a value copy.
-An affine or linear local transfers its obligation into the payload. A
-reference keeps its referent, and a fresh temporary becomes the payload
-directly. `variant_payload_ownership` checks these boundaries through both
-source entry points and serialized VBC, including rejection of an attempted
-copy from a borrowed affine owner.
+These boundaries use the source's declared type for both named values and
+explicit dereferences. Owned array elements follow their element declaration.
+Affinely owned locals transfer their obligation instead of invoking the copy
+operation. References preserve their referent, and fresh temporaries become
+the destination directly.
 
-The native lowering still loses allocation authority for a record copied
-through an explicit dereference. `Choice.Value(*borrowed)` can therefore
-retain the original storage under native execution. T2688 tracks this
-remaining producer-boundary defect separately from the sum-payload emitter.
+This is an implementation boundary, not a claim that every copy producer has
+been migrated. Runtime-intercepted container arguments, repeat initialization
+and other remaining untyped `Clone` sites still require their own integration.
+An explicit `.clone()` follows method selection and its declared contract.
+Neither the typed operation nor an available source body proves the complete
+caller/callee ownership ABI; immutable value parameters, destruction and mixed
+archives remain separately tracked by T1807. Native released-owner checks
+remain separately tracked by T2719.
 
-Usage discipline follows the declared owned components of a value. The
-canonical runtime container registry identifies which type arguments belong
-to its backing storage. A `List<Heap<T>>` therefore carries the exclusive
-ownership of its elements even though its record stores a raw buffer address.
-Reference fields and the payload behind a `Shared<T>` handle retain their
-separate ownership boundaries.
+## Storage operations
 
-The VBC resource query computes this constraint over a bounded explicit graph.
-Regular recursion through declared container storage is permitted. Cycles
-consisting only of inline owned fields, unresolved declarations and exhausted
-budgets remain `Unknown`. All alternatives of a sum contribute to its
-discipline. Source emission and archive consumers use the same query.
-`owned_storage_resources` exercises the actual standard record declarations,
-foreign same-name records, recursive values, dynamic handles and capture
-admission. This establishes permission to copy or transfer a value. The
-existing shallow copy operation still fails to preserve nested owned values
-across typed destruction, tracked separately within T2691.
+| Declared shape | Operation |
+|----------------|-----------|
+| Scalar and immutable text | Preserve the value. |
+| Reference | Preserve the reference and its qualifiers; do not traverse it. |
+| Record or tuple | Allocate independent storage and copy each owned field. |
+| Sum | Copy the active declared payload into independent storage. |
+| Fixed array | Copy exactly the declared number of elements. |
+| Registered list or deque | Copy initialized elements and independent backing storage. |
+| Registered map | Copy occupied keys and values into independent backing storage. |
+| Registered shared handle | Create the declared handle and retain the same allocation. |
 
-Two of these deserve their reasons stated, because both were once
-"fixed" in the wrong direction:
+Repeated owned children are copied independently. A cycle through owned
+storage is refused; a cycle through a shared handle or reference is not
+traversed. Therefore this operation is not a universal graph snapshot.
 
-* **The parameter copies in the PROLOGUE, not at the call site.** The
-  callee's declaration is what decides whether the argument is taken by
-  value or by reference, and under dynamic dispatch the call site cannot
-  see which body it will reach. The current prologue copies only `mut`
-  parameters. Read-only field access can hide the resulting sharing for an
-  immutable parameter, but observable `Drop` and returned aliases make it
-  visible. This implementation rule does not prove fresh ownership or grant
-  the callee an independent destruction obligation (T1538/T1540).
-* **A container copies what it is given.** `push`/`insert`/`append`/
-  `send` store their argument; the name that supplied it goes on living.
-  These are runtime-intercepted and have no Verum body to carry a
-  prologue, so the copy is made at the call site.
+## Failure and resource limits
 
-## 2. What a copy means, by shape
+Execution uses explicit work storage on ordinary thread stacks. Both tiers
+use `CopyLimits` for work and allocated payload/backing bytes; the byte budget
+excludes backend headers and is not a whole-process memory limit.
 
-`value_copy` (`verum_vbc::interpreter::…::memory_collections`) is the
-only place that answers this. Five shapes answer differently:
+The transaction validates storage and prepares allocations before retaining
+shared owners. It publishes the result only after all required retains
+succeed. On failure it releases newly allocated storage and rolls back only
+its own retain increments. Invalid storage, owned cycles, work/allocation
+limits, allocation failure, refused retains and failed rollback have distinct
+failure classifications. An unsupported shape never falls back to shallow
+aliasing.
 
-| Shape | Copy | Why not otherwise |
-|-------|------|-------------------|
-| Primitive | itself | nothing to share |
-| `Text`, immutable values | itself | sharing what cannot be written is unobservable |
-| `Shared<T>` | refcount bump, same carrier | forking gives the copy a private inner value; later writes are lost to the original (SHARED-CLONE-IDENTITY-1, T0107) |
-| `List`/`Map`/`Set`/`Deque` | header slots + a fresh backing array | copying only the header leaves two containers writing into one store (T0499) |
-| Record / variant / tuple | fresh object, slots copied bit-wise | the slot must be the copy's own |
-| Untracked pointer (raw `alloc` buffer, CBGR cell) | itself | its bytes are not an `ObjectHeader`; reading one there fabricates an object out of the user's payload |
+The native backend emits the operation and its bookkeeping in LLVM IR using
+the target runtime. It does not call a project-authored C/C++ copying shim.
 
-## 3. The three implementations that disagreed
+## Verification
 
-Stated plainly, because the shape of this defect recurs:
+- `nested_copy_boundaries` exercises actual source bindings, assignments,
+  fields, sum payloads, explicit dereferences and mutable parameters across
+  both source entry points and serialized VBC, including lexical destruction.
+- `typed_value_copy` checks nested mutation isolation, borrowed fields,
+  repeated children, arrays, wire remapping and refusal of unknown or affine
+  ownership.
+- `nested_value_copy` executes generated native images and the validated
+  interpreter entry on equivalent source programs.
+- `typed_copy_transactions` checks nested runtime operations, retain failures,
+  rollback, budgets, cycles and deep owned chains on ordinary thread stacks.
+- `typed_copy_wire`, `retain_forward` and `owned_storage_resources` pin
+  declaration identity and rejection boundaries.
 
-* `Instruction::Clone` (Tier-0 opcode) — gave a record a fresh object,
-  but copied a `List`'s three header slots and left the backing store
-  shared.
-* `.clone()` (method dispatch) — copied a container's spine correctly,
-  and handed a **record straight back as an alias**.
-* Tier-1 (`verum_codegen`) — `memcpy` when the allocation size was
-  statically known, plain register copy otherwise. So `Shared<T>` was
-  **forked**, `List` shared its backing, and anything of unknown size
-  aliased outright.
+These gates establish the named producer and runtime paths. They do not
+qualify a fresh full standard-library archive, configuration parsing or
+Registry publishing; those require their actual source and execution paths.
 
-Which spelling a program used decided whether a later write stayed
-private. That is the signature of a contract with no owner.
+## Forbidden shortcuts
 
-## 4. Verification
-
-* Unit: `value_copy_contract` (5 tests, inline — CI runs `--lib`) pins
-  record separation, `Shared` identity + refcount, container backing,
-  untracked-pointer passthrough, primitive identity.
-* Spec: `vcs/specs/L0-critical/vbc/e2e/628_value_semantics_binding.vr`
-  pins **both** sides — records copy AND references alias. The reference
-  half is not decoration: a fix that copies indiscriminately passes the
-  record half while turning every alias into a snapshot.
-* Probe: seven forms, expected `0 1` / `0 2` / `0 3` / `3 4` / `0 5` /
-  `0 7` / `4`.
-
-## 4b. Tier coherence
-
-The contract is one contract, so both tiers must answer alike. Tier-1
-decides by the register's STATIC type and allocation size, which is the
-same information the interpreter reads from the object header:
-
-* `Shared<T>` returns the same carrier — a memcpy would fork the cell.
-* A `List` object copies through the list-clone helper, and only where
-  the size is statically known: that is the path a flat memcpy of the
-  three header slots would otherwise have taken, sharing the backing
-  store.
-* Anything else with a known size gets `malloc` + `memcpy`.
-
-Two facts have to survive for that to work, and neither did:
-
-1. `New` recorded the allocation size BEFORE `set_register`, which
-   clears it. The mechanism was inert from the day it landed.
-2. `propagate_value_type_facts` — "ONE authority for copying every
-   value-describing register fact" — carried the type name but not the
-   size, so a binding's `Mov` dropped it anyway.
-
-`VERUM_AOT_CLONE_COPY=0` restores the historic aliasing behaviour, and
-`VERUM_TRACE_CLONE=1` prints what each lowering site knows about the
-register it is copying. Both exist so a Tier-1 failure can be
-ATTRIBUTED rather than guessed at.
-
-## 5. Forbidden patterns
-
-* A second implementation of "what does copying mean". Route through
-  `value_copy`.
-* Copying a value whose source is a temporary — that is cost with no
-  observable effect.
-* Copying a reference-typed binding's pointee. `reference_bindings`
-  carries which names are references; consult it.
-* Deep-copying through an untracked pointer.
-
+- Infer ownership from a short type name, an object header or a raw address.
+- Traverse a reference or arbitrary raw pointer as an owned component.
+- Accept an absent declaration or an unproved retain body as a shallow copy.
+- Copy a fresh temporary merely because it has a heap representation.
+- Publish a partial result or leave increments from a failed transaction.
+- Replace bounded work storage with growing or enlarged host stacks.
 
 ## 6. Block-tail cleanup demand (T1539)
 

@@ -1662,10 +1662,9 @@ impl VbcCodegen {
         // result, an arithmetic expression) takes sole ownership of a
         // value nobody else can name, so a copy would be pure cost.
         //
-        // `Instruction::Clone` is exactly this operation and already
-        // carries the exceptions: `Shared<T>` clones by refcount bump
-        // rather than forking the cell (T0107), and a non-heap value
-        // copies as itself.
+        // The source declaration determines owned components, shared handles
+        // and borrowed fields. A runtime pointer alone cannot establish which
+        // of them must survive destruction of the original value.
         let source_value_fact = init_reg.and_then(|reg| self.ctx.registers.value_uses.fact(reg));
         if let Some(reg) = init_reg {
             // The destination is established before invalidating the source.
@@ -1683,9 +1682,11 @@ impl VbcCodegen {
             } else { match value {
                 Some(expr) if !transfer && self.binds_a_copy_of_a_place(expr, reg, inferred_copy_type.as_ref())? => {
                     let owned = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::Clone {
+                    self.ctx.emit(Instruction::CloneTyped {
                         dst: owned,
                         src: reg,
+                        type_ref: inferred_copy_type.clone()
+                            .or_internal("value copy requires its source declaration")?,
                     });
                     owned
                 }

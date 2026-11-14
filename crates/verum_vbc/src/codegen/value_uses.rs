@@ -131,7 +131,7 @@ impl ValueUseRecorder {
             Instruction::Mov { dst, src } if !self.active.contains_key(dst) => {
                 self.capture_affine_operand(*src);
             }
-            Instruction::Clone { src, .. } => self.capture_affine_operand(*src),
+            Instruction::Clone { src, .. } | Instruction::CloneTyped { src, .. } => self.capture_affine_operand(*src),
             Instruction::SetF { value, .. } | Instruction::SetVariantData { value, .. } => {
                 // The owning store emitter clears this exact source immediately
                 // after installation. Its operand is no longer an outstanding
@@ -233,7 +233,7 @@ impl ValueUseRecorder {
                 }
                 return;
             }
-            Instruction::Clone { dst, src } => {
+            Instruction::Clone { dst, src } | Instruction::CloneTyped { dst, src, .. } => {
                 if let Some(fact) = self.fact(*src) {
                     let destination = self.active.get(dst).map(|f| f.id);
                     self.record(index, *src, fact, destination, ValueUseSite::Local, true);
@@ -313,6 +313,10 @@ impl super::VbcCodegen {
         ty.is_generic().then(|| ty.clone())
     }
 
+    pub(super) fn declared_named_binding_type(&self, name: &str, reg: Reg) -> Maybe<TypeRef> {
+        self.named_binding_fact(name, reg)?.declaration_type.clone()
+    }
+
     /// An exact type witness, not an object header, decides the generic branch.
     /// Unknown is refused before either a copy or an ownership handoff occurs.
     fn resource_is_unrestricted(&mut self, ty: TypeRef) -> Reg {
@@ -336,14 +340,14 @@ impl super::VbcCodegen {
     /// VBC producer emits the same branch for interpretation and specialization.
     pub(super) fn emit_generic_value_handoff(&mut self, source: Reg, ty: TypeRef, copy: bool) -> Reg {
         let result = self.ctx.registers.alloc_fresh();
-        let unrestricted = self.resource_is_unrestricted(ty);
+        let unrestricted = self.resource_is_unrestricted(ty.clone());
         let copy_label = self.ctx.new_label("resource_copy");
         let done = self.ctx.new_label("resource_received");
         self.ctx.emit_forward_jump(&copy_label, |offset| Instruction::JmpIf { cond: unrestricted, offset });
         self.ctx.emit_transferring_value(result, source);
         self.ctx.emit_forward_jump(&done, |offset| Instruction::Jmp { offset });
         self.ctx.define_label(&copy_label);
-        self.ctx.emit(if copy { Instruction::Clone { dst: result, src: source } }
+        self.ctx.emit(if copy { Instruction::CloneTyped { dst: result, src: source, type_ref: ty } }
             else { Instruction::Mov { dst: result, src: source } });
         self.ctx.define_label(&done);
         self.ctx.free_temp(unrestricted);
@@ -351,10 +355,10 @@ impl super::VbcCodegen {
     }
 
     pub(super) fn emit_generic_parameter_copy(&mut self, source: Reg, ty: TypeRef) {
-        let unrestricted = self.resource_is_unrestricted(ty);
+        let unrestricted = self.resource_is_unrestricted(ty.clone());
         let done = self.ctx.new_label("resource_parameter");
         self.ctx.emit_forward_jump(&done, |offset| Instruction::JmpNot { cond: unrestricted, offset });
-        self.ctx.emit(Instruction::Clone { dst: source, src: source });
+        self.ctx.emit(Instruction::CloneTyped { dst: source, src: source, type_ref: ty });
         self.ctx.define_label(&done);
         self.ctx.free_temp(unrestricted);
     }
