@@ -410,3 +410,33 @@ pub(super) fn resize(state: &mut InterpreterState) -> InterpreterResult<Dispatch
     state.set_reg(dst, Value::from_bool(true));
     Ok(DispatchResult::Continue)
 }
+
+/// A checked initialized prefix used by declaration-owned copying. Unlike
+/// OwnedElements this view does not retire any part of the source allocation.
+#[derive(Clone, Copy)]
+pub(super) struct CopyElements {
+    pub(super) data: *mut u8,
+    pub(super) len: usize,
+    pub(super) width: usize,
+    pub(super) capacity: usize,
+    pub(super) encoding: crate::types::TypeId,
+}
+impl CopyElements {
+    pub(super) fn resolve(state: &InterpreterState, value: Value) -> InterpreterResult<Self> {
+        let storage = Storage::resolve(state, value)?;
+        let owner = value.as_ptr::<heap::ObjectHeader>();
+        // SAFETY: Storage::resolve established the live three-field owner.
+        let fields = unsafe { (owner.cast::<u8>()).add(heap::OBJECT_HEADER_SIZE).cast::<Value>() };
+        let len = unsafe { fields.read_unaligned() }.try_as_i64()
+            .and_then(|n| usize::try_from(n).ok()).filter(|&n| n <= storage.capacity)
+            .ok_or_else(|| invalid("List copy length exceeds capacity"))?;
+        Ok(Self { data: storage.data, len, width: storage.width,
+            capacity: storage.capacity, encoding: unsafe { (*owner).type_id } })
+    }
+    pub(super) fn allocation_bytes(&self) -> Option<usize> {
+        self.capacity.checked_mul(self.width)?.checked_add(3 * 8)
+    }
+    pub(super) fn allocation_count(&self) -> usize {
+        1 + usize::from(self.capacity != 0)
+    }
+}

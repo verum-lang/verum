@@ -621,6 +621,7 @@ fn write_instruction(
         RefUnsafe { dst, src } => write!(out, "REF_UNSAFE {}, {}", r(dst), r(src)),
         DropRef { src } => write!(out, "DROP_REF  {}", r(src)),
         RetainCopy { dst, src, counter, type_ref } => write!(out, "RETAIN_COPY {}, {}, {}, {}", r(dst), r(src), r(counter), format_type_ref(module, type_ref)),
+        CloneTyped { dst, src, type_ref } => write!(out, "CLONE_TYPED {}, {}, {}", r(dst), r(src), format_type_ref(module, type_ref)),
         DropTyped { src, type_ref } => write!(out, "DROP_TYPED {}, {}", r(src), format_type_ref(module, type_ref)),
 
         // ── Pattern Matching + Variants ──

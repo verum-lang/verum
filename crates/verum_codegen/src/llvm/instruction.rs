@@ -29,6 +29,7 @@ use verum_common::well_known_types::type_names as tn;
 
 mod drop_typed;
 mod retain_copy;
+mod copy_typed;
 mod target_query;
 
 /// Emit a diagnosable runtime abort for an operation that has no honest
@@ -2500,6 +2501,7 @@ fn lower_instruction_impl<'ctx>(
         }
 
         Instruction::RetainCopy { dst, src, counter, type_ref } => retain_copy::lower(ctx, *dst, *src, *counter, type_ref),
+        Instruction::CloneTyped { dst, src, type_ref } => copy_typed::lower(ctx, *dst, *src, type_ref),
         Instruction::DropTyped { src, type_ref } => drop_typed::lower(ctx, *src, type_ref),
 
         Instruction::TypeResource { dst, type_ref } => {
@@ -31412,6 +31414,7 @@ fn lower_extended<'ctx>(
         Some(ExtendedSubOpcode::BindMethodReceiver) => Err(LlvmLoweringError::unsupported(
             "BindMethodReceiver requires the canonical decoded instruction",
         )),
+        Some(ExtendedSubOpcode::CloneTyped) => Err(LlvmLoweringError::unsupported("CloneTyped requires the canonical decoded instruction")),
         Some(ExtendedSubOpcode::RetainCopy) => Err(LlvmLoweringError::unsupported("RetainCopy requires the canonical decoded instruction")),
         Some(ExtendedSubOpcode::DropTyped) => Err(LlvmLoweringError::unsupported(
             "DropTyped requires the canonical decoded instruction",

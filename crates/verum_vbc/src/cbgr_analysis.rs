@@ -301,7 +301,7 @@ impl VbcEscapeAnalyzer {
                     provenance.insert(dst.0, RegisterProvenance::Unknown);
                 }
 
-                Instruction::RetainCopy { dst, .. } => {
+                Instruction::RetainCopy { dst, .. } | Instruction::CloneTyped { dst, .. } => {
                     provenance.insert(dst.0, RegisterProvenance::Heap);
                 }
 
@@ -351,7 +351,7 @@ impl VbcEscapeAnalyzer {
         for instr in instrs {
             match instr {
                 // Owned values enter user destruction code, like call arguments.
-                Instruction::DropTyped { src, .. } => {
+                Instruction::DropTyped { src, .. } | Instruction::CloneTyped { src, .. } => {
                     escaping.insert(src.0);
                 }
                 // Return escapes the function.

@@ -171,6 +171,8 @@ impl Default for PanicStrategy {
 /// Configuration for VBC → LLVM lowering.
 #[derive(Debug, Clone)]
 pub struct LoweringConfig {
+    /// Explicit per-copy work and copied-payload budget, shared with the VM.
+    pub typed_copy_limits: verum_vbc::copy_plan::CopyLimits,
     /// Module name.
     pub module_name: Text,
     /// Target triple (e.g., "x86_64-unknown-linux-gnu").
@@ -282,6 +284,7 @@ pub struct LoweringConfig {
 impl Default for LoweringConfig {
     fn default() -> Self {
         Self {
+            typed_copy_limits: verum_vbc::copy_plan::DEFAULT_COPY_LIMITS,
             module_name: Text::from("verum_module"),
             target_triple: None,
             target_cpu: Text::new(),
@@ -2647,6 +2650,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         );
         ctx.signal_runtime = Some(&self.signal_runtime);
         ctx.retained_counters = Some(super::retained_counter::RetainedCounters::for_lowering(&self.module, &self.retained_counters));
+        ctx.typed_copy_limits = self.config.typed_copy_limits;
         ctx.target_machine = self.target_machine.as_ref();
 
         // Hand the AOT permission policy to the function context so

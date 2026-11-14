@@ -836,15 +836,9 @@ implement<T> Shared<T> {
 
 implement<T> Clone for Shared<T> {
     fn clone(&self) -> Shared<T> {
-        // Atomically increment strong count
-        unsafe {
-            atomic_fetch_add_u32(&(*self.ptr).strong_count as *mut UInt32, 1, ORDERING_RELAXED);
-        }
-        Shared {
-            ptr: self.ptr,
-            generation: self.generation,
-            epoch: self.epoch,
-        }
+        // SAFETY: this live Shared owns the strong counter of its allocation.
+        // The primitive allocates the wrapper before its checked atomic retain.
+        unsafe { @intrinsic("retain_copy", self, &mut (*self.ptr).strong_count) }
     }
 }
 

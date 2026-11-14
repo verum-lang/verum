@@ -196,6 +196,7 @@ pub(super) mod cubical;
 pub(super) mod envelope;
 pub(super) mod extended;
 mod retain_copy;
+mod copy_typed;
 pub(super) mod ffi_extended;
 // Family gateways (T0852) — honest homes for the ex-FfiExtended squatters.
 pub(super) mod mem_extended;

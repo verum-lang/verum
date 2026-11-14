@@ -2164,6 +2164,11 @@ where
         self.inner.reserve(additional);
     }
 
+    /// Reserve additional set entries without panicking on allocation refusal.
+    pub fn try_reserve(&mut self, additional: usize) -> Result<(), std::collections::TryReserveError> {
+        self.inner.try_reserve(additional)
+    }
+
     /// Shrink capacity to fit
     pub fn shrink_to_fit(&mut self) {
         self.inner.shrink_to_fit();

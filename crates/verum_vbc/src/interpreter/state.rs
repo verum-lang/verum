@@ -2359,6 +2359,9 @@ pub struct InterpreterConfig {
     /// Maximum heap size (bytes).
     pub max_heap_size: usize,
 
+    /// Per-operation work and copied-payload budget; independent of the GC threshold.
+    pub typed_copy_limits: crate::copy_plan::CopyLimits,
+
     /// Enable execution tracing.
     pub trace_enabled: bool,
 
@@ -2419,6 +2422,7 @@ impl Default for InterpreterConfig {
             // single execution.
             max_stack_depth: 16 * 1024,
             max_heap_size: 64 * 1024 * 1024, // 64 MB
+            typed_copy_limits: crate::copy_plan::DEFAULT_COPY_LIMITS,
             trace_enabled: false,
             timeout_ms: 30_000, // 30 second timeout to prevent infinite loops
             count_instructions: false,

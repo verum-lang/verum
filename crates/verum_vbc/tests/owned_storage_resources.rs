@@ -182,3 +182,124 @@ fn deep_owned_declaration_chain_uses_the_graph_budget() {
     let module = compile(&source, "core.collections.list");
     assert_eq!(discipline(&module, "Node599"), D::Affine);
 }
+
+#[test]
+fn declared_copy_plan_keeps_owned_and_borrowed_fields_distinct() {
+    use verum_vbc::copy_plan::{self, CopyNode};
+    let module = compile(
+        r#"
+        module app;
+        type Leaf is { value: Int };
+        type Branch is { owned: Leaf, borrowed: &Leaf };
+    "#,
+        "core.collections.list",
+    );
+    let decoded = deserialize_module(&serialize_module(&module).unwrap()).unwrap();
+    for module in [&module, &decoded] {
+        let plan = copy_plan::build(
+            module,
+            &TypeRef::Concrete(descriptor(module, "app", "Branch").id),
+        )
+        .unwrap();
+        let CopyNode::Record { fields, .. } = &plan.nodes[0] else {
+            panic!("record plan missing");
+        };
+        assert!(matches!(plan.nodes[fields[0].0], CopyNode::Record { .. }));
+        assert!(matches!(plan.nodes[fields[1].0], CopyNode::Identity));
+    }
+}
+
+#[test]
+fn recursive_container_copy_plan_is_a_finite_declaration_graph() {
+    use verum_vbc::copy_plan::{self, CopyNode};
+    let module = compile(
+        r#"
+        module app;
+        mount core.collections.list.List;
+        mount core.collections.map.Map;
+        type Tree is Scalar(Int) | Children(List<Tree>) | Object(Map<Int, Tree>);
+    "#,
+        "core.collections.list",
+    );
+    let decoded = deserialize_module(&serialize_module(&module).unwrap()).unwrap();
+    for module in [&module, &decoded] {
+        let plan = copy_plan::build(
+            module,
+            &TypeRef::Concrete(descriptor(module, "app", "Tree").id),
+        )
+        .unwrap();
+        assert!(matches!(plan.nodes[0], CopyNode::Sum { .. }));
+        assert!(
+            plan.nodes
+                .iter()
+                .any(|node| matches!(node, CopyNode::List { element, .. } if element.0 == 0))
+        );
+        assert!(
+            plan.nodes
+                .iter()
+                .any(|node| matches!(node, CopyNode::Map { value, .. } if value.0 == 0))
+        );
+        assert!(plan.nodes.len() < 10);
+    }
+}
+
+#[test]
+fn copy_plan_refuses_affine_alternatives_and_missing_field_authority() {
+    use verum_vbc::copy_plan;
+    let mut module = compile(
+        r#"
+        module app;
+        mount core.base.memory.Heap;
+        type Mixed is Scalar(Int) | Owner(Heap<Int>);
+        type Good is { value: Int };
+    "#,
+        "core.collections.list",
+    );
+    assert!(
+        copy_plan::build(
+            &module,
+            &TypeRef::Concrete(descriptor(&module, "app", "Mixed").id)
+        )
+        .is_err()
+    );
+    let id = descriptor(&module, "app", "Good").id;
+    assert!(copy_plan::build(&module, &TypeRef::Concrete(id)).is_ok());
+    module
+        .types
+        .iter_mut()
+        .find(|decl| decl.id == id)
+        .unwrap()
+        .fields[0]
+        .declaration_type = None;
+    assert!(copy_plan::build(&module, &TypeRef::Concrete(id)).is_err());
+}
+
+#[test]
+fn foreign_container_name_cannot_authorize_owned_storage_copy() {
+    use verum_vbc::copy_plan::{self, CopyNode};
+    let module = compile(
+        r#"
+        module app;
+        mount foreign.storage.List;
+        type affine Ticket is { id: Int };
+        type Foreign is List<Ticket>;
+    "#,
+        "foreign.storage",
+    );
+    let plan = copy_plan::build(
+        &module,
+        &TypeRef::Concrete(descriptor(&module, "app", "Foreign").id),
+    )
+    .unwrap();
+    assert!(
+        plan.nodes
+            .iter()
+            .any(|node| matches!(node, CopyNode::Record { .. }))
+    );
+    assert!(
+        !plan
+            .nodes
+            .iter()
+            .any(|node| matches!(node, CopyNode::List { .. }))
+    );
+}

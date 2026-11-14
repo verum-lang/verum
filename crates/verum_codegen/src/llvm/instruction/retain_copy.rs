@@ -41,6 +41,114 @@ fn validate_reference<'ctx>(
     )
 }
 
+/// Prepare one declaration-checked shallow wrapper, without changing its counter.
+/// The caller has established the source's exact live extent and reserves any
+/// transaction receipt before calling. A null result owns nothing. A nonnull
+/// result is complete: no allocation or fallible operation remains in preparation.
+/// Only the caller decides whether to retain, publish, or release that storage.
+pub(super) fn prepare_wrapper<'ctx>(
+    context: &'ctx verum_llvm::context::Context,
+    builder: &verum_llvm::builder::Builder<'ctx>,
+    module: &Module<'ctx>,
+    source: PointerValue<'ctx>,
+    layout: verum_vbc::retain_copy::RetainLayout,
+) -> Result<PointerValue<'ctx>> {
+    let i64_type = context.i64_type();
+    let i32_type = context.i32_type();
+    let ptr_type = context.ptr_type(Default::default());
+    let bytes = RuntimeLowering::OBJECT_HEADER_SIZE
+        + layout.fields as u64 * verum_common::layout::VALUE_SLOT_SIZE;
+    let size = i64_type.const_int(bytes, false);
+    let allocate = super::super::error::get_or_declare_function(
+        module,
+        "verum_os_alloc",
+        ptr_type.fn_type(&[i64_type.into()], false),
+    );
+    let output = builder
+        .build_call(allocate, &[size.into()], "retain_prepared_storage")
+        .or_llvm_err()?
+        .basic_value_or("retained wrapper allocation")?
+        .into_pointer_value();
+    let entry = builder
+        .get_insert_block()
+        .or_internal("retained preparation entry")?;
+    let function = entry
+        .get_parent()
+        .or_internal("retained preparation owner")?;
+    let initialize = context.append_basic_block(function, "retain_prepare_initialize");
+    let ready = context.append_basic_block(function, "retain_prepare_ready");
+    builder
+        .build_conditional_branch(
+            builder
+                .build_is_null(output, "retain_prepare_failed")
+                .or_llvm_err()?,
+            ready,
+            initialize,
+        )
+        .or_llvm_err()?;
+    builder.position_at_end(initialize);
+    let runtime = RuntimeLowering::new(context);
+    builder
+        .build_call(
+            runtime.get_or_declare_memset(module)?,
+            &[output.into(), i32_type.const_zero().into(), size.into()],
+            "",
+        )
+        .or_llvm_err()?;
+    builder
+        .build_store(output, i32_type.const_int(u64::from(layout.owner.0), false))
+        .or_llvm_err()?;
+    // SAFETY: the nonnull fresh allocation and the caller-checked source both
+    // contain exactly the declaration's header plus its shallow value slots.
+    let (size_slot, target_data, source_data) = unsafe {
+        (
+            builder
+                .build_in_bounds_gep(
+                    context.i8_type(),
+                    output,
+                    &[i64_type.const_int(verum_common::layout::OBJECT_HEADER_SIZE_OFFSET, false)],
+                    "retain_prepared_size",
+                )
+                .or_llvm_err()?,
+            builder
+                .build_in_bounds_gep(
+                    context.i8_type(),
+                    output,
+                    &[i64_type.const_int(RuntimeLowering::OBJECT_HEADER_SIZE, false)],
+                    "retain_prepared_payload",
+                )
+                .or_llvm_err()?,
+            builder
+                .build_in_bounds_gep(
+                    context.i8_type(),
+                    source,
+                    &[i64_type.const_int(RuntimeLowering::OBJECT_HEADER_SIZE, false)],
+                    "retain_source_payload",
+                )
+                .or_llvm_err()?,
+        )
+    };
+    builder
+        .build_store(size_slot, i32_type.const_int(bytes, false))
+        .or_llvm_err()?;
+    builder
+        .build_call(
+            runtime.get_or_declare_memcpy(module),
+            &[
+                target_data.into(),
+                source_data.into(),
+                i64_type
+                    .const_int(bytes - RuntimeLowering::OBJECT_HEADER_SIZE, false)
+                    .into(),
+            ],
+            "",
+        )
+        .or_llvm_err()?;
+    builder.build_unconditional_branch(ready).or_llvm_err()?;
+    builder.position_at_end(ready);
+    Ok(output)
+}
+
 pub(super) fn lower<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
     dst: Reg,
@@ -158,57 +266,29 @@ pub(super) fn lower<'ctx>(
         .or_llvm_err()?,
         "retain_copy handle has an invalid extent",
     )?;
-    let runtime = RuntimeLowering::new(c);
-    // Use the canonical fresh-record allocator. The new wrapper must not
-    // inherit generation, flags or reference bookkeeping from the source.
-    let output = runtime.lower_new_object(b, ctx.get_module(), layout.fields as u32)?;
-    b.build_store(output, actual_owner).or_llvm_err()?;
-    // SAFETY: both source and destination have the checked declared extent.
-    let (output_size, output_data, source_data) = unsafe {
-        (
-            b.build_in_bounds_gep(
-                c.i8_type(),
-                output,
-                &[i64_type.const_int(verum_common::layout::OBJECT_HEADER_SIZE_OFFSET, false)],
-                "retained_size",
-            )
+    let output = prepare_wrapper(c, b, ctx.get_module(), source, layout)?;
+    guard(
+        ctx,
+        b.build_is_not_null(output, "retain_prepared")
             .or_llvm_err()?,
-            b.build_in_bounds_gep(
-                c.i8_type(),
-                output,
-                &[i64_type.const_int(RuntimeLowering::OBJECT_HEADER_SIZE, false)],
-                "retained_data",
-            )
-            .or_llvm_err()?,
-            b.build_in_bounds_gep(
-                c.i8_type(),
-                source,
-                &[i64_type.const_int(RuntimeLowering::OBJECT_HEADER_SIZE, false)],
-                "retain_source_data",
-            )
-            .or_llvm_err()?,
-        )
-    };
-    b.build_store(output_size, actual_size).or_llvm_err()?;
-    b.build_call(
-        runtime.get_or_declare_memcpy(ctx.get_module()),
-        &[
-            output_data.into(),
-            source_data.into(),
-            i64_type
-                .const_int(bytes - RuntimeLowering::OBJECT_HEADER_SIZE, false)
-                .into(),
-        ],
-        "",
-    )
-    .or_llvm_err()?;
-    let cache = ctx.retained_counters.as_ref().or_internal("retain_copy requires module-owned lowering state")?;
+        verum_vbc::copy_plan::CopyFailure::AllocationFailure.message(),
+    )?;
+    let cache = ctx
+        .retained_counters
+        .as_ref()
+        .or_internal("retain_copy requires module-owned lowering state")?;
     let (transition, _) = cache.get()?;
-    let success = b.build_call(transition, &[counter_pointer.into()], "retained")
-        .or_llvm_err()?.try_as_basic_value().basic().or_internal("retained counter result")?.into_int_value();
+    let success = b
+        .build_call(transition, &[counter_pointer.into()], "retained")
+        .or_llvm_err()?
+        .try_as_basic_value()
+        .basic()
+        .or_internal("retained counter result")?
+        .into_int_value();
     let failed = c.append_basic_block(ctx.function(), "retain_count_refused");
     let done = c.append_basic_block(ctx.function(), "retain_done");
-    b.build_conditional_branch(success, done, failed).or_llvm_err()?;
+    b.build_conditional_branch(success, done, failed)
+        .or_llvm_err()?;
     b.position_at_end(failed);
     let release = super::super::error::get_or_declare_function(
         ctx.get_module(),

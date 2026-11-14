@@ -127,10 +127,14 @@ pub(super) fn define<'ctx>(context: &'ctx Context, module: &Module<'ctx>) -> Res
     let runtime = RuntimeLowering::new(context);
     let i64_ty = context.i64_type();
     let ptr_ty = context.ptr_type(AddressSpace::default());
+    let answer = context.struct_type(
+        &[context.bool_type().into(), ptr_ty.into(), i64_ty.into()],
+        false,
+    );
     let address = super::super::error::get_or_declare_function(
         module,
-        "verum_list_storage_address",
-        ptr_ty.fn_type(&[ptr_ty.into(), i64_ty.into(), i64_ty.into()], false),
+        "verum_list_storage_address_checked",
+        answer.fn_type(&[ptr_ty.into(), i64_ty.into(), i64_ty.into()], false),
     );
     if address.count_basic_blocks() != 0 {
         return Ok(());
@@ -159,7 +163,57 @@ pub(super) fn define<'ctx>(context: &'ctx Context, module: &Module<'ctx>) -> Res
         .get_nth_param(2)
         .or_internal("storage count")?
         .into_int_value();
-    let width = runtime.lower_list_element_width(&builder, module, list)?;
+    let present = context.append_basic_block(address, "present");
+    builder
+        .build_conditional_branch(
+            builder.build_is_not_null(list, "present").or_llvm_err()?,
+            present,
+            invalid,
+        )
+        .or_llvm_err()?;
+    builder.position_at_end(present);
+    let encoding = builder
+        .build_load(context.i32_type(), list, "encoding")
+        .or_llvm_err()?
+        .into_int_value();
+    let bytes = builder
+        .build_int_compare(
+            IntPredicate::EQ,
+            encoding,
+            context
+                .i32_type()
+                .const_int(verum_vbc::TypeId::BYTE_LIST.0 as u64, false),
+            "bytes",
+        )
+        .or_llvm_err()?;
+    let slots = builder
+        .build_int_compare(
+            IntPredicate::EQ,
+            encoding,
+            context
+                .i32_type()
+                .const_int(verum_vbc::TypeId::LIST.0 as u64, false),
+            "slots",
+        )
+        .or_llvm_err()?;
+    let known = context.append_basic_block(address, "known_encoding");
+    builder
+        .build_conditional_branch(
+            builder.build_or(bytes, slots, "known").or_llvm_err()?,
+            known,
+            invalid,
+        )
+        .or_llvm_err()?;
+    builder.position_at_end(known);
+    let width = builder
+        .build_select(
+            bytes,
+            i64_ty.const_int(1, false),
+            i64_ty.const_int(8, false),
+            "width",
+        )
+        .or_llvm_err()?
+        .into_int_value();
     let object_size_ptr = runtime.list_field_address(&builder, list, 12, "object_size_ptr")?;
     let object_size = builder
         .build_load(context.i32_type(), object_size_ptr, "object_size")
@@ -238,8 +292,19 @@ pub(super) fn define<'ctx>(context: &'ctx Context, module: &Module<'ctx>) -> Res
         .build_conditional_branch(empty_owner, empty, invalid)
         .or_llvm_err()?;
     builder.position_at_end(empty);
+    let empty_result = builder
+        .build_insert_value(
+            answer.const_zero(),
+            context.bool_type().const_int(1, false),
+            0,
+            "empty_valid",
+        )
+        .or_llvm_err()?;
+    let empty_result = builder
+        .build_insert_value(empty_result, width, 2, "empty_width")
+        .or_llvm_err()?;
     builder
-        .build_return(Some(&ptr_ty.const_null()))
+        .build_return(Some(&empty_result.into_struct_value()))
         .or_llvm_err()?;
     builder.position_at_end(extent);
     // The canonical List constructor/resize contract owns CBGR backing.
@@ -290,8 +355,68 @@ pub(super) fn define<'ctx>(context: &'ctx Context, module: &Module<'ctx>) -> Res
             .build_in_bounds_gep(context.i8_type(), data, &[offset], "element_address")
             .or_llvm_err()?
     };
-    builder.build_return(Some(&pointer)).or_llvm_err()?;
+    let result = builder
+        .build_insert_value(
+            answer.const_zero(),
+            context.bool_type().const_int(1, false),
+            0,
+            "valid",
+        )
+        .or_llvm_err()?;
+    let result = builder
+        .build_insert_value(result, pointer, 1, "pointer")
+        .or_llvm_err()?;
+    let result = builder
+        .build_insert_value(result, width, 2, "width")
+        .or_llvm_err()?;
+    builder
+        .build_return(Some(&result.into_struct_value()))
+        .or_llvm_err()?;
     builder.position_at_end(invalid);
+    builder
+        .build_return(Some(&answer.const_zero()))
+        .or_llvm_err()?;
+
+    // Ordinary List operations and transactional copy share the same checked
+    // storage query. Only the caller chooses whether refusal aborts or rolls back.
+    let checked = address;
+    let address = super::super::error::get_or_declare_function(
+        module,
+        "verum_list_storage_address",
+        ptr_ty.fn_type(&[ptr_ty.into(), i64_ty.into(), i64_ty.into()], false),
+    );
+    address.set_linkage(Linkage::Internal);
+    builder.position_at_end(context.append_basic_block(address, "entry"));
+    let arguments = [
+        address.get_nth_param(0).or_internal("list")?.into(),
+        address.get_nth_param(1).or_internal("index")?.into(),
+        address.get_nth_param(2).or_internal("count")?.into(),
+    ];
+    let result = builder
+        .build_call(checked, &arguments, "checked_storage")
+        .or_llvm_err()?
+        .try_as_basic_value()
+        .basic()
+        .or_internal("checked storage result")?
+        .into_struct_value();
+    let valid = builder
+        .build_extract_value(result, 0, "valid")
+        .or_llvm_err()?
+        .into_int_value();
+    let accepted = context.append_basic_block(address, "accepted");
+    let refused = context.append_basic_block(address, "refused");
+    builder
+        .build_conditional_branch(valid, accepted, refused)
+        .or_llvm_err()?;
+    builder.position_at_end(accepted);
+    builder
+        .build_return(Some(
+            &builder
+                .build_extract_value(result, 1, "address")
+                .or_llvm_err()?,
+        ))
+        .or_llvm_err()?;
+    builder.position_at_end(refused);
     builder
         .build_call(
             runtime.get_or_declare_exit(module)?,

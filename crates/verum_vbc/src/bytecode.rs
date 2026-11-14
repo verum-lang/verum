@@ -120,6 +120,13 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             encode_reg(*feature, output);
         }
 
+        Instruction::CloneTyped { dst, src, type_ref } => {
+            output.push(Opcode::Extended.to_byte());
+            output.push(ExtendedSubOpcode::CloneTyped.to_byte());
+            encode_reg(*dst, output);
+            encode_reg(*src, output);
+            encode_type_ref(type_ref, output);
+        }
         Instruction::RetainCopy { dst, src, counter, type_ref } => {
             output.push(Opcode::Extended.to_byte());
             output.push(ExtendedSubOpcode::RetainCopy.to_byte());
@@ -5325,6 +5332,10 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     dst: decode_reg(data, offset)?, feature: decode_reg(data, offset)?,
                 }),
                 Some(ExtendedSubOpcode::BindMethodReceiver) => Ok(Instruction::BindMethodReceiver {
+                    type_ref: decode_type_ref(data, offset)?,
+                }),
+                Some(ExtendedSubOpcode::CloneTyped) => Ok(Instruction::CloneTyped {
+                    dst: decode_reg(data, offset)?, src: decode_reg(data, offset)?,
                     type_ref: decode_type_ref(data, offset)?,
                 }),
                 Some(ExtendedSubOpcode::RetainCopy) => Ok(Instruction::RetainCopy {

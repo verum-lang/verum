@@ -235,6 +235,7 @@ pub(in super::super) fn handle_extended(
             }
             super::method_dispatch::handle_bound_method(state, Some(receiver))
         }
+        Some(ExtendedSubOpcode::CloneTyped) => super::copy_typed::handle(state),
         Some(ExtendedSubOpcode::RetainCopy) => super::retain_copy::handle(state),
         Some(ExtendedSubOpcode::DropTyped) => super::cbgr::handle_drop_typed(state),
         Some(ExtendedSubOpcode::TypeLayout) => {

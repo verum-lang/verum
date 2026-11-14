@@ -9729,6 +9729,8 @@ pub enum ExtendedSubOpcode {    /// Reserved no-op — forward-compat anchor. Al
     TypeInspect = 0x0e,
     /// Failure-atomic shallow handle copy with an explicit UInt32 counter.
     RetainCopy = 0x12,
+    /// Copy a value using its complete declaration and witness.
+    CloneTyped = 0x0f,
 
     /// Process termination — reads one `Int` register and terminates
     /// the process with that exit code. Format: `[0x1F][0x10][reg:u16]`.
@@ -9994,6 +9996,7 @@ impl ExtendedSubOpcode {
             0x0d => Some(Self::TypeIdentity),
             0x0e => Some(Self::TypeInspect),
             0x12 => Some(Self::RetainCopy),
+            0x0f => Some(Self::CloneTyped),
             0x10 => Some(Self::ProcessExit),
             0x11 => Some(Self::PanicValue),
             0x20 => Some(Self::ScriptEngineNew),
@@ -10089,6 +10092,7 @@ impl ExtendedSubOpcode {
             Self::TypeIdentity => "EXT_TYPE_IDENTITY",
             Self::TypeInspect => "EXT_TYPE_INSPECT",
             Self::RetainCopy => "EXT_RETAIN_COPY",
+            Self::CloneTyped => "EXT_CLONE_TYPED",
             Self::GetFieldNamed => "EXT_GET_FIELD_NAMED",
             Self::SetFieldNamed => "EXT_SET_FIELD_NAMED",
             Self::ProcessExit => "EXT_PROCESS_EXIT",
@@ -11200,6 +11204,15 @@ pub enum Instruction {    // ===================================================
     },
     /// Copy an exactly declared shallow handle and retain its explicit counter.
     /// The unsafe source contract binds that counter to the handle's release.
+    /// Copy an unrestricted value without sharing its owned components.
+    CloneTyped {
+        /// Destination of the complete independent copy.
+        dst: Reg,
+        /// Source owner, preserved unchanged.
+        src: Reg,
+        /// Actual declaration, including lexical generic witnesses.
+        type_ref: TypeRef,
+    },
     RetainCopy {
         /// Complete copied handle. Published only after successful retain.
         dst: Reg,

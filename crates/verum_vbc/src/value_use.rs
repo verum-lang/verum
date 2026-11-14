@@ -153,9 +153,26 @@ impl crate::module::VbcModule {
         &self,
         function: crate::FunctionId,
     ) -> Maybe<verum_cbgr::analysis::ControlFlowGraph> {
+        use verum_cbgr::analysis::BlockId;
+        let uses = self.value_use_receipts(function)?;
+        let (_, mut cfg) = self.ordinary_control_flow(function)?;
+        for (i, receipt) in uses.iter().enumerate() {
+            if receipt.event.id.0 != i as u32 || !cfg.blocks.contains_key(&BlockId(u64::from(receipt.instruction))) {
+                return None;
+            }
+            cfg.value_uses.entry(BlockId(u64::from(receipt.instruction)))
+                .or_default().push(receipt.event.clone());
+        }
+        Some(cfg)
+    }
+
+    /// One bounded decoder/CFG for consumers of complete ordinary bodies.
+    /// Exceptional and suspending control flow remains explicitly unsupported.
+    pub(crate) fn ordinary_control_flow(
+        &self, function: crate::FunctionId,
+    ) -> Maybe<(List<crate::Instruction>, verum_cbgr::analysis::ControlFlowGraph)> {
         use crate::Instruction;
         use verum_cbgr::analysis::{BasicBlock, BlockId, ControlFlowGraph};
-        let uses = self.value_use_receipts(function)?;
         let descriptor = self.get_function(function)?;
         let start = descriptor.bytecode_offset as usize;
         let bytes = self
@@ -217,16 +234,7 @@ impl crate::module::VbcModule {
                     .insert(BlockId(i as u64));
             }
         }
-        for (i, receipt) in uses.iter().enumerate() {
-            if receipt.event.id.0 != i as u32 || receipt.instruction as usize >= body.len() {
-                return None;
-            }
-            cfg.value_uses
-                .entry(BlockId(u64::from(receipt.instruction)))
-                .or_default()
-                .push(receipt.event.clone());
-        }
-        Some(cfg)
+        Some((body, cfg))
     }
 }
 

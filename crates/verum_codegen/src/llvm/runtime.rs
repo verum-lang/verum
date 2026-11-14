@@ -10693,7 +10693,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
     ///
     /// See `docs/architecture/no-libc-architecture.md` for the
     /// architectural rule this method enforces.
-    fn get_or_declare_memset(&self, module: &Module<'ctx>) -> Result<FunctionValue<'ctx>> {
+    pub(super) fn get_or_declare_memset(&self, module: &Module<'ctx>) -> Result<FunctionValue<'ctx>> {
         // The wrapper gets a Verum-internal name to avoid colliding
         // with the libc `memset` symbol (which any C interop layer
         // would still want to expose). Internal-linkage so it
@@ -15547,7 +15547,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
     }
 
     /// Helper: get_header(ptr) = ptr - 32, returns i8*
-    fn emit_cbgr_get_header<'a>(
+    pub(super) fn emit_cbgr_get_header<'a>(
         &self,
         builder: &Builder<'ctx>,
         user_ptr: PointerValue<'ctx>,
