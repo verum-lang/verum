@@ -752,6 +752,7 @@ jobs:
           --test imported_callable_properties
           --test source_reference_purity
           --test owned_storage_archive
+          --test selected_value_copy
           --test scalar_constant_patterns
           --test source_admission_diagnostics
           --test parallel_source_analysis

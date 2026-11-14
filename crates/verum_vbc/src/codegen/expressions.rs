@@ -11345,6 +11345,37 @@ impl VbcCodegen {
     ) -> CodegenResult<Option<Reg>> {
         use verum_ast::expr::ResolvedCallTarget;
         match target {
+            ResolvedCallTarget::ValueCopy => {
+                let receiver = receiver.or_internal("value copy requires its receiver")?;
+                if !args.is_empty() || !type_args.is_empty() {
+                    return Err(CodegenError::with_span(CodegenErrorKind::TypeInference(
+                        "selected value copy cannot accept arguments".into(),
+                    ), method.span));
+                }
+                let mut type_ref = self.projection_operand_declaration(receiver)
+                    .or_internal("value copy requires the receiver's complete declaration")?;
+                let mut operand = receiver.clone();
+                let mut depth = 0;
+                while let crate::types::TypeRef::Reference { inner, .. } = type_ref {
+                    depth += 1;
+                    if depth > 64 {
+                        return Err(CodegenError::with_span(CodegenErrorKind::TypeInference(
+                            "value-copy receiver exceeds the supported reference depth".into(),
+                        ), receiver.span));
+                    }
+                    type_ref = *inner;
+                    operand = Expr::new(ExprKind::Unary {
+                        op: UnOp::Deref,
+                        expr: verum_common::Heap::new(operand),
+                    }, receiver.span);
+                }
+                let source = self.compile_expr(&operand)?
+                    .or_internal("value-copy receiver has no value")?;
+                let result = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::CloneTyped { dst: result, src: source, type_ref });
+                self.ctx.free_temp(source);
+                Ok(Some(result))
+            }
             ResolvedCallTarget::StaticCall {
                 qualified_name,
                 type_prefix_receiver,

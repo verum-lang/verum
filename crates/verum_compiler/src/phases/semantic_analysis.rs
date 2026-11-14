@@ -155,7 +155,7 @@ impl SemanticAnalysisPhase {
     /// it is shared across all checkers and never published as lowered metadata.
     pub(crate) fn admit_selected_sources(
         &self,
-        selected: &[(Text, Text, verum_ast::Module)],
+        selected: &mut [(Text, Text, verum_ast::Module)],
         session: &crate::Session,
     ) -> anyhow::Result<()> {
         let graph = verum_common::Shared::new(parking_lot::RwLock::new(session.module_registry().read().clone()));
@@ -185,13 +185,13 @@ impl SemanticAnalysisPhase {
     /// worker stack. Indexed slots preserve source order on success and refusal.
     fn check_source_roster(
         &self,
-        selected: &[(Text, Text, verum_ast::Module)],
+        selected: &mut [(Text, Text, verum_ast::Module)],
         graph: &crate::owned_source_semantics::SourceRegistry,
         threads: usize,
         render: impl Fn(&verum_types::TypeError) -> Diagnostic + Sync,
     ) -> anyhow::Result<List<SourceCheckOutcome>> {
         let dispatch = tracing::dispatcher::get_default(Clone::clone);
-        let check = |(owner, path, module): &(Text, Text, verum_ast::Module)| {
+        let check = |(owner, path, module): &mut (Text, Text, verum_ast::Module)| {
             tracing::dispatcher::with_default(&dispatch, || {
                 let _scope = tracing::debug_span!("source_admission",
                     module = owner.as_str(), source = path.as_str(),
@@ -205,6 +205,11 @@ impl SemanticAnalysisPhase {
                 if !diagnostics.is_empty() {
                     tracing::warn!(module = owner.as_str(), source = path.as_str(), errors = diagnostics.len(), diagnostics = %diagnostic_details(&diagnostics),
                         "source admission failed; checking remaining independent modules");
+                } else {
+                    // Keep the selected calls and receiver adjustments on the
+                    // exact source that passed. Lowering must not rediscover a
+                    // different operation after this checker has been dropped.
+                    checker.commit_resolved_call_targets(module);
                 }
                 SourceCheckOutcome { diagnostics, metrics: checker.metrics }
             })
@@ -218,12 +223,12 @@ impl SemanticAnalysisPhase {
                 .build()?;
             let mut outcomes: List<_> = selected.iter().map(|_| SourceCheckOutcome::default()).collect();
             pool.install(|| {
-                selected.par_iter().zip(outcomes.par_iter_mut())
+                selected.par_iter_mut().zip(outcomes.par_iter_mut())
                     .for_each(|(source, outcome)| *outcome = check(source));
             });
             outcomes
         } else {
-            selected.iter().map(check).collect()
+            selected.iter_mut().map(check).collect()
         };
         Ok(outcomes)
     }
@@ -548,7 +553,7 @@ impl CompilationPhase for SemanticAnalysisPhase {
         let semantic_error = |error: anyhow::Error| List::from_iter([
             DiagnosticBuilder::new(Severity::Error).message(format!("{error:#}")).build()
         ]);
-        let selected = self.select_owned_sources(modules).map_err(semantic_error)?;
+        let mut selected = self.select_owned_sources(modules).map_err(semantic_error)?;
         let registry = self.module_registry.clone()
             .unwrap_or_else(|| verum_common::Shared::new(parking_lot::RwLock::new(verum_modules::ModuleRegistry::new())));
         crate::owned_source_semantics::register_sources(&registry,
@@ -556,7 +561,7 @@ impl CompilationPhase for SemanticAnalysisPhase {
         ).map_err(semantic_error)?;
         let mut type_metrics = verum_types::TypeCheckMetrics::new();
         let outcomes = self.check_source_roster(
-            &selected, &registry, self.source_threads.get(), verum_types::TypeError::to_diagnostic,
+            &mut selected, &registry, self.source_threads.get(), verum_types::TypeError::to_diagnostic,
         ).map_err(semantic_error)?;
         let mut errors = List::new();
         for outcome in outcomes {

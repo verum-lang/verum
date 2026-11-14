@@ -85,7 +85,10 @@ fn a_native_mutable_parameter_owns_its_nested_value() {
 }
 
 fn run_native(source: &str) {
-    let mut wire = module(source);
+    run_native_module(module(source));
+}
+
+fn run_native_module(mut wire: verum_vbc::VbcModule) {
     let mut graph = verum_vbc::mono::InstantiationGraph::new();
     for function in &mut wire.functions {
         function.is_generic = !function.type_params.is_empty();
@@ -126,6 +129,33 @@ fn run_native(source: &str) {
     assert!(link.status.success(), "{}", Text::from_utf8_lossy(&link.stderr));
     let run = Command::new(executable).output().expect("native execution");
     assert_eq!(run.status.code(), Some(73), "{}", Text::from_utf8_lossy(&run.stderr));
+}
+
+#[test]
+fn selected_structural_clone_executes_the_declared_native_copy() {
+    let source = r#"
+        type Leaf is { value: Int };
+        fn duplicate(source: &Leaf)->Leaf { source.clone() }
+        fn main()->Int {
+            let original = Leaf { value: 0 };
+            let mut copied = duplicate(&original);
+            copied.value = 73;
+            original.value + copied.value
+        }
+    "#;
+    let mut ast = Parser::new(source).parse_module().unwrap();
+    let mut checker = verum_types::TypeChecker::with_minimal_context();
+    checker.register_builtins();
+    let mut errors = checker.prepare_module_declarations(&ast);
+    errors.extend(ast.items.iter().filter_map(|item| checker.check_item(item).err()));
+    errors.extend(checker.take_deferred_errors());
+    assert!(errors.is_empty(), "{errors:?}");
+    assert!(checker.diagnostic_sources().is_empty());
+    checker.commit_resolved_call_targets(&mut ast);
+    let module = VbcCodegen::new().compile_module(&ast).unwrap();
+    let wire = deserialize_module(&serialize_module(&module).unwrap()).unwrap();
+    verum_vbc::validate::validate_module(&wire).unwrap();
+    run_native_module(wire);
 }
 
 #[test]

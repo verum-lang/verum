@@ -202,12 +202,12 @@ impl<'s> CompilationPipeline<'s> {
         let identities: Vec<_> = all_parsed_modules.iter().flat_map(|(_, files)| files)
             .map(|file| (file.owner.as_str(), file.path.to_string_lossy().into_owned(), &file.ast)).collect();
         let refs: Vec<_> = identities.iter().map(|(owner, path, ast)| (*owner, path.as_str(), *ast)).collect();
-        let selected = crate::owned_source_semantics::select_source_roster(&refs, &target)?;
+        let mut selected = crate::owned_source_semantics::select_source_roster(&refs, &target)?;
         phase.next("Stdlib source admission");
         let semantic = crate::phases::semantic_analysis::SemanticAnalysisPhase::new()
             .with_language_features(self.session.language_features())
             .with_target(target);
-        semantic.admit_selected_sources(&selected, self.session)?;
+        semantic.admit_selected_sources(&mut selected, self.session)?;
 
         phase.next("Stdlib materialization");
         let mut selected: verum_common::Map<_, _> = selected.into_iter().map(|(owner, _, ast)| (owner, ast)).collect();

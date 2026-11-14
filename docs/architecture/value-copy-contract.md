@@ -55,6 +55,7 @@ The following emitters carry declaration authority into `CloneTyped`:
 | Sum payload and named variant field | `Choice.Value(value)` | variant emitters |
 | By-value `mut` parameter | `fn f(mut value: Holder)` | function prologue |
 | Generic owned handoff | a place with a declared type parameter | value-use emitter |
+| Checked implicit clone | a selected structural `value.clone()` | resolved-call emitter |
 
 These boundaries use the source's declared type for both named values and
 explicit dereferences. Owned array elements follow their element declaration.
@@ -66,6 +67,11 @@ This is an implementation boundary, not a claim that every copy producer has
 been migrated. Runtime-intercepted container arguments, repeat initialization
 and other remaining untyped `Clone` sites still require their own integration.
 An explicit `.clone()` follows method selection and its declared contract.
+When no declared method applies, a structural clone admitted by the checker
+carries an explicit value-copy selection into VBC. The source admission phase
+retains this selection and receiver adjustments for every accepted module.
+It does not widen the set of layouts admitted for implicit cloning; nested
+mutable storage and affine payloads still require their own checked contract.
 Neither the typed operation nor an available source body proves the complete
 caller/callee ownership ABI; immutable value parameters, destruction and mixed
 archives remain separately tracked by T1807. Native released-owner checks

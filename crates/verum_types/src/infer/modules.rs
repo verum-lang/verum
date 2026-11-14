@@ -20683,6 +20683,10 @@ impl TypeChecker {
             && matches!(recv_ty, Type::Named { .. } | Type::Generic { .. } | Type::Record(_) | Type::Variant(_))
         {
             self.check_structural_clone(&recv_ty, span)?;
+            self.resolved_call_targets.insert(
+                span,
+                verum_ast::expr::ResolvedCallTarget::ValueCopy,
+            );
             return Ok(InferResult::method(recv_ty, Some(crate::core_metadata::ReceiverKind::SelfRef)));
         }
 

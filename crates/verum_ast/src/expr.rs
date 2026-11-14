@@ -2851,6 +2851,10 @@ pub enum ReferenceKind {
 /// into the AST (verum_ast must not depend on verum_vbc).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, verum_ast_derive::DefinitionNode)]
 pub enum ResolvedCallTarget {
+    /// The checker selected declaration-owned value copying after ordinary
+    /// method resolution found no implementation. Lowering must retain the
+    /// receiver's complete type witness and use the typed copy operation.
+    ValueCopy,
     /// Direct call to a registered global function — both inherent
     /// methods (`Duration.nanos`) and free functions reachable via
     /// method-syntax dispatch.  `qualified_name` is the canonical
