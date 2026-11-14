@@ -157,6 +157,23 @@ fn build_inner(
     if declaration.type_params.len() != args.len() {
         return Err("typed destruction generic arity does not match its declaring owner".into());
     }
+    if let Some(payload) = crate::source_declaration_integrity::transparent_value_type(
+        declaration, &module.strings,
+    )? {
+        // Existing Glue takes an object carrier with the nominal owner's header.
+        // A transparent value has only the payload's carrier, so silently using
+        // that Glue (or dropping only the payload) would violate the declaration.
+        if declaration.drop_fn.is_some() {
+            return Err("typed destruction of a transparent value requires a carrier-aware explicit Drop call".into());
+        }
+        let substitution = TypeSubstitution::new(&declaration.type_params, args);
+        let payload = substitution.apply(payload)
+            .map_err(|error| Text::from(error.to_string()))?;
+        active.push(ty.clone());
+        let result = build_inner(module, &payload, active, budget);
+        active.pop();
+        return result;
+    }
     if let Some(reference) = declaration.drop_fn {
         let function = module.resolved_function_id(reference);
         let descriptor = module

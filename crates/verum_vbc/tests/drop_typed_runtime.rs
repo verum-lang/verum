@@ -433,3 +433,26 @@ fn transparent_aliases_keep_owned_arguments_and_refuse_erased_targets() {
         assert!(build(&module, &ty).is_err(), "erased alias must not authorize destruction");
     }
 }
+
+#[test]
+fn transparent_generic_wrapper_destroys_its_actual_payload_carrier_once() {
+    run(
+        r#"
+        type Wrapped<T> is (T);
+        fn probe() -> Int {
+            let mut drops = 0;
+            dispose<Wrapped<Guard>>(Wrapped(Guard { drops: &mut drops, marker: 41 }));
+            drops
+        }
+        "#,
+        1,
+    );
+}
+
+#[test]
+fn transparent_scalar_has_no_fictitious_object_destructor() {
+    run(
+        "type Number is (Int); fn probe()->Int {dispose<Number>(Number(37));37}",
+        37,
+    );
+}

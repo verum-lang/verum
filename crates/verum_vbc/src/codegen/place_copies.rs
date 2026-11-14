@@ -395,8 +395,7 @@ impl VbcCodegen {
             TypeRef::Concrete(id) | TypeRef::Instantiated { base: id, .. }
                 if *id != TypeId::PTR && *id != TypeId::RESERVED => {
                 match self.type_by_id(*id) {
-                    Some(declaration) => !declaration.is_transparent_wrapper
-                        && matches!(declaration.kind, TypeKind::Record | TypeKind::Sum
+                    Some(declaration) => matches!(declaration.kind, TypeKind::Record | TypeKind::Sum
                             | TypeKind::Tuple | TypeKind::Array | TypeKind::Primitive | TypeKind::Unit),
                     None => id.is_builtin(),
                 }

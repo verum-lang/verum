@@ -184,6 +184,13 @@ impl Builder<'_> {
             return Err("typed copy arguments do not match the declaring owner".into());
         }
         let substitution = TypeSubstitution::new(&declaration.type_params, args);
+        if let Some(payload) = crate::source_declaration_integrity::transparent_value_type(
+            declaration, &self.module.strings,
+        )? {
+            let payload = substitution.apply(payload)
+                .map_err(|error| Text::from(error.to_string()))?;
+            return Ok(CopyNode::Alias(self.intern(payload)?));
+        }
         let standard = self.module.declared_runtime_carrier(owner);
         if declaration.kind == TypeKind::Record {
             match standard {

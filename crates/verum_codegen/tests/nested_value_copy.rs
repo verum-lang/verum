@@ -1,5 +1,7 @@
 //! The original owning branch must remain independent of a copied branch.
 #![cfg(target_os = "macos")]
+#[path = "../../verum_vbc/tests/fixtures/canonical_drop.rs"]
+mod canonical_drop;
 use std::process::Command;
 use verum_common::Text;
 use verum_codegen::llvm::{LoweringConfig, VbcToLlvmLowering};
@@ -236,4 +238,93 @@ fn selected_imported_function_executes_the_same_native_declaration() {
             run_native_module(wire);
         }
     }
+}
+
+#[test]
+fn a_native_transparent_scalar_copy_keeps_the_inner_carrier() {
+    run_native(
+        "type Number is (Int); fn main()->Int {let first=Number(73);let second=first;second.0}",
+    );
+}
+
+#[test]
+fn a_native_generic_newtype_copy_owns_its_nested_payload() {
+    run_native(
+        r#"
+        type Leaf is {value:Int}; type Branch is {leaf:Leaf}; type Wrapped<T> is (T);
+        fn main()->Int {
+            let mut first:Wrapped<Branch> = Wrapped(Branch{leaf:Leaf{value:73}});
+            let second=first;first.0.leaf.value=0;second.0.leaf.value
+        }
+    "#,
+    );
+}
+
+#[test]
+fn a_native_borrowed_newtype_copy_owns_its_nested_payload() {
+    run_native(
+        r#"
+        type Leaf is {value:Int}; type Branch is {leaf:Leaf}; type Wrapped is (Branch);
+        fn main()->Int {
+            let mut first=Wrapped(Branch{leaf:Leaf{value:73}});
+            let second=*(&first);first.0.leaf.value=0;second.0.leaf.value
+        }
+    "#,
+    );
+}
+
+#[test]
+fn native_typed_destruction_of_a_generic_newtype_reaches_its_actual_payload() {
+    // Only the explicit generic disposal operation is a bytecode fixture.
+    // Constructors, witnesses and the counter-changing Drop body are source.
+    let source = r#"
+        module transparent_drop;
+        mount core.base.protocols.Drop;
+        type Guard is {count:&mut Int};
+        implement Drop for Guard {fn drop(&mut self) {*self.count=*self.count+1;}}
+        type Wrapped<T> is (T);
+        fn dispose<T>(value:T) {}
+        fn main()->Int {
+            let mut count=0;
+            dispose<Wrapped<Guard>>(Wrapped(Guard{count:&mut count}));
+            if count==1 {73}else{0}
+        }
+    "#;
+    let ast = Parser::new(source).parse_module().unwrap();
+    let mut generator =
+        VbcCodegen::with_config(verum_vbc::codegen::CodegenConfig::new("transparent_drop"));
+    canonical_drop::initialize(&mut generator);
+    let mut module = generator.compile_additional_module(&ast).unwrap();
+    let dispose = module
+        .find_function_by_name("transparent_drop.dispose")
+        .unwrap();
+    let declared = module
+        .get_function(dispose)
+        .unwrap()
+        .semantic_parameter_types()
+        .unwrap()[0]
+        .clone()
+        .unwrap();
+    assert!(declared.is_generic());
+    let start = module.bytecode.len() as u32;
+    verum_vbc::bytecode::encode_instruction(
+        &verum_vbc::Instruction::DropTyped {
+            src: verum_vbc::instruction::Reg(0),
+            type_ref: declared,
+        },
+        &mut module.bytecode,
+    );
+    verum_vbc::bytecode::encode_instruction(&verum_vbc::Instruction::RetV, &mut module.bytecode);
+    let end = module.bytecode.len() as u32;
+    let descriptor = module
+        .functions
+        .iter_mut()
+        .find(|f| f.id == dispose)
+        .unwrap();
+    descriptor.bytecode_offset = start;
+    descriptor.bytecode_length = end - start;
+    descriptor.instructions = None;
+    let wire = deserialize_module(&serialize_module(&module).unwrap()).unwrap();
+    verum_vbc::validate::validate_module(&wire).unwrap();
+    run_native_module(wire);
 }

@@ -1284,6 +1284,18 @@ impl VbcCodegen {
         expr: &Expr,
         demand: ResultDemand,
     ) -> CodegenResult<Option<Reg>> {
+        let outer = self.ctx.selected_call_result_span;
+        self.ctx.selected_call_result_span = matches!(
+            expr.kind, ExprKind::Call { .. } | ExprKind::MethodCall { .. },
+        ).then_some(expr.span);
+        let result = self.compile_expr_in_result_scope(expr, demand);
+        self.ctx.selected_call_result_span = outer;
+        result
+    }
+
+    fn compile_expr_in_result_scope(
+        &mut self, expr: &Expr, demand: ResultDemand,
+    ) -> CodegenResult<Option<Reg>> {
         self.ctx.stats.expressions_compiled += 1;
         // Track source span for DWARF debug info (SourceMap population)
         self.ctx.set_current_span(expr.span);
@@ -9128,12 +9140,10 @@ impl VbcCodegen {
                 expected: function.param_count, found: args.len(), function: function.return_type_name.clone().unwrap_or_default(),
             }));
         }
+        let result_span = self.ctx.selected_call_result_span;
         self.prepare_nominal_constructor(function)?;
         let inferred = self.selected_argument_witnesses(function, args.len(), args.iter(), None).map(CallInstantiation::known);
         let witnesses = self.apply_explicit_generic_args(Some(function), explicit, inferred)?;
-        if function.is_transparent_wrapper && args.len() == 1 {
-            return self.compile_expr(&args[0]);
-        }
         let name = function.return_type_name.as_deref().ok_or_else(|| CodegenError::internal("constructor has no declared name"))?;
         let nominal = function.nominal_constructor_type().or_internal("constructor lost its nominal owner")?;
         let descriptor = self.type_by_id(nominal).or_internal("constructor lost its nominal descriptor")?;
@@ -9143,7 +9153,16 @@ impl VbcCodegen {
             witnesses.filter(|arguments| arguments.len() == descriptor.type_params.len())
                 .map(|args| crate::types::TypeRef::Instantiated { base: nominal, args })
         };
-        self.compile_record_call_form(name, function, args, owner.as_ref())
+        let owner = owner.or_internal("nominal constructor result requires complete declaration witnesses")?;
+        let output = if function.is_transparent_wrapper && args.len() == 1 {
+            self.compile_expr(&args[0])?
+        } else {
+            self.compile_record_call_form(name, function, args, Some(&owner))?
+        };
+        if output.is_some() && let Some(span) = result_span {
+            self.ctx.declared_result_types.insert(span, Some(owner));
+        }
+        Ok(output)
     }
 
     /// Apply source arguments to their declaration-owned slots after inference.

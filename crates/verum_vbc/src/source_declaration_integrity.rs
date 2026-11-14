@@ -69,6 +69,40 @@ pub fn validate_type_descriptor(
     validate_type_descriptor_diagnostic(descriptor, strings).map_err(|error| error.message)
 }
 
+/// Resolve the payload of a representation-erasing declaration. A descriptor
+/// flag is not authority by itself: retained source must declare that exact
+/// shape. Ordinary single-field records keep their object carrier.
+pub(crate) fn transparent_value_type<'a>(
+    descriptor: &'a TypeDescriptor,
+    strings: &StringTable,
+) -> Result<Option<&'a TypeRef>, Text> {
+    // Only this representation boundary is queried here. Other descriptor
+    // kinds keep their own admission diagnostics; a cleared flag on a source
+    // newtype still reaches the authoritative integrity check below.
+    let source_may_erase = descriptor.source_declaration.as_ref().is_some_and(|source| {
+        matches!(&source.body, TypeDeclBody::Newtype(_))
+            || matches!(&source.body, TypeDeclBody::Tuple(fields) if fields.len() == 1)
+    });
+    if !descriptor.is_transparent_wrapper && !source_may_erase {
+        return Ok(None);
+    }
+    validate_type_descriptor(descriptor, strings)?;
+    if !descriptor.is_transparent_wrapper {
+        return Ok(None);
+    }
+    if descriptor.source_declaration.is_none() {
+        return Err("transparent value lacks its source declaration".into());
+    }
+    let [field] = descriptor.fields.as_slice() else {
+        return Err("transparent value requires exactly one declared payload".into());
+    };
+    if field.offset != 0 {
+        return Err("transparent value payload cannot have a record offset".into());
+    }
+    field.declaration_type.as_ref().map(Some)
+        .ok_or_else(|| "transparent value payload lacks declaration evidence".into())
+}
+
 pub(crate) fn validate_type_descriptor_diagnostic(
     descriptor: &TypeDescriptor,
     strings: &StringTable,

@@ -457,6 +457,9 @@ pub struct CodegenContext {
         Map<verum_ast::Span, verum_common::Maybe<verum_common::Text>>,
     /// Semantic result declarations captured while branch-local bindings exist.
     pub(super) declared_result_types: Map<verum_ast::Span, Option<TypeRef>>,
+    /// Current source call boundary; only its selected producer may publish a
+    /// semantic result here. Nested expressions save and restore this scope.
+    pub(super) selected_call_result_span: Option<verum_ast::Span>,
     /// Emitted result storage is separate from declaration/type hints.
     pub(super) array_result_facts: super::array_coercions::ArrayResultFacts,
 
@@ -1008,6 +1011,9 @@ pub struct ClosureCompilationContext {
         Map<verum_ast::Span, verum_common::Maybe<verum_common::Text>>,
     /// Semantic result declarations captured while branch-local bindings exist.
     pub(super) declared_result_types: Map<verum_ast::Span, Option<TypeRef>>,
+    /// Current source call boundary; only its selected producer may publish a
+    /// semantic result here. Nested expressions save and restore this scope.
+    pub(super) selected_call_result_span: Option<verum_ast::Span>,
     /// Emitted result storage is separate from declaration/type hints.
     pub(super) array_result_facts: super::array_coercions::ArrayResultFacts,
     /// The enclosing callable's residual target, independent of expression hints.
@@ -1728,6 +1734,7 @@ impl CodegenContext {
             variable_type_names: HashMap::new(),
             compiled_block_result_types: Map::new(),
             declared_result_types: Map::new(),
+            selected_call_result_span: None,
             array_result_facts: Default::default(),
             array_element_type_names: HashMap::new(),
             reference_bindings: std::collections::HashSet::new(),
@@ -2820,6 +2827,7 @@ impl CodegenContext {
         self.variable_type_names.clear();
         self.compiled_block_result_types.clear();
         self.declared_result_types.clear();
+        self.selected_call_result_span = None;
         self.array_result_facts.clear();
         self.reference_bound_vars.clear();
         self.array_element_type_names.clear();
@@ -4843,6 +4851,7 @@ impl CodegenContext {
             variable_type_names: self.variable_type_names.clone(),
             compiled_block_result_types: self.compiled_block_result_types.clone(),
             declared_result_types: self.declared_result_types.clone(),
+            selected_call_result_span: self.selected_call_result_span,
             array_result_facts: self.array_result_facts.clone(),
             function_return_type_name: self.function_return_type_name.clone(),
             function_return_declaration: self.function_return_declaration.clone(),
@@ -4880,6 +4889,7 @@ impl CodegenContext {
         self.variable_type_names = saved.variable_type_names;
         self.compiled_block_result_types = saved.compiled_block_result_types;
         self.declared_result_types = saved.declared_result_types;
+        self.selected_call_result_span = saved.selected_call_result_span;
         self.array_result_facts = saved.array_result_facts;
         self.reference_bindings = saved.reference_bindings;
         self.byte_array_vars = saved.byte_array_vars;
@@ -5041,6 +5051,7 @@ impl CodegenContext {
         self.generic_type_params.clear();
         self.compiled_block_result_types.clear();
         self.declared_result_types.clear();
+        self.selected_call_result_span = None;
         self.array_result_facts.clear();
         self.generic_type_params_ordered.clear();
         self.current_generic_param_ids.clear();
