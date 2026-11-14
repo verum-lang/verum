@@ -1,5 +1,7 @@
 //! T1710: callable conversion precedes lexical cleanup without removing it.
 #![cfg(feature = "codegen")]
+#[path = "fixtures/canonical_drop.rs"]
+mod canonical_drop;
 #[path = "fixtures/list_return_cleanup.rs"]
 mod fixtures;
 
@@ -15,9 +17,9 @@ use verum_vbc::{
 
 fn source_and_wire(source: &str) -> [(&'static str, VbcModule); 2] {
     let parsed = Parser::new(source).parse_module().expect("fixture grammar");
-    let module = VbcCodegen::new()
-        .compile_module(&parsed)
-        .expect("source lowering");
+    let mut codegen = VbcCodegen::new();
+    canonical_drop::initialize(&mut codegen);
+    let module = codegen.compile_additional_module(&parsed).expect("source lowering");
     let wire = verum_vbc::deserialize::deserialize_module(
         &verum_vbc::serialize::serialize_module(&module).expect("encode"),
     )

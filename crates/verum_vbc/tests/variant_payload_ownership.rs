@@ -1,5 +1,7 @@
 //! Sum payloads share the ordinary value-copy and affine-transfer boundary.
 #![cfg(feature = "codegen")]
+#[path = "fixtures/canonical_drop.rs"]
+mod canonical_drop;
 
 use verum_fast_parser::Parser;
 use verum_vbc::{
@@ -11,12 +13,13 @@ use verum_vbc::{
 fn compile(source: &str, unit: bool) -> CodegenResult<VbcModule> {
     let ast = Parser::new(source).parse_module().expect("source grammar");
     let mut codegen = VbcCodegen::with_config(CodegenConfig::new("payload"));
+    canonical_drop::initialize(&mut codegen);
     if unit {
         codegen.collect_unit_declarations(&[&ast])?;
         codegen.compile_unit_items(&[&ast], ItemFailurePolicy::Strict)?;
         codegen.finalize_module_from_state()
     } else {
-        codegen.compile_module(&ast)
+        codegen.compile_additional_module(&ast)
     }
 }
 
@@ -51,6 +54,7 @@ fn named_payload_copies_the_place_before_later_mutation() {
 #[test]
 fn a_returned_nested_payload_survives_its_original_local_cleanup() {
     run(r#"
+        mount core.base.protocols.Drop;
         type Cell is { value: Int };
         implement Drop for Cell { fn drop(&mut self) { self.value = 0; } }
         type Choice<T> is Empty | Value(T);

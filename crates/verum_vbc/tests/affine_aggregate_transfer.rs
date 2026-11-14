@@ -1,5 +1,7 @@
 //! T1805: an owning aggregate receives the source obligation before cleanup.
 #![cfg(feature = "codegen")]
+#[path = "fixtures/canonical_drop.rs"]
+mod canonical_drop;
 use std::sync::Arc;
 use verum_fast_parser::Parser;
 use verum_vbc::{
@@ -11,6 +13,7 @@ use verum_vbc::{
 };
 
 const DECLARATIONS: &str = r#"
+mount core.base.protocols.Drop;
 type Count is { value: Int };
 type affine Handle is { counter: &mut Count, digit: Int };
 implement Drop for Handle {
@@ -36,6 +39,7 @@ fn compile(body: &str, bootstrap: bool) -> VbcModule {
         .parse_module()
         .expect("source grammar");
     let mut codegen = VbcCodegen::with_config(CodegenConfig::new("aggregate_transfer"));
+    canonical_drop::initialize(&mut codegen);
     if bootstrap {
         codegen.collect_unit_declarations(&[&ast]).unwrap();
         codegen
@@ -43,7 +47,7 @@ fn compile(body: &str, bootstrap: bool) -> VbcModule {
             .unwrap();
         codegen.finalize_module_from_state().unwrap()
     } else {
-        codegen.compile_module(&ast).unwrap()
+        codegen.compile_additional_module(&ast).unwrap()
     }
 }
 fn run(body: &str, bootstrap: bool) -> i64 {

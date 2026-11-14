@@ -1,5 +1,7 @@
 //! T1539: a block hands its tail value to the caller before local cleanup.
 #![cfg(feature = "codegen")]
+#[path = "fixtures/canonical_drop.rs"]
+mod canonical_drop;
 
 use std::sync::Arc;
 use verum_fast_parser::Parser;
@@ -9,6 +11,7 @@ use verum_vbc::{
 };
 
 const DECLARATIONS: &str = r#"
+mount core.base.protocols.Drop;
 type Count is { value: Int };
 type Watch is { counter: &mut Count, digit: Int };
 implement Drop for Watch {
@@ -20,9 +23,9 @@ fn run(source: &str) -> i64 {
     let ast = Parser::new(&format!("{DECLARATIONS}\n{source}"))
         .parse_module()
         .expect("parse");
-    let module = VbcCodegen::with_config(CodegenConfig::new("block_lifetime"))
-        .compile_module(&ast)
-        .expect("compile");
+    let mut codegen = VbcCodegen::with_config(CodegenConfig::new("block_lifetime"));
+    canonical_drop::initialize(&mut codegen);
+    let module = codegen.compile_additional_module(&ast).expect("compile");
     let probe = module
         .functions
         .iter()

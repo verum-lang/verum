@@ -1,5 +1,7 @@
 //! Call boundaries must hand the same resource obligation to the callee.
 #![cfg(feature = "codegen")]
+#[path = "fixtures/canonical_drop.rs"]
+mod canonical_drop;
 use std::sync::Arc;
 use verum_fast_parser::Parser;
 use verum_vbc::{
@@ -7,6 +9,7 @@ use verum_vbc::{
     interpreter::Interpreter,
 };
 const TYPES: &str = r#"
+mount core.base.protocols.Drop;
 type Count is { value: Int };
 type affine Socket is { counter: &mut Count, digit: Int };
 implement Drop for Socket { fn drop(&mut self) { self.counter.value = self.counter.value * 10 + self.digit; } }
@@ -16,6 +19,7 @@ fn run(source: &str, bootstrap: bool) -> i64 {
         .parse_module()
         .unwrap();
     let mut codegen = VbcCodegen::with_config(CodegenConfig::new("call_ownership"));
+    canonical_drop::initialize(&mut codegen);
     let mut module = if bootstrap {
         codegen.collect_unit_declarations(&[&ast]).unwrap();
         codegen
@@ -23,7 +27,7 @@ fn run(source: &str, bootstrap: bool) -> i64 {
             .unwrap();
         codegen.finalize_module_from_state().unwrap()
     } else {
-        codegen.compile_module(&ast).unwrap()
+        codegen.compile_additional_module(&ast).unwrap()
     };
     for f in &mut module.functions {
         f.value_uses = None;

@@ -13,6 +13,7 @@ pub const LIST_CLOSURE: &str = "fn probe() -> List<Int16> { let build = || -> Li
 pub const ARRAY_CLOSURE: &str = "fn probe() -> List<UInt16> { let build = || -> [UInt16; 3] { let values: [UInt16; 3] = [32768, 65535, 1]; values }; let values = build(); assert_eq(values[0], 32768); [32768, 65535, 1] }";
 
 pub const OWNED_CLEANUP: &str = r#"
+mount core.base.protocols.Drop;
 type Count is { value: Int };
 type affine Watch is { counter: &mut Count, digit: Int };
 implement Drop for Watch {
@@ -35,6 +36,7 @@ fn probe() -> List<Int16> {
 "#;
 
 pub const POST_PRODUCER_OWNED_EFFECT: &str = r#"
+mount core.base.protocols.Drop;
 type Count is { value: Int };
 type affine Watch is { counter: &mut Count, digit: Int };
 implement Drop for Watch {
@@ -57,6 +59,7 @@ fn probe() -> List<Int16> {
 "#;
 
 pub const BORROWED_OWNER: &str = r#"
+mount core.base.protocols.Drop;
 type Count is { value: Int };
 type affine Watch is { counter: &mut Count, digit: Int };
 implement Drop for Watch {

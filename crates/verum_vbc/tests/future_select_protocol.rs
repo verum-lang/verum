@@ -1,4 +1,6 @@
 #![cfg(feature = "codegen")]
+#[path = "fixtures/canonical_drop.rs"]
+mod canonical_drop;
 use std::sync::Arc;
 use verum_fast_parser::Parser;
 use verum_vbc::{
@@ -8,6 +10,7 @@ use verum_vbc::{
     serialize::serialize_module,
 };
 const ENV: &str = r#"
+mount core.base.protocols.Drop;
 type Poll<T> is Ready(T) | Pending;
 type Waker is { marker: Int };
 type Context is { waker: &Waker };
@@ -30,6 +33,7 @@ fn run(body: &str, expected: i64) {
     let ast = Parser::new(&source).parse_module().expect("parse");
     for bootstrap in [false, true] {
         let mut compiler = VbcCodegen::with_config(CodegenConfig::new("select_pins"));
+        canonical_drop::initialize(&mut compiler);
         let module = if bootstrap {
             compiler
                 .collect_unit_declarations(&[&ast])
@@ -39,7 +43,7 @@ fn run(body: &str, expected: i64) {
                 .expect("items");
             compiler.finalize_module_from_state().unwrap()
         } else {
-            compiler.compile_module(&ast).expect("compile")
+            compiler.compile_additional_module(&ast).expect("compile")
         };
         let module = deserialize_module(&serialize_module(&module).unwrap()).unwrap();
         let entry = module.find_function_by_name("select_pins.probe").unwrap();

@@ -1,5 +1,7 @@
 //! T1745: the declaration of the runtime Text record keeps its reserved carrier.
 #![cfg(feature = "codegen")]
+#[path = "fixtures/canonical_drop.rs"]
+mod canonical_drop;
 
 use verum_ast::ItemKind;
 use verum_common::{List, Maybe, Text};
@@ -490,8 +492,9 @@ fn primitive_extension_then_bootstrap_record_preserves_all_protocols() {
 #[test]
 fn later_bootstrap_carrier_preserves_record_authority_and_resolved_drop_glue() {
     let mut producer = VbcCodegen::with_config(CodegenConfig::new(OWNER));
-    let source = wire(&producer.compile_module(&declaration_ast(OWNER,
-        "type Drop is protocol { fn drop(&mut self); }; implement Drop for Text { fn drop(&mut self) {} }"
+    canonical_drop::initialize(&mut producer);
+    let source = wire(&producer.compile_additional_module(&declaration_ast(OWNER,
+        "mount core.base.protocols.Drop; implement Drop for Text { fn drop(&mut self) {} }"
     )).expect("compile declared Drop body"));
     assert!(
         text(&source, Some(OWNER)).drop_fn.is_some(),
@@ -587,17 +590,15 @@ fn later_bootstrap_carrier_preserves_record_authority_and_resolved_drop_glue() {
 
 fn glue_carrier() -> VbcModule {
     let source = format!(
-        "{EXTENSION_SOURCE} type Drop is protocol {{ fn drop(&mut self); }}; \
+        "{EXTENSION_SOURCE} mount core.base.protocols.Drop; \
         implement Drop for Text {{ fn drop(&mut self) {{}} }}"
     );
     let ast = Parser::new(&source)
         .parse_module()
         .expect("parse real carrier Drop");
-    let module = wire(
-        &VbcCodegen::with_config(CodegenConfig::new("text_extension"))
-            .compile_module(&ast)
-            .expect("compile glue-bearing carrier"),
-    );
+    let mut codegen = VbcCodegen::with_config(CodegenConfig::new("text_extension"));
+    canonical_drop::initialize(&mut codegen);
+    let module = wire(&codegen.compile_additional_module(&ast).expect("compile glue-bearing carrier"));
     assert!(
         text(&module, Some("text_extension")).drop_fn.is_some(),
         "raw carrier claims real source glue"

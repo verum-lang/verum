@@ -1,5 +1,7 @@
 //! Generic method calls forward the caller's declaration-owned parameter IDs.
 #![cfg(feature = "codegen")]
+#[path = "fixtures/canonical_drop.rs"]
+mod canonical_drop;
 
 use std::sync::Arc;
 use verum_fast_parser::Parser;
@@ -11,6 +13,7 @@ use verum_vbc::{
 };
 
 const TYPES: &str = r#"
+mount core.base.protocols.Drop;
 type Count is { value: Int };
 type affine Ticket is { count: &mut Count };
 implement Drop for Ticket { fn drop(&mut self) { self.count.value = self.count.value + 1; } }
@@ -22,12 +25,13 @@ implement<T> Sink<T> {
 
 fn lower(ast: &verum_ast::Module, bootstrap: bool) -> CodegenResult<verum_vbc::module::VbcModule> {
     let mut codegen = VbcCodegen::with_config(CodegenConfig::new("forwarding"));
+    canonical_drop::initialize(&mut codegen);
     if bootstrap {
         codegen.collect_unit_declarations(&[ast])?;
         codegen.compile_unit_items(&[ast], ItemFailurePolicy::Strict)?;
         codegen.finalize_module_from_state()
     } else {
-        codegen.compile_module(ast)
+        codegen.compile_additional_module(ast)
     }
 }
 

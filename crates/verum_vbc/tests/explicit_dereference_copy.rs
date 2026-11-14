@@ -1,6 +1,8 @@
 //! T1753: explicit dereference copies a place at the existing value boundary.
 //! Nested slots remain shallow; this is not a recursive snapshot contract.
 #![cfg(feature = "codegen")]
+#[path = "fixtures/canonical_drop.rs"]
+mod canonical_drop;
 
 use verum_common::{List, Set, Shared, Text};
 use verum_fast_parser::Parser;
@@ -42,15 +44,11 @@ fn source_and_wire(body: &str) -> [(&'static str, VbcModule); 2] {
     }
     let source: Text = format!("module explicit_copy;\n{mounts}{body}").into();
     let parsed = Parser::new(source.as_str()).parse_module().expect("fixture grammar");
+    let mut codegen = VbcCodegen::with_config(CodegenConfig::new("explicit_copy"));
+    canonical_drop::initialize(&mut codegen);
     let source = if declarations.is_empty() {
-        VbcCodegen::with_config(CodegenConfig::new("explicit_copy"))
-            .compile_module(&parsed).expect("source codegen")
+        codegen.compile_additional_module(&parsed).expect("source codegen")
     } else {
-        let mut codegen = VbcCodegen::with_config(CodegenConfig::new("explicit_copy"));
-        codegen.register_builtin_variants();
-        codegen.register_stdlib_constants();
-        codegen.register_stdlib_intrinsics();
-        codegen.register_runtime_io_functions();
         let modules: List<_> = declarations.iter().collect();
         codegen.import_bootstrap_nominal_dependencies(&[&parsed], &modules)
             .expect("actual source-owned declaration import");
@@ -498,6 +496,7 @@ fn probe() -> Int {
 fn parenthesized_affine_place_preserves_the_existing_transfer() {
     for initializer in ["original", "((original))"] {
         let source: Text = format!(r#"
+mount core.base.protocols.Drop;
 type Count is {{ value: Int }};
 type affine Watch is {{ counter: &mut Count }};
 implement Drop for Watch {{ fn drop(&mut self) {{ self.counter.value += 1; }} }}
