@@ -273,13 +273,13 @@ fn implicit_clone_borrows_only_duplicable_layouts() {
         "implement Int { fn doubled(self) -> Int { self + self } } fn read(b: &Boxed) -> Int { b.value.doubled() }",
         "type Pair is { x: Int, y: Text }; fn read(p: &Pair) -> Pair { p.clone() }",
         "type Wrap<T> is { item: T }; fn read(p: &Wrap<Int>) -> Wrap<Int> { p.clone() }",
+        "type Outer is { inner: Boxed }; fn mutate(p: &Outer) -> Int { let mut replica = p.clone(); replica.inner.value = 13; p.inner.value }",
+        "type Code is (Text); type Box is { code: Code }; fn duplicate(t: &Box) -> Box { t.clone() }",
     ] {
         let messages = errors(source);
         assert!(messages.is_empty(), "{source}: {messages:?}");
     }
     for source in [
-        "type Outer is { inner: Boxed }; fn mutate(p: &Outer) -> Int { let mut replica = p.clone(); replica.inner.value = 13; p.inner.value }",
-        "type Code is (Text); type Box is { code: Code }; fn duplicate(t: &Box) -> Box { t.clone() }",
         "type affine Status is | Idle | Busy; fn duplicate(t: &Status) -> Status { t.clone() }",
         "type affine Status is | Idle | Busy; type Box is { status: Status }; fn duplicate(t: &Box) -> Box { t.clone() }",
         "type affine Ticket is { id: Int }; fn duplicate(t: &Ticket) -> Ticket { t.clone() }",
@@ -287,12 +287,45 @@ fn implicit_clone_borrows_only_duplicable_layouts() {
         "type Access is { ptr: &mut Int }; fn duplicate(a: &Access) -> Access { a.clone() }",
         "type Wrap<T> is { item: T }; type Pair is { a: Wrap<Int>, b: Wrap<&mut Int> }; fn duplicate(p: &Pair) -> Pair { p.clone() }",
         "type Wrap<T> is { item: T }; fn duplicate<T>(p: &Wrap<T>) -> Wrap<T> { p.clone() }",
+        "type Wrap<T> is { item: T }; type Inner is { action: fn()->Int }; fn duplicate(p: &Wrap<Inner>) -> Wrap<Inner> { p.clone() }",
+        "type Wrap<T> is { item: T }; type Inner is { ptr: &unsafe Int }; fn duplicate(p: &Wrap<Inner>) -> Wrap<Inner> { p.clone() }",
     ] {
         let messages = errors(source);
         assert!(messages.iter().any(|m| m.contains("implicit clone")), "{source}: {messages:?}");
     }
     let messages = errors("implement Boxed { fn clone(&mut self) -> Boxed { self.value += 1; Boxed { value: self.value } } } fn duplicate(p: &Boxed) -> Boxed { p.clone() }");
     assert!(messages.iter().any(|m| m.contains("shared reference")), "{messages:?}");
+}
+
+#[test]
+fn structural_copy_bounds_nominal_expansion_on_the_ordinary_stack() {
+    for (depth, accepted) in [(20, true), (80, false)] {
+        let mut source = "type Level0 is { value:Int };".to_owned();
+        for level in 1..=depth {
+            source.push_str(&format!("type Level{level} is {{ value:Level{} }};", level - 1));
+        }
+        source.push_str(&format!("fn duplicate(p:&Level{depth})->Level{depth} {{ p.clone() }}"));
+        let messages = errors(&source);
+        if accepted {
+            assert!(messages.is_empty(), "{messages:?}");
+        } else {
+            assert!(messages.iter().any(|message| message.contains("finite declaration boundary")), "{messages:?}");
+        }
+    }
+}
+
+#[test]
+fn nested_structural_copy_does_not_extend_a_borrowed_payload_lifetime() {
+    let messages = errors(r#"
+        type Payload is { reference:&Int };
+        type Wrapped is { payload:Payload };
+        fn escape()->Wrapped {
+            let local=73;
+            let original=Wrapped { payload:Payload { reference:&local } };
+            original.clone()
+        }
+    "#);
+    assert!(messages.iter().any(|message| message.contains("reference outlives referent")), "{messages:?}");
 }
 
 #[test]

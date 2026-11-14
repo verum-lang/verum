@@ -367,3 +367,45 @@ fn explicit_protocol_override_preserves_declared_behavior_through_archive_and_wi
             }
     "#, "core.probe", 73);
 }
+
+#[test]
+fn selected_nested_copy_isolates_every_owned_component_after_wire_reload() {
+    for source in [
+        r#"
+        type Leaf is { value:Int };
+        type Wrap<T> is { item:T };
+        fn duplicate(source:&Wrap<Leaf>)->Wrap<Leaf> { source.clone() }
+        fn main()->Int {
+            let mut original=Wrap { item:Leaf { value:73 } };
+            let mut copied=duplicate(&original);
+            original.item.value=0;
+            copied.item.value + original.item.value
+        }
+        "#,
+        r#"
+        type Leaf is { value:Int };
+        type Batch is { items:[Leaf;2] };
+        fn duplicate(source:&Batch)->Batch { source.clone() }
+        fn main()->Int {
+            let mut original=Batch { items:[Leaf {value:40}, Leaf {value:33}] };
+            let copied=duplicate(&original);
+            original.items[0].value=0;
+            original.items[1].value=0;
+            copied.items[0].value+copied.items[1].value
+        }
+        "#,
+        r#"
+        type Leaf is { value:Int };
+        type Choice is Empty | Data(Leaf);
+        fn duplicate(source:&Choice)->Choice { source.clone() }
+        fn main()->Int {
+            let mut original=Choice.Data(Leaf {value:73});
+            let copied=duplicate(&original);
+            match original { Data(ref mut leaf)=>leaf.value=0, Empty=>() };
+            match copied { Data(leaf)=>leaf.value, Empty=>0 }
+        }
+        "#,
+    ] {
+        assert_eq!(execute(source, true), 73, "{source}");
+    }
+}

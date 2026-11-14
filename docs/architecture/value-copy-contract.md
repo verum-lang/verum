@@ -70,8 +70,13 @@ An explicit `.clone()` follows method selection and its declared contract.
 When no declared method applies, a structural clone admitted by the checker
 carries an explicit value-copy selection into VBC. The source admission phase
 retains this selection and receiver adjustments for every accepted module.
-It does not widen the set of layouts admitted for implicit cloning; nested
-mutable storage and affine payloads still require their own checked contract.
+Admission follows the declared owned layout, including nested records, tuples,
+sum payloads and fixed arrays. A bounded work list instantiates each nominal
+component and checks its resource discipline. Borrowed fields stay borrowed;
+affine payloads, mutable references, unknown captures and opaque storage do
+not gain permission from the availability of the runtime copy operation.
+Registered scalar storage is recognized through the exact builtin declaration,
+never by a short type name.
 Neither the typed operation nor an available source body proves the complete
 caller/callee ownership ABI; immutable value parameters, destruction and mixed
 archives remain separately tracked by T1807. Native released-owner checks
