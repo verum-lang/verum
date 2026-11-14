@@ -187,7 +187,11 @@ fn bootstrap_reserves_local_protocol_ids_before_remapping_semantic_record_fields
     let record = completed
         .types
         .iter()
-        .find(|descriptor| descriptor.source_declaration.is_some())
+        .find(|descriptor| {
+            descriptor.origin_module.and_then(|owner| completed.get_string(owner)) == Some("owner")
+                && descriptor.source_declaration.as_ref()
+                    .is_some_and(|source| source.name.name.as_str() == "Carrier")
+        })
         .unwrap();
     let TypeRef::Instantiated { base, .. } = &record.fields[1].type_ref else {
         panic!(
