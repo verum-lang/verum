@@ -8467,8 +8467,25 @@ impl TypeChecker {
                 continue;
             }
 
+            self.check_owned_place_read(arg, &resolved_param, None)?;
+            let mut place = arg;
+            while let ExprKind::Paren(inner) = &place.kind { place = inner; }
+            if let Some((root, projection)) = Self::named_field_place(place)
+                && self.affine_tracker.get_binding_resource_kind(&root).is_some()
+            {
+                self.affine_tracker.check_field_available(&root, &projection, false, arg.span)?;
+                self.track_affine_field_access(&root, &projection, &resolved_param, arg.span)?;
+            }
+            if let ExprKind::TupleIndex { expr: tuple, index } = &place.kind
+                && self.type_contains_affine(&resolved_param)
+                && let ExprKind::Path(path) = &tuple.kind
+                && let Some(name) = path.as_ident()
+                && self.affine_tracker.is_affine_binding(name.name.as_str())
+            {
+                self.affine_tracker.use_index_value(name.name.as_str(), *index as usize, arg.span)?;
+            }
             // Extract the variable name from the argument expression
-            if let ExprKind::Path(path) = &arg.kind && let Some(ident) = path.as_ident() {
+            if let ExprKind::Path(path) = &place.kind && let Some(ident) = path.as_ident() {
                 let name = &ident.name;
                 self.check_borrowed_move(name, &resolved_param, arg.span)?;
                 // Check if this variable is affine and consume it

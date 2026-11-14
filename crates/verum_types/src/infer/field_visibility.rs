@@ -383,6 +383,7 @@ impl TypeChecker {
                     | Type::Ownership { inner, .. },
                     to,
                 ) => {
+                    self.check_resource_copy(to, span)?;
                     self.check_value_conversion_inner(inner, to, span, visited)?;
                 }
                 (

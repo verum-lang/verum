@@ -28,6 +28,61 @@ fn place_operand(expr: &Expr) -> Option<(&Expr, bool)> {
 }
 
 impl TypeChecker {
+    pub(super) fn check_resource_copy(&self, ty: &Type, span: Span) -> Result<()> {
+        let ty = self.unifier.try_apply(ty, span)?;
+        if self.type_contains_affine(&ty) {
+            Err(TypeError::OtherWithCodeSpanned {
+                code: "E310".into(),
+                msg: format!("cannot move resource value `{ty}` out of borrowed storage").into(),
+                span,
+            })
+        } else {
+            Ok(())
+        }
+    }
+
+    pub(super) fn check_owned_place_read(
+        &mut self, place: &Expr, value_type: &Type, source_type: Option<&Type>,
+    ) -> Result<()> {
+        if source_type.is_none() && place_operand(unparen(place)).is_none() {
+            return Ok(());
+        }
+        let value_type = self.unifier.try_apply(value_type, place.span)?;
+        if !self.type_contains_affine(&value_type) {
+            return Ok(());
+        }
+        if let Some(source) = source_type
+            && self.place_reference_head(source, place.span)?.reference_parts().is_some()
+        {
+            return self.check_resource_copy(&value_type, place.span);
+        }
+        let mut step = unparen(place);
+        while let Some((operand, _)) = place_operand(step) {
+            if matches!(step.kind, ExprKind::Field { .. })
+                && self.declaration_property_operand(operand).is_some()
+            {
+                break;
+            }
+            if self.place_reference_head(&self.place_operand_type(operand)?, operand.span)?
+                .reference_parts().is_some()
+            {
+                return self.check_resource_copy(&value_type, place.span);
+            }
+            step = unparen(operand);
+        }
+        Ok(())
+    }
+
+    pub(super) fn with_expression_places<T>(
+        &mut self, expr: &Expr, infer: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> Result<T> {
+        let args = match &unparen(expr).kind {
+            ExprKind::Call { args, .. } | ExprKind::MethodCall { args, .. } => args.as_slice(),
+            _ => &[],
+        };
+        self.with_call_place_types(expr, args, infer)
+    }
+
     /// Only computed operands need temporary storage. Keys are identities of
     /// live, borrowed AST nodes and are discarded when this operation returns.
     pub(super) fn with_place_types<T>(
@@ -54,12 +109,14 @@ impl TypeChecker {
                 requested.insert(std::ptr::from_ref(arg).addr(), None);
             }
         }
-        let mut step = unparen(place);
-        while let Some((operand, _)) = place_operand(step) {
-            step = unparen(operand);
-            if !matches!(&step.kind, ExprKind::Path(p) if p.segments.len() == 1 && self.ctx.env.lookup(p.last_segment_name()).is_some())
-            {
-                requested.insert(std::ptr::from_ref(step).addr(), None);
+        for place in std::iter::once(place).chain(args.iter()) {
+            let mut step = unparen(place);
+            while let Some((operand, _)) = place_operand(step) {
+                step = unparen(operand);
+                if !matches!(&step.kind, ExprKind::Path(p) if p.segments.len() == 1 && self.ctx.env.lookup(p.last_segment_name()).is_some())
+                {
+                    requested.insert(std::ptr::from_ref(step).addr(), None);
+                }
             }
         }
         if requested.is_empty() {
@@ -237,7 +294,7 @@ impl TypeChecker {
 
     /// Expand transparent type names without erasing the permission on a reference.
     pub(super) fn place_reference_head(&self, ty: &Type, span: Span) -> Result<Type> {
-        let mut current = self.unifier.apply(ty);
+        let mut current = self.unifier.try_apply(ty, span)?;
         for _ in 0..64 {
             match &current {
                 Type::Refined { base, .. } | Type::CapabilityRestricted { base, .. } => {

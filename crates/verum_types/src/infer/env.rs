@@ -1542,6 +1542,21 @@ impl TypeChecker {
         ty: &Type,
         visited: &mut std::collections::HashSet<Text>,
     ) -> bool {
+        // Transparent aliases bind their declaration parameters before we ask
+        // whether the value owns a resource. A parameter underneath a reference
+        // does not transfer ownership to the reference or its alias.
+        if let Some((name, _)) = self.conversion_nominal_head(ty)
+            && self.ctx.type_aliases.contains_key(&name)
+        {
+            if self.affine_tracker.is_type_affine(ty) || !visited.insert(name.clone()) {
+                return true;
+            }
+            let owns = self.place_reference_head(ty, Span::dummy()).map_or(true, |head| {
+                self.type_contains_affine_impl(&head, visited)
+            });
+            visited.remove(&name);
+            return owns;
+        }
         match ty {
             Type::Named { path, args } => {
                 let name = self.path_to_string(path);
@@ -1606,9 +1621,11 @@ impl TypeChecker {
                 .any(|t| self.type_contains_affine_impl(t, visited)),
             Type::Array { element, .. } => self.type_contains_affine_impl(element, visited),
             Type::Slice { element } => self.type_contains_affine_impl(element, visited),
-            Type::Reference { inner, .. }
-            | Type::CheckedReference { inner, .. }
-            | Type::UnsafeReference { inner, .. } => self.type_contains_affine_impl(inner, visited),
+            // References retain access to a referent; they do not own it.
+            // Their lifetimes and aliasing permissions are checked separately.
+            Type::Reference { .. }
+            | Type::CheckedReference { .. }
+            | Type::UnsafeReference { .. } => false,
             _ => false,
         }
     }
@@ -2396,7 +2413,7 @@ impl TypeChecker {
             }
         }
 
-        self.synth_field_use(expr, super::expr::FieldUse::Operand)
+        self.synth_place_use(expr, super::expr::PlaceUse::Operand)
     }
 
     /// Type-check an expression that is the target of an assignment.
@@ -2455,10 +2472,10 @@ impl TypeChecker {
             _ => ty,
         };
         // Inherent method on the exact type name.
-        let type_name: Text = self.type_to_name(inner_ty).to_string().into();
         {
             let inherents = self.inherent_methods.read();
-            if let Some(methods) = inherents.get(&type_name) {
+            for owner in self.inherent_method_owners(inner_ty) {
+                let Some(methods) = inherents.get(&owner) else { continue; };
                 if methods.contains_key(method_name) {
                     return true;
                 }
@@ -9749,7 +9766,10 @@ impl TypeChecker {
     /// Main entry point: infer type for an expression.
     pub fn infer(&mut self, expr: &Expr, mode: InferMode) -> Result<InferResult> {
         let start = Instant::now();
-        let result = self.with_value_obligation_scope(false, |checker| checker.infer_expr(expr, mode));
+        let result = self.with_value_obligation_scope(false, |checker| match mode {
+            InferMode::Synth => checker.synth_expr(expr),
+            _ => checker.infer_expr(expr, mode),
+        });
         self.check_analysis_control()?;
         self.metrics.time_us += start.elapsed().as_micros() as u64;
         result
@@ -12537,7 +12557,9 @@ with .to_float() or .to_int() (at {:?})",
             Deref => {
                 let operand = self.synth_expr(expr)?;
                 self.observe_expression_type(expr, &operand.ty);
-                self.unary_deref_target(&operand.ty, expr.span).map(InferResult::new)
+                let target = self.unary_deref_target(&operand.ty, expr.span)?;
+                if !self.in_call_arg_context { self.check_resource_copy(&target, _span)?; }
+                Ok(InferResult::new(target))
             }
             // Three-tier reference system: &checked T (Tier 1 - compiler-verified, 0ns overhead)
             // Spec: L0-critical/reference_system/reference_tiers/checked_promotion_fail

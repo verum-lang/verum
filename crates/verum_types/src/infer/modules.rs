@@ -17258,8 +17258,10 @@ impl TypeChecker {
     ) -> Result<InferResult> {
         self.with_call_place_types(receiver, args, |tc| {
             let mut receiver_type = precomputed_recv_ty;
+            let mut borrowed_deref_target = None;
             let mut result = tc.resolve_method_call(
-                receiver, method, type_args, args, span, &mut receiver_type, skip_static_lookup,
+                receiver, method, type_args, args, span, &mut receiver_type,
+                &mut borrowed_deref_target, skip_static_lookup,
             )?;
             // The call executes after its arguments. They may have opened a
             // dependent witness on this place even if none was live on entry.
@@ -17276,11 +17278,18 @@ impl TypeChecker {
             tc.check_call_loans(args, parameters, borrow, !preserves_input_payloads)?;
             match kind {
                 Some(kind) if !kind.meta().allows_mutation => {}
-                // Passing an immediate scalar by value copies it out of its place.
-                // An exclusive receiver still borrows that place even on a scalar.
-                Some(crate::core_metadata::ReceiverKind::SelfValue) if receiver_type.as_ref().is_some_and(|ty|
-                    matches!(Self::auto_deref_for_method_call(ty), Type::Int | Type::Bool | Type::Char | Type::Float | Type::Unit)
-                ) => {}
+                Some(crate::core_metadata::ReceiverKind::SelfValue) => {
+                    if let Some(target) = borrowed_deref_target.as_ref() {
+                        // The selected Deref lends its target; owning the wrapper
+                        // does not transfer ownership of the borrowed target.
+                        tc.check_resource_copy(target, receiver.span)?;
+                    } else if let Some(source) = receiver_type.as_ref() {
+                        let value = Self::auto_deref_for_method_call(source);
+                        tc.check_owned_place_read(receiver, &value, Some(source))?;
+                    } else {
+                        tc.check_write_access(receiver, None, method.span)?;
+                    }
+                }
                 _ => tc.check_write_access(receiver, receiver_type.as_ref(), method.span)?,
             }
             if let Some(ty) = receiver_type.as_ref() {
@@ -17354,6 +17363,7 @@ impl TypeChecker {
         args: &[Expr],
         span: Span,
         precomputed_recv_ty: &mut Option<Type>,
+        borrowed_deref_target: &mut Option<Type>,
         skip_static_lookup: bool,
     ) -> Result<InferResult> {
         self.clear_pending_arity();
@@ -17796,6 +17806,7 @@ impl TypeChecker {
             let method_name_t: Text = method.name.as_str().into();
             let mut current = recv_ty;
             let mut hops = 0;
+            let mut target_value = None;
             // Steps through a PROTOCOL `Deref` (as opposed to a carrier
             // the machine peels itself) have to reach the AST as
             // explicit `.deref()` calls — otherwise this loop finds the
@@ -17830,6 +17841,7 @@ impl TypeChecker {
                 match self.find_deref_target_type(&current, receiver.span)? {
                     Some(target) => {
                         let unwrapped = self.unwrap_reference_type(&target).clone();
+                        target_value = Some(unwrapped.clone());
                         let normalised = self.normalize_type(&unwrapped);
                         // DynProtocol is unsized and cannot be a
                         // by-value receiver. `Heap<dyn Tracer>` → deref
@@ -17856,6 +17868,9 @@ impl TypeChecker {
             // A loop that exited without finding the method took steps
             // that resolve nothing; only a successful chase is recorded.
             let found = self.type_or_dyn_has_method(&current, &method_name_t);
+            // The remaining resolver receives `current` even when this early
+            // lookup has no method. Preserve every actual borrowed step.
+            *borrowed_deref_target = target_value;
             (current, if found { materialised } else { 0 })
         };
         self.record_deref_adjustment(receiver.span, materialised_hops);
@@ -22032,7 +22047,7 @@ impl TypeChecker {
     }
 
     /// The lookup order is the exact receiver, its referent, then its supported views.
-    fn inherent_method_owners(&self, receiver: &Type) -> List<Text> {
+    pub(super) fn inherent_method_owners(&self, receiver: &Type) -> List<Text> {
         let mut owners = List::new();
         if let Some(exact) = self.get_exact_type_name(receiver) {
             owners.push(exact);

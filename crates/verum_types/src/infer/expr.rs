@@ -96,9 +96,9 @@ fn peel_refinement(ty: &Type) -> &Type {
 }
 
 
-/// Whether evaluating a named field transfers its value or only addresses its storage.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum FieldUse {
+/// Whether evaluating a place transfers its value or only addresses its storage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum PlaceUse {
     Value,
     Borrow,
     /// Selecting a deeper field may traverse a partially moved record.
@@ -119,22 +119,53 @@ enum CallPreparation {
 }
 
 impl TypeChecker {
-    pub(super) fn synth_field_use(&mut self, expr: &Expr, usage: FieldUse) -> Result<InferResult> {
+    pub(super) fn synth_place_use(&mut self, expr: &Expr, usage: PlaceUse) -> Result<InferResult> {
+        self.with_place_types(expr, |checker| {
+            let result = checker.synth_place_use_inner(expr, usage)?;
+            if usage == PlaceUse::Value && !checker.in_call_arg_context {
+                checker.check_owned_place_read(expr, &result.ty, None)?;
+            }
+            Ok(result)
+        })
+    }
+
+    fn synth_place_use_inner(&mut self, expr: &Expr, usage: PlaceUse) -> Result<InferResult> {
         let mut field = expr;
         while let ExprKind::Paren(inner) = &field.kind {
             field = inner;
         }
-        if !matches!(field.kind, ExprKind::Field { .. }) {
-            return self.synth_expr(expr);
-        }
-        let result = self.infer_expr_field(field)?;
+        let result = match &field.kind {
+            ExprKind::Field { .. } => self.infer_expr_field(field)?,
+            ExprKind::Index { .. } => self.infer_expr_index(field)?,
+            ExprKind::TupleIndex { .. } => self.infer_expr_tuple_index(field, usage)?,
+            ExprKind::Unary { op: UnOp::Deref, .. } if usage != PlaceUse::Value => {
+                // Addressing a dereference chain must not recurse through a new
+                // host frame or materialize any intermediate resource value.
+                let mut steps = List::new();
+                let mut base = field;
+                loop {
+                    while let ExprKind::Paren(inner) = &base.kind { base = inner; }
+                    let ExprKind::Unary { op: UnOp::Deref, expr: operand } = &base.kind else { break; };
+                    steps.push((base, operand.as_ref()));
+                    base = operand;
+                }
+                let mut result = self.synth_expr_for_field_access(base)?;
+                for (step, operand) in steps.into_iter().rev() {
+                    self.observe_expression_type(operand, &result.ty);
+                    result = InferResult::new(self.unary_deref_target(&result.ty, step.span)?);
+                    self.observe_expression_type(step, &result.ty);
+                }
+                result
+            }
+            _ => return self.synth_expr(expr),
+        };
         if let Some((root, projection)) = Self::named_field_place(field)
             && self.affine_tracker.get_binding_resource_kind(&root).is_some()
         {
             self.affine_tracker.check_field_available(
-                &root, &projection, usage == FieldUse::Operand, field.span,
+                &root, &projection, usage == PlaceUse::Operand, field.span,
             )?;
-            if usage == FieldUse::Value {
+            if usage == PlaceUse::Value && !self.in_call_arg_context {
                 self.track_affine_field_access(&root, &projection, &result.ty, field.span)?;
             }
         }
@@ -179,8 +210,24 @@ impl TypeChecker {
 
     pub(super) fn synth_borrowed_operand(&mut self, expr: &Expr) -> Result<InferResult> {
         self.with_borrowed_operand_context(expr, |checker| {
-            checker.synth_field_use(expr, FieldUse::Borrow)
+            checker.synth_place_use(expr, PlaceUse::Borrow)
         })
+    }
+
+    fn with_expression_value_context<T>(
+        &mut self, expr: &Expr, infer: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> Result<T> {
+        let mut operand = expr;
+        while let ExprKind::Paren(inner) = &operand.kind { operand = inner; }
+        let previous = self.in_call_arg_context;
+        if !matches!(operand.kind, ExprKind::Path(_) | ExprKind::Field { .. }
+            | ExprKind::Index { .. } | ExprKind::TupleIndex { .. } | ExprKind::Unary { .. })
+        {
+            self.in_call_arg_context = false;
+        }
+        let result = infer(self);
+        self.in_call_arg_context = previous;
+        result
     }
 
     fn with_async_context<T>(
@@ -240,7 +287,10 @@ impl TypeChecker {
         expected: &Type,
         mutable: bool,
     ) -> Result<InferResult> {
-        if mutable || Self::named_field_place(expr).is_some() {
+        let mut place = expr;
+        while let ExprKind::Paren(inner) = &place.kind { place = inner; }
+        if mutable || matches!(place.kind, ExprKind::Field { .. } | ExprKind::Index { .. }
+            | ExprKind::TupleIndex { .. } | ExprKind::Unary { op: UnOp::Deref, .. }) {
             let result = self.synth_borrowed_operand(expr)?;
             let source = result.ty.clone();
             let checked = self.check_synthesized_value(expr, expected, result)?;
@@ -265,12 +315,20 @@ impl TypeChecker {
         // Use iterative inference for expressions that might be deeply nested
         // to avoid stack overflow. Falls back to recursive inference for
         // complex expressions that need full context.
-        let result = self.with_value_obligation_scope(false, |checker| {
-            if Self::should_use_iterative_inference(expr) {
-                checker.synth_expr_iterative(expr)
-            } else {
-                checker.infer_expr(expr, InferMode::Synth)
-            }
+        let result = self.with_expression_value_context(expr, |checker| {
+            checker.with_expression_places(expr, |checker| {
+                let result = checker.with_value_obligation_scope(false, |checker| {
+                    if Self::should_use_iterative_inference(expr) {
+                        checker.synth_expr_iterative(expr)
+                    } else {
+                        checker.infer_expr(expr, InferMode::Synth)
+                    }
+                })?;
+                if !checker.in_call_arg_context {
+                    checker.check_owned_place_read(expr, &result.ty, None)?;
+                }
+                Ok(result)
+            })
         })?;
         self.observe_expression_type(expr, &result.ty);
         Ok(result)
@@ -338,7 +396,13 @@ impl TypeChecker {
         // `Maybe`) passes through untouched.
         let expected = &self.resolve_assoc_projections_deep(expected);
 
-        let result = self.check_expr_inner(expr, expected)?;
+        let result = self.with_expression_value_context(expr, |checker| {
+            checker.with_expression_places(expr, |checker| {
+                let result = checker.check_expr_inner(expr, expected)?;
+                checker.check_owned_place_read(expr, expected, None)?;
+                Ok(result)
+            })
+        })?;
         self.observe_expression_type(expr, &result.ty);
         Ok(result)
     }
@@ -4058,8 +4122,10 @@ impl TypeChecker {
 
     /// Explicit dereference has the same operand contract in both inference engines.
     pub(super) fn unary_deref_target(&mut self, operand: &Type, span: Span) -> Result<Type> {
-        let resolved = self.unifier.apply(operand);
-        let ty = self.unifier.normalize_aliases(&resolved);
+        // Dereference needs only the outer constructor. Expanding aliases under
+        // its referent both erases nominal resource rules and needlessly builds
+        // the whole remaining reference chain on every step.
+        let ty = self.place_reference_head(operand, span)?;
         match &ty {
             Type::Reference { inner, .. }
             | Type::CheckedReference { inner, .. }
@@ -4072,7 +4138,7 @@ impl TypeChecker {
                     if bound.protocol.as_ident().is_some_and(|id| matches!(id.name.as_str(), "Ref" | "RefMut"))
                         && let Some(target) = bound.args.first()
                     {
-                        return Ok(self.unifier.apply(target));
+                        return self.unifier.try_apply(target, span);
                     }
                 }
                 // A rigid value parameter retains its type. An unresolved inference
@@ -4089,7 +4155,7 @@ impl TypeChecker {
                     self.ensure_stdlib_type_loaded_transitive(&owner);
                 }
                 if let Some(target) = self.find_deref_target_type(&ty, span)? {
-                    return Ok(self.unifier.apply(&target));
+                    return self.unifier.try_apply(&target, span);
                 }
                 match &ty {
                     Type::Named { path, args } if args.is_empty() && named_primitive_value(path) => Ok(ty),
@@ -4134,7 +4200,8 @@ impl TypeChecker {
         }
 
         // Work stack: Tasks to process (processed in LIFO order)
-        let mut work_stack: Vec<InferWork> = vec![InferWork::SynthExpr(current_expr)];
+        let usage = if self.in_call_arg_context { PlaceUse::Operand } else { PlaceUse::Value };
+        let mut work_stack: Vec<InferWork> = vec![InferWork::SynthExpr(current_expr, usage)];
 
         // Value stack: Intermediate type results
         // When a SynthExpr completes, it pushes a type here
@@ -4142,7 +4209,7 @@ impl TypeChecker {
 
         while let Some(work) = work_stack.pop() {
             match work {
-                InferWork::SynthExpr(e) => {
+                InferWork::SynthExpr(e, usage) => {
                     // Unwrap parentheses
                     let mut e = e;
                     while let Paren(inner) = &e.kind {
@@ -4158,8 +4225,10 @@ impl TypeChecker {
 
                         // Variables: lookup and push type
                         Path(path) => {
-                            let ty = self.infer_path_expr(path, e.span)?;
-                            value_stack.push(ty);
+                            let previous = std::mem::replace(&mut self.in_call_arg_context, usage != PlaceUse::Value);
+                            let ty = self.infer_path_expr(path, e.span);
+                            self.in_call_arg_context = previous;
+                            value_stack.push(ty?);
                         }
 
                         // Binary operations: two-phase processing
@@ -4190,7 +4259,7 @@ impl TypeChecker {
                                     span: e.span,
                                 });
                                 // 3. First process left (pushes left_ty to value_stack)
-                                work_stack.push(InferWork::SynthExpr(left));
+                                work_stack.push(InferWork::SynthExpr(left, PlaceUse::Value));
                             }
                         }
 
@@ -4213,9 +4282,10 @@ impl TypeChecker {
                                 work_stack.push(InferWork::UnaryOpResult {
                                     op: *op,
                                     inner_expr: inner,
+                                    usage,
                                     span: e.span,
                                 });
-                                work_stack.push(InferWork::SynthExpr(inner));
+                                work_stack.push(InferWork::SynthExpr(inner, if *op == UnOp::Deref { PlaceUse::Operand } else { PlaceUse::Value }));
                             }
                         }
 
@@ -4223,8 +4293,10 @@ impl TypeChecker {
                         // This is safe because should_use_iterative_inference filters them out
                         // and they won't deeply nest in the same pattern as binary operations
                         _ => {
-                            let result = self.infer_expr(e, InferMode::Synth)?;
-                            value_stack.push(result.ty);
+                            let previous = std::mem::replace(&mut self.in_call_arg_context, usage != PlaceUse::Value);
+                            let result = self.synth_place_use(e, usage);
+                            self.in_call_arg_context = previous;
+                            value_stack.push(result?.ty);
                         }
                     }
                 }
@@ -4292,13 +4364,13 @@ impl TypeChecker {
                                 value_stack.push(left_ty);
                             } else {
                                 // Coercion failed, fall back to synth_expr
-                                work_stack.push(InferWork::SynthExpr(right));
+                                work_stack.push(InferWork::SynthExpr(right, PlaceUse::Value));
                             }
                         } else {
-                            work_stack.push(InferWork::SynthExpr(right));
+                            work_stack.push(InferWork::SynthExpr(right, PlaceUse::Value));
                         }
                     } else {
-                        work_stack.push(InferWork::SynthExpr(right));
+                        work_stack.push(InferWork::SynthExpr(right, PlaceUse::Value));
                     }
                 }
 
@@ -4319,6 +4391,7 @@ impl TypeChecker {
                 InferWork::UnaryOpResult {
                     op,
                     inner_expr,
+                    usage,
                     span,
                 } => {
                     // Operand ready: value_stack has [... inner_ty]
@@ -4331,6 +4404,9 @@ impl TypeChecker {
                     }
 
                     let result_ty = self.compute_unop_result(op, &inner_ty, span)?;
+                    if op == UnOp::Deref && usage == PlaceUse::Value {
+                        self.check_resource_copy(&result_ty, span)?;
+                    }
                     value_stack.push(result_ty);
                 }
 
@@ -4752,7 +4828,7 @@ impl TypeChecker {
 
                 // Field access (including GAT access like Iterator.Item)
                 // Generic Associated Types (GATs): associated types with their own type parameters, enabling lending iterators and monadic abstractions — .1-1.4 - GAT syntax
-                Field { .. } => self.synth_field_use(current_expr, FieldUse::Value),
+                Field { .. } => self.synth_place_use(current_expr, PlaceUse::Value),
 
                 // Index access
                 // Supports Array, Slice, List<T>, Text (returns Char), Map<K,V> (returns V)
@@ -4831,7 +4907,7 @@ impl TypeChecker {
                 Record { .. } => self.infer_expr_record(current_expr),
 
                 // Tuple index
-                TupleIndex { .. } => self.infer_expr_tuple_index(current_expr),
+                TupleIndex { .. } => self.synth_place_use(current_expr, PlaceUse::Value),
 
                 // Await expression: value.await or await value
                 // Syntax grammar: recursive-descent parseable (LL(k), k<=3), reserved keywords only let/fn/is, unified "type X is" definitions — Async/await syntax
@@ -10663,7 +10739,7 @@ impl TypeChecker {
         Ok(InferResult::new(final_type))
     }
 
-    fn infer_expr_tuple_index(&mut self, expr: &Expr) -> Result<InferResult> {
+    fn infer_expr_tuple_index(&mut self, expr: &Expr, usage: PlaceUse) -> Result<InferResult> {
         use ExprKind::*;
         let ExprKind::TupleIndex { expr: tup, index } = &expr.kind else { unreachable!() };
         // =====================================================================
@@ -10708,7 +10784,8 @@ impl TypeChecker {
                     // mark it as moved to prevent whole-tuple use.
                     // Memory model: three-tier references (&T managed, &checked T verified, &unsafe T raw) with CBGR runtime checking — #affine-partial-move
                     // =====================================================================
-                    if !borrowed && let Some((var_name, var_name_str)) = var_name_opt {
+                    if !borrowed && usage == PlaceUse::Value && !self.in_call_arg_context
+                        && let Some((var_name, var_name_str)) = var_name_opt {
                         // Check if this index was already moved
                         if !self.affine_tracker.can_access_index(&var_name_str, idx) {
                             return Err(TypeError::MovedValueUsed {
@@ -10758,7 +10835,8 @@ impl TypeChecker {
                         let element_ty = self.instantiate_declared_type(&type_name, &types[idx], args)?;
 
                         // Track affine element access for tuple structs
-                        if !borrowed && let Some((var_name, var_name_str)) = var_name_opt {
+                        if !borrowed && usage == PlaceUse::Value && !self.in_call_arg_context
+                        && let Some((var_name, var_name_str)) = var_name_opt {
                             if !self.affine_tracker.can_access_index(&var_name_str, idx)
                             {
                                 return Err(TypeError::MovedValueUsed {

@@ -533,7 +533,7 @@ impl InferResult {
 #[derive(Debug)]
 enum InferWork<'a> {
     /// Synthesize type for an expression (push result to value stack)
-    SynthExpr(&'a Expr),
+    SynthExpr(&'a Expr, expr::PlaceUse),
 
     /// Check expression against expected type (no result pushed)
     CheckExpr(&'a Expr, Type),
@@ -556,6 +556,7 @@ enum InferWork<'a> {
     UnaryOpResult {
         op: UnOp,
         inner_expr: &'a Expr,
+        usage: expr::PlaceUse,
         span: Span,
     },
 
