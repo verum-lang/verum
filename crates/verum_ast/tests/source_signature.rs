@@ -865,7 +865,9 @@ fn ordinary_nominal_where_predicates_survive_source_carrier_roundtrip() {
 #[test]
 fn ordinary_nominal_constructors_retain_source_authority() {
     let inner = Type::new(TypeKind::Path(Path::single(ident("T"))), Span::dummy());
-    for body in [TypeDeclBody::Unit, TypeDeclBody::Tuple(List::from_single(inner.clone())), TypeDeclBody::Newtype(inner)] {
+    for body in [TypeDeclBody::Unit, TypeDeclBody::Tuple(List::from_single(inner.clone())),
+        TypeDeclBody::Newtype(inner.clone()), TypeDeclBody::Record(List::from_single(RecordField::new(
+            Visibility::Public, ident("value"), inner, Span::dummy())))] {
         let mut declaration = type_declaration(body);
         declaration.generics.push(ordinary("T"));
         let carried = source_type_declaration(&declaration).unwrap().unwrap();

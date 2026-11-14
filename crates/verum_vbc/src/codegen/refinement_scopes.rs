@@ -238,6 +238,72 @@ impl VbcCodegen {
         )))
     }
 
+    /// Select the field from the same applied owner used by the actual write.
+    /// The retained declaration is authority for aliases, predicates and names;
+    /// rendered type strings and reparsed predicate hints are not evidence.
+    pub(super) fn emit_field_refinement_assert(
+        &mut self,
+        value: Reg,
+        owner: &TypeRef,
+        ordinal: u32,
+    ) -> CodegenResult<()> {
+        let invalid = |message: &str| {
+            CodegenError::new(CodegenErrorKind::InvalidSourceSignature(message.into()))
+        };
+        let (id, arguments) = match owner {
+            TypeRef::Concrete(id) => (*id, &[][..]),
+            TypeRef::Instantiated { base, args } => (*base, args.as_slice()),
+            _ => return Err(invalid("record field write has no nominal owner")),
+        };
+        let descriptor = self
+            .type_by_id(id)
+            .ok_or_else(|| invalid("record field write has no declared owner"))?;
+        if descriptor.kind != crate::types::TypeKind::Record {
+            return Err(invalid("record field write selected a non-record owner"));
+        }
+        let source = descriptor
+            .source_declaration
+            .as_ref()
+            .ok_or_else(|| invalid("record field write requires its source declaration"))?;
+        let slot = descriptor.fields.get(ordinal as usize)
+            .ok_or_else(|| invalid("record field write has no storage slot"))?;
+        let name = self.ctx.strings.get(slot.name.0 as usize)
+            .ok_or_else(|| invalid("record field write has no declared name"))?;
+        let mut scope = self.nominal_refinement_scope(descriptor, arguments)?;
+        let annotation = match &source.body {
+            verum_ast::TypeDeclBody::Record(fields) => {
+                let field = fields.get(ordinal as usize)
+                    .ok_or_else(|| invalid("record field write has no declared slot"))?;
+                if name.as_str() != field.name.name.as_str() {
+                    return Err(invalid("record field source disagrees with its storage slot"));
+                }
+                // Keep the same checked prefix as declaration lowering. A
+                // previous Type-valued field is its exact owner projection,
+                // never a free generic parameter from the current function.
+                for (index, prior) in fields.iter().take(ordinal as usize).enumerate() {
+                    if matches!(prior.ty.kind, verum_ast::ty::TypeKind::Universe {..}) {
+                        scope.substitution.insert(prior.name.name.to_string(), ImplReceiverWitness {
+                            ty: TypeRef::RecordFieldProjection { owner: id, ordinal: index as u32 },
+                            semantic: true,
+                        });
+                    }
+                }
+                field.ty.clone()
+            }
+            verum_ast::TypeDeclBody::Tuple(fields) => fields.get(ordinal as usize)
+                .ok_or_else(|| invalid("tuple constructor has no declared slot"))?.clone(),
+            verum_ast::TypeDeclBody::Newtype(inner) if ordinal == 0 => inner.clone(),
+            _ => return Err(invalid("record field source disagrees with its descriptor")),
+        };
+        let message = format!("refinement violation: field `{}.{name}`",
+            self.type_declaration_identity(descriptor)
+                .ok_or_else(|| invalid("record field owner has no declaration identity"))?);
+        for obligation in self.refinements_in_scope(&annotation, Some(scope))? {
+            self.emit_refinement_assert_on_reg(value, &obligation, &message)?;
+        }
+        Ok(())
+    }
+
     /// Rebind only lexical names and type arguments. Do not reset allocation,
     /// emitted instructions, resource facts or the enclosing function identity.
     pub(super) fn with_refinement_scope<T>(
@@ -246,6 +312,8 @@ impl VbcCodegen {
         lower: impl FnOnce(&mut Self) -> CodegenResult<T>,
     ) -> CodegenResult<T> {
         let restore_names = self.ctx.registers.suspend_named_bindings();
+        let constant_scopes = std::mem::take(&mut self.lexical_constant_scopes);
+        let active = std::mem::replace(&mut self.refinement_scope_active, true);
         let variables = std::mem::take(&mut self.ctx.variable_types);
         let constants = std::mem::take(&mut self.ctx.constant_types);
         let names = std::mem::take(&mut self.ctx.variable_type_names);
@@ -272,6 +340,8 @@ impl VbcCodegen {
         self.ctx.variable_type_names = names;
         self.ctx.variable_types = variables;
         self.ctx.constant_types = constants;
+        self.refinement_scope_active = active;
+        self.lexical_constant_scopes = constant_scopes;
         restore_names(&mut self.ctx.registers);
         result
     }

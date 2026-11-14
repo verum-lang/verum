@@ -51,8 +51,9 @@ pub fn type_declaration_uses_universes(declaration: &crate::TypeDecl) -> Result<
 /// from runtime type slots. Keep every nominal value telescope for exact
 /// application elaboration. Generic bounds and where predicates define the
 /// domain of every nominal application, even when its runtime layout is erased.
-/// Tuple, newtype and unit declarations also own value constructors: their
-/// callable telescope and nominal result cannot be recovered from ABI layout.
+/// Records own their field annotations; tuple, newtype and unit declarations
+/// also own callable constructors. Neither the annotation scope nor the
+/// constructor telescope can be recovered from ABI layout.
 pub fn type_declaration_needs_semantic_carrier(declaration: &crate::TypeDecl) -> Result<bool> {
     let universes = type_declaration_uses_universes(declaration)?;
     let mut scan = SignatureScan::new(false);
@@ -64,7 +65,7 @@ pub fn type_declaration_needs_semantic_carrier(declaration: &crate::TypeDecl) ->
         || scan.uses_callable_contexts
         || scan.uses_refinements
         || matches!(&declaration.body, crate::TypeDeclBody::Protocol(_) | crate::TypeDeclBody::Coinductive(_)
-            | crate::TypeDeclBody::Tuple(_) | crate::TypeDeclBody::Newtype(_) | crate::TypeDeclBody::Unit)
+            | crate::TypeDeclBody::Record(_) | crate::TypeDeclBody::Tuple(_) | crate::TypeDeclBody::Newtype(_) | crate::TypeDeclBody::Unit)
         || declaration.has_application_bounds()
         || declaration.generics.iter().any(|param| matches!(&param.kind,
             GenericParamKind::Type { default: Some(_), .. }

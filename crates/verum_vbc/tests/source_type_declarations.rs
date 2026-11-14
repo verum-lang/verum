@@ -513,7 +513,7 @@ fn reader_refuses_tampered_ast_protocol_method_rosters() {
 
 #[test]
 #[cfg(feature = "codegen")]
-fn source_producer_attaches_declaring_type_and_keeps_ordinary_types_empty() {
+fn source_producer_retains_ordinary_record_fields_in_the_declaring_type() {
     let source = "public type Carrier<A> is { value: Type(1), extra: A }; public type Ordinary is { value: Int };";
     let ast = Parser::new(source).parse_module().unwrap();
     let compiled = verum_vbc::codegen::VbcCodegen::new()
@@ -539,7 +539,8 @@ fn source_producer_attaches_declaring_type_and_keeps_ordinary_types_empty() {
         .iter()
         .find(|ty| compiled.get_string(ty.name) == Some("Ordinary"))
         .unwrap();
-    assert!(ordinary.source_declaration.is_none());
+    assert!(matches!(ordinary.source_declaration.as_ref().map(|source| &source.body),
+        Some(verum_ast::TypeDeclBody::Record(fields)) if fields.len()==1));
     let loaded = deserialize_module(&serialize_module(&compiled).unwrap()).unwrap();
     assert!(
         loaded

@@ -239,3 +239,35 @@ fn promoted_names_preserve_overlapping_module_segments_once() {
     assert!(!graph.has_symbol("beta.owner.owner.Counter.new"));
     assert!(!graph.has_symbol("gamma.owner.gamma.owner.Counter.new"));
 }
+
+
+#[test]
+fn constructor_and_type_annotation_keep_both_dependency_rows() {
+    use verum_vbc::codegen::{CodegenConfig, VbcCodegen};
+    let source = verum_fast_parser::Parser::new(
+        "module pkg.owner;
+         fn allowed(value:Int)->Bool {value>0}
+         type Holder is (Int{allowed(it)}, Int);",
+    ).parse_module().unwrap();
+    let mut module = VbcCodegen::with_config(CodegenConfig::new("pkg.owner"))
+        .compile_module(&source).unwrap();
+    // The graph also accepts an executable row at a constructor's exact name.
+    // Keep the nominal metadata from its real source producer, not a seed.
+    add_function(&mut module, "Holder", Some("pkg.owner"), Some("pkg.owner.finish"));
+    add_function(&mut module, "allowed", Some("pkg.decoy"), None);
+    let graph = SymbolGraph::build(&archive(&[module])).unwrap();
+    let index = graph.baked.function_index("pkg.owner.Holder").unwrap();
+    let dependencies: List<_> = graph.baked.callees(index).collect();
+    assert!(dependencies.contains(&"pkg.owner.finish"), "{dependencies:?}");
+    assert!(dependencies.contains(&"pkg.owner.allowed"), "{dependencies:?}");
+    assert!(!dependencies.contains(&"pkg.decoy.allowed"), "{dependencies:?}");
+}
+
+#[test]
+fn graph_without_declaration_dependencies_is_not_reused() {
+    let archive = sibling_archive(false);
+    let graph = SymbolGraph::scan_and_encode(&archive).unwrap();
+    let mut bytes = graph.as_bytes().to_owned();
+    bytes[4..8].copy_from_slice(&2u32.to_le_bytes());
+    assert!(crate::symbol_graph_baked::BakedSymbolGraph::from_bytes(Cow::Owned(bytes)).is_none());
+}

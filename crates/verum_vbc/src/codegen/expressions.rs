@@ -1405,9 +1405,13 @@ impl VbcCodegen {
                 let owner = if self.ctx.expected_value_span == Some(expr.span) {
                     self.ctx.expected_value_type.clone()
                 } else if matches!(demand, ResultDemand::CallableReturn) {
-                    self.ctx.function_return_type_name.as_deref()
-                        .and_then(|name| self.semantic_type_in_current_scope(name))
+                    // The selected signature already retains every type/value
+                    // slot; a display name cannot re-create that application.
+                    self.ctx.function_return_declaration.clone()
                 } else { None };
+                let owner = self.constructor_declaration(expr, owner.as_ref(), None, 0)
+                    .or(owner)
+                    .or_else(|| base.as_deref().and_then(|base| self.projection_operand_declaration(base)));
                 self.compile_record(path, fields, base.as_deref(), owner.as_ref())
             }
 
@@ -4093,7 +4097,7 @@ impl VbcCodegen {
 
             ExprKind::Field { expr: base, field } => {
                 let (base_reg, owner, ordinal) = self.compile_field_storage(base, &field.name, true)?;
-                self.emit_field_refinement_assert(value_reg, &owner, &field.name)?;
+                self.emit_field_refinement_assert(value_reg, &owner, ordinal)?;
                 self.emit_field_write(base_reg, ordinal, value_reg, false, &field.name);
 
                 self.ctx.free_temp(base_reg);
@@ -4588,7 +4592,6 @@ impl VbcCodegen {
             ExprKind::Field { expr: obj, field } => {
                 let field_name = &field.name;
                 let (obj_reg, owner, field_idx) = self.compile_field_storage(obj, field_name, true)?;
-                let obj_type = Some(owner);
                 let idx_guessed = false;
                 let current_val = self.ctx.alloc_temp();
                 {
@@ -4601,45 +4604,16 @@ impl VbcCodegen {
                     .compile_expr(value)?
                     .or_internal("compound assign value has no value")?;
 
-                // FLOAT-FIELD-COMPOUND-1: `obj.f += v` on a FLOAT field
-                // unconditionally emitted BinaryI — an integer add over
-                // NaN-boxed float bits — so `p.a += 0.25` produced 0/
-                // garbage for every Float record field (locals were
-                // fine; the field arm never had a float branch). Detect
-                // floatness from the field's DECLARED type (the carrier
-                // string classifies refined `Float{...}` too via
-                // strip_refinement) and route to BinaryF. Exposed by the
-                // REFINE-FIELD-DYNAMIC-BYPASS-1 runtime assert catching
-                // the garbage value in the in-range compound test.
-                let field_is_float = obj_type
-                    .as_deref()
-                    .and_then(|bt| {
-                        let key = Self::strip_generic_args(Self::strip_wrapper_type(bt));
-                        let resolved = self.resolve_record_type_key(key).ok()?;
-                        let key = resolved.as_deref().unwrap_or(key);
-                        self.type_field_type_names
-                            .get(&(key.to_string(), field_name.to_string()))
-                    })
-                    .map(|ftn| {
-                        verum_common::well_known_types::type_names::is_float_type(ftn)
-                    })
-                    .unwrap_or(false);
-
-                // TEXT-ADDASSIGN-CONCAT-1 (field leg): `obj.f += t` on a
-                // Text field concatenates — detect from the field's
-                // DECLARED type, the same carrier the float branch uses.
-                let field_is_text = matches!(op, BinOp::AddAssign)
-                    && obj_type
-                        .as_deref()
-                        .and_then(|bt| {
-                            let key = Self::strip_generic_args(Self::strip_wrapper_type(bt));
-                            let resolved = self.resolve_record_type_key(key).ok()?;
-                            let key = resolved.as_deref().unwrap_or(key);
-                            self.type_field_type_names
-                                .get(&(key.to_string(), field_name.to_string()))
-                        })
-                        .map(|ftn| Self::type_name_is_text(Some(ftn)))
-                        .unwrap_or(false);
+                // Arithmetic and its postcondition inspect the same selected
+                // field declaration, including aliases and owner arguments.
+                let carrier = self.projected_field_declaration(owner.clone(), field_name)
+                    .and_then(|field| self.expand_declared_alias(field))
+                    .ok_or_else(|| CodegenError::with_span(CodegenErrorKind::InvalidSourceSignature(
+                        "compound field assignment has no declared carrier".into()), target.span))?;
+                let scalar = carrier.base_type_id();
+                let field_is_float = scalar.is_some_and(crate::types::TypeId::is_float);
+                let field_is_text = matches!(op, BinOp::AddAssign) && scalar.is_some_and(|id|
+                    self.declared_runtime_carrier(id) == Some(WKT::Text));
 
                 // Perform operation
                 let result = self.ctx.alloc_temp();
@@ -4690,10 +4664,7 @@ impl VbcCodegen {
                 // REFINE-FIELD-DYNAMIC-BYPASS-1: the post-op value is
                 // what lands in the refined field — assert it before
                 // the write-back (T1-F parity for compound assignment).
-                if let Some(bt) = obj_type.as_deref() {
-                    let field_name_owned = field.name.to_string();
-                    self.emit_field_refinement_assert(result, bt, &field_name_owned)?;
-                }
+                self.emit_field_refinement_assert(result, &owner, field_idx)?;
 
                 // Store back to field
                 {
@@ -6412,6 +6383,18 @@ impl VbcCodegen {
                             {
                                 return self.compile_indirect_call(func, args);
                             }
+                            if self.refinement_scope_active {
+                                let owner = self.ctx.current_source_module.as_deref()
+                                    .or_internal("refinement call has no declared lexical owner")?;
+                                let selected = self.resolve_source_value_export(
+                                    &format!("{owner}.{name}"), owner,
+                                ).map_err(|message| CodegenError::with_span(
+                                    CodegenErrorKind::InvalidSourceSignature(message), func.span))?
+                                    .ok_or_else(|| CodegenError::with_span(
+                                        CodegenErrorKind::InvalidSourceSignature(format!(
+                                            "source-scoped call `{owner}.{name}` has no callable declaration")), func.span))?;
+                                selected.0
+                            } else
                             // SELF-NEWTYPE-CTOR-1 (codegen leg):
                             // `Self(v)` inside an `implement <Type>`
                             // block is the impl type's constructor call
@@ -7972,7 +7955,7 @@ impl VbcCodegen {
             // slot — same shape `compile_record` produces for the
             // literal `Type { f1: a, f2: b }` form, here applied to
             // the call form `Type(a, b)`.
-            return self.compile_record_call_form(&func_name, &func_info, args);
+            return self.compile_record_call_form(&func_name, &func_info, args, None);
         }
 
         // The selected declaration governs the native ABI for every stage of
@@ -9108,12 +9091,20 @@ impl VbcCodegen {
         }
         self.prepare_nominal_constructor(function)?;
         let inferred = self.selected_argument_witnesses(function, args.len(), args.iter(), None).map(CallInstantiation::known);
-        let _witnesses = self.apply_explicit_generic_args(Some(function), explicit, inferred)?;
+        let witnesses = self.apply_explicit_generic_args(Some(function), explicit, inferred)?;
         if function.is_transparent_wrapper && args.len() == 1 {
             return self.compile_expr(&args[0]);
         }
         let name = function.return_type_name.as_deref().ok_or_else(|| CodegenError::internal("constructor has no declared name"))?;
-        self.compile_record_call_form(name, function, args)
+        let nominal = function.nominal_constructor_type().or_internal("constructor lost its nominal owner")?;
+        let descriptor = self.type_by_id(nominal).or_internal("constructor lost its nominal descriptor")?;
+        let owner = if descriptor.type_params.is_empty() {
+            Some(crate::types::TypeRef::Concrete(nominal))
+        } else {
+            witnesses.filter(|arguments| arguments.len() == descriptor.type_params.len())
+                .map(|args| crate::types::TypeRef::Instantiated { base: nominal, args })
+        };
+        self.compile_record_call_form(name, function, args, owner.as_ref())
     }
 
     /// Apply source arguments to their declaration-owned slots after inference.
@@ -26379,6 +26370,10 @@ impl VbcCodegen {
                     })
             });
 
+            let applied_owner = applied_owner.ok_or_else(|| CodegenError::new(
+                CodegenErrorKind::InvalidSourceSignature(
+                    "record construction requires its complete declared owner application".into())))?;
+
             for field in fields.iter() {
                 // Root fix for Issue #1 (silent impl-method SKIP with
                 // "undefined variable: <Variant>"):
@@ -26388,11 +26383,9 @@ impl VbcCodegen {
                 // `VfsErrorKind.Closed`) can be disambiguated against
                 // other types exporting the same variant.
                 let saved_field_type = self.push_field_type_context(&type_name, &field.name.name);
-                if let Some(owner) = applied_owner.as_ref() {
-                    self.ctx.expected_value_type = self.projected_field_declaration(owner.clone(), &field.name.name)
-                        .filter(|ty| self.declared_type_in_scope(ty));
-                    self.ctx.expected_value_span = field.value.as_ref().map(|expr| Self::normalized_place(expr).span);
-                }
+                self.ctx.expected_value_type = self.projected_field_declaration(applied_owner.clone(), &field.name.name)
+                    .filter(|ty| self.declared_type_in_scope(ty));
+                self.ctx.expected_value_span = field.value.as_ref().map(|expr| Self::normalized_place(expr).span);
 
                 let copy_start = self.ctx.instructions.len();
                 let value_reg = if let Some(ref v) = field.value {
@@ -26491,9 +26484,14 @@ impl VbcCodegen {
                 // the SMT E500 gate only rejects LITERAL violations; a
                 // dynamic value (NaN through a fn return) reached the
                 // field unchecked (T1-F parity for fields).
-                self.emit_field_refinement_assert(value_reg, &type_name, &field.name.name)?;
-
-                let field_idx = self.resolve_field_index(Some(&type_name), &field.name.name);
+                let field_idx = applied_owner.base_type_id().and_then(|id| self.type_by_id(id))
+                    .and_then(|declaration| declaration.fields.iter().position(|declared|
+                        self.ctx.strings.get(declared.name.0 as usize).map(|name| name.as_str())
+                            == Some(field.name.name.as_str())))
+                    .and_then(|index| u32::try_from(index).ok())
+                    .ok_or_else(|| CodegenError::with_span(CodegenErrorKind::InvalidSourceSignature(
+                        "record construction selected an undeclared field".into()), field.name.span))?;
+                self.emit_field_refinement_assert(value_reg, &applied_owner, field_idx)?;
 
                 // A FIELD INITIALIZED FROM A PLACE TAKES A COPY (T0832).
                 //
@@ -26583,6 +26581,7 @@ impl VbcCodegen {
         type_name: &str,
         func_info: &crate::codegen::context::FunctionInfo,
         args: &verum_common::List<Expr>,
+        application: Option<&crate::types::TypeRef>,
     ) -> CodegenResult<Option<Reg>> {
         let result = self.ctx.alloc_temp();
 
@@ -26597,6 +26596,10 @@ impl VbcCodegen {
         let descriptor = self.type_by_id(nominal).or_internal("constructor target has no descriptor")?;
         let type_id = nominal.0;
         let alloc_slots = descriptor.fields.len() as u32;
+        let owner = application.filter(|owner| owner.base_type_id() == Some(nominal)).cloned()
+            .or_else(|| descriptor.type_params.is_empty().then_some(crate::types::TypeRef::Concrete(nominal)))
+            .ok_or_else(|| CodegenError::new(CodegenErrorKind::InvalidSourceSignature(
+                "record constructor requires its complete declared owner application".into())))?;
 
         self.ctx.emit(Instruction::New {
             dst: result,
@@ -26615,19 +26618,13 @@ impl VbcCodegen {
                 .compile_expr(arg_expr)?
                 .or_internal("record ctor arg has no value")?;
 
-            // REFINE-FIELD-DYNAMIC-BYPASS-1: assert the refined-field
-            // predicate on the incoming value once, before either
-            // SetF arm below (T1-F parity for ctor-form construction).
-            if let Some(fname) = func_info.param_names.get(idx) {
-                let fname = fname.clone();
-                self.emit_field_refinement_assert(value_reg, type_name, &fname)?;
-            }
-
             let field_idx = func_info
                 .param_names
                 .get(idx)
                 .map(|name| self.resolve_field_index(Some(type_name), name))
                 .unwrap_or(idx as u32);
+
+            self.emit_field_refinement_assert(value_reg, &owner, field_idx)?;
 
             // Clone for value semantics — same exception as
             // `compile_record` for raw pointers (the pointer's

@@ -375,7 +375,7 @@ impl VbcCodegen {
 
     pub(super) fn compile_field_storage(
         &mut self, base: &Expr, field: &str, mutable: bool,
-    ) -> CodegenResult<(Reg, String, u32)> {
+    ) -> CodegenResult<(Reg, crate::types::TypeRef, u32)> {
         let refusal = || CodegenError::with_span(CodegenErrorKind::TypeInference(format!(
             "cannot access field `{field}`: no declared {} projection",
             if mutable { "mutable" } else { "read" },
@@ -383,10 +383,9 @@ impl VbcCodegen {
         if mutable && !self.mutable_projection_place(base, 0) { return Err(refusal()); }
         let owner = self.projection_operand_declaration(base).ok_or_else(refusal)?;
         let projection = self.field_projection(owner, field, mutable).ok_or_else(refusal)?;
-        let name = self.declaration_type_name(&projection.owner, 0).ok_or_else(refusal)?;
         let value = self.compile_projection_base(base, mutable)?;
         let value = self.emit_receiver_adjustments(value, projection.adjustments, true);
-        Ok((value, name, projection.ordinal))
+        Ok((value, projection.owner, projection.ordinal))
     }
 
     fn compile_projection_base(&mut self, base: &Expr, mutable: bool) -> CodegenResult<Reg> {

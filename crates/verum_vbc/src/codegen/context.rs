@@ -3872,10 +3872,18 @@ impl CodegenContext {
     /// archive aliases and builtins must not acquire root declaration ownership.
     pub(super) fn register_source_function(&mut self, name: &str, info: &FunctionInfo) {
         let scope = self.source_function_scope().to_owned();
+        self.register_function_declaration(&scope, name, info);
+    }
+
+    /// An imported descriptor retains the same declaration scope as its source
+    /// producer. This does not publish a bare binding in the consumer.
+    pub(super) fn register_function_declaration(
+        &mut self, scope: &str, name: &str, info: &FunctionInfo,
+    ) {
         self.scoped_functions
-            .insert((scope.clone(), name.to_owned()), info.clone());
+            .insert((scope.to_owned(), name.to_owned()), info.clone());
         self.scoped_functions
-            .insert((scope, format!("{name}#{}", info.param_count)), info.clone());
+            .insert((scope.to_owned(), format!("{name}#{}", info.param_count)), info.clone());
     }
 
     /// A scoped row proves identity, not freshness of imported/inferred types.

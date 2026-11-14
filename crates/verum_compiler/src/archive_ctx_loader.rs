@@ -1590,7 +1590,9 @@ impl SymbolGraph {
                 .get(idx as usize)
                 .map(|e| e.name.as_str())
                 .unwrap_or("");
-            for ModuleFunction { name, origin_module, callees } in view.functions {
+            for ModuleFunction { name, origin_module, callees } in
+                view.functions.into_iter().chain(view.declarations)
+            {
                 // **Spelling completeness** (T0277 leg B part 2): a
                 // caller's edge records the callee under the spelling
                 // THE CALLER KNEW — commonly the fully-ROOTED canonical
@@ -2105,6 +2107,7 @@ struct ModuleFunction {
 
 struct ModuleSymbolView {
     functions: Vec<ModuleFunction>,
+    declarations: List<ModuleFunction>,
     qualified_aliases: Vec<(String, String)>,
 }
 
@@ -2275,7 +2278,125 @@ fn scan_module_symbols(module: &VbcModule) -> ModuleSymbolView {
         (alias.contains('.') && target.contains('.') && alias != target)
             .then(|| (alias.to_owned(), target.to_owned()))
     }).collect();
-    ModuleSymbolView { functions, qualified_aliases }
+    let declarations = declaration_symbol_edges(module);
+    // A tuple/newtype constructor and its type have the same source identity.
+    // Its body and annotation edges must coexist before the graph's existing
+    // first-definition rule chooses a row. No cross-owner leaf merging occurs.
+    let mut callable_rows = Map::<Text, usize>::new();
+    for (index, function) in functions.iter().enumerate() {
+        let owner = function.origin_module.as_deref().unwrap_or(&module.name);
+        callable_rows.entry(merge_module_and_simple_name(owner, &function.name).into())
+            .or_insert(index);
+    }
+    for declaration in &declarations {
+        if let Some(index) = callable_rows.get(&Text::from(declaration.name.as_str())) {
+            let calls = &mut functions[*index].callees;
+            calls.extend(declaration.callees.iter().cloned());
+            calls.sort();
+            calls.dedup();
+        }
+    }
+    ModuleSymbolView { functions, declarations, qualified_aliases }
+}
+
+/// Source annotations can execute predicates when another module constructs or
+/// writes a value. Those are declaration edges in the existing symbol graph;
+/// they are not calls in any library bytecode body yet.
+fn declaration_symbol_edges(module: &VbcModule) -> List<ModuleFunction> {
+    use verum_ast::Visitor;
+    #[derive(Default)]
+    struct Paths { names: verum_common::Set<Text> }
+    impl Visitor for Paths {
+        fn visit_path(&mut self, path: &verum_ast::Path) {
+            self.names.insert(path.to_string().replace("::", ".").into());
+        }
+        fn visit_expr(&mut self, expression: &verum_ast::Expr) {
+            // Qualified calls parse as a field chain plus a method name.
+            // Preserve the whole written path before applying lexical scope.
+            match &expression.kind {
+                verum_ast::ExprKind::MethodCall { receiver, method, .. } => {
+                    if let Some(path) = dotted_expr_path(receiver) {
+                        self.names.insert(format!("{path}.{}", method.name).into());
+                    }
+                }
+                verum_ast::ExprKind::Field { .. } => {
+                    if let Some(path) = dotted_expr_path(expression) {
+                        self.names.insert(path.into());
+                    }
+                }
+                _ => {}
+            }
+            verum_ast::visitor::walk_expr(self, expression);
+        }
+    }
+    let mut namespaces = verum_ast::checked_const::ModuleOwners::default();
+    namespaces.declare(&module.name);
+    for owner in module.types.iter().filter_map(|ty| ty.origin_module)
+        .chain(module.functions.iter().filter_map(|function| function.origin_module))
+        .filter_map(|owner| module.strings.get(owner))
+        .chain(module.declaration_type_bindings.keys().map(Text::as_str))
+    {
+        namespaces.declare(owner);
+    }
+    let identities: Map<TypeId, Text> = module.types.iter().filter_map(|ty| {
+        let name = module.strings.get(ty.name)?;
+        let owner = ty.origin_module.and_then(|id| module.strings.get(id))
+            .unwrap_or(&module.name);
+        Some((ty.id, merge_module_and_simple_name(owner, name).into()))
+    }).collect();
+    module.types.iter().filter_map(|ty| {
+        let name = identities.get(&ty.id)?.clone();
+        let owner = ty.origin_module.and_then(|id| module.strings.get(id))
+            .unwrap_or(&module.name);
+        let mut edges = verum_common::Set::<Text>::new();
+        let mut pending: List<&TypeRef> = ty.fields.iter().filter_map(|field| field.declaration_type.as_ref())
+            .chain(ty.alias_target.iter()).collect();
+        for variant in &ty.variants {
+            pending.extend(variant.fields.iter().filter_map(|field| field.declaration_type.as_ref()));
+        }
+        while let Some(ty) = pending.pop() {
+            let id = match ty {
+                TypeRef::Concrete(id) | TypeRef::Instantiated {base:id,..}
+                | TypeRef::RecordFieldProjection {owner:id,..} => Some(id),
+                _ => None,
+            };
+            if let Some(edge) = id.and_then(|id| identities.get(id)) { edges.insert(edge.clone()); }
+            ty.for_each_child(|child| pending.push(child));
+        }
+        if let Some(source) = &ty.source_declaration {
+            // The wire reader validates this bounded AST before graph scanning.
+            let mut paths = Paths::default();
+            paths.visit_type_decl(source);
+            for path in paths.names {
+                let (head, tail) = path.split_once('.').unwrap_or((&path, ""));
+                let local = merge_module_and_simple_name(owner, &path);
+                let edge = if let Some((_, target)) = module.mount_alias_target(&local) {
+                    target.into()
+                } else if let Some(Some(target)) = module.declaration_type_bindings.get(&Text::from(owner))
+                    .and_then(|bindings| bindings.get(&Text::from(head)))
+                {
+                    if tail.is_empty() { target.clone() } else { format!("{target}.{tail}").into() }
+                } else if let Some(selected) = namespaces.member(
+                    &path, owner, owner.split('.').next().unwrap_or_default(),
+                ) {
+                    selected
+                } else if head == "super" {
+                    // Relative expression paths share ordinary module resolution.
+                    // An invalid path remains unresolved; it never selects a leaf.
+                    verum_modules::ModulePath::resolve_import(
+                        &path, &verum_modules::ModulePath::from_str(owner),
+                    ).map(|selected| selected.to_string().into()).unwrap_or_else(|_| path.clone())
+                } else {
+                    local.into()
+                };
+                edges.insert(edge);
+            }
+        }
+        edges.remove(&name);
+        let mut callees: List<_> = edges.into_iter().map(Text::into_string).collect();
+        callees.sort();
+        Some(ModuleFunction {name:name.into_string(), origin_module:None, callees:callees.into()})
+    }).collect()
 }
 
 /// Immutable archive ownership. The concrete carriers cannot switch the

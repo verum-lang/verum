@@ -43,7 +43,7 @@ fn attached_declarations() -> VbcModule {
 
 #[test]
 fn implementation_only_carrier_keeps_its_scope_through_bootstrap_and_wire() {
-    let ast = Parser::new("module model; mount hidden.Token as Local; public type Packet<T> is { public body:T }; implement<T> Packet<T> { public fn inspect(&self)->Int { 1 } }")
+    let ast = Parser::new("module model; mount hidden.Token as Local; public type Packet<T> is [T;1]; implement<T> Packet<T> { public fn inspect(&self)->Int { 1 } }")
         .parse_module().unwrap();
     let original = VbcCodegen::with_config(CodegenConfig::new("model")).compile_module(&ast).unwrap();
     let packet = original.types.iter().find(|ty| !ty.source_inherent_implementations.is_empty()).unwrap();
