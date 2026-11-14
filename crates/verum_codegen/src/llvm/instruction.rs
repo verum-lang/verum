@@ -11099,6 +11099,12 @@ pub(super) fn prepare_field_reference_slots(
             Instruction::Mov { dst, src } => {
                 moves.entry(src.0).or_default().push(dst.0);
             }
+            Instruction::CbgrExtended { sub_op, operands }
+                if *sub_op == verum_vbc::instruction::CbgrSubOpcode::CapAttenuate as u8
+                    && operands.len() >= 3 =>
+            {
+                moves.entry(op_reg(operands, 1)).or_default().push(op_reg(operands, 0));
+            }
             _ => {}
         }
     }
@@ -26807,15 +26813,22 @@ fn lower_cbgr_extended<'ctx>(
             Ok(())
         }
         0x10 => {
-            // CapAttenuate — create ref with reduced capabilities
+            // CapAttenuate preserves the referenced place. Native carrier facts
+            // must follow that place even when the result reuses its register.
             if operands.len() < 3 {
                 return Ok(());
             }
             let dst = op_reg(operands, 0);
-            let src = ctx.get_register(op_reg(operands, 1))?;
-            // In AOT mode, capabilities are not enforced at runtime (compile-time only)
-            // Pass through the reference unchanged
-            ctx.set_register(dst, src);
+            let src = op_reg(operands, 1);
+            let value = ctx.get_register(src)?;
+            if dst != src {
+                let address = ctx.field_reference_address(src)?;
+                ctx.set_register(dst, value);
+                propagate_value_type_facts(ctx, Reg(src), Reg(dst));
+                if let Some(address) = address {
+                    ctx.set_field_reference_address(dst, address)?;
+                }
+            }
             Ok(())
         }
         0x11 | 0x34 => {

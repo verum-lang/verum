@@ -359,3 +359,123 @@ fn narrow_native_references_keep_signedness_and_width() {
         assert!(output.contains(instruction), "missing {instruction} in {output}");
     }
 }
+
+fn attenuate_reference(dst: u16, src: u16) -> verum_vbc::Instruction {
+    use verum_vbc::{Instruction, Reg, instruction::CbgrSubOpcode, value::Capabilities};
+    let mut operands = verum_common::List::<u8>::new().into();
+    verum_vbc::encoding::encode_reg(Reg(dst), &mut operands);
+    verum_vbc::encoding::encode_reg(Reg(src), &mut operands);
+    operands.extend_from_slice(&Capabilities::READ_ONLY.0.to_le_bytes());
+    Instruction::CbgrExtended { sub_op: CbgrSubOpcode::CapAttenuate as u8, operands }
+}
+
+#[test]
+fn attenuation_keeps_the_field_place_through_aliases_and_clears_replaced_places() {
+    use verum_codegen::llvm::{context::FunctionContext, instruction::lower_instruction};
+    use verum_llvm::{OptimizationLevel, targets::{InitializationConfig, Target}};
+    use verum_vbc::{Instruction, Reg, instruction::CbgrSubOpcode};
+    Target::initialize_native(&InitializationConfig::default()).unwrap();
+    // Keep the field reference, replace it with an ordinary reference, or
+    // replace its copied destination with a scalar.
+    for overwrite in [None, Some(Reg(0)), Some(Reg(2))] {
+        let context = Context::create();
+        let module = context.create_module("attenuated_place");
+        let word = context.i64_type();
+        let function = module.add_function("probe", word.fn_type(&[word.into(), word.into()], false), None);
+        let mut ctx = FunctionContext::new(&context, &module, function, "probe");
+        ctx.builder().position_at_end(context.append_basic_block(function, "entry"));
+        ctx.prepare_field_reference_slots([0, 1, 2]).unwrap();
+        ctx.set_register(0, word.const_int(73, false).into());
+        ctx.set_field_reference_address(0, function.get_nth_param(0).unwrap().into_int_value()).unwrap();
+        ctx.mark_ref_param_register(0);
+        ctx.set_sticky_type_hint(0, "Int".into());
+        // Reusing dst must replace this different place and its old type facts.
+        ctx.set_register(1, word.const_int(19, false).into());
+        ctx.set_field_reference_address(1, function.get_nth_param(1).unwrap().into_int_value()).unwrap();
+        ctx.set_sticky_type_hint(1, "Bool".into());
+        if overwrite == Some(Reg(0)) {
+            // A native reference parameter already contains the cell address;
+            // it must not inherit the previous field's separate address slot.
+            ctx.set_register(0, function.get_nth_param(1).unwrap());
+            ctx.mark_ref_param_register(0);
+        }
+        lower_instruction(&mut ctx, &attenuate_reference(0, 0)).unwrap();
+        lower_instruction(&mut ctx, &attenuate_reference(1, 0)).unwrap();
+        assert_eq!(ctx.sticky_type_hint(1), Some("Int"));
+        assert!(ctx.is_ref_param_register(1));
+        lower_instruction(&mut ctx, &Instruction::Mov { dst: Reg(2), src: Reg(1) }).unwrap();
+        let result = if overwrite == Some(Reg(2)) {
+            lower_instruction(&mut ctx, &Instruction::LoadI { dst: Reg(2), value: 123 }).unwrap();
+            assert!(!ctx.is_ref_param_register(2));
+            // Inspect the address sidecar directly. A scalar is not an operand
+            // for a reference conversion, and must retain no former cell.
+            ctx.field_reference_address(2).unwrap().unwrap().into()
+        } else {
+            lower_instruction(&mut ctx, &Instruction::CbgrExtended {
+                sub_op: CbgrSubOpcode::ToRawPtr as u8,
+                operands: [3, 2].into(),
+            }).unwrap();
+            ctx.get_register(3).unwrap()
+        };
+        ctx.builder().build_return(Some(&result)).unwrap();
+        module.verify().unwrap();
+        let engine = module.create_jit_execution_engine(OptimizationLevel::None).unwrap();
+        // SAFETY: the generated function has exactly this two-word input/result ABI.
+        let probe = unsafe { engine.get_function::<unsafe extern "C" fn(u64, u64) -> u64>("probe") }.unwrap();
+        let original = 73_i64;
+        let replaced = 19_i64;
+        let original_address = (&original as *const i64) as u64;
+        let replaced_address = (&replaced as *const i64) as u64;
+        // SAFETY: these live addresses are only forwarded, never dereferenced by the generated function.
+        let result = unsafe { probe.call(original_address, replaced_address) };
+        let expected = match overwrite {
+            Some(Reg(0)) => replaced_address,
+            Some(Reg(2)) => 0,
+            None => original_address,
+            _ => unreachable!(),
+        };
+        assert_eq!(result, expected);
+        assert_eq!((original, replaced), (73, 19));
+    }
+}
+
+#[test]
+fn distinct_attenuation_destinations_receive_field_provenance_slots() {
+    use verum_vbc::{Instruction, Reg, instruction::CbgrSubOpcode};
+    for wide in [false, true] {
+        let ast = Parser::new(r#"
+            type Cell is { padding:Int, value:Int };
+            fn inspect(value:&Int)->Int { *value }
+            fn probe(cell:&Cell, unused:Bool)->Int { inspect(&cell.value) }
+        "#).parse_module().unwrap();
+        let mut vbc = VbcCodegen::new().compile_module(&ast).unwrap();
+        let id = vbc.find_function_by_name("probe").unwrap();
+        let function = vbc.functions.iter_mut().find(|function| function.id == id).unwrap();
+        let destination = if wide { function.register_count.max(130) } else { function.register_count };
+        function.register_count = destination + 1;
+        let body = function.instructions.as_mut().unwrap();
+        let index = body.iter().position(|instruction| matches!(instruction,
+            Instruction::CbgrExtended { sub_op, .. } if *sub_op == CbgrSubOpcode::CapAttenuate as u8
+        )).unwrap();
+        let Instruction::CbgrExtended { operands, .. } = &body[index] else { unreachable!() };
+        let mut offset = 0;
+        let original_destination = verum_vbc::encoding::decode_reg(operands, &mut offset).unwrap();
+        let source = verum_vbc::encoding::decode_reg(operands, &mut offset).unwrap();
+        assert_eq!(original_destination, source);
+        // This low-level control gives the attenuation a distinct result register
+        // and forwards it back. The original source currently uses self-aliasing.
+        body[index] = attenuate_reference(destination, source.0);
+        body.insert(index + 1, Instruction::Mov { dst: original_destination, src: Reg(destination) });
+        let context = Context::create();
+        let mut lower = VbcToLlvmLowering::new(&context,
+            LoweringConfig::debug("distinct_attenuation")
+                .with_default_tier(RefTier::Tier1).with_debug_info(false));
+        lower.lower_module(&vbc).unwrap();
+        let probe = lower.module().get_function("probe").unwrap();
+        assert!(probe.verify(true));
+        use verum_llvm::values::AnyValue;
+        let output = probe.print_to_string().to_string();
+        assert!(output.contains(&format!("%r{destination}_field_addr = alloca i64")), "{output}");
+        assert!(output.contains("refield_arg_addr"), "{output}");
+    }
+}
