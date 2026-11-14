@@ -82,8 +82,8 @@ mount super.nn.{
 // one source of truth, not a stripped parallel copy. Downstream code keeps
 // `mount core.math.simple.Module` working, but it resolves to core.math.nn.Module.
 public mount super.nn.Module;
-mount super.autodiff.{grad, value_and_grad, with_no_grad};
-mount super.gpu.{default_device, has_gpu};
+mount super.autodiff.{GradientTape, grad, value_and_grad, with_no_grad};
+mount super.gpu.{ComputeDevice, default_device, has_gpu};
 mount core.random.deterministic.{RandomKey};
 // The DI context is mounted here rather than arriving ambiently: the
 // prelude published `context.standard`'s twelve names into every file
