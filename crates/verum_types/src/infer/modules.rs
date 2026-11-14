@@ -11718,10 +11718,7 @@ impl TypeChecker {
         let final_return_type = self.unifier.apply(&final_return_type);
 
         // Typed call targets contribute bounds; absent finite evidence stays unknown.
-        let body_bound = match &func.body {
-            Some(body) => self.callable_function_body_bound(body),
-            None => crate::computational_properties::PropertyRequirement::declared_function(func.is_pure, func.is_meta),
-        };
+        let body_bound = self.callable_declaration_bound(func);
         let inferred_bound = Self::callable_bound_with_marker(body_bound.clone(), func.is_async);
         let inferred_properties = inferred_bound.finite_footprint().cloned();
 

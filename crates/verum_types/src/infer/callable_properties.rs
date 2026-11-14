@@ -235,6 +235,25 @@ impl TypeChecker {
         calls.bound
     }
 
+    /// A callable executes more than its explicit body. Defaults and runtime
+    /// contracts retain the same selected-call evidence; an unchecked call in
+    /// those expressions remains unknown instead of becoming a pure wrapper.
+    pub(super) fn callable_declaration_bound(&mut self, function: &FunctionDecl) -> PropertyRequirement {
+        let mut bound = match &function.body {
+            Some(body) => self.callable_function_body_bound(body),
+            None => PropertyRequirement::declared_function(function.is_pure, function.is_meta),
+        };
+        for parameter in &function.params {
+            if let verum_ast::FunctionParamKind::Regular { default_value: Some(value), .. } = &parameter.kind {
+                bound = bound.join(&self.callable_body_bound(value));
+            }
+        }
+        for expression in function.requires.iter().chain(&function.ensures) {
+            bound = bound.join(&self.callable_body_bound(expression));
+        }
+        bound
+    }
+
     pub(super) fn callable_function_body_bound(
         &mut self,
         body: &verum_ast::FunctionBody,
