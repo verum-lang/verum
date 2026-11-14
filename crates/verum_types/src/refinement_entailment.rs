@@ -84,6 +84,19 @@ impl BoundImplication {
     }
 }
 
+/// Predicate identity for an already established pair of carrier types.
+/// Equal source syntax keeps its existing identity. Otherwise both checked
+/// implications are required, preserving provenance, binders and literal sorts.
+pub(crate) fn predicates_equivalent(
+    left_base: &Type, left: &RefinementPredicate,
+    right_base: &Type, right: &RefinementPredicate,
+) -> bool {
+    left == right
+        || (left.provenance == right.provenance
+            && entails(left_base, left, right_base, right)
+            && entails(right_base, right, left_base, left))
+}
+
 pub fn entails(
     source_base: &Type,
     source: &RefinementPredicate,

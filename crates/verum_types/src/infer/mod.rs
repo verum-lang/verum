@@ -982,11 +982,6 @@ pub struct TypeChecker {
     /// become immediately visible to all TypeChecker instances sharing this map.
     /// Order-independent declarations: types and functions can be referenced before their definition within a module
     inherent_methods: Shared<parking_lot::RwLock<Map<Text, Map<Text, crate::context::TypeScheme>>>>,
-    /// For each (type_name, method_name), stores the list of allowed impl self-type arg patterns.
-    /// Used to filter method availability based on receiver type specialization.
-    /// E.g., write() on Register has patterns [[Var, WriteOnly], [Var, ReadWrite]]
-    /// meaning it's only available when the 2nd type arg is WriteOnly or ReadWrite.
-    method_impl_patterns: Shared<parking_lot::RwLock<Map<Text, Map<Text, List<List<Type>>>>>>,
     /// Variance checker for generic type parameters.
     /// Validates that declared variance (+T, -T) matches actual usage in type bodies.
     /// Ensures type system soundness for covariant/contravariant generic parameters.

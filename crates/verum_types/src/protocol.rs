@@ -6613,6 +6613,11 @@ impl ProtocolChecker {
                     Some(Type::canonical_primitive(name.as_str())) == primitive.primitive_name()
                 })
             }
+            (
+                Type::Refined { base: left, predicate: lp },
+                Type::Refined { base: right, predicate: rp },
+            ) => self.types_structurally_equal(left, right)
+                && crate::refinement_entailment::predicates_equivalent(left, lp, right, rp),
             (Type::Unit, Type::Unit) => true,
             (Type::Never, Type::Never) => true,
             (Type::Bool, Type::Bool) => true,

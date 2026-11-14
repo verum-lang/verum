@@ -5308,14 +5308,11 @@ impl TypeChecker {
                 verum_ast::decl::ImplKind::Inherent(for_type) => Some(for_type),
                 verum_ast::decl::ImplKind::Protocol { for_type, .. } => Some(for_type),
             };
-            // Extract self-type args for specialization tracking.
-            // For `implement<T> Register<T, ReadOnly>`, this captures [Var(T), Named(ReadOnly)].
-            // Used to filter method availability during method lookup.
             // Method keys must carry the same resolved nominal owner as the
             // imported receiver. The source spelling alone collides with a
             // sibling's API and cannot serve an exact-owner static lookup.
             let mut method_owner = Text::from(type_name);
-            let impl_self_type_args: List<Type> = if let Some(for_type) = for_type {
+            if let Some(for_type) = for_type {
                 // Use ast_to_type_lenient since type params are now in scope
                 let self_type = self.ast_to_type_lenient(for_type);
                 match &self_type {
@@ -5323,18 +5320,6 @@ impl TypeChecker {
                     Type::Generic { name, .. } => method_owner = name.clone(),
                     _ => {}
                 }
-                let args = match &self_type {
-                    Type::Named { args, .. } | Type::Generic { args, .. } => args.clone(),
-                        // ARRAY-ITER-CONCRETIZE-1: surface the element as
-                        // the receiver's single type arg so the impl-level
-                        // var of `implement<T> [T]` binds (SliceIter<T>).
-                        Type::Array { element, .. } | Type::Slice { element } => {
-                            let mut l: List<Type> = List::new();
-                            l.push((**element).clone());
-                            l
-                        }
-                    _ => List::new(),
-                };
                 self.set_current_self_type(Maybe::Some(self_type.clone()));
                 // CRITICAL FIX: Also register "Self" in type context so that
                 // ast_to_type_lenient can resolve Self in method signatures.
@@ -5342,10 +5327,7 @@ impl TypeChecker {
                 // instead of being resolved to the concrete implementing type.
                 self.ctx
                     .define_type(verum_common::Text::from("Self"), self_type);
-                args
-            } else {
-                List::new()
-            };
+            }
 
             // Collect static method registrations to apply after exiting scope.
             // We need to process them while in scope (to resolve type params),
@@ -5658,17 +5640,6 @@ impl TypeChecker {
                             method_scheme,
                             is_protocol_impl,
                         );
-
-                        // Store the impl self-type arg pattern for specialization filtering.
-                        // Only store when the impl has type args (i.e., it's a generic/specialized impl).
-                        if !is_protocol_impl && !impl_self_type_args.is_empty() {
-                            let mut patterns_guard = self.method_impl_patterns.write();
-                            let type_patterns =
-                                patterns_guard.entry(type_name_text.clone()).or_default();
-                            let method_patterns =
-                                type_patterns.entry(method_name_text.clone()).or_default();
-                            method_patterns.push(impl_self_type_args.clone());
-                        }
 
                         {
                             // #[cfg(debug_assertions)]
@@ -18289,40 +18260,6 @@ impl TypeChecker {
                         self.ensure_stdlib_type_loaded(&dep, &mut pending_dep_load);
                     }
                 }
-                // Per-instantiation impl gating (task #35).
-                //
-
-                // When the stdlib or user code declares `impl<T> Foo<T,
-                // ReadOnly>` and `impl<T> Foo<T, WriteOnly>` with
-                // disjoint method sets, we must refuse `write(…)` on a
-                // `Foo<_, ReadOnly>` receiver. The method signatures
-                // themselves all landed in the flat
-                // (type_name, method_name) map when their impl blocks
-                // were registered, so this gate runs *before* the
-                // lookup succeeds and skips the early-inherent path
-                // when no registered impl pattern accepts the
-                // receiver's concrete type arguments. Subsequent
-                // lookup paths (protocol methods, universal methods)
-                // continue to run normally, producing a proper E400
-                // when none of them match either.
-                if !self.inherent_method_pattern_allows(
-                    &type_name_text,
-                    &method_name_text,
-                    Self::inherent_receiver_arguments(&recv_ty),
-                ) {
-                    // No registered impl pattern accepts this
-                    // instantiation — produce the canonical
-                    // "no method named X found for type Y" error
-                    // so that `readonly_write_fail.vr` /
-                    // `writeonly_read_fail.vr` reject at type check.
-                    return Err(crate::TypeError::MethodNotFound {
-                        ty: recv_ty.to_text(),
-                        method: method.name.as_str().to_text(),
-                        span: method.span,
-                        did_you_mean: verum_common::Maybe::None,
-                        field_fn: verum_common::Maybe::None,
-                    });
-                }
                 let early_method_info = {
                     let methods_guard = self.inherent_methods.read();
                     // Two-phase lookup: direct bucket key first;
@@ -18349,6 +18286,12 @@ impl TypeChecker {
                         });
                     drop(methods_guard);
                     scheme_opt.map(|scheme| -> Result<Option<_>> {
+                        if !self.inherent_receiver_allows(&recv_ty, &scheme) {
+                            return Err(TypeError::MethodNotFound {
+                                ty: recv_ty.to_text(), method: method.name.clone(),
+                                span: method.span, did_you_mean: None, field_fn: None,
+                            });
+                        }
                         let impl_vc = scheme.impl_var_count;
                         let instance = scheme.try_instantiate().map_err(|message| TypeError::UniverseBinding { message, span })?;
                         let ty = instance.ty;
@@ -22098,30 +22041,6 @@ impl TypeChecker {
         owners
     }
 
-    fn inherent_receiver_arguments(receiver: &Type) -> &[Type] {
-        match receiver {
-            Type::Named { args, .. } | Type::Generic { args, .. } => args.as_slice(),
-            Type::Array { element, .. } | Type::Slice { element } => {
-                std::slice::from_ref(element.as_ref())
-            }
-            _ => &[],
-        }
-    }
-
-    fn matches_inherent_specialization(
-        patterns: Option<&List<List<Type>>>,
-        actual: &[Type],
-    ) -> bool {
-        actual.is_empty() || patterns.is_none_or(|patterns| {
-            patterns.is_empty() || patterns.iter().any(|pattern| {
-                pattern.len() == actual.len()
-                    && pattern.iter().zip(actual).all(|(slot, argument)| {
-                        matches!(slot, Type::Var(_)) || slot.to_text() == argument.to_text()
-                    })
-            })
-        })
-    }
-
     /// Look up methods in the inherent methods table (from parsed .vr implement blocks).
     /// Handles specialization filtering, type variable binding, and the overload guard
     /// for closures. Returns (Some(result), false) on success, (None, true) when a
@@ -22135,7 +22054,6 @@ impl TypeChecker {
         span: Span,
     ) -> Result<(Option<InferResult>, bool)> {
         let type_names_to_try = self.inherent_method_owners(recv_ty);
-        let receiver_args = Self::inherent_receiver_arguments(recv_ty);
         let mut specialization_rejected = false;
         let method_info_opt = {
             let methods_guard = self.inherent_methods.read();
@@ -22171,11 +22089,9 @@ impl TypeChecker {
                 );
             }
 
-            let patterns = self.method_impl_patterns.read();
             type_names_to_try.iter().find_map(|owner| {
                 let scheme = methods_guard.get(owner)?.get(method_name_text)?;
-                let declared = patterns.get(owner).and_then(|methods| methods.get(method_name_text));
-                if Self::matches_inherent_specialization(declared, receiver_args) {
+                if self.inherent_receiver_allows(recv_ty, scheme) {
                     Some(scheme.clone())
                 } else {
                     specialization_rejected = true;
@@ -22659,8 +22575,6 @@ bake to have this verified.",
         };
         {
             let methods = self.inherent_methods.read();
-            let patterns = self.method_impl_patterns.read();
-            let receiver_args = Self::inherent_receiver_arguments(receiver);
             for owner in &owners {
                 if let Some(entries) = methods.get(owner) {
                     for (name, scheme) in entries {
@@ -22669,8 +22583,7 @@ bake to have this verified.",
                         {
                             continue;
                         }
-                        let declared = patterns.get(owner).and_then(|methods| methods.get(name));
-                        if Self::matches_inherent_specialization(declared, receiver_args) {
+                        if self.inherent_receiver_allows(receiver, scheme) {
                             consider(name);
                         }
                     }

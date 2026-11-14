@@ -122,13 +122,6 @@ impl TypeChecker {
         from_protocol_impl: bool,
     ) {
         self.record_method_publication(&type_name, &method_name, &scheme);
-        if from_protocol_impl && let Some(Type::Named { args, .. } | Type::Generic { args, .. }) = &scheme.impl_self_type
-            && !args.is_empty()
-        {
-            let mut all = self.method_impl_patterns.write();
-            let patterns = all.entry(type_name.clone()).or_default().entry(method_name.clone()).or_default();
-            if !patterns.contains(args) { patterns.push(args.clone()); }
-        }
         let overload_key = (type_name.clone(), method_name.clone());
         if self.inherent_overloaded_methods.contains(&overload_key) {
             if from_protocol_impl {
@@ -1008,7 +1001,6 @@ impl TypeChecker {
             current_source_contexts: List::new(),
             method_capability_mapper: crate::capability::MethodCapabilityMapper::new(),
             inherent_methods: Shared::new(parking_lot::RwLock::new(Map::new())),
-            method_impl_patterns: Shared::new(parking_lot::RwLock::new(Map::new())),
             variance_checker: crate::variance::VarianceChecker::new(),
             variant_type_names: Map::new(),
             variant_collision_log: List::new(),
@@ -3589,12 +3581,13 @@ impl TypeChecker {
                         .map(|gp| gp.name.as_str().to_string()),
                 )
                 .collect();
-            let ((params, return_ty, hof_reconnect, fn_bounds_parsed), scope_vars): (
+            let ((params, return_ty, hof_reconnect, fn_bounds_parsed, declared_receiver), scope_vars): (
                 (
                     List<Type>,
                     Type,
                     Vec<(Text, Type)>,
                     Vec<(verum_common::Maybe<u16>, Text, Type)>,
+                    Option<Type>,
                 ),
                 _,
             ) = crate::infer::helpers::with_declared_generic_names(declared_names, || {
@@ -3729,7 +3722,18 @@ impl TypeChecker {
                             fn_bounds_parsed.len(),
                         );
                     }
-                    (params, return_ty, hof_reconnect, fn_bounds_parsed)
+                    // Retain the actual self slot in this same binder scope.
+                    // `&Self` describes permission, not the implementation head;
+                    // in that case only a complete typed parameter supplies it.
+                    let declared_receiver = fn_desc.params.first()
+                        .filter(|parameter| parameter.name == "self")
+                        .map(|parameter| {
+                            let spelling = if parameter.declared_ty.is_empty()
+                                || crate::core_metadata::ReceiverKind::from_declared_self_type(&parameter.declared_ty).is_some()
+                            { &parameter.ty } else { &parameter.declared_ty };
+                            to_type(spelling)
+                        });
+                    (params, return_ty, hof_reconnect, fn_bounds_parsed, declared_receiver)
                 })
             });
             // SELF-RECONNECT (T0701): the carried verbatim return of a
@@ -3761,6 +3765,27 @@ impl TypeChecker {
                 .collect();
             let declaring_key = Self::metadata_declaring_key(type_desc);
             let parent = type_desc.name.as_str().rsplit('.').next().unwrap();
+            // Only this declaration's impl binders can occur in the retained
+            // receiver. Opaque ABI holes or method-local binders are not an
+            // implementation telescope. Reconnection qualifies the declared
+            // parent but never manufactures arguments or substitutes `Self`.
+            let receiver_variables = self_args.iter().filter_map(|ty| match ty {
+                Type::Var(variable) => Some(*variable), _ => None,
+            }).collect::<verum_common::Set<_>>();
+            let bare_owner = Type::Named {
+                path: Self::text_to_path(&declaring_key), args: List::new(),
+            };
+            let declared_receiver = declared_receiver
+                .filter(|_| Self::metadata_function_owner(fn_desc, metadata).is_some())
+                // This legacy reader carries callable bounds below, but cannot
+                // reconstruct protocol premises. Those require the source header.
+                .filter(|_| fn_desc.generic_params.iter().all(|parameter| parameter.bounds.is_empty()))
+                .filter(|ty| ty.free_vars().iter().all(|variable| receiver_variables.contains(variable)))
+                .map(|ty| {
+                    let receiver = ty.reference_parts().map_or(&ty, |(inner, _, _)| inner);
+                    Self::reconnect_metadata_parent(receiver, parent, &declaring_key, &bare_owner)
+                })
+                .filter(|ty| !matches!(ty, Type::Unit | Type::Unknown));
             let self_ty = if impl_k > 0 && self_args.len() == impl_k {
                 Type::Generic {
                     name: declaring_key.clone(),
@@ -3869,7 +3894,8 @@ impl TypeChecker {
             // list.
             let scheme = {
                 use crate::dependent_helpers::collect_type_vars;
-                let vars = collect_type_vars(&fn_ty);
+                let mut vars = collect_type_vars(&fn_ty);
+                if let Some(receiver) = &declared_receiver { vars.extend(receiver.free_vars()); }
                 if vars.is_empty() {
                     TypeScheme::mono(fn_ty.clone())
                 } else {
@@ -4140,6 +4166,7 @@ impl TypeChecker {
                 }
             };
             let mut scheme = scheme;
+            scheme.impl_self_type = declared_receiver;
             use crate::core_metadata::ReceiverKind;
             scheme.receiver_kind = if let Some(signature) = &fn_desc.source_signature {
                 Some(ReceiverKind::from_declaration(signature))
@@ -4380,7 +4407,6 @@ impl TypeChecker {
             current_source_contexts: List::new(),
             method_capability_mapper: crate::capability::MethodCapabilityMapper::new(),
             inherent_methods: Shared::new(parking_lot::RwLock::new(Map::new())),
-            method_impl_patterns: Shared::new(parking_lot::RwLock::new(Map::new())),
             variance_checker: crate::variance::VarianceChecker::new(),
             variant_type_names: Map::new(),
             variant_collision_log: List::new(),

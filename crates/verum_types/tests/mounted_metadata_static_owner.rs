@@ -526,6 +526,11 @@ fn shared_method_access_uses_the_selected_archive_receivers_permission() {
                 "mount core.alpha.Builder; fn probe(b: &Builder) -> Int { b.read() }");
             if receiver == "&Builder" {
                 assert!(errors.is_empty(), "{errors:?}");
+            } else if receiver == "Unit" {
+                // An erased ABI slot cannot establish which receiver applies;
+                // refusal precedes the selected method's permission check.
+                assert!(errors.iter().any(|error| error.contains("MethodNotFound") && error.contains("read")),
+                    "{receiver}, eager={eager}: {errors:?}");
             } else {
                 assert!(errors.iter().any(|error| error.contains("SharedReferenceWrite")),
                     "{receiver}, eager={eager}: {errors:?}");

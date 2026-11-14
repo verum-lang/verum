@@ -758,10 +758,7 @@ impl TypeChecker {
                 // replace the protocol's domain. The shared proof projection
                 // owns binder and literal identity and refuses unknown atoms.
                 same(eb, ab)?
-                    && (ep == ap
-                        || (ep.provenance == ap.provenance
-                            && crate::refinement_entailment::entails(eb, ep, ab, ap)
-                            && crate::refinement_entailment::entails(ab, ap, eb, ep)))
+                    && crate::refinement_entailment::predicates_equivalent(eb, ep, ab, ap)
             },
             _ => self
                 .protocol_checker

@@ -39,6 +39,74 @@ impl<'a> ConstraintEnvironment<'a> {
 }
 
 impl ProtocolChecker {
+    /// Applicability of the selected inherent declaration. This is a private
+    /// inference probe, not evidence for its callable or protocol conditions;
+    /// the selected call still discharges those in the caller's inference frame.
+    pub(crate) fn inherent_receiver_matches(
+        &self,
+        scheme: &crate::context::TypeScheme,
+        actual: &Type,
+        mut rigid_variables: verum_common::Map<crate::TypeVar, crate::unify::RigidVar>,
+    ) -> bool {
+        let Some(declaration) = &scheme.impl_self_type else {
+            // A callable signature alone does not establish an implementation
+            // receiver. Argument coercion cannot recover missing evidence.
+            return false;
+        };
+        if declaration.has_value_inference() { return false; }
+        let Ok(instance) = scheme.try_instantiate() else { return false; };
+        let Some(pattern) = &instance.impl_self_type else { return false; };
+        for variable in pattern.free_vars() {
+            if !instance.fresh_vars.contains(&variable) {
+                rigid_variables.entry(variable).or_insert_with(|| crate::unify::RigidVar {
+                    name: format!("parameter{}", variable.id()).into(),
+                    bounded: false,
+                    fn_bound: None,
+                });
+            }
+        }
+        let Some((matcher, pattern, actual)) = self.receiver_matcher(
+            pattern, actual, rigid_variables,
+        ) else { return false; };
+        if !self.matched_receiver_is_exact(&matcher, &pattern, &actual) { return false; }
+        let receiver_values = pattern.value_ids();
+        instance.value_parameters.iter()
+            .filter(|parameter| matches!(parameter,
+                Type::Meta { value: crate::ty::ValueTerm::Inference(id), .. }
+                    if receiver_values.contains(id)))
+            .all(|parameter| matched_value_domain(&matcher, parameter))
+    }
+
+    /// Shared first step for inherent and protocol implementation candidates.
+    /// Only declared binders have been freshened by the caller. Captures and
+    /// lexical parameters keep their identities, aliases come from this registry,
+    /// and probing cannot change the caller's substitutions or obligations.
+    fn receiver_matcher(
+        &self,
+        pattern: &Type,
+        actual: &Type,
+        rigid_variables: verum_common::Map<crate::TypeVar, crate::unify::RigidVar>,
+    ) -> Option<(crate::Unifier, Type, Type)> {
+        let mut matcher = self.fresh_proof_matcher();
+        matcher.exit_rigid_scope(rigid_variables);
+        let pattern = self.resolve_alias_head(pattern)?.into_owned();
+        let actual = self.resolve_alias_head(actual)?.into_owned();
+        if !self.resolved_heads_equal(&pattern, &actual) {
+            matcher.unify(&pattern, &actual, Span::default()).ok()?;
+        }
+        Some((matcher, pattern, actual))
+    }
+
+    fn matched_receiver_is_exact(
+        &self, matcher: &crate::Unifier, pattern: &Type, actual: &Type,
+    ) -> bool {
+        let (Ok(pattern), Ok(actual)) = (
+            matcher.try_apply(pattern, Span::default()),
+            matcher.try_apply(actual, Span::default()),
+        ) else { return false; };
+        self.types_structurally_equal(&pattern, &actual)
+    }
+
     pub(crate) fn instantiate_applicable_implementation(
         &self,
         implementation: &ProtocolImpl,
@@ -164,22 +232,18 @@ impl ProtocolChecker {
             }
             environment.extend_variables(&mut variables);
         }
-        let mut matcher = self.fresh_proof_matcher();
-        matcher.enter_rigid_scope(variables.into_iter().map(|variable| {
-            (
-                variable,
-                format!("parameter{}", variable.id()).into(),
-                false,
-                None,
-            )
-        }));
+        let rigid_variables = variables.into_iter().map(|variable| (
+            variable,
+            crate::unify::RigidVar {
+                name: format!("parameter{}", variable.id()).into(),
+                bounded: false,
+                fn_bound: None,
+            },
+        )).collect();
         let pattern = implementation.for_type.try_apply_subst(&fresh).ok()?;
-        let pattern = self.resolve_alias_head(&pattern)?;
-        let actual = self.resolve_alias_head(ty)?;
-        let ty = actual.as_ref();
-        if !self.resolved_heads_equal(&pattern, ty) {
-            matcher.unify(&pattern, ty, Span::default()).ok()?;
-        }
+        let (mut matcher, pattern, actual) =
+            self.receiver_matcher(&pattern, ty, rigid_variables)?;
+        let ty = &actual;
         for (pattern, actual) in implementation
             .protocol_args
             .iter()
@@ -264,28 +328,12 @@ impl ProtocolChecker {
             let crate::context::GenericBinder::Value(parameter) = parameter else {
                 continue;
             };
-            let mut required = parameter.try_apply_subst(&fresh).ok()?;
-            let actual = matcher.try_apply(&required, Span::default()).ok()?;
-            let Type::Meta { ty, .. } = &mut required else {
-                return None;
-            };
-            **ty = matcher.try_apply(ty, Span::default()).ok()?;
-            if !crate::value_parameter_domain::argument_satisfies_domain(
-                &required,
-                &actual,
-                Type::clone,
-            ) {
-                return None;
-            }
+            let required = parameter.try_apply_subst(&fresh).ok()?;
+            if !matched_value_domain(&matcher, &required) { return None; }
         }
         // Unification also serves inference/coercion. A proof match additionally
         // requires exact equality after substitution, so coercions are not evidence.
-        if !self.types_structurally_equal(
-            &matcher.try_apply(&pattern, Span::default()).ok()?,
-            &matcher.try_apply(ty, Span::default()).ok()?,
-        ) {
-            return None;
-        }
+        if !self.matched_receiver_is_exact(&matcher, &pattern, ty) { return None; }
         for (pattern, actual) in implementation
             .protocol_args
             .iter()
@@ -322,6 +370,17 @@ impl ProtocolChecker {
         }
         Some(substitution)
     }
+}
+
+/// Retain the declaration's scalar sort and domain after inference; a value
+/// payload or runtime base type alone cannot establish a const argument.
+fn matched_value_domain(matcher: &crate::Unifier, parameter: &Type) -> bool {
+    let Ok(actual) = matcher.try_apply(parameter, Span::default()) else { return false; };
+    let mut required = parameter.clone();
+    let Type::Meta { ty, .. } = &mut required else { return false; };
+    let Ok(domain) = matcher.try_apply(ty, Span::default()) else { return false; };
+    **ty = domain;
+    crate::value_parameter_domain::argument_satisfies_domain(&required, &actual, Type::clone)
 }
 
 /// Failure to elaborate a match is not evidence that two domains are disjoint.
@@ -541,3 +600,7 @@ fn extend_callable_variables(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/unit/inherent_receiver_matcher.rs"]
+mod inherent_receiver_matcher_tests;
