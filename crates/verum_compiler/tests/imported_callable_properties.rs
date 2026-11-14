@@ -265,7 +265,7 @@ fn calculus_callback_keeps_its_declared_signature_across_archive_execution() {
         ),
         (
             "pure fn wrong(x:Float, y:Float)->Float { x+y }",
-            "expected 'fn(Float) -> Float', found 'fn(Float, Float) -> Float'",
+            "expected 'fn(Float) -> Float [bound: excludes {Async}; observed: unknown]', found 'fn(Float, Float) -> Float [bound: at most Pure; observed: Pure]'",
         ),
     ] {
         let consumer = format!(
@@ -378,6 +378,18 @@ fn local_callable_bindings_keep_precedence_over_explicit_imports() {
     }
 }
 
+fn assert_sync_callback_refusal(error: &str) {
+    // A selected async declaration may still have an unknown body bound.
+    // Check the rejected requirement without relabelling unknown as observed async.
+    assert!(
+        error.contains("E400")
+            && error.contains("[bound: excludes {Async}; observed: unknown]'")
+            && (error.contains("found 'async fn() -> ")
+                || error.contains("[bound: unrestricted; observed: unknown]'")),
+        "{error}"
+    );
+}
+
 #[test]
 fn an_async_import_cannot_borrow_a_synchronous_local_contract() {
     for (mount, name) in [
@@ -393,7 +405,7 @@ fn an_async_import_cannot_borrow_a_synchronous_local_contract() {
             );
             let error = contract("public async fn operation()->Int {0}", &source)
                 .expect_err("selected async import was replaced by a synchronous homonym");
-            assert!(error.contains("E400") && error.contains("async"), "{error}");
+            assert_sync_callback_refusal(&error);
         }
     }
 }
@@ -431,7 +443,7 @@ fn inline_callable_imports_obey_the_same_selected_contract() {
         fn operation()->Int {73}
         public fn probe()->Int {let callback:fn()->Int=operation; callback()}
     "#).expect_err("an inline async import must not use a synchronous local contract");
-    assert!(error.contains("E400") && error.contains("async"), "{error}");
+    assert_sync_callback_refusal(&error);
 }
 
 #[test]
