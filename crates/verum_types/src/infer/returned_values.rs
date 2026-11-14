@@ -516,10 +516,35 @@ fn append_expression(
 }
 
 impl TypeChecker {
-    /// A callable's signature does not describe its captured environment. The
-    /// same closed structural language can prove that a literal closure only
-    /// mentions its own parameters. Unknown syntax keeps the conservative rule.
-    pub(super) fn callable_has_closed_environment(&self, value: &Expr) -> bool {
+    /// A callable's signature does not describe its captured environment.
+    /// Module functions have no caller-local captures; their exact declaration
+    /// must be selected before using that fact. A literal closure instead needs
+    /// the existing structural proof that it mentions only its own parameters.
+    pub(super) fn callable_has_closed_environment(&mut self, value: &Expr) -> bool {
+        if let ExprKind::Path(path) = &unparen(value).kind {
+            let Some(verum_ast::ty::PathSegment::Name(root)) = path.segments.first() else {
+                return false;
+            };
+            // Parameters, local aliases and nested functions cannot acquire a
+            // module declaration's environment proof through shared spelling.
+            let name = self.path_to_string(path);
+            if self.ctx.env.is_locally_bound(root.name.as_str())
+                || self.ctx.env.is_locally_bound(name.as_str())
+            {
+                return false;
+            }
+            let Some(scheme) = self.callee_scheme_with_mount_authority(name.as_str()) else {
+                return false;
+            };
+            let Some((_, declaration)) = &scheme.callable_source else {
+                return false;
+            };
+            return scheme.impl_self_type.is_none()
+                && declaration.contexts.is_empty()
+                && declaration.params.iter().all(|parameter| matches!(
+                    &parameter.kind, FunctionParamKind::Regular { .. }
+                ));
+        }
         let ExprKind::Closure {
             params,
             body,

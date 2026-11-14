@@ -433,3 +433,26 @@ fn inline_callable_imports_obey_the_same_selected_contract() {
     "#).expect_err("an inline async import must not use a synchronous local contract");
     assert!(error.contains("E400") && error.contains("async"), "{error}");
 }
+
+#[test]
+fn imported_function_values_preserve_unrelated_closure_origins() {
+    contract(
+        "public module first {public pure fn selected(value:Int)->Int {value}} public module second {public pure fn selected(value:Int)->Int {0}} public mount core.raw.first.selected as callback;",
+        "mount core.raw.callback as selected; mount core.raw.second.selected as other;
+         fn invoke(callback:fn(Int)->Int)->Int {callback(73)}
+         public fn probe()->Int {let factor=2; let scaled:fn(Int)->Int=|value| factor*value;
+         let named=invoke(selected); if named==73 && invoke(scaled)==146 && invoke(other)==0 {73} else {0}}",
+    ).unwrap();
+}
+
+#[test]
+fn imported_function_provenance_does_not_escape_into_a_shadowing_parameter() {
+    let error = contract(
+        "public pure fn selected(value:Int)->Int {value}",
+        "mount core.raw.selected; fn invoke(callback:fn(Int)->Int)->Int {callback(73)}
+         fn rejected(selected:fn(Int)->Int)->Int {let factor=2;
+         let scaled:fn(Int)->Int=|value| factor*value; invoke(selected); invoke(scaled)}
+         public fn probe()->Int {73}",
+    ).expect_err("an opaque parameter acquired its imported homonym's closed environment");
+    assert!(error.contains("E312") && error.contains("scaled"), "{error}");
+}
