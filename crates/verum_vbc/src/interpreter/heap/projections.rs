@@ -189,6 +189,33 @@ impl Heap {
         }
     }
 
+    /// Read a preserved reference snapshot without accessing its pointee.
+    /// Register references, raw addresses and raw projection tickets do not
+    /// carry an epoch snapshot; current heap state cannot reconstruct it.
+    pub(crate) fn reference_epoch_caps(&self, value: Value) -> InterpreterResult<u32> {
+        if let Some(id) = value.projection_id() {
+            let slot = self
+                .projections
+                .slots
+                .get(&id)
+                .ok_or(InterpreterError::CbgrViolation {
+                    kind: CbgrViolationKind::UseAfterFree,
+                    ptr: 0,
+                })?;
+            if let SlotStorage::Object { epoch, .. } = slot.storage {
+                return Ok((u32::from(epoch) << verum_common::layout::CAPS_BITS)
+                    | u32::from(slot.caps.0));
+            }
+        } else if let Some(reference) = value.try_as_thin_ref() {
+            return Ok(reference.epoch_caps);
+        } else if let Some(reference) = value.try_as_fat_ref() {
+            return Ok(reference.thin.epoch_caps);
+        }
+        Err(InterpreterError::InvalidOperand {
+            message: "GetEpochCaps requires a preserved reference epoch/capability snapshot".into(),
+        })
+    }
+
     /// Resolve direct and managed thin references at the memory boundary.
     pub(crate) fn thin_ref(&self, value: Value) -> InterpreterResult<ThinRef> {
         if let Some(id) = value.projection_id() {

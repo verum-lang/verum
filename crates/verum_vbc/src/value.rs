@@ -1607,11 +1607,14 @@ impl Value {
     /// Tries to extract as FatRef.
     #[inline]
     pub fn try_as_fat_ref(&self) -> Option<FatRef> {
-        if self.is_fat_ref() {
-            Some(self.as_fat_ref())
-        } else {
-            None
+        if !self.is_fat_ref() {
+            return None;
         }
+        FAT_REFS
+            .lock()
+            .unwrap()
+            .get((self.0 & REF_INDEX_MASK) as usize)
+            .copied()
     }
 
     // ========================================================================

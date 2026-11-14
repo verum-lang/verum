@@ -197,11 +197,6 @@ public fn cbgr_advance_generation<T>(t: &mut DynTensor<T>) {
     @vbc(CBGR_ADVANCE_GENERATION, t)
 }
 
-//Get epoch capabilities
-public fn cbgr_epoch_caps<T>(t: &DynTensor<T>) -> U16 {
-    @vbc(CBGR_GET_EPOCH_CAPS, t)
-}
-
 // Bypass CBGR checks (EXTREMELY DANGEROUS)
 // Safety: All safety guarantees are void. Use only for benchmarking.
 public fn cbgr_bypass<T, F: fn() -> T>(f: F) -> T {

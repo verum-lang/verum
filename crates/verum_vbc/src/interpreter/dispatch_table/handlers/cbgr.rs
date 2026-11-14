@@ -3798,30 +3798,12 @@ fn cbgr_extended_body(
         }
 
         Some(CbgrSubOpcode::GetEpochCaps) => {
-            // Get epoch and capabilities combined from a CBGR reference
-            // Format: dst:reg, src:reg
-            // If src is a CBGR ref (struct with [ptr, epoch_caps]), extract epoch_caps
-            // Otherwise return current epoch with full capabilities
+            // Format: dst:reg, src:reg. Read the saved packed32 snapshot;
+            // an address or the current epoch is not reference metadata.
             let dst = read_reg(state)?;
             let src_reg = read_reg(state)?;
-            let src_val = state.get_reg(src_reg);
-
-            let epoch_caps = if src_val.is_ptr() {
-                let ref_ptr = src_val.as_ptr::<i64>();
-                if !ref_ptr.is_null() {
-                    // CBGR ref layout: [ptr: i64, epoch_caps: i64]
-                    // Try to read epoch_caps from offset 1
-                    unsafe { *ref_ptr.add(1) }
-                } else {
-                    ((state.cbgr_epoch as i64) << 32) | 0xFF
-                }
-            } else if src_val.is_int() {
-                // May already be a packed epoch_caps value
-                src_val.as_i64()
-            } else {
-                ((state.cbgr_epoch as i64) << 32) | 0xFF
-            };
-            state.set_reg(dst, Value::from_i64(epoch_caps));
+            let epoch_caps = state.heap.reference_epoch_caps(state.get_reg(src_reg))?;
+            state.set_reg(dst, Value::from_i64(i64::from(epoch_caps)));
             Ok(DispatchResult::Continue)
         }
 

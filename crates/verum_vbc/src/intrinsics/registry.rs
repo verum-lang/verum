@@ -12072,7 +12072,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         return_count: 1, // epoch capabilities
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::CbgrGetEpochCaps),
         mlir_op: Some("verum.cbgr_get_epoch_caps"),
-        doc: "Get epoch capabilities of a CBGR reference",
+        doc: "Read a preserved reference snapshot: epoch in high 16 bits, capabilities in low 16 bits; refuse carriers without a snapshot",
     },
     Intrinsic {
         name: "CBGR_BYPASS_BEGIN",

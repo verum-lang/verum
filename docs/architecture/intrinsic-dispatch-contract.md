@@ -247,6 +247,30 @@ Inheritance from CBGR architecture docs:
 - `dispatch_method_call`, `handle_get_index`, `handle_set_index` —
   each has three parallel arms for the three shapes (Task #24 fix).
 
+### Preserved reference snapshots
+
+`CBGR_GET_EPOCH_CAPS` reads the saved 32-bit `epoch_caps` word: epoch in
+bits 16–31, capabilities in bits 0–15. Reading this metadata does not
+validate the pointee, confer capabilities or dereference its address.
+The VM reads saved ThinRef/FatRef entries or an issuing managed-object
+projection ticket. The native instruction extracts the same word from a
+canonical ThinRef/FatRef value. It does not dispatch to a function by name.
+
+An ordinary address, integer, register reference or raw projection ticket
+cannot supply an absent snapshot. These carriers are refused explicitly;
+current allocation metadata and the current execution epoch are not
+substitutes. Ordinary-reference snapshot transport is not yet available on
+all source/native paths. The intrinsic is therefore not a universal
+introspection API for arbitrary `&T`, and no tensor-specific wrapper claims
+that guarantee or truncates the result to 16 bits.
+
+Gates: `verum_vbc/tests/cbgr_epoch_caps.rs` checks actual source slices and
+managed fields through serialized bytecode, invalid carriers and exact bits.
+`verum_codegen/tests/cbgr_epoch_caps.rs` applies the source-emitted instruction
+to the real native snapshot producer, including changed allocation headers;
+it also pins the refusal of ordinary source-reference carriers without a
+saved snapshot.
+
 ## 7. A slice's canonical dispatch key is `Slice`, not its spelling
 
 > **`implement<T> [T]` registers under the prefix `Slice`.** Every layer

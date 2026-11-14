@@ -8333,9 +8333,11 @@ pub enum CbgrSubOpcode {
     /// Format: `src:reg`
     Invalidate = 0x51,
 
-    /// Get epoch capabilities combined.
+    /// Read a preserved reference's packed32 snapshot as an unsigned integer.
     ///
-    /// Returns epoch and capabilities as combined value.
+    /// Epoch occupies the high 16 bits, capabilities the low 16 bits.
+    /// A carrier without a saved snapshot is refused; neither a current
+    /// allocation header nor a raw address can supply a reference snapshot.
     /// Format: `dst:reg, src:reg`
     GetEpochCaps = 0x52,
 

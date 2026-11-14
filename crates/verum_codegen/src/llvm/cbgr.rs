@@ -43,7 +43,7 @@ use verum_llvm::builder::Builder;
 use verum_llvm::context::Context;
 use verum_llvm::module::Module;
 use verum_llvm::types::StructType;
-use verum_llvm::values::{BasicValue, FunctionValue, IntValue, PointerValue, StructValue};
+use verum_llvm::values::{BasicValue, BasicValueEnum, FunctionValue, IntValue, PointerValue, StructValue};
 use verum_llvm::{AtomicOrdering, IntPredicate};
 
 use super::error::{BuildExt, CallSiteExt, LlvmLoweringError, OptionExt, Result};
@@ -140,6 +140,28 @@ impl<'ctx> CbgrLowering<'ctx> {
     /// Get the FatRef struct type.
     pub fn fat_ref_type(&self) -> StructType<'ctx> {
         self.fat_ref_type
+    }
+
+    /// Extract the saved epoch-high/capabilities-low packed32 value.
+    /// This inspects the reference carrier only, without reading its pointee
+    /// or replacing a missing snapshot with allocation or current metadata.
+    pub(crate) fn reference_epoch_caps(
+        &self,
+        builder: &Builder<'ctx>,
+        reference: BasicValueEnum<'ctx>,
+    ) -> Result<IntValue<'ctx>> {
+        if let BasicValueEnum::StructValue(reference) = reference {
+            let ty = reference.get_type();
+            if ty == self.thin_ref_type || ty == self.fat_ref_type {
+                return Ok(builder
+                    .build_extract_value(reference, 2, "cbgr.epoch_caps")
+                    .or_llvm_err()?
+                    .into_int_value());
+            }
+        }
+        Err(LlvmLoweringError::InvalidType(
+            "GetEpochCaps requires a preserved ThinRef or FatRef snapshot".into(),
+        ))
     }
 
     /// Get CBGR statistics.

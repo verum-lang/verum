@@ -27159,86 +27159,27 @@ fn lower_cbgr_extended<'ctx>(
             Ok(())
         }
         0x52 => {
-            // GetEpochCaps — get capabilities from reference
-            if operands.len() < 2 {
-                return Ok(());
+            // GetEpochCaps reads the saved packed32 carrier, never user data.
+            let mut offset = 0;
+            let dst = verum_vbc::encoding::decode_reg(operands, &mut offset)
+                .map_err(|error| LlvmLoweringError::UnsupportedInstruction(
+                    format!("GetEpochCaps destination operand: {error}").into(),
+                ))?;
+            let src = verum_vbc::encoding::decode_reg(operands, &mut offset)
+                .map_err(|error| LlvmLoweringError::UnsupportedInstruction(
+                    format!("GetEpochCaps source operand: {error}").into(),
+                ))?;
+            if offset != operands.len() {
+                return Err(LlvmLoweringError::UnsupportedInstruction(
+                    "GetEpochCaps has trailing operands".into(),
+                ));
             }
-            let dst = op_reg(operands, 0);
-            let src = ctx.get_register(op_reg(operands, 1))?;
-            let i64_ty = ctx.types().i64_type();
-            let module = ctx.get_module();
-
-            // Try compiled .vr: ThinRef.capabilities(i64 ref_ptr) -> i16
-            if let Some(caps_fn) = module.get_function("ThinRef.capabilities") {
-                let ref_as_i64 = as_i64(ctx, src, "ref_i64")?;
-                let result = ctx
-                    .builder()
-                    .build_call(caps_fn, &[ref_as_i64.into()], "caps")
-                    .or_llvm_err()?
-            .basic_value_or("ThinRef.capabilities: expected return value")?;
-                let caps_i64 = ctx
-                    .builder()
-                    .build_int_z_extend(result.into_int_value(), i64_ty, "caps_i64")
-                    .or_llvm_err()?;
-                ctx.set_register(dst, caps_i64.into());
-            } else {
-                // Direct memory read fallback (original implementation).
-                //
-                // **Dual-shape guard** (task #11): `src` may be either a
-                // PointerValue (canonical reference) OR an IntValue (the
-                // register slot reload `%r0 = load i64, ptr %r0_slot` —
-                // common when the const-loaded Record value sits in an i64
-                // slot and the codegen routes through GetEpochCaps without
-                // a prior ptr-tagging cast).  Mirror the pattern from
-                // task #23 (commit 56c9dee67): test `is_pointer_value()`
-                // first, fall back to `build_int_to_ptr` then
-                // `build_ptr_to_int` (no-op round-trip but yields a
-                // canonical IntValue suitable for the arithmetic below).
-                let header_offset = i64_ty.const_int(24u64.wrapping_neg(), true);
-                let base_int = if src.is_pointer_value() {
-                    ctx.builder()
-                        .build_ptr_to_int(src.into_pointer_value(), i64_ty, "src_int")
-                        .or_llvm_err()?
-                } else if src.is_int_value() {
-                    // Already an int — use directly as the base address.
-                    src.into_int_value()
-                } else {
-                    return Err(LlvmLoweringError::internal(verum_common::Text::from(
-                        format!(
-                            "GetEpochCaps: src is neither PointerValue nor IntValue \
-                             (got {})",
-                            if src.is_struct_value() {
-                                "StructValue"
-                            } else if src.is_array_value() {
-                                "ArrayValue"
-                            } else if src.is_float_value() {
-                                "FloatValue"
-                            } else {
-                                "unknown"
-                            }
-                        )
-                    )));
-                };
-                let caps_ptr = ctx
-                    .builder()
-                    .build_int_to_ptr(
-                        ctx.builder()
-                            .build_int_add(base_int, header_offset, "caps_off")
-                            .or_llvm_err()?,
-                        ctx.types().ptr_type(),
-                        "caps_ptr",
-                    )
-                    .or_llvm_err()?;
-                let caps_val = ctx
-                    .builder()
-                    .build_load(ctx.llvm_context().i32_type(), caps_ptr, "epoch_caps")
-                    .or_llvm_err()?;
-                let caps_i64 = ctx
-                    .builder()
-                    .build_int_z_extend(caps_val.into_int_value(), i64_ty, "caps_i64")
-                    .or_llvm_err()?;
-                ctx.set_register(dst, caps_i64.into());
-            }
+            let src = ctx.get_register(src.0)?;
+            let snapshot = ctx.cbgr().reference_epoch_caps(ctx.builder(), src)?;
+            let result = ctx.builder()
+                .build_int_z_extend(snapshot, ctx.types().i64_type(), "epoch_caps_u64")
+                .or_llvm_err()?;
+            ctx.set_register(dst.0, result.into());
             Ok(())
         }
         0x53 | 0x54 => {
