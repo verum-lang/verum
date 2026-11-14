@@ -269,3 +269,34 @@ fn calculus_callback_keeps_its_declared_signature_across_archive_execution() {
         );
     }
 }
+
+#[test]
+fn selected_reference_forwarder_preserves_its_bound_through_archive_and_wire() {
+    let provider = r#"
+        @intrinsic("text_byte_len") public fn byte_count(value: &Text) -> Int;
+        public fn observed(value: &Text) -> Int { byte_count(value) }
+    "#;
+    contract(provider, r#"
+        mount core.raw.{observed as selected};
+        public pure fn probe() -> Int {
+            let text = "abc";
+            if selected(&text) == 3 { 73 } else { 0 }
+        }
+    "#).unwrap();
+}
+
+
+#[test]
+fn declared_reference_binders_and_scalar_cast_survive_archive_execution() {
+    contract(r#"
+        @intrinsic("text_as_bytes") public fn bytes(value: &Text) -> &[Byte];
+        public fn extent<T>(value: &[T]) -> USize { @intrinsic("slice_len", value) }
+        public fn observed<T>(value: &[T]) -> Int { extent(value) as Int }
+    "#, r#"
+        mount core.raw.{observed as selected, bytes};
+        public pure fn probe() -> Int {
+            let text = "abcdefghi";
+            if selected(bytes(&text)) == 9 { 73 } else { 0 }
+        }
+    "#).unwrap();
+}

@@ -33,16 +33,19 @@ fn intrinsic_declaration_bound(function: &FunctionDecl) -> Option<PropertyRequir
         return None;
     }
     let name = crate::core_pipeline::extract_intrinsic_name(function)?;
-    let has_defaults = function.params.iter().any(|param| matches!(
-        &param.kind, verum_ast::FunctionParamKind::Regular { default_value: Some(_), .. }
-    ));
-    if function.is_async || function.is_generator || function.extern_abi.is_some()
-        || !function.contexts.is_empty() || function.std_attr.is_some()
-        || !function.requires.is_empty() || !function.ensures.is_empty() || has_defaults
-    {
+    if has_implicit_call_computation(function) {
         return Some(PropertyRequirement::Unrestricted);
     }
     Some(intrinsic_requirement(&name).unwrap_or(PropertyRequirement::Unrestricted))
+}
+
+fn has_implicit_call_computation(function: &FunctionDecl) -> bool {
+    let has_defaults = function.params.iter().any(|param| matches!(
+        &param.kind, verum_ast::FunctionParamKind::Regular { default_value: Some(_), .. }
+    ));
+    function.is_async || function.is_generator || function.extern_abi.is_some()
+        || !function.contexts.is_empty() || function.std_attr.is_some()
+        || !function.requires.is_empty() || !function.ensures.is_empty() || has_defaults
 }
 
 #[derive(Default)]
@@ -212,11 +215,12 @@ impl TypeChecker {
         Ok(())
     }
 
-    /// A selected structural operation contains no user callback. Its arguments
-    /// are still traversed normally, so their properties cannot disappear.
+    /// A selected structural view reads its receiver and constructs fresh
+    /// metadata, possibly allocating or failing. It neither writes through that
+    /// view nor invokes user code. Operand computations are joined separately.
     pub(super) fn record_structural_call(&mut self, span: Span, params: List<Type>, result: Type) {
         self.type_registry.register_call_target(span, Type::function_with_requirement(
-            params, result, PropertyRequirement::source_callable(false),
+            params, result, PropertyRequirement::value_construction(),
         ));
     }
 
@@ -248,11 +252,183 @@ impl TypeChecker {
         calls.bound
     }
 
+    /// A complete, statement-free forwarding expression has no hidden local
+    /// work. This is a restricted proof form, not a second expression inferrer.
+    fn source_forwarding_expression(function: &FunctionDecl) -> Option<&Expr> {
+        use verum_ast::decl::FunctionBody;
+        match function.body.as_ref()? {
+            FunctionBody::Block(block) if block.stmts.is_empty() => block.expr.as_deref(),
+            FunctionBody::Expr(expression) => Some(expression),
+            _ => None,
+        }
+    }
+
+    fn direct_intrinsic_operands(expression: &Expr) -> Option<(PropertyRequirement, &[Expr])> {
+        let ExprKind::MetaFunction { name, args, parenthesized: true } = &expression.kind
+            else { return None; };
+        let operation = intrinsic_operation_name(&name.name, args)?;
+        let registered = lookup_intrinsic(&operation)?;
+        let operands = args.as_slice().get(1..)?;
+        if operands.len() != usize::from(registered.intrinsic.param_count) { return None; }
+        let bound = intrinsic_requirement(&operation)?;
+        bound.finite_footprint()?;
+        Some((bound, operands))
+    }
+
+    /// Numeric conversions are supplied by the language registrar. A foreign
+    /// nominal with a scalar-looking name cannot authorize its own conversion.
+    fn forwarding_scalar(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Int | Type::Float | Type::Bool | Type::Char => true,
+            Type::Named { path, args } if args.is_empty() => path.as_ident().is_some_and(|name| {
+                verum_common::well_known_types::type_names::is_numeric_type(&name.name)
+                    && self.ctx.builtin_type_definition(&name.name).is_some_and(|declared|
+                        self.unifier.normalize_aliases(declared) == *ty)
+            }),
+            _ => false,
+        }
+    }
+
+    /// Only declared references are forwarded; copying owned operands or
+    /// adapting a reference could execute Clone/Deref. Generic identities come
+    /// from the declaration frame, never from arbitrary unification variables.
+    /// The only composed body supported here is a call to an intrinsic leaf,
+    /// optionally followed by an ordinary checked scalar conversion.
+    fn source_intrinsic_forwarding_bound(
+        &mut self,
+        function: &FunctionDecl,
+    ) -> Option<PropertyRequirement> {
+        use verum_ast::{decl::FunctionParamKind, ty::{GenericParamKind, PathSegment}};
+        use crate::context::GenericBinder;
+        if has_implicit_call_computation(function)
+            || function.throws_clause.is_some()
+            || function.generics.iter().any(|parameter| !matches!(parameter.kind,
+                GenericParamKind::Type { .. })) { return None; }
+        let expression = Self::source_forwarding_expression(function)?;
+        let (operation, cast) = match &expression.kind {
+            ExprKind::Cast { expr, ty } => (expr.as_ref(), Some(ty)),
+            _ => (expression, None),
+        };
+        let direct = Self::direct_intrinsic_operands(operation);
+        let mut selected = None;
+        let operands = if let Some((_, operands)) = &direct {
+            if cast.is_some() { return None; }
+            *operands
+        } else {
+            let ExprKind::Call { func, args, type_args } = &operation.kind else { return None; };
+            if !type_args.is_empty() { return None; }
+            let ExprKind::Path(path) = &func.kind else { return None; };
+            let callee = path.as_ident()?;
+            let (owner, declaration) = self.source_function_for_properties(
+                &self.current_module_path, &callee.name,
+            )?;
+            // Do not recursively speculate through arbitrary source calls.
+            // A leaf is either the declared intrinsic or its exact operation.
+            if intrinsic_declaration_bound(&declaration).is_none()
+                && Self::source_forwarding_expression(&declaration)
+                    .and_then(Self::direct_intrinsic_operands).is_none() { return None; }
+            selected = Some((callee.name.clone(), owner, declaration));
+            args.as_slice()
+        };
+        let declared_variables: Set<TypeVar> = self.decl_param_frames.last().into_iter()
+            .flat_map(|frame| frame.values()).filter_map(|ty| match GenericBinder::declared(ty) {
+                Ok(GenericBinder::Type(variable)) => Some(variable), _ => None,
+            }).collect();
+        let known = |ty: &Type| ty.free_vars().iter().all(|var| declared_variables.contains(var))
+            && !ty.contains_type(|part| matches!(part, Type::Unknown | Type::Placeholder { .. }));
+        let mut parameters = Map::new();
+        for parameter in &function.params {
+            let (name, ty) = match &parameter.kind {
+                FunctionParamKind::Regular { pattern, ty, .. } => {
+                    let PatternKind::Ident { name, by_ref: false, subpattern: None, .. }
+                        = &pattern.kind else { return None; };
+                    (name.name.clone(), self.declared_type(ty).ok()?)
+                }
+                receiver => {
+                    let subject = self.current_self_type.clone()?;
+                    let ty = match receiver {
+                        FunctionParamKind::SelfRef => Type::reference(false, subject),
+                        FunctionParamKind::SelfRefMut => Type::reference(true, subject),
+                        FunctionParamKind::SelfRefChecked => Type::checked_reference(false, subject),
+                        FunctionParamKind::SelfRefCheckedMut => Type::checked_reference(true, subject),
+                        FunctionParamKind::SelfRefUnsafe => Type::unsafe_reference(false, subject),
+                        FunctionParamKind::SelfRefUnsafeMut => Type::unsafe_reference(true, subject),
+                        _ => return None,
+                    };
+                    (Text::from("self"), ty)
+                }
+            };
+            ty.reference_parts()?;
+            if !known(&ty) || parameters.insert(name, ty).is_some() { return None; }
+        }
+        let mut actual = List::new();
+        for operand in operands {
+            let ExprKind::Path(path) = &operand.kind else { return None; };
+            let name = match path.segments.as_slice() {
+                [PathSegment::Name(name)] => name.name.clone(),
+                [PathSegment::SelfValue] => Text::from("self"),
+                _ => return None,
+            };
+            actual.push(self.unifier.normalize_aliases(parameters.get(&name)?));
+        }
+        let output = function.return_type.as_ref()
+            .map(|ty| self.declared_type(ty)).transpose().ok()?.unwrap_or(Type::Unit);
+        if !known(&output) { return None; }
+        if let Some((bound, _)) = direct { return Some(bound); }
+        let (callee, owner, declaration) = selected?;
+        // A parameter owns its spelling, even when a module has that function.
+        if parameters.contains_key(&callee) { return None; }
+        let scheme = self.with_source_signature_scope(&owner, |checker| {
+            let previous_self = checker.current_self_type.clone();
+            checker.set_current_self_type(None);
+            checker.push_decl_param_frame(indexmap::IndexMap::new());
+            let scheme = checker.source_function_scheme(&declaration).ok();
+            checker.pop_decl_param_frame();
+            checker.set_current_self_type(previous_self);
+            scheme
+        })?;
+        let instance = scheme.try_instantiate().ok()?;
+        if !instance.type_bounds.is_empty() || !instance.protocol_bounds.is_empty()
+            || !instance.where_clauses.is_empty() || !instance.value_parameters.is_empty()
+            || !scheme.universe_params.is_empty() { return None; }
+        let Type::Function { params, return_type, property_requirement: bound, .. } = instance.ty
+            else { return None; };
+        bound.finite_footprint()?;
+        if params.len() != actual.len() { return None; }
+        // Speculative matching cannot specialize a caller's declared variable.
+        // The final exact equality also refuses coercions accepted by unification.
+        let mut matcher = crate::unify::Unifier::new();
+        matcher.enter_rigid_scope(declared_variables.iter()
+            .map(|var| (*var, Text::from("declared parameter"), false, None)));
+        let expected: List<_> = params.iter().map(|ty| self.unifier.normalize_aliases(ty)).collect();
+        for (expected, actual) in expected.iter().zip(&actual) {
+            matcher.unify(expected, actual, operation.span).ok()?;
+        }
+        if expected.iter().zip(&actual).any(|(expected, actual)| matcher.apply(expected) != *actual) {
+            return None;
+        }
+        let result = matcher.apply(&self.unifier.normalize_aliases(&return_type));
+        if !known(&result) { return None; }
+        let output = self.unifier.normalize_aliases(&output);
+        if let Some(cast) = cast {
+            let target = self.declared_type(cast).ok()?;
+            if !self.forwarding_scalar(&result) || !self.forwarding_scalar(&target)
+                || self.unifier.normalize_aliases(&target) != output { return None; }
+            self.check_cast(&result, &target, expression.span, Some(operation)).ok()?;
+            Some(bound.join(&PropertyRequirement::value_construction()))
+        } else {
+            (result == output).then_some(bound)
+        }
+    }
+
     pub(super) fn source_callable_requirement(
         &mut self,
         function: &FunctionDecl,
     ) -> PropertyRequirement {
         if let Some(bound) = intrinsic_declaration_bound(function) {
+            return bound;
+        }
+        if let Some(bound) = self.source_intrinsic_forwarding_bound(function) {
             return bound;
         }
         let declared = PropertyRequirement::declared_function(function.is_pure, function.is_meta);

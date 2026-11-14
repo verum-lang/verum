@@ -1372,13 +1372,19 @@ impl Intrinsic {
             )
             // Reading the stored length never visits the buffer. A full-width
             // Int result may require boxing in the interpreter.
-            | CodegenStrategy::InlineSequence(InlineSequenceId::TextByteLen) => IntrinsicCallBound::ValueConstruction,
+            | CodegenStrategy::InlineSequence(InlineSequenceId::TextByteLen)
+            // Both tiers read the argument and allocate a fresh byte view; the
+            // interpreter also copies inline Text bytes into fresh storage.
+            // Neither lowering mutates the input or calls user code.
+            | CodegenStrategy::InlineSequence(InlineSequenceId::TextAsBytes)
+            // SliceLen reads the existing FatRef/byte-view metadata in both
+            // tiers; materializing a full-width integer may allocate.
+            | CodegenStrategy::InlineSequence(InlineSequenceId::SliceLen) => IntrinsicCallBound::ValueConstruction,
             // These lowerings cannot invoke a user callable or suspend a task.
             // This establishes only absence of suspension, not a complete
             // computational footprint or a proof of purity.
             CodegenStrategy::RetainCopy
-            | CodegenStrategy::DirectOpcode(Opcode::Panic)
-            | CodegenStrategy::InlineSequence(InlineSequenceId::TextAsBytes) => IntrinsicCallBound::Synchronous,
+            | CodegenStrategy::DirectOpcode(Opcode::Panic) => IntrinsicCallBound::Synchronous,
             _ => IntrinsicCallBound::Unknown,
         }
     }

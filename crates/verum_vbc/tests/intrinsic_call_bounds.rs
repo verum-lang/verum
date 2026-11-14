@@ -46,9 +46,15 @@ fn optimizer_purity_does_not_supply_a_missing_computational_contract() {
 }
 
 #[test]
-fn stored_text_length_bounds_only_its_own_lowering() {
+fn metadata_views_bound_only_their_own_lowering() {
     let mut length = lookup_intrinsic("text_byte_len").unwrap().intrinsic.clone();
     assert_eq!(length.call_bound(), IntrinsicCallBound::ValueConstruction);
     length.strategy = lookup_intrinsic("text_as_bytes").unwrap().intrinsic.strategy.clone();
-    assert_eq!(length.call_bound(), IntrinsicCallBound::Synchronous);
+    assert_eq!(length.call_bound(), IntrinsicCallBound::ValueConstruction);
+    length.strategy = lookup_intrinsic("slice_len").unwrap().intrinsic.strategy.clone();
+    assert_eq!(length.call_bound(), IntrinsicCallBound::ValueConstruction);
+    length.name = "unrelated_surface_name";
+    assert_eq!(length.call_bound(), IntrinsicCallBound::ValueConstruction);
+    length.strategy = lookup_intrinsic("text_parse_int").unwrap().intrinsic.strategy.clone();
+    assert_eq!(length.call_bound(), IntrinsicCallBound::Unknown);
 }
