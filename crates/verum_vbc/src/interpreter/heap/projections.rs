@@ -484,6 +484,50 @@ impl Heap {
         Ok(target)
     }
 
+    /// Sized raw operations may access a managed element only in its complete
+    /// physical encoding. A ticket never authorizes a partial Value or an
+    /// unchecked address, even when its source reference uses the unsafe tier.
+    fn scalar_projection(
+        &self,
+        value: Value,
+        width: u8,
+    ) -> InterpreterResult<Option<HeapSlotRef>> {
+        let Some(id) = value.projection_id() else {
+            return Ok(None);
+        };
+        let target = self.projection_target(id)?;
+        let ProjectionShape::Element(encoding) = target.shape else {
+            return Err(invalid("a sequence view is not a scalar element"));
+        };
+        if usize::from(width) != encoding.width() {
+            return Err(invalid("scalar width does not match managed element encoding"));
+        }
+        Ok(Some(target))
+    }
+
+    pub(crate) fn read_projected_scalar(
+        &self,
+        value: Value,
+        width: u8,
+    ) -> InterpreterResult<Option<Value>> {
+        self.scalar_projection(value, width)?
+            .map(|target| self.read_projection(target))
+            .transpose()
+    }
+
+    pub(crate) fn write_projected_scalar(
+        &self,
+        target: Value,
+        value: Value,
+        width: u8,
+    ) -> InterpreterResult<bool> {
+        let Some(target) = self.scalar_projection(target, width)? else {
+            return Ok(false);
+        };
+        self.write_projection(target, value)?;
+        Ok(true)
+    }
+
     pub(crate) fn read_projected_element(&self, value: Value) -> InterpreterResult<Value> {
         let target = self.projection_target(
             value

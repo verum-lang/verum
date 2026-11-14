@@ -30,9 +30,25 @@ fn scalar_register_slot(state: &InterpreterState, value: Value) -> InterpreterRe
     Ok(Some(state.registers.get_absolute(slot)))
 }
 
-fn raw_register_scalar(state: &InterpreterState, value: Value, width: u8, signed: bool) -> InterpreterResult<Option<Value>> {
+fn raw_managed_scalar(
+    state: &InterpreterState,
+    value: Value,
+    width: u8,
+    signed: bool,
+) -> InterpreterResult<Option<Value>> {
     use crate::module::CType;
-    let Some(slot) = scalar_register_slot(state, value)? else { return Ok(None) };
+    let slot = if let Some(slot) = state.heap.read_projected_scalar(value, width)? {
+        // The complete managed Value already has its scalar encoding. In
+        // particular, Float bits and signed Int tags are not native integers.
+        if usize::from(width) == std::mem::size_of::<Value>() {
+            return Ok(Some(slot));
+        }
+        slot
+    } else if let Some(slot) = scalar_register_slot(state, value)? {
+        slot
+    } else {
+        return Ok(None);
+    };
     let storage = match (width, signed) {
         (1, false) => CType::U8, (1, true) => CType::I8,
         (2, false) => CType::U16, (2, true) => CType::I16,
@@ -394,7 +410,7 @@ fn mem_extended_body(
 
             // Accept both Pointer-tagged and Int-tagged values as raw addresses
             let val = state.get_reg(ptr_reg);
-            if let Some(value) = raw_register_scalar(state, val, size, false)? {
+            if let Some(value) = raw_managed_scalar(state, val, size, false)? {
                 state.set_reg(dst, value);
                 return Ok(DispatchResult::Continue);
             }
@@ -527,6 +543,10 @@ fn mem_extended_body(
             // `unsafe` at the language level, and the reject broke every
             // ptr_write through pointer arithmetic (T0108).
             let val = state.get_reg(ptr_reg);
+            let val_value = state.get_reg(value_reg);
+            if state.heap.write_projected_scalar(val, val_value, size)? {
+                return Ok(DispatchResult::Continue);
+            }
             let ptr: *mut u8 = if val.is_fat_ref() {
                 val.as_fat_ref().ptr()
             } else if val.is_thin_ref() {
@@ -568,7 +588,6 @@ fn mem_extended_body(
             // asserts the value is Int-tagged and therefore panicked
             // with "Expected int, got Some(0)" for any pointer-tagged
             // write — discovered while validating task #40.
-            let val_value = state.get_reg(value_reg);
             // SAFETY: `ptr` was null-checked above AND rejected if it was not a
             // pointer-tagged Value (guards against arbitrary integer-to-pointer
             // writes). The caller is responsible for ensuring the target is
@@ -761,7 +780,7 @@ fn mem_extended_body(
             let size = read_u8(state)?;
 
             let val = state.get_reg(ptr_reg);
-            if let Some(value) = raw_register_scalar(state, val, size, true)? {
+            if let Some(value) = raw_managed_scalar(state, val, size, true)? {
                 state.set_reg(dst, value);
                 return Ok(DispatchResult::Continue);
             }
