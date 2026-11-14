@@ -179,6 +179,16 @@ impl TypeChecker {
         (!positions.is_empty() && positions.len() == declaration.generics.len()).then_some(carrier)
     }
 
+    /// A primitive carrier is established by the language registrar, never by
+    /// a source declaration that happens to use the same spelling.
+    pub(super) fn has_registered_scalar_storage(&self, ty: &Type) -> bool {
+        self.conversion_nominal_head(ty).is_some_and(|(name, args)| {
+            args.is_empty()
+                && self.ctx.builtin_type_definition(&name) == Some(ty)
+                && verum_common::well_known_types::type_names::is_primitive_value_type(&name)
+        })
+    }
+
     fn stored_loan_shape(&self, ty: &Type, inspection: LoanInspection) -> bool {
         if let Some(present) = immediate(ty, inspection) {
             return present;
@@ -243,12 +253,7 @@ impl TypeChecker {
                     // Width-specific scalars have a nominal carrier. Only the
                     // registrar's exact definition proves their scalar storage;
                     // a same-named source record still needs its real layout.
-                    if args.is_empty()
-                        && self.ctx.builtin_type_definition(&name) == Some(node.ty)
-                        && verum_common::well_known_types::type_names::is_primitive_value_type(
-                            &name,
-                        )
-                    {
+                    if self.has_registered_scalar_storage(node.ty) {
                         continue;
                     }
                     let Some(body) = self

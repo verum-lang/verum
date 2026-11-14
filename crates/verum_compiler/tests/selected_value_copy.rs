@@ -243,3 +243,42 @@ fn ordinary_stdlib_admission_keeps_the_selected_operation_in_the_archive() {
     let mut vm = Interpreter::try_new_validated(module.into()).unwrap();
     assert_eq!(vm.execute_function(main).unwrap().try_as_i64(), Some(73));
 }
+
+#[test]
+fn selected_scalar_copy_preserves_declared_width_and_payload() {
+    for (ty, literal) in [
+        ("Int64", "-9223372036854775807"),
+        ("UInt64", "18446744073709551615"),
+        ("Byte", "231"),
+        ("UInt8", "231"),
+        ("UInt16", "65000"),
+    ] {
+        let source = format!(
+            "type Word is {{ value:{ty} }}; \
+             fn duplicate(source:&Word)->Word{{source.clone()}} \
+             fn main()->Int{{let original=Word {{value:{literal}}}; \
+             let copied=duplicate(&original); if copied.value == original.value {{73}} else {{0}}}}"
+        );
+        assert_eq!(execute(&source, true), 73, "{source}");
+    }
+}
+
+#[test]
+fn source_homonyms_do_not_inherit_registered_scalar_copy_permission() {
+    for declaration in [
+        "type affine Int64 is { value: Int };",
+        "type UInt64 is { value: &mut Int };",
+        "type Byte is { value: &unsafe Int };",
+    ] {
+        let name = declaration.split(" is ").next().unwrap().split_whitespace().last().unwrap();
+        let source = format!("module foreign; {declaration} fn duplicate(source:&{name})->{name}{{source.clone()}}");
+        let ast = Parser::new(&source).parse_module().unwrap();
+        let mut checker = TypeChecker::with_minimal_context();
+        checker.register_primitives();
+        checker.set_current_module_path("foreign");
+        let mut errors = checker.prepare_module_declarations(&ast);
+        errors.extend(ast.items.iter().filter_map(|item| checker.check_item(item).err()));
+        errors.extend(checker.take_deferred_errors());
+        assert!(errors.iter().any(|error| error.to_diagnostic().code() == Some("E400")), "{source}: {errors:?}");
+    }
+}

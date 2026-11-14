@@ -52,6 +52,9 @@ impl TypeChecker {
             Type::Record(_) | Type::Tuple(_) | Type::Array { .. } => aliases_storage(),
             Type::Refined { base, .. } => self.check_clone_layout(base, copies_storage, depth + 1),
             Type::Named { .. } | Type::Generic { .. } => {
+                if self.has_registered_scalar_storage(ty) {
+                    return Ok(());
+                }
                 let (name, args) = self.conversion_nominal_head(ty).expect("nominal type");
                 let key = if name.contains(".") {
                     name
