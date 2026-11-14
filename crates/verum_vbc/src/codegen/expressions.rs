@@ -279,33 +279,35 @@ fn is_unsigned_int_type_name(name: &str) -> bool {
     type_names::is_unsigned_integer_type(name)
 }
 
-/// Is `info` callable by a BARE name?
-///
-/// **SOLE authority** for the pinned architectural rule that every bare-name
-/// `Call` dispatch layer excludes impl-block instance methods from its
-/// candidate set — `CallM` (receiver syntax) is the only legal dispatch surface
-/// for those. See the rule's full statement at the `is_free_fn` use site in
-/// `compile_call`.
-///
-/// Method-ness is a CARRIED FACT: `parent_type_name` comes from the
-/// descriptor's `parent_type`, which the archive stores precisely to record
-/// "containing type (for methods)". The rule used to be implemented as the
-/// spelling test `param_names.first() != "self"`, and param names are
-/// best-effort — `archive_ctx_loader` substitutes `_arg{i}` whenever a param's
-/// string id is missing — so an archive-loaded method passed the spelling test
-/// and re-entered the very candidate set the rule excludes. Measured: under
-/// `mount core.prelude.*`, `take(&mut v)` resolved to no free function at all
-/// and `swap(&mut a, &mut b)` bound to `Vector.swap` and null-dereferenced.
-///
-/// Variant constructors carry a parent type as well and ARE legitimately
-/// bare-callable (`Some(x)`, `Ok(v)`), so they are admitted explicitly. The
-/// spelling test is kept as a second gate: it still catches source-declared
-/// methods whose descriptor has no parent type yet at registration time.
-fn is_free_function(info: &FunctionInfo) -> bool {
-    if info.variant_tag.is_some() {
+/// Bare source calls select free declarations, never implementation methods.
+/// Parameter names and optional rendered types do not establish receiver roles.
+fn is_free_function(codegen: &VbcCodegen, info: &FunctionInfo) -> bool {
+    // Constructors have their own declaration-owned call contracts. A nominal
+    // constructor is synthetic and therefore has no FunctionDecl signature;
+    // compile_nominal_constructor_call validates its selected TypeDescriptor.
+    if info.variant_tag.is_some() || info.nominal_constructor_type().is_some() {
         return true;
     }
-    info.parent_type_name.is_none() && info.param_names.first().is_none_or(|n| n != "self")
+    if let Some(declaration) = codegen.declared_callable_descriptors.get(&info.id) {
+        if declaration.source_receiver.is_some()
+            || (declaration.declaration_identity.as_ref()
+                    .is_some_and(|identity| identity.lexical_parent.is_none())
+                && declaration.source_definition
+                    .is_some_and(|definition| definition.implementation_scope.is_some()))
+        {
+            return false;
+        }
+        return declaration.source_signature.as_ref().is_some_and(|signature| {
+            signature.params.iter().all(|parameter| {
+                matches!(parameter.kind, verum_ast::FunctionParamKind::Regular { .. })
+            })
+        });
+    }
+    // Registry operations and foreign declarations have their own selected
+    // declaration paths. An unproved FunctionInfo is not a free source body.
+    info.intrinsic_name.as_deref().is_some_and(|name| lookup_intrinsic(name).is_some())
+        || info.foreign_declaration.as_ref()
+            .is_some_and(|identity| codegen.ffi_function_map.contains_key(identity.as_ref()))
 }
 
 /// Check if a name is a known type name (primitive or semantic numeric type).
@@ -7210,7 +7212,7 @@ impl VbcCodegen {
                     self.ctx
                         .functions
                         .get(&func_name)
-                        .filter(|b| is_free_function(b))
+                        .filter(|b| is_free_function(self, b))
                         .and_then(|b| {
                             arity_matches.iter().find(|(_, i)| i.id == b.id)
                         })
@@ -7256,56 +7258,11 @@ impl VbcCodegen {
                     let (name, info) = type_matched[0];
                     Some((name.clone(), info.clone()))
                 } else {
-                    // **Method-vs-free-fn shadow filter** (FUNDAMENTAL —
-                    // closes the bare-name vs impl-method dispatch
-                    // collision class).
-                    //
-                    // A bare-name call site `name(args...)` lowers to a
-                    // free-fn dispatch (Call instruction). Impl-block
-                    // instance methods on type T whose first parameter is
-                    // `self` (any of `&self`/`&mut self`/`self` shapes)
-                    // are NEVER legal targets of bare-name dispatch —
-                    // they require receiver-syntax `receiver.name(...)`
-                    // which lowers to CallM, not Call.
-                    //
-                    // Without this filter, `take(&mut x)` mounted via
-                    // `mount core.base.memory.{take}` (or by prelude
-                    // re-export) routes to one of `Set.take` / `Cell.take`
-                    // / `OnceCell.take` / `Args.take` / `Vars.take` /
-                    // `ErrorChain.take` / `Rev.take` / `FuseIter.take` /
-                    // `Empty.take` impl methods — the dispatcher's
-                    // argument-type filter fails when arg types are
-                    // unknown (closure params without annotations,
-                    // generic monomorphisations), and any matching impl
-                    // method may win. Pre-fix `take(&mut x)` resolved
-                    // to a wrong impl method that didn't perform the
-                    // expected replace-and-reset write-back, so x kept
-                    // its original value after the call.
-                    //
-                    // The filter excludes any candidate whose first
-                    // param_name is `self` (the canonical Verum naming
-                    // for impl-block receivers). If exactly one
-                    // non-method candidate remains, dispatch to it
-                    // (closes the unambiguous case); otherwise return
-                    // None and let the existing fallback chain handle
-                    // (most commonly resolving to the free fn by name).
-                    //
-                    // Architectural rule pinned: every bare-name Call
-                    // dispatch MUST exclude impl-block instance methods
-                    // from its candidate set. CallM dispatch (which
-                    // takes a receiver) handles impl methods correctly
-                    // through receiver-type qualification; mixing the
-                    // two surfaces creates the shadow-collision class
-                    // closed here. Regression-pinned at
-                    // `core-tests/base/mod/regression_test.vr §B::
-                    // regression_pin_take_resets_to_default`.
+                    // The retained source declaration distinguishes a method
+                    // receiver from an ordinary binding named `self` or `Self`.
                     let non_method: Vec<&(String, FunctionInfo)> = arity_matches
                         .iter()
-                        .filter(|(_, info)| {
-                            info.param_names
-                                .first()
-                                .is_none_or(|n| n != "self")
-                        })
+                        .filter(|(_, info)| is_free_function(self, info))
                         .collect();
                     if non_method.len() == 1 {
                         let (name, info) = non_method[0];
@@ -7353,26 +7310,8 @@ impl VbcCodegen {
         // index_of) prefer the entry registered in the caller's own
         // module rather than first-wins archive-load order.
         //
-        // **Method-vs-free-fn shadow filter** applied at every lookup
-        // layer: bare-name call sites lower to free-fn dispatch (Call)
-        // and MUST NEVER target impl-block instance methods (first
-        // param `self`). Pre-fix `take(&mut x)` mounted via the
-        // prelude was resolving to one of `Cell.take`/`OnceCell.take`/
-        // `Set.take`/etc. via hash-table first-wins on the bare key
-        // `take` — the wrong method's body ran, x kept its original
-        // value because the method body didn't perform the replace-
-        // and-reset write-back. Filtering each layer's result through
-        // the `param_names.first() != "self"` predicate ensures the
-        // dispatch routes to the canonical free fn
-        // `core.base.memory.take(dest)`.
-        //
-        // Architectural rule pinned: every bare-name `Call` dispatch
-        // layer MUST exclude impl-block instance methods from its
-        // candidate set. CallM (receiver-syntax) is the only legal
-        // dispatch surface for impl methods. Regression-pinned at
-        // `core-tests/base/mod/regression_test.vr §B::regression_pin_take_resets_to_default`
-        // and the broader `core-tests/base/memory/cbgr_test.vr::test_take`.
-        let is_free_fn = is_free_function;
+        // All bare-name lookup layers use the same retained declaration roles.
+        let is_free_fn = |info: &FunctionInfo| is_free_function(self, info);
         // CURRENT-UNIT-DECL-FIRST (task #20): a free fn DECLARED IN THE
         // COMPILING UNIT wins the bare-name call outright — before the
         // qualified type-aware overload scan can route `take(&v0)` to
@@ -7611,8 +7550,8 @@ impl VbcCodegen {
                 // Filtered suffix-scan fallback: when the direct lookup
                 // returned an impl method (was filtered out above), do
                 // a global scan for any qualified entry whose simple
-                // name equals func_name AND whose first param is NOT
-                // `self`. Picks the unique free-fn candidate when one
+                // name equals func_name and whose declaration is free.
+                // Picks the unique free-fn candidate when one
                 // exists; closes the case where the bare-name table
                 // entry is shadowed by an impl method but the qualified
                 // free-fn key (`core.base.memory.take`) lives elsewhere.

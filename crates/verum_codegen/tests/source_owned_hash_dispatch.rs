@@ -1,4 +1,9 @@
-//! T1580: a direct call's regular-parameter declaration excludes method interception.
+//! Direct calls retain the selected source declaration, including receiver methods.
+#[cfg(target_os = "macos")]
+#[path = "support/source_image.rs"]
+mod source_image;
+#[path = "support/canonical_hash_source.rs"]
+mod canonical_hash_source;
 use verum_codegen::llvm::context::FunctionContext;
 use verum_codegen::llvm::instruction::lower_instruction;
 use verum_codegen::llvm::{LoweringConfig, VbcToLlvmLowering};
@@ -148,14 +153,23 @@ fn two_argument_free_function_keeps_its_original_arity() {
 }
 
 fn direct_call_ir(vbc: &VbcModule, name: &str) -> Text {
+    direct_call_ir_with_target(vbc, name, true).expect("selected direct lowering")
+}
+
+fn direct_call_ir_with_target(
+    vbc: &VbcModule, name: &str, publish_target: bool,
+) -> verum_codegen::llvm::error::Result<Text> {
     let id = vbc.find_function_by_name(name).expect("selected callee");
     let descriptor = vbc.get_function(id).expect("descriptor");
     let context = Context::create();
     let module = context.create_module("direct_hash");
     let i64_type = context.i64_type();
-    module.add_function(name, i64_type.fn_type(&[i64_type.into()], false), None);
+    let target = module.add_function(name, i64_type.fn_type(&[i64_type.into()], false), None);
     let function = module.add_function("probe", i64_type.fn_type(&[], false), None);
     let mut ctx = FunctionContext::with_vbc_module(&context, &module, vbc, function, "probe");
+    if publish_target {
+        ctx.set_func_id_map(std::sync::Arc::new([(descriptor.id.0, target)].into_iter().collect()));
+    }
     ctx.builder()
         .position_at_end(context.append_basic_block(function, "entry"));
     ctx.set_register(0, i64_type.const_int(7, false).into());
@@ -169,38 +183,26 @@ fn direct_call_ir(vbc: &VbcModule, name: &str) -> Text {
                 count: 1,
             },
         },
-    )
-    .expect("direct lowering");
+    )?;
     ctx.builder()
         .build_return(Some(&ctx.get_register(1).expect("result")))
         .expect("return");
     module.verify().expect("valid direct IR");
-    Text::from(function.print_to_string().to_str().expect("UTF-8 IR"))
+    Ok(Text::from(function.print_to_string().to_str().expect("UTF-8 IR")))
 }
 
-fn canonical_hash_declarations() -> VbcModule {
-    // Compile the actual standard-library protocol/default body and actual
-    // Int/Unit implementations. Do not fabricate a Hash-parent descriptor:
-    // inherited defaults carry the concrete owner's parent (Unit has None).
-    let protocols = include_str!("../../../core/base/protocols.vr");
-    let hash_start = protocols
-        .find("public type Hash is protocol")
-        .expect("Hash source");
-    let hash_end = protocols
-        .find("// Clone Protocol")
-        .expect("following protocol");
-    let mut source = Text::from(&protocols[hash_start..hash_end]);
-    let primitives = include_str!("../../../core/base/primitives.vr");
-    for declaration in ["implement Hash for Int {", "implement Hash for () {"] {
-        let start = primitives.find(declaration).expect("primitive source");
-        let end = start + primitives[start..].find("\n}\n").expect("impl end") + 3;
-        source.push_str(&primitives[start..end]);
-    }
-    compile(&source)
+use canonical_hash_source::canonical_hash_source;
+
+fn canonical_hash_declarations() -> VbcModule { compile(&canonical_hash_source()) }
+
+fn assert_self_declaration(vbc: &VbcModule, descriptor: &verum_vbc::module::FunctionDescriptor) {
+    let source = descriptor.source_signature.as_ref().expect("retained source signature");
+    assert!(matches!(source.params[0].kind, verum_ast::FunctionParamKind::SelfRef));
+    assert_eq!(vbc.get_string(descriptor.params[0].type_name), Some("&Self"));
 }
 
 #[test]
-fn real_inherited_int_and_parentless_unit_defaults_keep_the_existing_hash_route() {
+fn real_inherited_defaults_keep_their_selected_owner_and_body() {
     let source = canonical_hash_declarations();
     for vbc in [source.clone(), roundtrip(&source)] {
         for name in ["Int.hash_value", "Unit.hash_value"] {
@@ -208,21 +210,24 @@ fn real_inherited_int_and_parentless_unit_defaults_keep_the_existing_hash_route(
                 .get_function(vbc.find_function_by_name(name).unwrap())
                 .unwrap();
             assert_eq!(descriptor.params.len(), 1);
-            assert_eq!(
-                descriptor.params[0].type_name,
-                StringId::EMPTY,
-                "Self carrier"
-            );
-            if name == "Unit.hash_value" {
-                assert!(descriptor.parent_type.is_none());
-            }
-            assert!(direct_call_ir(&vbc, name).contains("@verum_generic_hash("));
+            assert_self_declaration(&vbc, descriptor);
+            let owner = if name == "Unit.hash_value" {
+                verum_vbc::types::TypeId::UNIT
+            } else {
+                verum_vbc::types::TypeId::INT
+            };
+            assert_eq!(descriptor.parent_type, Some(owner));
+            assert_eq!(descriptor.source_receiver,
+                Some(verum_vbc::types::TypeRef::Concrete(owner)));
+            let ir = direct_call_ir(&vbc, name);
+            assert!(ir.contains(&format!("@{name}(")), "{ir}");
+            assert!(!ir.contains("@verum_generic_hash("), "{ir}");
         }
     }
 }
 
 #[test]
-fn absent_regular_parameter_metadata_is_not_invented_from_string_slot_zero() {
+fn absent_optional_spelling_does_not_replace_the_selected_regular_body() {
     let mut vbc = compile("fn hash_value(value: Int) -> Int { value + 30 }");
     let id = vbc.find_function_by_name("hash_value").unwrap();
     assert_ne!(
@@ -235,13 +240,15 @@ fn absent_regular_parameter_metadata_is_not_invented_from_string_slot_zero() {
         .unwrap()
         .params[0]
         .type_name = StringId::EMPTY;
-    // Source tables may intern real text at zero; zero is still the optional
-    // carrier's sentinel, not proof of a regular declared parameter.
+    // Optional display spelling is not authority for replacing the selected
+    // callable. The actual declaration remains a Regular source parameter.
     assert!(
         vbc.get_string(StringId::EMPTY)
             .is_some_and(|s| !s.is_empty())
     );
-    assert!(direct_call_ir(&vbc, "hash_value").contains("@verum_generic_hash("));
+    let ir = direct_call_ir(&vbc, "hash_value");
+    assert!(ir.contains("@hash_value("));
+    assert!(!ir.contains("@verum_generic_hash("));
 }
 
 fn import_bodies(source: &VbcModule) -> VbcModule {
@@ -266,7 +273,7 @@ fn import_bodies(source: &VbcModule) -> VbcModule {
 }
 
 #[test]
-fn actual_archive_body_merge_keeps_self_and_regular_direct_call_routes() {
+fn actual_archive_body_merge_keeps_self_and_regular_selected_bodies() {
     let defaults = canonical_hash_declarations();
     assert!(
         defaults
@@ -278,12 +285,10 @@ fn actual_archive_body_merge_keeps_self_and_regular_direct_call_routes() {
         let descriptor = imported
             .get_function(imported.find_function_by_name(name).unwrap())
             .unwrap();
-        assert_eq!(
-            descriptor.params[0].type_name,
-            StringId::EMPTY,
-            "Self marker after import"
-        );
-        assert!(direct_call_ir(&imported, name).contains("@verum_generic_hash("));
+        assert_self_declaration(&imported, descriptor);
+        let ir = direct_call_ir(&imported, name);
+        assert!(ir.contains(&format!("@{name}(")), "{ir}");
+        assert!(!ir.contains("@verum_generic_hash("), "{ir}");
     }
     let regular = import_bodies(&compile("fn hash_value(value: Int) -> Int { value + 30 }"));
     let ir = direct_call_ir(&regular, "hash_value");
@@ -292,7 +297,7 @@ fn actual_archive_body_merge_keeps_self_and_regular_direct_call_routes() {
 }
 
 #[test]
-fn unresolved_or_empty_regular_spelling_cannot_prove_a_free_parameter() {
+fn unresolved_or_empty_optional_spelling_cannot_replace_a_selected_body() {
     let source = compile("fn hash_value(value: Int) -> Int { value + 30 }");
     for invalid in [false, true] {
         let mut module = source.clone();
@@ -310,6 +315,95 @@ fn unresolved_or_empty_regular_spelling_cannot_prove_a_free_parameter() {
             .unwrap()
             .params[0]
             .type_name = marker;
-        assert!(direct_call_ir(&module, "hash_value").contains("@verum_generic_hash("));
+        let ir = direct_call_ir(&module, "hash_value");
+        assert!(ir.contains("@hash_value("));
+        assert!(!ir.contains("@verum_generic_hash("));
     }
+}
+
+#[test]
+fn explicitly_typed_self_and_ordinary_uppercase_name_are_regular_parameters() {
+    for name in ["self", "Receiver"] {
+        let source = format!(
+            "fn hash_value({name}: Int) -> Int {{ {name} + 30 }} fn probe() -> Int {{ hash_value(7) }}"
+        );
+        let vbc = compile(&source);
+        let descriptor = vbc.get_function(vbc.find_function_by_name("hash_value").unwrap()).unwrap();
+        assert!(matches!(descriptor.source_signature.as_ref().unwrap().params[0].kind,
+            verum_ast::FunctionParamKind::Regular { .. }));
+        assert_source_call(&source, "probe", 37, "hash_value");
+    }
+}
+
+#[test]
+fn self_spelling_or_absent_source_header_cannot_replace_a_selected_body() {
+    for remove_header in [false, true] {
+        let mut vbc = compile("fn hash_value(value: Int) -> Int { value + 30 }");
+        let spelling = vbc.strings.intern("&Self");
+        let id = vbc.find_function_by_name("hash_value").unwrap();
+        let descriptor = vbc.functions.iter_mut().find(|function| function.id == id).unwrap();
+        descriptor.params[0].type_name = spelling;
+        if remove_header { descriptor.source_signature = None; }
+        if remove_header {
+            let error = verum_vbc::serialize::serialize_module(&vbc).unwrap_err();
+            assert!(matches!(error, verum_vbc::error::VbcError::Serialization(_)));
+            assert!(error.to_string().contains("callable declaration identity has no source signature"), "{error}");
+        } else {
+            for module in [vbc.clone(), roundtrip(&vbc)] {
+                let ir = direct_call_ir(&module, "hash_value");
+                assert!(ir.contains("@hash_value("), "{ir}");
+                assert!(!ir.contains("@verum_generic_hash("), "{ir}");
+            }
+        }
+    }
+}
+
+#[test]
+fn missing_selected_native_target_refuses_even_when_a_same_named_symbol_exists() {
+    let vbc = compile("fn hash_value(value: Int) -> Int { value + 30 }");
+    let error = direct_call_ir_with_target(&vbc, "hash_value", false).unwrap_err();
+    assert!(matches!(error, verum_codegen::llvm::error::LlvmLoweringError::MissingFunction(_)));
+    assert!(error.to_string().contains("has no native target"), "{error}");
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn direct_user_self_method_executes_its_actual_body() {
+    let source = r#"
+        type Key is { value:Int };
+        implement Key { fn hash_value(&self)->Int { 73 } }
+        fn probe(value:&Key)->Int { Key.hash_value(value) }
+        fn main()->Int { let key=Key{value:7}; probe(&key) }
+    "#;
+    let vbc = compile(source);
+    let target = vbc.find_function_by_name("Key.hash_value").unwrap();
+    let probe = vbc.get_function(vbc.find_function_by_name("probe").unwrap()).unwrap();
+    assert!(probe.instructions.as_ref().unwrap().iter().any(|instruction|
+        matches!(instruction, Instruction::Call { func_id, .. } if *func_id == target.0)
+    ), "control must use the selected direct Call");
+    let wire = roundtrip(&vbc);
+    verum_vbc::validate::validate_module(&wire).unwrap();
+    let entry = wire.find_function_by_name("main").unwrap();
+    let mut vm = verum_vbc::interpreter::Interpreter::try_new_validated(wire.into()).unwrap();
+    assert_eq!(vm.execute_function(entry).unwrap().try_as_i64(), Some(73));
+    source_image::run(source);
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn actual_default_body_executes_without_direct_name_substitution() {
+    let mut source = canonical_hash_source();
+    source.push_str(r#"
+        fn main()->Int {
+            let value:Int=7;
+            let mut hasher=DefaultHasher.new();
+            DefaultHasher.write_int(&mut hasher, value);
+            let expected=DefaultHasher.finish(&hasher);
+            let actual=Int.hash_value(&value);
+            if actual == expected && actual == -1747035056885442531 {73} else {0}
+        }
+    "#);
+    // No runtime body substitution is performed by this fixture. If the actual
+    // source dependency graph cannot execute, retain its exact refusal.
+    source_image::run(&source);
 }

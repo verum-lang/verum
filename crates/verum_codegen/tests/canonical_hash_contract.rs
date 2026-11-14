@@ -1,4 +1,7 @@
 //! T1587: native primitive hashing follows the declared DefaultHasher byte stream.
+#[path = "support/canonical_hash_source.rs"]
+mod canonical_hash_source;
+use canonical_hash_source::canonical_hash_source as canonical_source;
 use verum_codegen::llvm::{LoweringConfig, VbcToLlvmLowering};
 use verum_common::{List, Set, Text};
 use verum_fast_parser::Parser;
@@ -154,35 +157,6 @@ fn pointer_shaped_integer_bits_are_hashed_without_loading_memory() {
     );
 }
 
-fn canonical_source() -> Text {
-    let protocols = include_str!("../../../core/base/protocols.vr");
-    let begin = protocols
-        .find("public type Hash is protocol")
-        .expect("Hash source");
-    let end = protocols.find("// Clone Protocol").expect("next protocol");
-    let mut source = Text::from(&protocols[begin..end]);
-    let primitives = include_str!("../../../core/base/primitives.vr");
-    let begin = primitives
-        .find("implement Hash for Int {")
-        .expect("Int Hash source");
-    let end = begin + primitives[begin..].find("\n}\n").expect("impl end") + 3;
-    source.push_str(&primitives[begin..end]);
-    // The actual DefaultHasher body calls these two actual primitive bodies;
-    // include its source dependencies rather than substitute a test hasher.
-    source.push_str(" implement Int { ");
-    for signature in [
-        "public fn wrapping_mul(self, rhs: Int)",
-        "public fn rotate_left(self, n: Int)",
-    ] {
-        let begin = primitives
-            .find(signature)
-            .expect("hasher primitive dependency");
-        let end = begin + primitives[begin..].find("\n    }").expect("method end") + 6;
-        source.push_str(&primitives[begin..end]);
-    }
-    source.push_str(" }");
-    source
-}
 
 #[test]
 fn real_declared_hash_default_agrees_with_the_byte_contract() {

@@ -14766,28 +14766,8 @@ fn lower_call<'ctx>(
         }
     }
 
-    // A declared free-function body is not a protocol-method fallback.
-    // compile_function carries a nonempty ParamDescriptor.type_name only
-    // for Regular AST parameters; Self* parameters leave it EMPTY. This
-    // extra fact matters because inherited Unit methods have parent=None.
-    // Missing optional spelling is unknown, not evidence of a Self parameter.
-    let declared_free_body = func_desc.parent_type.is_none()
-        && func_desc.intrinsic_name.is_none()
-        && (func_desc.bytecode_length > 0
-            || func_desc.instructions.as_ref().is_some_and(|body| !body.is_empty()))
-        && (func_desc.params.is_empty()
-            || func_desc.params.first().is_some_and(|param| {
-                param.type_name != StringId::EMPTY
-                    && vbc_mod.get_string(param.type_name).is_some_and(|name| !name.is_empty())
-            }));
-
-    // Preserve the existing method fallback. Its wider CallM/default-method
-    // provenance remains separate from this negative declaration authority.
-    let bare_call_method = func_name.rsplit('.').next().unwrap_or(func_name);
-    if bare_call_method == "hash_value" && args.count == 1 && !declared_free_body {
-        return lower_default_hash_value(ctx, dst, Reg(args.start.0));
-    }
-
+    // A direct Call already selects a declaration by FunctionId. Its spelling
+    // and receiver role do not authorize replacing the body with a hash helper.
     // Use the selected descriptor, including archive/band resolution above.
     let llvm_fn = ctx.resolve_declared_function(func_desc)?;
 
