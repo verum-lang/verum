@@ -127,15 +127,8 @@ impl VbcCodegen {
         };
         let owner = self.type_by_id(id)?;
         if owner.type_params.len() != args.len() { return None; }
-        let implementations = owner.protocols.iter().filter(|implementation| {
-            let Some(declaration) = self.type_by_id(crate::types::TypeId(implementation.protocol.0)) else {
-                return false;
-            };
-            let name = self.ctx.strings.get(declaration.name.0 as usize);
-            let module = declaration.origin_module.and_then(|id| self.ctx.strings.get(id.0 as usize));
-            name.is_some_and(|name| protocol.matches(name.rsplit('.').next().unwrap_or(name)))
-                && module.is_some_and(|module| protocol.canonical_archive_modules().contains(&module.as_str()))
-        });
+        let implementations = owner.protocols.iter().filter(|implementation|
+            self.declared_protocol_role(crate::types::TypeId(implementation.protocol.0)) == Some(protocol));
         let target = self.associated_binding(implementations, member)?;
         TypeSubstitution::new(&owner.type_params, args).apply(target).ok()
     }
@@ -495,14 +488,40 @@ impl VbcCodegen {
             }
             _ => (formal, actual),
         };
-        self.bind_source_declaration(formal, actual, bindings).then_some(())?;
+        self.bind_callable_operand(formal, actual, bindings).then_some(())?;
         if matches!(formal, TypeRef::Generic(_)) && matches!(actual, TypeRef::Function { .. })
             && let Some(bound) = self.callable_parameter_bound(function, index)
         {
             let bound = self.resolve_declared_associated_types(bound).unwrap_or_else(|| bound.clone());
-            self.bind_source_declaration(&bound, actual, bindings).then_some(())?;
+            self.bind_callable_operand(&bound, actual, bindings).then_some(())?;
         }
         Some(())
+    }
+
+    /// A diverging callback supplies no result, so it satisfies a selected
+    /// result type without changing that type's witness. This is covariance
+    /// at the function boundary, not equality of Never with another type.
+    fn bind_callable_operand(&self, formal: &TypeRef, actual: &TypeRef,
+        bindings: &mut TypeSubstitution) -> bool {
+        if let (TypeRef::Function { is_async: expected_async, params: expected_params,
+                return_type: expected_result, contexts: expected_contexts },
+            TypeRef::Function { is_async, params, return_type, contexts }) = (formal, actual)
+        {
+            if expected_async != is_async || expected_contexts != contexts || expected_params.len() != params.len() {
+                return false;
+            }
+            let mut selected = bindings.clone();
+            if !expected_params.iter().zip(params).all(|(expected, supplied)|
+                self.bind_source_declaration(expected, supplied, &mut selected))
+                || (return_type.as_ref() != &TypeRef::Concrete(crate::types::TypeId::NEVER)
+                    && !self.bind_source_declaration(expected_result, return_type, &mut selected))
+            {
+                return false;
+            }
+            *bindings = selected;
+            return true;
+        }
+        self.bind_source_declaration(formal, actual, bindings)
     }
 
     /// Only the callable's explicit slots are named at the call site. An
@@ -580,7 +599,13 @@ impl VbcCodegen {
                     if callable.param_names.first().is_some_and(|name| name == "self") {
                         return None;
                     }
-                    return self.source_call_result(callable, type_args, args, expected, depth);
+                    return self.source_call_result(callable, None, type_args, args, expected, depth);
+                }
+                if let Some(receiver) = self.source_expression_declaration(receiver, None, depth + 1) {
+                    let (function, owner) = self.declared_receiver_method(
+                        &receiver, method.name.as_str(), args.len() + 1,
+                    ).ok()??;
+                    return self.source_call_result(function, Some(&owner), type_args, args, expected, depth);
                 }
                 // Dotted free functions and static methods use the same source
                 // namespace grammar. Flatten only namespace paths; a value
@@ -593,12 +618,13 @@ impl VbcCodegen {
         let function = self
             .ctx
             .lookup_function_with_arity_in_scope(&name, args.len())?;
-        self.source_call_result(function, type_args, args, expected, depth)
+        self.source_call_result(function, None, type_args, args, expected, depth)
     }
 
     pub(super) fn source_call_result(
         &self,
         function: &FunctionInfo,
+        receiver: Option<&TypeRef>,
         type_args: &[verum_ast::ty::GenericArg],
         args: &[Expr],
         expected: Option<&TypeRef>,
@@ -612,17 +638,22 @@ impl VbcCodegen {
         else {
             return None;
         };
-        if params.len() != args.len() {
+        let receiver_slots = usize::from(receiver.is_some());
+        if params.len() != args.len() + receiver_slots {
             return None;
         }
         let mut bindings = TypeSubstitution::empty();
         self.bind_source_type_arguments(function, type_args, &mut bindings)?;
+        if let Some(receiver) = receiver {
+            let formal = crate::receiver_methods::pointee(params.first()?);
+            self.bind_declared_operand(function, 0, formal, receiver, &mut bindings)?;
+        }
         if let Some(expected) = expected {
             if !self.bind_source_declaration(return_type, expected, &mut bindings) {
                 return None;
             }
         }
-        for (index, (formal, argument)) in params.iter().zip(args).enumerate() {
+        for (index, (formal, argument)) in params.iter().skip(receiver_slots).zip(args).enumerate() {
             let contextual = bindings.apply(formal).ok()?;
             let expected = fully_bound(formal, &bindings).then_some(&contextual);
             let actual = self.compiled_callable_signature(argument).cloned().or_else(|| {
@@ -633,7 +664,7 @@ impl VbcCodegen {
                     .flatten();
                 supplied.or_else(|| self.source_expression_declaration(argument, expected, depth + 1))
             })?;
-            self.bind_declared_operand(function, index, formal, &actual, &mut bindings)?;
+            self.bind_declared_operand(function, index + receiver_slots, formal, &actual, &mut bindings)?;
         }
         fully_bound(return_type, &bindings).then(|| bindings.apply(return_type).ok()).flatten()
     }

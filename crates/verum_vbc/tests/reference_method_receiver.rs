@@ -4,17 +4,22 @@ use std::sync::Arc;
 use verum_common::{List, Text};
 use verum_fast_parser::Parser;
 use verum_vbc::bytecode::decode_instruction;
-use verum_vbc::codegen::{CodegenConfig, VbcCodegen};
+use verum_vbc::codegen::CodegenConfig;
 use verum_vbc::instruction::Instruction;
 use verum_vbc::interpreter::Interpreter;
+
+#[path = "fixtures/canonical_deref.rs"]
+mod canonical_deref;
 
 // The local method isolates dispatch from the stdlib's case-folding algorithm.
 // Its name and reference signature match the public Text method used by Weft.
 const ENV: &str = r#"
+module reference_receiver;
+mount core.base.protocols.Deref;
+mount core.base.maybe.Maybe;
 implement Text {
     fn eq_ignore_case(&self, other: &Text) -> Bool { *self == *other }
 }
-type Deref is protocol { type Target; fn deref(&self) -> &Self.Target; };
 type Guard<T> is { marker: Int, value: T };
 implement<T> Deref for Guard<T> {
     type Target = T;
@@ -36,8 +41,7 @@ fn check(body: &str, expected: Option<i64>) -> List<Text> {
     let ast = Parser::new(&format!("{ENV}\n{body}"))
         .parse_module()
         .expect("parse");
-    let module = VbcCodegen::with_config(CodegenConfig::new("reference_receiver"))
-        .compile_module(&ast)
+    let module = canonical_deref::compile(CodegenConfig::new("reference_receiver"), &ast)
         .expect("compile");
     let entry = module
         .functions

@@ -4,13 +4,16 @@ use std::sync::Arc;
 use verum_common::{List, Text};
 use verum_fast_parser::Parser;
 use verum_vbc::bytecode::decode_instruction;
-use verum_vbc::codegen::{CodegenConfig, VbcCodegen};
+use verum_vbc::codegen::CodegenConfig;
 use verum_vbc::instruction::Instruction;
 use verum_vbc::interpreter::Interpreter;
 
+#[path = "fixtures/canonical_deref.rs"]
+mod canonical_deref;
+
 const ENV: &str = r#"
 module user_receiver;
-type Deref is protocol { type Target; fn deref(&self) -> &Self.Target; };
+mount core.base.protocols.{Deref, DerefMut};
 type Guard<T> is { marker: Int, value: T };
 implement<T> Deref for Guard<T> {
     type Target = T;
@@ -30,8 +33,7 @@ fn check(body: &str, expected: Option<i64>) -> List<Text> {
     let ast = Parser::new(&format!("{ENV}\n{body}"))
         .parse_module()
         .expect("parse");
-    let module = VbcCodegen::with_config(CodegenConfig::new("user_receiver"))
-        .compile_module(&ast)
+    let module = canonical_deref::compile(CodegenConfig::new("user_receiver"), &ast)
         .expect("compile");
     let entry = module
         .functions
@@ -226,8 +228,8 @@ fn iterable_target_never_keeps_the_guard_method_identity() {
 
 fn assert_missing_method(body: &str, expected: &str) {
     let ast = Parser::new(&format!("{ENV}\n{body}")).parse_module().unwrap();
-    let err = VbcCodegen::with_config(CodegenConfig::new("user_receiver"))
-        .compile_module(&ast).err().expect("no declaration provides this method");
+    let err = canonical_deref::compile(CodegenConfig::new("user_receiver"), &ast)
+        .err().expect("no declaration provides this method");
     assert!(matches!(&err.kind, verum_vbc::codegen::CodegenErrorKind::UndefinedFunction(name)
         if name == expected), "{err}");
 }
@@ -430,9 +432,7 @@ fn probe<U: Reader>(g: Guard<U>) -> Int { g.read() }
 #[test]
 fn swapping_a_projected_field_and_a_local_moves_each_record_once() {
     check(r#"
-        type DerefMut is protocol { type Target; fn deref_mut(&mut self) -> &mut Self.Target; };
         implement<T> DerefMut for Guard<T> {
-            type Target = T;
             fn deref_mut(&mut self) -> &mut T { &mut self.value }
         }
         type Frame is { marker: Int, item: Cell };
@@ -451,9 +451,7 @@ fn swapping_a_projected_field_and_a_local_moves_each_record_once() {
 #[test]
 fn replacing_a_reborrowed_record_updates_the_guard_and_returns_the_old_record() {
     check(r#"
-        type DerefMut is protocol { type Target; fn deref_mut(&mut self) -> &mut Self.Target; };
         implement<T> DerefMut for Guard<T> {
-            type Target = T;
             fn deref_mut(&mut self) -> &mut T { &mut self.value }
         }
         fn exchange<T>(place: &mut T, value: T) -> T {
@@ -476,7 +474,6 @@ implement Cell {
 "#;
 
 const MUTABLE_GUARD: &str = r#"
-type DerefMut is protocol extends Deref { fn deref_mut(&mut self) -> &mut Self.Target; };
 implement<T> DerefMut for Guard<T> {
     fn deref_mut(&mut self) -> &mut T { &mut self.value }
 }
@@ -517,8 +514,7 @@ implement<T> Deref for Outer<T> {
         let mutable = if declarations.is_empty() { "" } else { MUTABLE_GUARD };
         let source = format!("{ENV}\n{MUTATING_TARGET}\n{mutable}\n{declarations}\nfn probe(g: &mut {ty}) {{ {receiver}.overwrite(73); }}");
         let ast = Parser::new(&source).parse_module().unwrap();
-        let err = VbcCodegen::with_config(CodegenConfig::new("user_receiver"))
-            .compile_module(&ast)
+        let err = canonical_deref::compile(CodegenConfig::new("user_receiver"), &ast)
             .err().expect("a read-only dereference cannot authorize mutation");
         assert!(err.to_string().contains("mutable dereference"), "{err}");
     }
@@ -549,8 +545,8 @@ fn read_only_bindings_and_borrowed_wrappers_cannot_give_out_mutable_storage() {
         for receiver in ["g", "(*g)"] {
             let source = format!("{ENV}\n{MUTATING_TARGET}\n{MUTABLE_GUARD}\nfn probe() {{ {setup} {receiver}.overwrite(73); }}");
             let ast = Parser::new(&source).parse_module().unwrap();
-            let err = VbcCodegen::with_config(CodegenConfig::new("user_receiver"))
-                .compile_module(&ast).err().unwrap_or_else(|| panic!("{label}: {receiver}"));
+            let err = canonical_deref::compile(CodegenConfig::new("user_receiver"), &ast)
+                .err().unwrap_or_else(|| panic!("{label}: {receiver}"));
             assert!(err.to_string().contains("mutable dereference"), "{err}");
         }
     }
@@ -581,7 +577,7 @@ implement<T> Guard<T> {{
 fn probe(g: &mut Guard<Cell>) {{ g.overwrite(73); }}
 "#);
     let ast = Parser::new(&source).parse_module().unwrap();
-    let err = VbcCodegen::with_config(CodegenConfig::new("user_receiver"))
-        .compile_module(&ast).err().expect("missing DerefMut implementation");
+    let err = canonical_deref::compile(CodegenConfig::new("user_receiver"), &ast)
+        .err().expect("missing DerefMut implementation");
     assert!(err.to_string().contains("mutable dereference"), "{err}");
 }

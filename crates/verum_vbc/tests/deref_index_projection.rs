@@ -6,10 +6,12 @@ use verum_fast_parser::Parser;
 use verum_vbc::codegen::{CodegenConfig, VbcCodegen};
 use verum_vbc::interpreter::Interpreter;
 
+#[path = "fixtures/canonical_deref.rs"]
+mod canonical_deref;
+
 const ENV: &str = r#"
 module index_projection;
-type Deref is protocol { type Target; fn deref(&self) -> &Self.Target; };
-type DerefMut is protocol { fn deref_mut(&mut self) -> &mut Self.Target; };
+mount core.base.protocols.{Deref, DerefMut};
 type Guard<T> is { marker: Int, value: T };
 implement<T> Deref for Guard<T> {
     type Target = T;
@@ -24,7 +26,7 @@ type Cell is { padding: Int, value: Int };
 fn compile(body: &str) -> Result<verum_vbc::VbcModule, verum_vbc::codegen::CodegenError> {
     let source = format!("{ENV}\n{body}");
     let ast = Parser::new(&source).parse_module().expect("source grammar");
-    VbcCodegen::with_config(CodegenConfig::new("index_projection")).compile_module(&ast)
+    canonical_deref::compile(CodegenConfig::new("index_projection"), &ast)
 }
 
 fn value(body: &str, expected: i64) {

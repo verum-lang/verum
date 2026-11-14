@@ -12946,9 +12946,6 @@ impl VbcCodegen {
             projections.push(projection);
             declaration = next;
         }
-        if self.semantic_type_in_current_scope(&target).as_ref() != Some(&declaration) {
-            return Err(refusal());
-        }
         let mut value = self.compile_expr(origin)?.or_internal("missing dereference receiver")?;
         for projection in projections {
             let reference = self.emit_projection_method(value, projection, None);
@@ -12956,7 +12953,9 @@ impl VbcCodegen {
             value = reference;
         }
         self.compile_method_on_adjusted_value(
-            value, &format!("&mut {target}"), origin.span, method, args,
+            value, &format!("&mut {target}"), Some(crate::types::TypeRef::reference(
+                declaration, crate::types::Mutability::Mutable, crate::types::CbgrTier::Tier0,
+            )), origin.span, method, args,
             resolved_target, type_args, true,
         )
     }
@@ -12976,6 +12975,8 @@ impl VbcCodegen {
         let mut value = self
             .compile_expr(receiver)?
             .or_internal("method receiver has no value")?;
+        let mut declaration = self.projection_operand_declaration(receiver)
+            .map(|ty| crate::receiver_methods::pointee(&ty).clone());
         let mut target = verum_common::Text::from(receiver_type);
         for _ in 0..depth {
             let key = self
@@ -12989,14 +12990,25 @@ impl VbcCodegen {
                 ));
             };
             let next_value = self.ctx.alloc_temp();
-            self.emit_user_deref_value(next_value, value, &key);
+            if let Some(owner) = declaration.as_ref() {
+                let (projection, next) = self.dereference_projection(owner, false)
+                    .ok_or_else(|| CodegenError::with_span(CodegenErrorKind::TypeInference(
+                        "Deref method must return its declared Target".into()), receiver.span))?;
+                let reference = self.emit_projection_method(value, projection, None);
+                self.ctx.emit(Instruction::Deref { dst: next_value, ref_reg: reference });
+                self.ctx.free_temp(reference);
+                declaration = Some(next);
+            } else {
+                self.emit_user_deref_value(next_value, value, &key);
+                declaration = None;
+            }
             self.ctx.free_temp(value);
             value = next_value;
             target = next_type;
         }
 
         self.compile_method_on_adjusted_value(
-            value, target.as_str(), receiver.span, method, args, resolved_target, type_args, false,
+            value, target.as_str(), declaration, receiver.span, method, args, resolved_target, type_args, false,
         )
     }
 
@@ -13006,6 +13018,7 @@ impl VbcCodegen {
         &mut self,
         value: Reg,
         target: &str,
+        declaration: Option<crate::types::TypeRef>,
         span: verum_ast::Span,
         method: &verum_ast::Ident,
         args: &verum_common::List<Expr>,
@@ -13029,6 +13042,10 @@ impl VbcCodegen {
             .insert(binding.clone(), target.to_string());
         self.ctx
             .register_variable_type(&binding, self.type_name_to_var_type(target));
+        if let Some(declaration) = declaration {
+            let discipline = self.value_resource_discipline(&declaration);
+            self.ctx.registers.value_uses.set_type(local, declaration, discipline);
+        }
         let adjusted = Expr::ident(verum_ast::Ident::new(binding.clone(), span));
         let result = self.compile_method_call_inner(
             &adjusted, method, args, resolved_target, type_args, receiver_is_borrowed,
@@ -13303,7 +13320,8 @@ impl VbcCodegen {
             let target = self.ctx.array_element_type_name(name.name.as_str())
                 .map_or_else(|| "Slice".to_string(), |element| format!("Slice<{element}>"));
             return self.compile_method_on_adjusted_value(
-                slice, &target, receiver.span, method, args, resolved_target, type_args, false,
+                slice, &target, self.semantic_type_in_current_scope(&target), receiver.span,
+                method, args, resolved_target, type_args, false,
             );
         }
 
@@ -13378,7 +13396,10 @@ impl VbcCodegen {
                 (value, format!("&mut {}", Self::method_receiver_type_name(receiver_type)))
             };
             return self.compile_method_on_adjusted_value(
-                borrowed, &target, receiver.span, method, args, resolved_target, type_args, true,
+                borrowed, &target, self.projection_operand_declaration(array_receiver).map(|ty| {
+                    if matches!(ty, crate::types::TypeRef::Reference { .. }) { ty }
+                    else { crate::types::TypeRef::reference(ty, crate::types::Mutability::Mutable, crate::types::CbgrTier::Tier0) }
+                }), receiver.span, method, args, resolved_target, type_args, true,
             );
         }
         if let Some(receiver_type) = receiver_declaration.as_deref() {
@@ -16381,6 +16402,22 @@ impl VbcCodegen {
         } else {
             effective_method_name
         };
+        // A declared alias can carry arguments that have no parseable display
+        // spelling. Select its callable and self witness structurally. A Deref
+        // adjustment must already have been emitted before using the target.
+        let typed_receiver = if let Some(receiver) = receiver_result_declaration.as_ref()
+            && let Some((_, owner)) = self.declared_receiver_method(receiver, method.name.as_str(), args.len() + 1)?
+            && (crate::receiver_methods::pointee(receiver) == &owner
+                || self.expand_declared_alias(receiver.clone())
+                    .is_some_and(|expanded| crate::receiver_methods::pointee(&expanded) == &owner))
+        {
+            owner.base_type_id().and_then(|id| self.type_by_id(id))
+                .and_then(|descriptor| self.type_declaration_identity(descriptor))
+                .and_then(|name| self.registered_receiver_method(&name, method.name.as_str()))
+                .map(|name| (name, owner))
+        } else { None };
+        let (effective_method_name, receiver_result_declaration) = typed_receiver
+            .map_or((effective_method_name, receiver_result_declaration), |(name, owner)| (name, Some(owner)));
         let method_id = self.intern_string(&effective_method_name);
 
         // `lookup_function_with_arity` handles overload sets via the
@@ -29443,7 +29480,7 @@ impl VbcCodegen {
                             // A result is declared in the callee's scope. Transport the
                             // instantiated declaration before interpreting display names
                             // in a caller that may shadow or never mount those types.
-                            if let Some(result) = self.source_call_result(func_info, type_args, args, None, 0)
+                            if let Some(result) = self.source_call_result(func_info, None, type_args, args, None, 0)
                                 && let Some(name) = self.declaration_type_name(&result, 0)
                             {
                                 return Some(name);

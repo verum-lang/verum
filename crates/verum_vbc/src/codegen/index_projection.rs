@@ -26,6 +26,40 @@ struct IndexProjection {
 }
 
 impl VbcCodegen {
+    /// Select the method using the declared receiver, retaining every argument
+    /// through alias expansion and Deref. Rendered names identify declarations;
+    /// they never carry the receiver's generic evidence.
+    pub(in crate::codegen) fn declared_receiver_method(
+        &self,
+        receiver: &crate::types::TypeRef,
+        method: &str,
+        arity: usize,
+    ) -> CodegenResult<verum_common::Maybe<(&FunctionInfo, crate::types::TypeRef)>> {
+        let mut owner = receiver.clone();
+        let mut seen = verum_common::List::new();
+        for _ in 0..64 {
+            owner = crate::receiver_methods::pointee(&owner).clone();
+            let Some(descriptor) = owner.base_type_id().and_then(|id| self.type_by_id(id)) else {
+                return Ok(None);
+            };
+            let Some(name) = self.type_declaration_identity(descriptor) else { return Ok(None); };
+            if let Some(key) = self.registered_receiver_method(&name, method) {
+                let selected = self.receiver_specialization(&key, Some(&owner), arity)?;
+                let Some(function) = selected.or_else(|| self.ctx.lookup_qualified_function(&key)) else { return Ok(None); };
+                return Ok((function.param_count == arity
+                    && function.param_names.first().is_some_and(|name| name == "self"))
+                    .then_some((function, owner)));
+            }
+            if seen.contains(&owner) { return Ok(None); }
+            seen.push(owner.clone());
+            let Some(expanded) = self.expand_declared_alias(owner.clone()) else { return Ok(None); };
+            if expanded != owner { owner = expanded; continue; }
+            let Some((_, next)) = self.dereference_projection(&owner, false) else { return Ok(None); };
+            owner = next;
+        }
+        Ok(None)
+    }
+
     /// Runtime carrier identity follows the defining descriptor, even when a
     /// source producer assigned a local ID. Foreign same-leaf declarations do
     /// not inherit a carrier merely by resembling its name or layout.
@@ -201,6 +235,8 @@ impl VbcCodegen {
         if !crate::codegen::constructor_types::fully_bound(return_type, &bindings) {
             return None;
         }
+        let result = bindings.apply(return_type).ok()?;
+        let result = self.resolve_declared_associated_types(&result)?;
         Some(ProjectionMethod {
             name,
             id: info.id,
@@ -209,7 +245,7 @@ impl VbcCodegen {
                 .iter()
                 .map(|id| bindings.get(*id).cloned())
                 .collect::<Option<_>>()?,
-            result: bindings.apply(return_type).ok()?,
+            result,
         })
     }
 
@@ -236,14 +272,19 @@ impl VbcCodegen {
         let descriptor = owner.base_type_id().and_then(|id| self.type_by_id(id))?;
         let implements_projection = descriptor.protocols.iter().any(|row| {
             row.methods.contains(&method.id.0)
-                && self.type_by_id(crate::types::TypeId(row.protocol.0))
-                    .and_then(|ty| self.ctx.strings.get(ty.name.0 as usize))
-                    .is_some_and(|name| protocol.matches(name.rsplit('.').next().unwrap_or(name)))
+                && self.declared_protocol_role(crate::types::TypeId(row.protocol.0)) == Some(protocol)
         });
         if !implements_projection {
             return None;
         }
+        // DerefMut inherits Target from Deref. Agreement includes every nested
+        // argument and reference capability; equal nominal carriers alone are
+        // not evidence that the method borrows the declared target.
+        let expected = self.declared_protocol_member(owner, WellKnownProtocol::Deref, "Target")?;
         let target = (**inner).clone();
+        if expected != target {
+            return None;
+        }
         Some((method, target))
     }
 

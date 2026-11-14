@@ -191,7 +191,7 @@ impl VbcCodegen {
                 let selected = emitted.and_then(|(reg, start, end)|
                     self.copy_selected_call_result(reg, start, end, type_args, args, depth));
                 if selected.is_some() { return selected; }
-                if emitted.is_some() && let Some(result) = self.source_call_declaration(expr, None, depth + 1) {
+                if let Some(result) = self.source_call_declaration(expr, None, depth + 1) {
                     return Some(result);
                 }
                 let owner = self.extract_expr_type_name(receiver)?;
@@ -334,7 +334,7 @@ impl VbcCodegen {
         // from its operands and require agreement with the emitted call.
         let witnesses = witnesses?;
         if params.len() != source_args.len() { return None; }
-        let result = self.source_call_result(info, type_args, source_args, None, depth)?;
+        let result = self.source_call_result(info, None, type_args, source_args, None, depth)?;
         for (id, witness) in info.type_param_ids.iter().zip(witnesses) {
             substitution.bind(*id, witness.clone());
         }
