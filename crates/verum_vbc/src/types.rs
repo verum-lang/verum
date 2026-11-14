@@ -1524,7 +1524,9 @@ pub struct FieldDescriptor {
     /// evidence and must not be reconstructed by interpreting pointer bits.
     #[serde(default)]
     pub declaration_type: Option<TypeRef>,
-    /// Offset within struct (0 for generic types).
+    /// Value-slot byte offset in this declaration's record or variant payload.
+    /// Global field-name selectors are not layout offsets. Foreign ABI layouts
+    /// are carried separately by `FfiStructLayout`.
     pub offset: u32,
     /// Coarse compatibility visibility; not authority for declaration access.
     pub visibility: Visibility,

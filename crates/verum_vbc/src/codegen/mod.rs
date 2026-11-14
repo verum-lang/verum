@@ -15936,9 +15936,8 @@ impl VbcCodegen {
                 let generic_param_map = generics.scope;
                 type_desc.type_params = generics.parameters;
 
-                // Populate fields for drop tracking
-                // NOTE: Field offset must use global field index from intern_field_name,
-                // since that's what SetF/GetF use at runtime.
+                // Storage positions follow this declaration's field order.
+                // The global name interner belongs only to named field lookup.
                 let mut field_scope = self.current_source_substitution.clone();
                 for (ordinal, field) in fields.iter().enumerate() {
                     let field_name = field.name.name.to_string();
@@ -15953,8 +15952,7 @@ impl VbcCodegen {
                     let field_type_ref = lower_field(false)?;
                     let declaration_type = formal_parameters::field_declaration_type(lower_field(true)?, &type_desc.type_params);
 
-                    // Use the same global field index that SetF/GetF use
-                    let field_idx = self.intern_field_name(&field_name);
+                    self.intern_field_name(&field_name);
 
                     let (refinement_src, refinement_binding) =
                         (StringId::EMPTY, StringId::EMPTY);
@@ -15976,7 +15974,7 @@ impl VbcCodegen {
                         name: StringId(self.ctx.intern_string_raw(&field_name)),
                         type_ref: field_type_ref,
                         declaration_type,
-                        offset: field_idx * 8, // Use global field index * sizeof(Value)
+                        offset: Self::declared_field_offset(ordinal, field.span)?,
                         visibility,
                         refinement_src,
                         refinement_binding,
@@ -16233,7 +16231,7 @@ impl VbcCodegen {
                 let generics = self.declared_generic_parameters(type_id, type_decl)?;
                 let generic_param_map = generics.scope;
                 let inner_type_ref = self.resolve_field_type_ref(_inner_type, &generic_param_map)?;
-                let inner_field_idx = self.intern_field_name("_0");
+                self.intern_field_name("_0");
 
                 // Canonical (serialisable) marker on the type
                 // descriptor: this type IS a transparent wrapper.
@@ -16275,7 +16273,7 @@ impl VbcCodegen {
                     declaration_type: formal_parameters::field_declaration_type(
                         self.resolve_signature_type_ref(_inner_type, &generic_param_map)?,
                         &type_desc.type_params),
-                    offset: inner_field_idx * 8,
+                    offset: 0,
                     visibility: crate::types::Visibility::Public,
                     refinement_src: StringId::EMPTY,
                         refinement_binding: StringId::EMPTY,
@@ -16343,14 +16341,14 @@ impl VbcCodegen {
                 for (i, inner_ty) in types.iter().enumerate() {
                     let field_name = format!("_{}", i);
                     let inner_type_ref = self.resolve_field_type_ref(inner_ty, &generic_param_map)?;
-                    let field_idx = self.intern_field_name(&field_name);
+                    self.intern_field_name(&field_name);
                     type_desc.fields.push(crate::types::FieldDescriptor {
                     declared_visibility: None,
                         name: StringId(self.ctx.intern_string_raw(&field_name)),
                         type_ref: inner_type_ref,
                         declaration_type: formal_parameters::field_declaration_type(
                             self.resolve_signature_type_ref(inner_ty, &generic_param_map)?, &type_desc.type_params),
-                        offset: field_idx * 8,
+                        offset: Self::declared_field_offset(i, inner_ty.span)?,
                         visibility: crate::types::Visibility::Public,
                         refinement_src: StringId::EMPTY,
                         refinement_binding: StringId::EMPTY,
@@ -20787,6 +20785,16 @@ impl VbcCodegen {
         self.context_name_to_id.insert(name.to_string(), id);
         self.context_names.push(name.to_string());
         id
+    }
+
+    /// Nominal storage uses Value slots in declaration order. Global field-name
+    /// IDs are selectors and cannot be serialized as a physical layout offset.
+    fn declared_field_offset(ordinal: usize, span: verum_ast::Span) -> CodegenResult<u32> {
+        u64::try_from(ordinal).ok()
+            .and_then(|ordinal| ordinal.checked_mul(verum_common::layout::VALUE_SLOT_SIZE))
+            .and_then(|offset| u32::try_from(offset).ok())
+            .ok_or_else(|| CodegenError::with_span(CodegenErrorKind::InvalidSourceSignature(
+                "nominal field offset exceeds VBC layout range".into()), span))
     }
 
     fn intern_field_name(&mut self, name: &str) -> u32 {
