@@ -6514,7 +6514,7 @@ impl ProtocolChecker {
             .flat_map(Self::nominal_name_components)
     }
 
-    fn paths_equal(&self, p1: &Path, p2: &Path) -> bool {
+    pub(crate) fn paths_equal(&self, p1: &Path, p2: &Path) -> bool {
         // Metadata may carry a canonical qualified name in one Ident; source
         // syntax carries one segment per component. Both denote the same full
         // declaration path, never merely its leaf. Relative markers remain

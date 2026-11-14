@@ -386,14 +386,19 @@ fn canonical_full_owner_survives_metadata_and_source_path_representations() {
             .find_impl(&receiver, &segmented("other.contract.Evidence"))
             .is_none()
     );
-    let mut relative = protocol;
-    relative
-        .segments
-        .insert(0, verum_ast::ty::PathSegment::Relative);
-    assert!(
-        checker.find_impl(&receiver, &relative).is_none(),
-        "relative routing collision is not absolute identity"
-    );
+    for marker in [
+        verum_ast::ty::PathSegment::Relative,
+        verum_ast::ty::PathSegment::Cog,
+        verum_ast::ty::PathSegment::Super,
+        verum_ast::ty::PathSegment::SelfValue,
+    ] {
+        let mut routed = protocol.clone();
+        routed.segments.insert(0, marker);
+        assert!(
+            checker.find_impl(&receiver, &routed).is_none(),
+            "unresolved routing markers are not absolute identity: {routed:?}"
+        );
+    }
 }
 
 #[test]

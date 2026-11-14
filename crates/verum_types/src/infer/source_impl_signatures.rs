@@ -602,7 +602,10 @@ impl TypeChecker {
                 en == an && sequence(ea, aa)?
             }
             (Type::Named { path: en, args: ea }, Type::Named { path: an, args: aa }) => {
-                en.to_string() == an.to_string() && sequence(ea, aa)?
+                // Applied Self and source annotations may retain different
+                // path representations of the same declared owner.
+                let same_owner = self.protocol_checker.read().paths_equal(en, an);
+                same_owner && sequence(ea, aa)?
             }
             (
                 Type::TypeApp {
