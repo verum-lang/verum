@@ -7145,6 +7145,17 @@ impl VbcCodegen {
         // Source policy belongs to the descriptor before it is observed or
         // compared with an earlier interface of this same declaration.
         ty.visibility = self.lower_field_visibility(&declaration.visibility)?.0;
+        // A sibling's local claim may have qualified this declaration's name.
+        // Replaying the same owner must retain that published spelling; a bare
+        // lookup name is not a different ABI. All other descriptor fields still
+        // pass the ordinary source and runtime-shape correspondence checks.
+        if let Some(owner) = self.type_declaration_identity(&ty)
+            && let Some(existing) = self.type_by_id(ty.id)
+            && existing.source_declaration.is_some()
+            && self.type_declaration_identity(existing).as_ref() == Some(&owner)
+        {
+            ty.name = existing.name;
+        }
         self.take_pending_implementation_attachments(&mut ty);
         self.complete_declared_lifecycle(&mut ty)?;
         let complete_forward = self.type_declaration_identity(&ty).is_some_and(|owner| {

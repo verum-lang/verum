@@ -267,3 +267,80 @@ fn source_completion_rejects_forged_visibility() {
         .visibility = verum_vbc::types::Visibility::Public;
     assert_fatal(complete("owner", &altered, &ast).unwrap_err());
 }
+
+fn wire(module: &VbcModule) -> VbcModule {
+    verum_vbc::deserialize::deserialize_module(
+        &verum_vbc::serialize::serialize_module(module).unwrap(),
+    ).unwrap()
+}
+
+#[test]
+fn homonymous_source_interfaces_complete_in_both_orders() {
+    // These forms retain exact source declarations. ABI-only sum completion
+    // has a separate duplicate-identity defect and cannot authorize this path.
+    for body in [
+        "{ public value: Int }",
+        "(Int)",
+        "()",
+        "Int { it > 0 }",
+        "protocol { fn value(&self) -> Int; }",
+    ] {
+        let declaration = format!("public type Carrier is {body};");
+        let first = parsed("bundle.first", &declaration);
+        let second = parsed("bundle.second", &declaration);
+        let mut producer = VbcCodegen::with_config(CodegenConfig::new("bundle"));
+        let archive = wire(&producer.collect_declaration_interface(&[&first, &second]).unwrap());
+        for units in [[&first, &second], [&second, &first]] {
+            let mut consumer = VbcCodegen::with_config(CodegenConfig::new("bundle"));
+            consumer.import_archive_module_types(&archive);
+            let completed = wire(&consumer.collect_declaration_interface(&units)
+                .unwrap_or_else(|error| panic!("{body}: {error}")));
+            let mut identities = verum_common::List::new();
+            for owner in ["bundle.first", "bundle.second"] {
+                let carriers: verum_common::List<_> = completed.types.iter().filter(|descriptor| {
+                    descriptor.origin_module.and_then(|id| completed.get_string(id)) == Some(owner)
+                        && completed.get_string(descriptor.name).is_some_and(|name|
+                            verum_vbc::module::qualify_module_name(owner, name) == format!("{owner}.Carrier"))
+                }).collect();
+                assert_eq!(carriers.len(), 1, "{owner}: {body}");
+                let original = archive.types.iter().find(|descriptor| {
+                    descriptor.origin_module.and_then(|id| archive.get_string(id)) == Some(owner)
+                        && archive.get_string(descriptor.name).is_some_and(|name|
+                            verum_vbc::module::qualify_module_name(owner, name) == format!("{owner}.Carrier"))
+                }).expect("each source owner was present before completion");
+                assert_eq!(carriers[0].source_declaration, original.source_declaration,
+                    "completion preserves the same source evidence: {owner}: {body}");
+                identities.push(carriers[0].id);
+            }
+            assert_ne!(identities[0], identities[1], "same spelling cannot merge owners: {body}");
+        }
+    }
+}
+
+#[test]
+fn qualified_spelling_never_authorizes_a_changed_runtime_descriptor() {
+    let ast = parsed("owner", "public type Carrier is { public value: Int };");
+    let original = interface("owner", &ast);
+    for changed in ["size", "alignment", "layout", "visibility", "resource", "offset", "payload"] {
+        let mut imported = original.clone();
+        let qualified = imported.intern_string("owner.Carrier");
+        let descriptor = imported.types.iter_mut()
+            .find(|descriptor| descriptor.source_declaration.is_some()).unwrap();
+        descriptor.name = qualified;
+        match changed {
+            "size" => descriptor.size += 8,
+            "alignment" => descriptor.alignment *= 2,
+            "layout" => descriptor.declared_layout.as_mut().unwrap().size += 8,
+            "visibility" => descriptor.visibility = verum_vbc::types::Visibility::Private,
+            "resource" => descriptor.resource_discipline = verum_common::ResourceDiscipline::Affine,
+            "offset" => descriptor.fields[0].offset += 8,
+            "payload" => descriptor.fields[0].declaration_type = Some(TypeRef::Concrete(TypeId::BOOL)),
+            _ => unreachable!(),
+        }
+        let error = complete("owner", &imported, &ast)
+            .expect_err("a qualified name cannot establish ABI correspondence");
+        // Resource policy can reject at source integrity before ABI comparison.
+        // Both paths must remain fatal rather than completing the forged header.
+        assert_fatal(error);
+    }
+}
