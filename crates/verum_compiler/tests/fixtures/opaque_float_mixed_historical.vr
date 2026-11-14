@@ -1,0 +1,17 @@
+// Historical mixed scalar control: current frontend must reject implicit widening.
+module core;
+
+fn launder<T>(x: T) -> T { x }
+
+@test
+fn regression_opaque_float_mixed_operands_pinned() {
+    // Dispatch must key on EITHER operand: keying on the first alone made
+    // `2 + 2.5` disagree with `2.5 + 2`.
+    let f = launder(2.5);
+    let i = launder(2);
+    assert_eq(f + 1.5, 4.0);
+    assert_eq(1.5 + f, 4.0);
+    assert_eq(i + f, 4.5);
+    assert_eq(f + i, 4.5);
+}
+

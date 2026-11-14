@@ -748,6 +748,7 @@ jobs:
           --test companion_factory_archive
           --test checked_source_callbacks
           --test checked_source_arithmetic
+          --test opaque_float_scalar_ordering
           --test os_error_contract
           --test imported_callable_properties
           --test source_reference_purity

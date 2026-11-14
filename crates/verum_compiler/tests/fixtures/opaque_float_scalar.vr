@@ -1,0 +1,62 @@
+// Five unchanged scalar controls from the original T0375 regression source.
+module core;
+
+fn launder<T>(x: T) -> T { x }
+
+@test
+fn regression_opaque_float_negation_pinned() {
+    // The originally reported case: interp returned -2, AOT -4612811918334230528.
+    assert_eq(-launder(2.5), -2.5);
+}
+
+@test
+fn regression_opaque_float_binary_arithmetic_pinned() {
+    let a = launder(2.5);
+    let b = launder(1.5);
+    assert_eq(a + b, 4.0);
+    assert_eq(a - b, 1.0);
+    assert_eq(a * b, 3.75);
+    assert_eq(a / b, 2.5 / 1.5);
+}
+
+@test
+fn regression_opaque_float_ordering_pinned() {
+    // Truncation collapsed both operands to 2, so `<` answered false.
+    let p = launder(2.5);
+    let q = launder(2.9);
+    assert(p < q);
+    assert(q > p);
+    assert(p <= q);
+    assert(!(p > q));
+    assert(!(q <= p));
+    // A difference smaller than 1 survives only under float subtraction.
+    assert(q - p > 0.0);
+}
+
+@test
+fn regression_opaque_float_loop_bound_pinned() {
+    // The fused compare-and-jump family decoded with a raw `as_i64()`, so a
+    // float loop bound branched on the mantissa bits of the IEEE payload.
+    let limit = launder(3.5);
+    let mut i = launder(0.0);
+    let mut steps = 0;
+    while i < limit {
+        i = i + 1.0;
+        steps = steps + 1;
+    }
+    assert_eq(steps, 4);
+}
+
+@test
+fn regression_opaque_float_nan_is_unordered_pinned() {
+    // `is_float()` alone rejects a boxed NaN (from_f64 re-tags it TAG_NAN),
+    // which sent NaN operands down the integer arm.  IEEE requires every
+    // ordered comparison against NaN to be false.
+    let z = launder(0.0);
+    let nan = z / z;
+    let one = launder(1.0);
+    assert(!(nan < one));
+    assert(!(nan > one));
+    assert(!(nan <= one));
+    assert(!(nan >= one));
+}
