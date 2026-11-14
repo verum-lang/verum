@@ -24,7 +24,26 @@ pub(super) struct ImplementationHeader {
 /// Caller premises, proof graphs and imported evidence remain query-local.
 #[derive(Default)]
 pub(super) struct ImplementationPreparation {
-    headers: Maybe<List<(ImplementationHeader, Maybe<PreparedImplementation>)>>,
+    headers: Maybe<List<PreparedHeader>>,
+}
+
+struct PreparedHeader {
+    header: ImplementationHeader,
+    protocol_heads: ProtocolHeadFilter,
+    implementation: Maybe<PreparedImplementation>,
+}
+
+impl PreparedHeader {
+    fn new(header: ImplementationHeader) -> Self {
+        Self { header, protocol_heads: ProtocolHeadFilter::Unprepared, implementation: None }
+    }
+}
+
+enum ProtocolHeadFilter {
+    Unprepared,
+    // Incomplete source identity cannot justify excluding this header.
+    Unknown,
+    Declared(List<TypeId>),
 }
 
 struct PreparedImplementation {
@@ -417,6 +436,56 @@ impl VbcCodegen {
         Ok(premises)
     }
 
+    /// A head mismatch is independent of receiver and argument substitution.
+    /// Follow only canonical protocol declarations in their own source scopes.
+    /// This does not prove an application: every potentially matching header
+    /// still enters the original receiver, argument and premise matcher.
+    fn implementation_protocol_heads(
+        &mut self,
+        header: &ImplementationHeader,
+    ) -> CodegenResult<ProtocolHeadFilter> {
+        let ImplKind::Protocol { protocol, .. } = &header.declaration.kind else {
+            return Ok(ProtocolHeadFilter::Unknown);
+        };
+        let first = self.with_protocol_source_scope(
+            Some(header.source.origin_module().into()), Default::default(), None,
+            |cg| Ok(cg.protocol_declaration_identity(protocol)),
+        )?;
+        let mut pending = List::from_iter([first]);
+        let mut heads = List::new();
+        while let Some((id, key)) = pending.pop() {
+            let Some(id) = id else { return Ok(ProtocolHeadFilter::Unknown) };
+            if heads.contains(&id) { continue; }
+            // The normal application traversal owns diagnostics. A head-only
+            // budget or an incomplete declaration merely defers to that path.
+            if heads.len() >= 256 { return Ok(ProtocolHeadFilter::Unknown); }
+            if self.type_by_id(id).is_none_or(|descriptor|
+                descriptor.kind != crate::types::TypeKind::Protocol)
+            {
+                return Ok(ProtocolHeadFilter::Unknown);
+            }
+            let Some(info) = self.protocol_registry.get(key.as_str()).cloned().filter(|info|
+                key.as_str() == crate::module::qualify_module_name(&info.source_module, &info.name))
+            else { return Ok(ProtocolHeadFilter::Unknown) };
+            heads.push(id);
+            let complete = self.with_protocol_source_scope(
+                Some(info.source_module.clone()), Default::default(), None,
+                |cg| {
+                    for parent in info.super_protocols.iter() {
+                        let Ok((path, _)) = Self::protocol_application_parts(parent) else {
+                            return Ok(false);
+                        };
+                        if pending.len() >= 256 { return Ok(false); }
+                        pending.push(cg.protocol_declaration_identity(path));
+                    }
+                    Ok(true)
+                },
+            )?;
+            if !complete { return Ok(ProtocolHeadFilter::Unknown); }
+        }
+        Ok(ProtocolHeadFilter::Declared(heads))
+    }
+
     /// Match a header in its own binder space, then resolve every premise in
     /// the actual receiver's space. Equal numeric binder IDs are not equality.
     fn implementation_alternative(
@@ -605,7 +674,7 @@ impl VbcCodegen {
         // the existing declaration roster is shared between its queries.
         let headers = preparation.headers.get_or_insert_with(|| {
             self.implementation_headers.iter().cloned()
-                .map(|header| (header, None)).collect()
+                .map(PreparedHeader::new).collect()
         });
         // Descriptor-provided evidence is visible only after this proof reaches
         // its subject. Retaining that roster would broaden later proof inputs.
@@ -652,15 +721,22 @@ impl VbcCodegen {
                     continue;
                 };
                 if !headers.iter().chain(&imported_headers)
-                    .any(|(header, _)| header.source == source)
+                    .any(|prepared| prepared.header.source == source)
                 {
                     let declaration =
                         Arc::new(source.declaration().map_err(|error| invalid(error, span))?);
-                    imported_headers.push((ImplementationHeader { source, declaration }, None));
+                    imported_headers.push(PreparedHeader::new(ImplementationHeader { source, declaration }));
                 }
             }
-            for (header, prepared) in headers.iter_mut().chain(&mut imported_headers) {
-                let Some(premises) = self.implementation_alternative(header, prepared, &goal, assumptions)? else {
+            for prepared in headers.iter_mut().chain(&mut imported_headers) {
+                let PreparedHeader { header, protocol_heads, implementation } = prepared;
+                if matches!(protocol_heads, ProtocolHeadFilter::Unprepared) {
+                    *protocol_heads = self.implementation_protocol_heads(header)?;
+                }
+                if matches!(protocol_heads, ProtocolHeadFilter::Declared(heads) if !heads.contains(&goal.protocol)) {
+                    continue;
+                }
+                let Some(premises) = self.implementation_alternative(header, implementation, &goal, assumptions)? else {
                     continue;
                 };
                 if premises.impossible {

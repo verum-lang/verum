@@ -317,3 +317,76 @@ fn a_new_alias_scope_cannot_reuse_an_earlier_prepared_header() {
         run(&module, expected);
     }
 }
+
+
+#[test]
+fn inherited_protocol_heads_keep_renamed_and_foreign_owner_identity() {
+    let directory = tempfile::tempdir().unwrap();
+    let core = directory.path().join("core");
+    std::fs::create_dir(&core).unwrap();
+    std::fs::write(core.join("mod.vr"), "module core;").unwrap();
+    for owner in ["actual", "foreign"] {
+        std::fs::write(core.join(format!("{owner}.vr")), format!(r#"
+            module core.{owner};
+            public type B<T> is protocol {{}};
+            public type Child<T> is protocol extends B<T> {{}};
+        "#)).unwrap();
+    }
+    let path = core.join("obligations.vr");
+    let compile_project = |implementation: &str, call: bool| {
+        let action = if call { "cell.flag()" } else { "cell.value" };
+        let source = format!(r#"
+            module obligations;
+            mount core.actual.B as Needed;
+            mount core.actual.Child as SelectedChild;
+            mount core.foreign.Child as OtherChild;
+            type A is protocol {{}};
+            type Granted is protocol {{ fn flag(&self)->Int; }};
+            type Cell is {{value:Int}};
+            implement<X: A + Needed<Int>> Granted for X {{ fn flag(&self)->Int {{59}} }}
+            implement A for Cell {{}}
+            implement {implementation} for Cell {{}}
+            fn main()->Int {{let cell=Cell {{value:7}}; {action}}}
+        "#);
+        std::fs::write(&path, &source).unwrap();
+        let ast = Parser::new(&source).parse_module().unwrap();
+        VbcCodegen::with_config(CodegenConfig::new("obligations"))
+            .compile_module_with_mounts(&ast, path.to_str().unwrap(), core.to_str().unwrap())
+    };
+    run(&compile_project("SelectedChild<Int>", true).unwrap(), 59);
+    for rejected in ["SelectedChild<Bool>", "OtherChild<Int>"] {
+        run(&compile_project(rejected, false).unwrap(), 7);
+        let error = compile_project(rejected, true)
+            .expect_err("foreign protocol or wrong inherited argument cannot supply the method");
+        assert!(error.to_string().contains("flag"), "{error}");
+    }
+}
+
+#[test]
+fn unrelated_generic_receivers_do_not_change_conjunctive_selection() {
+    for count in [0, 64] {
+        let mut declarations = verum_common::Text::from(r#"
+            type B<T> is protocol {};
+            implement<X: A + B<Int>> Granted for X { fn flag(&self)->Int {59} }
+        "#);
+        for index in 0..count {
+            declarations.push_str(&format!(r#"
+                type Noise{index}<T> is {{value:T}};
+                type Other{index} is protocol {{}};
+                implement<T> Other{index} for Noise{index}<Noise{index}<Noise{index}<T>>> {{}}
+            "#));
+        }
+        run(&compile(&format!("{declarations}\nimplement B<Int> for Cell {{}}"), true).unwrap(), 59);
+        absent(&format!("{declarations}\nimplement B<Bool> for Cell {{}}"));
+    }
+}
+
+#[test]
+fn unresolved_protocol_head_keeps_the_original_declaration_refusal() {
+    let error = compile(r#"
+        type B is protocol {};
+        implement<X: A + B> Granted for X { fn flag(&self)->Int {59} }
+        implement Undeclared for Missing {}
+    "#, false).expect_err("unknown protocol identity cannot discard a source declaration");
+    assert!(error.to_string().contains("Missing"), "{error}");
+}

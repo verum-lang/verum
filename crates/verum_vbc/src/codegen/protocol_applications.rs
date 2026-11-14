@@ -7,6 +7,7 @@ use super::{
 };
 use crate::types::{TypeId, TypeParamId, TypeRef};
 use std::collections::HashMap;
+use verum_common::{Maybe, Text};
 use verum_ast::{
     Expr, ExprKind, Path, Type,
     ty::{GenericArg, GenericParam, GenericParamKind, TypeKind},
@@ -38,19 +39,10 @@ impl VbcCodegen {
         }
     }
 
-    /// Resolve the selected source identity, including mounts, before reading
-    /// generic binders. A same-spelled protocol from another owner cannot supply
-    /// a parameter roster or a default body. Explicit arguments retain the
-    /// caller's lexical Self; declaration-owned defaults use `receiver`.
-    pub(super) fn resolve_protocol_application(
-        &mut self,
-        path: &Path,
-        args: &[GenericArg],
-        scope: &HashMap<String, u16>,
-        declared_ids: &[crate::types::TypeParamId],
-        caller_parameters: &[GenericParam],
-        receiver: &ImplReceiverWitness,
-    ) -> CodegenResult<ProtocolApplication> {
+    /// Resolve only the nominal declaration selected by this lexical source.
+    /// Both full applications and negative head filtering use this authority;
+    /// argument and premise validation still belongs to the full application.
+    pub(super) fn protocol_declaration_identity(&self, path: &Path) -> (Maybe<TypeId>, Text) {
         let written = Self::format_type_path(path);
         let selected = self.nominal_type_id(&written);
         let key = selected
@@ -69,6 +61,25 @@ impl VbcCodegen {
                     })
             })
             .unwrap_or_else(|| self.declared_dyn_path(path));
+        (selected, key.into())
+    }
+
+    /// Resolve the selected source identity, including mounts, before reading
+    /// generic binders. A same-spelled protocol from another owner cannot supply
+    /// a parameter roster or a default body. Explicit arguments retain the
+    /// caller's lexical Self; declaration-owned defaults use `receiver`.
+    pub(super) fn resolve_protocol_application(
+        &mut self,
+        path: &Path,
+        args: &[GenericArg],
+        scope: &HashMap<String, u16>,
+        declared_ids: &[crate::types::TypeParamId],
+        caller_parameters: &[GenericParam],
+        receiver: &ImplReceiverWitness,
+    ) -> CodegenResult<ProtocolApplication> {
+        let written = Self::format_type_path(path);
+        let (selected, key) = self.protocol_declaration_identity(path);
+        let key = key.into_string();
         let protocol = self.protocol_registry.get(&key).cloned().filter(|info| {
             key == crate::module::qualify_module_name(&info.source_module, &info.name)
         });
