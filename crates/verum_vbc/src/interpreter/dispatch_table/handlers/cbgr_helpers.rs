@@ -142,6 +142,13 @@ pub(super) fn resolve_arg_value(
     state: &super::super::super::state::InterpreterState,
     val: Value,
 ) -> InterpreterResult<Value> {
+    if val.is_projected_slot() {
+        return if state.heap.projection_len(val)?.is_some() {
+            Ok(val)
+        } else {
+            state.heap.read_projected_element(val)
+        };
+    }
     if is_cbgr_ref(&val) {
         let (abs_index, _gen) = decode_cbgr_ref(val);
         return Ok(state.registers.get_absolute(abs_index));
@@ -382,7 +389,8 @@ pub(super) fn require_reference_write(state: &super::super::super::state::Interp
 }
 
 fn require_reference_capability(state: &InterpreterState, reference: Value, required: u16) -> InterpreterResult<()> {
-    let actual = if reference.is_thin_ref() {
+    let actual = if let Some(caps) = state.heap.projection_capabilities(reference)? { caps
+    } else if reference.is_thin_ref() {
         state.heap.thin_ref(reference)?.capabilities()
     } else if reference.is_fat_ref() {
         reference.as_fat_ref().capabilities()
@@ -517,6 +525,8 @@ pub(super) fn resolve_receiver_place(
             } else {
                 Capabilities::READ_ONLY
             }
+        } else if let Some(caps) = state.heap.projection_capabilities(place)? {
+            caps
         } else if place.is_thin_ref() {
             state.heap.thin_ref(place)?.capabilities()
         } else if place.is_fat_ref() {
@@ -531,7 +541,7 @@ pub(super) fn resolve_receiver_place(
                 actual: u64::from(capabilities.0),
             });
         }
-        if place.is_fat_ref() {
+        if place.is_fat_ref() || state.heap.projection_len(place)?.is_some() {
             return Ok(ReceiverPlace {
                 value: place,
                 reference: place,

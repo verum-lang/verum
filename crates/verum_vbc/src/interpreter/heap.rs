@@ -50,6 +50,7 @@ use crate::types::TypeId;
 use crate::value::Value;
 
 mod projections;
+pub(crate) use projections::ProjectionEncoding;
 
 /// Size of object header in bytes.
 ///

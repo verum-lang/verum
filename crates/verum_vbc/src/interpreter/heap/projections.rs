@@ -1,5 +1,6 @@
-//! Heap-local, revocable handles to Value slots. Distinct issuer tickets and
-//! allocation generations prevent a recycled address from reviving a borrow.
+//! Heap-local, revocable handles to typed elements and sequence ranges.
+//! Distinct issuer tickets and allocation generations prevent address reuse
+//! from reviving a borrow.
 use super::{Heap, OBJECT_HEADER_SIZE, ObjectHeader};
 use crate::interpreter::{CbgrViolationKind, InterpreterError, InterpreterResult};
 use crate::value::{Capabilities, ThinRef, Value};
@@ -24,6 +25,50 @@ struct HeapSlotRef {
     offset: usize,
     caps: Capabilities,
     storage: SlotStorage,
+    shape: ProjectionShape,
+    container: Option<ContainerLink>,
+}
+
+/// Physical encoding comes from the existing runtime storage descriptor.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum ProjectionEncoding {
+    Value,
+    Byte,
+}
+impl ProjectionEncoding {
+    fn width(self) -> usize {
+        match self {
+            Self::Value => std::mem::size_of::<Value>(),
+            Self::Byte => 1,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum ProjectionShape {
+    Element(ProjectionEncoding),
+    Slice {
+        len: usize,
+        encoding: ProjectionEncoding,
+    },
+}
+impl ProjectionShape {
+    fn layout(self) -> (usize, ProjectionEncoding) {
+        match self {
+            Self::Element(encoding) => (1, encoding),
+            Self::Slice { len, encoding } => (len, encoding),
+        }
+    }
+}
+/// The owned container is distinct from its replaceable allocation. Snapshot
+/// both the owner incarnation and its exact backing field; a live old buffer
+/// alone cannot keep a removed view valid.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct ContainerLink {
+    owner: usize,
+    generation: u32,
+    epoch: u16,
+    backing_field: usize,
+    backing_value: Value,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -63,6 +108,8 @@ impl Heap {
             owner,
             offset,
             caps,
+            shape: ProjectionShape::Element(ProjectionEncoding::Value),
+            container: None,
             storage: SlotStorage::Object {
                 backing_field: Some(backing_field),
                 backing,
@@ -94,6 +141,8 @@ impl Heap {
             owner,
             offset,
             caps,
+            shape: ProjectionShape::Element(ProjectionEncoding::Value),
+            container: None,
             storage: SlotStorage::Object {
                 backing: owner,
                 backing_field: None,
@@ -119,6 +168,8 @@ impl Heap {
             offset,
             caps,
             storage: SlotStorage::Raw { len },
+            shape: ProjectionShape::Element(ProjectionEncoding::Value),
+            container: None,
         };
         self.resolve_slot(target)?;
         // A field projection keeps the allocation's storage fixed. Other
@@ -171,13 +222,15 @@ impl Heap {
         value: Value,
         allowed: u16,
     ) -> InterpreterResult<Value> {
-        let reference = self.thin_ref(value)?;
         if let Some(id) = value.projection_id() {
-            let mut target = self.projections.slots[&id];
+            let mut target = self.projection_target(id)?;
+            self.resolve_slot(target)?;
             target.caps = target.caps.attenuate(!allowed);
             self.cache_projection(target)
         } else {
-            Ok(Value::from_thin_ref(reference.attenuate(!allowed)))
+            Ok(Value::from_thin_ref(
+                self.thin_ref(value)?.attenuate(!allowed),
+            ))
         }
     }
 
@@ -227,9 +280,290 @@ impl Heap {
                     kind: CbgrViolationKind::UseAfterFree,
                     ptr: 0,
                 })?;
+            if slot.shape != ProjectionShape::Element(ProjectionEncoding::Value) {
+                return Err(invalid("typed sequence projection is not a Value slot"));
+            }
             return self.resolve_slot(*slot);
         }
         value.raw_thin_ref()
+    }
+
+    fn projection_target(&self, id: u64) -> InterpreterResult<HeapSlotRef> {
+        self.projections
+            .slots
+            .get(&id)
+            .copied()
+            .ok_or(InterpreterError::CbgrViolation {
+                kind: CbgrViolationKind::UseAfterFree,
+                ptr: 0,
+            })
+    }
+
+    /// The caller supplies a checked storage view from the existing container
+    /// resolver. Raw storage is registered under its allocator base so the
+    /// existing deallocation path revokes every derived ticket before release.
+    pub(crate) fn project_sequence(
+        &mut self,
+        owner: usize,
+        backing_field: usize,
+        backing_value: Value,
+        data: *mut u8,
+        raw_extent: Option<(usize, usize)>,
+        len: usize,
+        encoding: ProjectionEncoding,
+        caps: Capabilities,
+    ) -> InterpreterResult<Value> {
+        if !self.contains(owner as *const ObjectHeader) {
+            return Err(invalid("sequence owner is not a live managed object"));
+        }
+        // SAFETY: the existing storage resolver and membership prove the owner.
+        let header = unsafe { &*(owner as *const ObjectHeader) };
+        let link = ContainerLink {
+            owner,
+            generation: header.generation,
+            epoch: header.epoch,
+            backing_field,
+            backing_value,
+        };
+        let backing = self.backing_view(data);
+        let (root, offset, storage) = if let Some(base) = backing.owner {
+            // SAFETY: backing_view established exact managed membership.
+            let header = unsafe { &*base.cast::<ObjectHeader>() };
+            (
+                owner,
+                0,
+                SlotStorage::Object {
+                    backing: base as usize,
+                    backing_field: None,
+                    generation: header.generation,
+                    epoch: header.epoch,
+                },
+            )
+        } else if let Some((base, extent)) = raw_extent {
+            let offset = (data as usize)
+                .checked_sub(base)
+                .ok_or_else(|| invalid("sequence starts before its allocation"))?;
+            (base, offset, SlotStorage::Raw { len: extent })
+        } else if len == 0 && data.is_null() {
+            // Empty containers have no backing. A zero-length span still has
+            // its actual owner incarnation and cannot authorize an element.
+            (
+                owner,
+                0,
+                SlotStorage::Object {
+                    backing: owner,
+                    backing_field: None,
+                    generation: header.generation,
+                    epoch: header.epoch,
+                },
+            )
+        } else {
+            return Err(invalid("sequence backing has no live allocation authority"));
+        };
+        let target = HeapSlotRef {
+            owner: root,
+            offset,
+            caps,
+            storage,
+            shape: ProjectionShape::Slice { len, encoding },
+            container: Some(link),
+        };
+        self.issue_projection(target)
+    }
+
+    pub(crate) fn projection_capabilities(
+        &self,
+        value: Value,
+    ) -> InterpreterResult<Option<Capabilities>> {
+        value
+            .projection_id()
+            .map(|id| {
+                self.resolve_slot(self.projection_target(id)?)
+                    .map(|r| r.capabilities())
+            })
+            .transpose()
+    }
+
+    pub(crate) fn projection_len(&self, value: Value) -> InterpreterResult<Option<usize>> {
+        let Some(id) = value.projection_id() else {
+            return Ok(None);
+        };
+        let target = self.projection_target(id)?;
+        require(
+            self.resolve_slot(target)?.capabilities(),
+            Capabilities::READ,
+        )?;
+        Ok(match target.shape {
+            ProjectionShape::Slice { len, .. } => Some(len),
+            _ => None,
+        })
+    }
+
+    /// Derived projections share their parent's revocation domain. Creating a
+    /// subview must not issue a new exclusive owner borrow and retire its parent.
+    pub(crate) fn project_subsequence(
+        &mut self,
+        source: Value,
+        start: usize,
+        len: usize,
+        allowed: Capabilities,
+    ) -> InterpreterResult<Value> {
+        let mut target = self.projection_target(
+            source
+                .projection_id()
+                .ok_or_else(|| invalid("expected a sequence projection"))?,
+        )?;
+        let ProjectionShape::Slice {
+            len: available,
+            encoding,
+        } = target.shape
+        else {
+            return Err(invalid("expected a sequence projection"));
+        };
+        let rights = self
+            .resolve_slot(target)?
+            .capabilities()
+            .intersect(&allowed);
+        require(rights, Capabilities::READ)?;
+        if start > available || len > available - start {
+            return Err(invalid("slice range exceeds its owner-backed view"));
+        }
+        target.offset = start
+            .checked_mul(encoding.width())
+            .and_then(|bytes| target.offset.checked_add(bytes))
+            .ok_or_else(|| invalid("slice range byte offset overflow"))?;
+        target.shape = ProjectionShape::Slice { len, encoding };
+        target.caps = rights;
+        self.resolve_slot(target)?;
+        self.cache_projection(target)
+    }
+
+    pub(crate) fn project_sequence_element(
+        &mut self,
+        source: Value,
+        index: usize,
+        allowed: Capabilities,
+    ) -> InterpreterResult<Value> {
+        let mut target = self.sequence_element(source, index, allowed)?;
+        let (_, encoding) = target.shape.layout();
+        target.shape = ProjectionShape::Element(encoding);
+        self.cache_projection(target)
+    }
+
+    fn sequence_element(
+        &self,
+        source: Value,
+        index: usize,
+        allowed: Capabilities,
+    ) -> InterpreterResult<HeapSlotRef> {
+        let mut target = self.projection_target(
+            source
+                .projection_id()
+                .ok_or_else(|| invalid("expected a sequence projection"))?,
+        )?;
+        let ProjectionShape::Slice { len, encoding } = target.shape else {
+            return Err(invalid("expected a sequence projection"));
+        };
+        let rights = self
+            .resolve_slot(target)?
+            .capabilities()
+            .intersect(&allowed);
+        require(rights, Capabilities::READ)?;
+        if index >= len {
+            return Err(InterpreterError::IndexOutOfBounds {
+                index: index as i64,
+                length: len,
+            });
+        }
+        target.offset = index
+            .checked_mul(encoding.width())
+            .and_then(|n| target.offset.checked_add(n))
+            .ok_or_else(|| invalid("sequence element offset overflow"))?;
+        target.shape = ProjectionShape::Element(encoding);
+        target.caps = rights;
+        Ok(target)
+    }
+
+    pub(crate) fn read_projected_element(&self, value: Value) -> InterpreterResult<Value> {
+        let target = self.projection_target(
+            value
+                .projection_id()
+                .ok_or_else(|| invalid("expected an element projection"))?,
+        )?;
+        self.read_projection(target)
+    }
+    pub(crate) fn read_projected_index(
+        &self,
+        value: Value,
+        index: usize,
+    ) -> InterpreterResult<Value> {
+        self.read_projection(self.sequence_element(value, index, Capabilities::FULL)?)
+    }
+    fn read_projection(&self, target: HeapSlotRef) -> InterpreterResult<Value> {
+        let ProjectionShape::Element(encoding) = target.shape else {
+            return Err(invalid("a sequence view is not an element slot"));
+        };
+        let reference = self.resolve_slot(target)?;
+        require(reference.capabilities(), Capabilities::READ)?;
+        // SAFETY: lifetime and the encoding-specific complete extent were checked.
+        Ok(unsafe {
+            match encoding {
+                ProjectionEncoding::Value => reference.ptr.cast::<Value>().read(),
+                ProjectionEncoding::Byte => Value::from_i64(i64::from(reference.ptr.read())),
+            }
+        })
+    }
+    pub(crate) fn write_projected_element(
+        &self,
+        target: Value,
+        value: Value,
+    ) -> InterpreterResult<()> {
+        self.write_projection(
+            self.projection_target(
+                target
+                    .projection_id()
+                    .ok_or_else(|| invalid("expected an element projection"))?,
+            )?,
+            value,
+        )
+    }
+    pub(crate) fn write_projected_index(
+        &self,
+        target: Value,
+        index: usize,
+        value: Value,
+        allowed: Capabilities,
+    ) -> InterpreterResult<()> {
+        self.write_projection(self.sequence_element(target, index, allowed)?, value)
+    }
+    fn write_projection(&self, target: HeapSlotRef, value: Value) -> InterpreterResult<()> {
+        let ProjectionShape::Element(encoding) = target.shape else {
+            return Err(invalid("a sequence view is not an element slot"));
+        };
+        let reference = self.resolve_slot(target)?;
+        require(
+            reference.capabilities(),
+            if target.container.is_some() {
+                Capabilities::WRITE | Capabilities::EXCLUSIVE
+            } else {
+                Capabilities::WRITE
+            },
+        )?;
+        match encoding {
+            ProjectionEncoding::Value => {
+                // SAFETY: the checked, writable extent is one complete Value slot.
+                unsafe { reference.ptr.cast::<Value>().write(value) };
+            }
+            ProjectionEncoding::Byte => {
+                let byte = value
+                    .try_as_i64()
+                    .and_then(|n| u8::try_from(n).ok())
+                    .ok_or_else(|| invalid("packed Byte projection requires a value in 0..=255"))?;
+                // SAFETY: the checked, writable extent is exactly one byte.
+                unsafe { reference.ptr.write(byte) };
+            }
+        }
+        Ok(())
     }
 
     fn resolve_slot(&self, slot: HeapSlotRef) -> InterpreterResult<ThinRef> {
@@ -237,20 +571,51 @@ impl Heap {
             kind: CbgrViolationKind::UseAfterFree,
             ptr: slot.owner,
         };
+        let (count, encoding) = slot.shape.layout();
+        let bytes = count.checked_mul(encoding.width()).ok_or_else(stale)?;
+        let alignment = encoding.width();
+        let mut capabilities = slot.caps;
+        if let Some(link) = slot.container {
+            if !self.contains(link.owner as *const ObjectHeader) {
+                return Err(stale());
+            }
+            // SAFETY: exact membership precedes the retained owner snapshot check.
+            let owner = unsafe { &*(link.owner as *const ObjectHeader) };
+            let field_offset = link
+                .backing_field
+                .checked_mul(std::mem::size_of::<Value>())
+                .ok_or_else(stale)?;
+            if !owner.is_valid()
+                || owner.generation != link.generation
+                || owner.epoch != link.epoch
+                || field_offset
+                    .checked_add(std::mem::size_of::<Value>())
+                    .is_none_or(|end| end > owner.size as usize)
+            {
+                return Err(stale());
+            }
+            // SAFETY: the checked live owner extent contains this backing field.
+            let current = unsafe {
+                *((link.owner as *const u8)
+                    .add(OBJECT_HEADER_SIZE + field_offset)
+                    .cast::<Value>())
+            };
+            if current != link.backing_value {
+                return Err(stale());
+            }
+            capabilities = restrict_storage_access(capabilities, owner.capabilities);
+        }
         let (backing, backing_field, generation, epoch) = match slot.storage {
             SlotStorage::Raw { len } => {
                 let address = slot.owner.checked_add(slot.offset).ok_or_else(stale)?;
-                if !address.is_multiple_of(std::mem::align_of::<Value>())
-                    || slot
-                        .offset
-                        .checked_add(std::mem::size_of::<Value>())
-                        .is_none_or(|end| end > len)
+                if !address.is_multiple_of(alignment)
+                    || slot.offset.checked_add(bytes).is_none_or(|end| end > len)
                 {
                     return Err(stale());
                 }
                 // Raw allocations use revocable tickets as their lifetime
                 // authority. A freed allocation cannot reissue an old ticket.
-                return Ok(ThinRef::new(address as *mut u8, 0, 0, slot.caps));
+                return Ok(ThinRef::new(address as *mut u8, 0, 0, capabilities));
             }
             SlotStorage::Object {
                 backing,
@@ -296,10 +661,10 @@ impl Heap {
         if header.generation != generation
             || header.epoch != epoch
             || !header.is_valid()
-            || slot.offset % std::mem::align_of::<Value>() != 0
+            || slot.offset % alignment != 0
             || slot
                 .offset
-                .checked_add(std::mem::size_of::<Value>())
+                .checked_add(bytes)
                 .is_none_or(|end| end > header.size as usize)
         {
             return Err(stale());
@@ -309,7 +674,30 @@ impl Heap {
             ptr,
             header.generation,
             header.epoch,
-            slot.caps,
+            restrict_storage_access(capabilities, header.capabilities),
         ))
     }
+}
+
+fn invalid(message: &str) -> InterpreterError {
+    InterpreterError::InvalidOperand {
+        message: message.into(),
+    }
+}
+fn require(actual: Capabilities, required: u16) -> InterpreterResult<()> {
+    if actual.0 & required == required {
+        Ok(())
+    } else {
+        Err(InterpreterError::CapabilityDenied {
+            required: u64::from(required),
+            actual: u64::from(actual.0),
+        })
+    }
+}
+
+/// Allocation headers restrict memory access. Exclusivity and delegation belong
+/// to the incoming reference; a READ|WRITE allocation neither grants nor erases
+/// that borrow authority.
+fn restrict_storage_access(reference: Capabilities, allocation: u16) -> Capabilities {
+    reference.attenuate((Capabilities::READ | Capabilities::WRITE) & !allocation)
 }

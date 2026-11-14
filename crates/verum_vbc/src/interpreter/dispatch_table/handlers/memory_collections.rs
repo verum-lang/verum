@@ -1046,6 +1046,15 @@ pub(in super::super) fn handle_get_index(
     let arr = read_reg(state)?;
     let idx = read_reg(state)?;
 
+    let place = super::cbgr_helpers::resolve_receiver_place(state, state.get_reg(arr))?;
+    if state.heap.projection_len(place.value)?.is_some() {
+        let value = state
+            .heap
+            .read_projected_index(place.value, state.get_reg(idx).as_i64() as usize)?;
+        state.set_reg(dst, value);
+        return Ok(DispatchResult::Continue);
+    }
+
     // Same value-level peel as `Len`: every branch below dispatches on
     // the value's SHAPE, so a `Shared<T>` carrier has to be gone before
     // the first question is asked. Without it `Shared.new([10,20,30])[1]`
@@ -1479,6 +1488,17 @@ pub(in super::super) fn handle_set_index(
     let idx = read_reg(state)?;
     let val = read_reg(state)?;
 
+    let place = super::cbgr_helpers::resolve_receiver_place(state, state.get_reg(arr))?;
+    if state.heap.projection_len(place.value)?.is_some() {
+        state.heap.write_projected_index(
+            place.value,
+            state.get_reg(idx).as_i64() as usize,
+            state.get_reg(val),
+            place.capabilities,
+        )?;
+        return Ok(DispatchResult::Continue);
+    }
+
     // Auto-dereference CBGR register-based references, same as GET_E.
     let arr_val = state.get_reg(arr);
     use super::super::handlers::cbgr_helpers::{
@@ -1746,6 +1766,11 @@ pub(in super::super) fn handle_array_len(
         if is_cbgr_ref(&val) {
             let (abs_index, _generation) = decode_cbgr_ref(val);
             val = state.registers.get_absolute(abs_index);
+        }
+
+        if let Some(len) = state.heap.projection_len(val)? {
+            state.set_reg(dst, Value::from_i64(len as i64));
+            return Ok(DispatchResult::Continue);
         }
 
         // ThinRef points to a Value in memory (e.g. a variant field).

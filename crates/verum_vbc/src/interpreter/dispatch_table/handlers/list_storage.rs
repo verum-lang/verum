@@ -18,6 +18,9 @@ struct Storage {
     data: *mut u8,
     width: usize,
     capacity: usize,
+    owner: usize,
+    backing: Value,
+    len: usize,
 }
 impl Storage {
     fn resolve(state: &InterpreterState, value: Value) -> InterpreterResult<Self> {
@@ -44,13 +47,22 @@ impl Storage {
             .try_as_i64()
             .and_then(|n| usize::try_from(n).ok())
             .ok_or_else(|| invalid("List storage capacity is not a nonnegative Int"))?;
-        let data = value_as_addr(unsafe { fields.add(2).read_unaligned() }) as *mut u8;
+        let len = unsafe { fields.read_unaligned() }
+            .try_as_i64()
+            .and_then(|n| usize::try_from(n).ok())
+            .filter(|&n| n <= capacity)
+            .ok_or_else(|| invalid("List storage length exceeds capacity"))?;
+        let backing_value = unsafe { fields.add(2).read_unaligned() };
+        let data = value_as_addr(backing_value) as *mut u8;
         let backing = state.heap.backing_view(data);
         if capacity == 0 && data.is_null() {
             return Ok(Self {
                 data,
                 width,
                 capacity,
+                owner: owner as usize,
+                backing: backing_value,
+                len,
             });
         }
         let extent = backing
@@ -69,6 +81,9 @@ impl Storage {
             data: backing.data,
             width,
             capacity,
+            owner: owner as usize,
+            backing: backing_value,
+            len,
         })
     }
     fn range(&self, index: i64, count: i64) -> InterpreterResult<(*mut u8, usize)> {
@@ -89,6 +104,105 @@ impl Storage {
             count * self.width,
         ))
     }
+}
+
+/// Borrow the initialized storage through its existing physical-layout authority.
+/// A derived view retains the incoming rights; no packed pointer is upgraded to
+/// a mutable reference and no new raw-layout convention is introduced.
+pub(super) fn project_view(
+    state: &mut InterpreterState,
+    source: Value,
+    start: usize,
+    count: Option<usize>,
+) -> InterpreterResult<Option<Value>> {
+    use crate::value::Capabilities;
+    let place = super::cbgr_helpers::resolve_receiver_place(state, source)?;
+    if let Some(available) = state.heap.projection_len(place.value)? {
+        let count = count.unwrap_or(available.saturating_sub(start));
+        return state
+            .heap
+            .project_subsequence(place.value, start, count, place.capabilities)
+            .map(Some);
+    }
+    let value = place.value;
+    if !value.is_regular_ptr() || !state.heap.contains(value.as_ptr()) {
+        return Ok(None);
+    }
+    // SAFETY: exact managed membership precedes the physical type query.
+    if !unsafe { &*value.as_ptr::<heap::ObjectHeader>() }
+        .type_id
+        .is_list_like()
+    {
+        return Ok(None);
+    }
+    let storage = Storage::resolve(state, value)?;
+    let count = count.unwrap_or(storage.len.saturating_sub(start));
+    if start > storage.len || count > storage.len - start {
+        return Err(invalid("slice range exceeds List length"));
+    }
+    let encoding = if storage.width == 1 {
+        heap::ProjectionEncoding::Byte
+    } else {
+        heap::ProjectionEncoding::Value
+    };
+    let raw_extent = super::cbgr::bridge_extent(state, storage.data as usize);
+    let view = state.heap.project_sequence(
+        storage.owner,
+        2,
+        storage.backing,
+        storage.data,
+        raw_extent,
+        storage.len,
+        encoding,
+        place.capabilities,
+    )?;
+    if start == 0 && count == storage.len {
+        Ok(Some(view))
+    } else {
+        state
+            .heap
+            .project_subsequence(view, start, count, Capabilities::FULL)
+            .map(Some)
+    }
+}
+
+pub(super) fn project_element(
+    state: &mut InterpreterState,
+    source: Value,
+    index: i64,
+) -> InterpreterResult<Option<Value>> {
+    let place = super::cbgr_helpers::resolve_receiver_place(state, source)?;
+    if let Some(len) = state.heap.projection_len(place.value)? {
+        if index < 0 || index as u64 >= len as u64 {
+            return Err(InterpreterError::IndexOutOfBounds { index, length: len });
+        }
+        return state
+            .heap
+            .project_sequence_element(place.value, index as usize, place.capabilities)
+            .map(Some);
+    }
+    if !place.value.is_regular_ptr() || !state.heap.contains(place.value.as_ptr()) {
+        return Ok(None);
+    }
+    // SAFETY: exact managed membership precedes the physical type query.
+    if !unsafe { &*place.value.as_ptr::<heap::ObjectHeader>() }
+        .type_id
+        .is_list_like()
+    {
+        return Ok(None);
+    }
+    let storage = Storage::resolve(state, place.value)?;
+    if index < 0 || index as u64 >= storage.len as u64 {
+        return Err(InterpreterError::IndexOutOfBounds {
+            index,
+            length: storage.len,
+        });
+    }
+    let view = project_view(state, source, 0, None)?.expect("List storage was checked");
+    state
+        .heap
+        .project_sequence_element(view, index as usize, place.capabilities)
+        .map(Some)
 }
 
 /// An initialized native List prefix with the element destructor from its source declaration.
@@ -399,6 +513,7 @@ pub(super) fn resize(state: &mut InterpreterState) -> InterpreterResult<Dispatch
     if bridge && !managed {
         super::ffi_extended::cbgr_user_deallocate(state, storage.data as i64);
     }
+    state.heap.revoke_projections(owner as usize);
     // Managed old backing remains owned by the GC. No field changed before
     // the allocation and initialized-prefix copy succeeded.
     unsafe {

@@ -657,6 +657,16 @@ pub(super) fn load_referent_into(
         );
     }
 
+    if ref_val.is_projected_slot() {
+        let value = if state.heap.projection_len(ref_val)?.is_some() {
+            ref_val
+        } else {
+            state.heap.read_projected_element(ref_val)?
+        };
+        state.set_reg(dst, value);
+        return Ok(DispatchResult::Continue);
+    }
+
     // Handle ThinRef values (CBGR references stored in global table)
     if ref_val.is_thin_ref() {
         let thin_ref = state.heap.thin_ref(ref_val)?;
@@ -1040,6 +1050,11 @@ pub(super) fn store_referent(
         state.stats.cbgr_stats.tier0_derefs += 1;
     }
 
+    if ref_val.is_projected_slot() {
+        state.heap.write_projected_element(ref_val, value)?;
+        return Ok(DispatchResult::Continue);
+    }
+
     // Handle ThinRef values (CBGR references stored in global table)
     if ref_val.is_thin_ref() {
         let thin_ref = state.heap.thin_ref(ref_val)?;
@@ -1196,6 +1211,10 @@ pub(in super::super) fn handle_chk_ref(
 }
 
 pub(super) fn validate_reference(state: &InterpreterState, ref_val: Value) -> InterpreterResult<()> {
+    if ref_val.is_projected_slot() {
+        state.heap.projection_capabilities(ref_val)?;
+        return Ok(());
+    }
     if is_cbgr_ref(&ref_val) {
         // Register-based CBGR reference
         let (abs_index, generation) = decode_cbgr_ref(ref_val);
@@ -2078,6 +2097,10 @@ fn cbgr_extended_body(
 
             let list_val = state.get_reg(list_reg);
             let index = state.get_reg(index_reg).as_i64();
+            if let Some(reference) = super::list_storage::project_element(state, list_val, index)? {
+                state.set_reg(dst, reference);
+                return Ok(DispatchResult::Continue);
+            }
 
             // T1684: a returned record/variant payload borrow addresses a
             // Value slot, not the collection header. Resolve the same carrier
@@ -2548,7 +2571,30 @@ fn cbgr_extended_body(
             let start_reg = read_reg(state)?;
             let len_reg = read_reg(state)?;
 
-            let mut src = state.get_reg(src_reg);
+            let source = state.get_reg(src_reg);
+            let start_value = state.get_reg(start_reg).try_as_i64().ok_or_else(|| {
+                InterpreterError::InvalidOperand {
+                    message: "slice start is not Int".into(),
+                }
+            })?;
+            let len_value = state.get_reg(len_reg).try_as_i64().ok_or_else(|| {
+                InterpreterError::InvalidOperand {
+                    message: "slice length is not Int".into(),
+                }
+            })?;
+            let start =
+                usize::try_from(start_value).map_err(|_| InterpreterError::InvalidOperand {
+                    message: "slice start is negative".into(),
+                })?;
+            let len = usize::try_from(len_value).map_err(|_| InterpreterError::InvalidOperand {
+                message: "slice length is negative".into(),
+            })?;
+            if let Some(view) = super::list_storage::project_view(state, source, start, Some(len))?
+            {
+                state.set_reg(dst, view);
+                return Ok(DispatchResult::Continue);
+            }
+            let mut src = source;
             // T0467: `&list` passed to a slice parameter is a register ref,
             // possibly forwarded through more than one frame. Resolve its
             // value before classifying the container; otherwise the fallback
@@ -2849,8 +2895,12 @@ fn cbgr_extended_body(
 
             // Get slice value and extract length from FatRef or a
             // BYTE_SLICE byte-view object (ARCH-P5).
-            let slice = state.get_reg(slice_reg);
-            let len = if slice.is_fat_ref() {
+            let place =
+                super::cbgr_helpers::resolve_receiver_place(state, state.get_reg(slice_reg))?;
+            let slice = place.value;
+            let len = if let Some(len) = state.heap.projection_len(slice)? {
+                len as i64
+            } else if slice.is_fat_ref() {
                 slice.as_fat_ref().len() as i64
             } else if let Some((_p, l)) = heap::value_as_byte_slice(&slice) {
                 l as i64
@@ -2869,8 +2919,15 @@ fn cbgr_extended_body(
             let slice_reg = read_reg(state)?;
             let index_reg = read_reg(state)?;
 
-            let slice = state.get_reg(slice_reg);
+            let place =
+                super::cbgr_helpers::resolve_receiver_place(state, state.get_reg(slice_reg))?;
+            let slice = place.value;
             let index = state.get_reg(index_reg).as_i64() as usize;
+            if state.heap.projection_len(slice)?.is_some() {
+                let value = state.heap.read_projected_index(slice, index)?;
+                state.set_reg(dst, value);
+                return Ok(DispatchResult::Continue);
+            }
 
             // Respect fat_ref.reserved as the element stride: 1/2/4/8 for
             // raw integer arrays (bytes included) and 0 for NaN-boxed
@@ -2926,8 +2983,15 @@ fn cbgr_extended_body(
             let slice_reg = read_reg(state)?;
             let index_reg = read_reg(state)?;
 
-            let slice = state.get_reg(slice_reg);
+            let place =
+                super::cbgr_helpers::resolve_receiver_place(state, state.get_reg(slice_reg))?;
+            let slice = place.value;
             let index = state.get_reg(index_reg).as_i64() as usize;
+            if state.heap.projection_len(slice)?.is_some() {
+                let value = state.heap.read_projected_index(slice, index)?;
+                state.set_reg(dst, value);
+                return Ok(DispatchResult::Continue);
+            }
 
             let value = if slice.is_fat_ref() {
                 let fat_ref = slice.as_fat_ref();
@@ -2971,9 +3035,25 @@ fn cbgr_extended_body(
             // Pre-fix the unresolved ref fell through the FatRef and
             // byte-slice arms into a SILENT `src` passthrough:
             // `s.slice(1,5)` returned the WHOLE slice.
-            let src = super::cbgr_helpers::resolve_arg_value(state, state.get_reg(src_reg))?;
+            let place = super::cbgr_helpers::resolve_receiver_place(state, state.get_reg(src_reg))?;
+            let src = place.value;
             let start = state.get_reg(start_reg).as_i64() as u64;
             let end = state.get_reg(end_reg).as_i64() as u64;
+            if state.heap.projection_len(src)?.is_some() {
+                let count =
+                    end.checked_sub(start)
+                        .ok_or_else(|| InterpreterError::InvalidOperand {
+                            message: "slice end precedes its start".into(),
+                        })?;
+                let view = state.heap.project_subsequence(
+                    src,
+                    start as usize,
+                    count as usize,
+                    place.capabilities,
+                )?;
+                state.set_reg(dst, view);
+                return Ok(DispatchResult::Continue);
+            }
 
             // Create new FatRef with adjusted pointer and length. The
             // element stride comes from fat_ref.reserved (1/2/4/8 for raw
@@ -3051,8 +3131,30 @@ fn cbgr_extended_body(
 
             // SLICE-SUBSLICE-RESOLVE-1: same ref-resolution contract as
             // SliceSubslice above.
-            let src = super::cbgr_helpers::resolve_arg_value(state, state.get_reg(src_reg))?;
+            let place = super::cbgr_helpers::resolve_receiver_place(state, state.get_reg(src_reg))?;
+            let src = place.value;
             let mid = state.get_reg(mid_reg).as_i64() as u64;
+            if let Some(len) = state.heap.projection_len(src)? {
+                if mid > len as u64 {
+                    return Err(InterpreterError::IndexOutOfBounds {
+                        index: mid as i64,
+                        length: len,
+                    });
+                }
+                let left =
+                    state
+                        .heap
+                        .project_subsequence(src, 0, mid as usize, place.capabilities)?;
+                let right = state.heap.project_subsequence(
+                    src,
+                    mid as usize,
+                    len - mid as usize,
+                    place.capabilities,
+                )?;
+                state.set_reg(dst1, left);
+                state.set_reg(dst2, right);
+                return Ok(DispatchResult::Continue);
+            }
 
             if src.is_fat_ref() {
                 let fat_ref = src.as_fat_ref();
@@ -3653,20 +3755,7 @@ fn cbgr_extended_body(
             //    fail validation on dereference).
             let src_reg = read_reg(state)?;
             let user = state.get_reg(src_reg).as_integer_compatible();
-            let hdr = verum_common::layout::ALLOCATION_HEADER_SIZE as usize;
-            if user > 0
-                && (user as usize) >= hdr
-                && state.cbgr_allocations.contains(&((user as usize) - hdr))
-            {
-                // SAFETY: membership in cbgr_allocations gates liveness;
-                // gen@8 was written by cbgr_user_allocate.
-                unsafe {
-                    let gen_ptr = ((user as usize) - hdr
-                        + verum_common::layout::ALLOCATION_HEADER_GENERATION_OFFSET as usize)
-                        as *mut u32;
-                    *gen_ptr = verum_common::cbgr::GEN_UNALLOCATED;
-                }
-            } else {
+            if super::ffi_extended::cbgr_user_invalidate(state, user).is_none() {
                 let abs_index = state.reg_base() + src_reg.0 as u32;
                 state.registers.bump_generation(abs_index);
             }
@@ -3692,21 +3781,7 @@ fn cbgr_extended_body(
             // are a no-op on both halves.  Format: ptr:reg (void)
             let src_reg = read_reg(state)?;
             let user = state.get_reg(src_reg).as_integer_compatible();
-            let hdr = verum_common::layout::ALLOCATION_HEADER_SIZE as usize;
-            if user > 0
-                && (user as usize) >= hdr
-                && state.cbgr_allocations.contains(&((user as usize) - hdr))
-            {
-                // SAFETY: membership gates liveness; gen@8 was written
-                // by cbgr_user_allocate.
-                unsafe {
-                    let gen_ptr = ((user as usize) - hdr
-                        + verum_common::layout::ALLOCATION_HEADER_GENERATION_OFFSET as usize)
-                        as *mut u32;
-                    *gen_ptr = verum_common::cbgr::GEN_UNALLOCATED;
-                }
-                super::ffi_extended::cbgr_user_deallocate(state, user);
-            }
+            super::ffi_extended::cbgr_user_deallocate(state, user);
             Ok(DispatchResult::Continue)
         }
 

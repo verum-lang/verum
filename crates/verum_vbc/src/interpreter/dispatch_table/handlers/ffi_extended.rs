@@ -2312,43 +2312,44 @@ pub(super) fn cbgr_header_generation_epoch(user: i64) -> (i64, i64) {
     }
 }
 
-/// Free a `cbgr_user_allocate` block.  Defensive no-op on 0, on unknown
-/// pointers, and on double-free (the tracked-set removal is the gate).
-pub(super) fn cbgr_user_deallocate(state: &mut InterpreterState, user: i64) {
+/// Retire borrow access without releasing allocator ownership. The header stays
+/// tracked until deallocation, while the live extent and all derived tickets
+/// disappear together. No later projection may revive retired storage.
+pub(super) fn cbgr_user_invalidate(state: &mut InterpreterState, user: i64) -> Option<usize> {
+    use std::sync::atomic::{AtomicU32, Ordering};
     use verum_common::layout as l;
     let hdr = l::ALLOCATION_HEADER_SIZE as usize;
     if user <= 0 || (user as usize) < hdr {
-        return;
+        return None;
     }
     let header_addr = user as usize - hdr;
-    if !state.cbgr_allocations.remove(&header_addr) {
-        return;
+    if !state.cbgr_allocations.contains(&header_addr) {
+        return None;
+    }
+    // SAFETY: exact allocator membership proves a live, aligned header. This
+    // operation holds exclusive interpreter state through all retirement steps.
+    unsafe {
+        (&*((header_addr + l::ALLOCATION_HEADER_GENERATION_OFFSET as usize) as *const AtomicU32))
+            .store(verum_common::cbgr::GEN_UNALLOCATED, Ordering::Release);
     }
     state.heap.revoke_projections(user as usize);
-    // T0108 — the payload extent dies with the header entry; leaving it
-    // behind would let a freed interval keep answering the bridge-address
-    // provenance query in `handle_deref`/`handle_deref_mut`.
     state.cbgr_bridge_extents.remove(&(user as usize));
-    // CBGR-MUTABLE-PTRS-DEALLOC-1 (T0299): drop this block's per-pointer
-    // lifecycle state too.  Every other removal from `cbgr_mutable_ptrs` is a
-    // CAPABILITY DOWNGRADE (RefCreate / CapAttenuate / CapTransfer /
-    // MakeShared) — nothing removed on free, so a freed address stayed in the
-    // set for the life of the interpreter and a later allocation reusing that
-    // address tested true at the membership check (`handlers/cbgr.rs`,
-    // "is this a tracked mutable interior pointer?").  Same argument for
-    // `cbgr_ref_creation_epoch`, which is inserted alongside and was likewise
-    // never cleaned: a stale entry makes `.epoch()` report the OLD reference's
-    // creation time for a new one at the same address.
-    //
-    // Keyed on the USER pointer (what the insert sites register), not the
-    // header address the allocation set is keyed on.
     state.cbgr_mutable_ptrs.remove(&(user as usize));
     state.cbgr_ref_creation_epoch.remove(&(user as usize));
+    Some(header_addr)
+}
+
+/// Free a `cbgr_user_allocate` block. Defensive no-op on unknown pointers and
+/// double-free; retirement revokes access before allocator ownership is removed.
+pub(super) fn cbgr_user_deallocate(state: &mut InterpreterState, user: i64) {
+    use verum_common::layout as l;
+    let Some(header_addr) = cbgr_user_invalidate(state, user) else {
+        return;
+    };
+    state.cbgr_allocations.remove(&header_addr);
     // SAFETY: liveness gated by the tracked-set removal above; the header
     // fields were written by `cbgr_user_allocate`.
     unsafe {
-        *((header_addr + l::ALLOCATION_HEADER_GENERATION_OFFSET as usize) as *mut u32) =
-            verum_common::cbgr::GEN_UNALLOCATED;
         let flags_ptr = (header_addr + l::ALLOCATION_HEADER_FLAGS_OFFSET as usize) as *mut u32;
         *flags_ptr |= verum_common::cbgr::flags::FREED;
         let base_offset = *((header_addr + l::ALLOCATION_HEADER_BASE_OFFSET_OFFSET as usize)
