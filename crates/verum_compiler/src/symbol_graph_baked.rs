@@ -63,10 +63,10 @@ use std::borrow::Cow;
 /// Section offsets and counts, in `u32` slots.
 const MAGIC: &[u8; 4] = b"VSG1";
 
-/// Identifies the graph layout and its reachability semantics. Version 3
-/// includes declaration-owned annotation dependencies as well as qualified
-/// re-exports. Readers rebuild older graphs from the archive.
-pub const FORMAT_VERSION: u32 = 3;
+/// Identifies the graph layout and its reachability semantics. Version 4
+/// collects free annotation dependencies in their lexical binder scopes.
+/// Readers rebuild older graphs from the archive.
+pub const FORMAT_VERSION: u32 = 4;
 
 const H_MAGIC: usize = 0;
 const H_VERSION: usize = 1;

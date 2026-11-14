@@ -628,3 +628,23 @@ fn generic_record_method_return_preserves_its_value_arguments() {
         decision(&module, "core.api.inspect", &[74], false);
     }
 }
+
+#[test]
+fn scalar_field_homonym_does_not_remove_the_private_archive_predicate() {
+    let archive = try_compile_archive(
+        "module core.provider;
+         fn allowed(value:Int)->Bool {value>0}
+         public type Holder is {public allowed:Int, public value:Int{allowed(it)}};",
+        "module core.api;",
+    )
+    .unwrap();
+    let module = compile_archive_consumer(
+        &archive,
+        "module app; mount core.provider.Holder;
+         fn allowed(value:Int)->Bool {value<0}
+         public fn inspect(value:Int)->Int {let holder=Holder{allowed:7,value};holder.value}",
+    )
+    .unwrap();
+    decision(&module, "app.inspect", &[73], true);
+    decision(&module, "app.inspect", &[-73], false);
+}

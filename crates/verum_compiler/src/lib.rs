@@ -176,6 +176,7 @@ pub mod language_features;
 /// collection that walked 2400+ stdlib `.vr` files on every script
 /// invocation.
 pub mod archive_ctx_loader;
+mod source_annotation_paths;
 /// Canonical entry point for compiling a single Verum AST module to VBC
 /// with stdlib auto-linked. Used by test runners, REPL, and any caller
 /// that needs the codegen body without the full session pipeline.

@@ -2303,32 +2303,6 @@ fn scan_module_symbols(module: &VbcModule) -> ModuleSymbolView {
 /// writes a value. Those are declaration edges in the existing symbol graph;
 /// they are not calls in any library bytecode body yet.
 fn declaration_symbol_edges(module: &VbcModule) -> List<ModuleFunction> {
-    use verum_ast::Visitor;
-    #[derive(Default)]
-    struct Paths { names: verum_common::Set<Text> }
-    impl Visitor for Paths {
-        fn visit_path(&mut self, path: &verum_ast::Path) {
-            self.names.insert(path.to_string().replace("::", ".").into());
-        }
-        fn visit_expr(&mut self, expression: &verum_ast::Expr) {
-            // Qualified calls parse as a field chain plus a method name.
-            // Preserve the whole written path before applying lexical scope.
-            match &expression.kind {
-                verum_ast::ExprKind::MethodCall { receiver, method, .. } => {
-                    if let Some(path) = dotted_expr_path(receiver) {
-                        self.names.insert(format!("{path}.{}", method.name).into());
-                    }
-                }
-                verum_ast::ExprKind::Field { .. } => {
-                    if let Some(path) = dotted_expr_path(expression) {
-                        self.names.insert(path.into());
-                    }
-                }
-                _ => {}
-            }
-            verum_ast::visitor::walk_expr(self, expression);
-        }
-    }
     let mut namespaces = verum_ast::checked_const::ModuleOwners::default();
     namespaces.declare(&module.name);
     for owner in module.types.iter().filter_map(|ty| ty.origin_module)
@@ -2365,9 +2339,7 @@ fn declaration_symbol_edges(module: &VbcModule) -> List<ModuleFunction> {
         }
         if let Some(source) = &ty.source_declaration {
             // The wire reader validates this bounded AST before graph scanning.
-            let mut paths = Paths::default();
-            paths.visit_type_decl(source);
-            for path in paths.names {
+            for path in crate::source_annotation_paths::free_paths(source) {
                 let (head, tail) = path.split_once('.').unwrap_or((&path, ""));
                 let local = merge_module_and_simple_name(owner, &path);
                 let edge = if let Some((_, target)) = module.mount_alias_target(&local) {
