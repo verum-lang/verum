@@ -494,6 +494,14 @@ impl RegisterAllocator {
             .map(|(name, info)| (name.as_str(), info))
     }
 
+    /// Hide caller-local names while emitting a declaration-owned expression.
+    /// The returned capability restores those names without rewinding registers
+    /// or value-use facts produced while the expression is compiled.
+    pub(super) fn suspend_named_bindings(&mut self) -> impl FnOnce(&mut Self) + use<> {
+        let variables = std::mem::take(&mut self.variables);
+        move |allocator| allocator.variables = variables
+    }
+
     /// Creates a snapshot of current register state.
     ///
     /// This saves the full state including variables and scope_stack, which is needed

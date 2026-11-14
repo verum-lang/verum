@@ -82,6 +82,10 @@ impl VbcCodegen {
         if depth >= 64 { return None; }
         let expr = Self::normalized_place(expr);
         if let Some(result) = self.type_property_result(expr) { return Some(result); }
+        if let Some(name) = Self::literal_default_type_name(expr)
+            && let Some(id) = crate::types::TypeId::from_well_known_scalar_name(&name) {
+            return Some(TypeRef::Concrete(id.declared_scalar_identity(&name)));
+        }
         let nested = |value, emitted| self.copy_source_type_inner(value, emitted, depth + 1);
         match &expr.kind {
             ExprKind::Literal(verum_ast::literal::Literal {
@@ -123,11 +127,38 @@ impl VbcCodegen {
                 if binding.is_pattern_alias && !matches!(ty, TypeRef::Reference { .. }) { return None; }
                 (fact.id == binding.binding_id).then(|| ty.clone())
             }
+            ExprKind::Is { .. } => Some(TypeRef::Concrete(crate::types::TypeId::BOOL)),
             ExprKind::Binary { op, left, right } => {
-                let (protocol, member) = op.standard_protocol_member()?;
+                use verum_ast::expr::BinOpCategory;
+                let boolean = TypeRef::Concrete(crate::types::TypeId::BOOL);
+                if op.is_comparison() { return Some(boolean); }
                 let left = nested(left, None)?;
                 let right = nested(right, None)?;
+                let primitive_left = self.expand_declared_alias(left.clone())?;
+                let primitive_right = self.expand_declared_alias(right.clone())?;
+                if primitive_left == primitive_right {
+                    if op.category() == BinOpCategory::Logical && primitive_left == boolean {
+                        return Some(boolean);
+                    }
+                    if let TypeRef::Concrete(id) = primitive_left
+                        && ((op.category() == BinOpCategory::Arithmetic && id.is_numeric())
+                            || (op.category() == BinOpCategory::Bitwise && id.is_integer())) {
+                        return Some(TypeRef::Concrete(id));
+                    }
+                }
+                let (protocol, member) = op.standard_protocol_member()?;
                 self.bounded_binary_output(&left, protocol, member, &right)
+            }
+            ExprKind::Unary { op: UnOp::Not | UnOp::Neg | UnOp::BitNot, expr: operand } => {
+                let operand = self.expand_declared_alias(nested(operand, None)?)?;
+                let TypeRef::Concrete(id) = operand else { return None; };
+                let allowed = match &expr.kind {
+                    ExprKind::Unary { op: UnOp::Not, .. } => id == crate::types::TypeId::BOOL,
+                    ExprKind::Unary { op: UnOp::Neg, .. } => id.is_numeric(),
+                    ExprKind::Unary { op: UnOp::BitNot, .. } => id.is_integer(),
+                    _ => false,
+                };
+                allowed.then_some(TypeRef::Concrete(id))
             }
             ExprKind::Record { path, .. } => {
                 if let Some(declared) = self.constructor_declaration(expr, None, None, depth + 1) {

@@ -475,6 +475,20 @@ impl VbcCodegen {
 
     pub(super) fn bind_declared_operand(&self, function: &FunctionInfo, index: usize, formal: &TypeRef,
         actual: &TypeRef, bindings: &mut TypeSubstitution) -> Option<()> {
+        // A selected owned alias can be passed to its exact unrefined base.
+        // Keep a Generic formal's nominal witness and every nested argument
+        // unchanged; writable reference carriers remain invariant below.
+        let adapted = match (formal, actual.base_type_id()) {
+            (TypeRef::Concrete(formal_id), Some(actual_id))
+                if self.type_by_id(*formal_id).is_none_or(|declaration|
+                    declaration.kind != TypeKind::Alias)
+                    && self.type_by_id(actual_id).is_some_and(|declaration|
+                        declaration.kind == TypeKind::Alias)
+                    && !matches!(actual, TypeRef::Reference { .. }) =>
+                self.expand_declared_alias(actual.clone()).filter(|base| base == formal),
+            _ => None,
+        };
+        let actual = adapted.as_ref().unwrap_or(actual);
         // A checked call can adapt the outer reference carrier. Its witness
         // still describes the same pointee. Keep nested qualifiers exact and
         // never infer write capability from an immutable argument.

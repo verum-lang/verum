@@ -11171,6 +11171,8 @@ impl VbcCodegen {
                 format!("selected variant owner `{parent}` has no exact declaration"),
             )));
         };
+        let scope = sum.type_params.is_empty().then(|| self.nominal_refinement_scope(sum, &[]))
+            .transpose()?;
         let Some(source) = sum.source_declaration.as_ref() else {
             return Ok(());
         };
@@ -11195,17 +11197,11 @@ impl VbcCodegen {
         let Some(annotation) = annotation else {
             return Ok(());
         };
-        let Some(info) = self.refinement_of_annotation(&annotation)? else {
-            return Ok(());
-        };
-        self.emit_refinement_assert_on_reg(
-            value,
-            &info.pred_expr,
-            info.binding.as_deref(),
-            info.base_var_type,
-            &info.base_type_name,
-            &format!("refinement violation: variant `{parent}` payload {field}"),
-        )
+        let message = format!("refinement violation: variant `{parent}` payload {field}");
+        for info in self.refinements_in_scope(&annotation, scope)? {
+            self.emit_refinement_assert_on_reg(value, &info, &message)?;
+        }
+        Ok(())
     }
 
     /// Compiles a variant constructor call (e.g., Some(v), Ok(v), None, Err(e)).

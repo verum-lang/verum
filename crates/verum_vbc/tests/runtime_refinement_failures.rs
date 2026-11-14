@@ -139,3 +139,15 @@ fn seeded_constructor_cannot_replace_its_payload_declaration() {
         .expect_err("a name/tag seed is not source payload evidence");
     assert!(error.to_string().contains("no exact declaration"), "{error}");
 }
+
+#[test]
+fn non_boolean_predicate_cannot_be_encoded_as_truthiness() {
+    for predicate in ["73", "wrong(it)", "it && true", "!it"] {
+        let source = format!("fn wrong(value:Int)->Int {{value}}
+fn inspect(value:Int{{{predicate}}})->Int {{value}}");
+        let ast = Parser::new(&source).parse_module().unwrap();
+        let error = VbcCodegen::new().compile_module(&ast)
+            .expect_err("a non-Bool predicate must not reach a wire Assert");
+        assert!(error.to_string().contains("Bool"), "{error}");
+    }
+}
