@@ -2,14 +2,32 @@
 
 use std::sync::Arc;
 use verum_fast_parser::Parser;
-use verum_vbc::codegen::{CodegenConfig, VbcCodegen};
+use verum_vbc::codegen::{CodegenConfig, ItemFailurePolicy, VbcCodegen};
 use verum_vbc::interpreter::Interpreter;
 
 fn run(source: &str, result_type: Option<&str>) -> i64 {
-    let source = format!("type Poll<T> is Pending | Ready(T);\n{source}\nfn after_probe() {{}}");
+    let source = format!("mount core.base.result.Result;\ntype Poll<T> is Pending | Ready(T);\n{source}\nfn after_probe() {{}}");
     let ast = Parser::new(&source).parse_module().expect("parse");
+    // Constructor tests need the real payload declaration, not the historical
+    // bootstrap name/tag seed. This selection keeps the production declaration
+    // unchanged; no Result methods are called by this fixture.
+    let mut result = Parser::new(include_str!("../../../core/base/result.vr"))
+        .parse_module().expect("production Result grammar");
+    result.items.retain(|item| match &item.kind {
+        verum_ast::ItemKind::Module(decl) => decl.items.is_none(),
+        verum_ast::ItemKind::Type(decl) => decl.name.name == "Result",
+        _ => false,
+    });
     let mut codegen = VbcCodegen::with_config(CodegenConfig::new("nested_payload_pins"));
-    let module = codegen.compile_module(&ast).expect("compile");
+    let units = [&result, &ast];
+    codegen.collect_unit_declarations(&units).expect("complete declarations");
+    codegen.resolve_pending_imports();
+    codegen.compile_unit_items(&units, ItemFailurePolicy::Strict).expect("compile");
+    let module = codegen.finalize_module().expect("complete module");
+    let module = verum_vbc::deserialize::deserialize_module(
+        &verum_vbc::serialize::serialize_module(&module).expect("serialize"),
+    ).expect("deserialize");
+    verum_vbc::validate::validate_module(&module).expect("valid wire");
     if let Some(expected) = result_type {
         assert_eq!(
             codegen

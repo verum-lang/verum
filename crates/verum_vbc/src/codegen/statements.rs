@@ -54,7 +54,7 @@ impl VbcCodegen {
                 // deferred-initialization binding belongs at its
                 // assignment, not here.
                 if let (Some(annotation), Some(_)) = (ty.as_ref(), value.as_ref()) {
-                    self.emit_let_refinement_asserts(pattern, annotation);
+                    self.emit_let_refinement_asserts(pattern, annotation)?;
                 }
                 Ok(result)
             }

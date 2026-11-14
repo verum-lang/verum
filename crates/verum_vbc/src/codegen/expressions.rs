@@ -4093,7 +4093,7 @@ impl VbcCodegen {
 
             ExprKind::Field { expr: base, field } => {
                 let (base_reg, owner, ordinal) = self.compile_field_storage(base, &field.name, true)?;
-                self.emit_field_refinement_assert(value_reg, &owner, &field.name);
+                self.emit_field_refinement_assert(value_reg, &owner, &field.name)?;
                 self.emit_field_write(base_reg, ordinal, value_reg, false, &field.name);
 
                 self.ctx.free_temp(base_reg);
@@ -4692,7 +4692,7 @@ impl VbcCodegen {
                 // the write-back (T1-F parity for compound assignment).
                 if let Some(bt) = obj_type.as_deref() {
                     let field_name_owned = field.name.to_string();
-                    self.emit_field_refinement_assert(result, bt, &field_name_owned);
+                    self.emit_field_refinement_assert(result, bt, &field_name_owned)?;
                 }
 
                 // Store back to field
@@ -7829,7 +7829,7 @@ impl VbcCodegen {
                 let arg_val = self.compile_expr(arg)?.ok_or_else(|| {
                     CodegenError::internal("variant constructor arg has no value")
                 })?;
-                self.emit_variant_argument(result, i as u32, arg, arg_val, copy_start)?;
+                self.emit_variant_argument(result, i as u32, arg, arg_val, copy_start, parent.as_deref(), final_tag)?;
                 self.ctx.free_temp(arg_val);
             }
             return Ok(Some(result));
@@ -11117,8 +11117,18 @@ impl VbcCodegen {
 
     /// All source constructor routes share the same payload ownership boundary.
     fn emit_variant_argument(
-        &mut self, variant: Reg, field: u32, expr: &Expr, value: Reg, copy_start: usize,
+        &mut self,
+        variant: Reg,
+        field: u32,
+        expr: &Expr,
+        value: Reg,
+        copy_start: usize,
+        parent: Option<&str>,
+        tag: u32,
     ) -> CodegenResult<()> {
+        if let Some(parent) = parent {
+            self.emit_variant_refinement_assert(value, parent, tag, field)?;
+        }
         let copy_type = self.copy_source_type(expr, value, copy_start, self.ctx.instructions.len());
         let store = Instruction::SetVariantData { variant, field, value };
         if self.consumes_named_place(expr, value) {
@@ -11136,6 +11146,66 @@ impl VbcCodegen {
             self.ctx.emit(store);
         }
         Ok(())
+    }
+
+    fn emit_variant_refinement_assert(
+        &mut self,
+        value: Reg,
+        parent: &str,
+        tag: u32,
+        field: u32,
+    ) -> CodegenResult<()> {
+        // Prefer the selected declaration identity. A contextual constructor
+        // can still carry its source spelling; that spelling must resolve in
+        // the declaring lexical scope. Neither route accepts a foreign leaf.
+        let leaf = parent.rsplit('.').next().unwrap_or(parent);
+        let sum = self
+            .type_name_to_id
+            .get(parent)
+            .or_else(|| self.type_name_to_id.get(leaf))
+            .and_then(|id| self.type_by_id(*id))
+            .filter(|sum| self.type_declaration_identity(sum).as_deref() == Some(parent))
+            .or_else(|| self.declared_sum_descriptor(parent));
+        let Some(sum) = sum else {
+            return Err(CodegenError::new(CodegenErrorKind::InvalidSourceSignature(
+                format!("selected variant owner `{parent}` has no exact declaration"),
+            )));
+        };
+        let Some(source) = sum.source_declaration.as_ref() else {
+            return Ok(());
+        };
+        let verum_ast::TypeDeclBody::Variant(cases) = &source.body else {
+            return Ok(());
+        };
+        let selected = sum
+            .variants
+            .iter()
+            .find(|case| case.tag == tag)
+            .and_then(|case| self.ctx.strings.get(case.name.0 as usize))
+            .and_then(|name| cases.iter().find(|case| case.name.name.as_str() == name));
+        let annotation = selected
+            .and_then(|case| match &case.data {
+                Some(verum_ast::decl::VariantData::Tuple(fields)) => fields.get(field as usize),
+                Some(verum_ast::decl::VariantData::Record(fields)) => {
+                    fields.get(field as usize).map(|field| &field.ty)
+                }
+                None => None,
+            })
+            .cloned();
+        let Some(annotation) = annotation else {
+            return Ok(());
+        };
+        let Some(info) = self.refinement_of_annotation(&annotation)? else {
+            return Ok(());
+        };
+        self.emit_refinement_assert_on_reg(
+            value,
+            &info.pred_expr,
+            info.binding.as_deref(),
+            info.base_var_type,
+            &info.base_type_name,
+            &format!("refinement violation: variant `{parent}` payload {field}"),
+        )
     }
 
     /// Compiles a variant constructor call (e.g., Some(v), Ok(v), None, Err(e)).
@@ -11707,34 +11777,18 @@ impl VbcCodegen {
         });
         self.emit_make_variant(result, tag, args.len() as u32, parent.as_deref());
         if !args.is_empty() {
-            // The qualified variant, for the payload-refinement lookup:
-            // a variant name is unique only within its sum, so `Ok` of
-            // one type must not be asserted with another's predicate.
-            let variant_key = parent.as_deref().and_then(|p| {
-                variant_name.map(|v| {
-                    let simple = v.rsplit('.').next().unwrap_or(v);
-                    format!("{}.{}", p, simple)
-                })
-            });
-
             let copy_start = self.ctx.instructions.len();
             let data_val = self
                 .compile_expr(&args[0])?
                 .or_internal("variant constructor arg has no value")?;
-            if let Some(key) = variant_key.as_deref() {
-                self.emit_field_refinement_assert(data_val, key, "0");
-            }
-            self.emit_variant_argument(result, 0, &args[0], data_val, copy_start)?;
+            self.emit_variant_argument(result, 0, &args[0], data_val, copy_start, parent.as_deref(), tag)?;
             self.ctx.free_temp(data_val);
             for i in 1..args.len() {
                 let copy_start = self.ctx.instructions.len();
                 let next_val = self.compile_expr(&args[i])?.ok_or_else(|| {
                     CodegenError::internal("variant constructor arg has no value")
                 })?;
-                if let Some(key) = variant_key.as_deref() {
-                    self.emit_field_refinement_assert(next_val, key, &i.to_string());
-                }
-                self.emit_variant_argument(result, i as u32, &args[i], next_val, copy_start)?;
+                self.emit_variant_argument(result, i as u32, &args[i], next_val, copy_start, parent.as_deref(), tag)?;
                 self.ctx.free_temp(next_val);
             }
         }
@@ -12172,7 +12226,7 @@ impl VbcCodegen {
                 self.ctx.current_return_type_name = prev;
             }
 
-            self.emit_variant_argument(result, 0, &args[0], data_val, copy_start)?;
+            self.emit_variant_argument(result, 0, &args[0], data_val, copy_start, context_type.as_deref(), tag)?;
 
             self.ctx.free_temp(data_val);
 
@@ -12197,7 +12251,7 @@ impl VbcCodegen {
                     self.ctx.current_return_type_name = prev;
                 }
 
-                self.emit_variant_argument(result, (i + 1) as u32, arg, arg_val, copy_start)?;
+                self.emit_variant_argument(result, (i + 1) as u32, arg, arg_val, copy_start, context_type.as_deref(), tag)?;
 
                 self.ctx.free_temp(arg_val);
             }
@@ -18117,7 +18171,7 @@ impl VbcCodegen {
                 let arg_val = self.compile_expr(arg)?.ok_or_else(|| {
                     CodegenError::internal("variant constructor arg has no value")
                 })?;
-                self.emit_variant_argument(result, i as u32, arg, arg_val, copy_start)?;
+                self.emit_variant_argument(result, i as u32, arg, arg_val, copy_start, func_info.parent_type_name.as_deref(), tag)?;
                 self.ctx.free_temp(arg_val);
             }
             return Ok(Some(result));
@@ -18657,7 +18711,7 @@ impl VbcCodegen {
                 self.current_return_ast_type.clone(),
                 self.current_fn_lookup_name.clone(),
             ) {
-                self.emit_return_refinement_assert(reg, Some(&ret_ty), &fn_name);
+                self.emit_return_refinement_assert(reg, Some(&ret_ty), &fn_name)?;
             }
 
             if !self.emit_direct_affine_return(expr, reg, return_uses)? {
@@ -26374,7 +26428,7 @@ impl VbcCodegen {
                 // the SMT E500 gate only rejects LITERAL violations; a
                 // dynamic value (NaN through a fn return) reached the
                 // field unchecked (T1-F parity for fields).
-                self.emit_field_refinement_assert(value_reg, &type_name, &field.name.name);
+                self.emit_field_refinement_assert(value_reg, &type_name, &field.name.name)?;
 
                 let field_idx = self.resolve_field_index(Some(&type_name), &field.name.name);
 
@@ -26503,7 +26557,7 @@ impl VbcCodegen {
             // SetF arm below (T1-F parity for ctor-form construction).
             if let Some(fname) = func_info.param_names.get(idx) {
                 let fname = fname.clone();
-                self.emit_field_refinement_assert(value_reg, type_name, &fname);
+                self.emit_field_refinement_assert(value_reg, type_name, &fname)?;
             }
 
             let field_idx = func_info
