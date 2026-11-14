@@ -2078,20 +2078,6 @@ fn try_dispatch_intrinsic_named(
         }),
 
         // ================================================================
-        // CBGR Intrinsics (no-ops in interpreter)
-        // ================================================================
-        "verum_cbgr_get_epoch_caps" => Err(InterpreterError::InvalidOperand {
-            message: "GetEpochCaps requires its registered CBGR instruction and a preserved reference snapshot".into(),
-        }),
-        "verum_cbgr_advance_epoch"
-        | "cbgr_advance_epoch"
-        | "verum_cbgr_new_generation"
-        | "verum_cbgr_invalidate"
-        | "verum_cbgr_get_generation"
-        | "verum_cbgr_advance_generation"
-        | "verum_cbgr_get_stats" => Ok(Some(Value::from_i64(0))),
-
-        // ================================================================
         // Tier / Async Stubs (no-ops in interpreter)
         // ================================================================
         "verum_tier_promote" | "tier_promote" => {

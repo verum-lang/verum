@@ -222,7 +222,7 @@ fn legacy_named_intrinsic_cannot_report_a_fabricated_zero_snapshot() {
     let main = wire.find_function_by_name("main").unwrap();
     let mut vm = Interpreter::new(wire.into());
     assert!(
-        matches!(vm.execute_function(main), Err(verum_vbc::interpreter::InterpreterError::InvalidOperand { message }) if message.contains("registered CBGR instruction"))
+        matches!(vm.execute_function(main), Err(verum_vbc::interpreter::InterpreterError::UnsupportedIntrinsic { intrinsic, .. }) if intrinsic.as_str() == "verum_cbgr_get_epoch_caps")
     );
 }
 

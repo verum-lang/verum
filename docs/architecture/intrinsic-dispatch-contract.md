@@ -249,6 +249,12 @@ Inheritance from CBGR architecture docs:
 
 ### Preserved reference snapshots
 
+In the interpreter, an intrinsic declaration invoked through a function value
+requires implemented runtime dispatch for its registered identity. Otherwise the common
+`UnsupportedIntrinsic` diagnostic applies. Legacy CBGR names do not authorize
+successful no-ops. Ordinary functions without an intrinsic attribute execute
+their declared body regardless of a matching name.
+
 `CBGR_GET_EPOCH_CAPS` reads the saved 32-bit `epoch_caps` word: epoch in
 bits 16–31, capabilities in bits 0–15. Reading this metadata does not
 validate the pointee, confer capabilities or dereference its address.
