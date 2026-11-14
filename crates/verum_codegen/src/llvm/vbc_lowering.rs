@@ -978,6 +978,65 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         // pthread_create/pthread_mutex_lock/etc. become invalid and get stripped.
         self.declare_posix_functions();
 
+        // Establish the complete native runtime before declaring source bodies.
+        // Both eager and previously late runtime emitters own their ABI symbols;
+        // source declarations with the same spelling retain a distinct identity.
+        let (native_intrinsics, platform) = {
+            // VERUM_AOT_TRACE_RUNTIME=1 prints which top-level
+            // runtime-emit phase is running so signature-mismatch
+            // panics deep inside one of them can be pinpointed by
+            // reading the abort tail.
+            let trace = std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some();
+
+            let runtime = super::runtime::RuntimeLowering::new(self.context);
+            if trace {
+                eprintln!("[aot-runtime-stage] emit_text_ir_functions");
+            }
+            runtime.emit_text_ir_functions(&self.module)?;
+            if trace {
+                eprintln!("[aot-runtime-stage] emit_misc_ir_functions");
+            }
+            runtime.emit_misc_ir_functions(&self.module)?;
+
+            // Emit platform-native runtime functions as LLVM IR.
+            // Runtime ownership is established before any source declaration.
+            if trace {
+                eprintln!("[aot-runtime-stage] emit_platform_functions");
+            }
+            // Thread `[runtime].panic` from the manifest through to
+            // the platform-IR emitter — it drives the body shape of
+            // `verum_panic` (Unwind: route through
+            // verum_exception_throw; Abort: stderr + _exit(1)).
+            // Pre-fix this constructor used `PlatformIR::new` which
+            // hard-coded the abort body, ignoring the manifest setting.
+            let platform = super::platform_ir::PlatformIR::with_panic_strategy(
+                self.context,
+                self.config.panic_strategy,
+            )
+            .with_runtime_bridge(self.config.runtime_bridge);
+            let native_intrinsics = platform.emit_platform_functions_with_intrinsics(&self.module)?;
+            // Emit tensor runtime functions as LLVM IR.
+            // Uses LLVM intrinsics for target-native math operations.
+            if trace {
+                eprintln!("[aot-runtime-stage] emit_tensor_functions");
+            }
+            let tensor = super::tensor_ir::TensorIR::new(self.context);
+            tensor.emit_tensor_functions(&self.module)?;
+
+            // Emit Metal GPU runtime functions as LLVM IR.
+            // Uses the platform ObjC ABI through objc_msgSend.
+            if trace {
+                eprintln!("[aot-runtime-stage] emit_metal_functions");
+            }
+            let metal = super::metal_ir::MetalIR::new(self.context);
+            metal.emit_metal_functions(&self.module)?;
+            if trace {
+                eprintln!("[aot-runtime-stage] all_done");
+            }
+
+            (native_intrinsics, platform)
+        };
+
         // Phase 1: Forward declare all functions
         self.declare_functions(vbc_module, entry_index)?;
         self.array_returns = verum_common::Shared::new(
@@ -1395,114 +1454,48 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             );
         }
 
-        // Phase 3.6: Emit LLVM IR runtime functions
-        // These replace C runtime stubs with pure LLVM IR implementations.
-        // Must be emitted BEFORE setting Internal linkage (Phase 3.7) so that
-        // the IR versions become module-internal and don't conflict with C runtime
-        // symbols at link time.
-        let native_intrinsics;
-        {
-            // VERUM_AOT_TRACE_RUNTIME=1 prints which top-level
-            // runtime-emit phase is running so signature-mismatch
-            // panics deep inside one of them can be pinpointed by
-            // reading the abort tail.
-            let trace = std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some();
-
-            let runtime = super::runtime::RuntimeLowering::new(self.context);
-            if trace {
-                eprintln!("[aot-runtime-stage] emit_text_ir_functions");
-            }
-            runtime.emit_text_ir_functions(&self.module)?;
-            if trace {
-                eprintln!("[aot-runtime-stage] emit_misc_ir_functions");
-            }
-            runtime.emit_misc_ir_functions(&self.module)?;
-
-            // Emit platform-native runtime functions as LLVM IR.
-            // These shadow C runtime functions for full LTO optimization.
-            if trace {
-                eprintln!("[aot-runtime-stage] emit_platform_functions");
-            }
-            // Thread `[runtime].panic` from the manifest through to
-            // the platform-IR emitter — it drives the body shape of
-            // `verum_panic` (Unwind: route through
-            // verum_exception_throw; Abort: stderr + _exit(1)).
-            // Pre-fix this constructor used `PlatformIR::new` which
-            // hard-coded the abort body, ignoring the manifest setting.
-            let platform = super::platform_ir::PlatformIR::with_panic_strategy(
-                self.context,
-                self.config.panic_strategy,
-            )
-            .with_runtime_bridge(self.config.runtime_bridge);
-            native_intrinsics = platform.emit_platform_functions_with_intrinsics(&self.module)?;
-            if let Some(index) = entry_index {
-                let function_id = vbc_module.functions[index].id.0;
-                let entry_function = self.functions.get(&function_id).copied()
-                    .or_internal("selected program entry has no native declaration")?;
-                platform.emit_program_entry(&self.module, entry_function)?;
-            }
-            // VERUM_DUMP_IR above fires BEFORE this call, so the dump it
-            // writes cannot contain a single platform function —
-            // `verum_store_args`, `verum_get_argv`, `verum_getenv_linux`
-            // and the `__verum_*` globals are all absent from it.  That
-            // made the dump useless for exactly the question it is
-            // reached for ("which env function does this target call?"),
-            // and the absence read as "the emitter did not run" when it
-            // demonstrably had (T1082).
-            if let Ok(path) = std::env::var("VERUM_DUMP_IR_FINAL") {
-                let _ = self.module.print_to_file(std::path::Path::new(&path));
-                tracing::debug!("[IR dump, post-platform] wrote to {}", path);
-            }
-
-            // Emit tensor runtime functions as LLVM IR.
-            // Replaces verum_tensor.c — uses LLVM intrinsics for math (native HW speed).
-            if trace {
-                eprintln!("[aot-runtime-stage] emit_tensor_functions");
-            }
-            let tensor = super::tensor_ir::TensorIR::new(self.context);
-            tensor.emit_tensor_functions(&self.module)?;
-
-            // Emit Metal GPU runtime functions as LLVM IR.
-            // Replaces verum_metal.m — uses ObjC runtime calls via objc_msgSend.
-            if trace {
-                eprintln!("[aot-runtime-stage] emit_metal_functions");
-            }
-            let metal = super::metal_ir::MetalIR::new(self.context);
-            metal.emit_metal_functions(&self.module)?;
-            if trace {
-                eprintln!("[aot-runtime-stage] all_done");
-            }
-
-            // Architectural-invariant gate: every declaration of an
-            // LLVM function symbol must agree on its `fn_type` across
-            // all 240+ `get_or_declare_function` call sites and the
-            // 70+ raw `module.add_function` sites. Pre-fix the helper
-            // silently returned the first declaration when callers
-            // disagreed (e.g. `listen` declared once as
-            // `i32(i32, i32)` and again as `i64(i64, i64)`), producing
-            // an LLVM IR module whose runtime ABI shape diverged from
-            // what later codegen assumed — surfaced as cryptic
-            // "callee returns void" / "param type mismatch" errors
-            // thousands of instructions later. The check fuses every
-            // recorded mismatch into a single typed diagnostic so the
-            // root cause (two emit paths fighting over one symbol's
-            // ABI) is visible at compile time.
-            super::error::check_no_signature_mismatches()?;
-            // T0438 backstop: emit-time duplicate-definer registry
-            // (warn-default; VERUM_STRICT_DEFINERS=1 hard-errors).
-            super::error::check_no_duplicate_definers()?;
-            // Monomorphization-completeness gate: surface every Call that
-            // degraded to a const-zero stub (unresolved target — typically an
-            // un-monomorphized generic protocol dispatch).  Warning by default;
-            // hard error under VERUM_STRICT_MONO=1.
-            super::error::write_degrade_report(&self.config.module_name);
-            self.emit_shape_manifest_global();
-            super::error::check_no_unresolved_generic_calls()?;
-            // The reachable-name set is per-lowering-run state — clear
-            // it so a later lower_module in the same process starts
-            // from the conservative default instead of a stale walk.
-            super::error::set_reachable_function_names(None);
+        // Finalize the selected process entry and complete lowering diagnostics.
+        if let Some(index) = entry_index {
+            let function_id = vbc_module.functions[index].id.0;
+            let entry_function = self.functions.get(&function_id).copied()
+                .or_internal("selected program entry has no native declaration")?;
+            platform.emit_program_entry(&self.module, entry_function)?;
         }
+        // The final dump includes native runtime and source bodies.
+        if let Ok(path) = std::env::var("VERUM_DUMP_IR_FINAL") {
+            let _ = self.module.print_to_file(std::path::Path::new(&path));
+            tracing::debug!("[IR dump, post-platform] wrote to {}", path);
+        }
+
+        // Architectural-invariant gate: every declaration of an
+        // LLVM function symbol must agree on its `fn_type` across
+        // all 240+ `get_or_declare_function` call sites and the
+        // 70+ raw `module.add_function` sites. Pre-fix the helper
+        // silently returned the first declaration when callers
+        // disagreed (e.g. `listen` declared once as
+        // `i32(i32, i32)` and again as `i64(i64, i64)`), producing
+        // an LLVM IR module whose runtime ABI shape diverged from
+        // what later codegen assumed — surfaced as cryptic
+        // "callee returns void" / "param type mismatch" errors
+        // thousands of instructions later. The check fuses every
+        // recorded mismatch into a single typed diagnostic so the
+        // root cause (two emit paths fighting over one symbol's
+        // ABI) is visible at compile time.
+        super::error::check_no_signature_mismatches()?;
+        // T0438 backstop: emit-time duplicate-definer registry
+        // (warn-default; VERUM_STRICT_DEFINERS=1 hard-errors).
+        super::error::check_no_duplicate_definers()?;
+        // Monomorphization-completeness gate: surface every Call that
+        // degraded to a const-zero stub (unresolved target — typically an
+        // un-monomorphized generic protocol dispatch).  Warning by default;
+        // hard error under VERUM_STRICT_MONO=1.
+        super::error::write_degrade_report(&self.config.module_name);
+        self.emit_shape_manifest_global();
+        super::error::check_no_unresolved_generic_calls()?;
+        // The reachable-name set is per-lowering-run state — clear
+        // it so a later lower_module in the same process starts
+        // from the conservative default instead of a stale walk.
+        super::error::set_reachable_function_names(None);
 
         // Native runtime emission is the authority for bodyless intrinsic
         // declarations. Reject an executable declaration that still has no
@@ -1924,7 +1917,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             } else if Some(func_idx) == entry_index {
                 "verum_main".to_string()
             } else if raw_name == "main" {
-                // The platform shim owns the process symbol. A dependency's
+                // The platform entry owns the process symbol. A dependency's
                 // bare main remains reachable through its ordinary VBC id.
                 format!("__verum_nonentry_main_{func_idx}")
             } else {
@@ -2020,7 +2013,10 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     // Keep the original id-to-symbol binding: its source
                     // body may still be pending in this declaration pass.
                     self.module.add_function(&unique_name, fn_type, None)
-                } else if existing.count_basic_blocks() == 0 && existing.get_type() == fn_type {
+                } else if existing.count_basic_blocks() == 0
+                    && existing.get_type() == fn_type
+                    && !pending_source_bodies.contains(&existing)
+                {
                     // Same arity, same signature, and the existing symbol is a
                     // BODYLESS declaration — created speculatively by an earlier
                     // call site (resolve_llvm_function declares callees it can't
@@ -2105,7 +2101,8 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             }
 
             self.functions.insert(func_desc.id.0, llvm_fn);
-            if func_desc.bytecode_length > 0
+            if func_desc.has_source_body
+                || func_desc.bytecode_length > 0
                 || func_desc.instructions.as_ref().is_some_and(|body| !body.is_empty())
             {
                 pending_source_bodies.insert(llvm_fn);

@@ -1,7 +1,7 @@
 //! Execute serialized source bytecode through the complete native runtime.
 use std::process::Command;
-use verum_common::Text;
 use verum_codegen::llvm::{LoweringConfig, VbcToLlvmLowering};
+use verum_common::Text;
 use verum_fast_parser::Parser;
 use verum_llvm::{
     OptimizationLevel,
@@ -27,7 +27,14 @@ pub fn run(source: &str) {
 
 /// Set a runtime resource boundary before emitting the ordinary native image.
 pub fn run_with(source: &str, configure: impl FnOnce(&verum_llvm::module::Module<'_>)) {
-    let mut wire = module(source);
+    run_module(module(source), configure);
+}
+
+/// Execute an already admitted module through the same complete native path.
+pub fn run_module(
+    mut wire: verum_vbc::VbcModule,
+    configure: impl FnOnce(&verum_llvm::module::Module<'_>),
+) {
     let mut graph = verum_vbc::mono::InstantiationGraph::new();
     for function in &mut wire.functions {
         function.is_generic = !function.type_params.is_empty();
