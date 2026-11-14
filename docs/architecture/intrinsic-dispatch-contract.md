@@ -368,8 +368,8 @@ call reached a function that has no body.
 
 Body lowering is scoped to the reachable set (`scoped_lowering_enabled`,
 the 82GB → 5GB saving), and the by-name closure in
-`crates/verum_vbc/src/reachability.rs` drops a candidate whose parent
-type is a `Record` that reachable code never constructs. `Slice`'s
+`crates/verum_vbc/src/reachability.rs` previously dropped a candidate whose
+parent type was a `Record` that reachable code never constructed. `Slice`'s
 descriptor IS a `Record` — but only by synthesis:
 `ensure_structural_impl_target_type` materialises it for
 `implement<T> [T]`, which has no named type decl, and hard-codes the
@@ -382,9 +382,12 @@ and `@Slice.is_empty` are `declare`s, and 268 calls to `@Slice.len` sit
 in the module — dead only because their callers were pruned too. The
 linked binary carries no `Slice` symbol at all.
 
-So a structural impl target (`Slice`, `Array`, `Tuple`) belongs in the
-conservatively-included class that pass already names for variants and
-newtypes: **a parent whose construction the pass cannot observe at all.**
+The same limitation applies to nominal records supplied by parameters,
+foreign calls or stored values. The function-level walk records called method
+names, without a selected receiver proof at each `CallM`. It therefore keeps
+all matching candidates. A method's declared parent identifies its owner;
+absence of `New`/`NewG` is not evidence that no receiver of that type can exist.
+Uncalled method names and unrelated functions do not become roots.
 
 ### Pin
 
@@ -400,10 +403,11 @@ newtypes: **a parent whose construction the pass cannot observe at all.**
   answer.
 - Consequence: all 27 declared slice methods dispatch, not the three that
   happen to be called today.
-- Reachability: `crates/verum_vbc/src/reachability.rs`, the by-name
-  candidate closure — a structural impl target is never excluded by the
-  "record never constructed" rule, because its descriptor is synthesised
-  and its instances never pass through `New`/`NewG`.
+- Reachability: `crates/verum_vbc/src/reachability.rs`, the by-name candidate
+  closure. Unknown receivers keep matching methods without a type-name
+  exemption. `crates/verum_vbc/tests/reachability_materialization.rs` preserves
+  the no-local-construction and declared-return controls, including exclusion
+  of unrelated functions. These are analysis controls, not native ABI tests.
 - Cost of that inclusion, measured on one probe back-to-back with the
   pre-fix binary: **87s → 75s**. Un-pruning `Slice`/`Array`/`Tuple`
   methods did not cost AOT compile time here; the difference is load

@@ -1,14 +1,7 @@
 //! Function-level reachability analysis over a VBC module (T0103).
 //!
-//! An AOT build lowers `module.functions` wholesale — for a hello-world
-//! that is the entire baked stdlib (~48K functions), and every
-//! unresolved cross-module call inside a *never-executed* archive body
-//! degrades to a const-zero stub that the strict-mono gate then counts.
-//! The gate can never flip while it counts dead carry.  This module
-//! computes the conservative closure of functions reachable from a
-//! program's roots so consumers (the unresolved-call report, the
-//! strict gate, and — later — the lowering loop itself) can scope
-//! themselves to code that can actually run.
+//! Computes the closure of functions that may execute from a program's roots.
+//! Native body lowering and unresolved-call reporting consume the same result.
 //!
 //! # Conservatism contract
 //!
@@ -20,13 +13,12 @@
 //!  the runtime does (exact name first).
 //!  * `CallM` dispatches by NAME at runtime (with runtime type
 //!  switches over every same-name candidate), so every function
-//!  whose bare method name matches a called method name is kept —
-//!  narrowed by type evidence: a RECORD type's methods are excluded
-//!  while no `New`/`NewG` of that type appears in reachable code
-//!  (variants, newtypes, primitives, and well-known builtins stay
-//!  conservatively included). A type becoming reachable also pulls
-//!  its implicit edges — drop glue, clone glue, protocol
-//!  dispatch-table methods.
+//!  whose bare method name matches a called method name is kept. This
+//!  function-level walk has no selected receiver proof at each CallM. A
+//!  candidate's declared parent identifies its implementation, not whether
+//!  a receiver can arrive through a parameter, foreign call, or stored value.
+//!  Absence of `New`/`NewG` cannot exclude that candidate. A constructed type
+//!  also pulls its implicit drop, clone and protocol dispatch-table edges.
 //!  * Function references materialised as VALUES (`Constant::Function`
 //!  entries, `FfiExtended::CreateCallback` payloads) are roots —
 //!  anything that can flow into an indirect call stays.
@@ -245,68 +237,10 @@ pub fn analyze_with_roots(module: &VbcModule, extra_roots: &[u32]) -> Reachabili
     // function whose bare name matches a called method name becomes
     // reachable (its body may introduce new direct edges and new
     // method names — iterate to a fixed point).
-    // A by-name candidate is kept unless we can PROVE its receiver
-    // type cannot exist: methods of RECORD types whose construction
-    // (`New`/`NewG`) never appears in reachable code are excluded.
-    // Non-record parents (variants materialise via `MakeVariant`
-    // with no type operand; newtypes/aliases/primitives via
-    // conversions) and well-known builtin containers (instances come
-    // from dedicated instructions / runtime helpers) stay
-    // conservatively included.
-    let candidate_possible = |fid: u32, out: &Reachability| -> bool {
-        let Some(&pos) = by_id.get(&fid) else {
-            return true;
-        };
-        match module.functions[pos].parent_type {
-            None => true,
-            Some(tid) => {
-                out.reachable_type_ids.contains(&tid.0)
-                    || match type_by_id.get(&tid.0) {
-                        Some(td) => {
-                            // A STRUCTURAL impl target is a Record only by
-                            // synthesis. `implement<T> [T]` and
-                            // `implement<T; N> [T; N]` have no named type
-                            // decl, so codegen materialises a descriptor for
-                            // them (`ensure_structural_impl_target_type`,
-                            // which hard-codes `kind = Record`). Their
-                            // instances are never built by `New`/`NewG` — a
-                            // slice materialises via `RefSlice`, an array via
-                            // a pack — so "no construction in reachable code"
-                            // proves NOTHING about them, and the Record arm
-                            // below prunes every one of their methods.
-                            //
-                            // Measured (T1447): `@Slice.len`, `@Slice.iter`,
-                            // `@Slice.is_empty` reached the module as bodyless
-                            // `declare`s with 268 dead calls to `@Slice.len`
-                            // beside them — dead only because their callers
-                            // were pruned too. The first LIVE call would not
-                            // have linked, and the dispatch that should have
-                            // made one instead aborted at runtime:
-                            //
-                            //   PANIC: AOT dispatch fault: no runtime
-                            //   candidate for method '&[Byte].is_empty'
-                            //
-                            // These belong in the same conservatively-included
-                            // class the comment above names for variants and
-                            // newtypes: a parent whose construction this pass
-                            // cannot observe at all.
-                            let structural = matches!(
-                                module.strings.get(td.name),
-                                Some("Slice") | Some("Array") | Some("Tuple")
-                            );
-                            structural
-                                || td.kind != crate::types::TypeKind::Record
-                                || module
-                                    .strings
-                                    .get(td.name)
-                                    .map(verum_common::well_known_types::WellKnownType::is_well_known)
-                                    .unwrap_or(true)
-                        }
-                        None => true,
-                    }
-            }
-        }
-    };
+    // This analysis records method names, not the receiver value at each
+    // callsite. Without an exact receiver proof, every matching declaration
+    // remains possible. In particular, absence of local construction does not
+    // rule out a record supplied by a caller or external producer.
     // The by-name closure decides which same-name candidates survive,
     // and until now it printed NOTHING. Four links of T1214 were closed
     // only after a trace was added to the stage that held them; the
@@ -355,17 +289,8 @@ pub fn analyze_with_roots(module: &VbcModule, extra_roots: &[u32]) -> Reachabili
         for n in mono_names.iter().take(4) {
             eprintln!("[reach-byname]   mono={n:?}");
         }
-        // THE LAST FORK. With the bare-name fix the `collect` bucket
-        // grows 160 -> 166 (measured), i.e. the six `collect$mono$`
-        // bodies ARE candidates now — and the emitted module is still
-        // identical, 515 defines and no `Range.collect$mono`. So either
-        // `candidate_possible` rejects them, or they enter
-        // `reachable_ids` and a LATER stage drops them.
-        //
-        // Print, for each `$mono$` body in the `collect` bucket, the id,
-        // its `parent_type`, and the predicate's verdict. Whether it
-        // then reaches `reachable_ids` is printed after the loop, so the
-        // two possibilities are distinguished in one run.
+        // Print each specialized candidate's identity and declared parent.
+        // Its parent alone cannot establish the receiver at a CallM site.
         // How many `$mono$` bodies end up reachable AT ALL. The
         // lowering counts what it skips (`skipped_unreachable` in
         // `llvm/vbc_lowering.rs`) but reports it through `tracing::info!`,
@@ -396,10 +321,9 @@ pub fn analyze_with_roots(module: &VbcModule, extra_roots: &[u32]) -> Reachabili
                     continue;
                 }
                 eprintln!(
-                    "[reach-collect] id={} parent_type={:?} possible={} name={:?}",
+                    "[reach-collect] id={} parent_type={:?} name={:?}",
                     id,
                     module.functions[pos].parent_type.map(|t| t.0),
-                    candidate_possible(*id, &out),
                     name
                 );
             }
@@ -410,7 +334,7 @@ pub fn analyze_with_roots(module: &VbcModule, extra_roots: &[u32]) -> Reachabili
         for (bare, ids) in &by_bare_name {
             if out.called_method_names.contains(*bare) {
                 for id in ids {
-                    if !out.reachable_ids.contains(id) && candidate_possible(*id, &out) {
+                    if !out.reachable_ids.contains(id) {
                         newly.push(*id);
                     }
                 }
@@ -512,11 +436,11 @@ mod tests {
     }
 
     #[test]
-    fn record_method_candidates_gated_on_type_construction() {
+    fn record_method_candidates_do_not_require_local_construction() {
         use crate::types::{TypeDescriptor, TypeId, TypeKind};
         // main CallM's "tick"; Gadget.tick is a RECORD-parented method.
-        // Without a New{Gadget} in reachable code the candidate is
-        // excluded; adding the New pulls it in.
+        // Either a local New or an externally supplied receiver can reach
+        // the method. Construction absence is not a negative receiver proof.
         let build = |construct: bool| {
             let mut m = module_with(vec![("main", vec![]), ("Gadget.tick", vec![])]);
             let tname = m.intern_string("Gadget");
@@ -548,8 +472,8 @@ mod tests {
         };
         let without = analyze(&build(false));
         assert!(
-            !without.reachable_ids.contains(&1),
-            "record method excluded while its type is never constructed"
+            without.reachable_ids.contains(&1),
+            "unknown receiver keeps the record method without local construction"
         );
         let with = analyze(&build(true));
         assert!(
