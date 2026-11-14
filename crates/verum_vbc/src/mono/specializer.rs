@@ -502,7 +502,10 @@ impl<'a> BytecodeSpecializer<'a> {
 
     fn instantiate_witness(&self, ty: &TypeRef) -> Result<TypeRef, SpecializationError> {
         crate::associated_types::instantiate_witness(self.module, self.substitution, ty)
-            .map_err(|error| SpecializationError::InvalidWitness(error.to_string()))
+            .map_err(|error| match error {
+                crate::VbcError::TypeSubstitution(cause) => SpecializationError::TypeSubstitution(cause),
+                error => SpecializationError::InvalidWitness(error.to_string()),
+            })
     }
 
     /// Value-form specialization of one canonical instruction

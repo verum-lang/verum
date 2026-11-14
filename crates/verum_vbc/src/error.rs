@@ -111,6 +111,10 @@ pub enum VbcError {
     #[error("invalid associated type: {0}")]
     AssociatedType(String),
 
+    /// A declaration witness could not be substituted without losing its scope.
+    #[error(transparent)]
+    TypeSubstitution(#[from] crate::mono::SubstitutionError),
+
     /// Circular type definition detected.
     #[error("circular type definition: {0:?}")]
     CircularType(TypeId),

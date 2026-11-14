@@ -45,8 +45,7 @@ pub fn resolve_projection(
             }) else { return Ok(None); };
             if !parameters.is_empty() { return Ok(None); }
             if result.is_some() { return Ok(None); }
-            result = Some(substitution.apply(body)
-                .map_err(|error| VbcError::AssociatedType(error.to_string()))?);
+            result = Some(substitution.apply(body)?);
         }
     }
     Ok(result)
@@ -59,9 +58,7 @@ pub(crate) fn instantiate_witness(
     substitution: &TypeSubstitution,
     ty: &TypeRef,
 ) -> VbcResult<TypeRef> {
-    let mut result = if substitution.is_empty() { ty.clone() } else {
-        substitution.apply(ty).map_err(|error| VbcError::AssociatedType(error.to_string()))?
-    };
+    let mut result = substitution.apply(ty)?;
     normalize_projections(module, &mut result)?;
     Ok(result)
 }
