@@ -405,6 +405,18 @@ fn selected_nested_copy_isolates_every_owned_component_after_wire_reload() {
             match copied { Data(leaf)=>leaf.value, Empty=>0 }
         }
         "#,
+        r#"
+        type Leaf is { value:Int };
+        type Wrapped<T> is (T);
+        type Outer is { inner:Wrapped<Leaf> };
+        fn duplicate(source:&Outer)->Outer { source.clone() }
+        fn main()->Int {
+            let mut original=Outer { inner:Wrapped(Leaf {value:73}) };
+            let copied=duplicate(&original);
+            original.inner.0.value=0;
+            copied.inner.0.value
+        }
+        "#,
     ] {
         assert_eq!(execute(source, true), 73, "{source}");
     }
