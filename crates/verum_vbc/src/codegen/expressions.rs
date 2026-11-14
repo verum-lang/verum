@@ -26251,9 +26251,16 @@ impl VbcCodegen {
             let type_name = record_key.clone();
             // Only the selected record's own application can instantiate its
             // field types. A same-spelled formal of the caller has no authority.
-            let applied_owner = expected.filter(|ty| matches!(ty,
-                crate::types::TypeRef::Instantiated { base, .. }
-                    if Some(*base) == self.nominal_type_id(&type_name)));
+            let applied_owner = self.nominal_type_id(&type_name).and_then(|owner| {
+                expected
+                    .filter(|ty| ty.base_type_id() == Some(owner))
+                    .cloned()
+                    .or_else(|| {
+                        self.type_by_id(owner)
+                            .filter(|declaration| declaration.type_params.is_empty())
+                            .map(|_| crate::types::TypeRef::Concrete(owner))
+                    })
+            });
 
             for field in fields.iter() {
                 // Root fix for Issue #1 (silent impl-method SKIP with
@@ -26264,7 +26271,7 @@ impl VbcCodegen {
                 // `VfsErrorKind.Closed`) can be disambiguated against
                 // other types exporting the same variant.
                 let saved_field_type = self.push_field_type_context(&type_name, &field.name.name);
-                if let Some(owner) = applied_owner {
+                if let Some(owner) = applied_owner.as_ref() {
                     self.ctx.expected_value_type = self.projected_field_declaration(owner.clone(), &field.name.name)
                         .filter(|ty| self.declared_type_in_scope(ty));
                     self.ctx.expected_value_span = field.value.as_ref().map(|expr| Self::normalized_place(expr).span);

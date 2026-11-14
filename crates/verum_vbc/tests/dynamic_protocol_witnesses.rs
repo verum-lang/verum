@@ -435,3 +435,64 @@ fn existential_subject_cannot_be_forged_as_a_protocol_value_argument() {
         "existential type occupied a value slot"
     );
 }
+
+#[test]
+fn nested_constructor_calls_receive_the_selected_record_field_context() {
+    for payload in ["Int", "dyn Policy"] {
+        let module = compile(&format!(
+            "type Policy is protocol {{fn read(&self)->Int;}};
+            type Carrier<T> is {{value:Int}};
+            implement<T> Carrier<T> {{fn new()->Self {{Carrier{{value:73}}}}}}
+            type Holder<T> is {{value:T}};
+            implement<T> Holder<T> {{fn new(value:T)->Self {{Holder{{value:value}}}}}}
+            type Registry is {{item:Holder<Carrier<{payload}>>}};
+            fn create()->Registry {{Registry{{item:Holder.new(Carrier.new())}}}}
+            fn main()->Int {{let registry=create(); registry.item.value.value}}"
+        ));
+        let decoded = deserialize_module(&serialize_module(&module).unwrap()).unwrap();
+        validate_module(&decoded).unwrap();
+        let create = decoded
+            .get_function(decoded.find_function_by_name("create").unwrap())
+            .unwrap();
+        let body = verum_vbc::bytecode::decode_instructions(
+            &decoded.bytecode[create.bytecode_offset as usize
+                ..(create.bytecode_offset + create.bytecode_length) as usize],
+        )
+        .unwrap();
+        let carrier_witness = body
+            .iter()
+            .find_map(|instruction| match instruction {
+                verum_vbc::Instruction::CallG {
+                    func_id, type_args, ..
+                } if decoded
+                    .get_function(verum_vbc::FunctionId(*func_id))
+                    .and_then(|function| decoded.get_string(function.name))
+                    == Some("Carrier.new") =>
+                {
+                    Some(type_args)
+                }
+                _ => None,
+            })
+            .expect("the nested nullary call carries the field's declaration");
+        match carrier_witness.as_slice() {
+            [TypeRef::Dynamic(subject)] if payload == "dyn Policy" => {
+                assert_eq!(subject.bounds.len(), 1);
+                let policy = decoded
+                    .types
+                    .iter()
+                    .find(|protocol| decoded.get_string(protocol.name) == Some("Policy"))
+                    .unwrap();
+                assert_eq!(subject.bounds[0].protocol.0, policy.id.0);
+            }
+            [TypeRef::Concrete(TypeId::INT)] if payload == "Int" => {}
+            other => panic!("wrong nested witness for {payload}: {other:?}"),
+        }
+        let entry = decoded.find_function_by_name("main").unwrap();
+        let mut vm = verum_vbc::interpreter::Interpreter::new(std::sync::Arc::new(decoded));
+        vm.run_global_ctors().unwrap();
+        let result = vm
+            .execute_function(entry)
+            .unwrap_or_else(|error| panic!("{payload}: {error:?}"));
+        assert_eq!(result.try_as_i64(), Some(73));
+    }
+}
