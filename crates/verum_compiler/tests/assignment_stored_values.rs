@@ -89,6 +89,63 @@ fn automatic_user_cleanup_runs_its_declared_mutation() {
     );
 }
 
+fn execute_selected_cleanup(before_owner: &str, after_owner: &str, expected: i64) {
+    execute(&format!(r#"
+        module core;
+        public module base {{ public module protocols {{
+            public type Drop is protocol {{ fn drop(&mut self); }};
+        }} }}
+        {before_owner}
+        type affine DeferredWrite is {{ target: &mut Int }};
+        {after_owner}
+        fn replace_later(target: &mut Int) {{
+            let pending = DeferredWrite {{ target }}; ()
+        }}
+        public fn probe() -> Int {{
+            let mut value = 0;
+            replace_later(&mut value);
+            value
+        }}
+    "#), expected);
+}
+
+#[test]
+fn automatic_cleanup_resolves_qualified_and_renamed_protocols() {
+    for (mount, protocol) in [
+        ("", "core.base.protocols.Drop"),
+        ("mount core.base.protocols.Drop as Cleanup;", "Cleanup"),
+    ] {
+        execute_selected_cleanup(mount, &format!(
+            "implement {protocol} for DeferredWrite {{ fn drop(&mut self) {{ *self.target=73; }} }}"
+        ), 73);
+    }
+}
+
+#[test]
+fn automatic_cleanup_ignores_an_unrelated_protocol_named_drop() {
+    execute_selected_cleanup(
+        "type Drop is protocol { fn drop(&mut self); };",
+        "implement Drop for DeferredWrite { fn drop(&mut self) { *self.target=73; } }",
+        0,
+    );
+}
+
+#[test]
+fn automatic_cleanup_uses_the_protocol_body_instead_of_an_inherent_namesake() {
+    execute_selected_cleanup("mount core.base.protocols.Drop;", r#"
+        implement DeferredWrite { fn drop(&mut self) { *self.target=11; } }
+        implement Drop for DeferredWrite { fn drop(&mut self) { *self.target=73; } }
+    "#, 73);
+}
+
+#[test]
+fn automatic_cleanup_retains_an_implementation_before_its_owner() {
+    execute_selected_cleanup(r#"
+        mount core.base.protocols.Drop;
+        implement Drop for DeferredWrite { fn drop(&mut self) { *self.target=73; } }
+    "#, "", 73);
+}
+
 #[test]
 fn borrowed_variant_payloads_update_successive_fields() {
     execute(

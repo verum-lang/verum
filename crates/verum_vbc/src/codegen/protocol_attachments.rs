@@ -3,16 +3,25 @@
 use super::{CodegenError, CodegenErrorKind, CodegenResult, VbcCodegen};
 use crate::types::{ProtocolImpl, TypeDescriptor, TypeId};
 use verum_ast::decl::ImplKind;
+use verum_common::{Maybe, well_known_types::WellKnownProtocol};
 
 #[derive(Clone, PartialEq)]
 pub(super) enum ImplementationAttachment {
-    Protocol(ProtocolImpl),
+    Protocol {
+        implementation: ProtocolImpl,
+        drop_method: Maybe<crate::module::FunctionId>,
+    },
     Inherent(verum_ast::source_implementation::AssociatedImplementationSource),
 }
 impl ImplementationAttachment {
     pub(super) fn attach(self, target: &mut TypeDescriptor) {
         match self {
-            Self::Protocol(source) => target.register_implementation(source),
+            Self::Protocol { implementation, drop_method } => {
+                if let Some(method) = drop_method {
+                    target.drop_fn = Some(method.0);
+                }
+                target.register_implementation(implementation);
+            }
             Self::Inherent(source) => {
                 if !target.source_inherent_implementations.contains(&source) {
                     target.source_inherent_implementations.push(source);
@@ -60,6 +69,17 @@ pub(super) fn finish_protocol_slots(
 }
 
 impl VbcCodegen {
+    /// A protocol's language role belongs to its defining declaration. Mount
+    /// aliases and archive bundle parents cannot establish that identity.
+    pub(super) fn declared_protocol_role(&self, id: TypeId) -> Maybe<WellKnownProtocol> {
+        let declaration = self.type_by_id(id)?;
+        if declaration.kind != crate::types::TypeKind::Protocol { return None; }
+        let identity = self.type_declaration_identity(declaration)?;
+        let (owner, name) = identity.rsplit_once('.')?;
+        let role = WellKnownProtocol::from_name(name)?;
+        (role.canonical_archive_modules().first().copied() == Some(owner)).then_some(role)
+    }
+
     pub(super) fn attach_declared_implementation(
         &mut self,
         implementation: &ImplKind,

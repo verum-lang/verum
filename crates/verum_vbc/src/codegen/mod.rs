@@ -10007,23 +10007,6 @@ impl VbcCodegen {
                     self.ctx.prefer_existing_functions = true;
                 }
 
-                // Check if this is a Drop implementation
-                let is_drop_impl = if let verum_ast::decl::ImplKind::Protocol { protocol, .. } =
-                    &impl_decl.kind
-                {
-                    protocol
-                        .segments
-                        .first()
-                        .and_then(|s| match s {
-                            verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.as_str()),
-                            _ => None,
-                        })
-                        .map(|name| name == "Drop")
-                        .unwrap_or(false)
-                } else {
-                    false
-                };
-
                 let mut declared_methods = indexmap::IndexMap::new();
                 for impl_item in selected_items.iter() {
                     match &impl_item.kind {
@@ -10044,25 +10027,6 @@ impl VbcCodegen {
                                     func, registered_receiver.as_ref().expect("receiver resolved above"),
                                     ty_name, &impl_generics,
                                 )?;
-
-                                // If this is a Drop impl and the function is named "drop",
-                                // record the drop function ID in the TypeDescriptor
-                                if is_drop_impl && func.name.name == "drop" {
-                                    let qualified_name = format!("{}.drop", ty_name);
-                                    if let Some(func_info) =
-                                        self.ctx.lookup_function(&qualified_name)
-                                    {
-                                        // Find the TypeDescriptor for this type and set drop_fn
-                                        if let Some(type_id) = self.type_name_to_id.get(ty_name) {
-                                            for type_desc in self.types.iter_mut() {
-                                                if type_desc.id == *type_id {
-                                                    type_desc.drop_fn = Some(func_info.id.0);
-                                                    break;
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
                             } else {
                                 // Fallback: register by simple name if type extraction failed
                                 // This shouldn't happen often now that we handle more type kinds
@@ -10413,6 +10377,26 @@ impl VbcCodegen {
                             if !deferred_slots.is_empty() {
                                 self.pending_protocol_method_slots.insert(source.clone(), deferred_slots);
                             }
+                            // Cleanup follows the selected protocol row, including
+                            // renamed imports and owners declared later in the unit.
+                            // An inherent namesake is not an implementation body.
+                            let drop_method = if self.declared_protocol_role(proto_type_id)
+                                == Some(verum_common::well_known_types::WellKnownProtocol::Drop)
+                            {
+                                let slot = method_names.iter().position(|name| name == "drop")
+                                    .ok_or_else(|| CodegenError::new(
+                                        CodegenErrorKind::InvalidSourceSignature(
+                                            "canonical Drop protocol has no declared drop member".into(),
+                                        ),
+                                    ))?;
+                                let id = method_fn_ids.get(slot).copied().filter(|id| *id != u32::MAX)
+                                    .ok_or_else(|| CodegenError::new(
+                                        CodegenErrorKind::InvalidSourceSignature(
+                                            "canonical Drop implementation has no selected drop body".into(),
+                                        ),
+                                    ))?;
+                                Some(FunctionId(id))
+                            } else { None };
                             let impl_record = crate::types::ProtocolImpl {
                                 source_implementation: Some(source),
                                 protocol: crate::types::ProtocolId(proto_type_id.0),
@@ -10428,7 +10412,9 @@ impl VbcCodegen {
                             // module.  Ask for the DESCRIPTOR, which is what
                             // actually carries the impl.
                             self.attach_declared_implementation(
-                                &impl_decl.kind, ty_name, protocol_attachments::ImplementationAttachment::Protocol(impl_record),
+                                &impl_decl.kind, ty_name, protocol_attachments::ImplementationAttachment::Protocol {
+                                    implementation: impl_record, drop_method,
+                                },
                             )?;
                         }
                     }

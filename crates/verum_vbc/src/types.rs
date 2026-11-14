@@ -1364,6 +1364,10 @@ impl TypeDescriptor {
 
     #[cfg(feature = "codegen")]
     pub(crate) fn merge_implementations(&mut self, other: &Self) {
+        // Structural completion of the same declaration must retain its
+        // selected lifecycle bodies along with its implementation rows.
+        self.drop_fn = self.drop_fn.or(other.drop_fn);
+        self.clone_fn = self.clone_fn.or(other.clone_fn);
         for implementation in &other.protocols { self.register_implementation(implementation.clone()); }
         for source in &other.source_inherent_implementations {
             if !self.source_inherent_implementations.contains(source) {
