@@ -4509,6 +4509,7 @@ impl TypeChecker {
             // explicitly mounted single-source name outranks the flat
             // bare env slot — before the env chain, not after it.
             if let Some(scheme) = self.mount_authoritative_fn_scheme(name) {
+                self.record_mounted_callable_target(name, span, &scheme);
                 let ty = self.instantiate_value_scheme(&scheme, span)?;
                 return Ok(self.unifier.apply(&ty));
             }
@@ -6697,6 +6698,7 @@ impl TypeChecker {
             // MOUNT AUTHORITY (iterative-walker twin of the
             // infer_path_expr arm — see mount_authoritative_fn_scheme).
             if let Some(scheme) = self.mount_authoritative_fn_scheme(name) {
+                self.record_mounted_callable_target(name, expr.span, &scheme);
                 let ty = self.instantiate_value_scheme(&scheme, expr.span)?;
                 return Ok(InferResult::new(self.unifier.apply(&ty)));
             }
@@ -7588,6 +7590,9 @@ impl TypeChecker {
         if let Some(scheme) = callee_name.as_ref()
             .and_then(|name| self.callee_scheme_with_mount_authority(name))
         {
+            if let Some(name) = callee_name.as_ref() {
+                self.record_mounted_callable_target(name, func.span, &scheme);
+            }
             self.type_registry.register_declared_static_target(expr.span, func_ty.clone(), &scheme);
         } else {
             self.type_registry.register_call_target(expr.span, func_ty.clone());

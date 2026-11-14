@@ -646,6 +646,9 @@ impl VbcCodegen {
                 type_args,
                 args,
             } => {
+                if let Some(function) = self.selected_function_path(func).ok()? {
+                    return self.source_call_result(function, None, type_args, args, expected, depth);
+                }
                 let ExprKind::Path(path) = &func.kind else {
                     return None;
                 };

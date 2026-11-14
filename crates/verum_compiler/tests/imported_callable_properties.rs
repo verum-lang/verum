@@ -11,6 +11,10 @@ use verum_vbc::{
 };
 
 fn contract(provider: &str, consumer: &str) -> Result<(), Text> {
+    contract_with_threads(provider, consumer, 1)
+}
+
+fn contract_with_threads(provider: &str, consumer: &str, num_threads: usize) -> Result<(), Text> {
     let root = tempfile::tempdir().unwrap();
     let core = root.path().join("core");
     std::fs::create_dir(&core).unwrap();
@@ -28,6 +32,7 @@ fn contract(provider: &str, consumer: &str) -> Result<(), Text> {
     let output = root.path().join("stdlib.vbca");
     let mut session = Session::new(CompilerOptions {
         input: core.join("mod.vr"),
+        num_threads,
         ..Default::default()
     });
     CompilationPipeline::new_core(&mut session, CoreConfig::new(&core).with_output(&output))
@@ -52,6 +57,16 @@ fn contract(provider: &str, consumer: &str) -> Result<(), Text> {
     )
     .unwrap();
     for module in [module, restored] {
+        if std::env::var_os("VERUM_CALLABLE_SELECTION_EVIDENCE").is_some() {
+            for function in &module.functions {
+                eprintln!(
+                    "CALLABLE_DESCRIPTOR name={:?} declaration={:?} properties={:?} source_async={:?}",
+                    module.get_string(function.name), function.declaration_identity,
+                    function.properties,
+                    function.source_signature.as_ref().map(|source| source.is_async),
+                );
+            }
+        }
         let entry = module.find_function_by_name("app.main").unwrap();
         let result = Interpreter::new(Arc::new(module))
             .execute_function(entry)
@@ -299,4 +314,122 @@ fn declared_reference_binders_and_scalar_cast_survive_archive_execution() {
             if selected(bytes(&text)) == 9 { 73 } else { 0 }
         }
     "#).unwrap();
+}
+
+// Scope precedence: explicit mounts outrank module declarations; parameters and
+// local bindings outrank mounts. The emitted call must agree with that choice.
+#[test]
+fn explicit_callable_import_precedes_an_async_module_homonym() {
+    for (mount, name) in [
+        ("mount core.raw.operation;", "operation"),
+        ("mount core.raw.operation as selected;", "selected"),
+    ] {
+        for body in [
+            format!("let callback:fn()->Int={name}; callback()"),
+            format!("let callback={name}; callback()"),
+            format!("{name}()"),
+        ] {
+            let consumer = format!(
+                "{mount} async fn {name}()->Int {{0}} public fn probe()->Int {{{body}}}"
+            );
+            let parsed = Parser::new(&consumer).parse_module().unwrap();
+            assert!(parsed.items.iter().any(|item| matches!(
+                &item.kind, verum_ast::ItemKind::Function(function)
+                if function.name.as_str() == name && function.is_async
+            )));
+            for num_threads in [1, 2, 4] {
+                contract_with_threads("public fn operation()->Int {73}", &consumer, num_threads).unwrap();
+            }
+        }
+    }
+}
+
+#[test]
+fn an_async_local_callable_without_a_same_name_import_is_refused() {
+    for mount in ["", "mount core.raw.operation as selected;"] {
+        let consumer = format!(
+            "{mount} async fn operation()->Int {{0}} public fn probe()->Int {{let callback:fn()->Int=operation; callback()}}"
+        );
+        let error = contract("public fn operation()->Int {73}", &consumer)
+            .expect_err("the local async declaration cannot borrow the provider contract");
+        assert!(error.contains("E400") && error.contains("async"), "{error}");
+    }
+}
+
+#[test]
+fn a_renamed_callable_import_keeps_its_own_selected_target() {
+    contract(
+        "public fn operation()->Int {73}",
+        "mount core.raw.operation as selected; async fn operation()->Int {0} public fn probe()->Int {let callback:fn()->Int=selected; callback()}",
+    ).unwrap();
+}
+
+#[test]
+fn local_callable_bindings_keep_precedence_over_explicit_imports() {
+    for source in [
+        "fn rejected(operation:async fn()->Int)->Int {let callback:fn()->Int=operation; callback()}",
+        "async fn local()->Int {0} fn rejected()->Int {let operation=local; let callback:fn()->Int=operation; callback()}",
+    ] {
+        let error = contract(
+            "public fn operation()->Int {73}",
+            &format!("mount core.raw.operation; {source} public fn probe()->Int {{73}}"),
+        ).expect_err("inner async binding cannot borrow the imported contract");
+        assert!(error.contains("E400") && error.contains("async"), "{error}");
+    }
+}
+
+#[test]
+fn an_async_import_cannot_borrow_a_synchronous_local_contract() {
+    for (mount, name) in [
+        ("mount core.raw.operation;", "operation"),
+        ("mount core.raw.operation as selected;", "selected"),
+    ] {
+        for body in [
+            format!("let callback:fn()->Int={name}; callback()"),
+            format!("invoke(||{name}())"),
+        ] {
+            let source = format!(
+                "{mount} fn {name}()->Int {{73}} fn invoke(callback:fn()->Int)->Int {{callback()}} public fn probe()->Int {{{body}}}"
+            );
+            let error = contract("public async fn operation()->Int {0}", &source)
+                .expect_err("selected async import was replaced by a synchronous homonym");
+            assert!(error.contains("E400") && error.contains("async"), "{error}");
+        }
+    }
+}
+
+#[test]
+fn callable_imports_keep_the_exact_reexport_owner_and_generic_roster() {
+    contract(
+        "public module first {public fn operation<T>(value:T)->T {value}} public module second {public fn operation(value:Int)->Int {0}} public mount core.raw.first.operation as chosen;",
+        "mount core.raw.chosen as operation; mount core.raw.second.operation as other; async fn operation(value:Int)->Int {0} public fn probe()->Int {if other(73)==0 {operation<Int>(73)} else {0}}",
+    ).unwrap();
+}
+
+#[test]
+fn inaccessible_callable_imports_cannot_fall_back_to_a_local_homonym() {
+    for (mount, diagnostic) in [("mount core.raw.operation;", "E401"), ("mount core.raw.missing.operation;", "E402")] {
+        let error = contract(
+            "fn operation()->Int {0}",
+            &format!("{mount} fn operation()->Int {{73}} public fn probe()->Int {{operation()}}"),
+        ).expect_err("invalid explicit import was replaced by a local declaration");
+        assert!(error.contains(diagnostic), "{error}");
+    }
+}
+
+#[test]
+fn inline_callable_imports_obey_the_same_selected_contract() {
+    contract("", r#"
+        public module selected {public fn operation()->Int {73}}
+        mount core.consumer.selected.operation;
+        async fn operation()->Int {0}
+        public fn probe()->Int {let callback:fn()->Int=operation; callback()}
+    "#).unwrap();
+    let error = contract("", r#"
+        public module selected {public async fn operation()->Int {0}}
+        mount core.consumer.selected.operation;
+        fn operation()->Int {73}
+        public fn probe()->Int {let callback:fn()->Int=operation; callback()}
+    "#).expect_err("an inline async import must not use a synchronous local contract");
+    assert!(error.contains("E400") && error.contains("async"), "{error}");
 }

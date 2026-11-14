@@ -121,6 +121,9 @@ impl VbcCodegen {
             ),
             ExprKind::Closure { .. } => self.compiled_callable_signature(expr).cloned(),
             ExprKind::Path(path) => {
+                if let Some(function) = self.selected_function_path(expr).ok()? {
+                    return function.callable_signature.clone();
+                }
                 let name = match path.segments.as_slice() {
                     [verum_ast::PathSegment::Name(name)] => name.name.as_str(),
                     [verum_ast::PathSegment::SelfValue] => "self",

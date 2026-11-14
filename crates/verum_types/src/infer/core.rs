@@ -236,7 +236,7 @@ impl TypeChecker {
         );
     }
 
-    /// Walk `module` mutably and stamp every `MethodCall` expression's
+    /// Walk `module` mutably and stamp selected method calls and function paths'
     /// `resolved_call_target` from the typechecker's side-table.
     /// Idempotent — running twice produces the same AST.
     ///
@@ -291,7 +291,7 @@ impl TypeChecker {
     }
 }
 
-/// Walk `module` mutably and stamp every `MethodCall` expression's
+/// Walk `module` mutably and stamp selected method calls and function paths'
 /// `resolved_call_target` from the supplied side-table.  Same shape
 /// as `TypeChecker::commit_resolved_call_targets`, exposed as a
 /// free function so the pipeline can apply the table without
@@ -451,12 +451,12 @@ fn commit_resolved_in_expr(
     use verum_ast::expr::ExprKind;
     use verum_common::Maybe;
     // Stamp THIS node first if the table has a resolution for its span.
-    if matches!(expr.kind, ExprKind::MethodCall { .. })
+    if matches!(expr.kind, ExprKind::MethodCall { .. } | ExprKind::Path(_))
         && let Some(target) = table.calls.get(&expr.span)
     {
         expr.resolved_call_target = Some(target.clone());
     }
-    // Then recurse into children so nested method calls also get stamped.
+    // Then recurse into children so nested calls and function paths are stamped.
     commit_children(expr, table, place);
 
     // Finally, materialise any deref the typechecker needed to accept

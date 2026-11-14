@@ -1294,7 +1294,21 @@ impl VbcCodegen {
             ExprKind::Literal(lit) => self.compile_literal(lit),
 
             // === Variables and Paths ===
-            ExprKind::Path(path) => self.compile_path(path),
+            ExprKind::Path(path) => {
+                if let Some(info) = self.selected_function_path(expr)?.cloned() {
+                    let dest = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::NewClosure {
+                        lexical_types: self.named_callable_lexical_types(&info),
+                        dst: dest,
+                        func_id: info.id.0,
+                        captures: Default::default(),
+                        capture_types: Some(Default::default()),
+                    });
+                    Ok(Some(dest))
+                } else {
+                    self.compile_path(path)
+                }
+            }
 
             // === Operators ===
             ExprKind::Binary { op, left, right } => self.compile_binary(*op, left, right),
@@ -1953,6 +1967,27 @@ impl VbcCodegen {
             }
         }
         None
+    }
+
+    /// A checked function path names one declaration, including when used as a
+    /// value. Missing linkage cannot fall back to a same-leaf local function.
+    pub(super) fn selected_function_path(&self, expr: &Expr) -> CodegenResult<Option<&FunctionInfo>> {
+        let Some(verum_ast::expr::ResolvedCallTarget::StaticCall {
+            qualified_name,
+            resolver_pinned: true,
+            type_prefix_receiver: false,
+        }) = expr.resolved_call_target.as_ref() else {
+            return Ok(None);
+        };
+        if !matches!(expr.kind, ExprKind::Path(_)) {
+            return Ok(None);
+        }
+        self.ctx.lookup_qualified_function(qualified_name.as_str())
+            .filter(|info| info.variant_tag.is_none() && info.parent_type_name.is_none() && !info.is_const)
+            .map(Some)
+            .ok_or_else(|| CodegenError::with_span(
+                CodegenErrorKind::UndefinedFunction(qualified_name.to_string()), expr.span,
+            ))
     }
 
     fn compile_path(&mut self, path: &Path) -> CodegenResult<Option<Reg>> {
@@ -6348,6 +6383,9 @@ impl VbcCodegen {
         args: &verum_common::List<Expr>,
         type_args: &verum_common::List<verum_ast::ty::GenericArg>,
     ) -> CodegenResult<Option<Reg>> {
+        if let Some(info) = self.selected_function_path(func)?.cloned() {
+            return self.compile_static_method_call(&info, args, type_args);
+        }
         // Rooted call syntax and dotted method syntax share declaration lookup.
         // In particular, the prefix may denote a constructed value rather than
         // a namespace; stripping the root before that decision loses its owner.

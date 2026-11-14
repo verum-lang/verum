@@ -204,3 +204,36 @@ fn inferred_record_keeps_caller_and_owner_binders_separate_in_native_image() {
         }
     "#);
 }
+
+#[test]
+fn selected_imported_function_executes_the_same_native_declaration() {
+    for (mount, name) in [
+        ("mount main.provider.operation;", "operation"),
+        ("mount main.provider.operation as selected;", "selected"),
+    ] {
+        for body in [format!("{name}()"), format!("let callback:fn()->Int={name}; callback()")] {
+            let source = format!(
+                "module main; public module provider {{ public fn operation()->Int {{73}} }} {mount} async fn {name}()->Int {{0}} fn main()->Int {{{body}}}"
+            );
+            let mut ast = Parser::new(&source).parse_module().unwrap();
+            let mut checker = verum_types::TypeChecker::with_minimal_context();
+            checker.register_builtins();
+            checker.set_current_module_path("main");
+            let mut errors = checker.prepare_module_declarations(&ast);
+            errors.extend(ast.items.iter().filter_map(|item| checker.check_item(item).err()));
+            errors.extend(checker.take_deferred_errors());
+            assert!(errors.is_empty(), "{source}: {errors:?}");
+            assert!(checker.diagnostic_sources().is_empty(), "{:?}", checker.diagnostic_sources());
+            checker.commit_resolved_call_targets(&mut ast);
+            assert!(!checker.take_resolved_call_targets().is_empty(), "selected import needs a checked target: {source}");
+            let module = VbcCodegen::new().compile_module(&ast).unwrap();
+            let wire = deserialize_module(&serialize_module(&module).unwrap()).unwrap();
+            verum_vbc::validate::validate_module(&wire).unwrap();
+            let entry = wire.find_function_by_name("main").unwrap();
+            let value = verum_vbc::interpreter::Interpreter::try_new_validated(wire.clone().into()).unwrap()
+                .execute_function(entry).unwrap();
+            assert_eq!(value.try_as_i64(), Some(73), "selected source must agree before native lowering");
+            run_native_module(wire);
+        }
+    }
+}

@@ -1240,6 +1240,10 @@ impl TypeChecker {
         &mut self, module_name: &str, item_name: &str, local_name: Option<&str>,
     ) -> Result<()> {
         let register_name = local_name.unwrap_or(item_name);
+        // This helper is reached only by a named mount or its re-export
+        // continuation. Inline declarations have the same import priority as
+        // declarations reached through the file registry.
+        self.explicit_imports.insert(register_name.to_string());
         let module = self
             .inline_modules
             .get(&verum_common::Text::from(module_name))
@@ -15199,6 +15203,36 @@ impl TypeChecker {
     ) -> Option<crate::TypeScheme> {
         self.mount_authoritative_fn_scheme(name)
             .or_else(|| self.ctx.env.lookup(name).cloned())
+    }
+
+    /// Preserve the exact source declaration selected for an explicit value
+    /// import. A parameter or local value never acquires the imported target.
+    pub(super) fn record_mounted_callable_target(
+        &mut self,
+        name: &str,
+        span: verum_ast::Span,
+        scheme: &crate::TypeScheme,
+    ) {
+        if !self.explicit_imports.contains(name)
+            || self.ctx.env.is_locally_bound(name)
+            || scheme.impl_self_type.is_some()
+        {
+            return;
+        }
+        let Some((owner, declaration)) = &scheme.callable_source else {
+            return;
+        };
+        let qualified_name = verum_common::qualified_name::qualify_module_name(
+            owner, &declaration.name.name,
+        );
+        self.resolved_call_targets.insert(
+            span,
+            verum_ast::expr::ResolvedCallTarget::StaticCall {
+                qualified_name,
+                type_prefix_receiver: false,
+                resolver_pinned: true,
+            },
+        );
     }
 
     pub(super) fn mount_authoritative_fn_scheme(
