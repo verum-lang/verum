@@ -1,0 +1,47 @@
+mount core.collections.map.Map;
+mount core.base.maybe.Maybe;
+mount core.base.result.Result;
+
+@test
+fn initialized_slots_survive_growth_removal_and_fallible_reuse() {
+    let mut values: Map<Int, Int> = Map.new();
+    let mut key = 0;
+    while key < 96 {
+        match values.insert(key, key + 100) {
+            Maybe.None => {},
+            Maybe.Some(_) => panic("new slot was occupied"),
+        };
+        key = key + 1;
+    }
+    if values.len() != 96 { panic("growth lost entries"); }
+    key = 0;
+    while key < 96 {
+        match values.get(key) {
+            Maybe.Some(value) => if value != key + 100 { panic("growth changed value"); },
+            Maybe.None => panic("growth lost key"),
+        };
+        match values.remove(key) {
+            Maybe.Some(value) => if value != key + 100 { panic("remove changed value"); },
+            Maybe.None => panic("remove lost key"),
+        };
+        key = key + 1;
+    }
+    if values.len() != 0 { panic("remove retained entries"); }
+    key = 0;
+    while key < 160 {
+        match values.try_insert(key, key + 200) {
+            Result.Ok(Maybe.None) => {},
+            _ => panic("fallible insertion failed"),
+        };
+        key = key + 1;
+    }
+    if values.len() != 160 { panic("fallible growth lost entries"); }
+    key = 0;
+    while key < 160 {
+        match values.get(key) {
+            Maybe.Some(value) => if value != key + 200 { panic("reinsert changed value"); },
+            Maybe.None => panic("reinsert lost key"),
+        };
+        key = key + 1;
+    }
+}
