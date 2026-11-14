@@ -15,6 +15,12 @@ fn unparen(mut expr: &Expr) -> &Expr {
     expr
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum AutoBorrowRoot {
+    SharedOnly,
+    IncludeExclusive,
+}
+
 fn reference_mutability(ty: &Type) -> Option<bool> {
     match ty {
         Type::Reference { mutable, .. }
@@ -844,7 +850,7 @@ impl TypeChecker {
             if mode.is_none() && !self.carries_stored_loan(&head) { continue; }
             let mut origins = List::new();
             if mode.is_some() && self.reference_mode(actual, argument.span)?.is_none() {
-                if let Some((source, _)) = self.borrowed_record_place(argument) {
+                if let Some((source, _)) = self.record_place_for_auto_borrow(argument, AutoBorrowRoot::IncludeExclusive) {
                     origins.push(source);
                 }
             } else {
@@ -935,42 +941,61 @@ impl TypeChecker {
     }
 
     pub(super) fn borrowed_record_place(&mut self, expr: &Expr) -> Option<(RecordReceiver, Type)> {
-        match &unparen(expr).kind {
-            ExprKind::Path(path) => {
-                let name = &path.as_ident()?.name;
-                let ty = self.ctx.env.lookup(name)?.ty.clone();
-                let head = self.place_reference_head(&ty, expr.span).ok()?;
-                let reference = matches!(head, Type::Reference { mutable: false, .. });
-                if matches!(
-                    head,
-                    Type::Reference { mutable: true, .. }
-                        | Type::CheckedReference { .. }
-                        | Type::UnsafeReference { .. }
-                ) {
-                    return None;
-                }
-                Some((self.ctx.env.record_source(name, reference)?, ty))
-            }
-            ExprKind::Field {
-                expr: parent,
-                field,
-            } => {
-                let (mut owner, ty) = self.borrowed_record_place(parent)?;
-                let field_ty =
-                    self.lookup_field_type(&self.record_conversion_head(&ty), &field.name)?;
-                if matches!(
-                    self.place_reference_head(&field_ty, expr.span).ok()?,
-                    Type::Reference { .. }
-                        | Type::CheckedReference { .. }
-                        | Type::UnsafeReference { .. }
-                ) {
-                    return None;
-                }
-                owner.fields.push(field.name.clone());
-                Some((owner, field_ty))
-            }
-            _ => None,
+        self.record_place_for_auto_borrow(expr, AutoBorrowRoot::SharedOnly)
+    }
+
+    /// An implicit borrow of an inline field names its original storage even
+    /// when the root is an exclusive reference. This is location evidence,
+    /// not write permission; the caller still checks the selected receiver.
+    /// Reference-valued fields and computed roots need their own derivation.
+    fn record_place_for_auto_borrow(
+        &mut self,
+        expr: &Expr,
+        access: AutoBorrowRoot,
+    ) -> Option<(RecordReceiver, Type)> {
+        let mut fields = List::new();
+        let mut root = unparen(expr);
+        while let ExprKind::Field { expr, field } = &root.kind {
+            fields.push(field);
+            root = unparen(expr);
         }
+        let ExprKind::Path(path) = &root.kind else { return None };
+        let name = match path.segments.as_slice() {
+            [verum_ast::ty::PathSegment::Name(name)] => name.name.as_str(),
+            [verum_ast::ty::PathSegment::SelfValue]
+                if access == AutoBorrowRoot::IncludeExclusive => "self",
+            _ => return None,
+        };
+        let mut ty = self.ctx.env.lookup(name)?.ty.clone();
+        let head = self.place_reference_head(&ty, root.span).ok()?;
+        let reference = match &head {
+            Type::Reference { mutable: false, .. } => true,
+            Type::Reference { mutable: true, inner }
+            | Type::CheckedReference { mutable: true, inner }
+            | Type::UnsafeReference { mutable: true, inner }
+                if access == AutoBorrowRoot::IncludeExclusive =>
+            {
+                // The reference slot is not the storage behind another
+                // reference. Do not invent the second indirection's identity.
+                if self.reference_mode(inner, root.span).ok()?.is_some() {
+                    return None;
+                }
+                true
+            }
+            Type::Reference { .. }
+            | Type::CheckedReference { .. }
+            | Type::UnsafeReference { .. } => return None,
+            _ => false,
+        };
+        let mut owner = self.ctx.env.record_source(name, reference)?;
+        for field in fields.into_iter().rev() {
+            ty = self.lookup_field_type(&self.record_conversion_head(&ty), &field.name)?;
+            if self.reference_mode(&ty, field.span).ok()?.is_some() {
+                return None;
+            }
+            owner.fields.push(field.name.clone());
+        }
+        Some((owner, ty))
     }
 }
 

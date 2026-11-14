@@ -372,3 +372,69 @@ fn empty_record_layouts_preserve_nominal_identity() {
         "{invalid:?}"
     );
 }
+
+
+#[test]
+fn projected_mutable_receivers_preserve_unrelated_payload_origins() {
+    let declarations = "type Holder is {item:Payload}; type Outer is {holder:Holder};
+        type HolderRef is &mut Holder;
+        implement Payload {fn update(&mut self) {self.marker=73;}}";
+    for caller in [
+        "fn receive(target:&mut Payload,separate:&Payload)->&Int {target.update(); separate.ptr}",
+        "fn receive(target:&mut Holder,separate:&Payload)->&Int {target.item.update(); separate.ptr}",
+        "fn receive(target:HolderRef,separate:&Payload)->&Int {target.item.update(); separate.ptr}",
+        "fn receive(target:&checked mut Holder,separate:&Payload)->&Int {target.item.update(); separate.ptr}",
+        "fn receive(target:&unsafe mut Holder,separate:&Payload)->&Int {target.item.update(); separate.ptr}",
+        "fn receive(target:&mut Outer,separate:&Payload)->&Int {target.holder.item.update(); separate.ptr}",
+        "implement Holder {fn receive(&mut self,separate:&Payload)->&Int {self.item.update(); separate.ptr}}",
+    ] {
+        let errors = diagnostics(declarations, caller);
+        assert!(errors.is_empty(), "{caller}: {errors:?}");
+    }
+}
+
+#[test]
+fn projected_mutable_receivers_do_not_erase_real_shared_loans() {
+    let declarations = "type Holder is {item:Payload};
+        implement Payload {fn update(&mut self) {self.marker=73;}}";
+    for caller in [
+        "fn receive(target:&Holder)->&Int {target.item.update(); target.item.ptr}",
+        "fn receive(target:&mut Holder)->&Int {let held=&target.item; target.item.update(); held.ptr}",
+    ] {
+        let errors = diagnostics(declarations, caller);
+        assert!(errors.iter().any(|error| error.contains("borrow")
+            || error.contains("shared reference")), "{caller}: {errors:?}");
+    }
+}
+
+#[test]
+fn projected_mutable_receivers_keep_stored_local_origins() {
+    let declarations = "type Holder is {item:Payload};
+        implement Payload {fn replace(&mut self,source:&Int) {self.ptr=source;}}";
+    for caller in [
+        "fn receive(input:&Int)->Holder {let mut target=Holder{item:Payload{ptr:input,marker:2}};
+         {let local=3;target.item.replace(&local);} target}",
+        "fn receive(target:&mut Holder) { {let local=3;target.item.replace(&local);} let held=target.item.ptr; }",
+        "fn receive(input:&Int)->Holder {let mut target=Holder{item:Payload{ptr:input,marker:2}};
+         {let local=3;let alias=&mut target;alias.item.replace(&local);} target}",
+    ] {
+        let errors = diagnostics(declarations, caller);
+        assert!(errors.iter().any(|error| error.contains("does not live long enough")
+            || error.contains("cannot establish the lifetime")), "{caller}: {errors:?}");
+    }
+}
+
+
+#[test]
+fn computed_write_receivers_do_not_gain_an_unproved_storage_identity() {
+    let declarations = "type Holder is {item:Payload};
+        implement Payload {fn replace(&mut self,source:&Int) {self.ptr=source;}}
+        fn selected(a:&mut Holder,b:&mut Holder,first:Bool)->&mut Holder {if first {a} else {b}}";
+    let errors = diagnostics(declarations,
+        "fn receive(input:&Int,first:Bool)->Holder {
+         let mut a=Holder{item:Payload{ptr:input,marker:1}};
+         let mut b=Holder{item:Payload{ptr:input,marker:2}};
+         {let local=3;selected(&mut a,&mut b,first).item.replace(&local);} a}");
+    assert!(errors.iter().any(|error| error.contains("does not live long enough")
+        || error.contains("cannot establish the lifetime")), "{errors:?}");
+}
