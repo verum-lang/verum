@@ -286,3 +286,103 @@ fn a_scalar_field_read_does_not_retain_its_temporary_owner() {
     );
     assert!(found.is_empty(), "{found:?}");
 }
+
+
+#[test]
+fn compound_scalar_writes_preserve_unmodified_payloads() {
+    let found = errors(
+        "fn update(cell:&mut Cell) { cell.value+=1; }",
+        "fn preserve(mut cell:Cell)->Cell { update(&mut cell); cell }",
+    );
+    assert!(found.is_empty(), "{found:?}");
+}
+
+#[test]
+fn declared_sum_replacement_preserves_sibling_payloads() {
+    let found = errors(
+        "type Choice<T> is Empty | Full(T); type Holder is {public cell:Cell, public state:Choice<Int>}; fn reset(holder:&mut Holder) {holder.state=Choice.Empty;}",
+        "fn preserve(mut holder:Holder)->Holder {reset(&mut holder);holder}",
+    );
+    assert!(found.is_empty(), "{found:?}");
+}
+
+#[test]
+fn declared_sum_payload_replacement_preserves_sibling_payloads() {
+    let found = errors(
+        "type Choice<T> is Empty | Full(T); type Holder is {public cell:Cell, public state:Choice<Int>}; fn update(holder:&mut Holder, value:Int) {holder.state=Choice.Full(value);}",
+        "fn preserve(mut holder:Holder)->Holder {update(&mut holder,73);holder}",
+    );
+    assert!(found.is_empty(), "{found:?}");
+}
+
+#[test]
+fn a_sum_payload_cannot_hide_an_injected_reference() {
+    let found = errors(
+        "type Choice<T> is Empty | Full(T); type Holder is {public cell:Cell, public state:Choice<&Int>}; fn update(holder:&mut Holder, value:&Int) {holder.state=Choice.Full(value);}",
+        "fn preserve(input:&Int)->Holder {let mut holder=Holder{cell:Cell{pointer:input,value:0},state:Choice.Empty}; {let local=73;update(&mut holder,&local);} holder}",
+    );
+    assert!(found.iter().any(|e| e.contains("local") && e.contains("does not live long enough")), "{found:?}");
+}
+
+#[test]
+fn declared_sum_cleanup_cannot_invoke_an_unproved_destructor() {
+    let found = errors(
+        "type Drop is protocol {fn drop(&mut self);}; type Choice is Empty | Full(Int); implement Drop for Choice {fn drop(&mut self) {}} type Holder is {public cell:Cell,public state:Choice}; fn reset(holder:&mut Holder) {holder.state=Choice.Empty;}",
+        "fn preserve(mut holder:Holder)->Holder {reset(&mut holder);holder}",
+    );
+    assert!(found.iter().any(|e| e.contains("cannot establish the lifetime")), "{found:?}");
+}
+
+#[test]
+fn a_sum_with_a_callback_payload_does_not_get_structural_cleanup() {
+    let found = errors(
+        "type Choice<T> is Empty | Full(T); type Holder is {public cell:Cell,public state:Choice<fn(&Int)->Int>}; fn reset(holder:&mut Holder) {holder.state=Choice.Empty;}",
+        "fn preserve(mut holder:Holder)->Holder {reset(&mut holder);holder}",
+    );
+    assert!(found.iter().any(|e| e.contains("cannot establish the lifetime")), "{found:?}");
+}
+
+#[test]
+fn sum_writes_validate_the_whole_instantiated_payload() {
+    for (payload, accepted) in [("Int", true), ("&Int", false)] {
+        let found = errors(
+            "type Choice<T> is Empty | Full(T); type Holder<T> is {public cell:Cell,public state:Choice<T>}; fn reset<T>(holder:&mut Holder<T>) {holder.state=Choice.Empty;}",
+            &format!("fn preserve(mut holder:Holder<{payload}>)->Holder<{payload}> {{reset(&mut holder);holder}}"),
+        );
+        if accepted { assert!(found.is_empty(), "{found:?}"); }
+        else { assert!(found.iter().any(|e| e.contains("cannot establish the lifetime")), "{found:?}"); }
+    }
+}
+
+#[test]
+fn variant_spelling_does_not_override_a_different_declared_owner() {
+    let found = errors(
+        "type Choice is Empty | Full(Int); type Other is Empty | Full(Int); type Holder is {public cell:Cell,public state:Choice}; fn reset(holder:&mut Holder) {holder.state=Other.Empty;}",
+        "fn preserve(mut holder:Holder)->Holder {reset(&mut holder);holder}",
+    );
+    assert!(!found.is_empty(), "foreign owner was accepted");
+}
+
+#[test]
+fn a_structural_tuple_write_cannot_bypass_its_selected_destructor() {
+    let found = errors(
+        "type Drop is protocol {fn drop(&mut self);}; implement Drop for (Int,Int) {fn drop(&mut self) {}} type Holder is {public cell:Cell,public pair:(Int,Int)}; fn update(holder:&mut Holder) {holder.pair=(1,2);}",
+        "fn preserve(mut holder:Holder)->Holder {update(&mut holder);holder}",
+    );
+    assert!(found.iter().any(|e| e.contains("cannot establish the lifetime")), "{found:?}");
+}
+
+#[test]
+fn structural_cleanup_budget_exhaustion_keeps_the_unknown_write_rule() {
+    // Flat source exercises the explicit work budget on an ordinary stack;
+    // exhausting the proof is not evidence of reference-free storage.
+    for (count, accepted) in [(64, true), (4097, false)] {
+        let cases = (0..count).map(|index| format!("Case{index}")).collect::<List<_>>().join(" | ");
+        let found = errors(
+            &format!("type Many is {cases}; type Holder is {{public cell:Cell,public state:Many}}; fn reset(holder:&mut Holder) {{holder.state=Many.Case0;}}"),
+            "fn preserve(mut holder:Holder)->Holder {reset(&mut holder);holder}",
+        );
+        if accepted { assert!(found.is_empty(), "{found:?}"); }
+        else { assert!(found.iter().any(|e| e.contains("cannot establish the lifetime")), "{found:?}"); }
+    }
+}

@@ -3,7 +3,7 @@ use super::TypeChecker;
 use crate::context::{InputFieldWrite, ReturnedValue, ReturnedValueNode};
 use crate::ty::{RecordReceiver, Type};
 use verum_ast::{
-    Expr, ExprKind, FunctionBody, FunctionDecl, FunctionParamKind, LiteralKind, PatternKind,
+    BinOp, Expr, ExprKind, FunctionBody, FunctionDecl, FunctionParamKind, LiteralKind, PatternKind,
     StmtKind, TypeDeclBody,
 };
 use verum_common::{List, Map, Shared, Text};
@@ -124,13 +124,16 @@ pub(super) fn returned_value(
             }
             StmtKind::Expr { expr, .. } => {
                 let ExprKind::Binary {
-                    op: verum_ast::BinOp::Assign,
+                    op,
                     left,
                     right,
                 } = &unparen(expr).kind
                 else {
                     return None;
                 };
+                if !op.is_assignment() {
+                    return None;
+                }
                 let mut fields = List::new();
                 let mut root = unparen(left);
                 while let ExprKind::Field { expr, field } = &root.kind {
@@ -148,7 +151,13 @@ pub(super) fn returned_value(
                 ) {
                     return None;
                 }
-                let value = append_expression(checker, right, &bindings, &mut nodes)?;
+                let mut value = append_expression(checker, right, &bindings, &mut nodes)?;
+                if *op != BinOp::Assign {
+                    let left = append_expression(checker, left, &bindings, &mut nodes)?;
+                    let right = value;
+                    value = nodes.len();
+                    nodes.push(ReturnedValueNode::Compound { op: *op, left, right });
+                }
                 writes.push(InputFieldWrite {
                     input,
                     fields,
@@ -174,6 +183,46 @@ pub(super) fn returned_value(
     }))
 }
 
+/// Select a sum constructor in the declaration's lexical scope. A value with
+/// the same spelling is a value receiver, not a constructor declaration.
+fn variant_constructor(
+    checker: &TypeChecker,
+    receiver: &Expr,
+    name: &Text,
+    count: usize,
+    bindings: &Map<Text, usize>,
+) -> Option<Text> {
+    let mut suffix = List::new();
+    let mut root = unparen(receiver);
+    while let ExprKind::Field { expr, field } = &root.kind {
+        suffix.push(field.name.clone());
+        root = unparen(expr);
+    }
+    let ExprKind::Path(path) = &root.kind else { return None; };
+    let verum_ast::ty::PathSegment::Name(first) = path.segments.first()? else { return None; };
+    if bindings.contains_key(&first.name) || checker.ctx.env.is_bound_value(&first.name) {
+        return None;
+    }
+    let mut path = checker.path_to_string(path);
+    for segment in suffix.iter().rev() {
+        path = format!("{path}.{segment}").into();
+    }
+    let (declaration, owner) = checker.declaring_source_type_declaration(&path)?;
+    let TypeDeclBody::Variant(variants) = &declaration.body else { return None; };
+    let variant = variants.iter().find(|variant| variant.name.name == *name)?;
+    if !variant.generic_params.is_empty() || variant.where_clause.is_some()
+        || !variant.attributes.is_empty() || variant.path_endpoints.is_some()
+    {
+        return None;
+    }
+    match &variant.data {
+        None if count == 0 => (),
+        Some(verum_ast::decl::VariantData::Tuple(fields)) if fields.len() == count => (),
+        _ => return None,
+    }
+    Some(TypeChecker::source_type_declaration_key(&owner, &declaration.name.name))
+}
+
 fn append_expression(
     checker: &TypeChecker,
     value: &Expr,
@@ -187,6 +236,7 @@ fn append_expression(
         TupleIndex(usize),
         Tuple(usize),
         Record(Text, List<Text>),
+        Variant(Text, Text, usize),
     }
     let mut pending = List::from_iter([Step::Enter(value)]);
     let mut values = List::new();
@@ -213,10 +263,22 @@ fn append_expression(
                     }
                     ReturnedValueNode::Literal(checker.infer_literal(literal))
                 }
-                ExprKind::Field { expr, field } => {
-                    pending.push(Step::Field(&field.name));
-                    pending.push(Step::Enter(expr));
+                ExprKind::MethodCall { receiver, method, args, type_args }
+                    if type_args.is_empty() =>
+                {
+                    let owner = variant_constructor(checker, receiver, &method.name, args.len(), bindings)?;
+                    pending.push(Step::Variant(owner, method.name.clone(), args.len()));
+                    pending.extend(args.iter().rev().map(Step::Enter));
                     continue;
+                }
+                ExprKind::Field { expr, field } => {
+                    if let Some(owner) = variant_constructor(checker, expr, &field.name, 0, bindings) {
+                        ReturnedValueNode::Variant { owner, name: field.name.clone(), fields: List::new() }
+                    } else {
+                        pending.push(Step::Field(&field.name));
+                        pending.push(Step::Enter(expr));
+                        continue;
+                    }
                 }
                 ExprKind::TupleIndex { expr, index } => {
                     pending.push(Step::TupleIndex(*index as usize));
@@ -285,6 +347,10 @@ fn append_expression(
             Step::Tuple(count) => {
                 let start = values.len().checked_sub(count)?;
                 ReturnedValueNode::Tuple(values.split_off(start))
+            }
+            Step::Variant(owner, name, count) => {
+                let start = values.len().checked_sub(count)?;
+                ReturnedValueNode::Variant { owner, name, fields: values.split_off(start) }
             }
             Step::Record(owner, fields) => {
                 let start = values.len().checked_sub(fields.len())?;
@@ -384,15 +450,10 @@ impl TypeChecker {
             Some(&return_type),
             span,
         )?;
-        // Only primitive scalar replacement has no implicit lifecycle call.
-        // Type inference alone does not establish this ownership property.
-        if facts.writes.iter().any(|ty| {
-            !matches!(
-                ty,
-                Type::Unit | Type::Bool | Type::Int | Type::Float | Type::Char
-            )
-        }) {
-            return None;
+        // An assignment destroys the old value as well as constructing its
+        // replacement. Nominal shape alone is not a lifecycle contract.
+        for ty in &facts.writes {
+            if !self.write_value_has_structural_cleanup(ty, span) { return None; }
         }
 
         let mut values: List<List<RecordReceiver>> = List::new();
@@ -403,7 +464,7 @@ impl TypeChecker {
                     self.closed_call_input_origins(args.get(*parameter)?, ty)?
                 }
                 ReturnedValueNode::Receiver => self.closed_call_input_origins(receiver?, ty)?,
-                ReturnedValueNode::Literal(_) => List::new(),
+                ReturnedValueNode::Literal(_) | ReturnedValueNode::Compound { .. } => List::new(),
                 ReturnedValueNode::Field { source, .. }
                 | ReturnedValueNode::TupleIndex { source, .. } => {
                     // The type derivation admits only direct declared projections.
@@ -421,7 +482,8 @@ impl TypeChecker {
                     }
                     origins
                 }
-                ReturnedValueNode::Tuple(parts) => {
+                ReturnedValueNode::Tuple(parts)
+                | ReturnedValueNode::Variant { fields: parts, .. } => {
                     let mut origins = List::new();
                     for part in parts {
                         for origin in values.get(*part)? {
@@ -533,6 +595,21 @@ impl TypeChecker {
                     };
                     parts.iter().copied().zip(types).collect()
                 }
+                ReturnedValueNode::Compound { left, right, .. } => {
+                    List::from_iter([(*left, ty.clone()), (*right, ty.clone())])
+                }
+                ReturnedValueNode::Variant { owner, name, fields } => {
+                    if self.conversion_nominal_head(ty)?.0 != *owner { return None; }
+                    let Type::Variant(variants) = self.expand_generic_to_variant(ty).ok()? else { return None; };
+                    let payload = variants.get(name)?;
+                    let types = match (fields.len(), payload) {
+                        (0, Type::Unit) => List::new(),
+                        (1, payload) => List::from_iter([payload.clone()]),
+                        (count, Type::Tuple(parts)) if count == parts.len() => parts.clone(),
+                        _ => return None,
+                    };
+                    fields.iter().copied().zip(types).collect()
+                }
                 ReturnedValueNode::Record { owner, fields } => {
                     if self.conversion_nominal_head(ty)?.0 != *owner {
                         return None;
@@ -596,7 +673,22 @@ impl TypeChecker {
                         )
                     }
                 }
-                ReturnedValueNode::Record { .. } => expected[index].as_ref()?.clone(),
+                ReturnedValueNode::Record { .. } | ReturnedValueNode::Variant { .. } => expected[index].as_ref()?.clone(),
+                ReturnedValueNode::Compound { op, left, right } => {
+                    let left = nodes.get(*left)?;
+                    let right = nodes.get(*right)?;
+                    if left != right { return None; }
+                    match (op, left) {
+                        (BinOp::AddAssign | BinOp::SubAssign | BinOp::MulAssign
+                            | BinOp::DivAssign | BinOp::RemAssign, Type::Int | Type::Float)
+                        | (BinOp::BitAndAssign | BinOp::BitOrAssign | BinOp::BitXorAssign
+                            | BinOp::ShlAssign | BinOp::ShrAssign, Type::Int) => left.clone(),
+                        // A user operator may execute arbitrary writes. Its
+                        // spelling and a scalar result do not prove the body.
+                        _ => return None,
+                    }
+                }
+
             };
             if expected[index]
                 .as_ref()
@@ -607,6 +699,44 @@ impl TypeChecker {
             nodes.push(ty);
         }
         Some(ReturnedBodyTypes { nodes, writes })
+    }
+
+    /// A scalar-only sum with no selected destructor has structural cleanup.
+    /// This is deliberately narrower than "contains no loan": an owned record
+    /// or an unknown lifecycle can run user code even when its result is Unit.
+    fn write_value_has_structural_cleanup(&mut self, ty: &Type, span: verum_ast::Span) -> bool {
+        let mut pending = List::from_iter([self.unifier.apply(ty)]);
+        // This is a proof-search budget; exhaustion retains the unknown-write
+        // rule, rather than claiming that a deeper type is reference-free.
+        let mut remaining = 4096usize;
+        while let Some(ty) = pending.pop() {
+            let Some(next) = remaining.checked_sub(1) else { return false; };
+            remaining = next;
+            match ty {
+                Type::Unit | Type::Never | Type::Bool | Type::Int | Type::Float | Type::Char => (),
+                Type::Named { .. } | Type::Generic { .. } => {
+                    let Some((name, _)) = self.conversion_nominal_head(&ty) else { return false; };
+                    let is_sum = self.source_type_registration.completed_declaration(&name)
+                        .is_some_and(|declaration| matches!(declaration.body, TypeDeclBody::Variant(_)));
+                    if !is_sum { return false; }
+                    if !self.write_value_has_no_selected_drop(&ty, span) { return false; }
+                    let Ok(Type::Variant(variants)) = self.expand_generic_to_variant(&ty) else { return false; };
+                    pending.extend(variants.into_values());
+                }
+                _ => return false,
+            }
+            if pending.len() > remaining { return false; }
+        }
+        true
+    }
+
+    fn write_value_has_no_selected_drop(&mut self, ty: &Type, span: verum_ast::Span) -> bool {
+        use verum_common::well_known_types::WellKnownProtocol;
+        if self.load_source_receiver_methods(ty).is_err()
+            || self.load_source_operator_implementation(ty, WellKnownProtocol::Drop, span).is_err()
+        { return false; }
+        let Some(protocol) = self.source_operator_name(WellKnownProtocol::Drop) else { return false; };
+        self.protocol_checker.read().find_impl(ty, &Self::text_to_path(&protocol)).is_none()
     }
 
     fn closed_call_input_origins(

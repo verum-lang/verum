@@ -190,6 +190,8 @@ pub(crate) enum ReturnedValueNode {
     TupleIndex { source: usize, index: usize },
     Tuple(List<usize>),
     Record { owner: Text, fields: List<(Text, usize)> },
+    Variant { owner: Text, name: Text, fields: List<usize> },
+    Compound { op: verum_ast::BinOp, left: usize, right: usize },
 }
 
 impl ReturnedValue {
