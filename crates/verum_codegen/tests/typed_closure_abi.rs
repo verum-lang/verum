@@ -419,9 +419,26 @@ fn specialize_closures(mut module: VbcModule) -> VbcModule {
 // The generic disposal boundary is bytecode; constructors, Drop bodies and
 // counter observations are compiled source. This isolates backend cleanup from
 // select's separate source integration coverage.
+fn compile_cleanup_source(source: &str) -> VbcModule {
+    use verum_ast::ItemKind;
+    use verum_vbc::codegen::ItemFailurePolicy;
+    let mut protocols = Parser::new(include_str!("../../../core/base/protocols.vr"))
+        .parse_module().expect("actual Drop declaration");
+    protocols.items.retain(|item| matches!(&item.kind,
+        ItemKind::Module(declaration) if declaration.items.is_none())
+        || item.kind.type_or_protocol_name().is_some_and(|name| name.as_str() == "Drop"));
+    assert_eq!(protocols.items.len(), 2, "source header and the complete Drop protocol");
+    let ast = Parser::new(&format!("mount core.base.protocols.Drop;\n{source}"))
+        .parse_module().expect("cleanup source");
+    let mut compiler = VbcCodegen::new();
+    compiler.collect_unit_declarations(&[&protocols, &ast]).unwrap();
+    compiler.compile_unit_items(&[&protocols, &ast], ItemFailurePolicy::Strict).unwrap();
+    compiler.finalize_module_from_state().unwrap()
+}
+
 fn typed_cleanup_module(body: &str) -> VbcModule {
     use verum_vbc::{Instruction, bytecode::encode_instruction, instruction::Reg};
-    let mut module = compile(&format!(r#"
+    let mut module = compile_cleanup_source(&format!(r#"
 type Maybe<T> is None | Some(T);
 type Guard is {{ drops: &mut Int, marker: Int }};
 implement Drop for Guard {{ fn drop(&mut self) {{ *self.drops = *self.drops + 1; }} }}
@@ -547,7 +564,7 @@ fn probe() -> Int {
 }
 
 fn check_native_select_cleanup(body: &str, expected: i64) {
-    let module = compile(&format!(r#"
+    let module = compile_cleanup_source(&format!(r#"
 type Poll<T> is Ready(T) | Pending;
 type Waker is {{ marker: Int }};
 type Context is {{ waker: &Waker }};

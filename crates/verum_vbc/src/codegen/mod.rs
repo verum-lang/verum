@@ -8535,40 +8535,10 @@ impl VbcCodegen {
     fn claim_unit_source_type_identities(&mut self, files: &[&Module]) -> CodegenResult<()> {
         self.check_source_declaration_error()?;
         for module in files {
-            // T1369 — THE KEY MEANT TO DISTINGUISH MODULES DID NOT.
-            //
-            // `claim_user_type_name` guards on the pair
-            // (module_key, type_name) and returns early on a repeat, so
-            // that one module cannot claim its own simple name twice.
-            // Keyed on the file id, that guard is correct for a user
-            // compile and INERT for the bake: the bake parses every
-            // stdlib file through `verum_fast_parser::Parser::new`
-            // (pipeline/stdlib_bootstrap.rs), whose own docstring reads
-            // "Uses a default file ID of 0. For production use with
-            // proper file tracking, use `FastParser::parse_module`
-            // directly". Every file therefore arrives as FileId(0),
-            // every key is the same literal, and the FIRST declaration
-            // of a simple name anywhere in core/ takes it while every
-            // later module's claim is a no-op.
-            //
-            // The later module's DESCRIPTOR is still pushed — under the
-            // id `type_name_to_id` already holds — and `push_type_dedupe`
-            // then applies its richness rule between two DIFFERENT
-            // types, which is not the case that rule was written for.
-            //
-            // Measured on a miniature stdlib: with `S` declared 3-field
-            // in one module and 1-field in another, the 1-field module's
-            // OWN constructor emitted `New { type_id: 21, field_count: 3 }`
-            // — the other module's id AND object size. A third type
-            // declared right after it took id 22 rather than 23, which
-            // is how the skipped claim was shown to allocate nothing
-            // rather than be filtered out.
-            //
-            // The declared module path is what the key was reaching for,
-            // and it is already resolved a few lines above this loop for
-            // `unit_module_paths`. The file-id form stays as the
-            // fallback for a file with no `module X;` declaration, where
-            // it was never ambiguous.
+            // Source namespaces, including a headerless unit's declared root,
+            // own nominal identities. Parser FileIds only locate diagnostics:
+            // they cannot name a separate owner that signatures and emitted
+            // descriptors will never reference.
             let declared_owner = self.source_file_owner(module, &self.config.module_name);
             if declared_owner.is_none()
                 && (self.config.module_name.is_empty() || self.config.module_name == "main")
@@ -8586,7 +8556,7 @@ impl VbcCodegen {
                 }
             }
             let module_key = declared_owner.clone()
-                .unwrap_or_else(|| format!("file:{:?}", module.file_id));
+                .unwrap_or_else(|| self.config.module_name.clone());
             self.claim_declared_type_items(&module.items, &module_key, declared_owner.as_deref());
         }
         self.check_source_declaration_error()
