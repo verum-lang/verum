@@ -786,7 +786,7 @@ jobs:
           cargo test --locked --release -p verum_cli --test check_basic providers_authorize_imported_calls_in_their_lexical_scope -- --exact
           cargo test --locked --release -p verum_cli --test check_basic foreign_private_source_types_are_not_ambient_bindings -- --exact
           cargo test --locked --release -p verum_cli --test check_basic hidden_source_case_names_require_their_declaring_scope -- --exact
-          cargo test --locked --release -p verum_compiler --test qualified_constructor_archive
+          cargo test --locked --release -p verum_compiler --test qualified_constructor_archive --test generic_record_field_inference
           cargo test --locked --release -p verum_compiler --test reference_method_authority
           cargo test --locked --release -p verum_compiler --test imported_result_finalization
           cargo test --locked --release -p verum_compiler --test dynamic_protocol_archive --test refined_alias_archive --test refinement_scope_archive --test assignment_stored_values --test language_alias_archive

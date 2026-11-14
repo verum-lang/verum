@@ -318,6 +318,56 @@ impl VbcCodegen {
         Some(result)
     }
 
+    /// Numeric literals obtain their carrier from an already resolved source
+    /// declaration. Its canonical scalar identity and layout own the range;
+    /// a user record's name or size cannot authorize numeric construction.
+    /// `Some(None)` is a refused numeric context, not permission to retry the
+    /// literal's default type (which can have the very same primitive ID).
+    fn contextual_numeric_literal(
+        &self,
+        expression: &Expr,
+        expected: &TypeRef,
+    ) -> Option<Option<TypeRef>> {
+        use crate::instruction::LayoutProperty;
+        use verum_ast::{UnOp, literal::LiteralKind};
+
+        let primitive = self.expand_declared_alias(expected.clone())?;
+        let TypeRef::Concrete(id) = primitive else { return None };
+        let mut expression = Self::normalized_place(expression);
+        let negated = if let ExprKind::Unary { op: UnOp::Neg, expr } = &expression.kind {
+            expression = Self::normalized_place(expr);
+            true
+        } else {
+            false
+        };
+        let ExprKind::Literal(literal) = &expression.kind else { return None };
+        let accepts = match &literal.kind {
+            LiteralKind::Int(integer) if integer.suffix.is_none() && id.is_integer() => {
+                (|| {
+                    let value = if negated { integer.value.checked_neg()? } else { integer.value };
+                    let bits = crate::type_layout::query_with(
+                        &primitive, LayoutProperty::Bits, |id| self.type_by_id(id),
+                    )?;
+                    let signed = crate::type_layout::query_with(
+                        &primitive, LayoutProperty::IsSigned, |id| self.type_by_id(id),
+                    )? != 0;
+                    if !(1..=128).contains(&bits) { return None; }
+                    Some(if signed {
+                        bits == 128 || {
+                            let half = 1_i128.checked_shl(u32::try_from(bits - 1).ok()?)?;
+                            value >= -half && value < half
+                        }
+                    } else {
+                        value >= 0 && (bits == 128 || (value as u128) < (1_u128 << bits))
+                    })
+                })().unwrap_or(false)
+            }
+            LiteralKind::Float(float) if float.suffix.is_none() && id.is_float() => true,
+            _ => return None,
+        };
+        Some((accepts && self.declared_type_in_scope(expected)).then(|| expected.clone()))
+    }
+
     pub(super) fn source_expression_declaration(
         &self,
         expr: &Expr,
@@ -328,6 +378,10 @@ impl VbcCodegen {
             return None;
         }
         let expr = Self::normalized_place(expr);
+        if let Some(expected) = expected
+            && let Some(literal) = self.contextual_numeric_literal(expr, expected) {
+            return literal;
+        }
         if let Some(result) = self.lexical_call_result(expr) {
             return result;
         }

@@ -127,3 +127,39 @@ fn run_native(source: &str) {
     let run = Command::new(executable).output().expect("native execution");
     assert_eq!(run.status.code(), Some(73), "{}", Text::from_utf8_lossy(&run.stderr));
 }
+
+#[test]
+fn inferred_generic_record_with_sized_fields_executes_in_native_image() {
+    run_native(r#"
+        type Inner<T> is { strong_count: UInt32, weak_count: UInt32, value: T };
+        type Outer<T> is { inner: Inner<T> };
+        implement<T> Outer<T> {
+            fn new(value: T) -> Outer<T> {
+                let inner = Inner { strong_count: 1, weak_count: 0, value: value };
+                Outer { inner: inner }
+            }
+        }
+        fn main() -> Int {
+            let result = Outer.new(73);
+            if result.inner.strong_count != 1 || result.inner.weak_count != 0 { return 0; }
+            result.inner.value
+        }
+    "#);
+}
+
+#[test]
+fn inferred_record_keeps_caller_and_owner_binders_separate_in_native_image() {
+    run_native(r#"
+        type Inner<Right, Left> is { fixed: UInt16, left: Left, right: Right };
+        type Outer<A, B> is { inner: Inner<B, A> };
+        fn build<A, B>(a: A, b: B) -> Outer<A, B> {
+            let inner = Inner { right: b, fixed: 65535, left: a };
+            Outer { inner }
+        }
+        fn main() -> Int {
+            let result = build(73, true);
+            if result.inner.fixed != 65535 || !result.inner.right { return 0; }
+            result.inner.left
+        }
+    "#);
+}
