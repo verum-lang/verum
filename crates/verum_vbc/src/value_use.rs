@@ -54,7 +54,9 @@ impl ValueUsePlan {
         let use_sites: List<_> = uses.iter().map(|u| (&u.event, u.instruction, u.operand)).collect();
         // Type identity belongs to the versioned VBC codec, not serde's enum
         // ordinals. This domain change deliberately invalidates old seals.
-        let mut encoded = b"verum.value-use.signature/2\0".to_vec();
+        let mut encoded = if descriptor.source_receiver.is_some() {
+            b"verum.value-use.signature/3\0".to_vec()
+        } else { b"verum.value-use.signature/2\0".to_vec() };
         encoded.extend(bincode::serialize(&(param_mutability, type_ids, descriptor.register_count, use_sites)).ok()?);
         for param in &descriptor.params {
             crate::bytecode::encode_type_ref(&param.type_ref, &mut encoded);
@@ -71,6 +73,9 @@ impl ValueUsePlan {
             for param in params { optional_type(param.as_ref(), &mut encoded); }
         }
         optional_type(descriptor.semantic_return.as_ref(), &mut encoded);
+        if let Some(receiver) = &descriptor.source_receiver {
+            crate::bytecode::encode_type_ref(receiver, &mut encoded);
+        }
         for receipt in uses { optional_type(receipt.declaration_type.as_ref(), &mut encoded); }
         encoded.push(u8::from(descriptor.source_signature.is_some()));
         if let Some(signature) = &descriptor.source_signature {

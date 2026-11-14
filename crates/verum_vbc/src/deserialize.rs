@@ -1985,7 +1985,46 @@ impl<'a> Deserializer<'a> {
          _ => return Err(VbcError::Deserialization("invalid callable identity presence".into())),
      }
  } else { None };
+ let source_receiver = if fmt_minor >= 58 {
+     match decode_u8(self.data, &mut self.offset)? {
+         0 => None,
+         1 => Some(self.parse_type_ref()?),
+         _ => return Err(VbcError::Deserialization("invalid declared receiver presence".into())),
+     }
+ } else { None };
+ let source_definition = if fmt_minor >= 58 {
+     match decode_u8(self.data, &mut self.offset)? {
+         0 => None,
+         1 => {
+             let version = decode_u16(self.data, &mut self.offset)?;
+             if version != verum_ast::source_definition::VERSION || !has_source_body {
+                 return Err(VbcError::Deserialization("invalid source definition identity".into()));
+             }
+             let end = self.offset.checked_add(32).filter(|end| *end <= self.data.len())
+                 .ok_or_else(|| VbcError::Deserialization("truncated source definition identity".into()))?;
+             let mut digest = [0; 32];
+             digest.copy_from_slice(&self.data[self.offset..end]);
+             self.offset = end;
+             let implementation_scope = match decode_u8(self.data, &mut self.offset)? {
+                 0 => None,
+                 1 => {
+                     let end = self.offset.checked_add(32).filter(|end| *end <= self.data.len())
+                         .ok_or_else(|| VbcError::Deserialization("truncated implementation scope identity".into()))?;
+                     let mut scope = [0; 32];
+                     scope.copy_from_slice(&self.data[self.offset..end]);
+                     self.offset = end;
+                     Some(scope)
+                 }
+                 _ => return Err(VbcError::Deserialization("invalid implementation scope presence".into())),
+             };
+             Some(crate::module::SourceDefinitionIdentity { version, digest, implementation_scope })
+         }
+         _ => return Err(VbcError::Deserialization("invalid source definition identity presence".into())),
+     }
+ } else { None };
  Ok(FunctionDescriptor {
+ source_receiver,
+ source_definition,
  declaration_identity,
  has_source_body,
  semantic_params,

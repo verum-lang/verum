@@ -76,6 +76,7 @@ mod impl_generic_rosters;
 mod protocol_attachments;
 mod receiver_specialization;
 mod impl_method_registrations;
+mod source_definition;
 mod blanket_impls;
 mod implementation_obligations;
 mod cfg_selection;
@@ -363,6 +364,7 @@ struct DeferredImplScope {
 
 #[derive(Debug)]
 struct DeferredImplDeclaration {
+    definition: Option<crate::module::SourceDefinitionIdentity>,
     owner: Option<String>,
     type_generics: Vec<String>,
     const_generics: Vec<String>,
@@ -1045,6 +1047,7 @@ pub struct VbcCodegen {
     /// linkage without the carried structure.  `ctx.generic_type_params`
     /// is a name-only HashSet, hence this parallel carry.
     current_impl_ast_generics: Option<verum_common::List<verum_ast::ty::GenericParam>>,
+    current_impl_definition: Option<crate::module::SourceDefinitionIdentity>,
     /// The implementation's where predicates travel with its inline bounds.
     current_impl_where_clause: Option<verum_ast::ty::WhereClause>,
     /// Protocol instantiations guaranteed by the current callable's binder IDs.
@@ -1232,6 +1235,8 @@ pub struct VbcCodegen {
     collecting_declaration_interface: bool,
     /// Callable contracts retained from actual source or imported declarations.
     declared_callable_descriptors: Map<FunctionId, FunctionDescriptor>,
+    /// Lookup index only; retained descriptors own all definition evidence.
+    declared_impl_definitions: Map<(Text, Text, [u8; 32]), verum_common::List<FunctionId>>,
     declared_callable_defaults: Map<FunctionId, verum_common::List<Option<verum_ast::Expr>>>,
 }
 
@@ -2313,6 +2318,7 @@ impl VbcCodegen {
             ambiguous_bare_type_names: std::collections::HashSet::new(),
             impl_method_registrations: HashMap::new(),
             current_impl_ast_generics: None,
+            current_impl_definition: None,
             current_impl_where_clause: None,
             current_protocol_bounds: Default::default(),
             current_impl_receiver: None,
@@ -2517,6 +2523,7 @@ impl VbcCodegen {
             pending_tls_inits: Vec::new(),
             collecting_declaration_interface: false,
             declared_callable_descriptors: Map::new(),
+            declared_impl_definitions: Map::new(),
             declared_callable_defaults: Map::new(),
             propagate_test_attr: true,
             current_return_ast_type: None,
@@ -3411,6 +3418,7 @@ impl VbcCodegen {
     ) -> CodegenResult<ImplReceiverWitness> {
         let (type_generics, const_generics, ordered_generics) = self.resolve_impl_generics(implementation);
         let declaration = std::sync::Arc::new(DeferredImplDeclaration {
+            definition: self.current_impl_definition,
             owner: self.ctx.current_source_module.clone(),
             type_generics, const_generics, ordered_generics,
             ast_generics: self.implementation_source_parameters(implementation)?,
@@ -3680,6 +3688,7 @@ impl VbcCodegen {
         let previous_receiver = self.current_impl_receiver.replace(scope.receiver.clone());
         let previous_substitution = std::mem::replace(&mut self.current_source_substitution, scope.source_substitution.clone());
         let previous_impl_name = self.ctx.current_impl_type_name.clone();
+        let previous_definition = std::mem::replace(&mut self.current_impl_definition, scope.declaration.definition);
         let previous_ast = self.current_impl_ast_generics.replace(scope.declaration.ast_generics.clone());
         let previous_where = std::mem::replace(&mut self.current_impl_where_clause, scope.declaration.where_clause.clone());
         let previous_types = std::mem::replace(&mut self.ctx.generic_type_params, scope.declaration.type_generics.iter().cloned().collect());
@@ -3693,6 +3702,7 @@ impl VbcCodegen {
         self.current_impl_receiver = previous_receiver;
         self.current_source_substitution = previous_substitution;
         self.ctx.current_impl_type_name = previous_impl_name;
+        self.current_impl_definition = previous_definition;
         self.current_impl_ast_generics = previous_ast;
         self.current_impl_where_clause = previous_where;
         self.ctx.generic_type_params = previous_types;
@@ -5816,6 +5826,17 @@ impl VbcCodegen {
         &mut self,
         item: &Item,
         policy: ItemFailurePolicy,
+    ) -> CodegenResult<()> {
+        let previous = if matches!(&item.kind, ItemKind::Impl(_)) {
+            Some(self.current_impl_definition.replace(self.implementation_source_definition(item)?))
+        } else { None };
+        let result = self.compile_item_in_source_scope(item, policy);
+        if let Some(previous) = previous { self.current_impl_definition = previous; }
+        result
+    }
+
+    fn compile_item_in_source_scope(
+        &mut self, item: &Item, policy: ItemFailurePolicy,
     ) -> CodegenResult<()> {
         let mut first_strict_err: Option<CodegenError> = None;
         match &item.kind {
@@ -9756,12 +9777,17 @@ impl VbcCodegen {
     }
 
     fn collect_declarations(&mut self, item: &Item) -> CodegenResult<()> {
+        let definition = if matches!(&item.kind, ItemKind::Impl(_)) {
+            Some(self.implementation_source_definition(item)?)
+        } else { None };
         let previous = match &item.kind {
             ItemKind::Impl(declaration) => Some(self.current_impl_ast_generics.replace(self.implementation_source_parameters(declaration)?)),
             _ => None,
         };
+        let previous_definition = definition.map(|definition| self.current_impl_definition.replace(definition));
         let previous_preference = self.ctx.prefer_existing_functions;
         let result = self.collect_declarations_in_source_scope(item);
+        if let Some(previous) = previous_definition { self.current_impl_definition = previous; }
         self.ctx.prefer_existing_functions = previous_preference;
         if let Some(previous) = previous { self.current_impl_ast_generics = previous; }
         result
@@ -13393,9 +13419,12 @@ impl VbcCodegen {
         let func_name = func.name.name.to_string();
         let qualified_name = format!("{}.{}", type_name, func_name);
         let declaration_key = self.source_impl_method_key(type_name, &func_name);
-
-        let id = FunctionId(self.next_func_id);
-        self.next_func_id = self.next_func_id.saturating_add(1);
+        let reused = self.reusable_impl_definition(func, &declaration_key)?;
+        let id = if let Some(id) = reused { id } else {
+            let id = FunctionId(self.next_func_id);
+            self.next_func_id = self.next_func_id.saturating_add(1);
+            id
+        };
 
         // Extract parameter names and type names
         let param_names: Vec<String> = func
@@ -13572,16 +13601,23 @@ impl VbcCodegen {
         // (P2-safe).  Consumers self-pair by CONTENT
         // (param_type_names match), never by replaying this counter.
         let ordinal = self.impl_method_registrations.get(&declaration_key).map_or(1, |methods| methods.len() + 1);
-        let registration_key = if ordinal == 1 {
-            qualified_name
-        } else {
+        let registration_key = if reused.is_some() {
+            self.declared_callable_descriptors.get(&id)
+                .and_then(|descriptor| self.ctx.strings.get(descriptor.name.0 as usize))
+                .cloned().ok_or_else(|| CodegenError::internal("retained definition has no linkage"))?
+        } else if ordinal == 1 { qualified_name } else {
             format!("{}#impl{}", qualified_name, ordinal)
         };
         self.capture_declaration_interface(func, source_signature, &info, &registration_key, Some(type_name), &dense, &shadow)?;
-        let owned_key = if ordinal == 1 { declaration_key.clone() } else { format!("{declaration_key}#impl{ordinal}") };
-        self.impl_method_registrations.entry(declaration_key).or_default().push(impl_method_registrations::ImplMethodRegistration {
-            id, linkage: owned_key.clone(), receiver: self.current_impl_receiver.as_ref().map(|receiver| receiver.ty.clone()), declaration: func.span,
-        });
+        let owned_key = if reused.is_some() {
+            self.declared_callable_name(id).ok_or_else(|| CodegenError::internal("retained definition has no source owner"))?.into_string()
+        } else if ordinal == 1 { declaration_key.clone() } else { format!("{declaration_key}#impl{ordinal}") };
+        let registrations = self.impl_method_registrations.entry(declaration_key).or_default();
+        if !registrations.iter().any(|method| method.id == id) {
+            registrations.push(impl_method_registrations::ImplMethodRegistration {
+                id, linkage: owned_key.clone(), receiver: self.current_impl_receiver.as_ref().map(|receiver| receiver.ty.clone()), declaration: func.span,
+            });
+        }
         if owned_key != registration_key {
             // Only the source declaration producer may assert this ownership.
             // Generic registry aliases/imports do not acquire the caller's owner.
@@ -19566,6 +19602,8 @@ impl VbcCodegen {
             });
         }
         descriptor.has_source_body = func.body.is_some();
+        descriptor.source_definition = self.callable_source_definition(func, lexical_parent)?;
+        descriptor.source_receiver = impl_type_name.as_ref().and(self.current_impl_receiver.as_ref()).filter(|receiver| receiver.semantic).map(|receiver| receiver.ty.clone());
         descriptor.source_signature = self.retain_callable_owner_signature(
             func, source_signature, impl_type_name.map(String::as_str), &receiver_generics,
         )?;
@@ -26658,6 +26696,7 @@ impl VbcCodegen {
             }
             new_desc.semantic_params = formal_parameters::remapped_parameters(archive_desc, &type_id_remap);
             new_desc.semantic_return = formal_parameters::remapped_result(archive_desc, &type_id_remap);
+            new_desc.source_receiver = formal_parameters::remapped_receiver(archive_desc, &type_id_remap);
             new_desc.return_type =
                 remap_type_ref_archive(&new_desc.return_type, &type_id_remap);
             new_desc.value_uses = archive_module.value_use_receipts(archive_desc.id)

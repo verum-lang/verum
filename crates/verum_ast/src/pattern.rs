@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use verum_common::{Heap, List, Maybe};
 
 /// A pattern for destructuring and matching values.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct Pattern {
     pub kind: PatternKind,
     pub span: Span,
@@ -59,7 +59,7 @@ impl Spanned for Pattern {
 /// 2. Include view patterns for alternative pattern interfaces via `view` declarations
 /// 3. Carry proof obligations about the matched value via `with` clauses
 ///  These extensions enable compile-time proof of pattern exhaustiveness and type narrowing.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum PatternKind {
     /// Wildcard pattern: _
     Wildcard,
@@ -340,7 +340,7 @@ pub enum PatternKind {
 }
 
 /// A field in a record pattern.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct FieldPattern {
     pub name: Ident,
     /// Optional pattern to bind to (None means shorthand: { x } = { x: x })
@@ -375,7 +375,7 @@ impl Spanned for FieldPattern {
 }
 
 /// Variant pattern data (tuple or record style).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum VariantPatternData {
     /// Tuple-style variant: Some(x, y)
     Tuple(List<Pattern>),
@@ -402,7 +402,7 @@ pub enum VariantPatternData {
 ///  Succ(_) => false // Here we know n ≠ 0
 ///  }
 /// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct MatchArm {
     /// The pattern to match against
     pub pattern: Pattern,

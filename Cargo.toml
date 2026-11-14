@@ -10,6 +10,7 @@ members = [
     "crates/verum_parser",
     "crates/verum_fast_parser",
     "crates/verum_ast",
+    "crates/verum_ast_derive",
     "crates/verum_protocol_types",
     "crates/verum_types",
     "crates/verum_cbgr",

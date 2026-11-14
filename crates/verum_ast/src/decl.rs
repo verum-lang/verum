@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use verum_common::{Heap, List, Maybe, Text};
 
 /// A top-level item/declaration.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct Item {
     pub kind: ItemKind,
     pub attributes: List<Attribute>,
@@ -50,7 +50,7 @@ impl Spanned for Item {
 }
 
 /// The kind of top-level item.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum ItemKind {
     /// Function definition
     Function(FunctionDecl),
@@ -137,7 +137,7 @@ pub enum ItemKind {
 ///
 /// Stable serde tags (`"theorem"` / `"lemma"` / `"corollary"` /
 /// `"axiom"`) make this safe for round-trip pipelines.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 #[serde(rename_all = "snake_case")]
 pub enum ProofItemKind {
     /// `theorem name(params) ensures Q { proof body }` —
@@ -344,7 +344,7 @@ impl ItemKind {
 ///  body
 /// }
 /// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct FunctionDecl {
     pub visibility: Visibility,
     pub is_async: bool,
@@ -584,7 +584,7 @@ impl Spanned for FunctionDecl {
 }
 
 /// Function parameter.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct FunctionParam {
     pub kind: FunctionParamKind,
     #[serde(default)]
@@ -592,7 +592,7 @@ pub struct FunctionParam {
     pub span: Span,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum FunctionParamKind {
     /// Regular parameter: name: Type [= default_value]
     /// Supports optional default values for parameters
@@ -691,7 +691,7 @@ impl Spanned for FunctionParam {
 }
 
 /// Function body (block or single expression).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum FunctionBody {
     /// Block body: { stmts }
     Block(Block),
@@ -723,7 +723,7 @@ pub enum FunctionBody {
 /// A function with a throws clause has the `Fallible` computational property,
 /// meaning it may fail and propagate errors. This is tracked at compile-time
 /// for effect inference.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct ThrowsClause {
     /// The error types that can be thrown, separated by `|`
     /// Example: `throws(ParseError | ValidationError)` has two error types
@@ -765,7 +765,7 @@ impl Spanned for ThrowsClause {
 /// predicate NonZero(x: Int) -> Bool { x != 0 }
 /// predicate Positive(x: Float) -> Bool { x > 0.0 }
 /// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct PredicateDecl {
     pub visibility: Visibility,
     pub name: Ident,
@@ -832,7 +832,7 @@ pub use crate::context::{ContextList, ContextRequirement, ContextTransform};
 ///
 /// Affine types can be used at most once (moved or dropped).
 /// Linear types must be used exactly once (compile error if dropped unused).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum ResourceModifier {
     /// Affine type: use at most once
     ///
@@ -917,7 +917,7 @@ impl std::fmt::Display for ResourceModifier {
 ///
 /// Supports affine types (use at most once) and linear types (use exactly once).
 /// Type declarations use unified 'is' syntax: type Name is { fields } or type Name is A | B.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct TypeDecl {
     pub visibility: Visibility,
     pub name: Ident,
@@ -969,7 +969,7 @@ impl Spanned for TypeDecl {
 ///
 /// Stable serde tags (snake_case form of each variant name) make
 /// this safe for round-trip pipelines.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 #[serde(rename_all = "snake_case")]
 pub enum TypeDeclBodyKind {
     /// Type alias: `type X is Y;`.
@@ -1074,7 +1074,7 @@ impl TypeDeclBodyKind {
 }
 
 /// Type declaration body.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum TypeDeclBody {
     /// Type alias: type X is Y;
     Alias(Type),
@@ -1232,7 +1232,7 @@ impl TypeDeclBody {
 ///  async fn query(self, sql: Text) -> Result<Rows, Error>;
 /// };
 /// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct ProtocolBody {
     /// Whether this is a context protocol (`context type X is protocol { ... }`)
     ///
@@ -1358,7 +1358,7 @@ impl ProtocolBody {
 /// - Bit width does not exceed the storage type's bit width
 /// - No overlapping fields (unless explicitly allowed)
 /// - Total bits fit within the container
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct RecordField {
     pub visibility: Visibility,
     pub name: Ident,
@@ -1510,7 +1510,7 @@ impl Spanned for RecordField {
 }
 
 /// A variant in a sum type.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct Variant {
     pub name: Ident,
     /// Optional generic parameters on the variant (GADT constructors).
@@ -1587,7 +1587,7 @@ impl Spanned for Variant {
 }
 
 /// Variant data (tuple or record).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum VariantData {
     /// Tuple variant: Some(T)
     ///
@@ -1633,7 +1633,7 @@ pub enum VariantData {
 ///  async fn query(self, sql: Text) -> Result<Rows, Error>;
 /// }
 /// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct ProtocolDecl {
     pub visibility: Visibility,
     /// Whether this is a context protocol (`context protocol Database { ... }`)
@@ -1674,13 +1674,13 @@ impl ProtocolDecl {
 }
 
 /// An item in a protocol definition.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct ProtocolItem {
     pub kind: ProtocolItemKind,
     pub span: Span,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum ProtocolItemKind {
     /// Function signature
     Function {
@@ -1763,7 +1763,7 @@ impl Spanned for ProtocolItem {
 /// @specialize(when(T: Clone + Send))
 /// implement<T> Protocol for Heap<T> { }
 /// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct ImplDecl {
     /// Whether this is an unsafe impl (for unsafe traits like Send, Sync)
     /// Grammar: impl_block = [ attribute ] , [ 'unsafe' ] , 'implement' , ...
@@ -1796,7 +1796,7 @@ impl Spanned for ImplDecl {
 }
 
 /// The kind of implementation.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum ImplKind {
     /// Inherent implementation: implement Type { ... }
     Inherent(Type),
@@ -1812,7 +1812,7 @@ pub enum ImplKind {
 }
 
 /// An item in an implementation block.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct ImplItem {
     /// Attributes on the impl item (e.g., @inject for DI)
     pub attributes: List<Attribute>,
@@ -1821,7 +1821,7 @@ pub struct ImplItem {
     pub span: Span,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum ImplItemKind {
     /// Function implementation
     Function(FunctionDecl),
@@ -1892,7 +1892,7 @@ impl Spanned for ImplItem {
 /// # Specification
 ///
 /// Language profiles control which features are available in a module.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct ModuleDecl {
     pub visibility: Visibility,
     pub name: Ident,
@@ -1932,7 +1932,7 @@ impl Spanned for ModuleDecl {
 /// ```
 ///
 /// Mount statement for importing names into scope.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct ConstDecl {
     pub visibility: Visibility,
     pub name: Ident,
@@ -1950,7 +1950,7 @@ impl Spanned for ConstDecl {
 }
 
 /// A static declaration.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct StaticDecl {
     pub visibility: Visibility,
     pub is_mut: bool,
@@ -1974,7 +1974,7 @@ impl Spanned for StaticDecl {
 /// - `public mount std.io.File as MyFile;` - re-export with rename
 ///
 /// Re-export statement for making imported items publicly visible.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct MountDecl {
     /// Visibility modifier for re-exports
     /// Whether this re-export is public (visible to importers of this module).
@@ -1991,7 +1991,7 @@ impl Spanned for MountDecl {
 }
 
 /// A mount tree (supports nested mounts).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct MountTree {
     pub kind: MountTreeKind,
     /// Optional alias for this mount item (e.g., `exit as sys_exit`)
@@ -1999,7 +1999,7 @@ pub struct MountTree {
     pub span: Span,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum MountTreeKind {
     /// Simple path: std.io.File
     Path(Path),
@@ -2043,7 +2043,7 @@ impl Spanned for MountTree {
 }
 
 /// A meta (macro) declaration.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct MetaDecl {
     pub visibility: Visibility,
     pub name: Ident,
@@ -2059,7 +2059,7 @@ impl Spanned for MetaDecl {
 }
 
 /// A meta parameter.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct MetaParam {
     pub name: Ident,
     pub fragment: Maybe<MetaFragment>,
@@ -2067,7 +2067,7 @@ pub struct MetaParam {
 }
 
 /// Meta fragment specifier.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum MetaFragment {
     Expr,
     Stmt,
@@ -2081,7 +2081,7 @@ pub enum MetaFragment {
 }
 
 /// A meta rule (pattern => expansion).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct MetaRule {
     pub pattern: Pattern,
     pub expansion: Expr,
@@ -2123,7 +2123,7 @@ impl Spanned for MetaRule {
 /// ```
 ///
 /// Sub-context declaration: derives a new context from an existing one with restrictions.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct ContextDecl {
     pub visibility: Visibility,
     /// Whether this is an async context (`context async Database { ... }`)
@@ -2190,7 +2190,7 @@ impl Spanned for ContextDecl {
 /// ```verum
 /// using Pure = [!IO, !State<_>, !Random];
 /// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct ContextGroupDecl {
     pub visibility: Visibility,
     pub name: Ident,
@@ -2222,7 +2222,7 @@ impl Spanned for ContextGroupDecl {
 /// }
 /// layer AppLayer = DatabaseLayer + LoggingLayer;
 /// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct LayerDecl {
     pub visibility: Visibility,
     pub name: Ident,
@@ -2232,7 +2232,7 @@ pub struct LayerDecl {
 }
 
 /// Kind of layer declaration.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum LayerKind {
     /// Inline layer with provide statements.
     /// `layer Name { provide Ctx = expr; ... }`
@@ -2265,7 +2265,7 @@ impl Spanned for LayerDecl {
 /// | `public(super)` | Public to parent module |
 /// | `public(in path)` | Public within specified path |
 /// | *(none)* *(default)* | Private to current module |
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default, verum_ast_derive::DefinitionNode)]
 pub enum Visibility {
     /// Public: visible everywhere
     /// Syntax: `public`
@@ -2357,7 +2357,7 @@ impl Visibility {
 ///  proof by auto
 /// }
 /// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct TheoremDecl {
     /// Visibility modifier
     pub visibility: Visibility,
@@ -2507,7 +2507,7 @@ impl Spanned for TheoremDecl {
 ///
 /// Axioms should be used sparingly as they introduce unproven assumptions.
 /// Inconsistent axioms can lead to proving False.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct AxiomDecl {
     /// Visibility modifier
     pub visibility: Visibility,
@@ -2596,7 +2596,7 @@ impl Spanned for AxiomDecl {
 ///  all_goals auto
 /// }
 /// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct TacticDecl {
     /// Visibility modifier
     pub visibility: Visibility,
@@ -2638,7 +2638,7 @@ impl Spanned for TacticDecl {
 /// (e.g. `confidence: Float`, `candidate: Maybe<Proof>`). The optional
 /// `default` value lets tactic authors declare default arguments like
 /// `oracle(goal: Prop, confidence: Float = 0.9)`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct TacticParam {
     /// Parameter name
     pub name: Ident,
@@ -2655,7 +2655,7 @@ pub struct TacticParam {
 }
 
 /// Kind of tactic parameter.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum TacticParamKind {
     /// Expression parameter
     Expr,
@@ -2675,7 +2675,7 @@ pub enum TacticParamKind {
 }
 
 /// A tactic body.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum TacticBody {
     /// Simple tactic expression
     Simple(TacticExpr),
@@ -2703,7 +2703,7 @@ pub enum TacticBody {
 /// audit-gate JSON, diagnostic rendering, hash-based deduplication.
 /// Direct pattern-match on `ProofBody::*` remains the right call when
 /// you need the inner payload to walk it.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum ProofBody {
     /// Explicit proof term (Curry-Howard style)
     Term(Heap<Expr>),
@@ -2723,7 +2723,7 @@ pub enum ProofBody {
 /// payload variants. Stable JSON tags (`"term"` / `"tactic"` /
 /// `"structured"` / `"by_method"`) make this safe for audit-gate
 /// emission and round-trip via serde.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 #[serde(rename_all = "snake_case")]
 pub enum ProofBodyKind {
     /// `ProofBody::Term`.
@@ -2807,7 +2807,7 @@ impl ProofBody {
 }
 
 /// A structured proof with intermediate steps.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct ProofStructure {
     /// Proof steps
     pub steps: List<ProofStep>,
@@ -2818,7 +2818,7 @@ pub struct ProofStructure {
 }
 
 /// A step in a structured proof.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct ProofStep {
     /// Step kind
     pub kind: ProofStepKind,
@@ -2827,7 +2827,7 @@ pub struct ProofStep {
 }
 
 /// Kind of proof step.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum ProofStepKind {
     /// Introduce hypothesis: `have h: P by tactic`
     Have {
@@ -2893,7 +2893,7 @@ pub enum ProofStepKind {
 ///  = a by left_id
 /// }
 /// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct CalculationChain {
     /// The starting expression
     pub start: Heap<Expr>,
@@ -2904,7 +2904,7 @@ pub struct CalculationChain {
 }
 
 /// A step in a calculation chain.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct CalculationStep {
     /// Relation (=, <, ≤, etc.)
     pub relation: CalcRelation,
@@ -2917,7 +2917,7 @@ pub struct CalculationStep {
 }
 
 /// Relation in calculation steps.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum CalcRelation {
     /// Equality (=)
     Eq,
@@ -2946,7 +2946,7 @@ pub enum CalcRelation {
 }
 
 /// A case in a proof by cases.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct ProofCase {
     /// Case pattern
     pub pattern: Pattern,
@@ -2963,7 +2963,7 @@ pub struct ProofCase {
 }
 
 /// Proof method for `by` clauses.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum ProofMethod {
     /// Proof by induction
     Induction {
@@ -3008,7 +3008,7 @@ pub enum ProofMethod {
 /// ```text
 /// tactic ::= intro | apply expr | simp | ring | omega | ...
 /// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum TacticExpr {
     /// Trivially true (`trivial`)
     Trivial,
@@ -3177,7 +3177,7 @@ pub enum TacticExpr {
 
 /// An arm of a tactic-level `match` expression: pattern, optional guard,
 /// and a tactic-expression body executed when the pattern matches.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct TacticMatchArm {
     /// The pattern to match against.
     pub pattern: crate::pattern::Pattern,
@@ -3406,7 +3406,7 @@ impl ProofMethod {
 ///  Odd(_) => false
 ///  }
 /// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct ViewDecl {
     /// Visibility modifier
     pub visibility: Visibility,
@@ -3503,7 +3503,7 @@ impl Spanned for ViewDecl {
 ///  result_index: 2 * n + 1
 /// }
 /// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct ViewConstructor {
     /// Constructor name (e.g., "Even", "Odd")
     pub name: Ident,
@@ -3574,7 +3574,7 @@ impl Spanned for ViewConstructor {
 /// ```
 ///
 /// Functions inside an extern block are implicitly extern with the block's ABI.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct ExternBlockDecl {
     /// The ABI string (e.g., "C", "stdcall").
     /// None means default platform ABI (usually "C" on most platforms).
@@ -3661,7 +3661,7 @@ impl Spanned for ExternBlockDecl {
 ///  _ => "other",
 /// }
 /// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct PatternDecl {
     /// Visibility modifier
     pub visibility: Visibility,

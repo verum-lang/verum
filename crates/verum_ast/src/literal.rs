@@ -9,7 +9,7 @@ use std::fmt;
 use verum_common::Text;
 
 /// A literal value in the source code.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct Literal {
     pub kind: LiteralKind,
     pub span: Span,
@@ -108,7 +108,7 @@ impl Spanned for Literal {
 }
 
 /// The kind of literal value.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum LiteralKind {
     /// Integer literal (arbitrary precision)
     Int(IntLit),
@@ -147,7 +147,7 @@ pub enum LiteralKind {
 }
 
 /// An integer literal with optional type or unit suffix.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct IntLit {
     /// The integer value (arbitrary precision)
     pub value: i128,
@@ -172,7 +172,7 @@ impl IntLit {
 }
 
 /// Integer literal suffix indicating the specific type or unit of measure.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum IntSuffix {
     // Signed integers
     I8,
@@ -223,7 +223,7 @@ impl fmt::Display for IntSuffix {
 }
 
 /// A floating-point literal with optional type or unit suffix.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct FloatLit {
     /// The floating-point value
     pub value: f64,
@@ -248,7 +248,7 @@ impl FloatLit {
 }
 
 /// Floating-point literal suffix indicating the specific type or unit of measure.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum FloatSuffix {
     F32,
     F64,
@@ -285,7 +285,7 @@ impl fmt::Display for FloatSuffix {
 /// - `"""..."""` - Triple-quoted strings: raw AND multiline (no escape processing)
 ///
 /// The old `r#"..."#` syntax has been removed. Use `"""..."""` for raw strings.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum StringLit {
     /// Regular string with escape sequences processed: `"hello\nworld"`
     Regular(Text),
@@ -340,7 +340,7 @@ impl fmt::Display for StringLit {
 /// - `xml"<tag>{value}</tag>"`
 /// - `gql"query { user(id: {id}) { name } }"`
 /// - `f"Hello {name}"` (regular format string, not a safe prefix)
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct InterpolatedStringLit {
     /// The prefix before the string (e.g., "sql", "html", "uri", "json", "xml", "gql", "f")
     pub prefix: Text,
@@ -388,7 +388,7 @@ impl fmt::Display for InterpolatedStringLit {
 /// - `chem#"H2O"` → Molecule
 /// - `music#"C4 D4 E4 F4"` → Melody
 /// - `interval#"[0, 100)"` → Interval<f64>
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct CompositeLiteral {
     /// The tag identifying the composite type (e.g., "mat", "vec", "chem", "music", "interval")
     pub tag: Text,
@@ -455,7 +455,7 @@ impl fmt::Display for CompositeLiteral {
 }
 
 /// Delimiter style for composite literals.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum CompositeDelimiter {
     /// Double quotes: "..."
     Quote,
@@ -483,7 +483,7 @@ impl CompositeDelimiter {
 }
 
 /// Types of composite literals
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum CompositeType {
     /// Matrix: mat#"[[1, 2], [3, 4]]"
     Matrix,
@@ -635,7 +635,7 @@ fn validate_interval_content(content: &str) -> Result<(), Text> {
 /// - `#FF5733` as CssColor → CssColor::from_hex(0xFF5733)
 /// - `#FF5733` as RgbColor → RgbColor { r: 255, g: 87, b: 51 }
 /// - `#FF5733` as u32 → 0xFF5733
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct ContextAdaptiveLit {
     /// The kind of context-adaptive literal
     pub kind: ContextAdaptiveKind,
@@ -662,7 +662,7 @@ impl ContextAdaptiveLit {
 }
 
 /// The kind of context-adaptive literal.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum ContextAdaptiveKind {
     /// Hex literal: #FF5733 → 0xFF5733
     /// Can be interpreted as Color, u32, ByteArray, etc. depending on context
@@ -678,7 +678,7 @@ pub enum ContextAdaptiveKind {
 }
 
 /// Base for integer literals (decimal, hexadecimal, binary).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum IntBase {
     /// Decimal (base 10)
     Decimal,

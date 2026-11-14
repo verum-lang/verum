@@ -4297,6 +4297,17 @@ dependencies = [
  "serde",
  "serde_json",
  "smallvec",
+ "verum_ast_derive",
+ "verum_common",
+]
+
+[[package]]
+name = "verum_ast_derive"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
  "verum_common",
 ]
 

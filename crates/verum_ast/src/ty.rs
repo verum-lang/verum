@@ -36,7 +36,7 @@ impl CubicalTypePrimitive {
 }
 
 /// A type in the Verum type system.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct Type {
     pub kind: TypeKind,
     pub span: Span,
@@ -102,7 +102,7 @@ impl Spanned for Type {
 }
 
 /// The kind of type.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum TypeKind {
     /// Unit type: ()
     Unit,
@@ -729,7 +729,7 @@ impl TypeKind {
 /// Represents the level annotation on a universe type `Type(...)`.
 /// This is the syntactic form; it gets lowered to `UniverseLevel` in verum_types
 /// during type checking.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum UniverseLevelExpr {
     /// A concrete numeric level: `Type(0)`, `Type(1)`, `Type(2)`
     Concrete(u32),
@@ -750,7 +750,7 @@ pub enum UniverseLevelExpr {
 /// # Performance implications
 /// - RowMajor: Better for row-wise operations, natural for SIMD vectorization
 /// - ColumnMajor: Better for column-wise operations, required for BLAS interop
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum TensorLayout {
     /// Row-major (C-order): last dimension varies fastest
     /// Memory: [row0_col0, row0_col1, row0_col2, row1_col0, ...]
@@ -773,7 +773,7 @@ pub enum TensorLayout {
 /// Rule 5 (Bare where - deprecated): type Positive is Int where it > 0
 ///
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct RefinementPredicate {
     /// The predicate expression
     pub expr: Expr,
@@ -804,7 +804,7 @@ impl RefinementPredicate {
 }
 
 /// A generic argument (type or const expression).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum GenericArg {
     /// Type argument: List<Int>
     Type(Type),
@@ -949,13 +949,13 @@ impl GenericArg {
 }
 
 /// A type bound (protocol constraint).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct TypeBound {
     pub kind: TypeBoundKind,
     pub span: Span,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum TypeBoundKind {
     /// Protocol bound: T: Trait
     Protocol(Path),
@@ -1017,7 +1017,7 @@ pub enum TypeBoundKind {
 /// ```
 ///
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct TypeBinding {
     /// The name of the associated type (e.g., "Item")
     pub name: Ident,
@@ -1056,7 +1056,7 @@ impl TypeBinding {
 /// // Implicit value parameter
 /// fn complex<{n: meta Nat}>(x: Int) -> List<Int, n: meta Nat> = ...
 /// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct GenericParam {
     pub kind: GenericParamKind,
     /// Whether this parameter is implicit (inferred from context).
@@ -1065,7 +1065,7 @@ pub struct GenericParam {
     pub span: Span,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum GenericParamKind {
     /// Type parameter: T
     Type {
@@ -1183,7 +1183,7 @@ pub enum GenericParamKind {
 /// This mirrors `verum_types::poly_kinds::Kind` but lives in the AST crate so
 /// that the parser can represent kind annotations without depending on the type
 /// system crate.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum KindAnnotation {
     /// The base kind `Type` — the kind of all value-level concrete types.
     Type,
@@ -1217,7 +1217,7 @@ impl std::fmt::Display for KindAnnotation {
 }
 
 /// A path to a type or value (e.g., std.collections.Vec).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct Path {
     // A local name stays allocation-free. Longer qualified paths spill rather
     // than reserving four identifiers in every type, pattern and expression.
@@ -1306,7 +1306,7 @@ impl std::fmt::Display for Path {
 }
 
 /// A segment in a path.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum PathSegment {
     /// Regular name segment
     Name(Ident),
@@ -1321,7 +1321,7 @@ pub enum PathSegment {
 }
 
 /// An identifier.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct Ident {
     pub name: Text,
     pub span: Span,
@@ -1353,7 +1353,7 @@ impl std::fmt::Display for Ident {
 }
 
 /// A lifetime (for future lifetime tracking).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct Lifetime {
     pub name: Text,
     pub span: Span,
@@ -1366,7 +1366,7 @@ pub struct Lifetime {
 /// 2. Meta where clause (where meta N > 0) - for meta-parameter refinements
 ///
 /// These are represented as separate optional fields in declarations.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct WhereClause {
     pub predicates: List<WherePredicate>,
     pub span: Span,
@@ -1392,13 +1392,13 @@ impl WhereClause {
 /// 2. `where meta N > 0` - Meta-parameter refinements
 /// 3. `where value it > 0` - Value refinements (explicit)
 /// 4. `where ensures result >= 0` - Postconditions
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct WherePredicate {
     pub kind: WherePredicateKind,
     pub span: Span,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum WherePredicateKind {
     /// Generic type constraint: where type T: Protocol
     /// Example: fn sort<T>(list: List<T>) where type T: Ord

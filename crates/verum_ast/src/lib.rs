@@ -134,6 +134,7 @@ pub mod pattern;
 pub mod pretty;
 pub mod prelude;
 pub mod source_signature;
+pub mod source_definition;
 pub mod source_implementation;
 pub mod span;
 pub mod stmt;
@@ -270,7 +271,7 @@ pub use visitor::{
 /// to avoid breaking the `Module` struct's field layout — there are dozens of
 /// struct-literal construction sites across the codebase. Use
 /// [`CogKind::of`] / [`CogKind::set_on_module`] to inspect or set it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default, verum_ast_derive::DefinitionNode)]
 pub enum CogKind {
     /// Library cog. Default. No `fn main()` is required; one may exist for
     /// developer convenience but is not the entry point.
@@ -398,7 +399,7 @@ mod cog_kind_tests {
 }
 
 /// The root of an AST - a complete module or file.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct Module {
     /// The items in this module
     pub items: List<Item>,
@@ -501,7 +502,7 @@ impl AsRef<Module> for Module {
 }
 
 /// A complete compilation unit (potentially multiple modules).
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct CompilationUnit {
     /// All modules in this compilation unit
     pub modules: List<Module>,

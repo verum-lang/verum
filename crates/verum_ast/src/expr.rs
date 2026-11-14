@@ -18,7 +18,7 @@ use smallvec::SmallVec;
 use verum_common::{Heap, List, Maybe, Text};
 
 /// An expression in Verum.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct Expr {
     pub kind: ExprKind,
     pub span: Span,
@@ -150,7 +150,7 @@ impl Spanned for Expr {
 /// Used with the `attenuate()` method to create restricted sub-contexts.
 ///
 /// Capability expression for context-based access control.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct CapabilitySet {
     /// Set of capability flags
     pub capabilities: List<Capability>,
@@ -243,7 +243,7 @@ impl Spanned for CapabilitySet {
 /// Context implementations can define custom capabilities beyond these standard ones.
 ///
 /// Capability expression for context-based access control.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum Capability {
     /// Read-only access (no mutations)
     ReadOnly,
@@ -553,7 +553,7 @@ impl Capability {
 /// u32.bits // Bit width (32)
 /// T.name // Type name as string
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum TypeProperty {
     /// Size of the type in bytes
     /// Example: `Int.size` -> 8
@@ -671,7 +671,7 @@ impl std::fmt::Display for TypeProperty {
 }
 
 /// The kind of expression.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum ExprKind {
     /// Literal value: 42, "hello", true
     Literal(Literal),
@@ -1712,7 +1712,7 @@ pub enum ExprKind {
 /// # Example
 /// `.head => n` — the `head` observation returns `n`
 /// `.tail => nats_from(n + 1)` — the `tail` observation returns `nats_from(n + 1)`
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct CopatternArm {
     /// The observation/destructor name (without leading `.`)
     pub observation: Ident,
@@ -1736,7 +1736,7 @@ impl Spanned for CopatternArm {
 ///
 /// Represents a single operand in an @asm expression, specifying how
 /// data flows between Verum and the assembly code.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct AsmOperand {
     /// The operand direction and constraint
     pub kind: AsmOperandKind,
@@ -1747,7 +1747,7 @@ pub struct AsmOperand {
 }
 
 /// Kind of assembly operand.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum AsmOperandKind {
     /// Input operand: in("constraint", expr)
     In {
@@ -1791,7 +1791,7 @@ pub enum AsmOperandKind {
 ///
 /// Constraints specify which registers or memory locations can be used
 /// for an operand.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct AsmConstraint {
     /// The constraint string (e.g., "r", "m", "=r", "+r")
     pub constraint: Text,
@@ -1842,7 +1842,7 @@ impl AsmConstraint {
 }
 
 /// Assembly options/flags.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct AsmOptions {
     /// Assembly may have observable side effects (prevents elimination)
     pub volatile: bool,
@@ -1914,7 +1914,7 @@ impl Spanned for AsmOptions {
 // =============================================================================
 
 /// Binary operators.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum BinOp {
     // Arithmetic
     Add, // +
@@ -2208,7 +2208,7 @@ impl std::fmt::Display for BinOp {
 }
 
 /// Unary operators.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum UnOp {
     /// Logical not: !x
     Not,
@@ -2262,7 +2262,7 @@ impl std::fmt::Display for UnOp {
 }
 
 /// Array expression variants.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum ArrayExpr {
     /// List of elements: [a, b, c]
     List(List<Expr>),
@@ -2274,13 +2274,13 @@ pub enum ArrayExpr {
 }
 
 /// A clause in a comprehension (list or stream).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct ComprehensionClause {
     pub kind: ComprehensionClauseKind,
     pub span: Span,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum ComprehensionClauseKind {
     /// For clause: for x in iter
     For { pattern: Pattern, iter: Expr },
@@ -2309,7 +2309,7 @@ pub enum ComprehensionClauseKind {
 /// - `forall x in S where Q(x). P(x)` ≡ ∀x∈S. Q(x) → P(x)
 ///
 /// Quantifier expression for dependent types and proofs.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct QuantifierBinding {
     /// The bound variable pattern
     pub pattern: Pattern,
@@ -2378,7 +2378,7 @@ impl QuantifierBinding {
 }
 
 /// Field initialization in record expressions.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct FieldInit {
     /// Optional conditional compilation attributes (e.g., @cfg(feature = "async"))
     pub attributes: List<Attribute>,
@@ -2441,7 +2441,7 @@ impl Spanned for FieldInit {
 /// - `stream[0, 1, 2, ...]` -> count_from(0) if arithmetic sequence detected
 /// - `stream[0..100]` -> lazy range [0, 100)
 /// - `stream[0..]` -> infinite range from 0
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct StreamLiteralExpr {
     /// The kind of stream literal
     pub kind: StreamLiteralKind,
@@ -2450,7 +2450,7 @@ pub struct StreamLiteralExpr {
 }
 
 /// Kind of stream literal expression
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum StreamLiteralKind {
     /// Element list with optional infinite cycle: stream[1, 2, 3, ...]
     Elements {
@@ -2505,7 +2505,7 @@ impl Spanned for StreamLiteralExpr {
 ///
 /// Select expression for multiplexing over channels or async operations.
 /// Grammar: grammar/verum.ebnf v2.9 - select_arm
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct SelectArm {
     /// Optional attributes on this arm (e.g., `@cold`, `@likely`)
     /// Select expression for multiplexing over channels or async operations. - Attributes on select arms
@@ -2615,7 +2615,7 @@ impl Spanned for SelectArm {
 ///  // ...
 /// }
 /// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct NurseryOptions {
     /// Optional timeout duration expression
     pub timeout: Maybe<Heap<Expr>>,
@@ -2679,7 +2679,7 @@ impl NurseryOptions {
 /// Determines what happens when a task within the nursery fails.
 ///
 /// Nursery block for structured concurrency with bounded task lifetimes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, verum_ast_derive::DefinitionNode)]
 pub enum NurseryErrorBehavior {
     /// Cancel all remaining tasks immediately when one fails (default)
     #[default]
@@ -2691,7 +2691,7 @@ pub enum NurseryErrorBehavior {
 }
 
 /// A block of statements with an optional trailing expression.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct Block {
     pub stmts: List<Stmt>,
     pub expr: Maybe<Heap<Expr>>,
@@ -2719,13 +2719,13 @@ impl Spanned for Block {
 }
 
 /// If condition (expression or let-chain).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct IfCondition {
     pub conditions: SmallVec<[ConditionKind; 2]>,
     pub span: Span,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum ConditionKind {
     /// Boolean expression
     Expr(Expr),
@@ -2734,7 +2734,7 @@ pub enum ConditionKind {
 }
 
 /// Closure parameter.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct ClosureParam {
     pub pattern: Pattern,
     pub ty: Maybe<Type>,
@@ -2760,7 +2760,7 @@ impl Spanned for ClosureParam {
 /// 2. Closure: `recover |e| expr` or `recover |e: ErrorType| { ... }`
 ///
 /// try/recover/finally structured error handling with pattern matching on error types.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum RecoverBody {
     /// Match arms syntax: `recover { SomeError(msg) => handle(msg), _ => default() }`
     MatchArms { arms: List<MatchArm>, span: Span },
@@ -2789,7 +2789,7 @@ impl Spanned for RecoverBody {
 /// The pattern can be a simple identifier or a more complex destructuring pattern.
 ///
 /// try/recover/finally structured error handling with pattern matching on error types.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct RecoverClosureParam {
     /// The pattern to bind the error value
     pub pattern: Pattern,
@@ -2814,7 +2814,7 @@ impl Spanned for RecoverClosureParam {
 /// Reference kind for CBGR tier selection
 ///
 /// CBGR (Capability-Based Generational References) expression for memory safety.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default, verum_ast_derive::DefinitionNode)]
 pub enum ReferenceKind {
     /// &T - CBGR-managed with full checks (~15ns)
     #[default]
@@ -2849,7 +2849,7 @@ pub enum ReferenceKind {
 /// of which side resolved the name first; using a string-typed
 /// canonical key avoids embedding the codegen's `FunctionId` space
 /// into the AST (verum_ast must not depend on verum_vbc).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, verum_ast_derive::DefinitionNode)]
 pub enum ResolvedCallTarget {
     /// Direct call to a registered global function — both inherent
     /// methods (`Duration.nanos`) and free functions reachable via
@@ -2897,7 +2897,7 @@ pub enum ResolvedCallTarget {
 /// along with the delimiter used (parentheses, brackets, or braces).
 ///
 /// Spec: grammar/verum.ebnf - meta_call_args production
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct MacroArgs {
     /// The delimiter type used for the arguments
     pub delimiter: MacroDelimiter,
@@ -2926,7 +2926,7 @@ impl Spanned for MacroArgs {
 /// Delimiter type for macro arguments.
 ///
 /// Spec: grammar/verum.ebnf - meta_call_args production
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum MacroDelimiter {
     /// Parentheses: macro!(...)
     Paren,
@@ -2943,7 +2943,7 @@ pub enum MacroDelimiter {
 /// to process tokens at a lower level than the parsed AST.
 ///
 /// Spec: grammar/verum.ebnf - token_tree production
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum TokenTree {
     /// A single token (identifier, literal, operator, etc.)
     Token(TokenTreeToken),
@@ -3005,7 +3005,7 @@ impl TokenTree {
 ///
 /// This is a simplified representation of tokens that preserves
 /// the essential information needed for macro processing.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct TokenTreeToken {
     /// The kind of token (identifier, literal, punctuation)
     pub kind: TokenTreeKind,
@@ -3022,7 +3022,7 @@ impl TokenTreeToken {
 }
 
 /// The kind of token in a token tree.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum TokenTreeKind {
     /// An identifier (variable name, keyword, etc.)
     Ident,
@@ -3048,7 +3048,7 @@ pub enum TokenTreeKind {
 ///
 /// This structure holds both the raw text and the parsed token tree,
 /// allowing macros to work with either representation.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct MacroArgsExt {
     /// The delimiter type used for the arguments
     pub delimiter: MacroDelimiter,

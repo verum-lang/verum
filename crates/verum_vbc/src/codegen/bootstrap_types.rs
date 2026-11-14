@@ -138,6 +138,7 @@ fn function_ids(function: &FunctionDescriptor) -> Vec<TypeId> {
     let mut ids = Vec::new();
     type_ids(&function.return_type, &mut ids);
     if let Some(result) = &function.semantic_return { type_ids(result, &mut ids); }
+    if let Some(receiver) = &function.source_receiver { type_ids(receiver, &mut ids); }
     if let Some(yield_type) = &function.yield_type {
         type_ids(yield_type, &mut ids);
     }

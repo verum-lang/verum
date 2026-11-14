@@ -66,6 +66,8 @@ impl VbcCodegen {
             lexical_parent: self.current_source_callable_parent,
         });
         descriptor.has_source_body = info.has_source_body;
+        descriptor.source_definition = self.callable_source_definition(source, self.current_source_callable_parent)?;
+        descriptor.source_receiver = parent.and(self.current_impl_receiver.as_ref()).filter(|receiver| receiver.semantic).map(|receiver| receiver.ty.clone());
         descriptor.parent_type = parent.and_then(|name| {
             let owner = self
                 .ctx

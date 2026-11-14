@@ -150,7 +150,8 @@ pub const VERSION_MAJOR: u16 = 2;
 /// Minor 55 carries scoped existential protocol witnesses.
 /// Minor 56 adds failure-atomic retain of a declared shallow handle.
 /// Minor 57 adds declaration-owned copying of nested values.
-pub const VERSION_MINOR: u16 = 57;
+// v2.58: versioned complete source-definition identity for strict body replay.
+pub const VERSION_MINOR: u16 = 58;
 
 /// Minor-version floors for sections whose presence readers gate on.  The
 /// register-type-hints section has been written unconditionally since minor 2,

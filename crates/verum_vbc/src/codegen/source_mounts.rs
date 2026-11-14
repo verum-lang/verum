@@ -339,6 +339,38 @@ impl VbcCodegen {
         selected.map(Some)
     }
 
+    /// Retain the import inputs of the actual lexical ancestors, including
+    /// value and context names. A type-only binding map cannot identify a body
+    /// whose same-spelled callable import was rebound to another module.
+    pub(super) fn definition_lexical_scopes(
+        &self, owner: &str,
+    ) -> super::CodegenResult<verum_common::List<verum_ast::source_definition::LexicalScope>> {
+        let mut result = verum_common::List::new();
+        let mut visited = Set::new();
+        let mut current = Some(owner);
+        while let Some(owner) = current {
+            if !visited.insert(owner) {
+                return Err(super::CodegenError::new(super::CodegenErrorKind::InvalidSourceSignature(
+                    "cyclic lexical scope in source definition identity".into(),
+                )));
+            }
+            let named = self.source_type_mounts.get(&Text::from(owner));
+            let source = self.source_export_scope(owner);
+            let ordered: BTreeMap<_, _> = named.into_iter().flat_map(|names| names.iter()).collect();
+            result.push(verum_ast::source_definition::LexicalScope {
+                owner: owner.into(), known: named.is_some() || source.is_some(),
+                named: ordered.into_iter().map(|(name, binding)| (name.clone(), match binding {
+                    SourceMountBinding::Targets(targets) => Some(targets.iter().cloned().collect()),
+                    SourceMountBinding::Blocked => None,
+                })).collect(),
+                globs: source.into_iter().flat_map(|scope| scope.lexical_globs.iter())
+                    .map(|path| path.0.clone()).collect(),
+            });
+            current = self.lexical_type_parent(owner).flatten();
+        }
+        Ok(result)
+    }
+
     /// Archive readers receive the declaration's selected type environment,
     /// not import syntax that would need a different module graph to resolve.
     pub(super) fn declaration_source_type_bindings(

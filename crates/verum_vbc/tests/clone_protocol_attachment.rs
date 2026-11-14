@@ -359,3 +359,250 @@ fn an_unrelated_declared_protocol_cannot_supply_canonical_clone_completion() {
     assert!(matches!(error.kind, verum_vbc::codegen::CodegenErrorKind::InvalidSourceSignature(_)),
         "{error:?}");
 }
+
+#[test]
+fn repeated_private_source_completion_retains_the_selected_clone() {
+    let protocol = protocol();
+    let source = Parser::new(r#"
+        module app;
+        mount core.base.protocols.Clone as Reproduce;
+        type Token is { value: Int };
+        implement Reproduce for Token {
+            fn clone(&self)->Token { Token { value: self.value } }
+        }
+        public fn main()->Int { let original=Token{value:73}; original.clone().value }
+    "#).parse_module().unwrap();
+    let units: List<_> = [&protocol, &source].into_iter().collect();
+    let mut producer = VbcCodegen::with_config(CodegenConfig::new("app"));
+    producer.collect_unit_declarations(&units).unwrap();
+    producer.collect_unit_declarations(&units).unwrap();
+    producer.resolve_pending_imports();
+    producer.compile_unit_items(&units, ItemFailurePolicy::Strict).unwrap();
+    let produced = producer.finalize_module_from_state().unwrap();
+    let archived = wire(&produced);
+    let mut consumer = VbcCodegen::with_config(CodegenConfig::new("app"));
+    consumer.import_archive_module_types(&archived);
+    import_bodies(&mut consumer, &archived);
+    consumer.collect_unit_declarations(&units).unwrap();
+    let completed = consumer.finalize_module_from_state().unwrap();
+    for module in [produced, archived, wire(&completed)] {
+        assert_eq!(token(&module).visibility, verum_vbc::types::Visibility::Private);
+        selected(&module);
+        let entry = module.find_function_by_name("app.main").unwrap();
+        let mut vm = verum_vbc::interpreter::Interpreter::new(module.into());
+        assert_eq!(vm.execute_function(entry).unwrap().try_as_i64(), Some(73));
+    }
+}
+
+
+fn replay_source() -> Module {
+    Parser::new(r#"
+        module app;
+        mount core.base.protocols.Clone as Reproduce;
+        type Token is { value: Int };
+        implement Reproduce for Token {
+            fn clone(&self)->Token { Token { value: self.value } }
+        }
+        public fn main()->Int { let original=Token{value:73}; original.clone().value }
+    "#).parse_module().unwrap()
+}
+
+fn changed_clone_definition(source: &mut Module, change: usize) {
+    let function = source.items.iter_mut().find_map(|item| {
+        let ItemKind::Impl(implementation) = &mut item.kind else { return None };
+        implementation.items.iter_mut().find_map(|item| match &mut item.kind {
+            verum_ast::decl::ImplItemKind::Function(function) => Some(function),
+            _ => None,
+        })
+    }).unwrap();
+    let truth = verum_ast::Expr::literal(verum_ast::Literal::bool(true, function.span));
+    match change {
+        0 => function.body = Some(verum_ast::FunctionBody::Expr(
+            Parser::new("fn changed()->Token { Token { value: 74 } }").parse_module().unwrap()
+                .items.into_iter().find_map(|item| match item.kind {
+                    ItemKind::Function(function) => match function.body.unwrap() {
+                        verum_ast::FunctionBody::Block(block) => block.expr.map(|expression| *expression),
+                        verum_ast::FunctionBody::Expr(expression) => Some(expression),
+                    }, _ => None,
+                }).unwrap(),
+        )),
+        1 => function.requires.push(truth),
+        2 => function.ensures.push(truth),
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn same_owner_span_and_header_cannot_replace_body_or_contract() {
+    for change in 0..3 {
+        let protocol = protocol();
+        let original = replay_source();
+        let mut changed = original.clone();
+        changed_clone_definition(&mut changed, change);
+        let mut producer = VbcCodegen::with_config(CodegenConfig::new("app"));
+        producer.collect_unit_declarations(&[&protocol, &original]).unwrap();
+        let error = producer.collect_unit_declarations(&[&protocol, &changed]).unwrap_err();
+        assert!(error.to_string().contains("source definition"), "{change}: {error}");
+    }
+}
+
+#[test]
+fn archive_body_reuse_requires_the_same_complete_definition() {
+    for change in 0..3 {
+        let protocol = protocol();
+        let original = replay_source();
+        let units = [&protocol, &original];
+        let mut producer = VbcCodegen::with_config(CodegenConfig::new("app"));
+        producer.collect_unit_declarations(&units).unwrap();
+        producer.compile_unit_items(&units, ItemFailurePolicy::Strict).unwrap();
+        let archived = wire(&producer.finalize_module_from_state().unwrap());
+        let mut changed = original.clone();
+        changed_clone_definition(&mut changed, change);
+        let mut consumer = VbcCodegen::with_config(CodegenConfig::new("app"));
+        consumer.import_archive_module_types(&archived);
+        import_bodies(&mut consumer, &archived);
+        let error = consumer.collect_unit_declarations(&[&protocol, &changed]).unwrap_err();
+        assert!(error.to_string().contains("source definition"), "{change}: {error}");
+    }
+}
+
+#[test]
+fn a_body_free_archive_header_cannot_authorize_definition_reuse() {
+    let protocol = protocol();
+    let original = replay_source();
+    let units = [&protocol, &original];
+    let mut producer = VbcCodegen::with_config(CodegenConfig::new("app"));
+    producer.collect_unit_declarations(&units).unwrap();
+    producer.compile_unit_items(&units, ItemFailurePolicy::Strict).unwrap();
+    let mut produced = producer.finalize_module_from_state().unwrap();
+    let clone = selected(&produced).id;
+    produced.functions.iter_mut().find(|function| function.id == clone).unwrap().source_definition = None;
+    let archived = wire(&produced);
+    let mut consumer = VbcCodegen::with_config(CodegenConfig::new("app"));
+    consumer.import_archive_module_types(&archived);
+    import_bodies(&mut consumer, &archived);
+    let error = consumer.collect_unit_declarations(&units).unwrap_err();
+    assert!(error.to_string().contains("source definition"), "{error}");
+}
+
+#[test]
+fn definition_version_and_body_presence_are_checked_by_the_wire_writer() {
+    let original = compile(r#"
+        module app; mount core.base.protocols.Clone;
+        type Token is { value:Int };
+        implement Clone for Token { fn clone(&self)->Token { Token{value:self.value} } }
+    "#);
+    let id = selected(&original).id;
+    let identity = selected(&original).source_definition.expect("complete source input");
+    assert_eq!(selected(&wire(&original)).source_definition, Some(identity));
+    for wrong_version in [false, true] {
+        let mut invalid = original.clone();
+        let function = invalid.functions.iter_mut().find(|function| function.id == id).unwrap();
+        if wrong_version { function.source_definition.as_mut().unwrap().version += 1; }
+        else { function.has_source_body = false; }
+        let error = serialize_module(&invalid).unwrap_err();
+        assert!(error.to_string().contains("source definition identity"), "{error}");
+    }
+}
+
+#[test]
+fn rebinding_a_call_import_cannot_reuse_the_previous_body() {
+    let protocol = protocol();
+    let first = Parser::new("module first; public fn selected()->Int { 73 }").parse_module().unwrap();
+    let second = Parser::new("module other; public fn selected()->Int { 74 }").parse_module().unwrap();
+    let source = |dependency| Parser::new(&format!(r#"
+        module app;
+        mount core.base.protocols.Clone;
+        mount {dependency}.selected as selected;
+        type Token is {{value:Int}};
+        implement Clone for Token {{fn clone(&self)->Token{{Token{{value:selected()}}}}}}
+    "#)).parse_module().unwrap();
+    let original = source("first");
+    let changed = source("other");
+    let mut producer = VbcCodegen::with_config(CodegenConfig::new("app"));
+    producer.collect_unit_declarations(&[&protocol, &first, &second, &original]).unwrap();
+    let error = producer.collect_unit_declarations(&[&protocol, &first, &second, &changed]).unwrap_err();
+    assert!(error.to_string().contains("source definition"), "{error}");
+}
+
+#[test]
+fn static_receiver_applications_survive_replay_and_archive_id_relocation() {
+    let source = Parser::new(r#"
+        module app;
+        type First is { value:Int };
+        type Other is { value:Int };
+        type Carrier<T> is { value:T };
+        implement Carrier<First> { fn chosen()->Int {73} }
+        implement Carrier<Other> { fn chosen()->Int {74} }
+    "#).parse_module().unwrap();
+    let mut producer = VbcCodegen::with_config(CodegenConfig::new("app"));
+    producer.collect_unit_declarations(&[&source]).unwrap();
+    producer.collect_unit_declarations(&[&source]).unwrap();
+    producer.compile_unit_items(&[&source], ItemFailurePolicy::Strict).unwrap();
+    let produced = wire(&producer.finalize_module_from_state().unwrap());
+    let noise = Parser::new("module elsewhere; type Decoy is {payload:Int};").parse_module().unwrap();
+    let mut consumer = VbcCodegen::with_config(CodegenConfig::new("app"));
+    consumer.collect_unit_declarations(&[&noise]).unwrap();
+    consumer.import_archive_module_types(&produced);
+    import_bodies(&mut consumer, &produced);
+    consumer.collect_unit_declarations(&[&source]).unwrap();
+    let completed = wire(&consumer.finalize_module_from_state().unwrap());
+    for module in [produced, completed] {
+        for (argument, expected) in [("First",73),("Other",74)] {
+            let argument_id = module.types.iter().find(|ty| module.get_string(ty.name)==Some(argument)
+                && ty.origin_module.and_then(|id| module.get_string(id))==Some("app")).unwrap().id;
+            let mut methods = module.functions.iter().filter(|function|
+                function.declaration_identity.as_ref().and_then(|declaration| module.get_string(declaration.source_name)) == Some("chosen")
+                && matches!(&function.source_receiver, Some(TypeRef::Instantiated {args,..}) if args.as_slice()==[TypeRef::Concrete(argument_id)]));
+            let method = methods.next().expect("exact generic static declaration");
+            assert!(methods.next().is_none());
+            assert!(method.params.is_empty());
+            let id=method.id;
+            let mut vm=verum_vbc::interpreter::Interpreter::new(module.clone().into());
+            assert_eq!(vm.execute_function(id).unwrap().try_as_i64(),Some(expected));
+        }
+    }
+}
+
+
+#[test]
+fn missing_or_rebound_declared_receiver_cannot_authorize_body_reuse() {
+    let protocol = protocol();
+    let source = replay_source();
+    let units = [&protocol, &source];
+    let mut producer = VbcCodegen::with_config(CodegenConfig::new("app"));
+    producer.collect_unit_declarations(&units).unwrap();
+    producer.compile_unit_items(&units, ItemFailurePolicy::Strict).unwrap();
+    let original = producer.finalize_module_from_state().unwrap();
+    let selected_id = selected(&original).id;
+    for receiver in [None, Some(TypeRef::Concrete(verum_vbc::types::TypeId::I64))] {
+        let mut altered = original.clone();
+        altered.functions.iter_mut().find(|function| function.id == selected_id).unwrap()
+            .source_receiver = receiver;
+        let mut consumer = VbcCodegen::with_config(CodegenConfig::new("app"));
+        consumer.import_archive_module_types(&altered);
+        import_bodies(&mut consumer, &altered);
+        let error = consumer.collect_unit_declarations(&units).unwrap_err();
+        assert!(error.to_string().contains("source definition"), "{error}");
+    }
+}
+
+
+#[test]
+fn the_wire_reader_rejects_an_unknown_definition_version() {
+    let original = compile(r#"
+        module app; mount core.base.protocols.Clone;
+        type Token is { value:Int };
+        implement Clone for Token { fn clone(&self)->Token { Token{value:self.value} } }
+    "#);
+    let identity = selected(&original).source_definition.unwrap();
+    let mut bytes = serialize_module(&original).unwrap();
+    let occurrences: List<_> = bytes.windows(identity.digest.len()).enumerate()
+        .filter_map(|(offset, value)| (value == identity.digest).then_some(offset)).collect();
+    assert_eq!(occurrences.len(), 1, "select the actual source witness, not a guessed wire offset");
+    let start = occurrences[0];
+    assert_eq!(&bytes[start - 2..start], &identity.version.to_le_bytes());
+    bytes[start - 2..start].copy_from_slice(&(identity.version + 1).to_le_bytes());
+    let error = deserialize_module(&bytes).unwrap_err();
+    assert!(error.to_string().contains("source definition identity"), "{error}");
+}

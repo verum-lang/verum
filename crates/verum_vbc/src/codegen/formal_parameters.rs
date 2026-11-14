@@ -489,6 +489,13 @@ pub(super) fn remapped_parameters(
     })
 }
 
+pub(super) fn remapped_receiver(
+    function: &crate::FunctionDescriptor,
+    map: &std::collections::HashMap<u32, u32>,
+) -> Option<TypeRef> {
+    remapped_declaration_type(function.source_receiver.as_ref()?, map)
+}
+
 pub(super) fn remapped_result(
     function: &crate::FunctionDescriptor,
     map: &std::collections::HashMap<u32, u32>,

@@ -69,7 +69,7 @@ use verum_common::{List, Maybe, Text};
 ///  fn open(pathname: *const char, flags: i32, mode: u32) -> i32;
 /// }
 /// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct FFIBoundary {
     /// Boundary name (e.g., "LibMath", "Posix")
     pub name: Ident,
@@ -107,7 +107,7 @@ impl Spanned for FFIBoundary {
 /// - Thread safety guarantees
 /// - Error protocol (how errors are signaled)
 /// - Ownership transfer semantics
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct FFIFunction {
     /// Function name
     pub name: Ident,
@@ -144,7 +144,7 @@ impl Spanned for FFIFunction {
 }
 
 /// FFI function signature with C ABI information.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct FFISignature {
     /// Function parameters (name and type pairs)
     pub params: List<(Ident, Type)>,
@@ -167,7 +167,7 @@ pub struct FFISignature {
 ///
 /// Only C ABI is fully stable, but we support different calling conventions
 /// within the C ABI framework.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum CallingConvention {
     /// Standard C calling convention (cdecl)
     C,
@@ -217,7 +217,7 @@ impl CallingConvention {
 ///
 /// Memory effects tell the optimizer what a function can do to memory,
 /// enabling safe optimizations.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum MemoryEffects {
     /// Pure computation - no side effects
     Pure,
@@ -244,7 +244,7 @@ pub enum MemoryEffects {
 ///
 /// This specifies how a foreign function signals errors, allowing
 /// the Verum compiler to generate correct error handling code.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum ErrorProtocol {
     /// Function cannot fail
     None,
@@ -269,7 +269,7 @@ pub enum ErrorProtocol {
 /// Ownership semantics for FFI memory.
 ///
 /// Specifies how ownership of memory is transferred across the FFI boundary.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum Ownership {
     /// Borrowed reference - we don't own the memory
     Borrow,

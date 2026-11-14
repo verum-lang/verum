@@ -133,6 +133,13 @@ fn monomorphized_bodies_do_not_become_competing_source_implementations() {
     module.resolve_protocol_dispatch();
     validate_module(&module).unwrap();
     let declaration = module.find_function_by_name("Cell.width").unwrap();
+    assert!(module.get_function(declaration).unwrap().source_definition.is_some());
+    for specialization in &module.specializations {
+        let id = module.specialized_function_id(specialization.generic_fn, &specialization.type_args).unwrap();
+        let function = module.get_function(id).unwrap();
+        assert!(function.source_definition.is_none(),
+            "a substituted body is not the original source definition");
+    }
     let parent = module.get_function(declaration).unwrap().parent_type.unwrap();
     let method = module.strings.lookup("width").unwrap();
     for carrier in [TypeId::U8, TypeId::INT] {

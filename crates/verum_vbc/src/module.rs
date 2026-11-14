@@ -1974,7 +1974,9 @@ impl VbcModule {
                     value_uses: None,
                     semantic_params: None,
                     semantic_return: None,
+                    source_receiver: None,
                     source_signature: None,
+                    source_definition: None,
             declaration_identity: None,
                     explicit_type_param_ids: Vec::new(),
                     id: FunctionId(self.functions.len() as u32),
@@ -2813,6 +2815,21 @@ pub struct CallableDeclarationIdentity {
     pub lexical_parent: Option<FunctionId>,
 }
 
+/// Versioned identity of the complete source definition that produced this
+/// callable. The archive's integrity boundary transports this observation;
+/// it is not a proof that the body is safe or semantically equivalent to one
+/// with a different encoding. Absence never permits source-body reuse.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SourceDefinitionIdentity {
+    /// Structural encoding version, checked independently of the VBC version.
+    pub version: u16,
+    /// BLAKE3 digest of the complete versioned source-definition encoding.
+    pub digest: [u8; 32],
+    /// Exact implementation selector. This only locates competing declarations;
+    /// executable reuse additionally requires the complete definition digest.
+    pub implementation_scope: Option<[u8; 32]>,
+}
+
 /// Function signature, source identity and executable layout.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FunctionDescriptor {
@@ -2833,10 +2850,18 @@ pub struct FunctionDescriptor {
     /// the ABI return descriptor cannot supply this source fact (v2.27).
     #[serde(default)]
     pub semantic_return: Option<TypeRef>,
+    /// Exact declared implementation receiver (v2.58), including application
+    /// arguments even for static methods. A nominal parent ID is not evidence
+    /// for those arguments; absence never certifies a source replay.
+    #[serde(default)]
+    pub source_receiver: Option<TypeRef>,
     /// Complete body-free source signature (v2.30). This is declaration
     /// evidence, independent of runtime ABI types and linkage names.
     #[serde(default)]
     pub source_signature: Option<verum_ast::FunctionDecl>,
+    /// Complete source input identity (v2.58), distinct from a body-free header.
+    #[serde(default)]
+    pub source_definition: Option<SourceDefinitionIdentity>,
     /// Source declaration identity, separate from runtime linkage (v2.43).
     #[serde(default)]
     pub declaration_identity: Option<CallableDeclarationIdentity>,
@@ -3108,7 +3133,9 @@ impl Default for FunctionDescriptor {
             value_uses: None,
             semantic_params: None,
             semantic_return: None,
+            source_receiver: None,
             source_signature: None,
+            source_definition: None,
             declaration_identity: None,
             id: FunctionId(0),
             name: StringId::EMPTY,
@@ -3171,6 +3198,7 @@ impl FunctionDescriptor {
             .chain(std::iter::once(&self.return_type))
             .chain(self.yield_type.iter())
             .chain(self.semantic_return.iter())
+            .chain(self.source_receiver.iter())
             .chain(self.semantic_params.iter().flat_map(|parameters| parameters.iter().filter_map(Option::as_ref)))
             .chain(self.type_params.iter().flat_map(|parameter| parameter.default.iter().chain(parameter.type_bounds.iter())))
     }
@@ -4559,7 +4587,9 @@ mod precompile_extension_tests {
             value_uses: None,
             semantic_params: None,
             semantic_return: None,
+            source_receiver: None,
             source_signature: None,
+            source_definition: None,
             declaration_identity: None,
         };
         // Backwards-compat field is filled with the existing layout.
@@ -4620,7 +4650,9 @@ mod precompile_extension_tests {
             value_uses: None,
             semantic_params: None,
             semantic_return: None,
+            source_receiver: None,
             source_signature: None,
+            source_definition: None,
             declaration_identity: None,
         };
         m.functions.push(desc);

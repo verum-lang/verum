@@ -31,6 +31,15 @@ impl VbcCodegen {
                 ))));
             }
         }
+        if let Some(scope) = descriptor.source_definition.and_then(|identity| identity.implementation_scope)
+            && let Some(declaration) = &descriptor.declaration_identity
+            && declaration.lexical_parent.is_none()
+            && let Some(name) = self.ctx.strings.get(declaration.source_name.0 as usize)
+            && let Some(owner) = descriptor.origin_module.and_then(|id| self.ctx.strings.get(id.0 as usize))
+        {
+            let ids = self.declared_impl_definitions.entry((owner.as_str().into(), name.as_str().into(), scope)).or_default();
+            if !ids.contains(&descriptor.id) { ids.push(descriptor.id); }
+        }
         self.declared_callable_descriptors.insert(descriptor.id, descriptor);
         Ok(())
     }
@@ -157,6 +166,7 @@ impl VbcCodegen {
         }
         descriptor.semantic_params = super::formal_parameters::remapped_parameters(source, types);
         descriptor.semantic_return = super::formal_parameters::remapped_result(source, types);
+        descriptor.source_receiver = super::formal_parameters::remapped_receiver(source, types);
         descriptor.return_type = remap_type_ref_archive(&source.return_type, types);
         descriptor.yield_type = source.yield_type.as_ref().map(|ty| remap_type_ref_archive(ty, types));
         for context in &mut descriptor.contexts {
@@ -238,7 +248,9 @@ struct CallableContract<'a> {
     explicit_type_param_ids: &'a [Option<crate::types::TypeParamId>],
     semantic_params: &'a Option<verum_common::List<Option<crate::types::TypeRef>>>,
     semantic_return: &'a Option<crate::types::TypeRef>,
+    source_receiver: &'a Option<crate::types::TypeRef>,
     has_source_body: bool,
+    source_definition: Option<crate::module::SourceDefinitionIdentity>,
 }
 impl<'a> From<&'a FunctionDescriptor> for CallableContract<'a> {
     fn from(descriptor: &'a FunctionDescriptor) -> Self {
@@ -252,7 +264,7 @@ impl<'a> From<&'a FunctionDescriptor> for CallableContract<'a> {
             parent_type, type_params, return_type, contexts, properties, is_generic,
             visibility, is_generator, yield_type, calling_convention, optimization_hints,
             is_test, is_gpu_only, intrinsic_name, is_const, return_type_name,
-            explicit_type_param_ids, semantic_params, semantic_return, has_source_body, declaration_identity,
+            explicit_type_param_ids, semantic_params, semantic_return, source_receiver, has_source_body, source_definition, declaration_identity,
         } = descriptor;
         Self {
             parent_type: *parent_type, type_params, return_type, contexts, properties: *properties,
@@ -260,7 +272,7 @@ impl<'a> From<&'a FunctionDescriptor> for CallableContract<'a> {
             yield_type, calling_convention: *calling_convention, optimization_hints,
             is_test: *is_test, is_gpu_only: *is_gpu_only, intrinsic_name: *intrinsic_name,
             is_const: *is_const, return_type_name: *return_type_name, explicit_type_param_ids,
-            semantic_params, semantic_return, has_source_body: *has_source_body, declaration_identity,
+            semantic_params, semantic_return, source_receiver, has_source_body: *has_source_body, source_definition: *source_definition, declaration_identity,
         }
     }
 }

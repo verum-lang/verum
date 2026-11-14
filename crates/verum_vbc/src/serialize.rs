@@ -942,6 +942,20 @@ impl Serializer {
                 encode_u32(parent.0, &mut self.output);
             }
         }
+        self.output.push(desc.source_receiver.is_some() as u8);
+        if let Some(receiver) = &desc.source_receiver { self.serialize_type_ref(receiver)?; }
+        self.output.push(desc.source_definition.is_some() as u8);
+        if let Some(identity) = &desc.source_definition {
+            if identity.version != verum_ast::source_definition::VERSION || !desc.has_source_body {
+                return Err(crate::error::VbcError::Serialization("invalid source definition identity".into()));
+            }
+            encode_u16(identity.version, &mut self.output);
+            self.output.extend_from_slice(&identity.digest);
+            self.output.push(identity.implementation_scope.is_some() as u8);
+            if let Some(scope) = identity.implementation_scope {
+                self.output.extend_from_slice(&scope);
+            }
+        }
         Ok(())
     }
 

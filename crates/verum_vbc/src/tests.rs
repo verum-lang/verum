@@ -315,7 +315,9 @@ fn test_roundtrip_function_descriptor() {
             value_uses: None,
             semantic_params: None,
             semantic_return: None,
+            source_receiver: None,
             source_signature: None,
+            source_definition: None,
             declaration_identity: None,
     };
 
@@ -384,7 +386,9 @@ fn intrinsic_name_marker_survives_round_trip() {
             value_uses: None,
             semantic_params: None,
             semantic_return: None,
+            source_receiver: None,
             source_signature: None,
+            source_definition: None,
             declaration_identity: None,
     });
     module.header.function_table_count = 1;

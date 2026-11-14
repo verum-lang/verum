@@ -38,7 +38,7 @@ use verum_common::{List, Maybe, Text};
 /// # Specification
 ///
 /// Language profiles control which features are available in a module..1
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum Profile {
     /// Application profile: safe, productive, async-first
     /// - No unsafe operations by default
@@ -302,7 +302,7 @@ impl std::fmt::Display for Profile {
 /// # Specification
 ///
 /// Language profiles control which features are available in a module..1
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct ProfileAttr {
     /// The profiles this module supports
     pub profiles: List<Profile>,
@@ -388,7 +388,7 @@ impl Spanned for ProfileAttr {
 /// # Specification
 ///
 /// Language profiles control which features are available in a module..3
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct FeatureAttr {
     /// Features to enable
     pub features: List<Text>,
@@ -465,7 +465,7 @@ impl Spanned for FeatureAttr {
 /// # Specification
 ///
 /// @std attribute for automatic context provisioning using named context groups.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct StdAttr {
     /// Optional context group name (defaults to ApplicationContext if None)
     pub context_group: Maybe<Text>,
@@ -537,7 +537,7 @@ impl Spanned for StdAttr {
 /// # Specification
 ///
 /// @specialize attribute for protocol implementation specialization (v2.0+ planned).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct SpecializeAttr {
     /// Whether this is negative specialization (!Protocol)
     pub negative: bool,
@@ -643,7 +643,7 @@ impl Spanned for SpecializeAttr {
 /// # Specification
 ///
 /// Lock ordering attribute for static deadlock prevention.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct LockLevelAttr {
     /// The lock level (must be >= 0)
     /// Higher levels must be acquired after lower levels
@@ -677,7 +677,7 @@ impl Spanned for LockLevelAttr {
 /// # Specification
 ///
 /// Lock ordering attribute for static deadlock prevention.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct DeadlockDetectionAttr {
     /// Whether deadlock detection is enabled
     pub enabled: bool,
@@ -714,7 +714,7 @@ impl Spanned for DeadlockDetectionAttr {
 /// Generic attribute structure for items.
 ///
 /// Used for general-purpose attributes like @inline, @deprecated, etc.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct Attribute {
     pub name: Text,
     pub args: Maybe<List<crate::expr::Expr>>,
@@ -755,7 +755,7 @@ impl Spanned for Attribute {
 /// Inline mode for @inline attribute
 ///
 /// Controls function inlining: always, never, release-only, or compiler-decided.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum InlineMode {
     /// @inline - suggest inlining (compiler decides)
     Suggest,
@@ -899,7 +899,7 @@ impl InlineMode {
 /// ```
 ///
 /// Controls function inlining: always, never, release-only, or compiler-decided.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct InlineAttr {
     pub mode: InlineMode,
     pub span: Span,
@@ -952,7 +952,7 @@ impl Spanned for InlineAttr {
 /// ```
 ///
 /// Marks function as cold (rarely called) -- optimizes for size, not speed.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct ColdAttr {
     pub span: Span,
 }
@@ -984,7 +984,7 @@ impl Spanned for ColdAttr {
 /// ```
 ///
 /// Marks function as hot (frequently called) -- optimizes aggressively for speed.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct HotAttr {
     pub span: Span,
 }
@@ -1004,7 +1004,7 @@ impl Spanned for HotAttr {
 /// Optimization level for @optimize attribute
 ///
 /// Loop unrolling hint: full, N times, or disabled.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum OptimizationLevel {
     /// @optimize(none) - No optimization (for debugging)
     None,
@@ -1080,7 +1080,7 @@ impl OptimizationLevel {
 /// ```
 ///
 /// Loop unrolling hint: full, N times, or disabled.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct OptimizeAttr {
     pub level: OptimizationLevel,
     pub span: Span,
@@ -1101,7 +1101,7 @@ impl Spanned for OptimizeAttr {
 /// Vectorization mode for @vectorize and @simd attributes
 ///
 /// Auto-vectorization hint for SIMD acceleration of loops.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum VectorizeMode {
     /// @vectorize - enable auto-vectorization (default)
     Auto,
@@ -1175,7 +1175,7 @@ impl VectorizeMode {
 /// ```
 ///
 /// Auto-vectorization hint for SIMD acceleration of loops.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct VectorizeAttr {
     pub mode: VectorizeMode,
     /// Optional vectorization width hint (e.g., 4, 8, 16)
@@ -1216,7 +1216,7 @@ impl Spanned for VectorizeAttr {
 }
 
 /// Unroll mode for @unroll attribute
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum UnrollMode {
     /// @unroll(N) - unroll loop N times
     Count(u32),
@@ -1321,7 +1321,7 @@ impl UnrollMode {
 /// ```
 ///
 /// Loop optimization hint controlling unrolling behavior.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct UnrollAttr {
     pub mode: UnrollMode,
     pub span: Span,
@@ -1352,7 +1352,7 @@ impl Spanned for UnrollAttr {
 }
 
 /// Prefetch access mode
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum PrefetchAccess {
     #[default]
     Read,
@@ -1421,7 +1421,7 @@ impl PrefetchAccess {
 /// ```
 ///
 /// Memory optimization hint for cache prefetching or alignment.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct PrefetchAttr {
     pub access: PrefetchAccess,
     /// Locality level 0-3 (default: 3)
@@ -1468,7 +1468,7 @@ impl Spanned for PrefetchAttr {
 /// ```
 ///
 /// Memory optimization hint for cache prefetching or alignment.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct AlignAttr {
     /// Alignment in bytes (must be power of 2)
     pub alignment: u32,
@@ -1509,7 +1509,7 @@ impl Spanned for AlignAttr {
 /// ```
 ///
 /// Marks function as hot (frequently called) -- optimizes aggressively for speed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum Likelihood {
     /// @likely - mark as likely to be taken
     Likely,
@@ -1579,7 +1579,7 @@ impl Likelihood {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct LikelihoodAttr {
     pub likelihood: Likelihood,
     pub span: Span,
@@ -1613,7 +1613,7 @@ impl Spanned for LikelihoodAttr {
 /// guarantees and the ν-coordinate carried by the verification ladder.
 /// Ordered from cheapest (Runtime, ν=0) to most expensive
 /// (Synthesize, ν≤ω·3+1).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum VerificationMode {
     /// @verify(runtime) — runtime assertions, ν=0, ~5ns overhead.
     Runtime,
@@ -1888,7 +1888,7 @@ impl VerificationMode {
 /// ```
 ///
 /// Performance contract specifying expected latency/throughput guarantees.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct VerifyAttr {
     /// Verification modes (can be chained)
     pub modes: List<VerificationMode>,
@@ -1992,7 +1992,7 @@ impl Spanned for VerifyAttr {
 ///     ...
 /// }
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct DeterministicFpAttr {
     /// Strictness — how the compiler handles calls to
     /// non-deterministic-fp callees.
@@ -2001,7 +2001,7 @@ pub struct DeterministicFpAttr {
 }
 
 /// How aggressively `@deterministic_fp` flags non-determinism.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default, verum_ast_derive::DefinitionNode)]
 pub enum DeterministicFpStrictness {
     /// Default — calling a non-deterministic-fp function emits a
     /// warning. Intended for incremental adoption: an existing
@@ -2099,7 +2099,7 @@ impl Spanned for DeterministicFpAttr {
 ///
 /// Standard well-founded relations used to prove termination
 /// of recursive functions and loops.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default, verum_ast_derive::DefinitionNode)]
 pub enum WellFoundedRelation {
     /// Natural numbers with < (default for most cases)
     #[default]
@@ -2301,7 +2301,7 @@ impl WellFoundedRelation {
 /// 4. For loops, use `decreases` instead of `@measure`
 ///
 /// Gradual verification attributes for incremental safety assurance..2
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct MeasureAttr {
     /// The measure expression(s) - multiple form lexicographic ordering
     pub measures: List<crate::expr::Expr>,
@@ -2401,7 +2401,7 @@ impl Spanned for MeasureAttr {
 /// use `decreases EXPR` within the loop (already supported by parser).
 ///
 /// Gradual verification attributes for incremental safety assurance..3
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct DecreasesAttr {
     /// The decreasing expression(s)
     pub exprs: List<crate::expr::Expr>,
@@ -2475,7 +2475,7 @@ impl Spanned for DecreasesAttr {
 /// ```
 ///
 /// Gradual verification attributes for incremental safety assurance..4
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct WellFoundedAttr {
     /// The well-founded relation
     pub relation: WellFoundedRelation,
@@ -2553,7 +2553,7 @@ impl Spanned for WellFoundedAttr {
 /// ```
 ///
 /// Gradual verification attributes for incremental safety assurance..5
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct TerminationProofAttr {
     /// The function this proof applies to
     pub target_function: Text,
@@ -2610,7 +2610,7 @@ impl Spanned for TerminationProofAttr {
 /// ```
 ///
 /// Parallel execution hint for independent loop iterations.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct TargetCpuAttr {
     pub cpu: Text,
     pub span: Span,
@@ -2644,7 +2644,7 @@ impl Spanned for TargetCpuAttr {
 /// ```
 ///
 /// No-alias assertion for pointer/reference disambiguation.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct TargetFeatureAttr {
     /// Comma-separated feature list (e.g., "+avx2,+fma")
     pub features: Text,
@@ -2679,7 +2679,7 @@ impl Spanned for TargetFeatureAttr {
 /// ```
 ///
 /// Profile-guided optimization data collection attribute.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum ConstEvalMode {
     /// @const_eval - force compile-time evaluation
     Eval,
@@ -2724,7 +2724,7 @@ impl ConstEvalMode {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct ConstEvalAttr {
     pub mode: ConstEvalMode,
     pub span: Span,
@@ -2764,7 +2764,7 @@ impl Spanned for ConstEvalAttr {
 /// ```
 ///
 /// Profile annotation for PGO-guided optimization.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum PgoAttr {
     /// @profile - mark for profiling
     Profile {
@@ -2910,7 +2910,7 @@ impl Spanned for PgoAttr {
 /// ```
 ///
 /// Target CPU attribute for architecture-specific code generation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum LtoMode {
     /// @no_lto - exclude from LTO
     None,
@@ -2955,7 +2955,7 @@ impl LtoMode {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct LtoAttr {
     pub mode: LtoMode,
     pub span: Span,
@@ -2993,7 +2993,7 @@ impl Spanned for LtoAttr {
 /// ```
 ///
 /// Target feature attribute enabling specific CPU instructions (SSE, AVX, etc.).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum SymbolVisibility {
     /// Hidden - not exported, can be optimized aggressively
     Hidden,
@@ -3039,7 +3039,7 @@ impl SymbolVisibility {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct VisibilityAttr {
     pub visibility: SymbolVisibility,
     pub span: Span,
@@ -3091,7 +3091,7 @@ impl Spanned for VisibilityAttr {
 /// - Symbol versioning: multiple entry points to same implementation
 ///
 /// Symbol aliasing attribute for providing alternative names to exported symbols.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct AliasAttr {
     /// Target symbol name that this alias points to.
     /// Can be a function/static name or a string literal for external symbols.
@@ -3139,7 +3139,7 @@ impl Spanned for AliasAttr {
 /// - Commonly used in embedded/bare-metal for interrupt handlers
 ///
 /// Weak symbol attribute: symbol can be overridden by a strong definition at link time.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct WeakAttr {
     /// Source location.
     pub span: Span,
@@ -3158,7 +3158,7 @@ impl Spanned for WeakAttr {
 }
 
 /// Symbol linkage kind for fine-grained control.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default, verum_ast_derive::DefinitionNode)]
 pub enum LinkageKind {
     /// External linkage - visible outside the module (default for pub).
     #[default]
@@ -3278,7 +3278,7 @@ impl LinkageKind {
 /// ```
 ///
 /// Linkage control attribute for specifying symbol linkage (internal, external, weak).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct LinkageAttr {
     pub kind: LinkageKind,
     pub span: Span,
@@ -3330,7 +3330,7 @@ impl Spanned for LinkageAttr {
 /// On other platforms, uses constructor attribute with priority.
 ///
 /// Init section attribute: function runs during program initialization.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct InitPriorityAttr {
     /// Priority value (101-65535, lower runs first).
     pub priority: u32,
@@ -3373,7 +3373,7 @@ impl Spanned for InitPriorityAttr {
 /// ```
 ///
 /// Section control attribute: places symbol in a specific linker section.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct SectionAttr {
     /// Section name (e.g., ".text.hot", ".rodata.config").
     pub name: Text,
@@ -3411,7 +3411,7 @@ impl Spanned for SectionAttr {
 /// ```
 ///
 /// Export visibility control for shared library symbol tables.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct ExportAttr {
     /// ABI name (e.g., "C", "stdcall", "fastcall").
     pub abi: Text,
@@ -3487,7 +3487,7 @@ impl Spanned for ExportAttr {
 /// The compiler will not generate any code except for inline assembly.
 ///
 /// Naked function attribute: no prologue/epilogue, body must be inline assembly.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct NakedAttr {
     /// Source location.
     pub span: Span,
@@ -3521,7 +3521,7 @@ impl Spanned for NakedAttr {
 /// ```
 ///
 /// Used symbol attribute: prevents linker from stripping this symbol.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct LinkNameAttr {
     /// The symbol name to use for linking.
     pub name: Text,
@@ -3562,7 +3562,7 @@ impl Spanned for LinkNameAttr {
 /// ```
 ///
 /// Naked function: compiler generates no prologue/epilogue.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct NoReturnAttr {
     /// Source location.
     pub span: Span,
@@ -3593,7 +3593,7 @@ impl Spanned for NoReturnAttr {
 /// ```
 ///
 /// Used attribute: prevents linker dead-stripping of this symbol.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct NoMangleAttr {
     /// Source location.
     pub span: Span,
@@ -3642,7 +3642,7 @@ impl Spanned for NoMangleAttr {
 /// In AOT compilation mode, the attribute is informational only.
 ///
 /// Extended attribute position declarations for all syntactic elements.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct LlvmOnlyAttr {
     /// Optional reason why this function is LLVM-only
     pub reason: Maybe<Text>,
@@ -3701,7 +3701,7 @@ impl Spanned for LlvmOnlyAttr {
 /// ```
 ///
 /// MMIO/register hardware access attribute.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct GhostAttr {
     /// Source location.
     pub span: Span,
@@ -3741,7 +3741,7 @@ impl Spanned for GhostAttr {
 /// ```
 ///
 /// MMIO/register hardware access attribute.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct RequiresAttr {
     /// The precondition expression.
     pub condition: Box<crate::expr::Expr>,
@@ -3789,7 +3789,7 @@ impl Spanned for RequiresAttr {
 /// - `old(expr)`: The value of expr at function entry
 ///
 /// MMIO/register hardware access attribute.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct EnsuresAttr {
     /// The postcondition expression.
     pub condition: Box<crate::expr::Expr>,
@@ -3838,7 +3838,7 @@ impl Spanned for EnsuresAttr {
 /// ```
 ///
 /// DMA buffer attribute for hardware direct memory access.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct InvariantAttr {
     /// The invariant expression.
     pub condition: Box<crate::expr::Expr>,
@@ -3873,7 +3873,7 @@ impl Spanned for InvariantAttr {
 /// ```
 ///
 /// Optimization barrier preventing reordering across this point.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct UsedAttr {
     pub span: Span,
 }
@@ -3909,7 +3909,7 @@ impl Spanned for UsedAttr {
 /// ```
 ///
 /// Optimization barrier preventing reordering across this point.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct OptimizeBarrierAttr {
     pub span: Span,
 }
@@ -3942,7 +3942,7 @@ impl Spanned for OptimizeBarrierAttr {
 /// ```
 ///
 /// Optimization barrier preventing reordering across this point.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct BlackBoxAttr {
     pub span: Span,
 }
@@ -3979,7 +3979,7 @@ impl Spanned for BlackBoxAttr {
 /// ```
 ///
 /// IVDEP (ignore vector dependencies) hint for loop vectorization.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum PerformanceContract {
     /// @constant_time - guarantee constant time execution
     ConstantTime { span: Span },
@@ -4129,7 +4129,7 @@ impl PerformanceContract {
 /// ```
 ///
 /// Black box optimization barrier preventing constant folding.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum AccessPattern {
     Sequential,
     Random,
@@ -4172,7 +4172,7 @@ impl AccessPattern {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct AccessPatternAttr {
     pub pattern: AccessPattern,
     pub span: Span,
@@ -4208,7 +4208,7 @@ impl Spanned for AccessPatternAttr {
 /// ```
 ///
 /// Memory optimization hint for cache prefetching or alignment.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum Repr {
     /// @repr(packed) - no padding
     Packed,
@@ -4318,7 +4318,7 @@ impl Repr {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct ReprAttr {
     pub repr: Repr,
     pub span: Span,
@@ -4356,7 +4356,7 @@ impl Spanned for ReprAttr {
 /// ```
 ///
 /// Memory representation control: C layout, packed, aligned, transparent.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct DifferentiableAttr {
     /// Parameters to differentiate with respect to (comma-separated)
     pub wrt: List<Text>,
@@ -4412,7 +4412,7 @@ impl Spanned for DifferentiableAttr {
 /// ```
 ///
 /// Alignment attribute for SIMD-friendly data layout.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum AssumeAttr {
     /// @assume(expr) - assume expression is true
     Condition {
@@ -4467,7 +4467,7 @@ impl Spanned for AssumeAttr {
 /// ```
 ///
 /// Parallel execution hint for independent loop iterations.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct CpuDispatchAttr {
     pub span: Span,
 }
@@ -4538,7 +4538,7 @@ impl Spanned for CpuDispatchAttr {
 /// ```
 ///
 /// Multi-version dispatch: generate multiple function versions for different CPU features.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct MultiversionAttr {
     /// Named variants mapping name to feature requirements
     /// e.g., "avx512" -> "avx512f,avx512vl"
@@ -4547,7 +4547,7 @@ pub struct MultiversionAttr {
 }
 
 /// A single variant in @multiversion.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct MultiversionVariant {
     /// Variant name (e.g., "avx512", "default")
     pub name: Text,
@@ -4629,7 +4629,7 @@ impl Spanned for MultiversionVariant {
 /// ```
 ///
 /// Cache prefetch hint for data locality optimization.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct ParallelAttr {
     pub span: Span,
 }
@@ -4651,7 +4651,7 @@ impl Spanned for ParallelAttr {
 /// Specify reduction operation for parallel loops.
 ///
 /// Cache prefetch hint for data locality optimization.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum ReductionOp {
     Add,      // +
     Multiply, // *
@@ -4680,7 +4680,7 @@ pub struct ReductionOpMeta {
 /// Coarse classification for [`ReductionOp`] used by codegen passes
 /// that need to know whether a reduction is arithmetic, bitwise, or
 /// short-circuit-logical.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum ReductionOpKind {
     Arithmetic,
     Bitwise,
@@ -4790,7 +4790,7 @@ impl ReductionOp {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct ReduceAttr {
     pub op: ReductionOp,
     pub span: Span,
@@ -4820,7 +4820,7 @@ impl Spanned for ReduceAttr {
 /// ```
 ///
 /// Loop optimization hint controlling unrolling behavior.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct NoAliasAttr {
     pub span: Span,
 }
@@ -4852,7 +4852,7 @@ impl Spanned for NoAliasAttr {
 /// ```
 ///
 /// Cache prefetch hint for data locality optimization.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct IvdepAttr {
     pub span: Span,
 }
@@ -4873,7 +4873,7 @@ impl Spanned for IvdepAttr {
 ///
 /// This enum represents all parsed optimization attributes in a unified form
 /// that can be efficiently processed during code generation.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum OptimizationAttr {
     Inline(InlineAttr),
     Cold(ColdAttr),
@@ -4962,7 +4962,7 @@ impl Spanned for OptimizationAttr {
 /// ```
 ///
 /// Meta-system attributes for compile-time code generation. Section 10
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct TaggedLiteralAttr {
     /// The literal tag (e.g., "json", "img", "sql")
     pub tag: Text,
@@ -4983,7 +4983,7 @@ impl Spanned for TaggedLiteralAttr {
 }
 
 /// Collection of optimization attributes for a function/type/loop
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct OptimizationHints {
     pub inline: Maybe<InlineAttr>,
     pub cold: Maybe<ColdAttr>,
@@ -5114,7 +5114,7 @@ impl OptimizationHints {
 ///
 /// This struct collects all termination-related attributes that can be
 /// attached to a function for verification purposes.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct TerminationHints {
     /// The measure function for termination (@measure)
     pub measure: Maybe<MeasureAttr>,
@@ -5171,7 +5171,7 @@ impl TerminationHints {
 }
 
 /// Unified termination attribute enum for the parser/collector
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum TerminationAttr {
     Measure(MeasureAttr),
     Decreases(DecreasesAttr),
@@ -5240,7 +5240,7 @@ impl Spanned for TerminationAttr {
 /// # Specification
 ///
 /// Context transformation attribute (e.g., .transactional(), .scoped()).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct TransformAttr {
     /// Optional transform name (defaults to function name)
     pub name: Maybe<Text>,
@@ -5347,7 +5347,7 @@ impl Default for TransformAttr {
 /// # Specification
 ///
 /// @inject attribute for field-level dependency injection.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum InjectionScope {
     /// Created once, shared across all uses (0ns overhead)
     Singleton,
@@ -5462,7 +5462,7 @@ impl InjectionScope {
 /// # Specification
 ///
 /// @injectable attribute for marking types as injectable with scope control.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct InjectableAttr {
     /// The injection scope for this type
     pub scope: InjectionScope,
@@ -5532,7 +5532,7 @@ impl Spanned for InjectableAttr {
 /// # Specification
 ///
 /// Injection scope: singleton, scoped, or transient lifetime.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct InjectAttr {
     /// Source location
     pub span: Span,
@@ -5592,7 +5592,7 @@ impl Default for InjectAttr {
 /// - `get_field() -> T`: Extract with proper masking/shifting
 /// - `set_field(value: T)`: Update with bounds checking
 /// - `with_field(value: T) -> Self`: Builder-style immutable update
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct BitsAttr {
     /// Number of bits this field occupies
     pub width: u32,
@@ -5654,7 +5654,7 @@ impl std::fmt::Display for BitsAttr {
 /// - Hardware registers with reserved/unused bit ranges
 /// - Protocol fields at non-contiguous positions
 /// - Overlay patterns where fields share the same bits
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct BitOffsetAttr {
     /// Bit offset from start of container (0-indexed)
     pub offset: u32,
@@ -5718,7 +5718,7 @@ impl std::fmt::Display for BitOffsetAttr {
 /// - All fields have `@bits(N)` specification
 /// - No fields overlap (unless `@allow_overlap` is present)
 /// - Total bit count fits within container alignment
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, verum_ast_derive::DefinitionNode)]
 pub struct BitfieldAttr {
     /// Allow overlapping fields (union-like semantics)
     pub allow_overlap: bool,
@@ -5799,7 +5799,7 @@ impl Spanned for BitfieldAttr {
 ///
 /// If `@endian` is omitted, `little` is used as the default,
 /// matching common hardware platforms.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct EndianAttr {
     /// The byte order mode
     pub byte_order: crate::bitfield::ByteOrder,
@@ -5889,7 +5889,7 @@ impl std::fmt::Display for EndianAttr {
 /// # Specification
 ///
 /// Register block attribute for memory-mapped hardware register groups.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default, verum_ast_derive::DefinitionNode)]
 pub struct RegisterBlockAttr {
     /// Base address of the register block
     pub base_address: u64,
@@ -5979,7 +5979,7 @@ impl std::fmt::Display for RegisterBlockAttr {
 /// purpose. Context determines which is applicable:
 /// - On @bitfield types: BitOffsetAttr (bit offset)
 /// - On @register_block types: RegisterOffsetAttr (byte offset)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct RegisterOffsetAttr {
     /// Byte offset from the start of the register block
     pub offset: u64,
@@ -6035,7 +6035,7 @@ impl std::fmt::Display for RegisterOffsetAttr {
 /// # Specification
 ///
 /// Register access mode: read-only, write-only, or read-write.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum AccessMode {
     /// Read-only: only read() is allowed
     ReadOnly,
@@ -6183,7 +6183,7 @@ impl std::fmt::Display for AccessMode {
 /// # Specification
 ///
 /// Interrupt handler attribute with handler type and priority.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum InterruptKind {
     /// Regular interrupt: standard prologue saves all caller-saved registers.
     Regular,
@@ -6355,7 +6355,7 @@ impl std::fmt::Display for InterruptKind {
 /// # Specification
 ///
 /// Naked function: compiler generates no prologue/epilogue. (Interrupt Handler Codegen)
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct InterruptAttr {
     /// The kind of interrupt handler.
     pub kind: InterruptKind,
@@ -6490,7 +6490,7 @@ impl std::fmt::Display for InterruptAttr {
 /// # Specification
 ///
 /// Critical section attribute: disables interrupts within the annotated scope.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct CriticalSectionAttr {
     /// If Some, only mask interrupts below this priority (BASEPRI on ARM).
     /// If None, disable all maskable interrupts.
@@ -6580,7 +6580,7 @@ impl std::fmt::Display for CriticalSectionAttr {
 /// Attached to `axiom` or `theorem` declarations — or to a user-defined
 /// lemma that depends transitively on one of these external results and
 /// wants to make the dependency explicit.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct FrameworkAttr {
     /// Framework identifier — short, stable, machine-readable.
     /// Convention: `snake_case` matching the file under
@@ -6694,7 +6694,7 @@ impl std::fmt::Display for FrameworkAttr {
 ///
 /// Used by the cross-framework bridges in
 /// `core/theory_interop/bridges/<source>_to_<target>.vr`.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct FrameworkTranslateAttr {
     /// Source framework identifier (e.g., `owl2_fs`).
     pub source: Text,
@@ -6812,7 +6812,7 @@ impl std::fmt::Display for FrameworkTranslateAttr {
 ///
 /// Mirrors `verum_smt::program_extraction::ExtractionTarget` shape so
 /// the elaborator can map directly when dispatching.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum ExtractTarget {
     /// Verum native code (default).
     Verum,
@@ -6877,7 +6877,7 @@ impl std::fmt::Display for ExtractTarget {
 /// signature instead of synthesising the body from the proof term —
 /// useful when the proof is a specification of a primitive that the
 /// runtime provides natively (e.g. crypto stubs, intrinsic wrappers).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct ExtractAttr {
     pub target: ExtractTarget,
     /// Name of a native function to bind the extracted scaffold to.
@@ -6952,7 +6952,7 @@ impl std::fmt::Display for ExtractAttr {
 /// materialised in the target language. The optional `realize=`
 /// kwarg binds the witness to a hand-written native function (same
 /// semantics as on `@extract`).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct ExtractWitnessAttr {
     pub target: ExtractTarget,
     pub realize: Maybe<Text>,
@@ -7016,7 +7016,7 @@ impl std::fmt::Display for ExtractWitnessAttr {
 /// (rather than the static proof being erased entirely). The
 /// optional `realize=` kwarg binds the contract wrapper to a
 /// hand-written native function (same semantics as on `@extract`).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct ExtractContractAttr {
     pub target: ExtractTarget,
     pub realize: Maybe<Text>,
@@ -7231,7 +7231,7 @@ fn extract_target_from_attr_args(attr: &Attribute) -> Maybe<ExtractTarget> {
 /// Unicode (`ε_prove`) and ASCII (`epsilon_prove`) spellings are both
 /// accepted at parse time; the typed form stores the canonical Unicode
 /// string so `verum audit --epsilon` renders deterministically.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct EnactAttr {
     /// Canonical ε-primitive identifier, e.g. `"ε_prove"`, `"ε_compute"`.
     pub epsilon: Text,
@@ -7479,7 +7479,7 @@ impl std::fmt::Display for EnactAttr {
 /// `kind` discriminates require vs disable; `extension` is the
 /// foundation-neutral identifier (`vfe_1`, `vfe_2`, …, `vfe_10`,
 /// `vfe_plus_1`, …) of the extension being toggled.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum ExtensionToggleKind {
     /// `@require_extension(vfe_N)` — opt-in.
     Require,
@@ -7550,7 +7550,7 @@ impl ExtensionToggleKind {
 /// validated extension identifier; the `kind` field discriminates
 /// require / disable so the elaborator can run two parallel
 /// extension-set walks.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct ExtensionRequirementAttr {
     /// Whether this is a `@require_extension` or `@disable_extension`.
     pub kind: ExtensionToggleKind,
@@ -7687,7 +7687,7 @@ impl std::fmt::Display for ExtensionRequirementAttr {
 /// ordinal arithmetic here — that lives in the audit pass +
 /// framework-axiom registry; the AST attribute records the
 /// claim verbatim.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct AccessibilityAttr {
     /// Canonical ordinal token (e.g. `"omega"`, `"omega_1"`,
     /// `"omega+1"`, `"0"`).
@@ -7845,7 +7845,7 @@ impl std::fmt::Display for AccessibilityAttr {
 ///
 /// The attribute admits no arguments. `@owl2_class` is the canonical
 /// form; `@owl2_class()` is also accepted for parser uniformity.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct Owl2ClassAttr {
     pub span: Span,
 }
@@ -7880,7 +7880,7 @@ impl Spanned for Owl2ClassAttr {
 /// `@owl2_subclass_of(<class_name>)` — marks the decorated type as a
 /// subclass of the named OWL 2 class. The class name resolves through
 /// the surrounding module's import graph.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct Owl2SubClassOfAttr {
     pub parent: Text,
     pub span: Span,
@@ -7922,7 +7922,7 @@ impl Spanned for Owl2SubClassOfAttr {
 /// type as disjoint from each of the listed OWL 2 classes. Lowers to
 /// a `DisjointClasses(self, c1, c2, ...)` axiom invocation per
 /// Shkotin Table 5.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct Owl2DisjointWithAttr {
     pub disjoint_classes: Vec<Text>,
     pub span: Span,
@@ -7998,7 +7998,7 @@ impl Spanned for Owl2DisjointWithAttr {
 
 /// One of the seven OWL 2 object-property characteristics
 /// (Shkotin 2019 Table 6).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum Owl2Characteristic {
     Transitive,
     Symmetric,
@@ -8109,7 +8109,7 @@ impl Owl2Characteristic {
 /// `@owl2_characteristic("Transitive" | "Symmetric" | ...)` — marks
 /// the decorated function (interpreted as an OWL 2 ObjectProperty) with
 /// one of the seven Shkotin Table 6 characteristic flags.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct Owl2CharacteristicAttr {
     pub characteristic: Owl2Characteristic,
     pub span: Span,
@@ -8245,7 +8245,7 @@ fn parse_class_name_arg(arg: &crate::expr::Expr) -> Option<Text> {
 /// Lowers to a chain of `ObjectPropertyDomain` + `ObjectPropertyRange`
 /// + per-flag `<Char>ObjectProperty` axiom invocations + (when
 /// inverse_of is supplied) `InverseObjectProperties`.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct Owl2PropertyAttr {
     pub domain: Maybe<Text>,
     pub range: Maybe<Text>,
@@ -8347,7 +8347,7 @@ impl Spanned for Owl2PropertyAttr {
 /// `@owl2_equivalent_class(<class_expr>)` — declares the decorated
 /// class equivalent to another class expression. Lowers to
 /// `EquivalentClasses(self, expr)` per Shkotin Table 5.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct Owl2EquivalentClassAttr {
     pub equivalent_to: Text,
     pub span: Span,
@@ -8396,7 +8396,7 @@ impl Spanned for Owl2EquivalentClassAttr {
 /// design decision per Shkotin §2.3.5; routes HasKey
 /// obligations to `@verify(proof)` because the DL reasoner case
 /// requires a user-supplied tactic.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct Owl2HasKeyAttr {
     pub key_properties: Vec<Text>,
     pub span: Span,
@@ -8587,6 +8587,7 @@ fn parse_named_characteristic_list_arg(
 /// is `Many` (existing code stays unchanged).
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default,
+    verum_ast_derive::DefinitionNode,
 )]
 pub enum Quantity {
     /// `@quantity(0)` — erased (compile-time only).
@@ -8708,7 +8709,7 @@ impl Quantity {
 
 /// `@quantity(0 | 1 | omega)` — Atkey QTT quantity annotation on a
 /// binder (function parameter, let-binding, type-level binding, etc.).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct QuantityAttr {
     pub quantity: Quantity,
     pub span: Span,
@@ -8817,7 +8818,7 @@ impl std::fmt::Display for QuantityAttr {
 /// @doc(ru, "Русское описание")
 /// fn translated() { ... }
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct DocAttr {
     /// Raw Markdown body of the documentation. Pre-cross-reference
     /// resolution; structured rendering happens at doc-generation

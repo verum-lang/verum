@@ -57,7 +57,7 @@ use crate::span::Span;
 /// // @derive(Clone, Serialize) - variadic identifiers
 /// let variadic = ArgSpec::Variadic(ArgType::Ident);
 /// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default, verum_ast_derive::DefinitionNode)]
 pub enum ArgSpec {
     /// No arguments allowed: `@cold`, `@hot`, `@packed`
     #[default]
@@ -199,7 +199,7 @@ impl ArgSpec {
 /// Type of a single attribute argument value.
 ///
 /// Used to validate argument values at compile time.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum ArgType {
     /// Identifier: `Clone`, `always`, `never`, `C`
     Ident,
@@ -343,7 +343,7 @@ impl std::fmt::Display for ArgType {
 /// // @validate(min = 1) -- required
 /// let min_arg = NamedArgSpec::required("min", ArgType::Int);
 /// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct NamedArgSpec {
     /// Argument name (the key in `key = value`)
     pub name: Text,

@@ -51,7 +51,7 @@ use verum_common::{Heap, List, Maybe};
 /// transformed (`Database.transactional()`). Contexts are declared with `using [...]`
 /// after the return type and provided with `provide Context = expr` in lexical scope.
 /// Resolution is via task-local storage (theta) with ~5-30ns lookup overhead.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct ContextRequirement {
     pub path: Path,
     pub args: List<Type>,
@@ -126,7 +126,7 @@ impl Spanned for ContextRequirement {
 /// fn query() using [Database.transactional()] -> Data { ... }
 /// fn cached() using [Cache.scoped("user")] -> User { ... }
 /// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct ContextTransform {
     pub name: Ident,
     pub args: List<Expr>,
@@ -143,7 +143,7 @@ impl Spanned for ContextTransform {
 ///
 /// This is a thin wrapper around `List<ContextRequirement>` that provides
 /// convenient constructors and utility methods.
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct ContextList {
     pub requirements: List<ContextRequirement>,
 }

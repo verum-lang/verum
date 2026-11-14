@@ -88,7 +88,7 @@ use verum_common::Maybe;
 /// @bits(16) port: U16, // Valid: 16 <= 16
 /// @bits(1) flag: Bool, // Valid: boolean as single bit
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct BitWidth {
     /// The number of bits this field occupies
     pub bits: u32,
@@ -144,7 +144,7 @@ impl std::fmt::Display for BitWidth {
 /// @endian(little) // x86/ARM hardware registers
 /// @endian(native) // Platform-specific (rarely recommended)
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default, verum_ast_derive::DefinitionNode)]
 pub enum ByteOrder {
     /// Big-endian: Most significant byte at lowest address.
     /// Standard for network protocols (network byte order).
@@ -214,7 +214,7 @@ impl std::fmt::Display for ByteOrder {
 /// @bits(8) @offset(0) low_byte: U8,
 /// @bits(8) @offset(24) high_byte: U8, // Skip bits 8-23
 /// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct BitSpec {
     /// The bit width of this field
     pub width: BitWidth,
@@ -305,7 +305,7 @@ impl Spanned for BitSpec {
 ///
 /// let f2 = f.with_priority(7); // Immutable update
 /// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct BitLayout {
     /// Byte order for multi-byte containers
     pub byte_order: ByteOrder,
@@ -394,7 +394,7 @@ impl Default for BitLayout {
 /// - Generate correct accessor masks and shifts
 /// - Determine container type and alignment
 /// - Produce optimal bit manipulation code
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct ResolvedBitLayout {
     /// Total size in bits (rounded up to byte boundary for storage)
     pub total_bits: u32,
@@ -444,7 +444,7 @@ impl ResolvedBitLayout {
 /// Resolved layout information for a single bitfield member.
 ///
 /// Contains all information needed to generate accessor code.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct ResolvedBitField {
     /// Field name for error messages and codegen
     pub name: String,

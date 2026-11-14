@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use verum_common::{Heap, Maybe, Text};
 
 /// A statement in Verum.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub struct Stmt {
     pub kind: StmtKind,
     pub span: Span,
@@ -63,7 +63,7 @@ impl Spanned for Stmt {
 }
 
 /// The kind of statement.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, verum_ast_derive::DefinitionNode)]
 pub enum StmtKind {
     /// Let binding: let x = expr or let x: T = expr
     Let {

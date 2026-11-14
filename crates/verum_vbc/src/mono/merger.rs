@@ -531,6 +531,11 @@ impl ModuleMerger {
             }
             new_func.semantic_params = specialized.semantic_params;
             new_func.semantic_return = specialized.semantic_return;
+            new_func.source_receiver = specialized.source_receiver;
+            // Substitution creates a derived body, not a second declaration of
+            // the original AST. Keep its concrete semantic receiver, but never
+            // advertise it as authority to replay the unspecialized definition.
+            new_func.source_definition = None;
             new_func.return_type = specialized.return_type;
 
             // The specializer already applied the declaration's owner binders.

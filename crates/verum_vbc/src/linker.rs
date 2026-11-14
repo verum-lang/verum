@@ -977,6 +977,8 @@ impl VbcLinker {
         out.return_type = self.remap_type_ref(&src.return_type, remap)?;
         out.semantic_return = src.semantic_return.as_ref()
             .map(|ty| self.remap_type_ref(ty, remap)).transpose()?;
+        out.source_receiver = src.source_receiver.as_ref()
+            .map(|ty| self.remap_type_ref(ty, remap)).transpose()?;
         for ctx in out.contexts.iter_mut() {
             *ctx = remap.map_context(*ctx)?;
         }
@@ -1404,7 +1406,9 @@ mod tests {
             value_uses: None,
             semantic_params: None,
             semantic_return: None,
+            source_receiver: None,
             source_signature: None,
+            source_definition: None,
             declaration_identity: None,
         };
         let n0 = a.intern_string("alpha");
