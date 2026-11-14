@@ -961,7 +961,12 @@ fn execute_method_call(
     // Only that pair gets the second hop: broader fixed-point peeling
     // changes observable &mut write-back semantics (the monad
     // left-identity regressions the first two drafts introduced).
-    let mut dispatch_receiver = if is_cbgr_ref(&receiver) {
+    let mut dispatch_receiver = if receiver.is_projected_slot() {
+        // Checked sequences retain their owner ticket; only element projections
+        // denote one value. The shared reader validates lifetime and READ rights
+        // using the projection's encoding before either reaches dispatch.
+        resolve_arg_value(state, receiver)?
+    } else if is_cbgr_ref(&receiver) {
         let slot_val = {
             let (abs_index, _) = decode_cbgr_ref(receiver);
             state.registers.get_absolute(abs_index)

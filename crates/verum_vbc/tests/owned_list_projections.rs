@@ -3,9 +3,9 @@ use verum_common::List;
 use verum_vbc::{
     bytecode::encode_instruction,
     deserialize::deserialize_module,
-    instruction::{CbgrSubOpcode as C, Instruction as I, MemSubOpcode, Reg},
+    instruction::{CbgrSubOpcode as C, Instruction as I, MemSubOpcode, Reg, RegRange},
     interpreter::{Interpreter, InterpreterError, InterpreterResult, Object},
-    module::{FunctionDescriptor, FunctionId, VbcModule},
+    module::{FunctionDescriptor, FunctionId, ParamDescriptor, VbcModule},
     serialize::serialize_module,
     types::TypeId,
     value::{Capabilities, Value},
@@ -19,6 +19,7 @@ fn cbgr(op: C, args: &[u8]) -> I {
 }
 fn fixture() -> Interpreter {
     let mut module = VbcModule::new("projection_contract".into());
+    let receiver_identity = module.strings.intern("owner.receiver_identity");
     let bodies: List<(&str, List<I>)> = [
         (
             "mutable",
@@ -170,6 +171,41 @@ fn fixture() -> Interpreter {
             .collect(),
         ),
         (
+            "owner.receiver_identity",
+            [
+                I::Deref {
+                    dst: Reg(4),
+                    ref_reg: Reg(0),
+                },
+                I::Ret { value: Reg(4) },
+            ]
+            .into_iter()
+            .collect(),
+        ),
+        (
+            "method",
+            [
+                I::CallM {
+                    dst: Reg(4),
+                    receiver: Reg(0),
+                    method_id: receiver_identity.0,
+                    args: RegRange::new(Reg(1), 0),
+                },
+                I::Ret { value: Reg(4) },
+            ]
+            .into_iter()
+            .collect(),
+        ),
+        (
+            "writeonly",
+            [
+                cbgr(C::CapAttenuate, &[4, 0, Capabilities::WRITE as u8, 0]),
+                I::Ret { value: Reg(4) },
+            ]
+            .into_iter()
+            .collect(),
+        ),
+        (
             "raw",
             [cbgr(C::Unslice, &[4, 0]), I::Ret { value: Reg(4) }]
                 .into_iter()
@@ -181,6 +217,12 @@ fn fixture() -> Interpreter {
     for (name, body) in bodies {
         let mut descriptor = FunctionDescriptor::new(module.strings.intern(name));
         descriptor.id = FunctionId(module.functions.len() as u32);
+        if name == "owner.receiver_identity" {
+            descriptor.params.push(ParamDescriptor {
+                name: module.strings.intern("self"),
+                ..Default::default()
+            });
+        }
         descriptor.register_count = 8;
         descriptor.bytecode_offset = module.bytecode.len() as u32;
         for instruction in body {
@@ -603,4 +645,170 @@ fn raw_invalidation_retires_existing_and_new_sequence_projections() {
     );
     // Retirement leaves allocator ownership intact until explicit deallocation.
     call(&mut vm, "free", &[raw]).unwrap();
+}
+
+#[test]
+fn method_calls_preserve_sequence_tickets_and_subview_offsets() {
+    for bytes in [false, true] {
+        let mut vm = fixture();
+        let (owner, _) = list(&mut vm, bytes);
+        let span = full(&mut vm, &owner, true);
+        let sub = call(
+            &mut vm,
+            "subview",
+            &[span, Value::from_i64(1), Value::from_i64(3)],
+        )
+        .unwrap();
+        for (input, count, first) in [(span, 3, 11), (sub, 2, 42)] {
+            let output = call(&mut vm, "method", &[input]).unwrap();
+            assert_eq!(
+                output.bits(),
+                input.bits(),
+                "the method must retain its owner ticket"
+            );
+            assert!(output.try_as_thin_ref().is_none());
+            assert_eq!(
+                call(&mut vm, "len", &[output]).unwrap().try_as_i64(),
+                Some(count)
+            );
+            assert_eq!(
+                call(&mut vm, "get", &[output, Value::from_i64(0)])
+                    .unwrap()
+                    .try_as_i64(),
+                Some(first)
+            );
+        }
+        let selected = element(&mut vm, sub, 0);
+        call(&mut vm, "write", &[selected, Value::from_i64(73)]).unwrap();
+        assert_eq!(
+            call(&mut vm, "get", &[span, Value::from_i64(1)])
+                .unwrap()
+                .try_as_i64(),
+            Some(73)
+        );
+    }
+}
+
+#[test]
+fn method_calls_read_elements_using_their_exact_encoding() {
+    for bytes in [false, true] {
+        let mut vm = fixture();
+        let (owner, _) = list(&mut vm, bytes);
+        let span = full(&mut vm, &owner, true);
+        let selected = element(&mut vm, span, 1);
+        let expected = if bytes {
+            Value::from_i64(254)
+        } else {
+            Value::from_f64(-3.25)
+        };
+        call(&mut vm, "write", &[selected, expected]).unwrap();
+        assert_eq!(
+            call(&mut vm, "method", &[selected]).unwrap().bits(),
+            expected.bits()
+        );
+        assert_eq!(
+            call(&mut vm, "get", &[span, Value::from_i64(0)])
+                .unwrap()
+                .try_as_i64(),
+            Some(11)
+        );
+        assert_eq!(
+            call(&mut vm, "get", &[span, Value::from_i64(2)])
+                .unwrap()
+                .try_as_i64(),
+            Some(99)
+        );
+    }
+}
+
+#[test]
+fn method_calls_respect_projection_read_capabilities() {
+    for bytes in [false, true] {
+        let mut vm = fixture();
+        let (owner, _) = list(&mut vm, bytes);
+        let span = full(&mut vm, &owner, true);
+        let readonly = call(&mut vm, "attenuate", &[span]).unwrap();
+        let readonly = call(&mut vm, "method", &[readonly]).unwrap();
+        let selected = element(&mut vm, readonly, 1);
+        assert_eq!(
+            call(&mut vm, "method", &[selected]).unwrap().try_as_i64(),
+            Some(42)
+        );
+        capability(call(&mut vm, "write", &[selected, Value::from_i64(73)]).unwrap_err());
+        let mutable_element = element(&mut vm, span, 1);
+        for input in [span, mutable_element] {
+            let writeonly = call(&mut vm, "writeonly", &[input]).unwrap();
+            let result = call(&mut vm, "method", &[writeonly]);
+            assert!(
+                matches!(result, Err(InterpreterError::CapabilityDenied { required, .. })
+                    if required & u64::from(Capabilities::READ) != 0),
+                "{result:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn method_calls_reject_retired_owners_and_backings() {
+    for bytes in [false, true] {
+        for retire_owner in [false, true] {
+            let mut vm = fixture();
+            let (owner, backing) = list(&mut vm, bytes);
+            let span = full(&mut vm, &owner, true);
+            let selected = element(&mut vm, span, 1);
+            // SAFETY: after retirement only checked tickets access the retired allocation.
+            unsafe {
+                vm.state
+                    .heap
+                    .free(if retire_owner { owner } else { backing })
+            };
+            stale(call(&mut vm, "method", &[span]).unwrap_err());
+            stale(call(&mut vm, "method", &[selected]).unwrap_err());
+        }
+    }
+}
+
+#[test]
+fn method_calls_reject_replaced_or_revoked_sequence_owners() {
+    for bytes in [false, true] {
+        for replace_backing in [false, true] {
+            let mut vm = fixture();
+            let (owner, old_backing) = list(&mut vm, bytes);
+            let span = full(&mut vm, &owner, true);
+            let selected = element(&mut vm, span, 1);
+            if replace_backing {
+                let (_, replacement) = list(&mut vm, bytes);
+                // SAFETY: both allocations are live; update only the owner's backing slot.
+                unsafe {
+                    owner
+                        .data_ptr()
+                        .cast::<Value>()
+                        .add(2)
+                        .write(Value::from_ptr(replacement.as_ptr()));
+                }
+            } else {
+                let fresh = full(&mut vm, &owner, true);
+                assert_eq!(
+                    call(&mut vm, "method", &[fresh]).unwrap().bits(),
+                    fresh.bits()
+                );
+            }
+            assert!(vm.state.heap.contains(old_backing.as_ptr()));
+            stale(call(&mut vm, "method", &[span]).unwrap_err());
+            stale(call(&mut vm, "method", &[selected]).unwrap_err());
+        }
+    }
+}
+
+#[test]
+fn method_calls_reject_foreign_projection_tickets() {
+    for bytes in [false, true] {
+        let mut issuer = fixture();
+        let (owner, _) = list(&mut issuer, bytes);
+        let span = full(&mut issuer, &owner, true);
+        let selected = element(&mut issuer, span, 1);
+        let mut foreign = fixture();
+        stale(call(&mut foreign, "method", &[span]).unwrap_err());
+        stale(call(&mut foreign, "method", &[selected]).unwrap_err());
+    }
 }
