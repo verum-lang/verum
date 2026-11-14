@@ -10,21 +10,32 @@ use crate::types::TypeRef;
 // An associated projection is still a deferred type, even when its base is
 // concrete. Rank-2 binders need their own substitution scope (T1521).
 pub(crate) fn concrete(ty: &TypeRef) -> bool {
-    match ty {
-        TypeRef::Generic(_)
-        | TypeRef::AssociatedProjection { .. }
-        | TypeRef::RecordFieldProjection { .. }
-        | TypeRef::Rank2Function { .. } | TypeRef::Dynamic(_) => false,
-        TypeRef::Instantiated { args, .. } | TypeRef::Tuple(args) => args.iter().all(concrete),
-        TypeRef::Function {
-            params,
-            return_type,
-            ..
-        } => params.iter().all(concrete) && concrete(return_type),
-        TypeRef::Reference { inner, .. } | TypeRef::Slice(inner) => concrete(inner),
-        TypeRef::Array { element, .. } => concrete(element),
-        _ => true,
+    let mut pending = verum_common::List::from_iter([(ty, 0u32, 0usize)]);
+    let mut remaining = crate::types::MAX_TYPE_REF_NODES - 1;
+    while let Some((ty, binders, depth)) = pending.pop() {
+        if depth >= crate::types::MAX_TYPE_REF_DEPTH { return false; }
+        match ty {
+            TypeRef::Generic(id) if u32::from(id.0) >= binders => return false,
+            TypeRef::AssociatedProjection { .. }
+            | TypeRef::RecordFieldProjection { .. }
+            | TypeRef::Rank2Function { .. } => return false,
+            _ => {},
+        }
+        // A closed existential is an exact semantic argument. Its hidden
+        // subject is local; free caller slots in every bound and equality
+        // still require evidence. Layout is checked independently.
+        let child_binders = binders + u32::from(matches!(ty, TypeRef::Dynamic(_)));
+        let mut exhausted = false;
+        ty.for_each_child(|child| {
+            if remaining == 0 { exhausted = true; }
+            else {
+                remaining -= 1;
+                pending.push((child, child_binders, depth + 1));
+            }
+        });
+        if exhausted { return false; }
     }
+    true
 }
 
 #[cfg(test)]
@@ -51,7 +62,10 @@ pub fn canonical_type_args(func: &FunctionDescriptor, args: &[TypeRef]) -> Optio
     if args.is_empty() {
         return None;
     }
-    if !func.type_params.is_empty() && args.len() > func.type_params.len() {
+    if func.type_params.is_empty() {
+        return args.iter().all(concrete).then(|| args.to_vec());
+    }
+    if args.len() > func.type_params.len() {
         // Old metadata can omit actual const slots. Preserve a concrete
         // indexed vector in full; compacting it would erase specialization
         // identity and leave the body's LoadT for that slot unsubstituted.
@@ -68,9 +82,7 @@ pub fn canonical_type_args(func: &FunctionDescriptor, args: &[TypeRef]) -> Optio
             return None;
         }
     }
-    let actual = if func.type_params.is_empty() {
-        args.to_vec()
-    } else {
+    let actual = {
         let subst = TypeSubstitution::from_function(func, args);
         func.type_params
             .iter()

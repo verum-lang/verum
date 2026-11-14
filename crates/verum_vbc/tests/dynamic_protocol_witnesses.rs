@@ -106,6 +106,53 @@ fn object(argument: TypeRef, equality: TypeRef) -> TypeRef {
 }
 
 #[test]
+fn monomorphization_keeps_closed_existentials_and_rejects_free_callers() {
+    use verum_vbc::{module::FunctionDescriptor, mono::canonical_type_args, types::StringId};
+    let declaration = FunctionDescriptor::new(StringId::EMPTY);
+    let closed = object(parameter(0), TypeRef::Concrete(TypeId::INT));
+    for witness in [closed.clone(), TypeRef::Tuple(vec![closed.clone()]),
+        object(parameter(0), object(parameter(1), parameter(0)))]
+    {
+        assert_eq!(canonical_type_args(&declaration, &[witness.clone()]), Some(vec![witness]));
+    }
+    for witness in [parameter(0), object(parameter(1), parameter(0)),
+        object(parameter(0), parameter(1)), object(parameter(0), object(parameter(2), parameter(0)))]
+    {
+        assert_eq!(canonical_type_args(&declaration, &[witness]), None);
+    }
+}
+
+#[test]
+fn existential_bounds_do_not_resolve_deferred_projection_obligations() {
+    use verum_vbc::{module::FunctionDescriptor, mono::canonical_type_args, types::StringId};
+    let declaration = FunctionDescriptor::new(StringId::EMPTY);
+    for deferred in [
+        TypeRef::AssociatedProjection { base: Box::new(TypeRef::Concrete(TypeId::INT)),
+            qualifier: None, assoc: "Item".into(), args: vec![] },
+        TypeRef::RecordFieldProjection { owner: TypeId(3001), ordinal: 0 },
+        TypeRef::Rank2Function { is_async: false, type_param_count: 1,
+            params: vec![parameter(0)], return_type: Box::new(parameter(0)), contexts: Default::default() },
+    ] {
+        assert_eq!(canonical_type_args(&declaration, &[object(parameter(0), deferred)]), None);
+    }
+}
+
+#[test]
+fn concrete_witness_discovery_obeys_the_shared_type_resource_limits() {
+    use verum_vbc::{module::FunctionDescriptor, mono::canonical_type_args,
+        types::{MAX_TYPE_REF_DEPTH, MAX_TYPE_REF_NODES, StringId}};
+    let declaration = FunctionDescriptor::new(StringId::EMPTY);
+    let mut nested = TypeRef::Concrete(TypeId::INT);
+    for _ in 1..MAX_TYPE_REF_DEPTH { nested = TypeRef::Slice(Box::new(nested)); }
+    assert!(canonical_type_args(&declaration, &[nested.clone()]).is_some());
+    assert!(canonical_type_args(&declaration, &[TypeRef::Slice(Box::new(nested))]).is_none());
+    let wide = TypeRef::Tuple(vec![TypeRef::Concrete(TypeId::INT); MAX_TYPE_REF_NODES - 1]);
+    assert!(canonical_type_args(&declaration, &[wide]).is_some());
+    let oversized = TypeRef::Tuple(vec![TypeRef::Concrete(TypeId::INT); MAX_TYPE_REF_NODES]);
+    assert!(canonical_type_args(&declaration, &[oversized]).is_none());
+}
+
+#[test]
 fn existential_subject_cannot_capture_a_free_parameter_replacement() {
     use verum_vbc::{mono::TypeSubstitution, types::TypeParamId};
     let input = object(
