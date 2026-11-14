@@ -34,7 +34,7 @@ const SOURCE: &str = r#"
     // A user type with the same leaf name must keep its own source method.
     type Once is { state: Int };
     implement Once {
-        fn call_once(&self, f: fn()) {
+        fn call_once(&mut self, f: fn()) {
             if self.state + 0 == 41 { f(); self.state = 42; }
         }
     }
@@ -42,8 +42,8 @@ const SOURCE: &str = r#"
         || { cell.value += increment; }
     }
     fn invoke(f: fn()) { f(); }
-    fn invoke_once(once: &Once, f: fn()) { once.call_once(f); }
-    fn initialize(once: &Once, cell: &mut Cell, f: fn() -> Int) {
+    fn invoke_once(once: &mut Once, f: fn()) { once.call_once(f); }
+    fn initialize(once: &mut Once, cell: &mut Cell, f: fn() -> Int) {
         once.call_once(|| { cell.value += f(); });
     }
     fn make_empty() -> fn() -> Int { || 73 }
@@ -51,6 +51,16 @@ const SOURCE: &str = r#"
     fn make_with_argument(bias: Int) -> fn(Int) -> Int { |value| bias + value }
     fn invoke_with_argument(f: fn(Int) -> Int, value: Int) -> Int { f(value) }
 "#;
+
+#[test]
+fn readonly_source_callback_cannot_mutate_its_receiver() {
+    let source = SOURCE.replace("fn call_once(&mut self,", "fn call_once(&self,");
+    let ast = Parser::new(&source).parse_module().expect("source grammar");
+    let error = VbcCodegen::new().compile_module(&ast)
+        .expect_err("a callback cannot grant write access to a readonly receiver")
+        .to_string();
+    assert!(error.contains("no declared mutable projection"), "{error}");
+}
 
 fn with_source_ir(check: impl FnOnce(&Context, &str)) {
     let ast = Parser::new(SOURCE).parse_module().expect("source parses");

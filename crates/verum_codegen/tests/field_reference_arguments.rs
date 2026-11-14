@@ -41,6 +41,17 @@ fn borrowed_field_forwarding_keeps_address_across_alias() {
 }
 
 #[test]
+fn generic_call_reads_the_original_scalar_field_cell() {
+    let (value, fields) = execute(r#"
+        type Cell is { padding: Int, value: Int };
+        fn inspect<T>(marker: T, field: &Int) -> Int { *field }
+        fn probe(cell: &Cell, unused: Bool) -> Int { inspect<Int>(0, &cell.value) }
+    "#, 11, 73, false);
+    assert_eq!(value, 73);
+    assert_eq!(&fields[3..], &[11, 73]);
+}
+
+#[test]
 fn field_reference_cast_has_explicit_raw_address_conversion() {
     let output = ir(r#"
         type Cell is { padding: Int, value: Int };

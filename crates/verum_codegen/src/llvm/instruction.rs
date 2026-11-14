@@ -6912,8 +6912,8 @@ fn lower_instruction_impl<'ctx>(
             type_args,
             args,
         } => {
-            // Generic function call. Post-monomorphization, this should be resolved
-            // to a direct Call. As fallback, treat as direct call ignoring type_args.
+            // Inline generic witnesses and selected declaration identity remain
+            // authoritative even when this call survives monomorphization.
             // #24 witness invariant: CallG carries its type_args INLINE —
             // a staged sidecar (if any) is superseded; clear so it cannot
             // leak to a later Call.
@@ -6927,10 +6927,6 @@ fn lower_instruction_impl<'ctx>(
             // the whole enclosing function.
             let resolved_g = vbc_mod.resolved_function_id(*func_id);
             let func_desc = vbc_mod.get_function(resolved_g).or_internal_else(|| format!("CallG: function id {} not found", func_id))?;
-            let func_name = vbc_mod.get_string(func_desc.name).unwrap_or("<unknown>");
-            // Clone what we need before the mutable-ctx calls below (func_desc
-            // borrows ctx immutably via vbc_module()).
-            let func_name_owned = func_name.to_string();
             let return_type = func_desc.return_type.clone();
             // T0658: id-stable generator classification.  The
             // existential-return patch (`-> some I: Iterator` over a
@@ -6943,42 +6939,14 @@ fn lower_instruction_impl<'ctx>(
                 .and_then(|n| vbc_mod.get_string(n))
                 .is_some_and(|n| n == "Generator" || n.starts_with("Generator<"));
 
-            let module = ctx.get_module();
-
-            let i64_type = ctx.types().i64_type();
-            let mut native_arguments = verum_common::List::new();
-            let arg_vals: Vec<BasicMetadataValueEnum> = args
-                .iter()
-                .enumerate()
-                .map(|(i, r)| {
-                    let val = ctx.get_register(r.0)?;
-                    // Coerce to i64 for uniform call ABI
-                    let coerced = as_i64(ctx, val, &format!("callg_arg{}", i))?;
-                    let view = super::native_call::ArgumentView::Register(r.0).after_coercion(val, coerced.into());
-                    native_arguments.push(super::native_call::NativeArgument { view, value: coerced.into() });
-                    Ok(coerced.into())
-                })
-                .collect::<Result<Vec<_>>>()?;
-
-            let mut produced_value = false;
-            if let Some(llvm_fn) = module.get_function(&func_name_owned) {
-                let call_site = ctx
-                    .builder()
-                    .build_call(llvm_fn, &arg_vals, "callg_result")
-                    .or_llvm_err()?;
-
-                let native_receipt = ctx.record_native_call(dst.0, call_site, native_arguments);
-                ctx.finish_native_call(native_receipt, call_site.try_as_basic_value().basic(), super::native_call::ResultView::Word);
-                if let Some(ret_val) = call_site.try_as_basic_value().basic() {
-                    ctx.set_register(dst.0, ret_val);
-                    produced_value = true;
-                } else {
-                    ctx.set_register(dst.0, i64_type.const_int(0, false).into());
-                }
-            } else {
-                // Function not found - return zero (may happen for unresolved generics)
-                ctx.set_register(dst.0, i64_type.const_int(0, false).into());
-            }
+            let llvm_fn = ctx.resolve_declared_function(func_desc)?;
+            let (arg_vals, native_arguments) = declared_call_arguments(ctx, llvm_fn, func_desc, args)?;
+            let call_site = ctx.builder().build_call(llvm_fn, &arg_vals, "callg_result").or_llvm_err()?;
+            let native_receipt = ctx.record_native_call(dst.0, call_site, native_arguments);
+            let returned = call_site.try_as_basic_value().basic();
+            ctx.finish_native_call(native_receipt, returned, super::native_call::ResultView::Word);
+            let produced_value = returned.is_some();
+            ctx.set_register(dst.0, returned.unwrap_or_else(|| ctx.types().i64_type().const_zero().into()));
             // Track the result register's type from the (generic) return type,
             // exactly as the direct-Call path does (see lower_call). Without
             // this a generic call's result (e.g. `ready(x): ReadyFuture<T>`) was
@@ -11029,6 +10997,51 @@ fn parameter_uses_cell_address(param: &verum_vbc::module::ParamDescriptor) -> bo
     }
 }
 
+/// Adapt both ordinary and generic calls to their selected native declaration.
+/// Reference-cell provenance is applied before ABI coercion and recorded against
+/// the actual emitted operand. No method spelling supplies layout authority.
+fn declared_call_arguments<'ctx>(
+    ctx: &FunctionContext<'_, 'ctx>,
+    function: FunctionValue<'ctx>,
+    declaration: &verum_vbc::module::FunctionDescriptor,
+    arguments: &verum_vbc::instruction::RegRange,
+) -> Result<(verum_common::List<BasicMetadataValueEnum<'ctx>>, verum_common::List<super::native_call::NativeArgument<'ctx>>)> {
+    use super::native_call::{ArgumentView, NativeArgument};
+    let signature = function.get_type();
+    let parameters = signature.get_param_types();
+    let count = usize::from(arguments.count);
+    if count < parameters.len() || (!signature.is_var_arg() && count != parameters.len()) {
+        return Err(LlvmLoweringError::TypeLowering(format!(
+            "selected call '{}' passes {count} arguments, declaration requires {}{}",
+            function.get_name().to_string_lossy(), parameters.len(),
+            if signature.is_var_arg() { " or more" } else { "" },
+        ).into()));
+    }
+    let mut values = verum_common::List::with_capacity(count);
+    let mut receipts = verum_common::List::with_capacity(count);
+    for (index, register) in arguments.iter().enumerate() {
+        let mut value = ctx.get_register(register.0)?;
+        let mut view = ArgumentView::Register(register.0);
+        if declaration.params.get(index).is_some_and(parameter_uses_cell_address) {
+            view = ArgumentView::FieldCellOrRegister(register.0);
+            value = field_address_or_value(ctx, register.0, value, "refield_arg_addr")?;
+        }
+        // Register words can contain IEEE-754 bits. This is the same ABI
+        // conversion for both call forms, not an implicit numeric conversion.
+        let adapted = match parameters.get(index) {
+            Some(expected) => {
+                let expected = meta_type_to_basic(*expected)
+                    .or_internal("selected Verum call has a metadata parameter")?;
+                coerce_value(ctx, value, expected, &format!("arg{index}_coerce"))?.into()
+            }
+            None => value.into(), // Declared variadic tail.
+        };
+        receipts.push(NativeArgument { view: view.after_coercion(value, adapted), value: adapted });
+        values.push(adapted);
+    }
+    Ok((values, receipts))
+}
+
 fn field_address_or_value<'ctx>(
     ctx: &FunctionContext<'_, 'ctx>,
     reg: u16,
@@ -14759,85 +14772,7 @@ fn lower_call<'ctx>(
     // Use the selected descriptor, including archive/band resolution above.
     let llvm_fn = ctx.resolve_declared_function(func_desc)?;
 
-    // Coerce arguments to match callee's expected parameter types
-    // Special handling: Int→Float implicit coercion uses sitofp, not bitcast
-    let param_types = llvm_fn.get_type().get_param_types();
-    let mut native_arguments = verum_common::List::new();
-    let arg_vals: Vec<BasicMetadataValueEnum> = args
-        .iter()
-        .enumerate()
-        .map(|(i, r)| {
-            let mut raw_val = ctx.get_register(r.0)?;
-            let mut view = super::native_call::ArgumentView::Register(r.0);
-            if func_desc.params.get(i).is_some_and(parameter_uses_cell_address) {
-                view = super::native_call::ArgumentView::FieldCellOrRegister(r.0);
-                raw_val = field_address_or_value(ctx, r.0, raw_val, "refield_arg_addr")?;
-            }
-            if let Some(expected_meta) = param_types.get(i) {
-                if let Some(expected_ty) = meta_type_to_basic(*expected_meta) {
-                    // task #35: i64 → float param must BITCAST (recover the IEEE-754
-                    // bits), NOT sitofp. A value reaching a float param is a float
-                    // held in an i64 register — e.g. `f32_to_bits(*e)` / `f64_to_bits(*e)`
-                    // where `*e` is an iter-deref'd `List<Float>`/`List<Float32>`
-                    // element that never got float-marked: the iterator chain marks
-                    // only fn-return list elements, and the prescan_float pass marks
-                    // only CmpF/BinaryF operands — neither covers a value consumed
-                    // solely as a call argument. sitofp would treat the float bits as
-                    // an integer (0x4000000000000000 → 4.6e18 → f32 0x5E800000),
-                    // corrupting every `*_to_bits` round trip (law_f32/f64_bits_round_trip).
-                    // coerce_value bitcasts i64→f64 (+fptrunc for f32) — the correct
-                    // reinterpretation, and the SAME path the float-marked case already
-                    // took. A genuine Int passed to a Float param is not a supported
-                    // Verum coercion (the interpreter yields garbage for it too), so no
-                    // correct program depends on the removed sitofp path.
-                    let coerced =
-                        coerce_value(ctx, raw_val, expected_ty, &format!("arg{}_coerce", i))?;
-                    native_arguments.push(super::native_call::NativeArgument { view: view.after_coercion(raw_val, coerced.into()), value: coerced.into() });
-                    Ok(coerced.into())
-                } else {
-                    native_arguments.push(super::native_call::NativeArgument { view, value: raw_val.into() });
-                    Ok(raw_val.into())
-                }
-            } else {
-                native_arguments.push(super::native_call::NativeArgument { view, value: raw_val.into() });
-                Ok(raw_val.into())
-            }
-        })
-        .collect::<Result<Vec<_>>>()?;
-    // T1153 — THE DIRECT-CALL PATH NEVER COMPARES ITS ARGUMENT COUNT
-    // WITH THE CALLEE'S. `param_types` above is consulted per INDEX for
-    // coercion and never for LENGTH, so a call carrying one value too
-    // many is emitted as-is and the LLVM verifier rejects the module:
-    //
-    //     Incorrect number of arguments passed to called function!
-    //       call fastcc i64 @Cow.clone(i64 %r10, i64 %r11)
-    //     define internal fastcc i64 @Cow.clone(i64 %0)
-    //
-    // The sibling builder at ~34760 (`rts_call`) DOES reconcile, and
-    // its `pc + 1 == arg_vals.len()` branch is exactly this shape — a
-    // spare leading receiver the callee does not take.
-    //
-    // Counting before copying it: a fix here would be a WIDENING, and
-    // whether the reconciliation is targeted or load-bearing depends
-    // on how often direct calls disagree. This says.
-    if std::env::var_os("VERUM_TRACE_ARITY_FALLBACK").is_some() {
-        let pc = llvm_fn.count_params() as usize;
-        if pc != arg_vals.len() {
-            // `decl=` separates a PLACEHOLDER from a real definition:
-            // `get_or_declare_function` can return a declaration whose
-            // type was guessed, and `count_params()` then describes the
-            // guess, not the function the emitted call will name. That is
-            // the open question in T1153 — this probe reports 168
-            // disagreements while LLVM's own verifier accepts the module.
-            eprintln!(
-                "[arity-direct] '{}': call passes {}, definition takes {} decl={}",
-                llvm_fn.get_name().to_string_lossy(),
-                arg_vals.len(),
-                pc,
-                llvm_fn.count_basic_blocks() == 0
-            );
-        }
-    }
+    let (arg_vals, native_arguments) = declared_call_arguments(ctx, llvm_fn, func_desc, args)?;
     let call_site = ctx
         .builder()
         .build_call(llvm_fn, &arg_vals, "call_result")
@@ -33386,15 +33321,12 @@ fn coerce_value<'ctx>(
     use BasicTypeEnum as BTE;
     use BasicValueEnum as BVE;
 
-    // If types already match, return as-is
-    match (&val, &expected) {
-        (BVE::IntValue(i), BTE::IntType(t)) if i.get_type() == *t => return Ok(val),
-        (BVE::FloatValue(f), BTE::FloatType(t)) if f.get_type() == *t => return Ok(val),
-        (BVE::PointerValue(_), BTE::PointerType(_)) => return Ok(val),
-        (BVE::StructValue(s), BTE::StructType(t)) if s.get_type() == *t => return Ok(val),
-        _ => {}
-    }
-
+    let incompatible = || LlvmLoweringError::TypeLowering(format!(
+        "cannot adapt native value {:?} to {:?}", val.get_type(), expected,
+    ).into());
+    // Preserve exact aggregate/vector types too; unsupported representations
+    // must not acquire a fabricated zero, null pointer or unrelated LLVM type.
+    if val.get_type() == expected { return Ok(val); }
     match expected {
         BTE::IntType(target_int) => {
             match val {
@@ -33459,10 +33391,10 @@ fn coerce_value<'ctx>(
                             .or_llvm_err()?
                             .into())
                     } else {
-                        Ok(target_int.const_zero().into())
+                        Err(incompatible())
                     }
                 }
-                _ => Ok(target_int.const_zero().into()),
+                _ => Err(incompatible()),
             }
         }
         BTE::FloatType(target_float) => {
@@ -33528,12 +33460,12 @@ fn coerce_value<'ctx>(
                             .into())
                     }
                 }
-                _ => Ok(target_float.const_float(0.0).into()),
+                _ => Err(incompatible()),
             }
         }
         BTE::PointerType(target_ptr) => {
             match val {
-                BVE::PointerValue(_) => Ok(val),
+                BVE::PointerValue(_) => Err(incompatible()),
                 BVE::IntValue(i) => {
                     // T0272: a wide-prescan i128 register reaching a
                     // ptr-returning coercion (Ret of a ptr-typed fn) means
@@ -33563,23 +33495,19 @@ fn coerce_value<'ctx>(
                             .builder()
                             .build_extract_value(s, 0, &format!("{}_cbgr_ptr", name))
                             .or_llvm_err()?;
-                        if let BasicValueEnum::PointerValue(_) = ptr_val {
+                        if ptr_val.get_type() == expected {
                             Ok(ptr_val)
                         } else {
-                            // Field 0 is not a pointer — try converting
-                            Ok(target_ptr.const_null().into())
+                            Err(incompatible())
                         }
                     } else {
-                        Ok(target_ptr.const_null().into())
+                        Err(incompatible())
                     }
                 }
-                _ => Ok(target_ptr.const_null().into()),
+                _ => Err(incompatible()),
             }
         }
-        _ => {
-            // For struct/vector types, return value as-is (best effort)
-            Ok(val)
-        }
+        _ => Err(incompatible()),
     }
 }
 
