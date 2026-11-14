@@ -711,6 +711,18 @@ impl<'a> Validator<'a> {
         let func_name = format!("fn#{}@0x{:x}", func.id.0, instr_start);
 
         match instr {
+            Instruction::RetainCopy { dst, src, counter, type_ref } => {
+                if self.module.header.version_minor < 56 {
+                    self.errors.push(VbcError::InvalidInstructionEncoding {
+                        offset: instr_start,
+                        reason: "RetainCopy requires VBC minor 56 or newer".into(),
+                    });
+                }
+                self.check_reg(*dst, max_reg, &func_name);
+                self.check_reg(*src, max_reg, &func_name);
+                self.check_reg(*counter, max_reg, &func_name);
+                self.validate_type_ref(type_ref, 0);
+            }
             Instruction::DropTyped { src, type_ref } => {
                 self.check_reg(*src, max_reg, &func_name);
                 self.validate_type_ref(type_ref, 0);

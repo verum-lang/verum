@@ -752,3 +752,35 @@ Per the CBGR spec, these dispatch paths target:
 
 Drift here is a regression. Re-run `cargo bench -p verum_vbc --bench
 production_targets` after any change to the dispatch path.
+
+## Atomic retained-handle copying
+
+`retain_copy` is a declaration-carrying operation, encoded as `RetainCopy`
+(extended opcode `0x12`, VBC minor 56). The registry selects the operation;
+the interpreter executes it and the native backend emits LLVM allocation,
+validation and atomic instructions. Neither backend calls a C interlayer.
+
+The unsafe caller supplies a borrowed handle and a mutable `UInt32` counter.
+The handle and counter must belong to the same release contract, remain live
+through the operation, and use the same atomic width for concurrent updates.
+The exact record declaration must describe a fixed shallow wrapper containing
+only scalar or reference fields. An unknown declaration or an owning aggregate
+field cannot authorize a bitwise wrapper copy.
+
+Both backends validate the selected nominal owner and allocation extent, then
+allocate and initialize a fresh wrapper before changing the counter. A compare
+and exchange increments a live, nonzero counter only when it can do so without
+overflow. Zero and overflow release the unpublished wrapper and report failure;
+they leave the original handle and count unchanged. There is no allocation,
+user callback or ledger extension after a successful increment and before the
+new wrapper is returned. Borrowed fields remain references to their original
+storage.
+
+This primitive establishes one retained-handle transition. It does not itself
+establish recursive value copying or cleanup of an unused owned parameter.
+The source `Shared.clone` integration and its complete release lifecycle must
+be qualified separately; a successful primitive test cannot stand in for them.
+The `retain_copy` and `retain_copy_wire` VBC tests cover source declarations,
+revoked/readonly counters, failure cleanup, serialization and specialization.
+The matching type-checker and native tests check computational properties,
+explicit unsafe admission and actual generated execution.

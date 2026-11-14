@@ -305,6 +305,12 @@ pub const ALLOCATION_HEADER_TOTAL_OFFSET: u64 = 28;
 /// MUST equal this constant.
 pub const OBJECT_HEADER_SIZE: u64 = 24;
 
+/// Byte offset of an object header's nominal owner.
+pub const OBJECT_HEADER_TYPE_ID_OFFSET: u64 = 0;
+
+/// Byte offset of an object header's stored size.
+pub const OBJECT_HEADER_SIZE_OFFSET: u64 = 12;
+
 /// Width of a single object-field slot in bytes.
 ///
 /// **The STRIDE is universal.** Codegen emits

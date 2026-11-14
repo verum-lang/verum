@@ -148,7 +148,8 @@ pub const VERSION_MAJOR: u16 = 2;
 /// Minor 53 carries complete type identity queries.
 /// Minor 54 carries declaration-owned names and destruction-plan queries.
 /// Minor 55 carries scoped existential protocol witnesses.
-pub const VERSION_MINOR: u16 = 55;
+/// Minor 56 adds failure-atomic retain of a declared shallow handle.
+pub const VERSION_MINOR: u16 = 56;
 
 /// Minor-version floors for sections whose presence readers gate on.  The
 /// register-type-hints section has been written unconditionally since minor 2,

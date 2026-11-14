@@ -195,6 +195,7 @@ pub(super) mod cubical;
 // length-prefixed family routes through `envelope::dispatch_enveloped`.
 pub(super) mod envelope;
 pub(super) mod extended;
+mod retain_copy;
 pub(super) mod ffi_extended;
 // Family gateways (T0852) — honest homes for the ex-FfiExtended squatters.
 pub(super) mod mem_extended;

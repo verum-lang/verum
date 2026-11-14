@@ -653,6 +653,7 @@ impl<'a> BytecodeSpecializer<'a> {
                 }
             }
             I::BindMethodReceiver { type_ref }
+            | I::RetainCopy { type_ref, .. }
             | I::DropTyped { type_ref, .. }
             | I::TypeResource { type_ref, .. }
             | I::TargetHasAtomic { type_ref, .. }
@@ -864,6 +865,7 @@ impl<'a> BytecodeSpecializer<'a> {
     fn written_reg(instr: &crate::instruction::Instruction) -> Option<crate::instruction::Reg> {
         use crate::instruction::Instruction as I;
         match instr {
+            I::RetainCopy { dst, .. } => Some(*dst),
             I::DropTyped { src, .. } => Some(*src),
             I::Mov { dst, .. }
             | I::LoadI { dst, .. }

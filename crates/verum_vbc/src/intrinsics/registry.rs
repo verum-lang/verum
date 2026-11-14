@@ -300,6 +300,8 @@ pub enum CodegenStrategy {
     TypeLayout(crate::instruction::LayoutProperty),
     /// Complete declaration-owned identity, with collision refusal.
     TypeIdentity,
+    /// Allocate a shallow handle before atomically retaining its explicit counter.
+    RetainCopy,
     /// Inspect an exact declaration after generic substitution.
     TypeInspect(crate::instruction::TypeInspection),
     /// Type-witness query against explicit backend target capabilities.
@@ -1374,7 +1376,8 @@ impl Intrinsic {
             // These lowerings cannot invoke a user callable or suspend a task.
             // This establishes only absence of suspension, not a complete
             // computational footprint or a proof of purity.
-            CodegenStrategy::DirectOpcode(Opcode::Panic)
+            CodegenStrategy::RetainCopy
+            | CodegenStrategy::DirectOpcode(Opcode::Panic)
             | CodegenStrategy::InlineSequence(InlineSequenceId::TextAsBytes) => IntrinsicCallBound::Synchronous,
             _ => IntrinsicCallBound::Unknown,
         }
@@ -2008,6 +2011,12 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     // =========================================================================
     // Memory Lifecycle Intrinsics
     // =========================================================================
+    Intrinsic {
+        name: "retain_copy", category: IntrinsicCategory::Memory,
+        hints: &[IntrinsicHint::Unsafe, IntrinsicHint::MemoryEffect, IntrinsicHint::Generic],
+        param_count: 2, return_count: 1, strategy: CodegenStrategy::RetainCopy, mlir_op: None,
+        doc: "Copy a shallow handle and atomically retain its explicit nonzero UInt32 counter. Unsafe: handle and counter must belong to the same live allocation and release contract.",
+    },
     Intrinsic {
         name: "drop_in_place",
         category: IntrinsicCategory::Memory,

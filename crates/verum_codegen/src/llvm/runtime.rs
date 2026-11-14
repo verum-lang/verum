@@ -10397,7 +10397,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
     /// `llvm.memcpy.p0.p0.i64(dst, src, size, isvolatile=false)` —
     /// the LLVM intrinsic lowers to inline code, NOT a libc symbol.
     /// Pattern parallels `get_or_declare_memset` above.
-    fn get_or_declare_memcpy(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
+    pub(crate) fn get_or_declare_memcpy(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
         let wrapper_name = "verum_internal_memcpy";
         let ptr_type = self.context.ptr_type(AddressSpace::default());
         let i64_type = self.context.i64_type();

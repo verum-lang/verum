@@ -223,6 +223,21 @@ pub(super) fn resolve_arg_value(
     Ok(val)
 }
 
+/// Read exactly one declared reference, retaining register generation validation.
+pub(super) fn read_live_reference(state: &InterpreterState, reference: Value) -> InterpreterResult<Value> {
+    if is_cbgr_ref(&reference) {
+        let (index, generation) = decode_cbgr_ref(reference);
+        if index as usize >= state.registers.top() {
+            return Err(InterpreterError::InvalidOperand { message: "reference is outside its register scope".into() });
+        }
+        validate_cbgr_generation(state, index, generation)?;
+        Ok(state.registers.get_absolute(index))
+    } else {
+        require_reference_capability(state, reference, Capabilities::READ)?;
+        resolve_arg_value(state, reference)
+    }
+}
+
 /// Pointer references to one Value slot. Bridge allocations carry flat data,
 /// so their extent authority takes precedence over the interior-slot registry.
 #[inline]
@@ -289,13 +304,13 @@ pub(super) fn raw_record_field_slot(
 
 /// A validated, single Value slot. Register indices stay in the register file;
 /// managed addresses are resolved once, with no callback or allocation in the exchange.
-enum MutableValueSlot {
+pub(super) enum MutableValueSlot {
     Register(u32),
     Memory(*mut Value),
 }
 
 impl MutableValueSlot {
-    fn resolve(state: &InterpreterState, reference: Value) -> InterpreterResult<Self> {
+    pub(super) fn resolve(state: &InterpreterState, reference: Value) -> InterpreterResult<Self> {
         let invalid = || InterpreterError::InvalidOperand {
             message: "expected a live, aligned mutable Value slot".into(),
         };
@@ -315,6 +330,52 @@ impl MutableValueSlot {
         }
         require_reference_write(state, reference)?;
         reference_value_slot(state, reference)?.map(Self::Memory).ok_or_else(invalid)
+    }
+
+    /// Increment only a live nonzero UInt32. No allocation occurs after CAS.
+    pub(super) fn retain_u32(&self, state: &mut InterpreterState) -> InterpreterResult<()> {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        let next = |value: Value| -> InterpreterResult<Value> {
+            let value = value.try_as_i64().filter(|v| *v > 0 && *v < i64::from(u32::MAX))
+                .ok_or_else(|| InterpreterError::Panic { message: "retain_copy requires a nonzero, non-overflowing UInt32 counter".into() })?;
+            Ok(Value::from_i64(value + 1))
+        };
+        match *self {
+            Self::Register(index) => {
+                // Registers are local to this interpreter; the reference was
+                // checked before allocation, which cannot relocate register slots.
+                let value = next(state.registers.get_absolute(index))?;
+                state.registers.set_absolute(index, value);
+            }
+            Self::Memory(address) => {
+                // Value's tag word is immutable for this UInt32 storage. Use
+                // exactly the existing UInt32 atomic width, never an overlapping
+                // AtomicU64 access while other owners perform 32-bit release.
+                let little_endian = 1u64.to_ne_bytes()[0] == 1;
+                let low = usize::from(!little_endian);
+                let words = address.cast::<u32>();
+                // SAFETY: resolve checked an aligned live Value slot. The tag
+                // occupies disjoint immutable bytes; the payload is atomic.
+                let tag = unsafe { words.add(1 - low).read() };
+                if tag != (Value::from_i64(1).bits() >> 32) as u32 {
+                    return Err(InterpreterError::InvalidOperand { message: "retain_copy counter has no UInt32 Value representation".into() });
+                }
+                // SAFETY: the unsafe contract requires all owners to use this
+                // same UInt32 atomic counter and keep its containing slot alive.
+                let counter = unsafe { &*words.add(low).cast::<AtomicU32>() };
+                let mut observed = counter.load(Ordering::Relaxed);
+                loop {
+                    if observed == 0 || observed == u32::MAX {
+                        return Err(InterpreterError::Panic { message: "retain_copy requires a nonzero, non-overflowing UInt32 counter".into() });
+                    }
+                    match counter.compare_exchange_weak(observed, observed + 1, Ordering::Relaxed, Ordering::Relaxed) {
+                        Ok(_) => break,
+                        Err(current) => observed = current,
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     fn read(&self, state: &InterpreterState) -> Value {
@@ -349,6 +410,10 @@ pub(super) fn swap_referents(
 
 /// Check the capability carried by a heap reference before a store or writeback.
 pub(super) fn require_reference_write(state: &super::super::super::state::InterpreterState, reference: Value) -> InterpreterResult<()> {
+    require_reference_capability(state, reference, Capabilities::WRITE)
+}
+
+fn require_reference_capability(state: &InterpreterState, reference: Value, required: u16) -> InterpreterResult<()> {
     let actual = if reference.is_thin_ref() {
         state.heap.thin_ref(reference)?.capabilities()
     } else if reference.is_fat_ref() {
@@ -356,11 +421,11 @@ pub(super) fn require_reference_write(state: &super::super::super::state::Interp
     } else {
         return Ok(());
     };
-    if actual.has(Capabilities::WRITE) {
+    if actual.has(required) {
         Ok(())
     } else {
         Err(InterpreterError::CapabilityDenied {
-            required: u64::from(Capabilities::WRITE),
+            required: u64::from(required),
             actual: u64::from(actual.0),
         })
     }

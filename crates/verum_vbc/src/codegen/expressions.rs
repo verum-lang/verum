@@ -35392,6 +35392,10 @@ impl VbcCodegen {
             return Ok(Some(dest));
         }
 
+        if matches!(intrinsic_info.intrinsic.strategy, crate::intrinsics::registry::CodegenStrategy::RetainCopy) {
+            return self.compile_retain_copy(&args.as_slice()[1..], dest);
+        }
+
         // Compile remaining arguments
         let mut arg_regs = Vec::with_capacity(args.len().saturating_sub(1));
         for arg in args.iter().skip(1) {
@@ -35417,6 +35421,33 @@ impl VbcCodegen {
         }
 
         Ok(Some(dest))
+    }
+
+    /// Both operands carry declarations; a spelling or an expected return type
+    /// cannot authorize the handle layout or mutable counter.
+    fn compile_retain_copy(&mut self, args: &[Expr], dst: Reg) -> CodegenResult<Option<Reg>> {
+        if !self.ctx.is_unsafe() {
+            return Err(CodegenError::new(CodegenErrorKind::InvalidSourceSignature(
+                "retain_copy requires unsafe: the handle and counter must share one release contract".into(),
+            )));
+        }
+        let [source, counter] = args else { return Err(CodegenError::internal("retain_copy requires handle and counter references")); };
+        let start = self.ctx.instructions.len();
+        let src = self.compile_expr(source)?.ok_or_else(|| CodegenError::internal("retain_copy has no handle value"))?;
+        let source_type = self.declared_expression_result(source, Some(src), start, self.ctx.instructions.len())
+            .ok_or_else(|| CodegenError::internal("retain_copy handle lacks its declaration"))?;
+        let crate::types::TypeRef::Reference { inner, .. } = source_type else {
+            return Err(CodegenError::internal("retain_copy handle must be borrowed"));
+        };
+        let start = self.ctx.instructions.len();
+        let counter_reg = self.compile_expr(counter)?.ok_or_else(|| CodegenError::internal("retain_copy has no counter value"))?;
+        let counter_type = self.declared_expression_result(counter, Some(counter_reg), start, self.ctx.instructions.len())
+            .ok_or_else(|| CodegenError::internal("retain_copy counter lacks its declaration"))?;
+        if !matches!(counter_type, crate::types::TypeRef::Reference { inner, mutability: crate::types::Mutability::Mutable, .. } if *inner == crate::types::TypeRef::Concrete(crate::types::TypeId::U32)) {
+            return Err(CodegenError::internal("retain_copy counter must be a mutable UInt32 reference"));
+        }
+        self.ctx.emit(Instruction::RetainCopy { dst, src, counter: counter_reg, type_ref: *inner });
+        Ok(Some(dst))
     }
 
     /// Compiles @vbc(NAME, args...) call.
@@ -35893,6 +35924,9 @@ impl VbcCodegen {
         }
 
         let dest = self.ctx.alloc_temp();
+        if matches!(info.intrinsic.strategy, crate::intrinsics::registry::CodegenStrategy::RetainCopy) {
+            return self.compile_retain_copy(args.as_slice(), dest);
+        }
 
         // Compile arguments
         let mut arg_regs = Vec::with_capacity(args.len());
@@ -36101,7 +36135,7 @@ impl VbcCodegen {
             CodegenStrategy::CompileTimeConstant => {
                 self.emit_intrinsic_compile_time_constant(intrinsic.name, dest)?;
             }
-            CodegenStrategy::TypeLayout(_) | CodegenStrategy::TypeIdentity | CodegenStrategy::TypeInspect(_) | CodegenStrategy::TargetHasAtomic => return Err(CodegenError::internal("type query requires its declaration-owned type operand")),
+            CodegenStrategy::RetainCopy | CodegenStrategy::TypeLayout(_) | CodegenStrategy::TypeIdentity | CodegenStrategy::TypeInspect(_) | CodegenStrategy::TargetHasAtomic => return Err(CodegenError::internal("type query requires its declaration-owned type operand")),
             CodegenStrategy::TargetHasFeature => {
                 let [feature] = args else { return Err(CodegenError::internal("target_has_feature requires one Text operand")); };
                 self.ctx.emit(Instruction::TargetHasFeature { dst: dest, feature: *feature });

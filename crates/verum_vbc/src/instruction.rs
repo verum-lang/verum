@@ -9725,6 +9725,8 @@ pub enum ExtendedSubOpcode {    /// Reserved no-op — forward-compat anchor. Al
     TypeIdentity = 0x0d,
     /// Type inspection: destination, query discriminator, complete TypeRef.
     TypeInspect = 0x0e,
+    /// Failure-atomic shallow handle copy with an explicit UInt32 counter.
+    RetainCopy = 0x12,
 
     /// Process termination — reads one `Int` register and terminates
     /// the process with that exit code. Format: `[0x1F][0x10][reg:u16]`.
@@ -9989,6 +9991,7 @@ impl ExtendedSubOpcode {
             0x0c => Some(Self::TargetHasFeature),
             0x0d => Some(Self::TypeIdentity),
             0x0e => Some(Self::TypeInspect),
+            0x12 => Some(Self::RetainCopy),
             0x10 => Some(Self::ProcessExit),
             0x11 => Some(Self::PanicValue),
             0x20 => Some(Self::ScriptEngineNew),
@@ -10083,6 +10086,7 @@ impl ExtendedSubOpcode {
             Self::TargetHasFeature => "EXT_TARGET_HAS_FEATURE",
             Self::TypeIdentity => "EXT_TYPE_IDENTITY",
             Self::TypeInspect => "EXT_TYPE_INSPECT",
+            Self::RetainCopy => "EXT_RETAIN_COPY",
             Self::GetFieldNamed => "EXT_GET_FIELD_NAMED",
             Self::SetFieldNamed => "EXT_SET_FIELD_NAMED",
             Self::ProcessExit => "EXT_PROCESS_EXIT",
@@ -11191,6 +11195,18 @@ pub enum Instruction {    // ===================================================
     DropRef {
         /// Register holding the value to drop.
         src: Reg,
+    },
+    /// Copy an exactly declared shallow handle and retain its explicit counter.
+    /// The unsafe source contract binds that counter to the handle's release.
+    RetainCopy {
+        /// Complete copied handle. Published only after successful retain.
+        dst: Reg,
+        /// Borrowed handle with an exact shallow declaration.
+        src: Reg,
+        /// Live mutable reference to the associated UInt32 strong counter.
+        counter: Reg,
+        /// Exact handle declaration, including generic arguments.
+        type_ref: TypeRef,
     },
     /// Destroy a value using its declaration-owned type and clear its register.
     /// Generic arguments are resolved by the current frame or monomorphizer;

@@ -301,6 +301,10 @@ impl VbcEscapeAnalyzer {
                     provenance.insert(dst.0, RegisterProvenance::Unknown);
                 }
 
+                Instruction::RetainCopy { dst, .. } => {
+                    provenance.insert(dst.0, RegisterProvenance::Heap);
+                }
+
                 // Typed destruction consumes the old register and may call
                 // user glue. It cannot preserve the old source provenance.
                 Instruction::DropTyped { src, .. } => {

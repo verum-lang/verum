@@ -12087,6 +12087,32 @@ impl TypeChecker {
         {
             use verum_vbc::{instruction::TypeInspection, intrinsics::registry::CodegenStrategy};
             match operation.intrinsic.strategy {
+                CodegenStrategy::RetainCopy => {
+                    if !self.in_unsafe_context {
+                        return Err(TypeError::OtherWithCodeSpanned {
+                            code: "E0444".into(),
+                            msg: "retain_copy requires unsafe: the handle and counter must share one release contract".into(),
+                            span: expr.span,
+                        });
+                    }
+                    let [_, handle, counter] = args.as_slice() else {
+                        return Err(TypeError::OtherWithCodeSpanned { code: "E0444".into(), msg: "retain_copy requires handle and counter references".into(), span: expr.span });
+                    };
+                    let handle_ty = self.synth_expr(handle)?.ty;
+                    let inner = match self.unifier.apply(&handle_ty) {
+                        Type::Reference { inner, .. } | Type::CheckedReference { inner, .. } | Type::UnsafeReference { inner, .. } => *inner,
+                        _ => return Err(TypeError::OtherWithCodeSpanned { code: "E0444".into(), msg: "retain_copy requires a borrowed handle".into(), span: handle.span }),
+                    };
+                    let counter_ty = self.synth_expr(counter)?.ty;
+                    let target = match self.unifier.apply(&counter_ty) {
+                        Type::Reference { inner, mutable: true } | Type::CheckedReference { inner, mutable: true } | Type::UnsafeReference { inner, mutable: true } => *inner,
+                        _ => return Err(TypeError::SharedReferenceWrite { span: counter.span }),
+                    };
+                    if target != Type::u32_refined(0) {
+                        return Err(TypeError::OtherWithCodeSpanned { code: "E0444".into(), msg: "retain_copy counter must be UInt32".into(), span: counter.span });
+                    }
+                    return Ok(inner);
+                }
                 CodegenStrategy::TypeIdentity => return Ok(Type::uint64()),
                 CodegenStrategy::TypeInspect(TypeInspection::Name) => return Ok(Type::text()),
                 CodegenStrategy::TypeInspect(TypeInspection::NeedsDrop) => return Ok(Type::bool()),
