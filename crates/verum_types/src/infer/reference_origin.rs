@@ -944,6 +944,10 @@ impl TypeChecker {
         self.record_place_for_auto_borrow(expr, AutoBorrowRoot::SharedOnly)
     }
 
+    pub(super) fn call_input_place(&mut self, expr: &Expr) -> Option<(RecordReceiver, Type)> {
+        self.record_place_for_auto_borrow(expr, AutoBorrowRoot::IncludeExclusive)
+    }
+
     /// An implicit borrow of an inline field names its original storage even
     /// when the root is an exclusive reference. This is location evidence,
     /// not write permission; the caller still checks the selected receiver.

@@ -2656,6 +2656,7 @@ fn substitute_refinement_binder(
     ) {
         use crate::context::GenericBinder;
         scheme.callable_source = Some((self.current_module_path.clone(), Shared::new(func.clone())));
+        scheme.returned_value = super::returned_values::returned_value(self, func);
         // The exact receiver type carries implementation-owned value identities.
         // Explicit method slots contain only the method's own telescope.
         if scheme.impl_self_type.is_none() {

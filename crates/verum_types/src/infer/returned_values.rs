@@ -1,6 +1,6 @@
 //! Source-owned result derivations for direct values and structural projections.
 use super::TypeChecker;
-use crate::context::{ReturnedValue, ReturnedValueNode};
+use crate::context::{InputFieldWrite, ReturnedValue, ReturnedValueNode};
 use crate::ty::{RecordReceiver, Type};
 use verum_ast::{
     Expr, ExprKind, FunctionBody, FunctionDecl, FunctionParamKind, LiteralKind, PatternKind,
@@ -15,9 +15,10 @@ fn unparen(mut expression: &Expr) -> &Expr {
     expression
 }
 
-/// Only explicit value construction is admitted here. Calls, mutations,
-/// control flow and hidden inputs preserve the conservative caller rule.
-/// The flat program shares immutable local aliases and has no recursive nodes.
+/// A closed structural body: explicit values and direct field assignments.
+/// Calls, control flow and hidden inputs keep the conservative caller rule.
+/// Assignment targets are validated against the selected types before use;
+/// source syntax alone never proves that a write preserves stored loans.
 pub(super) fn returned_value(
     checker: &TypeChecker,
     function: &FunctionDecl,
@@ -39,93 +40,132 @@ pub(super) fn returned_value(
     let mut nodes = List::new();
     let mut bindings = Map::new();
     let mut locals = List::new();
+    let mut writes = List::new();
+    let mut argument = 0;
     for (index, parameter) in function.params.iter().enumerate() {
         if !parameter.attributes.is_empty() {
             return None;
         }
-        let FunctionParamKind::Regular {
-            pattern,
-            default_value: None,
-            ..
-        } = &parameter.kind
-        else {
-            return None;
+        let (name, node) = match &parameter.kind {
+            FunctionParamKind::Regular {
+                pattern,
+                default_value: None,
+                ..
+            } => {
+                let PatternKind::Ident {
+                    name,
+                    by_ref: false,
+                    subpattern: None,
+                    ..
+                } = &pattern.kind
+                else {
+                    return None;
+                };
+                let node = ReturnedValueNode::Parameter(argument);
+                argument += 1;
+                (name.name.clone(), node)
+            }
+            FunctionParamKind::SelfRef | FunctionParamKind::SelfRefMut if index == 0 => {
+                (Text::from("self"), ReturnedValueNode::Receiver)
+            }
+            _ => return None,
         };
-        let PatternKind::Ident {
-            name,
-            by_ref: false,
-            subpattern: None,
-            ..
-        } = &pattern.kind
-        else {
-            return None;
-        };
-        if bindings.insert(name.name.clone(), nodes.len()).is_some() {
+        if bindings.insert(name, nodes.len()).is_some() {
             return None;
         }
-        nodes.push(ReturnedValueNode::Parameter(index));
-    }
-    if let Some(FunctionBody::Block(block)) = &function.body
-        && block.stmts.is_empty()
-        && block.expr.is_none()
-    {
-        let result = nodes.len();
-        nodes.push(ReturnedValueNode::Literal(Type::Unit));
-        return Some(Shared::new(ReturnedValue {
-            nodes,
-            result,
-            locals,
-        }));
+        nodes.push(node);
     }
     let (statements, value) = match function.body.as_ref()? {
-        FunctionBody::Expr(value) => (&[][..], value),
+        FunctionBody::Expr(value) => (&[][..], Some(value)),
         FunctionBody::Block(block) => match block.expr.as_deref() {
-            Some(value) => (block.stmts.as_slice(), value),
-            None => {
-                let (last, prefix) = block.stmts.split_last()?;
-                if !last.attributes.is_empty() {
-                    return None;
-                }
-                let StmtKind::Expr { expr, .. } = &last.kind else {
-                    return None;
-                };
-                let ExprKind::Return(Some(value)) = &expr.kind else {
-                    return None;
-                };
-                (prefix, value.as_ref())
-            }
+            Some(value) => (block.stmts.as_slice(), Some(value)),
+            None => match block.stmts.last() {
+                Some(last) if last.attributes.is_empty() => match &last.kind {
+                    StmtKind::Expr { expr, .. } => match &expr.kind {
+                        ExprKind::Return(value) => (
+                            &block.stmts.as_slice()[..block.stmts.len() - 1],
+                            value.as_deref(),
+                        ),
+                        _ => (block.stmts.as_slice(), None),
+                    },
+                    _ => (block.stmts.as_slice(), None),
+                },
+                _ => (block.stmts.as_slice(), None),
+            },
         },
     };
     for statement in statements {
         if !statement.attributes.is_empty() {
             return None;
         }
-        let StmtKind::Let {
-            pattern,
-            ty: None,
-            value: Some(value),
-        } = &statement.kind
-        else {
-            return None;
-        };
-        let PatternKind::Ident {
-            name,
-            mutable: false,
-            by_ref: false,
-            subpattern: None,
-        } = &pattern.kind
-        else {
-            return None;
-        };
-        let result = append_expression(checker, value, &bindings, &mut nodes)?;
-        bindings.insert(name.name.clone(), result);
-        locals.push(result);
+        match &statement.kind {
+            StmtKind::Let {
+                pattern,
+                ty: None,
+                value: Some(value),
+            } => {
+                let PatternKind::Ident {
+                    name,
+                    mutable: false,
+                    by_ref: false,
+                    subpattern: None,
+                } = &pattern.kind
+                else {
+                    return None;
+                };
+                let result = append_expression(checker, value, &bindings, &mut nodes)?;
+                bindings.insert(name.name.clone(), result);
+                locals.push(result);
+            }
+            StmtKind::Expr { expr, .. } => {
+                let ExprKind::Binary {
+                    op: verum_ast::BinOp::Assign,
+                    left,
+                    right,
+                } = &unparen(expr).kind
+                else {
+                    return None;
+                };
+                let mut fields = List::new();
+                let mut root = unparen(left);
+                while let ExprKind::Field { expr, field } = &root.kind {
+                    fields.push(field.name.clone());
+                    root = unparen(expr);
+                }
+                if fields.is_empty() {
+                    return None;
+                }
+                fields.reverse();
+                let input = append_expression(checker, root, &bindings, &mut nodes)?;
+                if !matches!(
+                    nodes.get(input)?,
+                    ReturnedValueNode::Parameter(_) | ReturnedValueNode::Receiver
+                ) {
+                    return None;
+                }
+                let value = append_expression(checker, right, &bindings, &mut nodes)?;
+                writes.push(InputFieldWrite {
+                    input,
+                    fields,
+                    value,
+                });
+            }
+            _ => return None,
+        }
     }
-    let result = append_expression(checker, value, &bindings, &mut nodes)?;
+    let result = match value {
+        Some(value) => append_expression(checker, value, &bindings, &mut nodes)?,
+        None => {
+            let index = nodes.len();
+            nodes.push(ReturnedValueNode::Literal(Type::Unit));
+            index
+        }
+    };
     Some(Shared::new(ReturnedValue {
         nodes,
         result,
         locals,
+        writes,
     }))
 }
 
@@ -149,7 +189,14 @@ fn append_expression(
         let node = match step {
             Step::Enter(expression) => match &unparen(expression).kind {
                 ExprKind::Path(path) => {
-                    values.push(*bindings.get(&path.as_ident()?.name)?);
+                    let slot = match path.segments.as_slice() {
+                        [verum_ast::ty::PathSegment::Name(name)] => bindings.get(&name.name),
+                        [verum_ast::ty::PathSegment::SelfValue] => {
+                            bindings.get(&Text::from("self"))
+                        }
+                        _ => return None,
+                    };
+                    values.push(*slot?);
                     continue;
                 }
                 ExprKind::Literal(literal) => {
@@ -290,28 +337,37 @@ impl TypeChecker {
         &mut self,
         expression: &Expr,
     ) -> Option<List<RecordReceiver>> {
-        let args = match &unparen(expression).kind {
-            ExprKind::Call { args, .. } | ExprKind::MethodCall { args, .. } => args,
+        let (args, receiver) = match &unparen(expression).kind {
+            ExprKind::Call { args, .. } => (args.as_slice(), None),
+            ExprKind::MethodCall { args, receiver, .. } => {
+                (args.as_slice(), Some(receiver.as_ref()))
+            }
             _ => return None,
         };
-        self.returned_call_value_origins(expression.span, args)
+        self.returned_call_value_origins(expression.span, args, receiver)
     }
 
     pub(super) fn returned_call_value_origins(
         &mut self,
         span: verum_ast::Span,
         args: &[Expr],
+        receiver: Option<&Expr>,
     ) -> Option<List<RecordReceiver>> {
         let derivation = self.type_registry.returned_value(span)?.clone();
         let Type::Function {
             params,
             return_type,
+            contexts,
             ..
         } = self.type_registry.lookup_call_target(span)?.clone()
         else {
             return None;
         };
-        if params.len() != args.len() {
+        if params.len() != args.len()
+            || contexts
+                .as_ref()
+                .is_some_and(|contexts| !contexts.is_empty())
+        {
             return None;
         }
 
@@ -320,6 +376,52 @@ impl TypeChecker {
         // default initializers and user conversions from the closed program.
         let mut expected: List<Option<Type>> = (0..derivation.nodes.len()).map(|_| None).collect();
         expected[derivation.result] = Some(self.unifier.apply(&return_type));
+        let declared_receiver = self.type_registry.declared_receiver(span).cloned();
+        for write in &derivation.writes {
+            let input = match derivation.nodes.get(write.input)? {
+                ReturnedValueNode::Parameter(index) => params.get(*index)?,
+                ReturnedValueNode::Receiver => declared_receiver.as_ref()?,
+                _ => return None,
+            };
+            let head = self.place_reference_head(input, span).ok()?;
+            let mut field = match head {
+                Type::Reference {
+                    mutable: true,
+                    inner,
+                }
+                | Type::CheckedReference {
+                    mutable: true,
+                    inner,
+                }
+                | Type::UnsafeReference {
+                    mutable: true,
+                    inner,
+                } => *inner,
+                _ => return None,
+            };
+            for name in &write.fields {
+                // A reference-valued intermediate is another storage edge;
+                // custom Deref and computed places need their own proof.
+                if self.reference_mode(&field, span).ok()?.is_some() {
+                    return None;
+                }
+                field = self.lookup_field_type(&field, name)?;
+            }
+            let field = self.unifier.apply(&field);
+            // Replacing a nominal value can run Drop/Clone/conversion. Only
+            // primitive scalar storage has a closed write operation here.
+            if !matches!(
+                field,
+                Type::Unit | Type::Bool | Type::Int | Type::Float | Type::Char
+            ) {
+                return None;
+            }
+            let slot = expected.get_mut(write.value)?;
+            if slot.as_ref().is_some_and(|previous| previous != &field) {
+                return None;
+            }
+            *slot = Some(field);
+        }
         for (index, node) in derivation.nodes.iter().enumerate().rev() {
             let components: List<(usize, Type)> = match node {
                 ReturnedValueNode::Tuple(parts) => {
@@ -364,41 +466,12 @@ impl TypeChecker {
                 ReturnedValueNode::Parameter(index) => {
                     let argument = args.get(*index)?;
                     let ty = self.unifier.apply(params.get(*index)?);
-                    // An owned nominal parameter can run user Drop even in an
-                    // empty body. Only primitive values and references have a
-                    // closed cleanup operation here.
-                    if !self.return_value_has_trivial_cleanup(&ty) {
-                        return None;
-                    }
-                    if self.deref_adjustments.contains_key(&argument.span) {
-                        return None;
-                    }
-                    let actual = self
-                        .observed_operand_type(argument)
-                        .or_else(|| self.type_registry.lookup_expr(argument.span).cloned())?;
-                    let actual = self.place_reference_head(&actual, argument.span).ok()?;
-                    let selected = self.place_reference_head(&ty, argument.span).ok()?;
-                    let autoref = match &selected {
-                        Type::Reference { inner, .. }
-                        | Type::CheckedReference { inner, .. }
-                        | Type::UnsafeReference { inner, .. } => inner.as_ref() == &actual,
-                        _ => false,
-                    };
-                    if actual != selected && !autoref {
-                        return None;
-                    }
-                    let mut origins = List::new();
-                    if autoref {
-                        origins.push(self.borrowed_record_place(argument)?.0);
-                    } else if self
-                        .reference_mode(&selected, argument.span)
-                        .ok()?
-                        .is_some()
-                    {
-                        // Candidate input loans of an opaque reference result
-                        // do not establish the storage it actually points to.
-                        origins.push(self.reference_result_origin(argument)?);
-                    }
+                    let origins = self.closed_call_input_origins(argument, &ty)?;
+                    (ty, origins)
+                }
+                ReturnedValueNode::Receiver => {
+                    let ty = self.unifier.apply(declared_receiver.as_ref()?);
+                    let origins = self.closed_call_input_origins(receiver?, &ty)?;
                     (ty, origins)
                 }
                 ReturnedValueNode::Literal(ty) => (ty.clone(), List::new()),
@@ -473,6 +546,44 @@ impl TypeChecker {
             }
         }
         Some(values.get(derivation.result)?.1.clone())
+    }
+
+    fn closed_call_input_origins(
+        &mut self,
+        argument: &Expr,
+        ty: &Type,
+    ) -> Option<List<RecordReceiver>> {
+        // Even unused owned parameters may execute user cleanup.
+        if !self.return_value_has_trivial_cleanup(ty)
+            || self.deref_adjustments.contains_key(&argument.span)
+        {
+            return None;
+        }
+        let actual = self
+            .observed_operand_type(argument)
+            .or_else(|| self.type_registry.lookup_expr(argument.span).cloned())?;
+        let actual = self.place_reference_head(&actual, argument.span).ok()?;
+        let selected = self.place_reference_head(ty, argument.span).ok()?;
+        let autoref = match &selected {
+            Type::Reference { inner, .. }
+            | Type::CheckedReference { inner, .. }
+            | Type::UnsafeReference { inner, .. } => inner.as_ref() == &actual,
+            _ => false,
+        };
+        if actual != selected && !autoref {
+            return None;
+        }
+        let mut origins = List::new();
+        if autoref {
+            origins.push(self.call_input_place(argument)?.0);
+        } else if self
+            .reference_mode(&selected, argument.span)
+            .ok()?
+            .is_some()
+        {
+            origins.push(self.reference_result_origin(argument)?);
+        }
+        Some(origins)
     }
 
     fn return_value_has_trivial_cleanup(&self, ty: &Type) -> bool {

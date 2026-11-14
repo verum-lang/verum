@@ -10024,7 +10024,6 @@ impl TypeChecker {
             .map_err(|message| TypeError::UniverseBinding { message, span: func.span })?;
         scheme.where_clauses = structural_conditions.clone();
         self.record_callable_declaration(&mut scheme, func);
-        scheme.returned_value = super::returned_values::returned_value(self, func);
         let source_returned_value = scheme.returned_value.clone();
         let source_callable_declaration = scheme.callable_source.clone();
         let source_explicit_slots = scheme.explicit_method_vars.clone();
@@ -17273,8 +17272,8 @@ impl TypeChecker {
                 Some(Type::Function { params, .. }) if params.len() == args.len() => Some(params.as_slice()),
                 _ => None,
             };
-            let no_input_writes = tc.returned_call_value_origins(span, args).is_some();
-            tc.check_call_loans(args, parameters, borrow, !no_input_writes)?;
+            let preserves_input_payloads = tc.returned_call_value_origins(span, args, Some(receiver)).is_some();
+            tc.check_call_loans(args, parameters, borrow, !preserves_input_payloads)?;
             match kind {
                 Some(kind) if !kind.meta().allows_mutation => {}
                 // Passing an immediate scalar by value copies it out of its place.
@@ -18404,7 +18403,7 @@ impl TypeChecker {
                         }
                         self.retain_call_value_domains(instance.value_parameters, span)?;
                         let explicit_vars = instance.explicit_method_vars;
-                        Ok(Some(((ty, fresh_vars, impl_vc, explicit_vars), type_bounds, scheme.receiver_kind, instance.impl_self_type, instance.protocol_bounds, instance.where_clauses)))
+                        Ok(Some(((ty, fresh_vars, impl_vc, explicit_vars), type_bounds, scheme.receiver_kind, instance.impl_self_type, instance.protocol_bounds, instance.where_clauses, scheme)))
                     }).transpose()?.flatten()
                 };
                 if crate::ctor_trace_enabled() && early_method_info.is_none() {
@@ -18414,10 +18413,10 @@ impl TypeChecker {
                     );
                 }
 
-                if let Some(((method_ty, ordered_fresh_vars, impl_var_count, explicit_vars), type_bounds, receiver_kind, impl_self_type, protocol_bounds, where_clauses)) =
+                if let Some(((method_ty, ordered_fresh_vars, impl_var_count, explicit_vars), type_bounds, receiver_kind, impl_self_type, protocol_bounds, where_clauses, source_scheme)) =
                     early_method_info
                 {
-                    self.type_registry.register_call_target(span, method_ty.clone());
+                    self.type_registry.register_declared_method_target(span, method_ty.clone(), recv_ty.clone(), &source_scheme);
                     // #91/#95 — STATIC-DISPATCH ONLY.  Stamp the
                     // resolved-call-target side-table only when the
                     // receiver is a type-name path
@@ -22359,7 +22358,9 @@ impl TypeChecker {
         self.enforce_call_protocol_bounds(&protocol_bounds, span)?;
         self.enforce_call_type_bounds(&type_bounds, span)?;
         let output = self.resolve_call_output(return_type, &protocol_bounds, &where_clauses, &substitution, span)?;
-        self.type_registry.register_call_target(span, self.unifier.apply(&method_ty));
+        self.type_registry.register_declared_method_target(
+            span, self.unifier.apply(&method_ty), self.unifier.apply(recv_ty), scheme,
+        );
         Ok(Some(InferResult::method(self.unifier.apply(&output), receiver_kind)))
     }
 

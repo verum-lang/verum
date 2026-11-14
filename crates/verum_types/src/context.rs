@@ -162,17 +162,29 @@ pub(crate) struct NominalApplication {
     pub arguments: List<Type>,
 }
 
-/// A flat, source-owned value derivation. Every edge selects an earlier node.
+/// A flat, source-owned body derivation. Every value edge selects an earlier
+/// node; input writes remain separate from the returned value dependencies.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ReturnedValue {
     pub nodes: List<ReturnedValueNode>,
     pub result: usize,
     pub locals: List<usize>,
+    /// Writes are separate from result dependencies. Each target names a
+    /// declared input and a direct field path, validated against call types.
+    pub writes: List<InputFieldWrite>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct InputFieldWrite {
+    pub input: usize,
+    pub fields: List<Text>,
+    pub value: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum ReturnedValueNode {
     Parameter(usize),
+    Receiver,
     Literal(Type),
     Field { source: usize, name: Text },
     TupleIndex { source: usize, index: usize },
@@ -182,6 +194,8 @@ pub(crate) enum ReturnedValueNode {
 
 impl ReturnedValue {
     pub(crate) fn forwarded_parameter(&self) -> Option<usize> {
+        // The shorthand is not a substitute for validating a write footprint.
+        if !self.writes.is_empty() { return None; }
         match self.nodes.get(self.result)? {
             ReturnedValueNode::Parameter(index) => Some(*index),
             _ => None,
@@ -234,7 +248,7 @@ pub struct TypeScheme {
     /// Permission of the implicit receiver stripped from the callable arguments.
     /// Legacy descriptors without this information cannot establish a shared borrow.
     pub(crate) receiver_kind: Option<crate::core_metadata::ReceiverKind>,
-    /// Structural result derivation owned by this callable's exact source body.
+    /// Structural body derivation owned by this callable's exact source.
     pub(crate) returned_value: Option<Shared<ReturnedValue>>,
     /// Declared implementation receiver using this scheme's type variables.
     /// This preserves reordered, nested and fixed receiver arguments without

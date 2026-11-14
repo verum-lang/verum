@@ -47,6 +47,7 @@ use crate::ty::Type;
 struct CallTarget {
     ty: Type,
     explicit_inputs: bool,
+    declared_receiver: Option<Type>,
     returned_value: Option<Shared<crate::context::ReturnedValue>>,
 }
 
@@ -112,7 +113,7 @@ impl TypeRegistry {
     }
 
     pub fn register_call_target(&mut self, span: Span, ty: Type) {
-        self.record_call_target(span, ty, false, None);
+        self.record_call_target(span, ty, false, None, None);
     }
 
     pub(crate) fn register_declared_static_target(
@@ -132,7 +133,33 @@ impl TypeRegistry {
                 && !source.is_variadic
                 && source.body.is_some()
         });
-        self.record_call_target(span, ty, explicit_inputs, scheme.returned_value.clone());
+        self.record_call_target(span, ty, explicit_inputs, None, scheme.returned_value.clone());
+    }
+
+    /// A selected source receiver is separate from the explicit argument list.
+    /// Unknown dispatch and context inputs do not supply this authority.
+    pub(crate) fn register_declared_method_target(
+        &mut self,
+        span: Span,
+        ty: Type,
+        receiver: Type,
+        scheme: &crate::TypeScheme,
+    ) {
+        use verum_ast::FunctionParamKind;
+        let declared_receiver = scheme.callable_source.as_ref().and_then(|(_, source)| {
+            if !source.contexts.is_empty() || source.is_unsafe || source.extern_abi.is_some()
+                || source.is_variadic || source.body.is_none() { return None; }
+            if scheme.receiver_kind != Some(crate::core_metadata::ReceiverKind::from_declaration(source)) {
+                return None;
+            }
+            let mutable = match &source.params.first()?.kind {
+                FunctionParamKind::SelfRef => false,
+                FunctionParamKind::SelfRefMut => true,
+                _ => return None,
+            };
+            Some(Type::Reference { inner: Box::new(receiver), mutable })
+        });
+        self.record_call_target(span, ty, false, declared_receiver, scheme.returned_value.clone());
     }
 
     fn record_call_target(
@@ -140,16 +167,21 @@ impl TypeRegistry {
         span: Span,
         ty: Type,
         explicit_inputs: bool,
+        declared_receiver: Option<Type>,
         returned_value: Option<Shared<crate::context::ReturnedValue>>,
     ) {
         let previous = self.call_targets.get(&span);
         let agreed = !span.is_empty() && explicit_inputs
             && previous.is_none_or(|previous| previous.explicit_inputs && previous.ty == ty);
-        let same_rule = agreed && previous.is_none_or(|previous|
-            previous.returned_value == returned_value);
+        let same_rule = !span.is_empty() && (explicit_inputs || declared_receiver.is_some())
+            && previous.is_none_or(|previous| previous.ty == ty
+                && previous.explicit_inputs == explicit_inputs
+                && previous.declared_receiver == declared_receiver
+                && previous.returned_value == returned_value);
         self.call_targets.insert(span, CallTarget {
             ty,
             explicit_inputs: agreed,
+            declared_receiver: same_rule.then_some(declared_receiver).flatten(),
             returned_value: same_rule.then_some(returned_value).flatten(),
         });
     }
@@ -161,6 +193,10 @@ impl TypeRegistry {
     pub(crate) fn explicit_input_target(&self, span: Span) -> Maybe<&Type> {
         let target = self.call_targets.get(&span)?;
         target.explicit_inputs.then_some(&target.ty)
+    }
+
+    pub(crate) fn declared_receiver(&self, span: Span) -> Option<&Type> {
+        self.call_targets.get(&span)?.declared_receiver.as_ref()
     }
 
     pub(crate) fn returned_value(&self, span: Span) -> Option<&Shared<crate::context::ReturnedValue>> {

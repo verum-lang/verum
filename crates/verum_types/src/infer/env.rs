@@ -10034,14 +10034,15 @@ impl TypeChecker {
                         ExprKind::Path(_) | ExprKind::Closure { .. }
                     ) && !resolved_ty.free_vars().is_empty();
 
-                    // An immutable alias of a declared polymorphic value keeps
-                    // its entire scheme. Generalizing only the inferred body
-                    // would discard the declaration's levels and obligations.
+                    // An immutable alias keeps the exact declared callable as well
+                    // as quantified values. Generalizing only its type loses
+                    // body authority, levels and obligations.
                     let aliased_scheme = if ty.is_none() && !is_mutable_binding {
                         if let ExprKind::Path(path) = &val.kind {
                             let name = self.path_to_string(path);
                             self.callee_scheme_with_mount_authority(name.as_str())
-                                .filter(|scheme| !scheme.vars.is_empty() || !scheme.universe_parameters().is_empty())
+                                .filter(|scheme| scheme.callable_source.is_some()
+                                    || !scheme.vars.is_empty() || !scheme.universe_parameters().is_empty())
                         } else { None }
                     } else { None };
 

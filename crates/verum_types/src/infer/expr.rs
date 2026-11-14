@@ -7872,8 +7872,8 @@ impl TypeChecker {
         else {
             unreachable!()
         };
-        let no_input_writes = self.returned_value_origins(expr).is_some();
-        self.check_call_loans(args, Some(&params), None, !no_input_writes)?;
+        let preserves_input_payloads = self.returned_value_origins(expr).is_some();
+        self.check_call_loans(args, Some(&params), None, !preserves_input_payloads)?;
 
         // Consume affine values passed by value
         self.consume_affine_call_args(args, &params)?;
