@@ -203,6 +203,20 @@ fn assert_replayed_callable(ty: &Type, polymorphic: bool) {
         &expected,
         "metadata must not invent a Future wrapper"
     );
+
+    // The archive preserves an async-permitting bound, not an observed body.
+    // Its diagnostic view must distinguish those facts without changing the
+    // parseable spelling carried by existing descriptors.
+    let mut synchronous = function.clone();
+    let Type::Function { property_requirement, .. } = &mut synchronous else { unreachable!() };
+    *property_requirement = verum_types::computational_properties::PropertyRequirement::source_callable(false);
+    let error = verum_types::Unifier::new()
+        .unify(function, &synchronous, verum_ast::Span::dummy()).unwrap_err();
+    let verum_types::TypeError::Mismatch { expected, actual, .. } = &error else { panic!("{error:?}") };
+    assert!(expected.contains("bound: excludes {Async}; observed: unknown"), "{error}");
+    assert!(actual.contains("bound: unrestricted; observed: unknown"), "{error}");
+    assert!(!actual.starts_with("async fn"), "{error}");
+    assert!(function.to_string().starts_with("async fn"));
 }
 
 #[test]

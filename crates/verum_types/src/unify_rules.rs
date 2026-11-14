@@ -27,8 +27,8 @@ impl Unifier {
             Ok(Substitution::new())
         } else {
             Err(TypeError::Mismatch {
-                expected: t2.to_text(),
-                actual: t1.to_text(),
+                expected: t2.diagnostic_text(),
+                actual: t1.diagnostic_text(),
                 span,
             })
         }
@@ -68,8 +68,8 @@ impl Unifier {
             // If "()" is registered as a variant type name, check if it matches
         }
         Err(TypeError::Mismatch {
-            expected: t2.to_text(),
-            actual: t1.to_text(),
+            expected: t2.diagnostic_text(),
+            actual: t1.diagnostic_text(),
             span,
         })
     }
@@ -140,8 +140,8 @@ impl Unifier {
 
         if p1.len() != p2.len() || requirement1 != requirement2 {
             return Err(TypeError::Mismatch {
-                expected: t2.to_text(),
-                actual: t1.to_text(),
+                expected: t2.diagnostic_text(),
+                actual: t1.diagnostic_text(),
                 span,
             });
         }
@@ -161,8 +161,8 @@ impl Unifier {
         //  But fn f<T: Ord>(x: T) <: fn f<T: Eq>(x: T) if Ord extends Eq
         if tp1.len() != tp2.len() {
             return Err(TypeError::Mismatch {
-                expected: t2.to_text(),
-                actual: t1.to_text(),
+                expected: t2.diagnostic_text(),
+                actual: t1.diagnostic_text(),
                 span,
             });
         }
@@ -217,8 +217,8 @@ impl Unifier {
 
         if t1s.len() != t2s.len() {
             return Err(TypeError::Mismatch {
-                expected: t2.to_text(),
-                actual: t1.to_text(),
+                expected: t2.diagnostic_text(),
+                actual: t1.diagnostic_text(),
                 span,
             });
         }
@@ -306,8 +306,8 @@ impl Unifier {
 
         if app_args.len() != 1 {
             return Err(TypeError::Mismatch {
-                expected: t2.to_text(),
-                actual: t1.to_text(),
+                expected: t2.diagnostic_text(),
+                actual: t1.diagnostic_text(),
                 span,
             });
         }
@@ -344,15 +344,15 @@ impl Unifier {
                 self.unify_inner(e1, &app_args[0], span)
             } else {
                 Err(TypeError::Mismatch {
-                    expected: t2.to_text(),
-                    actual: t1.to_text(),
+                    expected: t2.diagnostic_text(),
+                    actual: t1.diagnostic_text(),
                     span,
                 })
             }
         } else {
             Err(TypeError::Mismatch {
-                expected: t2.to_text(),
-                actual: t1.to_text(),
+                expected: t2.diagnostic_text(),
+                actual: t1.diagnostic_text(),
                 span,
             })
         }
@@ -369,8 +369,8 @@ impl Unifier {
 
         if f1.len() != f2.len() {
             return Err(TypeError::Mismatch {
-                expected: t2.to_text(),
-                actual: t1.to_text(),
+                expected: t2.diagnostic_text(),
+                actual: t1.diagnostic_text(),
                 span,
             });
         }
@@ -392,8 +392,8 @@ impl Unifier {
                 }
                 None => {
                     return Err(TypeError::Mismatch {
-                        expected: t2.to_text(),
-                        actual: t1.to_text(),
+                        expected: t2.diagnostic_text(),
+                        actual: t1.diagnostic_text(),
                         span,
                     });
                 }
@@ -439,8 +439,8 @@ impl Unifier {
             } else if r2.is_none() {
                 // f1 has a field that f2 doesn't, and f2 is closed
                 return Err(TypeError::Mismatch {
-                    expected: t2.to_text(),
-                    actual: t1.to_text(),
+                    expected: t2.diagnostic_text(),
+                    actual: t1.diagnostic_text(),
                     span,
                 });
             }
@@ -451,8 +451,8 @@ impl Unifier {
         for (name, _) in f2 {
             if !f1.contains_key(name) && r1.is_none() {
                 return Err(TypeError::Mismatch {
-                    expected: t2.to_text(),
-                    actual: t1.to_text(),
+                    expected: t2.diagnostic_text(),
+                    actual: t1.diagnostic_text(),
                     span,
                 });
             }
@@ -545,8 +545,8 @@ impl Unifier {
                 }
                 None => {
                     return Err(TypeError::Mismatch {
-                        expected: t2.to_text(),
-                        actual: t1.to_text(),
+                        expected: t2.diagnostic_text(),
+                        actual: t1.diagnostic_text(),
                         span,
                     });
                 }
@@ -570,8 +570,8 @@ impl Unifier {
             // Extensible record is closed (no row var) - must have exact same fields
             if ext_fields.len() != rec_fields.len() {
                 return Err(TypeError::Mismatch {
-                    expected: t2.to_text(),
-                    actual: t1.to_text(),
+                    expected: t2.diagnostic_text(),
+                    actual: t1.diagnostic_text(),
                     span,
                 });
             }
@@ -593,8 +593,8 @@ impl Unifier {
         let v2_is_subset = v2.keys().all(|key| v1.contains_key(key));
         if !v1_is_subset && !v2_is_subset {
             return Err(TypeError::Mismatch {
-                expected: t2.to_text(),
-                actual: t1.to_text(),
+                expected: t2.diagnostic_text(),
+                actual: t1.diagnostic_text(),
                 span,
             });
         }
@@ -645,8 +645,8 @@ impl Unifier {
         // Bounds must match (same protocols)
         if b1.len() != b2.len() {
             return Err(TypeError::Mismatch {
-                expected: t2.to_text(),
-                actual: t1.to_text(),
+                expected: t2.diagnostic_text(),
+                actual: t1.diagnostic_text(),
                 span,
             });
         }
@@ -655,8 +655,8 @@ impl Unifier {
         for (bound1, bound2) in b1.iter().zip(b2.iter()) {
             if bound1 != bound2 {
                 return Err(TypeError::Mismatch {
-                    expected: t2.to_text(),
-                    actual: t1.to_text(),
+                    expected: t2.diagnostic_text(),
+                    actual: t1.diagnostic_text(),
                     span,
                 });
             }
@@ -665,8 +665,8 @@ impl Unifier {
         // Unify associated type bindings
         if bi1.len() != bi2.len() {
             return Err(TypeError::Mismatch {
-                expected: t2.to_text(),
-                actual: t1.to_text(),
+                expected: t2.diagnostic_text(),
+                actual: t1.diagnostic_text(),
                 span,
             });
         }
@@ -688,8 +688,8 @@ impl Unifier {
                 }
                 None => {
                     return Err(TypeError::Mismatch {
-                        expected: t2.to_text(),
-                        actual: t1.to_text(),
+                        expected: t2.diagnostic_text(),
+                        actual: t1.diagnostic_text(),
                         span,
                     });
                 }
@@ -722,8 +722,8 @@ impl Unifier {
         // Error only if expected is mutable but actual is immutable
         if *m2 && !*m1 {
             return Err(TypeError::Mismatch {
-                expected: t2.to_text(),
-                actual: t1.to_text(),
+                expected: t2.diagnostic_text(),
+                actual: t1.diagnostic_text(),
                 span,
             });
         }
@@ -753,8 +753,8 @@ impl Unifier {
         // Error only if expected is mutable but actual is immutable
         if *m2 && !*m1 {
             return Err(TypeError::Mismatch {
-                expected: t2.to_text(),
-                actual: t1.to_text(),
+                expected: t2.diagnostic_text(),
+                actual: t1.diagnostic_text(),
                 span,
             });
         }
@@ -784,8 +784,8 @@ impl Unifier {
         // Error only if expected is mutable but actual is immutable
         if *m2 && !*m1 {
             return Err(TypeError::Mismatch {
-                expected: t2.to_text(),
-                actual: t1.to_text(),
+                expected: t2.diagnostic_text(),
+                actual: t1.diagnostic_text(),
                 span,
             });
         }
@@ -813,15 +813,15 @@ impl Unifier {
 
         if *m2 && !*m1 {
             return Err(TypeError::Mismatch {
-                expected: t2.to_text(),
-                actual: t1.to_text(),
+                expected: t2.diagnostic_text(),
+                actual: t1.diagnostic_text(),
                 span,
             });
         }
         if !*m2 && *m1 {
             return Err(TypeError::Mismatch {
-                expected: t2.to_text(),
-                actual: t1.to_text(),
+                expected: t2.diagnostic_text(),
+                actual: t1.diagnostic_text(),
                 span,
             });
         }
@@ -849,8 +849,8 @@ impl Unifier {
 
         if m1 != m2 {
             return Err(TypeError::Mismatch {
-                expected: t2.to_text(),
-                actual: t1.to_text(),
+                expected: t2.diagnostic_text(),
+                actual: t1.diagnostic_text(),
                 span,
             });
         }
@@ -881,8 +881,8 @@ impl Unifier {
         // But not immutable ref to mutable unsafe (need mut for writing)
         if *m2 && !*m1 {
             return Err(TypeError::Mismatch {
-                expected: t2.to_text(),
-                actual: t1.to_text(),
+                expected: t2.diagnostic_text(),
+                actual: t1.diagnostic_text(),
                 span,
             });
         }
@@ -920,8 +920,8 @@ impl Unifier {
 
         if *m2 && !*m1 {
             return Err(TypeError::Mismatch {
-                expected: t2.to_text(),
-                actual: t1.to_text(),
+                expected: t2.diagnostic_text(),
+                actual: t1.diagnostic_text(),
                 span,
             });
         }
@@ -959,8 +959,8 @@ impl Unifier {
 
         if *m2 && !*m1 {
             return Err(TypeError::Mismatch {
-                expected: t2.to_text(),
-                actual: t1.to_text(),
+                expected: t2.diagnostic_text(),
+                actual: t1.diagnostic_text(),
                 span,
             });
         }
@@ -988,8 +988,8 @@ impl Unifier {
 
         if m1 != m2 {
             return Err(TypeError::Mismatch {
-                expected: t2.to_text(),
-                actual: t1.to_text(),
+                expected: t2.diagnostic_text(),
+                actual: t1.diagnostic_text(),
                 span,
             });
         }
@@ -1017,8 +1017,8 @@ impl Unifier {
 
         if m1 != m2 {
             return Err(TypeError::Mismatch {
-                expected: t2.to_text(),
-                actual: t1.to_text(),
+                expected: t2.diagnostic_text(),
+                actual: t1.diagnostic_text(),
                 span,
             });
         }
@@ -1097,8 +1097,8 @@ impl Unifier {
             && std::env::var_os("VERUM_NO_LEAF_BRIDGE").is_none();
         if a1.len() != a2.len() || !(same_head || bare_bridge) {
             return Err(TypeError::Mismatch {
-                expected: t2.to_text(),
-                actual: t1.to_text(),
+                expected: t2.diagnostic_text(),
+                actual: t1.diagnostic_text(),
                 span,
             });
         }
@@ -1132,8 +1132,8 @@ impl Unifier {
         // Unify the base types
         if a1.len() != a2.len() {
             return Err(TypeError::Mismatch {
-                expected: t2.to_text(),
-                actual: t1.to_text(),
+                expected: t2.diagnostic_text(),
+                actual: t1.diagnostic_text(),
                 span,
             });
         }
@@ -1169,8 +1169,8 @@ impl Unifier {
             return self.unify_inner(&resolved, other, span);
         }
         Err(TypeError::Mismatch {
-            expected: t2.to_text(),
-            actual: t1.to_text(),
+            expected: t2.diagnostic_text(),
+            actual: t1.diagnostic_text(),
             span,
         })
     }
@@ -1190,8 +1190,8 @@ impl Unifier {
             return self.unify_inner(other, &resolved, span);
         }
         Err(TypeError::Mismatch {
-            expected: t2.to_text(),
-            actual: t1.to_text(),
+            expected: t2.diagnostic_text(),
+            actual: t1.diagnostic_text(),
             span,
         })
     }
@@ -1207,8 +1207,8 @@ impl Unifier {
 
         if n1 != n2 || a1.len() != a2.len() {
             return Err(TypeError::Mismatch {
-                expected: t2.to_text(),
-                actual: t1.to_text(),
+                expected: t2.diagnostic_text(),
+                actual: t1.diagnostic_text(),
                 span,
             });
         }
@@ -1255,8 +1255,8 @@ impl Unifier {
 
         if !same_head || a1.len() != a2.len() {
             return Err(TypeError::Mismatch {
-                expected: t2.to_text(),
-                actual: t1.to_text(),
+                expected: t2.diagnostic_text(),
+                actual: t1.diagnostic_text(),
                 span,
             });
         }
@@ -1316,8 +1316,8 @@ impl Unifier {
                 // Check arity matches
                 if app_args.len() != type_ctor_arity {
                     return Err(TypeError::Mismatch {
-                        expected: t2.to_text(),
-                        actual: t1.to_text(),
+                        expected: t2.diagnostic_text(),
+                        actual: t1.diagnostic_text(),
                         span,
                     });
                 }
@@ -1361,8 +1361,8 @@ impl Unifier {
 
             // Unknown variant type - can't infer HKT
             Err(TypeError::Mismatch {
-                expected: t2.to_text(),
-                actual: t1.to_text(),
+                expected: t2.diagnostic_text(),
+                actual: t1.diagnostic_text(),
                 span,
             })
         } else {
@@ -1401,8 +1401,8 @@ impl Unifier {
                 }
             }
             Err(TypeError::Mismatch {
-                expected: t2.to_text(),
-                actual: t1.to_text(),
+                expected: t2.diagnostic_text(),
+                actual: t1.diagnostic_text(),
                 span,
             })
         }
@@ -1994,8 +1994,8 @@ impl Unifier {
             self.unify_inner(inner, ty, span)
         } else {
             Err(TypeError::Mismatch {
-                expected: t2.to_text(),
-                actual: t1.to_text(),
+                expected: t2.diagnostic_text(),
+                actual: t1.diagnostic_text(),
                 span,
             })
         }
@@ -2063,8 +2063,8 @@ impl Unifier {
         // Must have same arity
         if vs1.len() != vs2.len() {
             return Err(TypeError::Mismatch {
-                expected: t2.to_text(),
-                actual: t1.to_text(),
+                expected: t2.diagnostic_text(),
+                actual: t1.diagnostic_text(),
                 span,
             });
         }
@@ -2133,8 +2133,8 @@ impl Unifier {
         // Args must have the same length
         if a1.len() != a2.len() {
             return Err(TypeError::Mismatch {
-                expected: t2.to_text(),
-                actual: t1.to_text(),
+                expected: t2.diagnostic_text(),
+                actual: t1.diagnostic_text(),
                 span,
             });
         }
@@ -2183,8 +2183,8 @@ impl Unifier {
             Ok(Substitution::new())
         } else {
             Err(TypeError::Mismatch {
-                expected: t2.to_text(),
-                actual: t1.to_text(),
+                expected: t2.diagnostic_text(),
+                actual: t1.diagnostic_text(),
                 span,
             })
         }
@@ -2223,8 +2223,8 @@ impl Unifier {
         if let Type::Var(var) = constructor.as_ref() {
             if app_args.len() != gen_args.len() {
                 return Err(TypeError::Mismatch {
-                    expected: t2.to_text(),
-                    actual: t1.to_text(),
+                    expected: t2.diagnostic_text(),
+                    actual: t1.diagnostic_text(),
                     span,
                 });
             }
@@ -2282,8 +2282,8 @@ impl Unifier {
                 }
             }
             Err(TypeError::Mismatch {
-                expected: t2.to_text(),
-                actual: t1.to_text(),
+                expected: t2.diagnostic_text(),
+                actual: t1.diagnostic_text(),
                 span,
             })
         }
@@ -2322,8 +2322,8 @@ impl Unifier {
         if let Type::Var(var) = constructor.as_ref() {
             if app_args.len() != named_args.len() {
                 return Err(TypeError::Mismatch {
-                    expected: t2.to_text(),
-                    actual: t1.to_text(),
+                    expected: t2.diagnostic_text(),
+                    actual: t1.diagnostic_text(),
                     span,
                 });
             }
@@ -2367,8 +2367,8 @@ impl Unifier {
             Ok(subst)
         } else {
             Err(TypeError::Mismatch {
-                expected: t2.to_text(),
-                actual: t1.to_text(),
+                expected: t2.diagnostic_text(),
+                actual: t1.diagnostic_text(),
                 span,
             })
         }
@@ -2438,8 +2438,8 @@ impl Unifier {
             Ok(Substitution::new())
         } else {
             Err(TypeError::Mismatch {
-                expected: t2.to_text(),
-                actual: t1.to_text(),
+                expected: t2.diagnostic_text(),
+                actual: t1.diagnostic_text(),
                 span,
             })
         }
@@ -2485,8 +2485,8 @@ impl Unifier {
             Ok(Substitution::new())
         } else {
             Err(TypeError::Mismatch {
-                expected: t2.to_text(),
-                actual: t1.to_text(),
+                expected: t2.diagnostic_text(),
+                actual: t1.diagnostic_text(),
                 span,
             })
         }
@@ -2525,8 +2525,8 @@ impl Unifier {
                 span,
             )
             .map_err(|_| TypeError::Mismatch {
-                expected: t2.to_text(),
-                actual: t1.to_text(),
+                expected: t2.diagnostic_text(),
+                actual: t1.diagnostic_text(),
                 span,
             })
         }
@@ -2555,8 +2555,8 @@ impl Unifier {
             self.unify_inner(output, &args[0], span)
         } else {
             Err(TypeError::Mismatch {
-                expected: t2.to_text(),
-                actual: t1.to_text(),
+                expected: t2.diagnostic_text(),
+                actual: t1.diagnostic_text(),
                 span,
             })
         }
@@ -2593,8 +2593,8 @@ impl Unifier {
             return Ok(Substitution::new());
         }
         Err(TypeError::Mismatch {
-            expected: t2.to_text(),
-            actual: t1.to_text(),
+            expected: t2.diagnostic_text(),
+            actual: t1.diagnostic_text(),
             span,
         })
     }

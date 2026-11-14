@@ -598,8 +598,8 @@ impl TypeChecker {
             };
             if !self.subtyping.is_subtype(&actual_contract, &bound_contract) {
                 return Err(TypeError::Mismatch {
-                    expected: bound.to_text(),
-                    actual: actual.to_text(),
+                    expected: bound.diagnostic_text(),
+                    actual: actual.diagnostic_text(),
                     span,
                 });
             }
@@ -649,8 +649,8 @@ impl TypeChecker {
             self.check_callable_header(&actual, &bound, span)?;
             if actual_params.len() != bound_params.len() {
                 return Err(TypeError::Mismatch {
-                    expected: bound.to_text(),
-                    actual: actual.to_text(),
+                    expected: bound.diagnostic_text(),
+                    actual: actual.diagnostic_text(),
                     span,
                 });
             }
@@ -691,8 +691,8 @@ impl TypeChecker {
             Ok(())
         } else {
             Err(TypeError::Mismatch {
-                expected: bound.to_text(),
-                actual: actual.to_text(),
+                expected: bound.diagnostic_text(),
+                actual: actual.diagnostic_text(),
                 span,
             })
         }

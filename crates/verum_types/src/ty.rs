@@ -2854,9 +2854,70 @@ impl Type {
     }
 }
 
+impl Type {
+    /// Human-readable type evidence for diagnostics, including unknown callable
+    /// properties. This is not source syntax or a descriptor serialization.
+    pub fn diagnostic_text(&self) -> Text {
+        format!("{}", TypeDisplay { ty: self, diagnostic: true }).into()
+    }
+}
+
+struct TypeDisplay<'a> {
+    ty: &'a Type,
+    diagnostic: bool,
+}
+
+impl<'a> TypeDisplay<'a> {
+    fn child(&self, ty: &'a Type) -> Self {
+        Self { ty, diagnostic: self.diagnostic }
+    }
+}
+
 impl fmt::Display for Type {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
+        TypeDisplay { ty: self, diagnostic: false }.fmt(f)
+    }
+}
+
+fn write_callable_evidence(
+    f: &mut fmt::Formatter<'_>,
+    bound: &crate::computational_properties::PropertyRequirement,
+    observed: Option<&crate::computational_properties::PropertySet>,
+) -> fmt::Result {
+    use crate::computational_properties::{PropertyRequirement, PropertySet};
+
+    fn properties(f: &mut fmt::Formatter<'_>, set: &PropertySet) -> fmt::Result {
+        if set.is_pure() {
+            return write!(f, "Pure");
+        }
+        let mut names: List<Text> = set.iter().map(|property| format!("{property}").into()).collect();
+        names.sort();
+        write!(f, "{{{}}}", names.join(", "))
+    }
+
+    write!(f, " [bound: ")?;
+    match bound {
+        PropertyRequirement::Unrestricted => write!(f, "unrestricted")?,
+        PropertyRequirement::Excludes(forbidden) => {
+            write!(f, "excludes ")?;
+            properties(f, forbidden)?;
+        }
+        PropertyRequirement::AtMost(allowed) => {
+            write!(f, "at most ")?;
+            properties(f, allowed)?;
+        }
+    }
+    write!(f, "; observed: ")?;
+    match observed {
+        Some(known) => properties(f, known)?,
+        None => write!(f, "unknown")?,
+    }
+    write!(f, "]")
+}
+
+impl fmt::Display for TypeDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.ty {
             Type::Unit => write!(f, "Unit"),
             Type::Never => write!(f, "!"),
             Type::Bool => write!(f, "Bool"),
@@ -2879,7 +2940,7 @@ impl fmt::Display for Type {
                         if i > 0 {
                             write!(f, ", ")?;
                         }
-                        write!(f, "{}", arg)?;
+                        write!(f, "{}", self.child(arg))?;
                     }
                     write!(f, ">")?;
                 }
@@ -2899,7 +2960,7 @@ impl fmt::Display for Type {
                         if i > 0 {
                             write!(f, ", ")?;
                         }
-                        write!(f, "{}", arg)?;
+                        write!(f, "{}", self.child(arg))?;
                     }
                     write!(f, ">")?;
                 }
@@ -2913,7 +2974,12 @@ impl fmt::Display for Type {
                 contexts,
                 properties,
             } => {
-                if property_requirement.may_be_async() {
+                let show_async = if self.diagnostic {
+                    properties.as_ref().is_some_and(|known| known.is_async())
+                } else {
+                    property_requirement.may_be_async()
+                };
+                if show_async {
                     write!(f, "async ")?;
                 }
                 write!(f, "fn(")?;
@@ -2921,9 +2987,9 @@ impl fmt::Display for Type {
                     if i > 0 {
                         write!(f, ", ")?;
                     }
-                    write!(f, "{}", param)?;
+                    write!(f, "{}", self.child(param))?;
                 }
-                write!(f, ") -> {}", return_type)?;
+                write!(f, ") -> {}", self.child(return_type))?;
                 if let Some(req) = contexts
                     && !req.is_empty()
                 {
@@ -2936,6 +3002,9 @@ impl fmt::Display for Type {
                     }
                     write!(f, "]")?;
                 }
+                if self.diagnostic {
+                    write_callable_evidence(f, property_requirement, properties.as_ref())?;
+                }
                 Ok(())
             }
             Type::Tuple(types) => {
@@ -2944,27 +3013,27 @@ impl fmt::Display for Type {
                     if i > 0 {
                         write!(f, ", ")?;
                     }
-                    write!(f, "{}", ty)?;
+                    write!(f, "{}", self.child(ty))?;
                 }
                 write!(f, ")")
             }
             Type::Array { element, size } => {
                 if let Some(n) = size {
-                    write!(f, "[{}; {}]", element, n)
+                    write!(f, "[{}; {}]", self.child(element), n)
                 } else {
-                    write!(f, "[{}]", element)
+                    write!(f, "[{}]", self.child(element))
                 }
             }
             // Slice represents an unsized array type [T], NOT a reference &[T]
             // References to slices are represented as Reference { inner: Slice }
-            Type::Slice { element } => write!(f, "[{}]", element),
+            Type::Slice { element } => write!(f, "[{}]", self.child(element)),
             Type::Record(fields) => {
                 write!(f, "{{ ")?;
                 for (i, (name, ty)) in fields.iter().enumerate() {
                     if i > 0 {
                         write!(f, ", ")?;
                     }
-                    write!(f, "{}: {}", name, ty)?;
+                    write!(f, "{}: {}", name, self.child(ty))?;
                 }
                 write!(f, " }}")
             }
@@ -2973,58 +3042,58 @@ impl fmt::Display for Type {
                     if i > 0 {
                         write!(f, " | ")?;
                     }
-                    write!(f, "{}({})", name, ty)?;
+                    write!(f, "{}({})", name, self.child(ty))?;
                 }
                 Ok(())
             }
             Type::Reference { mutable, inner } => {
                 if *mutable {
-                    write!(f, "&mut {}", inner)
+                    write!(f, "&mut {}", self.child(inner))
                 } else {
-                    write!(f, "&{}", inner)
+                    write!(f, "&{}", self.child(inner))
                 }
             }
             Type::CheckedReference { mutable, inner } => {
                 if *mutable {
-                    write!(f, "&checked mut {}", inner)
+                    write!(f, "&checked mut {}", self.child(inner))
                 } else {
-                    write!(f, "&checked {}", inner)
+                    write!(f, "&checked {}", self.child(inner))
                 }
             }
             Type::UnsafeReference { mutable, inner } => {
                 if *mutable {
-                    write!(f, "&unsafe mut {}", inner)
+                    write!(f, "&unsafe mut {}", self.child(inner))
                 } else {
-                    write!(f, "&unsafe {}", inner)
+                    write!(f, "&unsafe {}", self.child(inner))
                 }
             }
             Type::Ownership { mutable, inner } => {
                 // Display owned types with user-friendly syntax
                 if *mutable {
-                    write!(f, "owned mut {}", inner)
+                    write!(f, "owned mut {}", self.child(inner))
                 } else {
-                    write!(f, "owned {}", inner)
+                    write!(f, "owned {}", self.child(inner))
                 }
             }
             Type::Pointer { mutable, inner } => {
                 if *mutable {
-                    write!(f, "*mut {}", inner)
+                    write!(f, "*mut {}", self.child(inner))
                 } else {
-                    write!(f, "*const {}", inner)
+                    write!(f, "*const {}", self.child(inner))
                 }
             }
             Type::VolatilePointer { mutable, inner } => {
                 if *mutable {
-                    write!(f, "*volatile mut {}", inner)
+                    write!(f, "*volatile mut {}", self.child(inner))
                 } else {
-                    write!(f, "*volatile {}", inner)
+                    write!(f, "*volatile {}", self.child(inner))
                 }
             }
             Type::Refined { base, predicate } => {
-                write!(f, "{}{{{}}}", base, predicate)
+                write!(f, "{}{{{}}}", self.child(base), predicate)
             }
             Type::Exists { var, body } => {
-                write!(f, "∃{}. {}", var, body)
+                write!(f, "∃{}. {}", var, self.child(body))
             }
             Type::Forall { vars, body } => {
                 write!(f, "∀")?;
@@ -3034,7 +3103,7 @@ impl fmt::Display for Type {
                     }
                     write!(f, "{}", v)?;
                 }
-                write!(f, ". {}", body)
+                write!(f, ". {}", self.child(body))
             }
             Type::Meta {
                 name,
@@ -3047,23 +3116,23 @@ impl fmt::Display for Type {
                 if let ValueTerm::Constant(v) = value {
                     return write!(f, "{}", v);
                 }
-                write!(f, "{}: meta {}", name, ty)?;
+                write!(f, "{}: meta {}", name, self.child(ty))?;
                 if let Some(pred) = refinement {
                     write!(f, "{{{}}}", pred)?;
                 }
                 Ok(())
             }
             Type::Future { output } => {
-                write!(f, "Future<{}>", output)
+                write!(f, "Future<{}>", self.child(output))
             }
             Type::Generator {
                 yield_ty,
                 return_ty,
             } => {
-                write!(f, "Generator<{}, {}>", yield_ty, return_ty)
+                write!(f, "Generator<{}, {}>", self.child(yield_ty), self.child(return_ty))
             }
             Type::Tensor { element, shape, .. } => {
-                write!(f, "Tensor<{}, [", element)?;
+                write!(f, "Tensor<{}, [", self.child(element))?;
                 for (i, dim) in shape.iter().enumerate() {
                     if i > 0 {
                         write!(f, ", ")?;
@@ -3076,7 +3145,7 @@ impl fmt::Display for Type {
                 write!(f, "'{}", name)
             }
             Type::GenRef { inner } => {
-                write!(f, "GenRef<{}>", inner)
+                write!(f, "GenRef<{}>", self.child(inner))
             }
             Type::TypeConstructor { name, arity, .. } => {
                 // Display type constructor with placeholders for arity
@@ -3098,7 +3167,7 @@ impl fmt::Display for Type {
                 // Extract just the constructor name, not its full display (which includes <_> placeholders)
                 match constructor.as_ref() {
                     Type::TypeConstructor { name, .. } => write!(f, "{}", name)?,
-                    _ => write!(f, "{}", constructor)?,
+                    _ => write!(f, "{}", self.child(constructor))?,
                 }
                 if !args.is_empty() {
                     write!(f, "<")?;
@@ -3106,7 +3175,7 @@ impl fmt::Display for Type {
                         if i > 0 {
                             write!(f, ", ")?;
                         }
-                        write!(f, "{}", arg)?;
+                        write!(f, "{}", self.child(arg))?;
                     }
                     write!(f, ">")?;
                 }
@@ -3119,7 +3188,7 @@ impl fmt::Display for Type {
                 param_type,
                 return_type,
             } => {
-                write!(f, "({}: {}) → {}", param_name, param_type, return_type)
+                write!(f, "({}: {}) → {}", param_name, self.child(param_type), self.child(return_type))
             }
 
             Type::Sigma {
@@ -3127,21 +3196,21 @@ impl fmt::Display for Type {
                 fst_type,
                 snd_type,
             } => {
-                write!(f, "({}: {}, {})", fst_name, fst_type, snd_type)
+                write!(f, "({}: {}, {})", fst_name, self.child(fst_type), self.child(snd_type))
             }
 
             Type::Eq { ty, lhs, rhs } => {
-                write!(f, "Eq<{}, lhs, rhs>", ty)
+                write!(f, "Eq<{}, lhs, rhs>", self.child(ty))
             }
 
             Type::PathType { space, left, right } => {
-                write!(f, "Path<{}>({:?}, {:?})", space, left, right)
+                write!(f, "Path<{}>({:?}, {:?})", self.child(space), left, right)
             }
 
             Type::Interval => write!(f, "I"),
 
             Type::Partial { element_type, face } => {
-                write!(f, "Partial<{}>({:?})", element_type, face)
+                write!(f, "Partial<{}>({:?})", self.child(element_type), face)
             }
 
             Type::Universe { level } => {
@@ -3164,14 +3233,14 @@ impl fmt::Display for Type {
                         if !first {
                             write!(f, ", ")?;
                         }
-                        write!(f, "{}: {}", pname, pty)?;
+                        write!(f, "{}: {}", pname, self.child(pty))?;
                         first = false;
                     }
                     for (iname, ity) in indices.iter() {
                         if !first {
                             write!(f, ", ")?;
                         }
-                        write!(f, "{}: {}", iname, ity)?;
+                        write!(f, "{}: {}", iname, self.child(ity))?;
                         first = false;
                     }
                     write!(f, ">")?;
@@ -3187,7 +3256,7 @@ impl fmt::Display for Type {
                         if i > 0 {
                             write!(f, ", ")?;
                         }
-                        write!(f, "{}: {}", pname, pty)?;
+                        write!(f, "{}: {}", pname, self.child(pty))?;
                     }
                     write!(f, ">")?;
                 }
@@ -3202,7 +3271,7 @@ impl fmt::Display for Type {
                         if i > 0 {
                             write!(f, ", ")?;
                         }
-                        write!(f, "{}: {}", pname, pty)?;
+                        write!(f, "{}: {}", pname, self.child(pty))?;
                     }
                     write!(f, ">")?;
                 }
@@ -3210,7 +3279,7 @@ impl fmt::Display for Type {
             }
 
             Type::Quantified { inner, quantity } => {
-                write!(f, "{} @{}", inner, quantity)
+                write!(f, "{} @{}", self.child(inner), quantity)
             }
 
             Type::Placeholder { name, .. } => {
@@ -3223,7 +3292,7 @@ impl fmt::Display for Type {
                     if i > 0 {
                         write!(f, ", ")?;
                     }
-                    write!(f, "{}: {}", name, ty)?;
+                    write!(f, "{}: {}", name, self.child(ty))?;
                 }
                 if let Some(rv) = row_var {
                     write!(f, " | {}", rv)?;
@@ -3232,7 +3301,7 @@ impl fmt::Display for Type {
             }
 
             Type::CapabilityRestricted { base, capabilities } => {
-                write!(f, "{} with [", base)?;
+                write!(f, "{} with [", self.child(base))?;
                 let names = capabilities.names();
                 for (i, name) in names.iter().enumerate() {
                     if i > 0 {
@@ -3261,7 +3330,7 @@ impl fmt::Display for Type {
                         if i > 0 {
                             write!(f, ", ")?;
                         }
-                        write!(f, "{} = {}", name, ty)?;
+                        write!(f, "{} = {}", name, self.child(ty))?;
                     }
                     write!(f, ">")?;
                 }

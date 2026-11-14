@@ -253,7 +253,9 @@ fn inferred_async_and_unknown_callables_cannot_be_coerced_to_strict_fn_types() {
         assert!(
             errors
                 .iter()
-                .any(|error| error.contains("Type mismatch") && error.contains("async fn")),
+                .any(|error| error.contains("Type mismatch")
+                    && error.contains("bound: excludes {Async}; observed: unknown")
+                    && error.contains("bound: unrestricted; observed: unknown")),
             "{source}: {errors:?}"
         );
     }
@@ -263,7 +265,9 @@ fn inferred_async_and_unknown_callables_cannot_be_coerced_to_strict_fn_types() {
     assert!(
         errors
             .iter()
-            .any(|error| error.contains("Type mismatch") && error.contains("async fn")),
+            .any(|error| error.contains("Type mismatch")
+                    && error.contains("bound: excludes {Async}; observed: unknown")
+                    && error.contains("bound: unrestricted; observed: unknown")),
         "{errors:?}"
     );
 }

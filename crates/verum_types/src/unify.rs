@@ -1805,7 +1805,7 @@ impl Unifier {
                 self.bind_var(*v, field, span)
             }
             (RecordField { .. }, _) | (_, RecordField { .. }) => Err(TypeError::Mismatch {
-                expected: t2.to_text(), actual: t1.to_text(), span,
+                expected: t2.diagnostic_text(), actual: t1.diagnostic_text(), span,
             }),
 
             // Equality is not bottom elimination. Diverging expressions may be
@@ -1814,7 +1814,7 @@ impl Unifier {
             (Never, Never) => Ok(Substitution::new()),
             (Var(v), Never) | (Never, Var(v)) => self.bind_var(*v, &Never, span),
             (Never, _) | (_, Never) => Err(TypeError::Mismatch {
-                expected: t2.to_text(), actual: t1.to_text(), span,
+                expected: t2.diagnostic_text(), actual: t1.diagnostic_text(), span,
             }),
 
             // Unknown type (top type) - any value can be assigned to unknown
@@ -2139,8 +2139,8 @@ impl Unifier {
             // Erasing a concrete carrier requires implementation evidence.
             // Equality cannot establish that evidence or recover an erased carrier.
             (_, DynProtocol { .. }) | (DynProtocol { .. }, _) => Err(TypeError::Mismatch {
-                expected: t2.to_text(),
-                actual: t1.to_text(),
+                expected: t2.diagnostic_text(),
+                actual: t1.diagnostic_text(),
                 span,
             }),
 
@@ -2408,7 +2408,7 @@ impl Unifier {
                     && crate::ty::nominal_path_name(expected)
                         .is_some_and(|name| self.protocol_names.contains(name.as_ref())) =>
             {
-                Err(TypeError::Mismatch { expected: t2.to_text(), actual: t1.to_text(), span })
+                Err(TypeError::Mismatch { expected: t2.diagnostic_text(), actual: t1.diagnostic_text(), span })
             }
 
             // META TYPE COERCION: TokenStream ↔ @Expr/@Ident/@Type etc.
@@ -2532,7 +2532,7 @@ impl Unifier {
             | (Variant(variants), Generic { name, args }) => {
                 self.unify_declared_variant(name, args, variants, span)
                     .unwrap_or_else(|| Err(TypeError::Mismatch {
-                        expected: t2.to_text(), actual: t1.to_text(), span,
+                        expected: t2.diagnostic_text(), actual: t1.diagnostic_text(), span,
                     }))
             }
             (Named { path, args }, Variant(variants))
@@ -2540,7 +2540,7 @@ impl Unifier {
                 crate::ty::nominal_path_name(path)
                     .and_then(|name| self.unify_declared_variant(&name.as_ref().into(), args, variants, span))
                     .unwrap_or_else(|| Err(TypeError::Mismatch {
-                        expected: t2.to_text(), actual: t1.to_text(), span,
+                        expected: t2.diagnostic_text(), actual: t1.diagnostic_text(), span,
                     }))
             }
 
@@ -3183,8 +3183,8 @@ impl Unifier {
 
             // Type mismatch
             _ => Err(TypeError::Mismatch {
-                expected: t2.to_text(),
-                actual: t1.to_text(),
+                expected: t2.diagnostic_text(),
+                actual: t1.diagnostic_text(),
                 span,
             }),
         }
@@ -3319,7 +3319,7 @@ impl Unifier {
                 // wrong.
                 actual: match ty {
                     Type::Var(other) => self.rigid_name(*other),
-                    other => other.to_text(),
+                    other => other.diagnostic_text(),
                 },
                 span,
             });
