@@ -237,6 +237,17 @@ impl WellKnownType {
         Self::from_name(name).is_some()
     }
 
+    /// Type arguments whose values belong to this runtime container's storage.
+    /// Callers must first establish the canonical declaring owner. Raw-pointer
+    /// fields describe its storage address, not ownership of stored elements.
+    pub const fn owned_storage_parameters(self) -> &'static [usize] {
+        match self {
+            Self::List | Self::Set | Self::Deque => &[0],
+            Self::Map => &[0, 1],
+            _ => &[],
+        }
+    }
+
     /// Returns a non-zero type hint for the Len instruction if this type supports
     /// built-in length queries, or 0 if it does not.
     /// These hints correspond to the interpreter's Len opcode dispatch.

@@ -3956,9 +3956,7 @@ impl VbcCodegen {
             (Some(destination), Some(crate::types::TypeRef::Reference { inner, .. }))
                 if inner.as_ref() == destination
                     && !destination.is_generic()
-                    && crate::resource_discipline::resource_discipline_with(
-                        destination, |id| self.type_by_id(id),
-                    ) != verum_common::ResourceDiscipline::Unknown => Some(destination.clone()),
+                    && self.value_resource_discipline(destination) != verum_common::ResourceDiscipline::Unknown => Some(destination.clone()),
             _ => None,
         };
         let copy_start = self.ctx.instructions.len();
@@ -21372,7 +21370,7 @@ impl VbcCodegen {
             PatternBindingMode::Value => inner,
             PatternBindingMode::Tuple(_) => return,
         };
-        let discipline = crate::resource_discipline::resource_discipline_with(&ty, |id| self.type_by_id(id));
+        let discipline = self.value_resource_discipline(&ty);
         self.ctx.registers.value_uses.set_type(reg, ty, discipline);
     }
 
@@ -32412,8 +32410,7 @@ impl VbcCodegen {
             // has no local initializer from which to infer its ownership shape.
             if let (Some(binding), Some(ty)) = (self.ctx.lookup_var(name), ty) {
                 let reg = binding.reg;
-                let discipline = crate::resource_discipline::resource_discipline_with(ty,
-                    |id| self.type_index_of(id).and_then(|i| self.types.get(i)));
+                let discipline = self.value_resource_discipline(ty);
                 self.ctx.registers.value_uses.set_type(reg, ty.clone(), discipline);
             }
             if matches!(ty, Some(crate::types::TypeRef::Reference { .. })) {

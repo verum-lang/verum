@@ -402,7 +402,7 @@ impl VbcCodegen {
         if matches!(ty, crate::types::TypeRef::Reference { .. }) {
             return Ok(false);
         }
-        match crate::resource_discipline::resource_discipline_with(ty, |id| self.type_by_id(id)) {
+        match self.value_resource_discipline(ty) {
             verum_common::ResourceDiscipline::Unrestricted => Ok(self.copy_type_is_value(ty)),
             verum_common::ResourceDiscipline::Affine | verum_common::ResourceDiscipline::Linear =>
                 Err(CodegenError::with_span(super::error::CodegenErrorKind::UnsupportedExpr(
@@ -470,7 +470,7 @@ impl VbcCodegen {
                     } else {
                         ty.clone()
                     };
-                    let discipline = crate::resource_discipline::resource_discipline_with(&binding, |id| self.type_by_id(id));
+                    let discipline = self.value_resource_discipline(&binding);
                     self.ctx.registers.value_uses.set_type(reg, binding, discipline);
                     if let Some(declared) = self.declaration_type_name(ty, 0) {
                         self.ctx.variable_type_names.insert(name.name.to_string(), declared);
@@ -1703,9 +1703,7 @@ impl VbcCodegen {
                     // The initializer's exact declaration is also authoritative
                     // for an inferred binding. Requiring a written annotation
                     // would make `let h = Handle { ... }` copy an affine handle.
-                    let discipline = crate::resource_discipline::resource_discipline_with(&inferred, |id| {
-                        self.type_index_of(id).and_then(|index| self.types.get(index))
-                    });
+                    let discipline = self.value_resource_discipline(&inferred);
                     if matches!(inferred, crate::types::TypeRef::Reference { .. }) {
                         self.ctx.reference_bindings.insert(name.name.to_string());
                     }

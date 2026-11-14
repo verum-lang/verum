@@ -19521,9 +19521,7 @@ impl VbcCodegen {
         for (param, ty) in func.params.iter().zip(parameter_types) {
             if let (Some((name, _)), Some(ty)) = (self.extract_param_name_and_mutable(param), ty)
                 && let Some(reg) = self.ctx.lookup_var(&name).map(|binding| binding.reg) {
-                let discipline = crate::resource_discipline::resource_discipline_with(
-                    &ty, |id| self.type_by_id(id),
-                );
+                let discipline = self.value_resource_discipline(&ty);
                 self.ctx.registers.value_uses.set_type(reg, ty, discipline);
             }
         }

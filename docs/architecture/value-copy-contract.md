@@ -60,6 +60,24 @@ through an explicit dereference. `Choice.Value(*borrowed)` can therefore
 retain the original storage under native execution. T2688 tracks this
 remaining producer-boundary defect separately from the sum-payload emitter.
 
+Usage discipline follows the declared owned components of a value. The
+canonical runtime container registry identifies which type arguments belong
+to its backing storage. A `List<Heap<T>>` therefore carries the exclusive
+ownership of its elements even though its record stores a raw buffer address.
+Reference fields and the payload behind a `Shared<T>` handle retain their
+separate ownership boundaries.
+
+The VBC resource query computes this constraint over a bounded explicit graph.
+Regular recursion through declared container storage is permitted. Cycles
+consisting only of inline owned fields, unresolved declarations and exhausted
+budgets remain `Unknown`. All alternatives of a sum contribute to its
+discipline. Source emission and archive consumers use the same query.
+`owned_storage_resources` exercises the actual standard record declarations,
+foreign same-name records, recursive values, dynamic handles and capture
+admission. This establishes permission to copy or transfer a value. The
+existing shallow copy operation still fails to preserve nested owned values
+across typed destruction, tracked separately within T2691.
+
 Two of these deserve their reasons stated, because both were once
 "fixed" in the wrong direction:
 

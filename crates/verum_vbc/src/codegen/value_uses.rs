@@ -266,6 +266,12 @@ impl ValueUseRecorder {
 }
 
 impl super::VbcCodegen {
+    pub(super) fn value_resource_discipline(&self, ty: &TypeRef) -> ResourceDiscipline {
+        crate::resource_discipline::resource_discipline_with(
+            ty, |id| self.type_by_id(id), |id| self.declared_runtime_carrier(id),
+        )
+    }
+
     pub(super) fn bind_capture_declarations(
         &mut self,
         captures: &[(String, bool)],
@@ -274,8 +280,7 @@ impl super::VbcCodegen {
         for ((name, _), declaration) in captures.iter().zip(declarations) {
             if let (Some(binding), Some(ty)) = (self.ctx.lookup_var(name), declaration) {
                 let reg = binding.reg;
-                let discipline = crate::resource_discipline::resource_discipline_with(ty,
-                    |id| self.type_index_of(id).and_then(|i| self.types.get(i)));
+                let discipline = self.value_resource_discipline(ty);
                 self.ctx.registers.value_uses.set_type(reg, ty.clone(), discipline);
             }
         }
@@ -489,13 +494,7 @@ impl super::VbcCodegen {
             .as_ref()
             .map(|ast| self.resolve_signature_type_ref(ast, &self.ctx.current_generic_param_ids)).transpose()?;
         let declared_discipline = declared.as_ref().map(|ty| {
-            crate::resource_discipline::resource_discipline_with(
-                ty,
-                |id| {
-                    self.type_index_of(id)
-                        .and_then(|index| self.types.get(index))
-                },
-            )
+            self.value_resource_discipline(ty)
         });
         let declared_affine = declared_discipline.is_some_and(constrained);
         let fact = self.ctx.registers.value_uses.active.get(&source);
@@ -583,10 +582,7 @@ impl super::VbcCodegen {
         } else {
             self.ctx.variable_type_names.remove(name);
         }
-        let discipline = crate::resource_discipline::resource_discipline_with(ty, |id| {
-            self.type_index_of(id)
-                .and_then(|index| self.types.get(index))
-        });
+        let discipline = self.value_resource_discipline(ty);
         if let Some(reg) = self.ctx.lookup_var(name).map(|v| v.reg) {
             self.ctx.registers.value_uses.set_type(reg, ty.clone(), discipline);
         }
