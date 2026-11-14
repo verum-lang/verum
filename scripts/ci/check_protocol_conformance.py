@@ -92,14 +92,9 @@ SIG_ANY = re.compile(
 # roster keyed on positions goes red when an unrelated edit above shifts
 # a line, which teaches the reader to re-baseline without looking.
 #
-# All six are in `core/math/`, and none is reachable from the language
-# runtime — they are category-theory example structures whose protocols
-# demand law methods (`associativity`, `left_identity`, …) that the
-# example does not carry.  See T0812.
+# These category-theory example structures in `core/math/` do not carry
+# all methods required by their declared protocols. See T0812.
 KNOWN: set[tuple[str, str, str]] = {
-    ("Category", "SetCategory", "core/math/concrete_accessible.vr"),
-    ("Category", "SmallCatCategory", "core/math/concrete_accessible.vr"),
-    ("Category", "TopCategory", "core/math/concrete_accessible.vr"),
     ("Sieve", "ToposExampleMaximalSieve", "core/math/examples.vr"),
     ("InfPresheaf", "ConstantInfPresheaf", "core/math/examples.vr"),
     ("InfSubobjectClassifier", "TrivialInfSubobjectClassifier", "core/math/examples.vr"),
