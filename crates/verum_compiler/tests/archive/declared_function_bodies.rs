@@ -8,6 +8,9 @@ use verum_vbc::{
     serialize::serialize_module,
 };
 
+#[path = "../../../verum_vbc/tests/fixtures/body_presence_v223.rs"]
+mod legacy;
+
 #[test]
 fn full_and_filtered_archive_imports_preserve_source_and_legacy_body_presence() {
     let ast = Parser::new(
@@ -21,17 +24,26 @@ fn full_and_filtered_archive_imports_preserve_source_and_legacy_body_presence() 
         .compile_module(&ast)
         .expect("body declaration compilation");
     for legacy in [false, true] {
-        let mut bytes = serialize_module(&source).expect("encode source bodies");
-        if legacy {
-            // The old descriptor format has no declaration-owned flag, even
-            // if a reserved bit happens to be set in its existing flag byte.
-            bytes[6..8].copy_from_slice(&23_u16.to_le_bytes());
-        }
+        let bytes = if legacy {
+            self::legacy::module_bytes().into()
+        } else {
+            serialize_module(&source).expect("encode source bodies")
+        };
         let module = deserialize_module(&bytes).expect("decode source or legacy descriptors");
+        assert_eq!(
+            module
+                .functions
+                .iter()
+                .filter(|function| function.has_source_body)
+                .count(),
+            if legacy { 0 } else { 2 }
+        );
         let mut builder = ArchiveBuilder::new();
-        builder.add_module("body_archive", &module, &[]).unwrap();
+        builder.add_module_data("body_archive", bytes, &[]).unwrap();
         let archive = builder.finish();
-        let loaded = archive.load_module("body_archive").expect("decode archived module");
+        let loaded = archive
+            .load_module("body_archive")
+            .expect("decode archived module");
         let mut full = CodegenContext::new();
         populate_ctx_from_archive(&archive, &mut full, &mut 0).unwrap();
         let mut filtered = CodegenContext::new();
@@ -48,8 +60,29 @@ fn full_and_filtered_archive_imports_preserve_source_and_legacy_body_presence() 
         ] {
             for context in [&full, &filtered] {
                 let info = context.lookup_qualified_function(name).expect(name);
-                assert_eq!(info.has_source_body, !legacy && has_body, "{name}, legacy={legacy}");
+                assert_eq!(
+                    info.has_source_body,
+                    !legacy && has_body,
+                    "{name}, legacy={legacy}"
+                );
             }
         }
     }
+}
+
+#[test]
+fn changing_the_version_label_does_not_migrate_function_descriptors() {
+    let ast = Parser::new("fn first() -> Unit {} fn second() -> Unit {}")
+        .parse_module()
+        .unwrap();
+    let module = VbcCodegen::with_config(CodegenConfig::new("body_archive"))
+        .compile_module(&ast)
+        .unwrap();
+    let mut bytes = serialize_module(&module).unwrap();
+    deserialize_module(&bytes).expect("current descriptors are valid");
+    bytes[6..8].copy_from_slice(&23u16.to_le_bytes());
+    assert!(
+        deserialize_module(&bytes).is_err(),
+        "a version label cannot remove newer fields"
+    );
 }

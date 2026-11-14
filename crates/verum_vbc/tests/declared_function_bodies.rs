@@ -9,6 +9,9 @@ use verum_vbc::{
     serialize::serialize_module,
 };
 
+#[path = "fixtures/body_presence_v223.rs"]
+mod legacy;
+
 fn compile(source: &str) -> (VbcCodegen, VbcModule) {
     let ast = Parser::new(source).parse_module().expect("body syntax");
     let mut codegen = VbcCodegen::with_config(CodegenConfig::new("body_presence"));
@@ -43,7 +46,9 @@ fn source_declarations_distinguish_empty_expression_and_forward_bodies() {
         assert_eq!(function.has_source_body, expected, "{name}");
         // Final module IDs are compacted independently of the codegen registry.
         // Resolve the same declaration by its exact export key in each table.
-        let info = functions.get(name).unwrap_or_else(|| panic!("registration {name}"));
+        let info = functions
+            .get(name)
+            .unwrap_or_else(|| panic!("registration {name}"));
         assert_eq!(info.has_source_body, expected, "registration {name}");
     }
 }
@@ -59,28 +64,14 @@ fn source_body_presence_survives_wire_without_conflating_forward_stubs() {
 
 #[test]
 fn legacy_reserved_flag_cannot_authorize_a_source_body() {
-    let (_, mut source) = compile("fn empty() -> Unit {}");
-    let id = descriptor(&source, "body_presence.empty").id;
-    source.functions.retain(|function| function.id == id);
-    source.functions[0].semantic_return = None;
-    let mut bytes = serialize_module(&source).unwrap();
-    // Remove the v2.27 result-presence byte from this single-function fixture.
-    let read = |bytes: &[u8], at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
-    let tail = read(&bytes, 32) as usize - 1;
-    assert_eq!(bytes.remove(tail), 0);
-    for at in [16, 24, 32, 40, 48, 56, 64, 88] {
-        let offset = read(&bytes, at);
-        if offset > tail as u32 { bytes[at..at + 4].copy_from_slice(&(offset - 1).to_le_bytes()); }
-    }
-    let hash = blake3::hash(&bytes[verum_vbc::format::HEADER_SIZE..]);
-    bytes[72..80].copy_from_slice(&hash.as_bytes()[..8]);
-    // v2.24 uses an existing flag byte and adds no tail. Keep its bit set to
-    // prove that a v2.23 descriptor's reserved bit has no source authority.
-    bytes[6..8].copy_from_slice(&23_u16.to_le_bytes());
+    let bytes = legacy::module_bytes();
     let module = deserialize_module(&bytes).expect("v2.23 descriptor remains readable");
-    let function = descriptor(&module, "body_presence.empty");
-    assert!(function.bytecode_length > 0);
-    assert!(!function.has_source_body);
+    assert_eq!(module.header.version_minor, 23);
+    assert_eq!(module.functions.len(), 4);
+    for function in &module.functions {
+        assert!(function.bytecode_length > 0);
+        assert!(!function.has_source_body);
+    }
 }
 
 #[test]
@@ -90,5 +81,8 @@ fn unknown_and_synthetic_defaults_have_no_body_provenance() {
         bytecode_length: 1,
         ..FunctionDescriptor::default()
     };
-    assert!(!function.has_source_body, "bytecode length is not AST evidence");
+    assert!(
+        !function.has_source_body,
+        "bytecode length is not AST evidence"
+    );
 }
