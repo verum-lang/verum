@@ -38,6 +38,13 @@ fn name_field_projections(module: &mut verum_vbc::VbcModule, fields: &[&str]) {
                 encode_varint(u64::from(names[field].0), operands);
                 *sub_op = CbgrSubOpcode::RefFieldNamed as u8;
             }
+            if let Instruction::SetF { obj, field_idx, value } = instruction {
+                instruction = Instruction::SetFieldNamed {
+                    obj,
+                    name: names[field_idx as usize].0,
+                    value,
+                };
+            }
             encode_instruction(&instruction, &mut module.bytecode);
         }
         function.bytecode_length = module.bytecode.len() as u32 - function.bytecode_offset;
@@ -278,4 +285,236 @@ fn declared_readonly_reborrow_cannot_request_mutability() {
     let error = VbcCodegen::new().compile_module(&ast)
         .expect_err("readonly declaration cannot authorize a mutable reborrow");
     assert!(error.to_string().contains("readonly place"), "{error}");
+}
+
+#[test]
+fn references_stored_in_heap_slots_retain_every_inner_capability() {
+    use verum_vbc::value::{Capabilities, FatRef};
+    for named in [false, true] {
+        for fat in [true, false] {
+            let source = "type Inner is { value: Int }; type Outer is { value: Inner };\n\
+                type Forward is { value: &Inner };\n\
+                fn borrowed(owner: &Outer)->&Inner { &owner.value }\n\
+                fn mutable(owner: &mut Outer)->&mut Inner { &mut owner.value }\n\
+                fn forward(owner: &mut Forward)->&mut &Inner { &mut owner.value }\n\
+                fn field(inner:&mut Inner)->&mut Int { &mut inner.value }\n\
+                fn update(inner:&mut Inner) { inner.value=47; }\n\
+                fn read(value:&Int)->Int { *value }\n\
+                fn write(value:&mut Int) { *value=99; }";
+            let ast = Parser::new(source).parse_module().unwrap();
+            let mut module = VbcCodegen::new().compile_module(&ast).unwrap();
+            if named {
+                name_field_projections(&mut module, &["value"]);
+            }
+            let module = deserialize_module(&serialize_module(&module).unwrap()).unwrap();
+            validate_module(&module).unwrap();
+            let type_id = |name: &str| {
+                module
+                    .types
+                    .iter()
+                    .find(|ty| module.get_string(ty.name) == Some(name))
+                    .unwrap()
+                    .id
+            };
+            let (inner_id, outer_id, forward_id) =
+                (type_id("Inner"), type_id("Outer"), type_id("Forward"));
+            let mut vm = Interpreter::new(module.into());
+            let inner = vm
+                .state
+                .heap
+                .alloc(inner_id, std::mem::size_of::<Value>())
+                .unwrap();
+            let outer = vm
+                .state
+                .heap
+                .alloc(outer_id, std::mem::size_of::<Value>())
+                .unwrap();
+            let forwarded = vm
+                .state
+                .heap
+                .alloc(forward_id, std::mem::size_of::<Value>())
+                .unwrap();
+            // SAFETY: all three exact owners remain live; each has one Value slot.
+            unsafe {
+                inner.data_ptr().cast::<Value>().write(Value::from_i64(73));
+                outer
+                    .data_ptr()
+                    .cast::<Value>()
+                    .write(Value::from_ptr(inner.as_ptr().cast::<u8>()));
+            }
+            let readonly = if fat {
+                Value::from_fat_ref(FatRef::new(
+                    inner.as_ptr().cast::<u8>(),
+                    inner.generation(),
+                    inner.epoch(),
+                    Capabilities::READ_ONLY,
+                    1,
+                ))
+            } else {
+                call(
+                    &mut vm,
+                    "borrowed",
+                    Value::from_ptr(outer.as_ptr().cast::<u8>()),
+                )
+                .unwrap()
+            };
+            // SAFETY: the declared forwarding slot holds a live reference value.
+            unsafe {
+                forwarded.data_ptr().cast::<Value>().write(readonly);
+            }
+            let indirect = call(
+                &mut vm,
+                "forward",
+                Value::from_ptr(forwarded.as_ptr().cast::<u8>()),
+            )
+            .unwrap();
+            let field = call(&mut vm, "field", indirect)
+                .unwrap_or_else(|error| panic!("named={named} fat={fat}: {error}"));
+            assert_eq!(call(&mut vm, "read", field).unwrap().try_as_i64(), Some(73));
+            let error = call(&mut vm, "write", field)
+                .expect_err("outer mutable slot cannot strengthen its readonly reference value");
+            assert!(
+                matches!(error, InterpreterError::CapabilityDenied { .. }),
+                "named={named} fat={fat}: {error}"
+            );
+            let error = call(&mut vm, "update", indirect)
+                .expect_err("direct field writes must retain the same inner capability");
+            assert!(
+                matches!(error, InterpreterError::CapabilityDenied { .. }),
+                "{error}"
+            );
+            // SAFETY: refusal preserves the live original owner.
+            assert_eq!(
+                unsafe { inner.data_ptr().cast::<Value>().read() }.try_as_i64(),
+                Some(73)
+            );
+            let mutable = if fat {
+                Value::from_fat_ref(FatRef::new(
+                    inner.as_ptr().cast::<u8>(),
+                    inner.generation(),
+                    inner.epoch(),
+                    Capabilities::MUT_EXCLUSIVE,
+                    1,
+                ))
+            } else {
+                call(
+                    &mut vm,
+                    "mutable",
+                    Value::from_ptr(outer.as_ptr().cast::<u8>()),
+                )
+                .unwrap()
+            };
+            // SAFETY: replace only the forwarding reference, retaining its owner.
+            unsafe {
+                forwarded.data_ptr().cast::<Value>().write(mutable);
+            }
+            let field = call(&mut vm, "field", indirect).unwrap();
+            call(&mut vm, "write", field).unwrap();
+            assert_eq!(call(&mut vm, "read", field).unwrap().try_as_i64(), Some(99));
+            call(&mut vm, "update", indirect).unwrap();
+            assert_eq!(call(&mut vm, "read", field).unwrap().try_as_i64(), Some(47));
+            // SAFETY: retire only the forwarding owner to test the outer ticket.
+            unsafe {
+                vm.state.heap.free(forwarded);
+            }
+            let error = call(&mut vm, "field", indirect)
+                .expect_err("a live inner reference cannot revive its retired outer slot");
+            assert!(
+                matches!(error, InterpreterError::CbgrViolation { .. }),
+                "{error}"
+            );
+            assert_eq!(call(&mut vm, "read", field).unwrap().try_as_i64(), Some(47));
+        }
+    }
+}
+
+#[test]
+fn receiver_slot_cycles_and_exhausted_depth_refuse_without_granting_write() {
+    let source = "type Record is { value: Int }; type Forward is { value: &Record };\n\
+        fn field(record:&mut Record)->&mut Int { &mut record.value }\n\
+        fn forward(owner:&mut Forward)->&mut &Record { &mut owner.value }\n\
+        fn borrowed(owner:&Forward)->&Record { owner.value }\n\
+        fn write(value:&mut Int){*value=99;}";
+    let ast = Parser::new(source).parse_module().unwrap();
+    let module = VbcCodegen::new().compile_module(&ast).unwrap();
+    let module = deserialize_module(&serialize_module(&module).unwrap()).unwrap();
+    validate_module(&module).unwrap();
+    let type_id = |name: &str| {
+        module
+            .types
+            .iter()
+            .find(|ty| module.get_string(ty.name) == Some(name))
+            .unwrap()
+            .id
+    };
+    let (record_id, forward_id) = (type_id("Record"), type_id("Forward"));
+    let mut vm = Interpreter::new(module.into());
+    let record = vm
+        .state
+        .heap
+        .alloc(record_id, std::mem::size_of::<Value>())
+        .unwrap();
+    // SAFETY: the exact record allocation owns one initialized Value slot.
+    unsafe {
+        record.data_ptr().cast::<Value>().write(Value::from_i64(73));
+    }
+    let mut chain = Value::from_ptr(record.as_ptr().cast::<u8>());
+    for depth in 1..=9 {
+        let owner = vm
+            .state
+            .heap
+            .alloc(forward_id, std::mem::size_of::<Value>())
+            .unwrap();
+        // SAFETY: initialized forwarding storage remains owned by the heap.
+        unsafe {
+            owner.data_ptr().cast::<Value>().write(chain);
+        }
+        chain = call(
+            &mut vm,
+            "forward",
+            Value::from_ptr(owner.as_ptr().cast::<u8>()),
+        )
+        .unwrap();
+        let result = call(&mut vm, "field", chain);
+        if depth <= 8 {
+            assert!(result.is_ok(), "depth={depth}: {result:?}");
+        } else {
+            let error =
+                result.expect_err("resource limit cannot return a partially checked receiver");
+            assert!(
+                matches!(error,InterpreterError::InvalidOperand{ref message} if message.contains("depth limit")),
+                "{error}"
+            );
+        }
+    }
+    let cycle_owner = vm
+        .state
+        .heap
+        .alloc(forward_id, std::mem::size_of::<Value>())
+        .unwrap();
+    // SAFETY: initialize before taking a reference, then deliberately encode a
+    // cyclic reference value to exercise malformed-bytecode refusal.
+    unsafe {
+        cycle_owner.data_ptr().cast::<Value>().write(Value::nil());
+    }
+    let cycle = call(
+        &mut vm,
+        "forward",
+        Value::from_ptr(cycle_owner.as_ptr().cast::<u8>()),
+    )
+    .unwrap();
+    unsafe {
+        cycle_owner.data_ptr().cast::<Value>().write(cycle);
+    }
+    let error = call(&mut vm, "field", cycle)
+        .expect_err("cyclic tagged references cannot grant a field place");
+    assert!(
+        matches!(error,InterpreterError::InvalidOperand{ref message} if message.contains("cyclic")),
+        "{error}"
+    );
+    // SAFETY: failed resolution did not touch or retire the record.
+    assert_eq!(
+        unsafe { record.data_ptr().cast::<Value>().read() }.try_as_i64(),
+        Some(73)
+    );
 }

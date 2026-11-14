@@ -304,7 +304,7 @@ pub(in super::super) fn handle_extended(
                 state, state.get_reg(obj),
             )?;
             receiver.require_write()?;
-            let obj_val = receiver.value;
+            let obj_val = receiver.record_value();
             let (tid, base_ptr) = field_named_object(state, obj_val, "SetFieldNamed")?;
             let idx = field_named_index(&state.module, tid, name_sid, "SetFieldNamed")?;
             let value = state.get_reg(value_reg);

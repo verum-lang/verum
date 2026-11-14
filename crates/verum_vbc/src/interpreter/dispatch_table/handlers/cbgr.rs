@@ -2330,11 +2330,7 @@ fn cbgr_extended_body(
                 state, state.get_reg(base_reg),
             )?;
             let capabilities = receiver.capabilities.intersect(&Capabilities::MUT_EXCLUSIVE);
-            let base_val = if receiver.value.is_fat_ref() {
-                Value::from_ptr(receiver.value.as_fat_ref().ptr())
-            } else {
-                receiver.value
-            };
+            let base_val = receiver.record_value();
 
             let field_offset = field_idx.checked_mul(std::mem::size_of::<Value>())
                 .ok_or_else(|| InterpreterError::InvalidOperand {
@@ -2492,7 +2488,7 @@ fn cbgr_extended_body(
                 state, state.get_reg(base_reg),
             )?;
             let capabilities = receiver.capabilities.intersect(&Capabilities::MUT_EXCLUSIVE);
-            let base_val = receiver.value;
+            let base_val = receiver.record_value();
             let (tid, base_ptr) =
                 super::extended::field_named_object(state, base_val, "RefFieldNamed")?;
             let field_idx =

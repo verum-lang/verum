@@ -440,6 +440,17 @@ pub(super) struct ReceiverPlace {
 }
 
 impl ReceiverPlace {
+    /// A fat reference carries its aggregate address separately from metadata.
+    /// Preserve the reference value for other consumers, and expose this address
+    /// only after the caller has retained the accumulated access capabilities.
+    pub(super) fn record_value(&self) -> Value {
+        if self.value.is_fat_ref() {
+            Value::from_ptr(self.value.as_fat_ref().ptr())
+        } else {
+            self.value
+        }
+    }
+
     pub(super) fn require_write(&self) -> InterpreterResult<()> {
         if self.capabilities.has(Capabilities::WRITE) {
             Ok(())
@@ -453,9 +464,10 @@ impl ReceiverPlace {
 }
 
 /// Select a receiver's current value without discarding its access authority.
-/// Register-reference forwarding retains every incoming restriction. A heap
-/// slot is loaded once: its value can itself be an owned record pointer, whose
-/// first field must not be confused with another indirection.
+/// Every tagged reference encountered through a slot retains its restriction.
+/// A loaded owned record is a terminal value: its first field must not be
+/// confused with another indirection. Fat references already address their
+/// aggregate storage and do not introduce a Value-slot load.
 pub(super) fn resolve_receiver_place(
     state: &InterpreterState,
     receiver: Value,
@@ -483,27 +495,39 @@ pub(super) fn resolve_receiver_place(
                 actual: u64::from(capabilities.0),
             });
         }
-        if !is_cbgr_ref(&place) {
+        if place.is_fat_ref() {
             return Ok(ReceiverPlace {
-                value: resolve_arg_value(state, place)?,
+                value: place,
                 reference: place,
                 capabilities,
             });
         }
-        let (absolute, generation) = decode_cbgr_ref(place);
-        if absolute as usize >= state.registers.top() {
-            return Err(InterpreterError::InvalidOperand {
-                message: "method receiver register reference is out of bounds".into(),
+        let register_reference = is_cbgr_ref(&place);
+        let next = if register_reference {
+            let (absolute, generation) = decode_cbgr_ref(place);
+            if absolute as usize >= state.registers.top() {
+                return Err(InterpreterError::InvalidOperand {
+                    message: "method receiver register reference is out of bounds".into(),
+                });
+            }
+            validate_cbgr_generation(state, absolute, generation)?;
+            state.registers.get_absolute(absolute)
+        } else {
+            resolve_arg_value(state, place)?
+        };
+        let nested_reference = is_cbgr_ref(&next) || next.is_thin_ref() || next.is_fat_ref();
+        let forwarded_slot = register_reference
+            && !nested_reference
+            && reference_value_slot(state, next)?.is_some();
+        if nested_reference || forwarded_slot {
+            place = next;
+        } else {
+            return Ok(ReceiverPlace {
+                value: next,
+                reference: place,
+                capabilities,
             });
         }
-        validate_cbgr_generation(state, absolute, generation)?;
-        let next = state.registers.get_absolute(absolute);
-        if !is_cbgr_ref(&next) && !next.is_fat_ref()
-            && reference_value_slot(state, next)?.is_none()
-        {
-            return Ok(ReceiverPlace { value: next, reference: place, capabilities });
-        }
-        place = next;
     }
     Err(InterpreterError::InvalidOperand {
         message: "method receiver reference chain is cyclic or exceeds its depth limit".into(),

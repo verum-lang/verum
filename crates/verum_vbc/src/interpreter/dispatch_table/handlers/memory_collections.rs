@@ -878,7 +878,7 @@ pub(in super::super) fn handle_set_field(
         state, state.get_reg(obj),
     )?;
     receiver.require_write()?;
-    let obj_val = receiver.value;
+    let obj_val = receiver.record_value();
 
     let field_offset = field_idx.checked_mul(std::mem::size_of::<Value>())
         .ok_or_else(|| InterpreterError::InvalidOperand { message: "field offset overflow".into() })?;
