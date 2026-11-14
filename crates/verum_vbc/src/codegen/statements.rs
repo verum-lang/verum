@@ -551,6 +551,11 @@ impl VbcCodegen {
         if result.is_ok()
             && let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind
         {
+            // Every initializer path publishes the same declared binding type.
+            // Packed allocations return before the inner function's epilogue.
+            if let Some(ty) = ty {
+                self.publish_binding_type(name.name.as_str(), ty);
+            }
             if let Some(element) = element_name {
                 self.ctx.set_array_element_type_name(&name.name, element);
             }
@@ -1696,9 +1701,7 @@ impl VbcCodegen {
         }
 
         if let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind {
-            if let Some(ty) = ty {
-                self.publish_binding_type(name.name.as_str(), ty);
-            } else if let Some(inferred) = inferred_copy_type {
+            if let Some(inferred) = inferred_copy_type.filter(|_| ty.is_none()) {
                 if let Some(reg) = self.ctx.lookup_var(name.name.as_str()).map(|v| v.reg) {
                     // The initializer's exact declaration is also authoritative
                     // for an inferred binding. Requiring a written annotation
@@ -1714,7 +1717,7 @@ impl VbcCodegen {
                     }
                     self.ctx.registers.value_uses.set_type(reg, inferred, discipline);
                 }
-            } else if let Some(fact) = source_value_fact {
+            } else if ty.is_none() && let Some(fact) = source_value_fact {
                 if let (Some(ty), Some(reg)) = (fact.declaration_type, self.ctx.lookup_var(name.name.as_str()).map(|v| v.reg)) {
                     self.ctx.registers.value_uses.set_type(reg, ty, fact.discipline);
                 }
