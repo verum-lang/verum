@@ -30,7 +30,7 @@ struct HeapSlotRef {
 enum SlotStorage {
     Object {
         backing: usize,
-        backing_field: usize,
+        backing_field: Option<usize>,
         generation: u32,
         epoch: u16,
     },
@@ -64,13 +64,45 @@ impl Heap {
             offset,
             caps,
             storage: SlotStorage::Object {
-                backing_field,
+                backing_field: Some(backing_field),
                 backing,
                 generation: header.generation,
                 epoch: header.epoch,
             },
         };
         self.issue_projection(target)
+    }
+
+    /// Borrow a Value field of the exact managed object. Unlike a collection
+    /// element, the storage has no replaceable backing allocation. Sibling
+    /// field references coexist and retire together with their owner.
+    pub(crate) fn project_object_field(
+        &mut self,
+        owner: usize,
+        offset: usize,
+        caps: Capabilities,
+    ) -> InterpreterResult<Value> {
+        if !self.contains(owner as *const ObjectHeader) {
+            return Err(InterpreterError::CbgrViolation {
+                kind: CbgrViolationKind::UseAfterFree,
+                ptr: owner,
+            });
+        }
+        // SAFETY: exact membership proves a live ObjectHeader.
+        let header = unsafe { &*(owner as *const ObjectHeader) };
+        let target = HeapSlotRef {
+            owner,
+            offset,
+            caps,
+            storage: SlotStorage::Object {
+                backing: owner,
+                backing_field: None,
+                generation: header.generation,
+                epoch: header.epoch,
+            },
+        };
+        self.resolve_slot(target)?;
+        self.cache_projection(target)
     }
 
     /// The caller proves the live raw allocation's base and extent. Its
@@ -208,23 +240,30 @@ impl Heap {
         // SAFETY: both bases belong to this heap. No heap mutation or callback
         // occurs between this extent check and the caller's immediate access.
         let owner = unsafe { &*(slot.owner as *const ObjectHeader) };
-        let field_offset = backing_field
-            .checked_mul(std::mem::size_of::<Value>())
-            .ok_or_else(stale)?;
-        if !owner.is_valid()
-            || field_offset
-                .checked_add(std::mem::size_of::<Value>())
-                .is_none_or(|end| end > owner.size as usize)
-        {
+        if !owner.is_valid() {
             return Err(stale());
         }
-        let current_backing = unsafe {
-            *((slot.owner as *const u8)
-                .add(OBJECT_HEADER_SIZE + field_offset)
-                .cast::<Value>())
-        };
-        if !current_backing.is_regular_ptr() || current_backing.as_ptr::<u8>() as usize != backing {
-            return Err(stale());
+        if let Some(backing_field) = backing_field {
+            let field_offset = backing_field
+                .checked_mul(std::mem::size_of::<Value>())
+                .ok_or_else(stale)?;
+            if field_offset
+                .checked_add(std::mem::size_of::<Value>())
+                .is_none_or(|end| end > owner.size as usize)
+            {
+                return Err(stale());
+            }
+            // SAFETY: the live owner and checked field extent contain a Value.
+            let current_backing = unsafe {
+                *((slot.owner as *const u8)
+                    .add(OBJECT_HEADER_SIZE + field_offset)
+                    .cast::<Value>())
+            };
+            if !current_backing.is_regular_ptr()
+                || current_backing.as_ptr::<u8>() as usize != backing
+            {
+                return Err(stale());
+            }
         }
         let header = unsafe { &*(backing as *const ObjectHeader) };
         if header.generation != generation

@@ -2317,15 +2317,9 @@ fn cbgr_extended_body(
         }
 
         Some(CbgrSubOpcode::RefField) => {
-            // Create interior reference to a record field by field-index,
-            // producing a `Value::from_ptr(field_ptr)` anchored directly
-            // in the heap object's data area.
-            //
-            // Closes task #121: the generic `Ref` path encodes the
-            // method-frame stack-slot abs_index, which `pop_frame`'s
-            // generation bump invalidates even when the heap object is
-            // still alive in the caller.  `RefField` produces a
-            // heap-anchored pointer that survives frame teardown.
+            // A managed field borrows its object's storage, independent of the
+            // producing call frame. The owner's revocable ticket also prevents
+            // a freed/recycled address from reviving the reference.
             //
             // Format: dst:reg, base:reg, field_idx:varint
             let dst = read_reg(state)?;
@@ -2476,17 +2470,10 @@ fn cbgr_extended_body(
                     ),
                 });
             }
-            // SAFETY: field bounds validated above; data area starts
-            // at OBJECT_HEADER_SIZE and contains an initialized Value
-            // at field_offset.
-            let field_ptr =
-                unsafe { ptr.add(heap::OBJECT_HEADER_SIZE + field_offset) };
-
-            // Mark the field pointer as a tracked mutable interior ref
-            // so the generic Deref / DerefMut handlers read and write
-            // through it instead of treating it as an opaque pointer.
-            state.cbgr_mutable_ptrs.insert(field_ptr as usize);
-            state.set_reg(dst, Value::from_ptr(field_ptr));
+            let reference = state.heap.project_object_field(
+                ptr as usize, field_offset, Capabilities::MUT_EXCLUSIVE,
+            )?;
+            state.set_reg(dst, reference);
             Ok(DispatchResult::Continue)
         }
 
@@ -2498,8 +2485,8 @@ fn cbgr_extended_body(
             // pointer into the WRONG field). Same resolver authorities
             // as the by-name read/write doors (resolve_arg_value +
             // field_named_object + field_named_index) so the three
-            // by-name doors can never drift; same interior product as
-            // RefField (bounds check + cbgr_mutable_ptrs registration).
+            // by-name doors can never drift; the same revocable object-field
+            // product as RefField retains its exact allocation lifetime.
             // Format: dst:reg, base:reg, name:varint(StringId).
             let dst = read_reg(state)?;
             let base_reg = read_reg(state)?;
@@ -2526,10 +2513,10 @@ fn cbgr_extended_body(
                     ),
                 });
             }
-            let field_ptr =
-                unsafe { base_ptr.add(heap::OBJECT_HEADER_SIZE + field_offset) };
-            state.cbgr_mutable_ptrs.insert(field_ptr as usize);
-            state.set_reg(dst, Value::from_ptr(field_ptr as *mut u8));
+            let reference = state.heap.project_object_field(
+                base_ptr as usize, field_offset, Capabilities::MUT_EXCLUSIVE,
+            )?;
+            state.set_reg(dst, reference);
             Ok(DispatchResult::Continue)
         }
 

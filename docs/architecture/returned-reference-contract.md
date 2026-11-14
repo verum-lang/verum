@@ -882,3 +882,20 @@ This is LLVM-only: no VBC format, source ownership/transfer rule, packed storage
 ABI or native Drop glue changes. Both-tier public source acceptance and the
 fresh full supervisor run remain required to close T1573; focused JIT results
 do not establish those final integration outcomes.
+
+## Managed field lifetime in the interpreter
+
+`RefField` and `RefFieldNamed` produce heap-issued slot references for managed
+records. The ticket records the exact object, field extent, generation, epoch
+and capabilities. It is independent of the producing call frame: returning a
+field reference does not invalidate a live owner's storage. Freeing the owner
+revokes all of its tickets, so a later allocation cannot revive an old field
+reference by reusing the same address. Sibling field references coexist;
+attenuating one to read-only does not grant write permission through it.
+
+The interpreter resolves these tickets at each slot access. Headerless raw
+records retain their separate, explicitly registered allocation-extent
+contract. Neither path treats an interior address in a process-wide pointer
+set as sufficient lifetime evidence. The serialized-bytecode controls in
+`crates/verum_vbc/tests/managed_field_lifetime.rs` cover positional and named
+projections, frame return, mutation, readonly refusal and owner retirement.

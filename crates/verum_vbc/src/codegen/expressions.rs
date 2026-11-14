@@ -5137,16 +5137,7 @@ impl VbcCodegen {
                         }
                         self.emit_field_reference(dst, ptr_reg, ordinal);
                         if matches!(op, UnOp::Ref | UnOp::RefChecked) {
-                            let mut operands = verum_common::List::<u8>::with_capacity(6).into();
-                            Self::write_reg(&mut operands, dst.0);
-                            Self::write_reg(&mut operands, dst.0);
-                            operands.extend_from_slice(
-                                &crate::value::Capabilities::READ_ONLY.0.to_le_bytes(),
-                            );
-                            self.ctx.emit(Instruction::CbgrExtended {
-                                sub_op: crate::instruction::CbgrSubOpcode::CapAttenuate as u8,
-                                operands,
-                            });
+                            self.emit_reference_attenuation(dst, crate::value::Capabilities::READ_ONLY);
                         }
                         self.ctx.free_temp(ptr_reg);
                         return Ok(Some(dst));
@@ -5662,13 +5653,9 @@ impl VbcCodegen {
         // detects as "expected generation N, found N+1" → CBGR
         // use-after-free panic.
         //
-        // Fix: emit `RefField`, which computes the field's pointer
-        // inside the heap object (mirroring GetF's auto-deref chain)
-        // and stores it as a heap-anchored `Value::from_ptr` marked
-        // in `cbgr_mutable_ptrs`.  The resulting ref survives
-        // function boundaries because it doesn't reference any stack
-        // slot — the generic Deref/DerefMut handlers read and write
-        // through it directly into the heap.
+        // RefField produces an allocation-owned, revocable field reference.
+        // Its lifetime follows the heap owner rather than this call frame;
+        // immutable source borrows attenuate the resulting capability.
         //
         // Only applies to Tier-0 `Ref`/`RefMut` — Tier-1 RefChecked /
         // Tier-2 RefUnsafe variants opt out of generation tracking
@@ -5768,6 +5755,9 @@ impl VbcCodegen {
             )?;
             let dest = self.ctx.alloc_temp();
             self.emit_field_reference(dest, base_reg, field_idx);
+            if op == UnOp::Ref {
+                self.emit_reference_attenuation(dest, crate::value::Capabilities::READ_ONLY);
+            }
             self.ctx.free_temp(base_reg);
             return Ok(Some(dest));
         }
@@ -21485,6 +21475,17 @@ impl VbcCodegen {
         scrutinee: Reg,
     ) -> CodegenResult<()> {
         self.compile_pattern_bind_mode(pattern, scrutinee, &PatternBindingMode::Value)
+    }
+
+    fn emit_reference_attenuation(&mut self, reference: Reg, allowed: crate::value::Capabilities) {
+        let mut operands = verum_common::List::<u8>::with_capacity(6).into();
+        Self::write_reg(&mut operands, reference.0);
+        Self::write_reg(&mut operands, reference.0);
+        operands.extend_from_slice(&allowed.0.to_le_bytes());
+        self.ctx.emit(Instruction::CbgrExtended {
+            sub_op: crate::instruction::CbgrSubOpcode::CapAttenuate as u8,
+            operands,
+        });
     }
 
     fn emit_field_reference(&mut self, dst: Reg, owner: Reg, field: u32) {

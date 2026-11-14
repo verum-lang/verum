@@ -871,17 +871,13 @@ pub(in super::super) fn handle_set_field(
     let field_idx = read_varint(state)? as usize;
     let val = read_reg(state)?;
 
-    let obj_val = state.get_reg(obj);
-
-    // Handle CBGR register references: deref to get the actual pointer
-    // This is essential when setting a field on a value accessed through a mutable reference:
-    // e.g., `ref.field = value` where `ref: &mut Struct`
-    let obj_val = if is_cbgr_ref(&obj_val) {
-        let (abs_index, _generation) = decode_cbgr_ref(obj_val);
-        state.registers.get_absolute(abs_index)
-    } else {
-        obj_val
-    };
+    // Retain the actual write authority while resolving the receiver. A field
+    // ticket is a checked Value slot, not an ObjectHeader or an untracked
+    // interior pointer; the reader and writer use the same receiver resolver.
+    let (obj_val, reference) = super::cbgr_helpers::resolve_receiver_place(
+        state, state.get_reg(obj),
+    )?;
+    super::cbgr_helpers::require_reference_write(state, reference)?;
 
     let field_offset = field_idx.checked_mul(std::mem::size_of::<Value>())
         .ok_or_else(|| InterpreterError::InvalidOperand { message: "field offset overflow".into() })?;
@@ -890,26 +886,6 @@ pub(in super::super) fn handle_set_field(
         unsafe { slot.write(state.get_reg(val)); }
         return Ok(DispatchResult::Continue);
     }
-
-    // T0562: mirror the read side (0x8B GetVariantDataRef / T0557) — a
-    // `ref mut` variant-payload bind hands SetField a heap-INTERIOR pointer
-    // tracked in `cbgr_mutable_ptrs`, which is NOT a register-ref, so the
-    // deref above skips it. Without this, the payload SLOT address is read as
-    // an ObjectHeader (size 0) and the field bounds check panics
-    // "field write out of bounds ... size 0" — the write-side twin of T0557.
-    let obj_val = if obj_val.is_ptr()
-        && !obj_val.is_nil()
-        && state
-            .cbgr_mutable_ptrs
-            .contains(&(obj_val.as_ptr::<u8>() as usize))
-    {
-        // SAFETY: a pointer tracked in `cbgr_mutable_ptrs` points into a live
-        // heap object's data area; reading 8 bytes yields the stored Value
-        // (the actual inner variant ptr).
-        unsafe { *(obj_val.as_ptr::<Value>()) }
-    } else {
-        obj_val
-    };
 
     if !obj_val.is_ptr() || obj_val.is_nil() {
         return Err(InterpreterError::NullPointer);

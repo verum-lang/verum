@@ -6,7 +6,7 @@ use std::sync::Arc;
 use verum_common::{List, Text};
 use verum_fast_parser::Parser;
 use verum_vbc::bytecode::decode_instructions;
-use verum_vbc::codegen::{CodegenConfig, VbcCodegen};
+use verum_vbc::codegen::{CodegenConfig, ItemFailurePolicy, VbcCodegen};
 use verum_vbc::instruction::{CbgrSubOpcode, Instruction, Reg};
 use verum_vbc::interpreter::{Interpreter, InterpreterError};
 use verum_vbc::module::{FunctionDescriptor, FunctionId, VbcModule};
@@ -14,6 +14,7 @@ use verum_vbc::types::{StringId, TypeId};
 use verum_vbc::value::{Capabilities, ThinRef, Value};
 
 const ENV: &str = r#"
+mount core.base.maybe.Maybe;
 type Holder is { marker: Int, values: List<Int> };
 type Packet is Empty | Items(List<Int>);
 fn sample() -> List<Int> {
@@ -81,9 +82,17 @@ fn execute(body: &str) -> Result<Value, InterpreterError> {
     let ast = Parser::new(source.as_str())
         .parse_module()
         .expect("source grammar");
-    let module = VbcCodegen::with_config(CodegenConfig::new("borrowed_lists"))
-        .compile_module(&ast)
-        .expect("source VBC");
+    let mut maybe = Parser::new(include_str!("../../../core/base/maybe.vr"))
+        .parse_module().expect("canonical Maybe grammar");
+    maybe.items.retain(|item| {
+        matches!(&item.kind, verum_ast::ItemKind::Module(decl) if decl.items.is_none())
+            || item.kind.type_or_protocol_name().is_some_and(|name| name.as_str() == "Maybe")
+    });
+    let mut compiler = VbcCodegen::with_config(CodegenConfig::new("borrowed_lists"));
+    compiler.collect_unit_declarations(&[&maybe, &ast]).expect("source declarations");
+    compiler.resolve_pending_imports();
+    compiler.compile_unit_items(&[&maybe, &ast], ItemFailurePolicy::Strict).expect("source VBC");
+    let module = compiler.finalize_module_from_state().expect("checked source module");
     let bytes = verum_vbc::serialize::serialize_module(&module).expect("serialize VBC");
     let module = verum_vbc::deserialize::deserialize_module(&bytes).expect("decode VBC");
     body_has(&module, "read_ref", |instruction| {
