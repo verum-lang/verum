@@ -220,3 +220,100 @@ fn growing_obligations_are_rejected_on_an_ordinary_thread_stack() {
         .join()
         .unwrap();
 }
+
+#[test]
+fn a_repeated_query_observes_a_later_source_implementation() {
+    let declarations = Parser::new(
+        r#"
+        module obligations;
+        type A is protocol {};
+        type B<T> is protocol {};
+        type Granted is protocol { fn flag(&self)->Int; };
+        type Cell is {value:Int};
+        implement<X: A + B<Int>> Granted for X {fn flag(&self)->Int {59}}
+        implement A for Cell {}
+    "#,
+    )
+    .parse_module()
+    .unwrap();
+    let additional = Parser::new(
+        r#"
+        module obligations;
+        implement B<Int> for Cell {}
+        implement A for Cell {}
+        fn main()->Int {let cell=Cell {value:7}; cell.flag()}
+    "#,
+    )
+    .parse_module()
+    .unwrap();
+    let mut codegen = VbcCodegen::with_config(CodegenConfig::new("obligations"));
+    codegen.initialize();
+    let first = codegen.compile_additional_module(&declarations).unwrap();
+    assert!(!first.functions.iter().any(|function| {
+        first
+            .get_string(function.name)
+            .is_some_and(|name| name.ends_with("Cell.flag"))
+    }));
+    let completed = codegen.compile_additional_module(&additional).unwrap();
+    run(&completed, 59);
+}
+
+#[test]
+fn repeated_proofs_keep_different_protocol_arguments_independent() {
+    let declarations = r#"
+        type B<T> is protocol {};
+        type Denied is protocol {fn forbidden(&self)->Int;};
+        implement<X: A + B<Int>> Granted for X {fn flag(&self)->Int {59}}
+        implement<X: A + B<Bool>> Denied for X {fn forbidden(&self)->Int {91}}
+        implement B<Int> for Cell {}
+    "#;
+    let module = compile(declarations, true).unwrap();
+    assert!(!module.functions.iter().any(|function| {
+        module
+            .get_string(function.name)
+            .is_some_and(|name| name.ends_with("Cell.forbidden"))
+    }));
+    run(&module, 59);
+    let error = compile(
+        &format!("{declarations}\nfn rejected(cell:&Cell)->Int {{cell.forbidden()}}"),
+        true,
+    )
+    .expect_err("another protocol argument cannot inherit a completed proof");
+    assert!(error.to_string().contains("forbidden"), "{error}");
+}
+
+#[test]
+fn a_new_alias_scope_cannot_reuse_an_earlier_prepared_header() {
+    let mut codegen = VbcCodegen::with_config(CodegenConfig::new("obligations"));
+    for (argument, action, expected) in [
+        ("First", "cell.flag()", 59),
+        ("Second", "cell.value", 7),
+        ("First", "cell.flag()", 59),
+    ] {
+        let source = format!(
+            r#"
+            module obligations;
+            type A is protocol {{}};
+            type B<T> is protocol {{}};
+            type Granted is protocol {{fn flag(&self)->Int;}};
+            type Cell is {{value:Int}};
+            public module choices {{public type First is (); public type Second is ();}}
+            mount choices.{argument} as Argument;
+            implement<X:A+B<Argument>> Granted for X {{fn flag(&self)->Int {{59}}}}
+            implement A for Cell {{}}
+            implement B<choices.First> for Cell {{}}
+            fn main()->Int {{let cell=Cell {{value:7}}; {action}}}
+        "#
+        );
+        let module = codegen
+            .compile_module(&Parser::new(&source).parse_module().unwrap())
+            .unwrap();
+        let carries_method = module.functions.iter().any(|function| {
+            module
+                .get_string(function.name)
+                .is_some_and(|name| name.ends_with("Cell.flag"))
+        });
+        assert_eq!(carries_method, argument == "First");
+        run(&module, expected);
+    }
+}

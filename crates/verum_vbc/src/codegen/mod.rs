@@ -3609,6 +3609,8 @@ impl VbcCodegen {
             std::collections::HashSet<String>,
         > = std::collections::HashMap::new();
         per_proto_overrides.insert(root_application, implemented_methods.clone());
+        let mut implementation_preparation =
+            implementation_obligations::ImplementationPreparation::default();
 
         while let Some(application) = protocols_to_check.pop() {
             if let Some(previous) = checked.get(&application.key) {
@@ -3664,7 +3666,10 @@ impl VbcCodegen {
                 {
                     continue;
                 }
-                if !self.blanket_requirements_hold(&blanket, &receiver, implementation, &deferred_scope.dense)? {
+                if !self.blanket_requirements_hold(
+                    &blanket, &receiver, implementation, &deferred_scope.dense,
+                    &mut implementation_preparation,
+                )? {
                     continue;
                 }
                 let derived = self.with_protocol_source_scope(

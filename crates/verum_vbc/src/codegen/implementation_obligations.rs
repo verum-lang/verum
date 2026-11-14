@@ -19,6 +19,14 @@ pub(super) struct ImplementationHeader {
     declaration: Arc<ImplDecl>,
 }
 
+/// Preparation shared only while one implementation's default methods are
+/// selected. That pass queues bodies without changing declaration authority.
+/// Caller premises, proof graphs and imported evidence remain query-local.
+#[derive(Default)]
+pub(super) struct ImplementationPreparation {
+    headers: Maybe<List<(ImplementationHeader, Maybe<PreparedImplementation>)>>,
+}
+
 struct PreparedImplementation {
     scope: std::collections::HashMap<String, u16>,
     source_bindings: SourceTypeSubstitution,
@@ -544,6 +552,7 @@ impl VbcCodegen {
         receiver: &ImplReceiverWitness,
         implementation: &ImplDecl,
         scope: &std::collections::HashMap<String, u16>,
+        preparation: &mut ImplementationPreparation,
     ) -> CodegenResult<bool> {
         let source_bindings = self.implementation_value_scope(implementation, scope)?;
         let assumptions = self.with_protocol_source_scope(
@@ -565,7 +574,9 @@ impl VbcCodegen {
         if !requirements.callables.iter().all(|bound| callable_is_proven(bound, &assumptions.callables)) {
             return Err(invalid("unproved callable bound", blanket.declaration.span));
         }
-        self.prove_implementation_goals(requirements.goals, &assumptions, blanket.declaration.span)
+        self.prove_implementation_goals(
+            requirements.goals, &assumptions, blanket.declaration.span, preparation,
+        )
     }
 
     /// Build a finite AND/OR obligation graph and compute its least fixed point.
@@ -575,6 +586,7 @@ impl VbcCodegen {
         required: List<Goal>,
         assumptions: &Premises,
         span: Span,
+        preparation: &mut ImplementationPreparation,
     ) -> CodegenResult<bool> {
         const MAX_GOALS: usize = 4096;
         const MAX_EDGES: usize = 32768;
@@ -588,11 +600,16 @@ impl VbcCodegen {
             })?;
             self.obligation_blanket_cursor += 1;
         }
-        // One proof runs against one declaration registry and lexical context.
-        // The cache dies with the proof, so a later registration or re-export
-        // cannot inherit an older receiver or protocol application.
-        let mut headers: List<_> = self.implementation_headers.iter().cloned()
-            .map(|header| (header, None)).collect();
+        // The caller owns this preparation for one method-selection pass.
+        // Registration and alias changes happen outside that lifetime. Only
+        // the existing declaration roster is shared between its queries.
+        let headers = preparation.headers.get_or_insert_with(|| {
+            self.implementation_headers.iter().cloned()
+                .map(|header| (header, None)).collect()
+        });
+        // Descriptor-provided evidence is visible only after this proof reaches
+        // its subject. Retaining that roster would broaden later proof inputs.
+        let mut imported_headers = List::new();
         let mut goals = required.clone();
         let mut indices: Map<Goal, usize> = goals
             .iter()
@@ -634,13 +651,15 @@ impl VbcCodegen {
                     ));
                     continue;
                 };
-                if !headers.iter().any(|(header, _)| header.source == source) {
+                if !headers.iter().chain(&imported_headers)
+                    .any(|(header, _)| header.source == source)
+                {
                     let declaration =
                         Arc::new(source.declaration().map_err(|error| invalid(error, span))?);
-                    headers.push((ImplementationHeader { source, declaration }, None));
+                    imported_headers.push((ImplementationHeader { source, declaration }, None));
                 }
             }
-            for (header, prepared) in &mut headers {
+            for (header, prepared) in headers.iter_mut().chain(&mut imported_headers) {
                 let Some(premises) = self.implementation_alternative(header, prepared, &goal, assumptions)? else {
                     continue;
                 };
