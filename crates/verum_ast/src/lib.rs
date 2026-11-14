@@ -126,6 +126,7 @@ pub mod mount_paths;
 pub mod expr;
 pub mod ffi;
 pub mod literal;
+pub mod language_aliases;
 pub mod meta_fn;
 pub mod meta_value;
 pub mod method_dispatch;

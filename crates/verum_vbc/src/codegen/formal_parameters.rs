@@ -228,6 +228,9 @@ impl VbcCodegen {
         if !path.is_single() {
             return self.nominal_type_id(&name).is_some();
         }
+        if self.selected_language_alias(&name).is_some() {
+            return true;
+        }
         let owner = self.lexical_type_scope();
         if let Some(selected) = self.source_nominal_type_id(&name) { return selected.is_some(); }
         if self.mounted_type_path(&name).is_some() {
@@ -431,7 +434,7 @@ impl VbcCodegen {
                 }
                 TypeKind::DynProtocol { .. } => cg.resolve_signature_type_ref(ty, scope)
                     .is_ok_and(|resolved| resolved_in_scope(&resolved,
-                        &mut |id| declared_ids.contains(&id), depth + 1, binders)),
+                        &mut |id| declared_ids.contains(&id), depth + 1, binders, false)),
                 // Raw pointers and unsupported forms do not establish an
                 // exact declaration-owned semantic type.
                 _ => false,
@@ -450,7 +453,7 @@ impl VbcCodegen {
             if !resolved_in_scope(witness, &mut |id| {
                 if !admitted_ids.contains(&id) { admitted_ids.push(id); }
                 true
-            }, 0, 0) { return None; }
+            }, 0, 0, false) { return None; }
         }
         let owner = self.lexical_type_scope();
         // A fixed extent requires its exact declaring scope. The wildcard
@@ -551,8 +554,19 @@ fn remapped_declaration_type(
     known(ty, map, 0).then(|| super::remap_type_ref_archive(ty, map))
 }
 
+/// A source field has already resolved its own telescope. Retain that exact
+/// declaration only when no component was erased to an opaque ABI carrier.
+/// Callable scopes deliberately cannot admit the record's field projections.
+pub(super) fn field_declaration_type(
+    ty: TypeRef,
+    parameters: &[crate::types::TypeParamDescriptor],
+) -> Option<TypeRef> {
+    resolved_in_scope(&ty, &mut |id| parameters.iter().any(|parameter| parameter.id == id), 0, 0, true)
+        .then_some(ty)
+}
+
 pub(super) fn resolved(ty: &TypeRef, declared_ids: &[TypeParamId], depth: usize) -> bool {
-    resolved_in_scope(ty, &mut |id| declared_ids.contains(&id), depth, 0)
+    resolved_in_scope(ty, &mut |id| declared_ids.contains(&id), depth, 0, false)
 }
 
 fn resolved_in_scope(
@@ -560,6 +574,7 @@ fn resolved_in_scope(
     parameter: &mut impl FnMut(TypeParamId) -> bool,
     depth: usize,
     binders: u32,
+    source_field: bool,
 ) -> bool {
     if depth > 64 {
         return false;
@@ -572,21 +587,21 @@ fn resolved_in_scope(
             index < binders || parameter(TypeParamId((index - binders) as u16))
         }
         TypeRef::Dynamic(object) => binders.checked_add(1).is_some_and(|binders|
-            object.types().all(|ty| resolved_in_scope(ty, parameter, depth + 1, binders))),
+            object.types().all(|ty| resolved_in_scope(ty, parameter, depth + 1, binders, source_field))),
         TypeRef::ConstValue(_) | TypeRef::ConstSequence(_) => true,
         // The record telescope supplies this binder, not the callable's scope.
-        TypeRef::RecordFieldProjection { .. } => false,
+        TypeRef::RecordFieldProjection { owner, .. } => source_field && concrete(*owner),
         TypeRef::AssociatedProjection { base, qualifier, assoc, args } => !assoc.is_empty()
-            && resolved_in_scope(base, parameter, depth + 1, binders)
-            && args.iter().all(|argument| resolved_in_scope(argument, parameter, depth + 1, binders))
+            && resolved_in_scope(base, parameter, depth + 1, binders, source_field)
+            && args.iter().all(|argument| resolved_in_scope(argument, parameter, depth + 1, binders, source_field))
             && qualifier.as_ref().is_none_or(|application|
                 concrete(TypeId(application.protocol.0)) && application.args.iter().all(|argument|
-                    resolved_in_scope(argument, parameter, depth + 1, binders))),
+                    resolved_in_scope(argument, parameter, depth + 1, binders, source_field))),
         TypeRef::Reference { inner, .. } | TypeRef::Slice(inner)
-        | TypeRef::Array { element: inner, .. } => resolved_in_scope(inner, parameter, depth + 1, binders),
-        TypeRef::Tuple(parts) => parts.iter().all(|p| resolved_in_scope(p, parameter, depth + 1, binders)),
+        | TypeRef::Array { element: inner, .. } => resolved_in_scope(inner, parameter, depth + 1, binders, source_field),
+        TypeRef::Tuple(parts) => parts.iter().all(|p| resolved_in_scope(p, parameter, depth + 1, binders, source_field)),
         TypeRef::Instantiated { base, args } => {
-            concrete(*base) && args.iter().all(|p| resolved_in_scope(p, parameter, depth + 1, binders))
+            concrete(*base) && args.iter().all(|p| resolved_in_scope(p, parameter, depth + 1, binders, source_field))
         }
         TypeRef::Function {
             is_async: _,
@@ -594,15 +609,15 @@ fn resolved_in_scope(
             return_type,
             contexts,
         } => {
-            contexts.is_empty()
-                && params.iter().all(|p| resolved_in_scope(p, parameter, depth + 1, binders))
-                && resolved_in_scope(return_type, parameter, depth + 1, binders)
+            (source_field || contexts.is_empty())
+                && params.iter().all(|p| resolved_in_scope(p, parameter, depth + 1, binders, source_field))
+                && resolved_in_scope(return_type, parameter, depth + 1, binders, source_field)
         }
         TypeRef::Rank2Function { is_async: _, type_param_count, params, return_type, contexts } => {
             let Some(binders) = binders.checked_add(u32::from(*type_param_count)) else { return false; };
-            contexts.is_empty()
-                && params.iter().all(|p| resolved_in_scope(p, parameter, depth + 1, binders))
-                && resolved_in_scope(return_type, parameter, depth + 1, binders)
+            (source_field || contexts.is_empty())
+                && params.iter().all(|p| resolved_in_scope(p, parameter, depth + 1, binders, source_field))
+                && resolved_in_scope(return_type, parameter, depth + 1, binders, source_field)
         }
     }
 }

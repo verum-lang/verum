@@ -871,6 +871,36 @@ impl VbcCodegen {
         })
     }
 
+    /// Select a language alias only after the written source scope has no
+    /// binding for that name. A failed explicit mount still owns its spelling.
+    pub(super) fn selected_language_alias(
+        &self, name: &str,
+    ) -> Option<&'static verum_ast::language_aliases::LanguageTypeAlias> {
+        let declaration = verum_ast::language_aliases::lookup(name)?;
+        if self.source_nominal_type_id(name).is_some()
+            || self.mounted_type_path(name).is_some()
+            || self.source_glob_type_id(name, self.lexical_type_scope()).is_some()
+        {
+            return None;
+        }
+        Some(declaration)
+    }
+
+    /// A language declaration's primitive target cannot capture a same-named
+    /// source type in the caller. Raw pointers retain the existing opaque ABI
+    /// lowering, which does not establish a semantic ownership witness.
+    pub(super) fn language_alias_type_ref(
+        &self, declaration: &verum_ast::language_aliases::LanguageTypeAlias,
+    ) -> CodegenResult<TypeRef> {
+        if let verum_ast::TypeKind::Path(path) = &declaration.target.kind {
+            return TypeId::from_well_known_scalar_name(&path.to_string())
+                .map(TypeRef::Concrete)
+                .ok_or_else(|| CodegenError::internal(format!(
+                    "language alias '{}' has no declared primitive target", declaration.name)));
+        }
+        self.ast_type_to_type_ref(&declaration.target)
+    }
+
     pub(super) fn nominal_type_id(&self, name: &str) -> Option<TypeId> {
         if let Some(selected) = self.source_nominal_type_id(name) { return selected; }
         let owner = self.lexical_type_scope();

@@ -1442,22 +1442,7 @@ impl TypeChecker {
                 }
                 continue;
             }
-            if let crate::core_metadata::TypeDescriptorKind::Alias { target } = &td.kind {
-                let target_ty = parse_descriptor_type_string(target.as_str());
-                self.ctx
-                    .define_alias(alias_name.clone(), target_ty.clone());
-                self.unifier
-                    .register_type_alias(alias_name.clone(), target_ty);
-                let param_names: List<Text> = td
-                    .generic_params
-                    .iter()
-                    .map(|gp| gp.name.clone())
-                    .collect();
-                if !param_names.is_empty() {
-                    self.unifier
-                        .register_type_alias_params(alias_name.clone(), param_names);
-                }
-            }
+            self.register_metadata_alias(alias_name, td);
         }
     }
 
@@ -1559,11 +1544,23 @@ impl TypeChecker {
         self.load_source_type_declaration_with_parameter_key(declaration, &owner.into(), declaration.span)
     }
 
+    /// Incidental archive lookup keys cannot replace language declarations.
+    /// The descriptor still loads under its exact owner. An explicit mount
+    /// publishes its selected spelling separately via bind_source_type_import.
+    fn metadata_registration_key(
+        &self, name: &Text, descriptor: &crate::core_metadata::TypeDescriptor,
+    ) -> Option<Text> {
+        self.ctx.builtin_type_definition(name)
+            .map(|_| Self::metadata_declaring_key(descriptor))
+    }
+
     fn register_metadata_source_type(
         &mut self,
         name: &Text,
         descriptor: &crate::core_metadata::TypeDescriptor,
     ) -> Option<(Type, Text)> {
+        let declaring_key = self.metadata_registration_key(name, descriptor);
+        let name = declaring_key.as_ref().unwrap_or(name);
         match self.load_metadata_source_type(descriptor) {
             Ok((ty, key)) => {
                 if !self.current_module_declared_types.contains(name.as_str()) {
@@ -1753,6 +1750,8 @@ impl TypeChecker {
         let crate::core_metadata::TypeDescriptorKind::Alias { target } = &descriptor.kind else {
             return None;
         };
+        let declaring_key = self.metadata_registration_key(key, descriptor);
+        let key = declaring_key.as_ref().unwrap_or(key);
         let target_ty = parse_descriptor_type_string(target.as_str());
         if std::env::var("VERUM_TRACE_ALIAS").is_ok() {
             eprintln!(
@@ -1870,6 +1869,8 @@ impl TypeChecker {
                 }
             }
         };
+        let declaring_key = self.metadata_registration_key(name, type_desc);
+        let name = declaring_key.as_ref().unwrap_or(name);
         self.register_metadata_resource_discipline(type_desc);
         if type_desc.source_declaration.is_some() {
             if self.register_metadata_source_type(name, type_desc).is_some()
@@ -4487,6 +4488,8 @@ impl TypeChecker {
         // appended in alphabetical order so we still register every type.
         let ordered_types = Self::stdlib_iteration_order(metadata);
         for (name, type_desc) in ordered_types {
+            let declaring_key = self.metadata_registration_key(name, type_desc);
+            let name = declaring_key.as_ref().unwrap_or(name);
             self.register_metadata_resource_discipline(type_desc);
             if type_desc.source_declaration.is_some() {
                 self.register_metadata_source_type(name, type_desc);

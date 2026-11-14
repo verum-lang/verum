@@ -2394,34 +2394,26 @@ impl TypeContext {
     /// - u32: 32-bit unsigned integer (for CBGR generation counters)
     /// - Epoch: epoch counter type for CBGR tracking
     pub(crate) fn add_cbgr_type_aliases(&mut self) {
-        use crate::ty::Type;
-
-        // RawPtr is an alias for raw mutable pointer (void* equivalent)
-        // CBGR implementation: epoch-based generation tracking, acquire-release memory ordering, lock-free ABA-protected maps, ThinRef 16 bytes, FatRef 24 bytes — #raw-pointers
-        self.define_builtin_alias(
-            "RawPtr",
-            Type::Pointer {
-                mutable: true,
-                inner: Box::new(Type::Int),
-            },
-        );
-
-        // u32 type alias: use UInt32 (4 bytes) rather than Int (8 bytes)
-        // to match the type system's from_le_bytes/to_le_bytes byte counts.
-        // CBGR generation counters that need the full range should use Int directly.
-        self.define_builtin_alias(
-            "u32",
-            Type::Named {
-                path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
-                    "UInt32",
-                    verum_ast::span::Span::dummy(),
-                )),
-                args: verum_common::List::new(),
-            },
-        );
-
-        // Epoch type for CBGR epoch tracking
-        self.define_builtin_alias("Epoch", Type::Int);
+        fn translate(target: &verum_ast::Type) -> Type {
+            use verum_ast::TypeKind;
+            match &target.kind {
+                TypeKind::Int => Type::Int,
+                TypeKind::Path(path) => Type::Named {
+                    path: path.clone(),
+                    args: List::new(),
+                },
+                TypeKind::Pointer { mutable, inner } => Type::Pointer {
+                    mutable: *mutable,
+                    inner: verum_common::Heap::new(translate(inner)),
+                },
+                // The immutable registry contains only these structurally
+                // bounded declaration forms; unsupported additions fail closed.
+                _ => panic!("unsupported language alias declaration: {target:?}"),
+            }
+        }
+        for declaration in verum_ast::language_aliases::declarations() {
+            self.define_builtin_alias(declaration.name, translate(&declaration.target));
+        }
     }
 
     /// Add protocol implementations for language primitive types.

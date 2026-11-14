@@ -15761,7 +15761,8 @@ impl VbcCodegen {
                                                 name: StringId(
                                                     self.ctx.intern_string_raw(&pos_name),
                                                 ),
-                                                declaration_type: Some(self.resolve_signature_type_ref(ty, &sum_generic_param_map)?),
+                                                declaration_type: formal_parameters::field_declaration_type(
+                                                    self.resolve_signature_type_ref(ty, &sum_generic_param_map)?, &sum_desc.type_params),
                                                 type_ref: self.resolve_field_type_ref(
                                                     ty,
                                                     &sum_generic_param_map,
@@ -15801,7 +15802,8 @@ impl VbcCodegen {
                                             name: StringId(
                                                 self.ctx.intern_string_raw(f.name.name.as_str()),
                                             ),
-                                            declaration_type: Some(self.resolve_signature_type_ref(&f.ty, &sum_generic_param_map)?),
+                                            declaration_type: formal_parameters::field_declaration_type(
+                                                self.resolve_signature_type_ref(&f.ty, &sum_generic_param_map)?, &sum_desc.type_params),
                                             type_ref: self.resolve_field_type_ref(
                                                 &f.ty,
                                                 &sum_generic_param_map,
@@ -15956,7 +15958,7 @@ impl VbcCodegen {
                             self.impl_self_type_ref(&generic_param_map).as_ref(), values, &[])
                     });
                     let field_type_ref = lower_field(false)?;
-                    let declaration_type = lower_field(true)?;
+                    let declaration_type = formal_parameters::field_declaration_type(lower_field(true)?, &type_desc.type_params);
 
                     // Use the same global field index that SetF/GetF use
                     let field_idx = self.intern_field_name(&field_name);
@@ -15980,7 +15982,7 @@ impl VbcCodegen {
                         declared_visibility: Some(declared_visibility),
                         name: StringId(self.ctx.intern_string_raw(&field_name)),
                         type_ref: field_type_ref,
-                        declaration_type: Some(declaration_type),
+                        declaration_type,
                         offset: field_idx * 8, // Use global field index * sizeof(Value)
                         visibility,
                         refinement_src,
@@ -16277,7 +16279,9 @@ impl VbcCodegen {
                     declared_visibility: None,
                     name: StringId(self.ctx.intern_string_raw("_0")),
                     type_ref: inner_type_ref,
-                    declaration_type: Some(self.resolve_signature_type_ref(_inner_type, &generic_param_map)?),
+                    declaration_type: formal_parameters::field_declaration_type(
+                        self.resolve_signature_type_ref(_inner_type, &generic_param_map)?,
+                        &type_desc.type_params),
                     offset: inner_field_idx * 8,
                     visibility: crate::types::Visibility::Public,
                     refinement_src: StringId::EMPTY,
@@ -16351,7 +16355,8 @@ impl VbcCodegen {
                     declared_visibility: None,
                         name: StringId(self.ctx.intern_string_raw(&field_name)),
                         type_ref: inner_type_ref,
-                        declaration_type: Some(self.resolve_signature_type_ref(inner_ty, &generic_param_map)?),
+                        declaration_type: formal_parameters::field_declaration_type(
+                            self.resolve_signature_type_ref(inner_ty, &generic_param_map)?, &type_desc.type_params),
                         offset: field_idx * 8,
                         visibility: crate::types::Visibility::Public,
                         refinement_src: StringId::EMPTY,
@@ -18099,6 +18104,9 @@ impl VbcCodegen {
             TypeKind::Path(path) => {
                 let type_name = path.to_string().replace("::", ".");
 
+                if let Some(declaration) = self.selected_language_alias(&type_name) {
+                    return self.language_alias_type_ref(declaration);
+                }
                 // Map Verum type names to TypeId via the consolidated registry
                 match self.nominal_type_id(&type_name)
                     .filter(|_| self.semantic_formal_path_is_declared(ty, &Default::default())) {
