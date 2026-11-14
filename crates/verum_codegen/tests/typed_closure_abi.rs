@@ -348,6 +348,7 @@ fn adapter_preserves_target_calling_convention_and_exposes_slot_convention() {
         let descriptor = FunctionDescriptor::new(vbc.intern_string(name));
         vbc.add_function(descriptor);
         let mut ctx = FunctionContext::with_vbc_module(&context, &native, &vbc, caller, "make");
+        ctx.set_func_id_map(Arc::new([(0, target)].into_iter().collect()));
         ctx.builder()
             .position_at_end(context.append_basic_block(caller, "entry"));
         lower_instruction(

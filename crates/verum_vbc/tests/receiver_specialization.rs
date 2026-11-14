@@ -105,3 +105,46 @@ fn a_protocol_bound_uses_the_callers_concrete_receiver_on_each_invocation() {
         .unwrap();
     assert_eq!(value.as_i64(), 1329);
 }
+
+#[test]
+fn monomorphized_bodies_do_not_become_competing_source_implementations() {
+    use verum_vbc::{
+        bytecode::decode_instructions,
+        mono::{InstantiationGraph, discover_call_instantiations, monomorphize_minimal},
+        types::{TypeId, TypeRef},
+    };
+
+    let ast = Parser::new(include_str!("fixtures/bound_receiver.vr"))
+        .parse_module().unwrap();
+    let mut module = VbcCodegen::new().compile_module(&ast).unwrap();
+    module.resolve_protocol_dispatch();
+    let mut graph = InstantiationGraph::new();
+    for function in &mut module.functions {
+        function.is_generic = !function.type_params.is_empty();
+    }
+    for function in &module.functions {
+        let start = function.bytecode_offset as usize;
+        let body = decode_instructions(&module.bytecode[start..start + function.bytecode_length as usize])
+            .unwrap();
+        discover_call_instantiations(&module, &body, function.func_id_base, &mut graph).unwrap();
+    }
+    let specialized = monomorphize_minimal(module, &graph).unwrap().module;
+    let mut module = deserialize_module(&serialize_module(&specialized).unwrap()).unwrap();
+    module.resolve_protocol_dispatch();
+    validate_module(&module).unwrap();
+    let declaration = module.find_function_by_name("Cell.width").unwrap();
+    let parent = module.get_function(declaration).unwrap().parent_type.unwrap();
+    let method = module.strings.lookup("width").unwrap();
+    for carrier in [TypeId::U8, TypeId::INT] {
+        let arguments = vec![TypeRef::Concrete(carrier)];
+        let receiver = TypeRef::instantiated(parent, arguments.clone());
+        let (selected, selected_arguments) = module.try_bound_instance_method(&receiver, method, 0)
+            .expect("one source implementation despite multiple compiled bodies")
+            .expect("declared method");
+        assert_eq!(selected, declaration);
+        assert_eq!(selected_arguments, arguments);
+        assert_ne!(module.specialized_function_id(selected, &arguments).unwrap(), selected);
+    }
+    let entry = module.find_function_by_name("probe").unwrap();
+    assert_eq!(Interpreter::new(Arc::new(module)).execute_function(entry).unwrap().as_i64(), 108);
+}

@@ -2,6 +2,7 @@ use crate::module::{FunctionId, VbcModule};
 use crate::mono::{TypeSubstitution, match_declared_types};
 use crate::types::{StringId, TypeId, TypeRef};
 use std::collections::HashMap;
+use verum_common::{Map, Set};
 
 pub(crate) type MethodFamilies =
     HashMap<(TypeId, StringId, usize), smallvec::SmallVec<[FunctionId; 1]>>;
@@ -71,6 +72,34 @@ impl VbcModule {
             return Ok(None);
         };
         let families = self.receiver_method_families.get_or_init(|| {
+            // Instantiation emits another body of an existing declaration, not
+            // another implementation. Use exact receipts and declaration
+            // identity; backend symbol spelling cannot establish this relation.
+            // Index unique extents once so building the family remains linear
+            // in the function and specialization tables.
+            let mut bodies = Map::new();
+            for function in &self.functions {
+                if function.type_params.is_empty() && function.bytecode_length != 0 {
+                    bodies.entry((function.bytecode_offset, function.bytecode_length))
+                        .and_modify(|body| *body = None)
+                        .or_insert(Some(function));
+                }
+            }
+            let mut generated = Set::new();
+            for receipt in &self.specializations {
+                let Some(origin) = self.get_function(receipt.generic_fn) else { continue };
+                let Some(Some(body)) = bodies.get(&(receipt.bytecode_offset, receipt.bytecode_length))
+                else { continue };
+                if !origin.type_params.is_empty()
+                    && body.id != origin.id
+                    && body.parent_type == origin.parent_type
+                    && body.source_signature.is_some()
+                    && body.source_signature == origin.source_signature
+                    && body.declaration_identity == origin.declaration_identity
+                {
+                    generated.insert(body.id);
+                }
+            }
             let mut families = MethodFamilies::new();
             for (index, function) in self.functions.iter().enumerate() {
                 let (Some(parent), Some(identity)) =
@@ -79,6 +108,7 @@ impl VbcModule {
                     continue;
                 };
                 if identity.lexical_parent.is_none()
+                    && !generated.contains(&function.id)
                     && function.has_source_body
                     && function
                         .source_signature
