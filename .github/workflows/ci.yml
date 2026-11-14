@@ -791,7 +791,7 @@ jobs:
           cargo test --locked --release -p verum_compiler --test qualified_constructor_archive --test generic_record_field_inference
           cargo test --locked --release -p verum_compiler --test reference_method_authority --test panic_callback_contracts
           cargo test --locked --release -p verum_compiler --test imported_result_finalization
-          cargo test --locked --release -p verum_compiler --test dynamic_protocol_archive --test refined_alias_archive --test refinement_scope_archive --test assignment_stored_values --test language_alias_archive --test match_place_ownership
+          cargo test --locked --release -p verum_compiler --test dynamic_protocol_archive --test refined_alias_archive --test refinement_scope_archive --test assignment_stored_values --test language_alias_archive --test match_place_ownership --test refined_method_archive
 
       - name: Audit CLI proof authority
         timeout-minutes: 5

@@ -749,7 +749,17 @@ impl TypeChecker {
                     base: ab,
                     predicate: ap,
                 },
-            ) => ep == ap && same(eb, ab)?,
+            ) => {
+                // Declaration locations do not constrain a refinement domain.
+                // Require both checked implications: a subtype alone cannot
+                // replace the protocol's domain. The shared proof projection
+                // owns binder and literal identity and refuses unknown atoms.
+                same(eb, ab)?
+                    && (ep == ap
+                        || (ep.provenance == ap.provenance
+                            && crate::refinement_entailment::entails(eb, ep, ab, ap)
+                            && crate::refinement_entailment::entails(ab, ap, eb, ep)))
+            },
             _ => self
                 .protocol_checker
                 .read()
