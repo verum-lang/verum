@@ -873,3 +873,25 @@ fn ordinary_nominal_constructors_retain_source_authority() {
         validate_source_type_declaration(&carried).unwrap();
     }
 }
+
+#[test]
+fn refined_alias_keeps_its_predicate_in_the_declaration_carrier() {
+    let refined = Type::new(
+        TypeKind::Refined {
+            base: Heap::new(Type::new(TypeKind::Int, Span::dummy())),
+            predicate: Heap::new(verum_ast::ty::RefinementPredicate::new(
+                Expr::literal(Literal::bool(false, Span::dummy())),
+                Span::dummy(),
+            )),
+        },
+        Span::dummy(),
+    );
+    let declaration = type_declaration(TypeDeclBody::Alias(refined));
+    let carrier = source_type_declaration(&declaration).unwrap().unwrap();
+    let restored: TypeDecl = serde_json::from_slice(&serde_json::to_vec(&carrier).unwrap()).unwrap();
+    validate_source_type_declaration(&restored).unwrap();
+    assert_eq!(restored, declaration);
+
+    let ordinary = type_declaration(TypeDeclBody::Alias(Type::new(TypeKind::Int, Span::dummy())));
+    assert!(source_type_declaration(&ordinary).unwrap().is_none());
+}

@@ -62,6 +62,7 @@ pub fn type_declaration_needs_semantic_carrier(declaration: &crate::TypeDecl) ->
         || scan.uses_applied_projection
         || scan.uses_rank_two
         || scan.uses_callable_contexts
+        || scan.uses_refinements
         || matches!(&declaration.body, crate::TypeDeclBody::Protocol(_) | crate::TypeDeclBody::Coinductive(_)
             | crate::TypeDeclBody::Tuple(_) | crate::TypeDeclBody::Newtype(_) | crate::TypeDeclBody::Unit)
         || declaration.has_application_bounds()
@@ -288,6 +289,7 @@ struct SignatureScan {
     uses_applied_projection: bool,
     uses_rank_two: bool,
     uses_callable_contexts: bool,
+    uses_refinements: bool,
     universe_in_rank_two: bool,
     rank_two_depth: usize,
     type_bound_depth: usize,
@@ -305,6 +307,7 @@ impl SignatureScan {
             uses_applied_projection: false,
             uses_rank_two: false,
             uses_callable_contexts: false,
+            uses_refinements: false,
             universe_in_rank_two: false,
             rank_two_depth: 0,
             type_bound_depth: 0,
@@ -677,6 +680,10 @@ impl Visitor for SignatureScan {
             return;
         }
         match &ty.kind {
+            TypeKind::Refined { .. } => {
+                self.uses_refinements = true;
+                walk_type(self, ty);
+            }
             TypeKind::Universe { level } => {
                 self.universe();
                 if let Some(level) = level {

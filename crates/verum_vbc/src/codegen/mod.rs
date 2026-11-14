@@ -1097,22 +1097,6 @@ pub struct VbcCodegen {
     /// the four field-write emission sites in expressions.rs.
     type_field_refinements: std::collections::HashMap<(String, String), FieldRefinementInfo>,
 
-    /// A NAMED type's own refinement: `type Positive is Int{ it > 0 };`.
-    ///
-    /// The runtime-assert emitters pattern-match the ANNOTATION's syntax
-    /// (`TypeKind::Refined`), so a binding or parameter written with the
-    /// alias — `let a: Positive` — matched nothing and the assert was
-    /// never emitted. The static checker sees through the alias (a
-    /// literal `-1` behind it is refused with E500), so the predicate is
-    /// present at type-check time and lost before codegen: the two
-    /// halves of gradual verification disagreed about the same type.
-    ///
-    /// Measured (T1063): the inline spellings assert, the named ones
-    /// print the violating value. Naming the domain type is what real
-    /// programs do, so the enforced spelling was the one in examples and
-    /// the silent one was the one in code.
-    type_refinements: std::collections::HashMap<String, FieldRefinementInfo>,
-
     /// Declared file module paths and ownerless root-inline module paths in
     /// this compilation unit, known before their declarations are walked.
     ///
@@ -2461,7 +2445,6 @@ impl VbcCodegen {
             type_name_claim_owner: std::collections::HashMap::new(),
             type_field_type_names: std::collections::HashMap::new(),
             type_field_refinements: std::collections::HashMap::new(),
-            type_refinements: std::collections::HashMap::new(),
             unit_module_paths: std::collections::HashSet::new(),
             static_mut_type_names: std::collections::HashMap::new(),
             // Pending constants for deferred compilation
@@ -10568,30 +10551,6 @@ impl VbcCodegen {
                 {
                     declaration.visibility = visibility;
                 }
-                // A NAMED refinement — `type Positive is Int{ it > 0 };`
-                // parses as an Alias whose target is `Refined`. Register
-                // the predicate under the type's own name so the assert
-                // emitters can ASK the annotation's type for a refinement
-                // instead of pattern-matching the annotation's syntax
-                // (T1063).
-                if let TypeDeclBody::Alias(target) = &type_decl.body
-                    && let verum_ast::ty::TypeKind::Refined { base, predicate } = &target.kind
-                {
-                    let binding = match &predicate.binding {
-                        verum_common::Maybe::Some(id) => id.name.to_string(),
-                        verum_common::Maybe::None => "it".to_string(),
-                    };
-                    self.type_refinements.insert(
-                        type_decl.name.name.to_string(),
-                        FieldRefinementInfo {
-                            pred_expr: predicate.expr.clone(),
-                            binding,
-                            base_type_name: Self::extract_type_name_from_ast(base),
-                            base_var_type: self.type_kind_to_var_type(&base.kind),
-                        },
-                    );
-                }
-
                 // Register record field layouts for sequential field indexing
                 if let TypeDeclBody::Record(fields) = &type_decl.body {
                     let field_names: Vec<String> =
@@ -16605,7 +16564,14 @@ impl VbcCodegen {
                     None
                 } else {
                     self.resolve_signature_type_ref(target_type, &generic_param_map)?;
-                    self.semantic_formal_type(target_type, &generic_param_map, &ids)
+                    // Alias storage follows its exact base. The retained source
+                    // declaration owns the predicate; this representation is not
+                    // evidence for a conversion or semantic type identity.
+                    let representation = match &target_type.kind {
+                        verum_ast::ty::TypeKind::Refined { base, .. } => base,
+                        _ => target_type,
+                    };
+                    self.semantic_formal_type(representation, &generic_param_map, &ids)
                 };
                 let origin_module = self.current_origin_module_sid();
                 let type_desc = crate::types::TypeDescriptor {
@@ -20954,11 +20920,9 @@ impl VbcCodegen {
     /// The refinement an ANNOTATION carries, whether it is written
     /// inline or hidden behind a named type (T1063).
     ///
-    /// ONE carrier, because the emitters used to each pattern-match
-    /// `TypeKind::Refined` and therefore each answered "no refinement"
-    /// for `let a: Positive`. Asking the type is the difference between
-    /// a check that follows the predicate and one that follows the
-    /// spelling.
+    /// Inline annotations own their predicate. A named annotation resolves
+    /// its exact declaration first, then reads the same retained source AST
+    /// used by archive consumers. A sibling's short name is never authority.
     ///
     /// The alias is NOT expanded: `type Positive is Int{…}` stays a
     /// nominal declaration and nothing here makes `Positive` and `Int`
@@ -20967,28 +20931,31 @@ impl VbcCodegen {
         &self,
         ty: &verum_ast::ty::Type,
     ) -> Option<FieldRefinementInfo> {
-        match &ty.kind {
-            verum_ast::ty::TypeKind::Refined { base, predicate } => {
-                let binding = match &predicate.binding {
-                    verum_common::Maybe::Some(id) => id.name.to_string(),
-                    verum_common::Maybe::None => "it".to_string(),
-                };
-                Some(FieldRefinementInfo {
-                    pred_expr: predicate.expr.clone(),
-                    binding,
-                    base_type_name: Self::extract_type_name_from_ast(base),
-                    base_var_type: self.type_kind_to_var_type(&base.kind),
-                })
-            }
-            verum_ast::ty::TypeKind::Path(path) => {
-                let seg = path.segments.last()?;
-                let verum_ast::ty::PathSegment::Name(id) = seg else {
-                    return None;
-                };
-                self.type_refinements.get(id.name.as_str()).cloned()
-            }
-            _ => None,
-        }
+        let annotation = if matches!(ty.kind, verum_ast::ty::TypeKind::Path(_)) {
+            let witness = self
+                .resolve_signature_type_ref(ty, &self.ctx.current_generic_param_ids)
+                .ok()?;
+            let declaration = self.type_by_id(witness.base_type_id()?)?;
+            let source = declaration.source_declaration.as_ref()?;
+            let TypeDeclBody::Alias(target) = &source.body else {
+                return None;
+            };
+            target
+        } else {
+            ty
+        };
+        let verum_ast::ty::TypeKind::Refined { base, predicate } = &annotation.kind else {
+            return None;
+        };
+        Some(FieldRefinementInfo {
+            pred_expr: predicate.expr.clone(),
+            binding: predicate
+                .binding
+                .as_ref()
+                .map_or_else(|| "it".to_string(), |id| id.name.to_string()),
+            base_type_name: Self::extract_type_name_from_ast(base),
+            base_var_type: self.type_kind_to_var_type(&base.kind),
+        })
     }
 
     pub(super) fn emit_return_refinement_assert(

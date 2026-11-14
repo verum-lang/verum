@@ -165,6 +165,12 @@ fn normalize(
                     return Err("type reflection has incomplete declaration arguments".into());
                 }
                 if declaration.kind == TypeKind::Alias {
+                    if declaration.source_declaration.as_ref().is_some_and(|source|
+                        matches!(&source.body, verum_ast::TypeDeclBody::Alias(target)
+                            if matches!(target.kind, verum_ast::ty::TypeKind::Refined { .. })))
+                    {
+                        return Err("refinement type identity requires its predicate, not only runtime layout".into());
+                    }
                     let target = declaration
                         .alias_target
                         .as_ref()
