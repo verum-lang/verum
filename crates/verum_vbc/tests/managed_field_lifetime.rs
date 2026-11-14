@@ -38,6 +38,13 @@ fn name_field_projections(module: &mut verum_vbc::VbcModule, fields: &[&str]) {
                 encode_varint(u64::from(names[field].0), operands);
                 *sub_op = CbgrSubOpcode::RefFieldNamed as u8;
             }
+            if let Instruction::GetF { dst, obj, field_idx } = instruction {
+                instruction = Instruction::GetFieldNamed {
+                    dst,
+                    obj,
+                    name: names[field_idx as usize].0,
+                };
+            }
             if let Instruction::SetF { obj, field_idx, value } = instruction {
                 instruction = Instruction::SetFieldNamed {
                     obj,
@@ -517,4 +524,104 @@ fn receiver_slot_cycles_and_exhausted_depth_refuse_without_granting_write() {
         unsafe { record.data_ptr().cast::<Value>().read() }.try_as_i64(),
         Some(73)
     );
+}
+
+#[test]
+fn fat_record_snapshots_are_validated_before_projection_or_field_access() {
+    use verum_vbc::value::{Capabilities, FatRef};
+    let source = "type Record is { value: Int };\n\
+        fn field(record:&mut Record)->&mut Int { &mut record.value }\n\
+        fn read(record:&Record)->Int { record.value }\n\
+        fn update(record:&mut Record) { record.value=99; }";
+    for named in [false, true] {
+        let ast = Parser::new(source).parse_module().unwrap();
+        let mut module = VbcCodegen::new().compile_module(&ast).unwrap();
+        if named {
+            name_field_projections(&mut module, &["value"]);
+        }
+        let module = deserialize_module(&serialize_module(&module).unwrap()).unwrap();
+        validate_module(&module).unwrap();
+        let owner = module
+            .types
+            .iter()
+            .find(|ty| module.get_string(ty.name) == Some("Record"))
+            .unwrap()
+            .id;
+        let mut vm = Interpreter::new(module.into());
+        let mut object = vm
+            .state
+            .heap
+            .alloc(owner, std::mem::size_of::<Value>())
+            .unwrap();
+        // SAFETY: the live exact owner contains one initialized Value slot.
+        unsafe {
+            object.data_ptr().cast::<Value>().write(Value::from_i64(73));
+        }
+        let valid = FatRef::new(
+            object.as_ptr().cast(),
+            object.generation(),
+            object.epoch(),
+            Capabilities::MUT_EXCLUSIVE,
+            1,
+        );
+        for (case, generation, epoch) in [
+            (
+                "generation",
+                valid.generation().wrapping_add(1),
+                valid.epoch(),
+            ),
+            ("epoch", valid.generation(), valid.epoch().wrapping_sub(1)),
+        ] {
+            let stale = Value::from_fat_ref(FatRef::new(
+                valid.ptr(),
+                generation,
+                epoch,
+                valid.capabilities(),
+                1,
+            ));
+            for operation in ["field", "read", "update"] {
+                let error = call(&mut vm, operation, stale)
+                    .expect_err("stale snapshots cannot acquire current allocation authority");
+                assert!(
+                    matches!(error, InterpreterError::CbgrViolation { .. }),
+                    "named={named} {case} {operation}: {error}"
+                );
+            }
+        }
+        let reference = Value::from_fat_ref(valid);
+        assert_eq!(
+            call(&mut vm, "read", reference).unwrap().try_as_i64(),
+            Some(73)
+        );
+        call(&mut vm, "update", reference).unwrap();
+        assert_eq!(
+            call(&mut vm, "read", reference).unwrap().try_as_i64(),
+            Some(99)
+        );
+        object.header_mut().set_capabilities(Capabilities::READ_ONLY.0);
+        let error = call(&mut vm, "update", reference)
+            .expect_err("a live owner can revoke write authority from an older snapshot");
+        assert!(matches!(error, InterpreterError::CapabilityDenied { .. }), "{error}");
+        assert_eq!(call(&mut vm, "read", reference).unwrap().try_as_i64(), Some(99));
+        object.header_mut().set_capabilities(0);
+        for operation in ["field", "read", "update"] {
+            let error = call(&mut vm, operation, reference)
+                .expect_err("current owner capability revocation is not a fresh ticket");
+            assert!(matches!(error, InterpreterError::CapabilityDenied { .. }), "{error}");
+        }
+        object.header_mut().set_capabilities(Capabilities::FULL.0);
+        // SAFETY: retire the allocation; subsequent probes must use membership
+        // authority and must not inspect this released header.
+        unsafe {
+            vm.state.heap.free(object);
+        }
+        for operation in ["field", "read", "update"] {
+            let error = call(&mut vm, operation, reference)
+                .expect_err("released owner cannot authorize a fat snapshot");
+            assert!(
+                matches!(error, InterpreterError::CbgrViolation { .. }),
+                "named={named} {operation}: {error}"
+            );
+        }
+    }
 }

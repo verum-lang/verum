@@ -477,15 +477,46 @@ pub(super) struct ReceiverPlace {
 }
 
 impl ReceiverPlace {
-    /// A fat reference carries its aggregate address separately from metadata.
-    /// Preserve the reference value for other consumers, and expose this address
-    /// only after the caller has retained the accumulated access capabilities.
-    pub(super) fn record_value(&self) -> Value {
-        if self.value.is_fat_ref() {
-            Value::from_ptr(self.value.as_fat_ref().ptr())
-        } else {
-            self.value
+    /// Open a record carrier only after checking a fat snapshot against its
+    /// exact live allocation. Erasing the snapshot first would let a stale
+    /// reference acquire a new projection ticket from the current owner.
+    pub(super) fn into_record(mut self, state: &InterpreterState) -> InterpreterResult<Self> {
+        if !self.value.is_fat_ref() {
+            return Ok(self);
         }
+        use crate::interpreter::CbgrViolationKind;
+        use super::super::super::heap::ObjectHeader;
+
+        let reference = self.value.as_fat_ref().thin;
+        let invalid = |kind| InterpreterError::CbgrViolation {
+            kind, ptr: reference.ptr as usize,
+        };
+        let capabilities = if state.heap.contains(reference.ptr.cast::<ObjectHeader>()) {
+            // SAFETY: exact heap membership proves this ObjectHeader remains
+            // readable. There is no allocation or callback before projection.
+            let header = unsafe { &*reference.ptr.cast::<ObjectHeader>() };
+            if !header.is_valid() {
+                return Err(invalid(CbgrViolationKind::UseAfterFree));
+            }
+            if reference.generation == 0 || reference.generation != header.generation {
+                return Err(invalid(CbgrViolationKind::GenerationMismatch));
+            }
+            if reference.epoch() != header.epoch {
+                return Err(invalid(CbgrViolationKind::EpochExpired));
+            }
+            reference.capabilities().intersect(&Capabilities(header.capabilities))
+        } else {
+            bridge_reference_capabilities(state, reference)?
+        };
+        self.capabilities = self.capabilities.intersect(&capabilities);
+        if !self.capabilities.has(Capabilities::READ) {
+            return Err(InterpreterError::CapabilityDenied {
+                required: u64::from(Capabilities::READ),
+                actual: u64::from(self.capabilities.0),
+            });
+        }
+        self.value = Value::from_ptr(reference.ptr);
+        Ok(self)
     }
 
     pub(super) fn require_write(&self) -> InterpreterResult<()> {

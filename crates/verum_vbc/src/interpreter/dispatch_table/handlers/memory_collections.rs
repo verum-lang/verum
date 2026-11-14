@@ -143,50 +143,11 @@ pub(in super::super) fn handle_get_field(
     let obj = read_reg(state)?;
     let field_idx = read_varint(state)? as usize;
 
-    let obj_val = state.get_reg(obj);
-
-    // REFL-CLOSURE-XREC-1: adapter closures receive their element as a
-    // REFERENCE (`any`/`all`/`find` pass `&x` per `fn(&Self.Item)`),
-    // and only the register-ref encoding was peeled here — a ThinRef or
-    // tracked-raw-ptr receiver had GetF read the REF'S OWN BYTES as
-    // field slots (SIGSEGV on `|r| r.name`). Resolve through the full
-    // helper first: it covers all three ref encodings and is IDENTITY
-    // for plain values, so the for-loop's by-value binder path is
-    // untouched (same precedent as the handle_iter_new fix).
-    // ONE layered receiver authority (T0705): the previous pair —
-    // resolve_arg_value plus a single hand-rolled second hop "kept for
-    // layered register-ref chains" — is exactly the shape that kept
-    // reopening this gap one handler at a time. resolve_receiver loops
-    // the same peel to a fixpoint with a bounded hop count.
-    // The generation is checked BEFORE the peel, because the peel is
-    // what makes a stale reference indistinguishable from a live one.
-    //
-    // `resolve_receiver` decodes `(abs_index, generation)` and uses only
-    // the index — its documented contract is that the CALLER validates
-    // — and this caller did not. So a `&T` held in a record field and
-    // read after its referent's scope ended produced whatever the
-    // register holds now:
-    //
-    //     let mut k = Keeper { held: &Big { a: 1 } };
-    //     { let v = Big { a: 7 }; k = Keeper { held: &v }; }
-    //     k.held.a        ->  Variant(196608)
-    //
-    // `verum check` reported nothing, and `&T` is the DEFAULT tier —
-    // the one whose whole purpose is that this cannot happen. The
-    // explicit `Deref` opcode has always validated; the implicit peel
-    // every field read performs did not, so which of two spellings a
-    // program used decided whether it was memory-safe.
-    //
-    // Only a register-ref pays for this: a plain object value is not
-    // one, and `validate_cbgr_generation` itself honours
-    // `cbgr_enabled`, so a build that proved its references safe
-    // upfront still skips it.
-    if super::cbgr_helpers::is_cbgr_ref(&obj_val) {
-        let (abs_index, generation) =
-            crate::interpreter::dispatch_table::handlers::cbgr_helpers::decode_cbgr_ref(obj_val);
-        super::cbgr_helpers::validate_cbgr_generation(state, abs_index, generation)?;
-    }
-    let obj_val = super::cbgr_helpers::resolve_receiver(state, obj_val)?;
+    // Field reads and writes use the same checked receiver path. In particular,
+    // a reference stored in a heap slot retains its generation and capabilities
+    // until the exact record carrier has been validated.
+    let obj_val = super::cbgr_helpers::resolve_receiver_place(state, state.get_reg(obj))?
+        .into_record(state)?.value;
 
     let field_offset = field_idx.checked_mul(std::mem::size_of::<Value>())
         .ok_or_else(|| InterpreterError::InvalidOperand { message: "field offset overflow".into() })?;
@@ -876,9 +837,9 @@ pub(in super::super) fn handle_set_field(
     // interior pointer; the reader and writer use the same receiver resolver.
     let receiver = super::cbgr_helpers::resolve_receiver_place(
         state, state.get_reg(obj),
-    )?;
+    )?.into_record(state)?;
     receiver.require_write()?;
-    let obj_val = receiver.record_value();
+    let obj_val = receiver.value;
 
     let field_offset = field_idx.checked_mul(std::mem::size_of::<Value>())
         .ok_or_else(|| InterpreterError::InvalidOperand { message: "field offset overflow".into() })?;

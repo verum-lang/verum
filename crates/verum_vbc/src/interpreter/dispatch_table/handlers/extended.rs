@@ -283,7 +283,7 @@ pub(in super::super) fn handle_extended(
             let dst = read_reg(state)?;
             let obj = read_reg(state)?;
             let name_sid = read_varint(state)? as u32;
-            let obj_val = super::cbgr_helpers::resolve_arg_value(state, state.get_reg(obj))?;
+            let obj_val = state.get_reg(obj);
             let (tid, base_ptr) = field_named_object(state, obj_val, "GetFieldNamed")?;
             let idx = field_named_index(&state.module, tid, name_sid, "GetFieldNamed")?;
             let value = unsafe {
@@ -302,9 +302,9 @@ pub(in super::super) fn handle_extended(
             let value_reg = read_reg(state)?;
             let receiver = super::cbgr_helpers::resolve_receiver_place(
                 state, state.get_reg(obj),
-            )?;
+            )?.into_record(state)?;
             receiver.require_write()?;
-            let obj_val = receiver.record_value();
+            let obj_val = receiver.value;
             let (tid, base_ptr) = field_named_object(state, obj_val, "SetFieldNamed")?;
             let idx = field_named_index(&state.module, tid, name_sid, "SetFieldNamed")?;
             let value = state.get_reg(value_reg);
@@ -609,24 +609,8 @@ pub(in super::super) fn field_named_object(
     obj_val: crate::value::Value,
     op: &str,
 ) -> InterpreterResult<(crate::types::TypeId, *const u8)> {
-    // PEEL THE REFERENCE FIRST. This read the header straight off
-    // whatever it was handed, so a `&T` receiver — a CBGR register-ref,
-    // or the interior pointer `&record.field` produces — gave a header
-    // that is not an object's:
-    //
-    //     Panic: GetFieldNamed: no TypeDescriptor for runtime type_id=0
-    //
-    // for a value that was a perfectly good record. `Transducer.filter`
-    // hands its closure an `&A`, so every by-name field read inside one
-    // died that way (T0911).
-    //
-    // `resolve_receiver` is the authority every receiver-consuming
-    // handler is supposed to go through; this one was not. Same rule,
-    // same fix as the file intercept's path argument earlier today —
-    // the class is "a handler that derefs a `&T` must handle every
-    // encoding of one", and its instances are found by grepping for
-    // the ones that do not.
-    let obj_val = super::cbgr_helpers::resolve_receiver(state, obj_val)?;
+    let obj_val = super::cbgr_helpers::resolve_receiver_place(state, obj_val)?
+        .into_record(state)?.value;
     if !obj_val.is_ptr() || obj_val.is_nil() {
         return Err(InterpreterError::Panic {
             message: format!(

@@ -2293,9 +2293,9 @@ fn cbgr_extended_body(
 
             let receiver = super::cbgr_helpers::resolve_receiver_place(
                 state, state.get_reg(base_reg),
-            )?;
+            )?.into_record(state)?;
             let capabilities = receiver.capabilities.intersect(&Capabilities::MUT_EXCLUSIVE);
-            let base_val = receiver.record_value();
+            let base_val = receiver.value;
 
             let field_offset = field_idx.checked_mul(std::mem::size_of::<Value>())
                 .ok_or_else(|| InterpreterError::InvalidOperand {
@@ -2451,9 +2451,9 @@ fn cbgr_extended_body(
 
             let receiver = super::cbgr_helpers::resolve_receiver_place(
                 state, state.get_reg(base_reg),
-            )?;
+            )?.into_record(state)?;
             let capabilities = receiver.capabilities.intersect(&Capabilities::MUT_EXCLUSIVE);
-            let base_val = receiver.record_value();
+            let base_val = receiver.value;
             let (tid, base_ptr) =
                 super::extended::field_named_object(state, base_val, "RefFieldNamed")?;
             let field_idx =
