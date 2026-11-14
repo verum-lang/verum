@@ -26,10 +26,10 @@ fn ordinary_register_store_replaces_reference_value_without_following_it() {
     let mut state = state();
     let origin = Value::from_i64(17);
     state.registers.set_absolute(0, origin);
-    let inner = encode_cbgr_ref_mut(0, 1);
+    let inner = encode_cbgr_ref_mut(0, state.registers.get_generation(0));
     state.registers.set_absolute(1, inner);
-    let outer = encode_cbgr_ref_mut(1, 1);
-    let replacement = encode_cbgr_ref_mut(2, 1);
+    let outer = encode_cbgr_ref_mut(1, state.registers.get_generation(1));
+    let replacement = encode_cbgr_ref_mut(2, state.registers.get_generation(2));
     assert!(write_through_ref(&mut state, outer, replacement).unwrap());
     assert_eq!(state.registers.get_absolute(1).bits(), replacement.bits());
     assert_eq!(state.registers.get_absolute(0).bits(), origin.bits());
@@ -41,7 +41,7 @@ fn ordinary_pointer_store_replaces_reference_value_without_following_it() {
         let mut state = state();
         let origin = Value::from_i64(17);
         state.registers.set_absolute(0, origin);
-        let mut slot = encode_cbgr_ref_mut(0, 1);
+        let mut slot = encode_cbgr_ref_mut(0, state.registers.get_generation(0));
         let reference = if tracked {
             let address = &mut slot as *mut Value;
             state.cbgr_mutable_ptrs.insert(address as usize);
@@ -49,7 +49,7 @@ fn ordinary_pointer_store_replaces_reference_value_without_following_it() {
         } else {
             thin(&mut slot)
         };
-        let replacement = encode_cbgr_ref_mut(2, 1);
+        let replacement = encode_cbgr_ref_mut(2, state.registers.get_generation(2));
         assert!(write_through_ref(&mut state, reference, replacement).unwrap());
         assert_eq!(slot.bits(), replacement.bits());
         assert_eq!(state.registers.get_absolute(0).bits(), origin.bits());
@@ -60,9 +60,11 @@ fn ordinary_pointer_store_replaces_reference_value_without_following_it() {
 fn receiver_register_chain_keeps_original_register_target() {
     let mut state = state();
     state.registers.set_absolute(0, Value::from_i64(17));
-    let original = encode_cbgr_ref_mut(0, 1);
+    let original = encode_cbgr_ref_mut(0, state.registers.get_generation(0));
     state.registers.set_absolute(1, original);
-    let (current, target) = resolve_receiver_place(&state, encode_cbgr_ref_mut(1, 1)).unwrap();
+    let receiver = resolve_receiver_place(&state, encode_cbgr_ref_mut(1, state.registers.get_generation(1))).unwrap();
+    receiver.require_write().unwrap();
+    let (current, target) = (receiver.value, receiver.reference);
     assert_eq!(current.as_i64(), 17);
     assert_eq!(target.bits(), original.bits());
     assert!(write_through_ref(&mut state, target, Value::from_i64(23)).unwrap());
@@ -83,7 +85,9 @@ fn receiver_register_chain_keeps_pointer_target_and_alias() {
             thin(&mut slot)
         };
         state.registers.set_absolute(0, reference);
-        let (current, target) = resolve_receiver_place(&state, encode_cbgr_ref_mut(0, 1)).unwrap();
+        let receiver = resolve_receiver_place(&state, encode_cbgr_ref_mut(0, state.registers.get_generation(0))).unwrap();
+        receiver.require_write().unwrap();
+        let (current, target) = (receiver.value, receiver.reference);
         assert_eq!(current.as_i64(), 17);
         assert_eq!(target.bits(), reference.bits());
         assert!(write_through_ref(&mut state, target, Value::from_i64(23)).unwrap());
@@ -143,10 +147,10 @@ fn untracked_and_unaligned_addresses_do_not_authorize_slot_access() {
 #[test]
 fn cyclic_receiver_chain_is_a_bounded_operand_error() {
     let mut state = state();
-    state.registers.set_absolute(0, encode_cbgr_ref_mut(1, 1));
-    state.registers.set_absolute(1, encode_cbgr_ref_mut(0, 1));
+    state.registers.set_absolute(0, encode_cbgr_ref_mut(1, state.registers.get_generation(1)));
+    state.registers.set_absolute(1, encode_cbgr_ref_mut(0, state.registers.get_generation(0)));
     assert!(matches!(
-        resolve_receiver_place(&state, encode_cbgr_ref_mut(0, 1)),
+        resolve_receiver_place(&state, encode_cbgr_ref_mut(0, state.registers.get_generation(0))),
         Err(InterpreterError::InvalidOperand { .. })
     ));
 }
@@ -221,4 +225,29 @@ fn swap_validates_both_places_before_any_write() {
     swap_referents(&mut machine, writable, valid).unwrap();
     assert_eq!(cell.as_i64(), 17);
     assert_eq!(machine.registers.get_absolute(0).as_i64(), 37);
+}
+
+#[test]
+fn receiver_permissions_intersect_every_forwarding_reference() {
+    use super::encode_cbgr_ref;
+    let mut state = state();
+    let mut slot = Value::from_i64(17);
+    let writable = thin(&mut slot);
+    state.registers.set_absolute(0, writable);
+    state.registers.set_absolute(1, encode_cbgr_ref_mut(0, state.registers.get_generation(0)));
+    let receiver = resolve_receiver_place(&state, encode_cbgr_ref(1, state.registers.get_generation(1))).unwrap();
+    assert_eq!(receiver.value.try_as_i64(), Some(17));
+    assert!(matches!(receiver.require_write(), Err(InterpreterError::CapabilityDenied { .. })));
+    let readonly = Value::from_thin_ref(ThinRef::new(
+        (&mut slot as *mut Value).cast(), 1, 0, Capabilities::READ_ONLY,
+    ));
+    state.registers.set_absolute(0, readonly);
+    let receiver = resolve_receiver_place(&state, encode_cbgr_ref_mut(1, state.registers.get_generation(1))).unwrap();
+    assert!(matches!(receiver.require_write(), Err(InterpreterError::CapabilityDenied { .. })));
+    state.registers.bump_generation(0);
+    assert!(matches!(resolve_receiver_place(&state, encode_cbgr_ref_mut(1, state.registers.get_generation(1))),
+        Err(InterpreterError::CbgrPanic { failure: crate::interpreter::CbgrFailure {
+            kind: crate::interpreter::CbgrViolationKind::GenerationMismatch, ..
+        }, .. })));
+    assert_eq!(slot.try_as_i64(), Some(17));
 }

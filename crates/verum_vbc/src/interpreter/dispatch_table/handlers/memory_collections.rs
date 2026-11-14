@@ -874,10 +874,11 @@ pub(in super::super) fn handle_set_field(
     // Retain the actual write authority while resolving the receiver. A field
     // ticket is a checked Value slot, not an ObjectHeader or an untracked
     // interior pointer; the reader and writer use the same receiver resolver.
-    let (obj_val, reference) = super::cbgr_helpers::resolve_receiver_place(
+    let receiver = super::cbgr_helpers::resolve_receiver_place(
         state, state.get_reg(obj),
     )?;
-    super::cbgr_helpers::require_reference_write(state, reference)?;
+    receiver.require_write()?;
+    let obj_val = receiver.value;
 
     let field_offset = field_idx.checked_mul(std::mem::size_of::<Value>())
         .ok_or_else(|| InterpreterError::InvalidOperand { message: "field offset overflow".into() })?;

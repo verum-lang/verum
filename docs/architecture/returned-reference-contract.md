@@ -893,6 +893,11 @@ revokes all of its tickets, so a later allocation cannot revive an old field
 reference by reusing the same address. Sibling field references coexist;
 attenuating one to read-only does not grant write permission through it.
 
+Nested projection intersects the capabilities of every traversed reference.
+Resolving the referent value cannot erase a readonly restriction. A managed
+`&*reference` reborrow retains the original place; it does not read a value
+into a temporary and then create a fresh reference with greater permissions.
+
 The interpreter resolves these tickets at each slot access. Headerless raw
 records retain their separate, explicitly registered allocation-extent
 contract. Neither path treats an interior address in a process-wide pointer

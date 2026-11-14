@@ -1072,8 +1072,13 @@ fn execute_method_call(
         "truncate" | "clear" | "pop" | "push_str" | "push" | "push_char" | "push_byte" | "reserve"
     )
     {
-        let (value, place) = resolve_receiver_place(state, receiver)?;
-        (value.is_small_string() || is_heap_string(&value)).then_some((value, place))
+        let place = resolve_receiver_place(state, receiver)?;
+        if place.value.is_small_string() || is_heap_string(&place.value) {
+            place.require_write()?;
+            Some((place.value, place.reference))
+        } else {
+            None
+        }
     } else {
         None
     };

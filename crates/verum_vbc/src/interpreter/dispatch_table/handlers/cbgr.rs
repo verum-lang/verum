@@ -2326,18 +2326,14 @@ fn cbgr_extended_body(
             let base_reg = read_reg(state)?;
             let field_idx = read_varint(state)? as usize;
 
-            let base_val = state.get_reg(base_reg);
-
-            // Receiver resolution through the ONE layered authority
-            // (T0705): the private one-hop chain here returned NIL for
-            // a receiver forwarded through two method frames, and every
-            // baked `Shared` &mut-self chain died on the reference-typed
-            // field it then failed to read. Fat-refs keep their local
-            // arm — resolve_receiver does not flatten them.
-            let base_val = if base_val.is_fat_ref() {
-                Value::from_ptr(base_val.as_fat_ref().ptr())
+            let receiver = super::cbgr_helpers::resolve_receiver_place(
+                state, state.get_reg(base_reg),
+            )?;
+            let capabilities = receiver.capabilities.intersect(&Capabilities::MUT_EXCLUSIVE);
+            let base_val = if receiver.value.is_fat_ref() {
+                Value::from_ptr(receiver.value.as_fat_ref().ptr())
             } else {
-                super::cbgr_helpers::resolve_receiver(state, base_val)?
+                receiver.value
             };
 
             let field_offset = field_idx.checked_mul(std::mem::size_of::<Value>())
@@ -2349,7 +2345,7 @@ fn cbgr_extended_body(
                 let (owner, len) = bridge_extent(state, address)
                     .expect("raw_record_field_slot established a live allocation");
                 let reference = state.heap.project_raw_slot(
-                    owner, len, address - owner, Capabilities::MUT_EXCLUSIVE,
+                    owner, len, address - owner, capabilities,
                 )?;
                 state.set_reg(dst, reference);
                 return Ok(DispatchResult::Continue);
@@ -2471,7 +2467,7 @@ fn cbgr_extended_body(
                 });
             }
             let reference = state.heap.project_object_field(
-                ptr as usize, field_offset, Capabilities::MUT_EXCLUSIVE,
+                ptr as usize, field_offset, capabilities,
             )?;
             state.set_reg(dst, reference);
             Ok(DispatchResult::Continue)
@@ -2492,8 +2488,11 @@ fn cbgr_extended_body(
             let base_reg = read_reg(state)?;
             let name_sid = read_varint(state)? as u32;
 
-            let base_val =
-                super::cbgr_helpers::resolve_arg_value(state, state.get_reg(base_reg))?;
+            let receiver = super::cbgr_helpers::resolve_receiver_place(
+                state, state.get_reg(base_reg),
+            )?;
+            let capabilities = receiver.capabilities.intersect(&Capabilities::MUT_EXCLUSIVE);
+            let base_val = receiver.value;
             let (tid, base_ptr) =
                 super::extended::field_named_object(state, base_val, "RefFieldNamed")?;
             let field_idx =
@@ -2514,7 +2513,7 @@ fn cbgr_extended_body(
                 });
             }
             let reference = state.heap.project_object_field(
-                base_ptr as usize, field_offset, Capabilities::MUT_EXCLUSIVE,
+                base_ptr as usize, field_offset, capabilities,
             )?;
             state.set_reg(dst, reference);
             Ok(DispatchResult::Continue)

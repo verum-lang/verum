@@ -151,7 +151,9 @@ pub(in super::super) fn try_intercept_text_static_runtime(
             if additional <= 0 {
                 return Ok(Some(Value::unit()));
             }
-            let (current_val, target) = resolve_receiver_place(state, self_raw)?;
+            let receiver = resolve_receiver_place(state, self_raw)?;
+            receiver.require_write()?;
+            let (current_val, target) = (receiver.value, receiver.reference);
             // Byte-exact extraction (a reserve may land mid-code-point
             // during byte-wise construction).
             let bytes = extract_text_bytes(&current_val, state);
@@ -426,7 +428,9 @@ pub(in super::super) fn try_intercept_text_static_runtime(
             let arg_raw = state
                 .registers
                 .get(caller_base, Reg(args_start_reg + 1));
-            let (self_val, target) = resolve_receiver_place(state, self_raw)?;
+            let receiver = resolve_receiver_place(state, self_raw)?;
+            receiver.require_write()?;
+            let (self_val, target) = (receiver.value, receiver.reference);
             let arg_val = resolve_arg_value(state, arg_raw)?;
             // BYTE-domain round trip (SSO-UTF8-SPLIT-1): `push_byte`
             // builds multi-byte UTF-8 sequences one byte at a time

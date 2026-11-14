@@ -5180,6 +5180,29 @@ impl VbcCodegen {
             expr: ptr_expr,
         } = &inner.kind
         {
+            // A managed reference already denotes the borrowed place. Loading
+            // its pointee then borrowing that temporary loses both ownership
+            // lifetime and the actual incoming capabilities.
+            if matches!(op, UnOp::Ref | UnOp::RefMut)
+                && let Some(crate::types::TypeRef::Reference {
+                    tier: CbgrTier::Tier0, mutability, ..
+                }) = self.declared_expression_result(ptr_expr, None, 0, 0)
+            {
+                if op == UnOp::RefMut && mutability != crate::types::Mutability::Mutable {
+                    return Err(CodegenError::with_span(
+                        CodegenErrorKind::TypeInference("a readonly place cannot be reborrowed mutably".into()),
+                        inner.span,
+                    ));
+                }
+                let source = self.compile_expr(ptr_expr)?.or_internal("managed reborrow has no reference")?;
+                let reference = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::Mov { dst: reference, src: source });
+                if op == UnOp::Ref {
+                    self.emit_reference_attenuation(reference, crate::value::Capabilities::READ_ONLY);
+                }
+                self.ctx.free_temp(source);
+                return Ok(Some(reference));
+            }
             // Reborrow the place returned by a declared dereference. Loading
             // its value first would create a reference to a temporary copy.
             let method = match op {

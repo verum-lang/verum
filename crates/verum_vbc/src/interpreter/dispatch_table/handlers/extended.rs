@@ -299,10 +299,11 @@ pub(in super::super) fn handle_extended(
             let obj = read_reg(state)?;
             let name_sid = read_varint(state)? as u32;
             let value_reg = read_reg(state)?;
-            let (obj_val, reference) = super::cbgr_helpers::resolve_receiver_place(
+            let receiver = super::cbgr_helpers::resolve_receiver_place(
                 state, state.get_reg(obj),
             )?;
-            super::cbgr_helpers::require_reference_write(state, reference)?;
+            receiver.require_write()?;
+            let obj_val = receiver.value;
             let (tid, base_ptr) = field_named_object(state, obj_val, "SetFieldNamed")?;
             let idx = field_named_index(&state.module, tid, name_sid, "SetFieldNamed")?;
             let value = state.get_reg(value_reg);

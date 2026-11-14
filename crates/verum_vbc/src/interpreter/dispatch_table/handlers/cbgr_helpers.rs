@@ -366,29 +366,77 @@ pub(super) fn require_reference_write(state: &super::super::super::state::Interp
     }
 }
 
-/// Select a method receiver's current value and its writeback reference.
-/// Only receiver callers opt into layered register-reference traversal; a
-/// normal store through `&mut &T` must still replace the reference-valued slot.
-/// A pointer/ThinRef slot is loaded once, using the same authority as argument
-/// reads and single-reference stores. Plain values keep local-register fallback.
-pub(super) fn resolve_receiver_place(
-    state: &super::super::super::state::InterpreterState,
-    receiver: Value,
-) -> InterpreterResult<(Value, Value)> {
-    let mut place = receiver;
-    for _ in 0..8 {
-        if !is_cbgr_ref(&place) {
-            return Ok((resolve_arg_value(state, place)?, place));
+/// A receiver value together with its original writeback place and the
+/// intersection of every reference capability traversed to reach it.
+pub(super) struct ReceiverPlace {
+    pub value: Value,
+    pub reference: Value,
+    pub capabilities: Capabilities,
+}
+
+impl ReceiverPlace {
+    pub(super) fn require_write(&self) -> InterpreterResult<()> {
+        if self.capabilities.has(Capabilities::WRITE) {
+            Ok(())
+        } else {
+            Err(InterpreterError::CapabilityDenied {
+                required: u64::from(Capabilities::WRITE),
+                actual: u64::from(self.capabilities.0),
+            })
         }
-        let (absolute, _) = decode_cbgr_ref(place);
+    }
+}
+
+/// Select a receiver's current value without discarding its access authority.
+/// Register-reference forwarding retains every incoming restriction. A heap
+/// slot is loaded once: its value can itself be an owned record pointer, whose
+/// first field must not be confused with another indirection.
+pub(super) fn resolve_receiver_place(
+    state: &InterpreterState,
+    receiver: Value,
+) -> InterpreterResult<ReceiverPlace> {
+    let mut place = receiver;
+    let mut capabilities = Capabilities::FULL;
+    for _ in 0..8 {
+        let incoming = if is_cbgr_ref(&place) {
+            if is_cbgr_ref_mutable(place) {
+                Capabilities::MUT_EXCLUSIVE
+            } else {
+                Capabilities::READ_ONLY
+            }
+        } else if place.is_thin_ref() {
+            state.heap.thin_ref(place)?.capabilities()
+        } else if place.is_fat_ref() {
+            place.as_fat_ref().capabilities()
+        } else {
+            Capabilities::FULL
+        };
+        capabilities = capabilities.intersect(&incoming);
+        if !capabilities.has(Capabilities::READ) {
+            return Err(InterpreterError::CapabilityDenied {
+                required: u64::from(Capabilities::READ),
+                actual: u64::from(capabilities.0),
+            });
+        }
+        if !is_cbgr_ref(&place) {
+            return Ok(ReceiverPlace {
+                value: resolve_arg_value(state, place)?,
+                reference: place,
+                capabilities,
+            });
+        }
+        let (absolute, generation) = decode_cbgr_ref(place);
         if absolute as usize >= state.registers.top() {
             return Err(InterpreterError::InvalidOperand {
                 message: "method receiver register reference is out of bounds".into(),
             });
         }
+        validate_cbgr_generation(state, absolute, generation)?;
         let next = state.registers.get_absolute(absolute);
-        if !is_cbgr_ref(&next) && reference_value_slot(state, next)?.is_none() {
-            return Ok((next, place));
+        if !is_cbgr_ref(&next) && !next.is_fat_ref()
+            && reference_value_slot(state, next)?.is_none()
+        {
+            return Ok(ReceiverPlace { value: next, reference: place, capabilities });
         }
         place = next;
     }
