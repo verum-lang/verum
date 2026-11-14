@@ -1,0 +1,49 @@
+mount core.configuration.format.{ConfigFormatOptions, empty_options, default_capabilities};
+mount core.configuration.value.ConfigValue;
+mount core.configuration.error.{ConfigErrorKind, format_id_json};
+mount core.collections.map.Map;
+mount core.base.result.Result;
+mount core.base.maybe.Maybe;
+
+fn require_unsupported_options(options: &ConfigFormatOptions) {
+    match options.require_empty(format_id_json()) {
+        Result.Err(error) => {
+            assert(error.kind is ConfigErrorKind.UnsupportedFeature);
+            assert_eq(error.format_id, format_id_json());
+            assert_eq(error.line, 0);
+            assert_eq(error.column, 0);
+            assert_eq(error.byte_offset, 0);
+            match error.path {
+                Maybe.None => (),
+                Maybe.Some(_) => panic("option refusal acquired an unrelated path"),
+            };
+        }
+        Result.Ok(_) => panic("unsupported options accepted"),
+    };
+}
+
+@test
+fn test_empty_options_accept_only_an_empty_table() {
+    let empty = empty_options();
+    assert(empty.require_empty(format_id_json()).is_ok());
+    require_unsupported_options(&ConfigFormatOptions { payload: ConfigValue.ConfigNull });
+    require_unsupported_options(&ConfigFormatOptions { payload: ConfigValue.ConfigBool(false) });
+    let mut values: Map<Text, ConfigValue> = Map.new();
+    values.insert("unknown", ConfigValue.ConfigBool(true));
+    require_unsupported_options(&ConfigFormatOptions { payload: ConfigValue.ConfigTable(values) });
+}
+
+@test
+fn test_default_capabilities_expose_supported_value_kinds() {
+    let capabilities = default_capabilities();
+    assert(capabilities.has_null);
+    assert(capabilities.has_heterogeneous_arrays);
+    assert(capabilities.single_root);
+    assert(!capabilities.preserves_comments);
+    assert(!capabilities.has_bytes);
+    assert(!capabilities.has_offset_datetime);
+    assert(!capabilities.has_local_datetime);
+    assert(!capabilities.has_duration);
+    assert(!capabilities.has_references);
+    assert(!capabilities.preserves_key_order);
+}

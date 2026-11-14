@@ -44,7 +44,7 @@ module core.configuration.format;
 mount collections.{List, Map};
 mount base.{Result, Ok, Err, Maybe, Some, None, Text};
 mount configuration.value.{ConfigValue};
-mount configuration.error.{ConfigError, FormatId};
+mount configuration.error.{ConfigError, ConfigErrorKind, FormatId, config_err};
 // Mounted rather than inherited: §4ter — the prelude carries only what
 // the LANGUAGE requires, and this is library API.
 mount core.sync.{RwLock};
@@ -69,11 +69,22 @@ mount core.sync.{RwLock};
 // This side moves because it is the smaller: 11 uses inside
 // `core/configuration`, none in any test, against 19 on the meta side.
 public type ConfigFormatOptions is {
-    payload: ConfigValue,
+    public payload: ConfigValue,
 };
 
 public fn empty_options() -> ConfigFormatOptions {
     ConfigFormatOptions { payload: ConfigValue.ConfigTable(Map.new()) }
+}
+
+implement ConfigFormatOptions {
+    /// Adapters without configurable options reject unsupported input explicitly.
+    public fn require_empty(&self, format: FormatId) -> Result<(), ConfigError> {
+        match &self.payload {
+            ConfigValue.ConfigTable(values) if values.is_empty() => Result.Ok(()),
+            _ => Result.Err(config_err(format, ConfigErrorKind.UnsupportedFeature, 0, 0, 0,
+                "configuration options must be empty".to_text())),
+        }
+    }
 }
 
 // =============================================================================
@@ -87,25 +98,25 @@ public fn empty_options() -> ConfigFormatOptions {
 // with `ConfigError.UnsupportedFeature`.
 public type FormatCapabilities is {
     /// Format supports comments preserved through round-trip.
-    preserves_comments: Bool,
+    public preserves_comments: Bool,
     /// Format supports null values explicitly.
-    has_null: Bool,
+    public has_null: Bool,
     /// Format supports binary blobs natively (else: must be base64).
-    has_bytes: Bool,
+    public has_bytes: Bool,
     /// Format supports timezone-aware datetimes.
-    has_offset_datetime: Bool,
+    public has_offset_datetime: Bool,
     /// Format supports timezone-naive datetimes.
-    has_local_datetime: Bool,
+    public has_local_datetime: Bool,
     /// Format supports duration values natively.
-    has_duration: Bool,
+    public has_duration: Bool,
     /// Format supports cross-references / anchors / inheritance.
-    has_references: Bool,
+    public has_references: Bool,
     /// Format supports heterogeneous arrays.
-    has_heterogeneous_arrays: Bool,
+    public has_heterogeneous_arrays: Bool,
     /// Format supports key ordering preservation.
-    preserves_key_order: Bool,
+    public preserves_key_order: Bool,
     /// Format requires a single root value (vs. multi-document).
-    single_root: Bool,
+    public single_root: Bool,
 };
 
 public fn default_capabilities() -> FormatCapabilities {
@@ -118,7 +129,7 @@ public fn default_capabilities() -> FormatCapabilities {
         has_duration:             false,
         has_references:           false,
         has_heterogeneous_arrays: true,
-        preserves_key_order:      true,
+        preserves_key_order:      false,
         single_root:              true,
     }
 }
