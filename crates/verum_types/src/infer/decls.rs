@@ -6434,6 +6434,18 @@ impl TypeChecker {
             .map_err(|message| TypeError::UniverseBinding { message, span: func.span })?;
         scheme.where_clauses = structural_conditions;
         self.record_callable_declaration(&mut scheme, func);
+        if func.return_type.is_none()
+            && let Some(body) = &scheme.returned_value
+            && let Type::Function { params, .. } = &scheme.ty
+            && let Some(result) = self.structural_source_result(body, params, func.span)
+        {
+            let result = self.wrap_return_type_for_sig_full(
+                result, &func.throws_clause, func.is_async, func.is_generator,
+            );
+            if let Type::Function { return_type, .. } = &mut scheme.ty {
+                *return_type = Heap::new(result);
+            }
+        }
         Ok(scheme)
         })();
 

@@ -8,6 +8,11 @@ use verum_ast::{
 };
 use verum_common::{List, Map, Shared, Text};
 
+struct ReturnedBodyTypes {
+    nodes: List<Type>,
+    writes: List<Type>,
+}
+
 fn unparen(mut expression: &Expr) -> &Expr {
     while let ExprKind::Paren(inner) = &expression.kind {
         expression = inner;
@@ -371,20 +376,118 @@ impl TypeChecker {
             return None;
         }
 
-        // A structural constructor must supply every field of the selected
-        // result, with exactly its checked types. This excludes implicit
-        // default initializers and user conversions from the closed program.
-        let mut expected: List<Option<Type>> = (0..derivation.nodes.len()).map(|_| None).collect();
-        expected[derivation.result] = Some(self.unifier.apply(&return_type));
         let declared_receiver = self.type_registry.declared_receiver(span).cloned();
-        for write in &derivation.writes {
-            let input = match derivation.nodes.get(write.input)? {
-                ReturnedValueNode::Parameter(index) => params.get(*index)?,
-                ReturnedValueNode::Receiver => declared_receiver.as_ref()?,
+        let facts = self.returned_body_types(
+            &derivation,
+            &params,
+            declared_receiver.as_ref(),
+            Some(&return_type),
+            span,
+        )?;
+        // Only primitive scalar replacement has no implicit lifecycle call.
+        // Type inference alone does not establish this ownership property.
+        if facts.writes.iter().any(|ty| {
+            !matches!(
+                ty,
+                Type::Unit | Type::Bool | Type::Int | Type::Float | Type::Char
+            )
+        }) {
+            return None;
+        }
+
+        let mut values: List<List<RecordReceiver>> = List::new();
+        for (index, node) in derivation.nodes.iter().enumerate() {
+            let ty = facts.nodes.get(index)?;
+            let origins = match node {
+                ReturnedValueNode::Parameter(parameter) => {
+                    self.closed_call_input_origins(args.get(*parameter)?, ty)?
+                }
+                ReturnedValueNode::Receiver => self.closed_call_input_origins(receiver?, ty)?,
+                ReturnedValueNode::Literal(_) => List::new(),
+                ReturnedValueNode::Field { source, .. }
+                | ReturnedValueNode::TupleIndex { source, .. } => {
+                    // The type derivation admits only direct declared projections.
+                    // Copying an owned nominal field may still run user code.
+                    if !self.return_value_has_trivial_cleanup(ty) {
+                        return None;
+                    }
+                    let (_, mut origins) = self.projected_origins_for_type(
+                        facts.nodes.get(*source)?.clone(),
+                        values.get(*source)?.clone(),
+                        span,
+                    )?;
+                    if !self.carries_stored_loan(ty) {
+                        origins.clear();
+                    }
+                    origins
+                }
+                ReturnedValueNode::Tuple(parts) => {
+                    let mut origins = List::new();
+                    for part in parts {
+                        for origin in values.get(*part)? {
+                            if !origins.contains(origin) {
+                                origins.push(origin.clone());
+                            }
+                        }
+                    }
+                    origins
+                }
+                ReturnedValueNode::Record { fields, .. } => {
+                    let mut origins = List::new();
+                    for (_, part) in fields {
+                        for origin in values.get(*part)? {
+                            if !origins.contains(origin) {
+                                origins.push(origin.clone());
+                            }
+                        }
+                    }
+                    origins
+                }
+            };
+            values.push(origins);
+        }
+        for local in &derivation.locals {
+            if !self.return_value_has_trivial_cleanup(facts.nodes.get(*local)?) {
+                return None;
+            }
+        }
+        values.get(derivation.result).cloned()
+    }
+
+    /// Complete a source signature before caller instantiation. An unknown
+    /// callable is never solved from the caller's desired result: only the
+    /// exact declaration's closed body and its own parameter types contribute.
+    pub(super) fn structural_source_result(
+        &mut self,
+        body: &ReturnedValue,
+        parameters: &[Type],
+        span: verum_ast::Span,
+    ) -> Option<Type> {
+        let facts = self.returned_body_types(body, parameters, None, None, span)?;
+        facts.nodes.get(body.result).cloned()
+    }
+
+    /// One flat type derivation serves source result inference and call-site
+    /// payload reasoning. This supplies type facts, not permission to copy,
+    /// mutate or drop a value; the ownership consumer checks those separately.
+    fn returned_body_types(
+        &mut self,
+        body: &ReturnedValue,
+        parameters: &[Type],
+        receiver: Option<&Type>,
+        result: Option<&Type>,
+        span: verum_ast::Span,
+    ) -> Option<ReturnedBodyTypes> {
+        let mut expected: List<Option<Type>> = (0..body.nodes.len()).map(|_| None).collect();
+        *expected.get_mut(body.result)? = result.map(|ty| self.unifier.apply(ty));
+        let mut writes = List::new();
+        for write in &body.writes {
+            let input = match body.nodes.get(write.input)? {
+                ReturnedValueNode::Parameter(index) => parameters.get(*index)?,
+                ReturnedValueNode::Receiver => receiver?,
                 _ => return None,
             };
-            let head = self.place_reference_head(input, span).ok()?;
-            let mut field = match head {
+            let mut field = match self.place_reference_head(input, span).ok()? {
                 Type::Reference {
                     mutable: true,
                     inner,
@@ -400,32 +503,29 @@ impl TypeChecker {
                 _ => return None,
             };
             for name in &write.fields {
-                // A reference-valued intermediate is another storage edge;
-                // custom Deref and computed places need their own proof.
+                // A reference-valued intermediate names another storage edge.
+                // Neither custom Deref nor a computed place is a direct field.
                 if self.reference_mode(&field, span).ok()?.is_some() {
                     return None;
                 }
                 field = self.lookup_field_type(&field, name)?;
             }
             let field = self.unifier.apply(&field);
-            // Replacing a nominal value can run Drop/Clone/conversion. Only
-            // primitive scalar storage has a closed write operation here.
-            if !matches!(
-                field,
-                Type::Unit | Type::Bool | Type::Int | Type::Float | Type::Char
-            ) {
-                return None;
-            }
             let slot = expected.get_mut(write.value)?;
             if slot.as_ref().is_some_and(|previous| previous != &field) {
                 return None;
             }
-            *slot = Some(field);
+            *slot = Some(field.clone());
+            writes.push(field);
         }
-        for (index, node) in derivation.nodes.iter().enumerate().rev() {
+        // Push declared result/field constraints into structural constructors.
+        // A constructor without an inferable nominal application stays unknown.
+        for (index, node) in body.nodes.iter().enumerate().rev() {
+            let Some(ty) = expected[index].as_ref() else {
+                continue;
+            };
             let components: List<(usize, Type)> = match node {
                 ReturnedValueNode::Tuple(parts) => {
-                    let ty = expected[index].as_ref()?;
                     let types = match ty {
                         Type::Unit if parts.is_empty() => List::new(),
                         Type::Tuple(types) if types.len() == parts.len() => types.clone(),
@@ -434,7 +534,6 @@ impl TypeChecker {
                     parts.iter().copied().zip(types).collect()
                 }
                 ReturnedValueNode::Record { owner, fields } => {
-                    let ty = expected[index].as_ref()?;
                     if self.conversion_nominal_head(ty)?.0 != *owner {
                         return None;
                     }
@@ -450,87 +549,54 @@ impl TypeChecker {
                 _ => List::new(),
             };
             for (component, ty) in components {
-                if expected[component]
-                    .as_ref()
-                    .is_some_and(|known| known != &ty)
-                {
+                let slot = expected.get_mut(component)?;
+                if slot.as_ref().is_some_and(|known| known != &ty) {
                     return None;
                 }
-                expected[component] = Some(ty);
+                *slot = Some(ty);
             }
         }
 
-        let mut values: List<(Type, List<RecordReceiver>)> = List::new();
-        for (index, node) in derivation.nodes.iter().enumerate() {
-            let (ty, origins) = match node {
-                ReturnedValueNode::Parameter(index) => {
-                    let argument = args.get(*index)?;
-                    let ty = self.unifier.apply(params.get(*index)?);
-                    let origins = self.closed_call_input_origins(argument, &ty)?;
-                    (ty, origins)
+        let mut nodes: List<Type> = List::new();
+        for (index, node) in body.nodes.iter().enumerate() {
+            let ty = match node {
+                ReturnedValueNode::Parameter(parameter) => {
+                    self.unifier.apply(parameters.get(*parameter)?)
                 }
-                ReturnedValueNode::Receiver => {
-                    let ty = self.unifier.apply(declared_receiver.as_ref()?);
-                    let origins = self.closed_call_input_origins(receiver?, &ty)?;
-                    (ty, origins)
-                }
-                ReturnedValueNode::Literal(ty) => (ty.clone(), List::new()),
+                ReturnedValueNode::Receiver => self.unifier.apply(receiver?),
+                ReturnedValueNode::Literal(ty) => ty.clone(),
                 ReturnedValueNode::Field { source, name } => {
-                    let (ty, origins) = values.get(*source)?.clone();
-                    let (receiver, mut origins) =
-                        self.projected_origins_for_type(ty, origins, span)?;
-                    // This is a direct declared field. A Deref implementation
-                    // cannot enter the derivation through this lookup.
-                    let field = self.lookup_field_type(&receiver, name)?;
-                    // Copying an owned nominal field can dispatch declared
-                    // copy behavior. Its resource discipline alone does not
-                    // prove that operation cannot write through another input.
-                    if !self.return_value_has_trivial_cleanup(&field) {
-                        return None;
-                    }
-                    if !self.carries_stored_loan(&field) {
-                        origins.clear();
-                    }
-                    (field, origins)
+                    let (head, _) = self.projected_origins_for_type(
+                        nodes.get(*source)?.clone(),
+                        List::new(),
+                        span,
+                    )?;
+                    self.unifier.apply(&self.lookup_field_type(&head, name)?)
                 }
                 ReturnedValueNode::TupleIndex { source, index } => {
-                    let (ty, origins) = values.get(*source)?.clone();
-                    let (receiver, mut origins) =
-                        self.projected_origins_for_type(ty, origins, span)?;
-                    let Type::Tuple(parts) = receiver else {
+                    let (head, _) = self.projected_origins_for_type(
+                        nodes.get(*source)?.clone(),
+                        List::new(),
+                        span,
+                    )?;
+                    let Type::Tuple(parts) = head else {
                         return None;
                     };
-                    let field = parts.get(*index)?.clone();
-                    if !self.return_value_has_trivial_cleanup(&field) {
-                        return None;
-                    }
-                    if !self.carries_stored_loan(&field) {
-                        origins.clear();
-                    }
-                    (field, origins)
+                    parts.get(*index)?.clone()
                 }
                 ReturnedValueNode::Tuple(parts) => {
-                    let mut origins = List::new();
-                    for part in parts {
-                        for origin in &values.get(*part)?.1 {
-                            if !origins.contains(origin) {
-                                origins.push(origin.clone());
-                            }
-                        }
+                    if parts.is_empty() {
+                        Type::Unit
+                    } else {
+                        Type::Tuple(
+                            parts
+                                .iter()
+                                .map(|part| nodes.get(*part).cloned())
+                                .collect::<Option<List<_>>>()?,
+                        )
                     }
-                    (expected[index].as_ref()?.clone(), origins)
                 }
-                ReturnedValueNode::Record { fields, .. } => {
-                    let mut origins = List::new();
-                    for (_, part) in fields {
-                        for origin in &values.get(*part)?.1 {
-                            if !origins.contains(origin) {
-                                origins.push(origin.clone());
-                            }
-                        }
-                    }
-                    (expected[index].as_ref()?.clone(), origins)
-                }
+                ReturnedValueNode::Record { .. } => expected[index].as_ref()?.clone(),
             };
             if expected[index]
                 .as_ref()
@@ -538,14 +604,9 @@ impl TypeChecker {
             {
                 return None;
             }
-            values.push((ty, origins));
+            nodes.push(ty);
         }
-        for local in &derivation.locals {
-            if !self.return_value_has_trivial_cleanup(&values.get(*local)?.0) {
-                return None;
-            }
-        }
-        Some(values.get(derivation.result)?.1.clone())
+        Some(ReturnedBodyTypes { nodes, writes })
     }
 
     fn closed_call_input_origins(
