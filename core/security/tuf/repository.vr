@@ -60,6 +60,8 @@ mount base.{Result, Ok, Err, Maybe, Some, None, Text, Bool, Int};
 mount collections.{List, Map};
 mount core.net.http.{HttpClient, Request, Response, Method, StatusCode, HttpError, Headers, Version};
 mount io.path.{Path, PathBuf};
+mount core.io.file.{read_async};
+mount core.io.protocols.{IoErrorKind};
 mount sync.rwlock.{RwLock};
 mount time.system_time.{epoch_seconds};
 mount core.security.tuf.types.{RoleName, role_name_to_text};
@@ -316,7 +318,6 @@ implement TufRepository for LocalRepository {
         role:    &RoleName,
         version: Maybe<Int>,
     ) -> Result<List<Byte>, RepoError>
-        using [Filesystem]
     {
         let role_text = role_name_to_text(role);
         let filename = if self.consistent_snapshot {
@@ -327,8 +328,9 @@ implement TufRepository for LocalRepository {
         } else {
             f"{role_text}.json"
         };
-        let path = self.root.join("metadata").join(&filename);
-        match Filesystem.read_file_bytes(&path).await {
+        let path = self.root.join_str("metadata").join_str(&filename);
+        let path_text = path.to_text();
+        match read_async(&path_text).await {
             Result.Ok(bytes) => {
                 let limit = max_bytes_for_role(role);
                 if bytes.len() > limit {
@@ -337,7 +339,10 @@ implement TufRepository for LocalRepository {
                     Result.Ok(bytes)
                 }
             }
-            Result.Err(_) => Result.Err(NotFound { role: role.clone(), version }),
+            Result.Err(error) if error.kind() == IoErrorKind.NotFound => {
+                Result.Err(NotFound { role: role.clone(), version })
+            },
+            Result.Err(error) => Result.Err(IoFailure(f"{error}")),
         }
     }
 
@@ -346,11 +351,11 @@ implement TufRepository for LocalRepository {
         path:        &Text,
         hash_prefix: Maybe<&Text>,
     ) -> Result<List<Byte>, RepoError>
-        using [Filesystem]
     {
         let _ = hash_prefix; // local mode optionally honours, omitted for v0.1
-        let target_path = self.root.join("targets").join(path);
-        match Filesystem.read_file_bytes(&target_path).await {
+        let target_path = self.root.join_str("targets").join_str(path);
+        let path_text = target_path.to_text();
+        match read_async(&path_text).await {
             Result.Ok(bytes) => {
                 if bytes.len() > MAX_TARGET_FILE_BYTES {
                     Result.Err(TooLarge { role: "target".to_text(), size: bytes.len(), limit: MAX_TARGET_FILE_BYTES })
@@ -358,7 +363,10 @@ implement TufRepository for LocalRepository {
                     Result.Ok(bytes)
                 }
             }
-            Result.Err(_) => Result.Err(TargetNotFound(path.clone())),
+            Result.Err(error) if error.kind() == IoErrorKind.NotFound => {
+                Result.Err(TargetNotFound(path.clone()))
+            },
+            Result.Err(error) => Result.Err(IoFailure(f"{error}")),
         }
     }
 }

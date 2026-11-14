@@ -62,6 +62,7 @@ mount collections.{List, Map};
 mount core.hash.crypto.sha256.{digest};
 mount core.encoding.hex.{encode as hex_encode};
 mount io.path.{Path, PathBuf};
+mount core.io.file.{read_async};
 
 // =============================================================================
 // Constants — match kernel `verum_vbc.archive`
@@ -238,10 +239,9 @@ public fn read_archive_bytes(bytes: &List<Byte>) -> Result<CogArchive, ArchiveEr
 }
 
 /// Read a `.vbca` from a filesystem path.
-public async fn read_archive(path: &Path) -> Result<CogArchive, ArchiveError>
-    using [Filesystem]
-{
-    let bytes = Filesystem.read_file_bytes(path).await
+public async fn read_archive(path: &Path) -> Result<CogArchive, ArchiveError> {
+    let path_text = path.to_text();
+    let bytes = read_async(&path_text).await
         .map_err(|e| ArchiveError.IoFailure(f"{e}"))?;
     read_archive_bytes(&bytes)
 }
