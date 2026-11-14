@@ -125,7 +125,7 @@ const _: () = assert!(
     caps::MASK == 0xFFFF,
     "caps::MASK is the lower 16 bits of the packed epoch_and_caps field; \
      core/mem/capability.vr packing puts caps in the lower half via \
-     `pack_epoch_caps(epoch, caps) = (caps << 16) | epoch`.  Cross-pin \
+     `pack_epoch_caps(epoch, caps) = (epoch << 16) | caps`.  Cross-pin \
      with verum_common::layout::EPOCH_BITS = 16 (epoch occupies upper 16).",
 );
 // Allocation flag bits — `core/mem/header.vr` FLAG_PINNED=1<<0 etc.

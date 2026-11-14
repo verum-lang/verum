@@ -3392,7 +3392,6 @@ impl<'ctx> PlatformIR<'ctx> {
 
         let i32_type = ctx.i32_type();
         let i16_type = ctx.i16_type();
-        let i8_type = ctx.i8_type();
 
         // Helper: ensure verum_cbgr_validate_ref is declared
         let validate_fn_type = i1_type.fn_type(&[i64_type.into(), i64_type.into()], false);
@@ -3400,285 +3399,26 @@ impl<'ctx> PlatformIR<'ctx> {
             module.add_function("verum_cbgr_validate_ref", validate_fn_type, None);
         }
 
-        // verum_cbgr_check(ref: ptr) -> i1: load ThinRef fields, call validate_ref
-        // ThinRef layout at ptr: { user_ptr: ptr(8), generation: i32(4), epoch_caps: i32(4) }
-        {
+        // ThinRef and FatRef share their first three fields. Their public
+        // checks use the same snapshot/current-authority validator as Deref,
+        // ChkRef and retained copying; no separate packing convention exists.
+        for (name, required) in [
+            ("verum_cbgr_check", verum_common::cbgr::caps::READ),
+            ("verum_cbgr_check_write", verum_common::cbgr::caps::WRITE),
+            ("verum_cbgr_check_fat", verum_common::cbgr::caps::READ),
+        ] {
             let fn_type = i1_type.fn_type(&[ptr_type.into()], false);
-            let func = self.get_or_declare_fn(module, "verum_cbgr_check", fn_type);
-            if func.count_basic_blocks() > 0 { /* already emitted */
-            } else {
-                let entry = ctx.append_basic_block(func, "entry");
-                builder.position_at_end(entry);
-                let ref_ptr = func
-                    .get_nth_param(0)
-                    .or_internal("missing param 0")?
-                    .into_pointer_value();
-
-                // Load user_ptr (offset 0, 8 bytes as i64)
-                let user_ptr = builder
-                    .build_load(i64_type, ref_ptr, "user_ptr")
-                    .or_llvm_err()?
-                    .into_int_value();
-
-                // Load generation (offset 8, i32)
-                // SAFETY: GEP into the ThinRef struct to access the generation field at a fixed offset
-                let gen_ptr = unsafe {
-                    builder
-                        .build_in_bounds_gep(
-                            i8_type,
-                            ref_ptr,
-                            &[i64_type.const_int(verum_common::layout::THIN_REF_GENERATION_OFFSET, false)],
-                            "gen_ptr",
-                        )
-                        .or_llvm_err()?
-                };
-                let generation = builder
-                    .build_load(i32_type, gen_ptr, "generation")
-                    .or_llvm_err()?
-                    .into_int_value();
-
-                // Load epoch_caps (offset 12, i32)
-                // SAFETY: GEP into the ThinRef struct to access the epoch_caps field at a fixed offset
-                let caps_ptr = unsafe {
-                    builder
-                        .build_in_bounds_gep(
-                            i8_type,
-                            ref_ptr,
-                            &[i64_type.const_int(verum_common::layout::THIN_REF_EPOCH_CAPS_OFFSET, false)],
-                            "caps_ptr",
-                        )
-                        .or_llvm_err()?
-                };
-                let epoch_caps = builder
-                    .build_load(i32_type, caps_ptr, "epoch_caps")
-                    .or_llvm_err()?
-                    .into_int_value();
-
-                // Extract epoch (low 16 bits of epoch_caps)
-                let epoch_mask = i32_type.const_int(verum_common::layout::CAPS_MASK_U32 as u64, false);
-                let epoch_i32 = builder
-                    .build_and(epoch_caps, epoch_mask, "epoch_i32")
-                    .or_llvm_err()?;
-
-                // Pack: generation (low 32) | epoch (bits 32..47)
-                let gen_i64 = builder
-                    .build_int_z_extend(generation, i64_type, "gen_i64")
-                    .or_llvm_err()?;
-                let epoch_i64 = builder
-                    .build_int_z_extend(epoch_i32, i64_type, "epoch_i64")
-                    .or_llvm_err()?;
-                let epoch_shifted = builder
-                    .build_left_shift(epoch_i64, i64_type.const_int(verum_common::layout::EPOCH_CAPS_BITS as u64, false), "epoch_shifted")
-                    .or_llvm_err()?;
-                let packed = builder
-                    .build_or(gen_i64, epoch_shifted, "packed_gen_epoch")
-                    .or_llvm_err()?;
-
-                // Call verum_cbgr_validate_ref(user_ptr, packed_gen_epoch)
-                let validate_fn = module.get_function("verum_cbgr_validate_ref").unwrap();
-                let result = builder
-                    .build_call(validate_fn, &[user_ptr.into(), packed.into()], "valid")
-                    .or_llvm_err()?
-            .basic_value_or("validate_ref: expected return value")?
-                    .into_int_value();
-                builder.build_return(Some(&result)).or_llvm_err()?;
-            }
-        }
-
-        // verum_cbgr_check_write(ref: ptr) -> i1: validate ref AND check write capability
-        {
-            let fn_type = i1_type.fn_type(&[ptr_type.into()], false);
-            let func = self.get_or_declare_fn(module, "verum_cbgr_check_write", fn_type);
-            if func.count_basic_blocks() > 0 { /* already emitted */
-            } else {
-                let entry = ctx.append_basic_block(func, "entry");
-                builder.position_at_end(entry);
-                let ref_ptr = func
-                    .get_nth_param(0)
-                    .or_internal("missing param 0")?
-                    .into_pointer_value();
-
-                // Load user_ptr (offset 0)
-                let user_ptr = builder
-                    .build_load(i64_type, ref_ptr, "user_ptr")
-                    .or_llvm_err()?
-                    .into_int_value();
-
-                // Load generation (offset 8)
-                // SAFETY: GEP into the ThinRef struct to access the generation field at a fixed offset
-                let gen_ptr = unsafe {
-                    builder
-                        .build_in_bounds_gep(
-                            i8_type,
-                            ref_ptr,
-                            &[i64_type.const_int(verum_common::layout::THIN_REF_GENERATION_OFFSET, false)],
-                            "gen_ptr",
-                        )
-                        .or_llvm_err()?
-                };
-                let generation = builder
-                    .build_load(i32_type, gen_ptr, "generation")
-                    .or_llvm_err()?
-                    .into_int_value();
-
-                // Load epoch_caps (offset 12)
-                // SAFETY: GEP into the ThinRef struct to access the epoch_caps field at a fixed offset
-                let caps_ptr = unsafe {
-                    builder
-                        .build_in_bounds_gep(
-                            i8_type,
-                            ref_ptr,
-                            &[i64_type.const_int(verum_common::layout::THIN_REF_EPOCH_CAPS_OFFSET, false)],
-                            "caps_ptr",
-                        )
-                        .or_llvm_err()?
-                };
-                let epoch_caps = builder
-                    .build_load(i32_type, caps_ptr, "epoch_caps")
-                    .or_llvm_err()?
-                    .into_int_value();
-
-                // Extract epoch (low 16 bits) and caps (high 16 bits)
-                let epoch_mask = i32_type.const_int(0xFFFF, false);
-                let epoch_i32 = builder
-                    .build_and(epoch_caps, epoch_mask, "epoch_i32")
-                    .or_llvm_err()?;
-                let caps_shifted = builder
-                    .build_right_shift(
-                        epoch_caps,
-                        i32_type.const_int(verum_common::layout::CAPS_BITS as u64, false),
-                        false,
-                        "caps_shifted",
-                    )
-                    .or_llvm_err()?;
-                let caps_i16 = builder
-                    .build_int_truncate(caps_shifted, i16_type, "caps_i16")
-                    .or_llvm_err()?;
-
-                // Check write capability (bit 1 of caps)
-                let write_bit = builder
-                    .build_and(caps_i16, i16_type.const_int(0x02, false), "write_bit")
-                    .or_llvm_err()?;
-                let has_write = builder
-                    .build_int_compare(
-                        IntPredicate::NE,
-                        write_bit,
-                        i16_type.const_int(0, false),
-                        "has_write",
-                    )
-                    .or_llvm_err()?;
-
-                // Pack gen+epoch and validate ref
-                let gen_i64 = builder
-                    .build_int_z_extend(generation, i64_type, "gen_i64")
-                    .or_llvm_err()?;
-                let epoch_i64 = builder
-                    .build_int_z_extend(epoch_i32, i64_type, "epoch_i64")
-                    .or_llvm_err()?;
-                let epoch_shifted = builder
-                    .build_left_shift(epoch_i64, i64_type.const_int(verum_common::layout::EPOCH_CAPS_BITS as u64, false), "epoch_shifted")
-                    .or_llvm_err()?;
-                let packed = builder
-                    .build_or(gen_i64, epoch_shifted, "packed_gen_epoch")
-                    .or_llvm_err()?;
-
-                let validate_fn = module.get_function("verum_cbgr_validate_ref").unwrap();
-                let ref_valid = builder
-                    .build_call(validate_fn, &[user_ptr.into(), packed.into()], "ref_valid")
-                    .or_llvm_err()?
-            .basic_value_or("validate_ref: expected return value")?
-                    .into_int_value();
-
-                // Result = ref_valid AND has_write
-                let result = builder
-                    .build_and(ref_valid, has_write, "valid_and_writable")
-                    .or_llvm_err()?;
-                builder.build_return(Some(&result)).or_llvm_err()?;
-            }
-        }
-
-        // verum_cbgr_check_fat(ref: ptr) -> i1: same as check but for FatRef.
-        // Canonical FatRef layout (`core/mem/fat_ref.vr`):
-        //   { user_ptr: ptr(8), generation: i32(4), epoch_and_caps: i32(4),
-        //     metadata: i64(8), offset_from_base: i32(4), reserved: i32(4) } = 32 bytes
-        // The first 3 fields (offsets 0/8/12) are common with ThinRef and
-        // are the only fields the check needs.
-        {
-            let fn_type = i1_type.fn_type(&[ptr_type.into()], false);
-            let func = self.get_or_declare_fn(module, "verum_cbgr_check_fat", fn_type);
-            if func.count_basic_blocks() > 0 { /* already emitted */
-            } else {
-                let entry = ctx.append_basic_block(func, "entry");
-                builder.position_at_end(entry);
-                let ref_ptr = func
-                    .get_nth_param(0)
-                    .or_internal("missing param 0")?
-                    .into_pointer_value();
-
-                // FatRef has same layout for first 3 fields as ThinRef
-                let user_ptr = builder
-                    .build_load(i64_type, ref_ptr, "user_ptr")
-                    .or_llvm_err()?
-                    .into_int_value();
-
-                // SAFETY: GEP into the FatRef struct to access generation field at a fixed offset
-                let gen_ptr = unsafe {
-                    builder
-                        .build_in_bounds_gep(
-                            i8_type,
-                            ref_ptr,
-                            &[i64_type.const_int(verum_common::layout::THIN_REF_GENERATION_OFFSET, false)],
-                            "gen_ptr",
-                        )
-                        .or_llvm_err()?
-                };
-                let generation = builder
-                    .build_load(i32_type, gen_ptr, "generation")
-                    .or_llvm_err()?
-                    .into_int_value();
-
-                // SAFETY: GEP into the FatRef struct to access epoch_caps field at a fixed offset
-                let caps_ptr = unsafe {
-                    builder
-                        .build_in_bounds_gep(
-                            i8_type,
-                            ref_ptr,
-                            &[i64_type.const_int(verum_common::layout::THIN_REF_EPOCH_CAPS_OFFSET, false)],
-                            "caps_ptr",
-                        )
-                        .or_llvm_err()?
-                };
-                let epoch_caps = builder
-                    .build_load(i32_type, caps_ptr, "epoch_caps")
-                    .or_llvm_err()?
-                    .into_int_value();
-
-                let epoch_mask = i32_type.const_int(verum_common::layout::CAPS_MASK_U32 as u64, false);
-                let epoch_i32 = builder
-                    .build_and(epoch_caps, epoch_mask, "epoch_i32")
-                    .or_llvm_err()?;
-
-                let gen_i64 = builder
-                    .build_int_z_extend(generation, i64_type, "gen_i64")
-                    .or_llvm_err()?;
-                let epoch_i64 = builder
-                    .build_int_z_extend(epoch_i32, i64_type, "epoch_i64")
-                    .or_llvm_err()?;
-                let epoch_shifted = builder
-                    .build_left_shift(epoch_i64, i64_type.const_int(verum_common::layout::EPOCH_CAPS_BITS as u64, false), "epoch_shifted")
-                    .or_llvm_err()?;
-                let packed = builder
-                    .build_or(gen_i64, epoch_shifted, "packed_gen_epoch")
-                    .or_llvm_err()?;
-
-                let validate_fn = module.get_function("verum_cbgr_validate_ref").unwrap();
-                let result = builder
-                    .build_call(validate_fn, &[user_ptr.into(), packed.into()], "valid")
-                    .or_llvm_err()?
-            .basic_value_or("validate_ref: expected return value")?
-                    .into_int_value();
-                builder.build_return(Some(&result)).or_llvm_err()?;
-            }
+            let func = self.get_or_declare_fn(module, name, fn_type);
+            if func.count_basic_blocks() != 0 { continue; }
+            let entry = ctx.append_basic_block(func, "entry");
+            builder.position_at_end(entry);
+            let ref_ptr = func.get_nth_param(0).or_internal("reference storage")?
+                .into_pointer_value();
+            let mut cbgr = super::cbgr::CbgrLowering::new(ctx);
+            let reference = builder.build_load(cbgr.thin_ref_type(), ref_ptr, "snapshot")
+                .or_llvm_err()?.into_struct_value();
+            let result = cbgr.reference_is_valid(&builder, module, reference, required)?;
+            builder.build_return(Some(&result)).or_llvm_err()?;
         }
 
         // verum_cbgr_epoch_begin(): increment global epoch with overflow detection
@@ -3878,8 +3618,11 @@ impl<'ctx> PlatformIR<'ctx> {
                 };
                 let actual_gen = builder
                     .build_load(i32_type, gen_ptr, "actual_gen")
-                    .or_llvm_err()?
-                    .into_int_value();
+                    .or_llvm_err()?;
+                actual_gen.as_instruction_value().or_internal("actual_gen atomic load")?
+                    .set_atomic_ordering(verum_llvm::AtomicOrdering::Acquire)
+                    .map_err(|_| super::error::LlvmLoweringError::internal("actual_gen atomic ordering"))?;
+                let actual_gen = actual_gen.into_int_value();
 
                 // Load actual_epoch from the canonical epoch@12 slot
                 // SAFETY: fixed in-header offset within the 32-byte header.
@@ -3898,8 +3641,11 @@ impl<'ctx> PlatformIR<'ctx> {
                 };
                 let actual_epoch = builder
                     .build_load(i16_type, epoch_ptr, "actual_epoch")
-                    .or_llvm_err()?
-                    .into_int_value();
+                    .or_llvm_err()?;
+                actual_epoch.as_instruction_value().or_internal("actual_epoch atomic load")?
+                    .set_atomic_ordering(verum_llvm::AtomicOrdering::Monotonic)
+                    .map_err(|_| super::error::LlvmLoweringError::internal("actual_epoch atomic ordering"))?;
+                let actual_epoch = actual_epoch.into_int_value();
 
                 // Compare: gen_ok = (actual_gen == expected_gen)
                 let gen_ok = builder

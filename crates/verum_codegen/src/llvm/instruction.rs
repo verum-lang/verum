@@ -6200,8 +6200,14 @@ fn lower_instruction_impl<'ctx>(
                 // Proper CBGR ref struct — use the standard deref path
                 let ref_val = val.into_struct_value();
                 let tier = ctx.get_effective_ref_tier(ref_reg.0);
+                let module = ctx.get_module();
+                let function = ctx.function();
                 let (builder, cbgr) = ctx.builder_and_cbgr();
-                let ptr = cbgr.deref_checked(builder, ref_val, tier)?;
+                let ptr = if tier == RefTier::Tier0 {
+                    cbgr.deref_tier0(builder, module, function, ref_val)?
+                } else {
+                    cbgr.deref_checked(builder, ref_val, tier)?
+                };
                 ctx.set_register(dst.0, ptr.into());
             } else {
                 // Non-struct value (IntValue as heap pointer or PointerValue) in alloca mode.
@@ -6353,8 +6359,10 @@ fn lower_instruction_impl<'ctx>(
             if val.is_struct_value() {
                 // Proper CBGR ref struct — perform full validation
                 let ref_val = val.into_struct_value();
+                let module = ctx.get_module();
+                let function = ctx.function();
                 let (builder, cbgr) = ctx.builder_and_cbgr();
-                cbgr.validate_ref(builder, ref_val)?;
+                cbgr.validate_ref(builder, module, function, ref_val)?;
             }
             // Non-struct value (IntValue/PointerValue) — raw pointer/int with no
             // CBGR generation/epoch to validate. Skip validation silently.

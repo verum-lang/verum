@@ -1,0 +1,54 @@
+{
+  "base": "6227e65da687718e9288b6540f2777c5101715a3",
+  "source_sha256": {
+    "core/mem/capability.vr": "86e51ed9e1a6d30df5fe73adeee48dfacb825778596b1be93ce29c3e2d9181a4",
+    "core/mem/thin_ref.vr": "3f4f8fa5085a536f1f6b03ec1200d1de68ba597137c670cfd76b60d916e68725",
+    "core/mem/fat_ref.vr": "a989b95b1e5261dadf4f35ef7030c9e2be41f838a2ff90a2f753fd6452894fb7",
+    "crates/verum_common/src/cbgr.rs": "191500b99c9efc93a7fe76042f9b412604eced604dca204c673f06dd1ea339ef",
+    "crates/verum_codegen/src/llvm/cbgr.rs": "d74b6935856906bb008dae7c6a6a5fc54e3e558197eace7d5dc2530429c5d27f",
+    "crates/verum_codegen/src/llvm/instruction.rs": "a8323003b40bb756c33596dc2bd3d4c324152e5ee7ee21f6bcbb9ac52c5fa3b1",
+    "crates/verum_codegen/src/llvm/platform_ir.rs": "2028b66326d9025f2eaa35f2d5e42be34845e32457b92446340deeb5c87b08cc",
+    "crates/verum_codegen/src/llvm/instruction/retain_copy.rs": "d305177184a0e2fda854b3c62ef7b2648ad1a4b42a8cdb28fcb1f3080f9c470f",
+    "crates/verum_codegen/tests/cbgr_reference_encoding.rs": "c767e98d09de90f6c599a842c6c06c13e77ab085989477af5e423695ed84cd9b",
+    "crates/verum_vbc/tests/cbgr_source_encoding.rs": "10139519022600820ea9d675cc3c3b115c7ef6b87c8dbd05f83f62f3735469a1"
+  },
+  "logs": {
+    "native-before": {
+      "sha256": "79a72788f3d61f4258c998bdbbfa65270d64bd3fb0f6e2d415656cd4dea8640b",
+      "bytes": 223763
+    },
+    "source-before": {
+      "sha256": "7a2a1f48ec3dfb485cc30bed1e163fd7e41fc91434d404988784c4aa2e8c2ab6",
+      "bytes": 11652
+    },
+    "native-final": {
+      "sha256": "9a190236b779f66fda085729d7df515f86049a4362ffd1f094f6d62b77b09655",
+      "bytes": 223982
+    },
+    "source-after": {
+      "sha256": "7b3087f02bebccb32d29cefd289d1573cf130742a4cde739f4eb21f76f68e3b9",
+      "bytes": 12402
+    },
+    "released-owner": {
+      "sha256": "47ef3e2cf939003ee715ae5c01483b73603ce93f6ec13aa62e42a69d738471c1",
+      "bytes": 223123
+    }
+  },
+  "native_checks": {
+    "passed": 7,
+    "failed": 0
+  },
+  "vm_wire_checks": {
+    "passed": 14,
+    "failed": 0
+  },
+  "released_owner": {
+    "reproducer": "released_owner.rs",
+    "build": "Copy this source to crates/verum_codegen/examples/t2717_released_owner.rs; cargo run -p verum_codegen --example t2717_released_owner",
+    "before_release_valid": true,
+    "after_real_verum_os_free": "SIGSEGV",
+    "exit_code": 139,
+    "task": "T2719",
+    "scope": "Actual native page allocator/free and generated reference snapshot/validator; no safe lifetime authority for the unmapped header is established."
+  }
+}

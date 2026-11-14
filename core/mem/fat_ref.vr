@@ -98,7 +98,7 @@ public type FatRef<T> is {
     /// Expected generation counter from allocation time.
     generation: UInt32,
 
-    /// Packed epoch (bits 0-15) and capabilities (bits 16-31).
+    /// Packed capabilities (bits 0-15) and epoch (bits 16-31).
     epoch_and_caps: UInt32,
 
     /// Metadata: length for slices, vtable pointer for trait objects.

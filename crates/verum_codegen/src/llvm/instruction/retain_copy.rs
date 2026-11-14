@@ -20,87 +20,26 @@ fn guard(ctx: &FunctionContext<'_, '_>, condition: IntValue<'_>, message: &str) 
 /// canonical packed epoch/capabilities layout; plain addresses come from checked
 /// native slot producers or the caller's explicit unsafe-reference contract.
 fn validate_reference<'ctx>(
-    ctx: &FunctionContext<'_, 'ctx>,
+    ctx: &mut FunctionContext<'_, 'ctx>,
     value: BasicValueEnum<'ctx>,
     write: bool,
 ) -> Result<()> {
     let BasicValueEnum::StructValue(reference) = value else {
         return Ok(());
     };
-    let b = ctx.builder();
-    let c = ctx.llvm_context();
-    let pointer = b
-        .build_extract_value(reference, 0, "retain_ref_ptr")
-        .or_llvm_err()?;
-    let generation = b
-        .build_extract_value(reference, 1, "retain_ref_gen")
-        .or_llvm_err()?
-        .into_int_value();
-    let epoch_caps = b
-        .build_extract_value(reference, 2, "retain_ref_caps")
-        .or_llvm_err()?
-        .into_int_value();
-    let capability = if write {
+    let required = if write {
         verum_common::cbgr::caps::WRITE
     } else {
         verum_common::cbgr::caps::READ
     };
-    let caps = b
-        .build_and(
-            epoch_caps,
-            c.i32_type().const_int(u64::from(capability), false),
-            "retain_capability",
-        )
-        .or_llvm_err()?;
+    let module = ctx.get_module();
+    let (builder, cbgr) = ctx.builder_and_cbgr();
+    let valid = cbgr.reference_is_valid(builder, module, reference, required)?;
     guard(
         ctx,
-        b.build_int_compare(
-            IntPredicate::NE,
-            caps,
-            c.i32_type().const_zero(),
-            "retain_authorized",
-        )
-        .or_llvm_err()?,
-        "retain_copy reference lacks its required capability",
-    )?;
-    let epoch = b
-        .build_right_shift(
-            epoch_caps,
-            c.i32_type()
-                .const_int(u64::from(verum_common::layout::CAPS_BITS), false),
-            false,
-            "retain_epoch",
-        )
-        .or_llvm_err()?;
-    let epoch = b
-        .build_int_z_extend(epoch, c.i64_type(), "retain_epoch64")
-        .or_llvm_err()?;
-    let epoch = b
-        .build_left_shift(
-            epoch,
-            c.i64_type().const_int(32, false),
-            "retain_epoch_packed",
-        )
-        .or_llvm_err()?;
-    let generation = b
-        .build_int_z_extend(generation, c.i64_type(), "retain_generation64")
-        .or_llvm_err()?;
-    let packed = b
-        .build_or(epoch, generation, "retain_generation_epoch")
-        .or_llvm_err()?;
-    let address = as_i64(ctx, pointer, "retain_reference_address")?;
-    let validate = super::super::error::get_or_declare_function(
-        ctx.get_module(),
-        "verum_cbgr_validate_ref",
-        c.bool_type()
-            .fn_type(&[c.i64_type().into(), c.i64_type().into()], false),
-    );
-    let valid = b
-        .build_call(validate, &[address.into(), packed.into()], "retain_live")
-        .or_llvm_err()?
-        .basic_value_or("reference validity")?
-        .into_int_value();
-    guard(ctx, valid, "retain_copy reference is no longer live")
+        valid,
+        "retain_copy reference is stale or lacks its required capability",
+    )
 }
 
 pub(super) fn lower<'ctx>(

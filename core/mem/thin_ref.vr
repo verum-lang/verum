@@ -29,8 +29,8 @@
 //
 
 // epoch_and_caps layout:
-// - Bits 0-15: epoch (16 bits, for wraparound protection)
-// - Bits 16-31: capabilities (16 bits, access control)
+// - Bits 0-15: capabilities (16 bits, access control)
+// - Bits 16-31: epoch (16 bits, for wraparound protection)
 //
 
 // # Validation Tiers

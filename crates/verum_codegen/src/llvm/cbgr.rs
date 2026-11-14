@@ -39,14 +39,14 @@
 //! * `offset_from_base`: subslice view offset from the base allocation.
 //! * `reserved`: padding for future extensions.
 
-use verum_llvm::IntPredicate;
 use verum_llvm::builder::Builder;
 use verum_llvm::context::Context;
 use verum_llvm::module::Module;
 use verum_llvm::types::StructType;
-use verum_llvm::values::{FunctionValue, IntValue, PointerValue, StructValue};
+use verum_llvm::values::{BasicValue, FunctionValue, IntValue, PointerValue, StructValue};
+use verum_llvm::{AtomicOrdering, IntPredicate};
 
-use super::error::{BuildExt, Result};
+use super::error::{BuildExt, CallSiteExt, LlvmLoweringError, OptionExt, Result};
 use super::types::RefTier;
 
 /// CBGR lowering context.
@@ -60,9 +60,6 @@ pub struct CbgrLowering<'ctx> {
     /// FatRef struct type — matches `core/mem/fat_ref.vr` 6-field layout
     /// `{ ptr, generation, epoch_and_caps, metadata, offset_from_base, reserved }`.
     fat_ref_type: StructType<'ctx>,
-
-    /// Runtime check function (for Tier 0).
-    check_fn: Option<FunctionValue<'ctx>>,
 
     /// Statistics.
     stats: CbgrStats,
@@ -131,7 +128,6 @@ impl<'ctx> CbgrLowering<'ctx> {
             context,
             thin_ref_type,
             fat_ref_type,
-            check_fn: None,
             stats: CbgrStats::default(),
         }
     }
@@ -144,11 +140,6 @@ impl<'ctx> CbgrLowering<'ctx> {
     /// Get the FatRef struct type.
     pub fn fat_ref_type(&self) -> StructType<'ctx> {
         self.fat_ref_type
-    }
-
-    /// Set the runtime check function.
-    pub fn set_check_function(&mut self, check_fn: FunctionValue<'ctx>) {
-        self.check_fn = Some(check_fn);
     }
 
     /// Get CBGR statistics.
@@ -248,7 +239,7 @@ impl<'ctx> CbgrLowering<'ctx> {
     /// layer 2 — the Tier-1 epoch check was a tautology).
     ///
     /// Packs into `{ ptr, generation, epoch_and_caps }` where epoch_and_caps
-    /// stores epoch in the low 16 bits and zero capabilities in the high 16.
+    /// stores epoch in the upper half and allocation capabilities in the lower half.
     pub fn create_thin_ref(
         &mut self,
         builder: &Builder<'ctx>,
@@ -261,11 +252,13 @@ impl<'ctx> CbgrLowering<'ctx> {
         let i16_type = self.context.i16_type();
         let i32_type = self.context.i32_type();
         let i64_type = self.context.i64_type();
-        let _ptr_type = self.context.ptr_type(Default::default());
 
         // 1. Compute header address: ptr - 32
         //  GEP with i8 and index -32 to get byte-level offset.
-        let neg_32 = i64_type.const_int((-32i64) as u64, true);
+        let neg_32 = i64_type.const_int(
+            (-(verum_common::layout::ALLOCATION_HEADER_SIZE as i64)) as u64,
+            true,
+        );
         // SAFETY: GEP with -32 byte offset to reach the CBGR allocation header preceding the user data pointer; all CBGR-managed allocations include a 32-byte header before the user region
         let header_ptr = unsafe {
             builder
@@ -290,8 +283,13 @@ impl<'ctx> CbgrLowering<'ctx> {
         };
         let generation = builder
             .build_load(i32_type, gen_ptr, "cbgr.alloc_gen")
-            .or_llvm_err()?
-            .into_int_value();
+            .or_llvm_err()?;
+        generation
+            .as_instruction_value()
+            .or_internal("generation load")?
+            .set_atomic_ordering(AtomicOrdering::Acquire)
+            .map_err(|_| LlvmLoweringError::internal("generation load ordering"))?;
+        let generation = generation.into_int_value();
 
         // 3. Load epoch (i16) from the canonical epoch@12 slot
         // SAFETY: fixed in-header offset within the 32-byte header.
@@ -300,22 +298,57 @@ impl<'ctx> CbgrLowering<'ctx> {
                 .build_gep(
                     i8_type,
                     header_ptr,
-                    &[i64_type.const_int(
-                        verum_common::layout::ALLOCATION_HEADER_EPOCH_OFFSET,
-                        false,
-                    )],
+                    &[i64_type
+                        .const_int(verum_common::layout::ALLOCATION_HEADER_EPOCH_OFFSET, false)],
                     "cbgr.epoch_ptr",
                 )
                 .or_llvm_err()?
         };
         let epoch = builder
             .build_load(i16_type, epoch_ptr, "cbgr.alloc_epoch")
-            .or_llvm_err()?
-            .into_int_value();
-
-        // 4. Pack epoch into epoch_and_caps (epoch in low 16 bits, caps = 0)
+            .or_llvm_err()?;
+        epoch
+            .as_instruction_value()
+            .or_internal("epoch load")?
+            .set_atomic_ordering(AtomicOrdering::Monotonic)
+            .map_err(|_| LlvmLoweringError::internal("epoch load ordering"))?;
+        // SAFETY: the caller supplies a live CBGR allocation, whose canonical
+        // header includes the complete atomic capability field.
+        let caps_ptr = unsafe {
+            builder
+                .build_gep(
+                    i8_type,
+                    header_ptr,
+                    &[i64_type.const_int(
+                        verum_common::layout::ALLOCATION_HEADER_CAPABILITIES_OFFSET,
+                        false,
+                    )],
+                    "cbgr.caps_ptr",
+                )
+                .or_llvm_err()?
+        };
+        let caps = builder
+            .build_load(i16_type, caps_ptr, "cbgr.alloc_caps")
+            .or_llvm_err()?;
+        caps.as_instruction_value()
+            .or_internal("capability load")?
+            .set_atomic_ordering(AtomicOrdering::Acquire)
+            .map_err(|_| LlvmLoweringError::internal("capability load ordering"))?;
+        let epoch = builder
+            .build_int_z_extend(epoch.into_int_value(), i32_type, "cbgr.epoch32")
+            .or_llvm_err()?;
+        let caps = builder
+            .build_int_z_extend(caps.into_int_value(), i32_type, "cbgr.caps32")
+            .or_llvm_err()?;
+        let shifted = builder
+            .build_left_shift(
+                epoch,
+                i32_type.const_int(u64::from(verum_common::layout::CAPS_BITS), false),
+                "cbgr.epoch_shifted",
+            )
+            .or_llvm_err()?;
         let epoch_and_caps = builder
-            .build_int_z_extend(epoch, i32_type, "cbgr.epoch_caps")
+            .build_or(shifted, caps, "cbgr.epoch_caps")
             .or_llvm_err()?;
 
         // 5. Build the ThinRef struct { ptr, generation, epoch_and_caps }
@@ -336,6 +369,151 @@ impl<'ctx> CbgrLowering<'ctx> {
         Ok(ref_val)
     }
 
+    /// Validate a real reference snapshot against its still-addressable CBGR
+    /// allocation header and the intersection of snapshot/current capabilities.
+    /// This does not establish lifetime for an already released address: callers
+    /// must keep the allocation metadata addressable during the check.
+    pub fn reference_is_valid(
+        &mut self,
+        builder: &Builder<'ctx>,
+        module: &Module<'ctx>,
+        reference: StructValue<'ctx>,
+        required: u32,
+    ) -> Result<IntValue<'ctx>> {
+        self.stats.runtime_checks += 1;
+        let c = self.context;
+        let pointer = builder
+            .build_extract_value(reference, 0, "cbgr.pointer")
+            .or_llvm_err()?
+            .into_pointer_value();
+        let generation = builder
+            .build_extract_value(reference, 1, "cbgr.generation")
+            .or_llvm_err()?
+            .into_int_value();
+        let epoch_caps = builder
+            .build_extract_value(reference, 2, "cbgr.epoch_caps")
+            .or_llvm_err()?
+            .into_int_value();
+        let caps_ok = self.check_capability(builder, reference, required)?;
+        let present = builder
+            .build_is_not_null(pointer, "cbgr.present")
+            .or_llvm_err()?;
+        let live_generation = builder
+            .build_int_compare(
+                IntPredicate::NE,
+                generation,
+                c.i32_type().const_zero(),
+                "cbgr.nonzero_generation",
+            )
+            .or_llvm_err()?;
+        let candidate = builder
+            .build_and(present, live_generation, "cbgr.candidate")
+            .or_llvm_err()?;
+        let candidate = builder
+            .build_and(candidate, caps_ok, "cbgr.authorized_candidate")
+            .or_llvm_err()?;
+        let from = builder
+            .get_insert_block()
+            .or_internal("reference validation block")?;
+        let function = from
+            .get_parent()
+            .or_internal("reference validation function")?;
+        let check = c.append_basic_block(function, "cbgr.check_allocation");
+        let done = c.append_basic_block(function, "cbgr.validation_done");
+        builder
+            .build_conditional_branch(candidate, check, done)
+            .or_llvm_err()?;
+        builder.position_at_end(check);
+        let epoch = builder
+            .build_right_shift(
+                epoch_caps,
+                c.i32_type()
+                    .const_int(u64::from(verum_common::layout::CAPS_BITS), false),
+                false,
+                "cbgr.epoch",
+            )
+            .or_llvm_err()?;
+        let epoch = builder
+            .build_int_z_extend(epoch, c.i64_type(), "cbgr.epoch64")
+            .or_llvm_err()?;
+        let epoch = builder
+            .build_left_shift(
+                epoch,
+                c.i64_type().const_int(32, false),
+                "cbgr.packed_epoch",
+            )
+            .or_llvm_err()?;
+        let generation = builder
+            .build_int_z_extend(generation, c.i64_type(), "cbgr.generation64")
+            .or_llvm_err()?;
+        let packed = builder
+            .build_or(epoch, generation, "cbgr.generation_epoch")
+            .or_llvm_err()?;
+        let address = builder
+            .build_ptr_to_int(pointer, c.i64_type(), "cbgr.address")
+            .or_llvm_err()?;
+        let validate = super::error::get_or_declare_function(
+            module,
+            "verum_cbgr_validate_ref",
+            c.bool_type()
+                .fn_type(&[c.i64_type().into(), c.i64_type().into()], false),
+        );
+        let live = builder
+            .build_call(validate, &[address.into(), packed.into()], "cbgr.live")
+            .or_llvm_err()?
+            .basic_value_or("CBGR validity")?
+            .into_int_value();
+        // SAFETY: this branch has a nonnull reference into an allocation whose
+        // metadata remains addressable by the caller's lifetime contract.
+        let caps_pointer = unsafe {
+            builder
+                .build_gep(
+                    c.i8_type(),
+                    pointer,
+                    &[c.i64_type().const_int(
+                        (verum_common::layout::ALLOCATION_HEADER_CAPABILITIES_OFFSET as i64
+                            - verum_common::layout::ALLOCATION_HEADER_SIZE as i64)
+                            as u64,
+                        true,
+                    )],
+                    "cbgr.current_caps_pointer",
+                )
+                .or_llvm_err()?
+        };
+        let current_caps = builder
+            .build_load(c.i16_type(), caps_pointer, "cbgr.current_caps")
+            .or_llvm_err()?;
+        current_caps
+            .as_instruction_value()
+            .or_internal("current capability load")?
+            .set_atomic_ordering(AtomicOrdering::Acquire)
+            .map_err(|_| LlvmLoweringError::internal("current capability ordering"))?;
+        let current_caps = builder
+            .build_int_z_extend(
+                current_caps.into_int_value(),
+                c.i32_type(),
+                "cbgr.current_caps32",
+            )
+            .or_llvm_err()?;
+        let mask = c.i32_type().const_int(u64::from(required), false);
+        let current = builder
+            .build_and(current_caps, mask, "cbgr.current_required")
+            .or_llvm_err()?;
+        let current_ok = builder
+            .build_int_compare(IntPredicate::EQ, current, mask, "cbgr.current_authority")
+            .or_llvm_err()?;
+        let valid = builder
+            .build_and(live, current_ok, "cbgr.valid")
+            .or_llvm_err()?;
+        builder.build_unconditional_branch(done).or_llvm_err()?;
+        builder.position_at_end(done);
+        let result = builder
+            .build_phi(c.bool_type(), "cbgr.result")
+            .or_llvm_err()?;
+        result.add_incoming(&[(&c.bool_type().const_zero(), from), (&valid, check)]);
+        Ok(result.as_basic_value().into_int_value())
+    }
+
     /// Dereference a ThinRef (Tier 0 - with real validation).
     ///
     /// Extracts generation and epoch from the ThinRef, packs them into a
@@ -350,75 +528,12 @@ impl<'ctx> CbgrLowering<'ctx> {
         current_fn: FunctionValue<'ctx>,
         ref_val: StructValue<'ctx>,
     ) -> Result<PointerValue<'ctx>> {
-        self.stats.runtime_checks += 1;
-
-        let i64_type = self.context.i64_type();
-        let i32_type = self.context.i32_type();
-        let i1_type = self.context.bool_type();
-        let ptr_type = self.context.ptr_type(Default::default());
-
-        // 1. Extract the user pointer (field 0)
+        let is_valid = self.reference_is_valid(builder, module, ref_val, capabilities::READ)?;
         let user_ptr = builder
             .build_extract_value(ref_val, 0, "cbgr.user_ptr")
             .or_llvm_err()?
             .into_pointer_value();
-
-        // 2. Extract generation (field 1, i32) and epoch_caps (field 2, i32)
-        let generation = builder
-            .build_extract_value(ref_val, 1, "cbgr.gen")
-            .or_llvm_err()?
-            .into_int_value();
-
-        let epoch_caps = builder
-            .build_extract_value(ref_val, 2, "cbgr.epoch_caps")
-            .or_llvm_err()?
-            .into_int_value();
-
-        // 3. Extract epoch from epoch_caps (low 16 bits)
-        let epoch_mask = i32_type.const_int(0xFFFF, false);
-        let epoch_i32 = builder
-            .build_and(epoch_caps, epoch_mask, "cbgr.epoch_i32")
-            .or_llvm_err()?;
-
-        // 4. Pack: generation (low 32) | epoch (bits 32..47)
-        //  packed = zext(generation) | (zext(epoch_i32) << 32)
-        let gen_i64 = builder
-            .build_int_z_extend(generation, i64_type, "cbgr.gen_i64")
-            .or_llvm_err()?;
-        let epoch_i64 = builder
-            .build_int_z_extend(epoch_i32, i64_type, "cbgr.epoch_i64")
-            .or_llvm_err()?;
-        let shift_amt = i64_type.const_int(32, false);
-        let epoch_shifted = builder
-            .build_left_shift(epoch_i64, shift_amt, "cbgr.epoch_shifted")
-            .or_llvm_err()?;
-        let packed = builder
-            .build_or(gen_i64, epoch_shifted, "cbgr.packed_gen_epoch")
-            .or_llvm_err()?;
-
-        // 5. Convert user pointer to i64 for the call
-        let user_ptr_i64 = builder
-            .build_ptr_to_int(user_ptr, i64_type, "cbgr.ptr_i64")
-            .or_llvm_err()?;
-
-        // 6. Get or declare verum_cbgr_validate_ref(i64, i64) -> i1
-        let fn_type = i1_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-        let validate_fn = super::error::get_or_declare_function(module, "verum_cbgr_validate_ref", fn_type);
-
-        // 7. Call the validation function
-        let call_result = builder
-            .build_call(
-                validate_fn,
-                &[user_ptr_i64.into(), packed.into()],
-                "cbgr.valid",
-            )
-            .or_llvm_err()?;
-
-        let is_valid = call_result
-            .try_as_basic_value()
-            .basic()
-            .expect("verum_cbgr_validate_ref should return i1")
-            .into_int_value();
+        let ptr_type = self.context.ptr_type(Default::default());
 
         // 8. Branch: on success return pointer, on failure abort via panic
         let valid_bb = self.context.append_basic_block(current_fn, "cbgr.valid_bb");
@@ -458,7 +573,7 @@ impl<'ctx> CbgrLowering<'ctx> {
         let panic_fn = super::error::get_or_declare_function(module, "verum_panic", fn_type);
         // Constant panic message; `len` is its byte length so the body can
         // write it without a strlen.
-        const CBGR_PANIC_MSG: &str = "CBGR: use-after-free detected (generation mismatch)";
+        const CBGR_PANIC_MSG: &str = "CBGR: invalid generation, epoch or read capability";
         let panic_msg = builder
             .build_global_string_ptr(CBGR_PANIC_MSG, "cbgr_panic_msg")
             .or_llvm_err()?;
@@ -467,22 +582,20 @@ impl<'ctx> CbgrLowering<'ctx> {
                 panic_fn,
                 &[
                     panic_msg.as_pointer_value().into(),
-                    i64_type.const_int(CBGR_PANIC_MSG.len() as u64, false).into(),
+                    i64_type
+                        .const_int(CBGR_PANIC_MSG.len() as u64, false)
+                        .into(),
                     ptr_type.const_null().into(),
                     i32_type.const_int(0, false).into(),
                 ],
                 "",
             )
             .or_llvm_err()?;
-        builder
-            .build_unreachable()
-            .or_llvm_err()?;
+        builder.build_unreachable().or_llvm_err()?;
 
         // Valid path: branch to merge
         builder.position_at_end(valid_bb);
-        builder
-            .build_unconditional_branch(merge_bb)
-            .or_llvm_err()?;
+        builder.build_unconditional_branch(merge_bb).or_llvm_err()?;
 
         // Merge: return the (validated) pointer
         builder.position_at_end(merge_bb);
@@ -504,7 +617,9 @@ impl<'ctx> CbgrLowering<'ctx> {
                 self.stats.checks_eliminated += 1;
             }
             RefTier::Tier0 => {
-                self.stats.runtime_checks += 1;
+                return Err(LlvmLoweringError::internal(
+                    "Tier 0 dereference requires allocation validation",
+                ));
             }
         }
 
@@ -543,36 +658,12 @@ impl<'ctx> CbgrLowering<'ctx> {
     pub fn validate_ref(
         &mut self,
         builder: &Builder<'ctx>,
+        module: &Module<'ctx>,
+        current_fn: FunctionValue<'ctx>,
         ref_val: StructValue<'ctx>,
     ) -> Result<()> {
-        self.stats.runtime_checks += 1;
-
-        // Extract generation from reference
-        let generation = builder
-            .build_extract_value(ref_val, 1, "ref.gen")
-            .or_llvm_err()?
-            .into_int_value();
-
-        // For now, check that generation is non-zero (valid reference)
-        // In a full implementation, this would compare against the actual
-        // generation counter at the pointed-to memory.
-        let zero = self.context.i32_type().const_zero();
-        let is_valid = builder
-            .build_int_compare(IntPredicate::NE, generation, zero, "cbgr.valid")
-            .or_llvm_err()?;
-
-        // If we have a check function, call it for validation failure handling
-        if let Some(check_fn) = self.check_fn {
-            let ptr = builder
-                .build_extract_value(ref_val, 0, "ref.ptr.validate")
-                .or_llvm_err()?;
-
-            builder
-                .build_call(check_fn, &[is_valid.into(), ptr.into()], "cbgr.validate")
-                .or_llvm_err()?;
-        }
-
-        Ok(())
+        self.deref_tier0(builder, module, current_fn, ref_val)
+            .map(|_| ())
     }
 
     /// Check if a capability is present.
@@ -588,34 +679,21 @@ impl<'ctx> CbgrLowering<'ctx> {
             .or_llvm_err()?
             .into_int_value();
 
-        // Check if capability bit is set
+        if capability & !verum_common::layout::CAPS_MASK_U32 != 0 {
+            return Ok(self.context.bool_type().const_zero());
+        }
+        // Every requested capability must be present; one bit cannot grant a set.
         let cap_mask = self.context.i32_type().const_int(capability as u64, false);
         let masked = builder
             .build_and(caps, cap_mask, "cap.masked")
             .or_llvm_err()?;
         let has_cap = builder
-            .build_int_compare(
-                IntPredicate::NE,
-                masked,
-                self.context.i32_type().const_zero(),
-                "cap.check",
-            )
+            .build_int_compare(IntPredicate::EQ, masked, cap_mask, "cap.check")
             .or_llvm_err()?;
 
         Ok(has_cap)
     }
 }
 
-/// CBGR capability flags.
-pub mod capabilities {
-    /// Read capability.
-    pub const READ: u32 = 0x01;
-    /// Write capability.
-    pub const WRITE: u32 = 0x02;
-    /// Exclusive borrow capability.
-    pub const EXCLUSIVE: u32 = 0x04;
-    /// Shared borrow capability.
-    pub const SHARED: u32 = 0x08;
-    /// Move capability.
-    pub const MOVE: u32 = 0x10;
-}
+/// Canonical CBGR capability meanings; native lowering has no private roster.
+pub use verum_common::cbgr::caps as capabilities;
