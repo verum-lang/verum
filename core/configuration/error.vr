@@ -47,8 +47,32 @@ mount core.base.protocols.{PartialEq, Eq, Hash, Hasher, Debug, Formatter, Format
 // =============================================================================
 
 public type FormatId is Text {
-    self.matches("^[a-z][a-z0-9_-]{0,31}$")
+    is_format_id(&self)
 };
+
+// Identifiers have one to 32 ASCII bytes: a lowercase letter followed by
+// lowercase letters, digits, underscores or hyphens. Validate the bytes
+// directly; Text.matches finds literal substrings and is not a regex predicate.
+fn is_format_id(value: &Text) -> Bool {
+    let bytes = value.as_bytes();
+    let length = bytes.len();
+    if length == 0 || length > 32 {
+        return false;
+    }
+    if bytes[0] < b'a' || bytes[0] > b'z' {
+        return false;
+    }
+    let mut index = 1;
+    while index < length {
+        let byte = bytes[index];
+        if !((byte >= b'a' && byte <= b'z') ||
+             (byte >= b'0' && byte <= b'9') || byte == b'_' || byte == b'-') {
+            return false;
+        }
+        index += 1;
+    }
+    true
+}
 
 // These protocols observe the validated identifier through its Text carrier.
 // Their implementations neither construct nor mutate a FormatId.
