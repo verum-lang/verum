@@ -52,7 +52,7 @@ mod selection;
 #[path = "method_types.rs"]
 mod method_types;
 #[path = "index_projection.rs"]
-mod index_projection;
+pub(super) mod index_projection;
 
 type FieldWriteback = (Reg, u32, bool, verum_common::Text);
 
@@ -15648,8 +15648,14 @@ impl VbcCodegen {
         // Check receiver type to prefix method name for correct dispatch.
         // For primitive types (Byte, Int32, UInt64), use type$ prefix.
         // For named struct types (MapFlags, MemProt, etc.), use Type:: prefix.
-        let dynamic = receiver_declaration.as_deref().and_then(|name|
-            self.dynamic_method(name, method.name.as_str(), args.len())).transpose()?;
+        let selected = receiver_result_declaration.as_ref().map(|receiver|
+            self.declared_receiver_method(receiver, method.name.as_str(), args.len() + 1)).transpose()?.flatten();
+        let dynamic = if let Some(index_projection::DeclaredReceiverMethod::Protocol(member)) = selected {
+            Some(member)
+        } else {
+            receiver_declaration.as_deref().and_then(|name|
+                self.dynamic_method(name, method.name.as_str(), args.len())).transpose()?
+        };
         let effective_method_name = if let Some(member) = dynamic
             && let Some(identity) = self.type_by_id(member.owner).and_then(|ty| self.type_declaration_identity(ty))
         {
@@ -16402,7 +16408,7 @@ impl VbcCodegen {
         // spelling. Select its callable and self witness structurally. A Deref
         // adjustment must already have been emitted before using the target.
         let typed_receiver = if let Some(receiver) = receiver_result_declaration.as_ref()
-            && let Some((_, owner)) = self.declared_receiver_method(receiver, method.name.as_str(), args.len() + 1)?
+            && let Some(index_projection::DeclaredReceiverMethod::Function(_, owner)) = self.declared_receiver_method(receiver, method.name.as_str(), args.len() + 1)?
             && (crate::receiver_methods::pointee(receiver) == &owner
                 || self.expand_declared_alias(receiver.clone())
                     .is_some_and(|expanded| crate::receiver_methods::pointee(&expanded) == &owner))

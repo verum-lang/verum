@@ -137,9 +137,9 @@ impl VbcCodegen {
             },
             _ => name.clone(),
         };
-        // A projected place carries the owner's substituted field declaration.
-        // A displayed nominal head cannot recover its nested type arguments.
-        let projection = matches!(root.kind, ExprKind::Field { .. })
+        // Bindings and projected places retain their structural declarations.
+        // A displayed nominal head cannot recover nested type arguments.
+        let projection = matches!(root.kind, ExprKind::Path(_) | ExprKind::Field { .. })
             .then(|| self.declared_expression_result(root, None, 0, 0))
             .flatten();
         let declared = self
@@ -183,6 +183,25 @@ impl VbcCodegen {
                     declared: name,
                 };
                 continue;
+            }
+            if let Some(owner) = types.callable.as_ref()
+                && let Ok(Some(selected)) =
+                    self.declared_receiver_method(owner, method.name.as_str(), args.len() + 1)
+            {
+                let dynamic = matches!(&selected, index_projection::DeclaredReceiverMethod::Protocol(_));
+                let result = match selected {
+                    index_projection::DeclaredReceiverMethod::Function(function, owner) =>
+                        self.source_call_result(function, Some(&owner), type_args, args, None, 0),
+                    index_projection::DeclaredReceiverMethod::Protocol(member) =>
+                        (type_args.is_empty() && !member.is_async).then_some(member.output),
+                };
+                if dynamic || result.is_some() {
+                    let name = result.as_ref().and_then(|ty| self.callable_result_name(ty));
+                    types = ExpressionTypes {
+                        callable: result, name: name.clone(), chain: name.clone(), declared: name,
+                    };
+                    continue;
+                }
             }
             if let Some(result) = types.declared.as_deref().and_then(|owner|
                 self.dynamic_call_result(owner, method.name.as_str(), args.len(), type_args))

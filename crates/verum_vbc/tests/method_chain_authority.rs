@@ -3,29 +3,51 @@
 use verum_common::{List, Text};
 use verum_fast_parser::Parser;
 use verum_vbc::bytecode::decode_instruction;
-use verum_vbc::codegen::{CodegenConfig, VbcCodegen};
+use verum_vbc::codegen::{CodegenConfig, ItemFailurePolicy, VbcCodegen};
 use verum_vbc::instruction::Instruction;
 use verum_vbc::module::{FunctionDescriptor, VbcModule};
 use verum_vbc::types::{CbgrTier, Mutability, TypeId, TypeParamId, TypeRef};
 
+#[path = "fixtures/canonical_deref.rs"]
+mod canonical_deref;
+
 const ENV: &str = r#"
 module chain;
-type Deref is protocol { type Target; fn deref(&self) -> &Self.Target; };
+mount core.base.protocols.Deref;
 type Guard<T> is { value: T };
 implement<T> Deref for Guard<T> { type Target = T; fn deref(&self) -> &T { &self.value } }
 type Source<T> is { value: T };
 type Items<T> is { value: T };
 type Mapped<I, F> is { iter: I, f: F };
 implement<T> Source<T> { fn iter(&self) -> Items<T> { Items { value: self.value } } }
-implement<T> Items<T> { fn map<F>(self, f: F) -> Mapped<Self, F> { Mapped { iter: self, f: f } } }
+implement<T> Items<T> { fn map<F: fn(T) -> T>(self, f: F) -> Mapped<Self, F> { Mapped { iter: self, f: f } } }
 implement<I, F> Mapped<I, F> { fn collect<C>(self) -> C { C.from_iter(self) } }
 "#;
 
 fn compile(source: &str) -> (VbcCodegen, VbcModule) {
+    compile_checked(source).expect("compile")
+}
+
+fn compile_checked(source: &str) -> Result<(VbcCodegen, VbcModule), verum_vbc::codegen::CodegenError> {
     let ast = Parser::new(source).parse_module().expect("parse");
+    let protocols = canonical_deref::declarations();
     let mut codegen = VbcCodegen::with_config(CodegenConfig::new("chain"));
-    let module = codegen.compile_module(&ast).expect("compile");
-    (codegen, module)
+    codegen.collect_unit_declarations(&[&protocols, &ast])?;
+    codegen.resolve_pending_imports();
+    codegen.compile_unit_items(&[&protocols, &ast], ItemFailurePolicy::Strict)?;
+    let module = codegen.finalize_module_from_state()?;
+    Ok((codegen, module))
+}
+
+#[test]
+fn an_unconstrained_callback_cannot_invent_the_chains_missing_witness() {
+    let source = format!("{}\nfn probe(g: Source<Int>) -> Int {{g.iter().map(|x| x).collect<Int>()}}",
+        ENV.replace("F: fn(T) -> T", "F"));
+    let error = match compile_checked(&source) {
+        Ok(_) => panic!("the callback parameter has no declared type"),
+        Err(error) => error,
+    };
+    assert!(error.to_string().contains("cannot infer generic argument"), "{error}");
 }
 
 fn function<'a>(module: &'a VbcModule, name: &str) -> &'a FunctionDescriptor {

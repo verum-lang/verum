@@ -1,8 +1,8 @@
 //! Method declarations selected through protocol objects and constrained type parameters.
-use super::{CodegenError, CodegenResult, VbcCodegen};
+use super::{CodegenError, CodegenErrorKind, CodegenResult, VbcCodegen};
 use crate::types::TypeRef;
 use verum_ast::{Expr, ExprKind};
-use verum_common::Maybe;
+use verum_common::{List, Maybe};
 
 #[derive(Clone, PartialEq, Eq)]
 pub(super) struct BoundProtocol {
@@ -27,10 +27,48 @@ pub(super) struct ProtocolMethod {
     pub owner: crate::types::TypeId,
     pub output: TypeRef,
     inputs: Vec<TypeRef>,
-    is_async: bool,
+    pub is_async: bool,
 }
 
 impl VbcCodegen {
+    /// Resolve an object's complete protocol applications without reparsing
+    /// display names or assuming that a particular wrapper owns the object.
+    pub(super) fn declared_dynamic_method(
+        &self, object: &crate::types::DynamicProtocolType, method: &str, arity: usize,
+    ) -> CodegenResult<Maybe<ProtocolMethod>> {
+        use crate::types::{TypeId, TypeParamId};
+        let invalid = |message: &str| CodegenError::new(
+            CodegenErrorKind::InvalidSourceSignature(message.into()));
+        let mut outer_ids = List::new();
+        let mut opening = crate::mono::TypeSubstitution::empty();
+        for &id in self.ctx.current_generic_param_ids.values() {
+            let shifted = id.checked_add(1).ok_or_else(|| invalid(
+                "dynamic method argument exceeds the binder index space"))?;
+            outer_ids.push(TypeParamId(shifted));
+            opening.bind(TypeParamId(shifted), TypeRef::Generic(TypeParamId(id)));
+        }
+        // The hidden subject is not the object interface itself. Calls that
+        // expose it require an existential opening witness; never substitute
+        // a caller's same-numbered parameter or invent an erased Self value.
+        let open = |ty: &TypeRef| -> CodegenResult<TypeRef> {
+            if !super::formal_parameters::resolved(ty, &outer_ids, 0) {
+                return Err(invalid(
+                    "dynamic method exposes an unresolved existential subject"));
+            }
+            opening.apply(ty).map_err(|error| invalid(&error.to_string()))
+        };
+        let protocols = object.bounds.iter().map(|bound| {
+            let args = bound.args.iter().map(&open).collect::<CodegenResult<List<_>>>()?;
+            let application = if args.is_empty() { TypeRef::Concrete(TypeId(bound.protocol.0)) }
+                else { TypeRef::Instantiated { base: TypeId(bound.protocol.0), args: args.into() } };
+            let associated = object.bindings.iter().filter(|binding| &binding.owner == bound)
+                .map(|binding| open(&binding.value).map(|ty| (binding.member.to_string(), ty)))
+                .collect::<CodegenResult<_>>()?;
+            Ok(BoundProtocol { application, associated })
+        }).collect::<CodegenResult<List<_>>>()?;
+        self.protocol_method(protocols.into(), method, arity, Receiver::Value(None)).transpose()
+    }
+
     /// Retain only positive, nominal constraints on this scope's type binders.
     pub(super) fn collect_receiver_protocols(
         &self,

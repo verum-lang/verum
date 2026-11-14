@@ -6,7 +6,7 @@ use verum_vbc::{
     codegen::{CodegenConfig, CodegenError, ItemFailurePolicy, VbcCodegen},
 };
 
-pub fn compile(config: CodegenConfig, source: &verum_ast::Module) -> Result<VbcModule, CodegenError> {
+pub fn declarations() -> verum_ast::Module {
     let mut protocols = Parser::new(include_str!("../../../../core/base/protocols.vr"))
         .parse_module().expect("canonical protocol grammar");
     protocols.items.retain(|item| {
@@ -15,6 +15,11 @@ pub fn compile(config: CodegenConfig, source: &verum_ast::Module) -> Result<VbcM
                 matches!(name.as_str(), "Deref" | "DerefMut"))
     });
     assert_eq!(protocols.items.len(), 3, "header and two actual protocol declarations");
+    protocols
+}
+
+pub fn compile(config: CodegenConfig, source: &verum_ast::Module) -> Result<VbcModule, CodegenError> {
+    let protocols = declarations();
     let mut maybe = Parser::new(include_str!("../../../../core/base/maybe.vr"))
         .parse_module().expect("canonical Maybe grammar");
     maybe.items.retain(|item| {

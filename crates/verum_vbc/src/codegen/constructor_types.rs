@@ -616,10 +616,15 @@ impl VbcCodegen {
                     return self.source_call_result(callable, None, type_args, args, expected, depth);
                 }
                 if let Some(receiver) = self.source_expression_declaration(receiver, None, depth + 1) {
-                    let (function, owner) = self.declared_receiver_method(
+                    let selected = self.declared_receiver_method(
                         &receiver, method.name.as_str(), args.len() + 1,
                     ).ok()??;
-                    return self.source_call_result(function, Some(&owner), type_args, args, expected, depth);
+                    return match selected {
+                        super::expressions::index_projection::DeclaredReceiverMethod::Function(function, owner) =>
+                            self.source_call_result(function, Some(&owner), type_args, args, expected, depth),
+                        super::expressions::index_projection::DeclaredReceiverMethod::Protocol(member) =>
+                            (type_args.is_empty() && !member.is_async).then_some(member.output),
+                    };
                 }
                 // Dotted free functions and static methods use the same source
                 // namespace grammar. Flatten only namespace paths; a value

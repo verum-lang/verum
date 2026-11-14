@@ -1,6 +1,11 @@
 //! Resolve record and index projections against the declarations that own their storage.
 use super::*;
 
+pub(in crate::codegen) enum DeclaredReceiverMethod<'a> {
+    Function(&'a FunctionInfo, crate::types::TypeRef),
+    Protocol(crate::codegen::protocol_results::ProtocolMethod),
+}
+
 pub(super) struct ProjectionMethod {
     name: String,
     id: crate::module::FunctionId,
@@ -34,11 +39,15 @@ impl VbcCodegen {
         receiver: &crate::types::TypeRef,
         method: &str,
         arity: usize,
-    ) -> CodegenResult<verum_common::Maybe<(&FunctionInfo, crate::types::TypeRef)>> {
+    ) -> CodegenResult<verum_common::Maybe<DeclaredReceiverMethod<'_>>> {
         let mut owner = receiver.clone();
         let mut seen = verum_common::List::new();
         for _ in 0..64 {
             owner = crate::receiver_methods::pointee(&owner).clone();
+            if let crate::types::TypeRef::Dynamic(object) = &owner {
+                return self.declared_dynamic_method(object, method, arity.saturating_sub(1))
+                    .map(|member| member.map(DeclaredReceiverMethod::Protocol));
+            }
             let Some(descriptor) = owner.base_type_id().and_then(|id| self.type_by_id(id)) else {
                 return Ok(None);
             };
@@ -48,7 +57,7 @@ impl VbcCodegen {
                 let Some(function) = selected.or_else(|| self.ctx.lookup_qualified_function(&key)) else { return Ok(None); };
                 return Ok((function.param_count == arity
                     && function.param_names.first().is_some_and(|name| name == "self"))
-                    .then_some((function, owner)));
+                    .then_some(DeclaredReceiverMethod::Function(function, owner)));
             }
             if seen.contains(&owner) { return Ok(None); }
             seen.push(owner.clone());
