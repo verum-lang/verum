@@ -11303,12 +11303,12 @@ fn lower_call<'ctx>(
                             let c_name = qname.rsplit('.').next().unwrap_or(qname);
                             if let Some(sig) = super::syscall_registry::lookup_sig(c_name)
                                 && sig.args.len() == args.count as usize
-                                && let Some(cfn) = super::syscall_registry::get_or_declare(
+                            {
+                                let cfn = super::syscall_registry::get_or_declare(
                                     ctx.get_module(),
                                     ctx.llvm_context(),
                                     c_name,
-                                )
-                            {
+                                )?;
                                 let mut call_args: Vec<BasicMetadataValueEnum> =
                                     Vec::with_capacity(sig.args.len());
                                 for (i, abi) in sig.args.iter().enumerate() {
@@ -35082,9 +35082,9 @@ fn lower_ffi_extended<'ctx>(
             // tripped over with "callee returns void".
             let llvm_ctx = ctx.llvm_context();
             let llvm_module = ctx.get_module();
-            let (fn_type, llvm_fn) = if let Some(canonical) =
-                super::syscall_registry::get_or_declare(llvm_module, llvm_ctx, symbol_name)
-            {
+            let (fn_type, llvm_fn) = if super::syscall_registry::lookup_sig(symbol_name).is_some() {
+                let canonical =
+                    super::syscall_registry::get_or_declare(llvm_module, llvm_ctx, symbol_name)?;
                 (canonical.get_type(), canonical)
             } else {
                 let ret_type = ctype_to_llvm_type(llvm_ctx, ffi_symbol.signature.return_type);

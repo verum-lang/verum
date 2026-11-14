@@ -45,16 +45,15 @@
 //! reach for it through [`get_or_declare`] automatically pick up the
 //! canonical signature.
 
-use verum_llvm::AddressSpace;
 use verum_llvm::builder::Builder;
 use verum_llvm::context::Context;
 use verum_llvm::module::Module;
-use verum_llvm::types::{BasicMetadataTypeEnum, FunctionType};
+use verum_llvm::types::BasicMetadataTypeEnum;
 use verum_llvm::values::{
     BasicMetadataValueEnum, BasicValueEnum, FunctionValue, IntValue,
 };
 
-use super::error::{BuildExt, CallSiteExt, Result as LlvmResult};
+use super::error::{BuildExt, CallSiteExt, LlvmLoweringError, Result as LlvmResult};
 
 /// Argument or return-value classification under Verum's uniform-i64
 /// AOT ABI. Concrete `FunctionType` values are constructed lazily from
@@ -71,30 +70,6 @@ pub enum AbiTy {
     Void,
 }
 
-impl AbiTy {
-    fn ll_arg<'ctx>(self, ctx: &'ctx Context) -> verum_llvm::types::BasicMetadataTypeEnum<'ctx> {
-        match self {
-            AbiTy::I64 => ctx.i64_type().into(),
-            AbiTy::Ptr => ctx.ptr_type(AddressSpace::default()).into(),
-            AbiTy::Void => unreachable!("Void is a return-only classification"),
-        }
-    }
-
-    fn fn_type<'ctx>(
-        ctx: &'ctx Context,
-        args: &[AbiTy],
-        ret: AbiTy,
-    ) -> FunctionType<'ctx> {
-        let arg_tys: Vec<verum_llvm::types::BasicMetadataTypeEnum<'ctx>> =
-            args.iter().map(|a| a.ll_arg(ctx)).collect();
-        match ret {
-            AbiTy::I64 => ctx.i64_type().fn_type(&arg_tys, false),
-            AbiTy::Ptr => ctx.ptr_type(AddressSpace::default()).fn_type(&arg_tys, false),
-            AbiTy::Void => ctx.void_type().fn_type(&arg_tys, false),
-        }
-    }
-}
-
 /// Canonical signature of a single platform syscall under Verum ABI.
 pub struct SyscallSig {
     /// LLVM symbol name (e.g. `"clock_gettime"`, `"verum_tcp_connect"`).
@@ -105,30 +80,45 @@ pub struct SyscallSig {
     pub ret: AbiTy,
 }
 
+// Each private time wrapper has the same ABI as its registered syscall.
+// Keep the argument/return roster here; emitters must not reconstruct it.
+const CLOCK_GETTIME: SyscallSig = SyscallSig {
+    name: "clock_gettime",
+    args: &[AbiTy::I64, AbiTy::Ptr],
+    ret: AbiTy::I64,
+};
+const NANOSLEEP: SyscallSig = SyscallSig {
+    name: "nanosleep",
+    args: &[AbiTy::Ptr, AbiTy::Ptr],
+    ret: AbiTy::I64,
+};
+const SCHED_YIELD: SyscallSig = SyscallSig {
+    name: "sched_yield",
+    args: &[],
+    ret: AbiTy::I64,
+};
+const VERUM_CLOCK_GETTIME: SyscallSig = SyscallSig {
+    name: "__verum_clock_gettime",
+    ..CLOCK_GETTIME
+};
+const VERUM_NANOSLEEP: SyscallSig = SyscallSig {
+    name: "__verum_nanosleep",
+    ..NANOSLEEP
+};
+const VERUM_SCHED_YIELD: SyscallSig = SyscallSig {
+    name: "__verum_sched_yield",
+    ..SCHED_YIELD
+};
+
 /// The canonical registry. Append-only — every syscall reachable from
 /// any LLVM emit path lives here. When adding a new entry, prefer
 /// `AbiTy::I64` for all integer slots even if the C signature is
 /// narrower; see the module-level docstring for the ABI rationale.
 const POSIX_SYSCALLS: &[SyscallSig] = &[
     // ── time ────────────────────────────────────────────────────
-    // C: int clock_gettime(clockid_t, struct timespec *)
-    SyscallSig {
-        name: "clock_gettime",
-        args: &[AbiTy::I64, AbiTy::Ptr],
-        ret: AbiTy::I64,
-    },
-    // C: int nanosleep(const struct timespec *, struct timespec *)
-    SyscallSig {
-        name: "nanosleep",
-        args: &[AbiTy::Ptr, AbiTy::Ptr],
-        ret: AbiTy::I64,
-    },
-    // C: int sched_yield(void)
-    SyscallSig {
-        name: "sched_yield",
-        args: &[],
-        ret: AbiTy::I64,
-    },
+    CLOCK_GETTIME,
+    NANOSLEEP,
+    SCHED_YIELD,
     // ── I/O ─────────────────────────────────────────────────────
     // C: int close(int fd)
     SyscallSig {
@@ -408,6 +398,9 @@ const POSIX_SYSCALLS: &[SyscallSig] = &[
 // =============================================================================
 
 const VERUM_RUNTIME_SYMBOLS: &[SyscallSig] = &[
+    VERUM_CLOCK_GETTIME,
+    VERUM_NANOSLEEP,
+    VERUM_SCHED_YIELD,
     // Text helpers.
     // verum_string_join(list_ptr: i64, sep: *i8) -> *i8
     SyscallSig {
@@ -478,9 +471,8 @@ pub fn lookup_sig(name: &str) -> Option<&'static SyscallSig> {
 }
 
 /// Build the canonical LLVM `FunctionType` for a given `SyscallSig`.
-/// Mirrors the construction in [`get_or_declare`] so callers comparing
-/// against an `existing` declaration can compute the expected shape
-/// without re-implementing AbiTy::fn_type.
+/// Shared by [`get_or_declare`] and callers comparing an existing
+/// declaration against the registry. There is one ABI-to-LLVM conversion.
 ///
 /// Accepts `impl AsContextRef<'ctx>` so callers holding either
 /// `&'ctx Context` or `ContextRef<'ctx>` (`module.get_context()`) can
@@ -669,55 +661,43 @@ pub(crate) fn call_c_adapted<'ctx>(
     }
 }
 
-/// Get-or-declare `name` under its canonical Verum-ABI signature.
+/// Get or declare `name` under its canonical Verum-ABI signature.
 ///
-/// First-call semantics: if `name` is not yet declared in `module`,
-/// add it with the registry's signature. Subsequent calls return the
-/// existing declaration. When the pre-existing declaration disagrees
-/// with the registry's canonical signature, the mismatch is recorded
-/// into the codegen-global signature-mismatch registry so the lowering
-/// pipeline's final `check_no_signature_mismatches()` gate lifts it
-/// into a hard `LlvmLoweringError::Internal`.
-///
-/// Panics in debug builds if `name` is not in [`POSIX_SYSCALLS`]; in
-/// release builds returns `None` so callers can defensively fall back
-/// to a local declaration. Adding a missing entry to the registry is
-/// always preferred over handling `None` at the call site.
+/// Unknown names and pre-existing declarations with an incompatible ABI return
+/// a lowering error before a function handle is issued. A registered compatible
+/// declaration is reused; otherwise the registry supplies the new declaration.
+/// Use [`lookup_sig`] for an optional registry-membership query.
 pub fn get_or_declare<'ctx>(
     module: &Module<'ctx>,
     ctx: &'ctx Context,
     name: &str,
-) -> Option<FunctionValue<'ctx>> {
-    let sig = lookup(name)?;
-    let canonical_ty = AbiTy::fn_type(ctx, sig.args, sig.ret);
+) -> LlvmResult<FunctionValue<'ctx>> {
+    let sig = lookup_sig(name).ok_or_else(|| {
+        LlvmLoweringError::internal(format!(
+            "required symbol `{name}` is missing from syscall_registry"
+        ))
+    })?;
+    let canonical_ty = canonical_fn_type(ctx, sig);
     if let Some(existing) = module.get_function(name) {
         if existing.get_type() != canonical_ty {
-            super::error::record_signature_mismatch_public(
-                name,
-                format!("{:?}", existing.get_type()),
-                format!("{:?} (canonical from POSIX_SYSCALLS registry)", canonical_ty),
-            );
+            return Err(LlvmLoweringError::internal(format!(
+                "syscall_registry ABI mismatch for `{name}`: existing {:?}, expected {:?}",
+                existing.get_type(), canonical_ty,
+            )));
         }
-        return Some(existing);
+        return Ok(existing);
     }
-    Some(module.add_function(name, canonical_ty, None))
+    Ok(module.add_function(name, canonical_ty, None))
 }
 
-/// Pre-declare every entry in [`POSIX_SYSCALLS`] AND
-/// [`VERUM_RUNTIME_SYMBOLS`] into `module`. Call this **before** any
-/// other emit path can race to declare a symbol with the wrong
-/// signature. The canonical declarations land first, and any
-/// subsequent `module.get_function(name)` lookup throughout VBC
-/// lowering returns the canonical FunctionValue with the right
-/// fn_type. This eliminates the entire "first declaration wins"
-/// defect class at codegen time.
-pub fn predeclare_all<'ctx>(module: &Module<'ctx>, ctx: &'ctx Context) {
-    for sig in POSIX_SYSCALLS {
-        let _ = get_or_declare(module, ctx, sig.name);
+/// Pre-declare every entry in [`POSIX_SYSCALLS`] and
+/// [`VERUM_RUNTIME_SYMBOLS`] before emitting callers. An incompatible existing
+/// declaration stops lowering instead of publishing its handle as canonical.
+pub fn predeclare_all<'ctx>(module: &Module<'ctx>, ctx: &'ctx Context) -> LlvmResult<()> {
+    for sig in POSIX_SYSCALLS.iter().chain(VERUM_RUNTIME_SYMBOLS.iter()) {
+        get_or_declare(module, ctx, sig.name)?;
     }
-    for sig in VERUM_RUNTIME_SYMBOLS {
-        let _ = get_or_declare(module, ctx, sig.name);
-    }
+    Ok(())
 }
 
 // `ensure_io_declared` REMOVED (T1073): superseded by
@@ -851,20 +831,18 @@ pub fn emit_linux_syscall_inline<'ctx>(
 /// see the same Verum-ABI signature regardless of target — no
 /// per-callsite Linux/macOS branching, no libc symbol on Linux.
 ///
-/// Returns `None` when no wrapper exists; callers then fall back to
-/// the direct-symbol [`get_or_declare`] path which is correct for
-/// syscalls whose libc binding is already considered acceptable
-/// (POSIX I/O on macOS goes through libSystem unconditionally per
-/// the architecture doc; matching libc bindings on Linux is the gap
-/// this wrapper layer closes for time-critical syscalls).
+/// Returns a lowering error when the required wrapper is not registered.
+/// A missing wrapper does not authorize a direct-symbol fallback.
 ///
 /// See `docs/architecture/no-libc-architecture.md` for the
 /// project-wide no-libc invariant this layer enforces.
-pub fn verum_wrapper_name(syscall_name: &str) -> Option<&'static str> {
+pub fn verum_wrapper_name(syscall_name: &str) -> LlvmResult<&'static str> {
     match syscall_name {
-        "clock_gettime" => Some("__verum_clock_gettime"),
-        "nanosleep"     => Some("__verum_nanosleep"),
-        "sched_yield"   => Some("__verum_sched_yield"),
-        _ => None,
+        "clock_gettime" => Ok(VERUM_CLOCK_GETTIME.name),
+        "nanosleep" => Ok(VERUM_NANOSLEEP.name),
+        "sched_yield" => Ok(VERUM_SCHED_YIELD.name),
+        _ => Err(LlvmLoweringError::internal(format!(
+            "required wrapper for `{syscall_name}` is missing from syscall_registry"
+        ))),
     }
 }

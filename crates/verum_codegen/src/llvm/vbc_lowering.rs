@@ -966,7 +966,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         // signature. Fixes the AOT "callee returns void" class of
         // defects on `listen` / `socket` / `accept` / friends that
         // previously gated every `Heap.new`-touching AOT test.
-        super::syscall_registry::predeclare_all(&self.module, self.context);
+        super::syscall_registry::predeclare_all(&self.module, self.context)?;
 
         // Phase 0.5: Emit LLVM IR helper functions (replaces C runtime stubs)
         super::runtime::define_text_ir_helpers(self.context, &self.module)?;

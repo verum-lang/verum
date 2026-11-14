@@ -5967,7 +5967,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 .or_llvm_err()?;
             let _ = self.emit_linux_syscall(&builder, module, sys_num, &[clock_id_val, ts_addr])?;
         } else {
-            let clock_gettime_fn = self.get_or_declare_clock_gettime(module);
+            let clock_gettime_fn = super::syscall_registry::get_or_declare(module, self.context, "clock_gettime")?;
             // CLOCK_MONOTONIC: macOS=6 (libSystem), other-Unix=1.
             // Verum-ABI uniform i64: see `syscall_registry` module
             // docstring for why widening clockid_t (C `int`) to i64
@@ -6043,7 +6043,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 .or_llvm_err()?;
             let _ = self.emit_linux_syscall(&builder, module, sys_num, &[clock_id, ts_addr])?;
         } else {
-            let clock_gettime_fn = self.get_or_declare_clock_gettime(module);
+            let clock_gettime_fn = super::syscall_registry::get_or_declare(module, self.context, "clock_gettime")?;
             // CLOCK_REALTIME = 0 across Linux/macOS.  Verum-ABI i64 —
             // see `syscall_registry` for ABI rationale.
             let clock_id_val = i64_type.const_int(0, false);
@@ -6157,7 +6157,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
             let null_addr = i64_type.const_zero();
             let _ = self.emit_linux_syscall(&builder, module, sys_num, &[ts_addr, null_addr])?;
         } else {
-            let nanosleep_fn = self.get_or_declare_nanosleep(module);
+            let nanosleep_fn = super::syscall_registry::get_or_declare(module, self.context, "nanosleep")?;
             let ptr_type = self.context.ptr_type(AddressSpace::default());
             let null_ptr = ptr_type.const_null();
             builder
@@ -9930,25 +9930,6 @@ impl<'ctx> RuntimeLowering<'ctx> {
         super::output::get_or_declare_write_all(self.context, module, write)
     }
 
-    /// Get or declare `clock_gettime` under the canonical Verum-ABI
-    /// signature.  See `super::syscall_registry` for the full rationale
-    /// — this thin wrapper exists only so existing callers keep their
-    /// current call shape during the migration; new sites should use
-    /// `super::syscall_registry::get_or_declare(module, ctx, "clock_gettime")`
-    /// directly.
-    fn get_or_declare_clock_gettime(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
-        super::syscall_registry::get_or_declare(module, self.context, "clock_gettime")
-            .expect("clock_gettime must be in the syscall registry")
-    }
-
-    /// Get or declare `nanosleep` under the canonical Verum-ABI
-    /// signature.  See [`get_or_declare_clock_gettime`] for the
-    /// migration discipline.
-    fn get_or_declare_nanosleep(&self, module: &Module<'ctx>) -> FunctionValue<'ctx> {
-        super::syscall_registry::get_or_declare(module, self.context, "nanosleep")
-            .expect("nanosleep must be in the syscall registry")
-    }
-
     // =========================================================================
     // Verum-ABI syscall wrappers — single typed boundary that closes the
     // libc-on-Linux gap exposed by `platform_ir.rs::emit_nursery_await_all`
@@ -9975,21 +9956,12 @@ impl<'ctx> RuntimeLowering<'ctx> {
         &self,
         module: &Module<'ctx>,
     ) -> Result<FunctionValue<'ctx>> {
-        let name = super::syscall_registry::verum_wrapper_name("clock_gettime")
-            .expect("clock_gettime wrapper present in registry");
-        if let Some(existing) = module.get_function(name) {
-            if existing.count_basic_blocks() > 0 {
-                return Ok(existing);
-            }
+        let name = super::syscall_registry::verum_wrapper_name("clock_gettime")?;
+        let func = super::syscall_registry::get_or_declare(module, self.context, name)?;
+        if func.count_basic_blocks() > 0 {
+            return Ok(func);
         }
-
         let i64_type = self.context.i64_type();
-        let ptr_type = self.context.ptr_type(AddressSpace::default());
-        let fn_type = i64_type.fn_type(&[i64_type.into(), ptr_type.into()], false);
-        let func = match module.get_function(name) {
-            Some(f) => f,
-            None => module.add_function(name, fn_type, None),
-        };
         let entry = self.context.append_basic_block(func, "entry");
         let builder = self.context.create_builder();
         builder.position_at_end(entry);
@@ -10017,7 +9989,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
         } else {
             // macOS / other: forward to the libSystem `clock_gettime`
             // symbol declared via the canonical syscall registry.
-            let lib_fn = self.get_or_declare_clock_gettime(module);
+            let lib_fn = super::syscall_registry::get_or_declare(module, self.context, "clock_gettime")?;
             let call_site = builder
                 .build_call(lib_fn, &[clock_id.into(), ts.into()], "ret")
                 .or_llvm_err()?;
@@ -10040,21 +10012,12 @@ impl<'ctx> RuntimeLowering<'ctx> {
         &self,
         module: &Module<'ctx>,
     ) -> Result<FunctionValue<'ctx>> {
-        let name = super::syscall_registry::verum_wrapper_name("nanosleep")
-            .expect("nanosleep wrapper present in registry");
-        if let Some(existing) = module.get_function(name) {
-            if existing.count_basic_blocks() > 0 {
-                return Ok(existing);
-            }
+        let name = super::syscall_registry::verum_wrapper_name("nanosleep")?;
+        let func = super::syscall_registry::get_or_declare(module, self.context, name)?;
+        if func.count_basic_blocks() > 0 {
+            return Ok(func);
         }
-
         let i64_type = self.context.i64_type();
-        let ptr_type = self.context.ptr_type(AddressSpace::default());
-        let fn_type = i64_type.fn_type(&[ptr_type.into(), ptr_type.into()], false);
-        let func = match module.get_function(name) {
-            Some(f) => f,
-            None => module.add_function(name, fn_type, None),
-        };
         let entry = self.context.append_basic_block(func, "entry");
         let builder = self.context.create_builder();
         builder.position_at_end(entry);
@@ -10080,7 +10043,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 self.emit_linux_syscall(&builder, module, sys_num, &[req_addr, rem_addr])?;
             builder.build_return(Some(&result)).or_llvm_err()?;
         } else {
-            let lib_fn = self.get_or_declare_nanosleep(module);
+            let lib_fn = super::syscall_registry::get_or_declare(module, self.context, "nanosleep")?;
             let call_site = builder
                 .build_call(lib_fn, &[req.into(), rem.into()], "ret")
                 .or_llvm_err()?;
@@ -10099,20 +10062,11 @@ impl<'ctx> RuntimeLowering<'ctx> {
         &self,
         module: &Module<'ctx>,
     ) -> Result<FunctionValue<'ctx>> {
-        let name = super::syscall_registry::verum_wrapper_name("sched_yield")
-            .expect("sched_yield wrapper present in registry");
-        if let Some(existing) = module.get_function(name) {
-            if existing.count_basic_blocks() > 0 {
-                return Ok(existing);
-            }
+        let name = super::syscall_registry::verum_wrapper_name("sched_yield")?;
+        let func = super::syscall_registry::get_or_declare(module, self.context, name)?;
+        if func.count_basic_blocks() > 0 {
+            return Ok(func);
         }
-
-        let i64_type = self.context.i64_type();
-        let fn_type = i64_type.fn_type(&[], false);
-        let func = match module.get_function(name) {
-            Some(f) => f,
-            None => module.add_function(name, fn_type, None),
-        };
         let entry = self.context.append_basic_block(func, "entry");
         let builder = self.context.create_builder();
         builder.position_at_end(entry);
@@ -10124,8 +10078,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
             builder.build_return(Some(&result)).or_llvm_err()?;
         } else {
             let lib_fn =
-                super::syscall_registry::get_or_declare(module, self.context, "sched_yield")
-                    .expect("sched_yield in registry");
+                super::syscall_registry::get_or_declare(module, self.context, "sched_yield")?;
             let call_site = builder
                 .build_call(lib_fn, &[], "ret")
                 .or_llvm_err()?;

@@ -241,20 +241,12 @@ impl<'ctx> PlatformIR<'ctx> {
         &self,
         module: &Module<'ctx>,
     ) -> super::error::Result<verum_llvm::values::FunctionValue<'ctx>> {
-        let name = super::syscall_registry::verum_wrapper_name("clock_gettime")
-            .expect("registry has clock_gettime wrapper");
-        if let Some(existing) = module.get_function(name) {
-            if existing.count_basic_blocks() > 0 {
-                return Ok(existing);
-            }
+        let name = super::syscall_registry::verum_wrapper_name("clock_gettime")?;
+        let func = super::syscall_registry::get_or_declare(module, self.context, name)?;
+        if func.count_basic_blocks() > 0 {
+            return Ok(func);
         }
         let i64_type = self.context.i64_type();
-        let ptr_type = self.context.ptr_type(AddressSpace::default());
-        let fn_type = i64_type.fn_type(&[i64_type.into(), ptr_type.into()], false);
-        let func = match module.get_function(name) {
-            Some(f) => f,
-            None => module.add_function(name, fn_type, None),
-        };
         let entry = self.context.append_basic_block(func, "entry");
         let builder = self.context.create_builder();
         builder.position_at_end(entry);
@@ -277,8 +269,7 @@ impl<'ctx> PlatformIR<'ctx> {
             builder.build_return(Some(&result)).or_llvm_err()?;
         } else {
             let lib_fn =
-                super::syscall_registry::get_or_declare(module, self.context, "clock_gettime")
-                    .expect("registry has clock_gettime");
+                super::syscall_registry::get_or_declare(module, self.context, "clock_gettime")?;
             let cs = builder
                 .build_call(lib_fn, &[clock_id.into(), ts.into()], "ret")
                 .or_llvm_err()?;
@@ -299,19 +290,11 @@ impl<'ctx> PlatformIR<'ctx> {
         &self,
         module: &Module<'ctx>,
     ) -> super::error::Result<verum_llvm::values::FunctionValue<'ctx>> {
-        let name = super::syscall_registry::verum_wrapper_name("sched_yield")
-            .expect("registry has sched_yield wrapper");
-        if let Some(existing) = module.get_function(name) {
-            if existing.count_basic_blocks() > 0 {
-                return Ok(existing);
-            }
+        let name = super::syscall_registry::verum_wrapper_name("sched_yield")?;
+        let func = super::syscall_registry::get_or_declare(module, self.context, name)?;
+        if func.count_basic_blocks() > 0 {
+            return Ok(func);
         }
-        let i64_type = self.context.i64_type();
-        let fn_type = i64_type.fn_type(&[], false);
-        let func = match module.get_function(name) {
-            Some(f) => f,
-            None => module.add_function(name, fn_type, None),
-        };
         let entry = self.context.append_basic_block(func, "entry");
         let builder = self.context.create_builder();
         builder.position_at_end(entry);
@@ -322,8 +305,7 @@ impl<'ctx> PlatformIR<'ctx> {
             builder.build_return(Some(&result)).or_llvm_err()?;
         } else {
             let lib_fn =
-                super::syscall_registry::get_or_declare(module, self.context, "sched_yield")
-                    .expect("registry has sched_yield");
+                super::syscall_registry::get_or_declare(module, self.context, "sched_yield")?;
             let cs = builder
                 .build_call(lib_fn, &[], "ret")
                 .or_llvm_err()?;
@@ -4803,47 +4785,20 @@ impl<'ctx> PlatformIR<'ctx> {
         sys_x86_64: u64,
         sys_aarch64: u64,
     ) -> super::error::Result<()> {
-        // Idempotent: if the wrapper is already in the module WITH a
-        // body, skip — we only emit each wrapper once. A bodyless
-        // pre-existing declaration is fine; we'll re-stamp its
-        // signature below via the canonical syscall registry and
-        // then write the body. This is the "first declaration wins"
-        // fix: the registry IS the first (canonical) declaration,
-        // and any bodyless declaration emitted earlier with a
-        // divergent signature gets surfaced as a hard signature
-        // mismatch by the lowering-pass gate.
-        if let Some(f) = module.get_function(name) {
-            if f.count_basic_blocks() > 0 {
-                return Ok(());
-            }
-        }
-
+        // Reuse a completed body only after its ABI passes the same registry
+        // check as a new declaration. A body is not signature authority.
         let ctx = self.context;
+        let wrapper = super::syscall_registry::get_or_declare(module, ctx, name)?;
+        if wrapper.count_basic_blocks() > 0 {
+            return Ok(());
+        }
         let i64_type = ctx.i64_type();
-
-        // Per-symbol signature is sourced from the canonical
-        // `syscall_registry::POSIX_SYSCALLS` table — the single
-        // source of truth for native-FFI signatures under Verum's
-        // i64-everywhere AOT ABI. Pre-fix this function had its own
-        // inline match arm per symbol, which drifted from the
-        // registry's entries silently when callers reached for the
-        // same symbol via different emit paths.
-        let wrapper = super::syscall_registry::get_or_declare(module, ctx, name)
-            .ok_or_else(|| {
-                super::error::LlvmLoweringError::internal(format!(
-                    "emit_libc_free_socket_wrapper: `{}` is not in the canonical POSIX_SYSCALLS registry — \
-                     add an entry to syscall_registry.rs::POSIX_SYSCALLS or remove the call site",
-                    name
-                ))
-            })?;
         let fn_type = wrapper.get_type();
 
         // `wrapper` and `fn_type` were both established above via
         // `syscall_registry::get_or_declare` — the registry IS the
-        // signature reconciliation point. Any pre-existing
-        // divergent declaration is recorded into the global
-        // signature-mismatch registry and surfaced as a hard error
-        // by the lowering pass's final gate.
+        // signature reconciliation point. An incompatible existing
+        // declaration returns an error before its handle reaches this caller.
         let wrapper_fn_ty = fn_type;
         let wrapper_ret_ty = wrapper_fn_ty.get_return_type();
 
@@ -9954,10 +9909,7 @@ impl<'ctx> PlatformIR<'ctx> {
     /// kqueue dual-declaration (the other is the libsystem.vr extern).
     fn ensure_kqueue_declared(&self, module: &Module<'ctx>) -> super::error::Result<()> {
         for name in ["kqueue", "kevent"] {
-            super::syscall_registry::get_or_declare(module, self.context, name)
-                .or_internal_else(|| {
-                    format!("`{}` missing from POSIX_SYSCALLS registry", name)
-                })?;
+            super::syscall_registry::get_or_declare(module, self.context, name)?;
         }
         Ok(())
     }
@@ -11706,18 +11658,9 @@ impl<'ctx> PlatformIR<'ctx> {
         //     i32 declared vs i64 callsite (or vice versa)
         // Architectural rule: every POSIX/libc symbol MUST flow through
         // the canonical `syscall_registry::get_or_declare` so the
-        // process-wide SIGNATURE_MISMATCH_REGISTRY catches drift at
-        // declaration time, not at LLVM verify time thousands of
-        // instructions later.
+        // registry rejects ABI drift before returning a function handle.
         let sched_yield_fn =
-            super::syscall_registry::get_or_declare(module, ctx, "sched_yield")
-                .ok_or_else(|| {
-                    crate::llvm::error::LlvmLoweringError::internal(
-                        verum_common::Text::from(
-                            "syscall_registry missing sched_yield signature",
-                        ),
-                    )
-                })?;
+            super::syscall_registry::get_or_declare(module, ctx, "sched_yield")?;
 
         let builder = ctx.create_builder();
         let entry = ctx.append_basic_block(func, "entry");
