@@ -2,7 +2,7 @@
 //! Runtime controls use padded live allocations so baseline failures are wrong
 //! state changes, not undefined reads. Source controls inspect actual wire code.
 
-use super::cbgr::handle_drop_ref;
+use super::cbgr::{handle_drop_ref, handle_drop_typed};
 use super::cbgr_helpers::encode_cbgr_ref;
 use super::ffi_extended::{cbgr_user_allocate, cbgr_user_deallocate};
 use crate::interpreter::{heap, state::InterpreterState};
@@ -104,6 +104,28 @@ impl Fixture {
     fn drop_register(&mut self) {
         self.state.set_pc(0);
         handle_drop_ref(&mut self.state).expect("DropRef");
+    }
+
+    fn drop_typed_reference(&mut self, value: Value) {
+        use crate::types::{CbgrTier, Mutability, TypeRef};
+        let module = Arc::make_mut(&mut self.state.module);
+        module.bytecode.clear();
+        crate::bytecode::encode_instruction(
+            &crate::instruction::Instruction::DropTyped {
+                src: Reg(0),
+                type_ref: TypeRef::Reference {
+                    inner: Box::new(TypeRef::Concrete(TypeId::INT)),
+                    mutability: Mutability::Immutable,
+                    tier: CbgrTier::Tier0,
+                },
+            },
+            &mut module.bytecode,
+        );
+        module.functions[0].bytecode_length = module.bytecode.len() as u32;
+        self.state.set_reg(Reg(0), value);
+        // The dispatcher has consumed Extended + DropTyped before this handler.
+        self.state.set_pc(2);
+        handle_drop_typed(&mut self.state).expect("declared reference cleanup");
     }
 
     fn cleanup_state(&self) -> (bool, u32) {
@@ -250,15 +272,77 @@ fn invalid_shared_drop_does_not_touch_the_inner_count() {
     );
 }
 
+#[test]
+fn typed_reference_cleanup_retires_the_local_slot_and_preserves_the_owner() {
+    use crate::value::Capabilities;
+    let mut fixture = Fixture::new();
+    let backing = fixture.object(TypeId::UNIT, &[Value::from_i64(520)]);
+    let owner = fixture.object(TypeId::UNIT, &[Value::from_ptr(backing.as_ptr().cast::<u8>())]);
+    let field = fixture
+        .state
+        .heap
+        .project_slot(owner.as_ptr() as usize, 0, backing.as_ptr() as usize, 0, Capabilities::READ_ONLY)
+        .expect("live field borrow");
+    fixture.state.set_reg(Reg(1), field);
+    let local_generation = fixture.state.registers.get_generation(0);
+    let alias_generation = fixture.state.registers.get_generation(1);
+    fixture.drop_typed_reference(field);
+    assert_eq!(fixture.cleanup_state(), (true, local_generation + 1));
+    assert!(
+        super::cbgr_helpers::validate_cbgr_generation(&fixture.state, 0, local_generation).is_err()
+    );
+    assert_eq!(fixture.state.registers.get_generation(1), alias_generation);
+    assert!(fixture.state.heap.contains(owner.as_ptr()));
+    let alias = fixture
+        .state
+        .heap
+        .thin_ref(fixture.state.get_reg(Reg(1)))
+        .expect("sibling borrow remains live");
+    // SAFETY: the unchanged live owner still owns this checked Value slot.
+    assert_eq!(
+        unsafe { alias.ptr.cast::<Value>().read() }.try_as_i64(),
+        Some(520)
+    );
+    // SAFETY: retire the known owner, which invalidates all remaining field tickets.
+    unsafe {
+        fixture.state.heap.free(owner);
+    }
+    assert!(
+        fixture
+            .state
+            .heap
+            .thin_ref(fixture.state.get_reg(Reg(1)))
+            .is_err()
+    );
+}
+
 #[cfg(feature = "codegen")]
 fn emitted_probe(source: &str) -> List<crate::instruction::Instruction> {
-    use crate::codegen::{CodegenConfig, VbcCodegen};
+    use crate::codegen::{CodegenConfig, ItemFailurePolicy, VbcCodegen};
     let ast = verum_fast_parser::Parser::new(source)
         .parse_module()
         .expect("source grammar");
-    let module = VbcCodegen::with_config(CodegenConfig::new("drop_authority"))
-        .compile_module(&ast)
+    let mut maybe = verum_fast_parser::Parser::new(include_str!("../../../../core/base/maybe.vr"))
+        .parse_module()
+        .expect("canonical Maybe grammar");
+    maybe.items.retain(|item| {
+        matches!(&item.kind, verum_ast::ItemKind::Module(decl) if decl.items.is_none())
+            || item
+                .kind
+                .type_or_protocol_name()
+                .is_some_and(|name| name.as_str() == "Maybe")
+    });
+    let mut compiler = VbcCodegen::with_config(CodegenConfig::new("drop_authority"));
+    compiler
+        .collect_unit_declarations(&[&maybe, &ast])
+        .expect("declared source owners");
+    compiler.resolve_pending_imports();
+    compiler
+        .compile_unit_items(&[&maybe, &ast], ItemFailurePolicy::Strict)
         .expect("source codegen");
+    let module = compiler
+        .finalize_module_from_state()
+        .expect("source module");
     let bytes = crate::serialize::serialize_module(&module).expect("wire writer");
     let module = crate::deserialize::deserialize_module(&bytes).expect("wire reader");
     let entry = module
@@ -280,7 +364,7 @@ fn emitted_probe(source: &str) -> List<crate::instruction::Instruction> {
 
 #[cfg(feature = "codegen")]
 #[test]
-fn a_returned_borrow_local_reaches_dropref_in_emitted_code() {
+fn a_returned_borrow_local_reaches_declared_reference_cleanup_in_emitted_code() {
     use crate::instruction::Instruction;
     use verum_common::Set;
     let instructions = emitted_probe(
@@ -303,7 +387,11 @@ fn probe(input: &Int) -> Int {
             Instruction::Mov { dst, src } if returned.contains(src) => {
                 returned.insert(*dst);
             }
-            Instruction::DropRef { src } if returned.contains(src) => {
+            Instruction::DropRef { src }
+            | Instruction::DropTyped {
+                src,
+                type_ref: crate::types::TypeRef::Reference { .. },
+            } if returned.contains(src) => {
                 cleaned = true;
             }
             _ => {}
@@ -323,6 +411,7 @@ fn a_returned_maybe_borrow_payload_is_checked_and_read_in_emitted_code() {
     let instructions = emitted_probe(
         r#"
 module drop_authority;
+mount core.base.maybe.Maybe;
 fn borrowed(input: &Int) -> Maybe<&Int> { Maybe.Some(input) }
 fn probe(input: &Int) -> Int {
     match borrowed(input) { Maybe.Some(value) => *value, Maybe.None => 0 }
@@ -350,11 +439,15 @@ fn probe(input: &Int) -> Int {
         }
     }
     // Pattern-bound borrowed payloads are checked and read, but this lowering
-    // does not emit DropRef for the payload. The explicit local test above
-    // pins the actual returned-reference path into the DropRef handler.
+    // does not assert a cleanup opcode for the payload. The explicit local
+    // test pins the returned-reference path; the runtime control above proves
+    // typed cleanup retires that slot without destroying its owner.
     // Inspect the Some arm without conflating registers reused by the None
     // arm. This is an instruction-boundary control, not a CFG execution proof.
-    assert!(checked_read, "borrowed payload must be checked before reading: {instructions:?}");
+    assert!(
+        checked_read,
+        "borrowed payload must be checked before reading: {instructions:?}"
+    );
     assert!(matches!(instructions.last(), Some(Instruction::Ret { .. })));
     eprintln!("returned Maybe borrow lowering: {instructions:?}");
 }
