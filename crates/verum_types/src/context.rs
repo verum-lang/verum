@@ -192,6 +192,7 @@ pub(crate) enum ReturnedValueNode {
     Record { owner: Text, fields: List<(Text, usize)> },
     Variant { owner: Text, name: Text, fields: List<usize> },
     Compound { op: verum_ast::BinOp, left: usize, right: usize },
+    SelectedCall { span: Span, receiver: Option<usize>, arguments: List<usize> },
 }
 
 impl ReturnedValue {

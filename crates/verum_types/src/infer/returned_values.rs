@@ -237,6 +237,7 @@ fn append_expression(
         Tuple(usize),
         Record(Text, List<Text>),
         Variant(Text, Text, usize),
+        Call(verum_ast::Span, bool, usize),
     }
     let mut pending = List::from_iter([Step::Enter(value)]);
     let mut values = List::new();
@@ -263,12 +264,24 @@ fn append_expression(
                     }
                     ReturnedValueNode::Literal(checker.infer_literal(literal))
                 }
+                ExprKind::Call { func, args, type_args }
+                    if type_args.is_empty() && matches!(unparen(func).kind, ExprKind::Path(_)) =>
+                {
+                    pending.push(Step::Call(expression.span, false, args.len()));
+                    pending.extend(args.iter().rev().map(Step::Enter));
+                    continue;
+                }
                 ExprKind::MethodCall { receiver, method, args, type_args }
                     if type_args.is_empty() =>
                 {
-                    let owner = variant_constructor(checker, receiver, &method.name, args.len(), bindings)?;
-                    pending.push(Step::Variant(owner, method.name.clone(), args.len()));
-                    pending.extend(args.iter().rev().map(Step::Enter));
+                    if let Some(owner) = variant_constructor(checker, receiver, &method.name, args.len(), bindings) {
+                        pending.push(Step::Variant(owner, method.name.clone(), args.len()));
+                        pending.extend(args.iter().rev().map(Step::Enter));
+                    } else {
+                        pending.push(Step::Call(expression.span, true, args.len()));
+                        pending.extend(args.iter().rev().map(Step::Enter));
+                        pending.push(Step::Enter(receiver));
+                    }
                     continue;
                 }
                 ExprKind::Field { expr, field } => {
@@ -348,6 +361,12 @@ fn append_expression(
                 let start = values.len().checked_sub(count)?;
                 ReturnedValueNode::Tuple(values.split_off(start))
             }
+            Step::Call(span, has_receiver, count) => {
+                let start = values.len().checked_sub(count)?;
+                let arguments = values.split_off(start);
+                let receiver = if has_receiver { Some(values.pop()?) } else { None };
+                ReturnedValueNode::SelectedCall { span, receiver, arguments }
+            }
             Step::Variant(owner, name, count) => {
                 let start = values.len().checked_sub(count)?;
                 ReturnedValueNode::Variant { owner, name, fields: values.split_off(start) }
@@ -402,6 +421,9 @@ impl TypeChecker {
             nodes.push(ReturnedValueNode::Parameter(index));
         }
         append_expression(self, body, &bindings, &mut nodes).is_some()
+            // A selected callable contract is not evidence about a closure's
+            // environment. The capture consumer keeps its original boundary.
+            && !nodes.iter().any(|node| matches!(node, ReturnedValueNode::SelectedCall { .. }))
     }
 
     pub(super) fn returned_value_origins(
@@ -464,7 +486,8 @@ impl TypeChecker {
                     self.closed_call_input_origins(args.get(*parameter)?, ty)?
                 }
                 ReturnedValueNode::Receiver => self.closed_call_input_origins(receiver?, ty)?,
-                ReturnedValueNode::Literal(_) | ReturnedValueNode::Compound { .. } => List::new(),
+                ReturnedValueNode::Literal(_) | ReturnedValueNode::Compound { .. }
+                | ReturnedValueNode::SelectedCall { .. } => List::new(),
                 ReturnedValueNode::Field { source, .. }
                 | ReturnedValueNode::TupleIndex { source, .. } => {
                     // The type derivation admits only direct declared projections.
@@ -674,6 +697,12 @@ impl TypeChecker {
                     }
                 }
                 ReturnedValueNode::Record { .. } | ReturnedValueNode::Variant { .. } => expected[index].as_ref()?.clone(),
+                ReturnedValueNode::SelectedCall { span, receiver, arguments } => {
+                    let arguments = arguments.iter().map(|index| nodes.get(*index).cloned())
+                        .collect::<Option<List<_>>>()?;
+                    let receiver = match receiver { Some(index) => Some(nodes.get(*index)?), None => None };
+                    self.source_scalar_call_result(*span, &arguments, receiver)?
+                }
                 ReturnedValueNode::Compound { op, left, right } => {
                     let left = nodes.get(*left)?;
                     let right = nodes.get(*right)?;
@@ -699,6 +728,52 @@ impl TypeChecker {
             nodes.push(ty);
         }
         Some(ReturnedBodyTypes { nodes, writes })
+    }
+
+    /// Reuse the body attached to the exact selected source call. A scalar
+    /// result or a property bound alone cannot account for implicit cleanup.
+    /// This leaf proof deliberately refuses nested calls, so the shared flat
+    /// derivation never recursively walks a source call graph.
+    fn source_scalar_call_result(
+        &mut self,
+        span: verum_ast::Span,
+        arguments: &[Type],
+        receiver: Option<&Type>,
+    ) -> Option<Type> {
+        let body = self.type_registry.returned_value(span)?.clone();
+        if !body.writes.is_empty()
+            || body.nodes.iter().any(|node| matches!(node, ReturnedValueNode::SelectedCall { .. }))
+        { return None; }
+        let declared_receiver = self.type_registry.declared_receiver(span).cloned();
+        if receiver.is_some() != declared_receiver.is_some()
+            || (receiver.is_none() && self.type_registry.explicit_input_target(span).is_none())
+        { return None; }
+        let Type::Function { params, return_type, contexts, .. } =
+            self.type_registry.lookup_call_target(span)?.clone() else { return None; };
+        if params.len() != arguments.len()
+            || contexts.as_ref().is_some_and(|contexts| !contexts.is_empty())
+        { return None; }
+        for (actual, declared) in arguments.iter().zip(&params)
+            .chain(receiver.zip(declared_receiver.as_ref()))
+        {
+            let actual = self.place_reference_head(actual, span).ok()?;
+            let declared = self.place_reference_head(declared, span).ok()?;
+            let autoref = match &declared {
+                Type::Reference { inner, .. } | Type::CheckedReference { inner, .. }
+                | Type::UnsafeReference { inner, .. } => inner.as_ref() == &actual,
+                _ => false,
+            };
+            if actual != declared && !autoref { return None; }
+        }
+        let facts = self.returned_body_types(&body, &params, declared_receiver.as_ref(), Some(&return_type), span)?;
+        // Covers unused parameters and intermediate/local values too: a hidden
+        // user Drop or value copy is not proved by a scalar terminal result.
+        if facts.nodes.iter().any(|ty| !self.return_value_has_trivial_cleanup(ty)) {
+            return None;
+        }
+        let result = facts.nodes.get(body.result)?;
+        matches!(result, Type::Unit | Type::Never | Type::Bool | Type::Int | Type::Float | Type::Char)
+            .then(|| result.clone())
     }
 
     /// A scalar-only sum with no selected destructor has structural cleanup.
