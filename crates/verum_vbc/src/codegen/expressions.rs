@@ -9336,6 +9336,14 @@ impl VbcCodegen {
         if name == "()" {
             return Some(crate::types::TypeRef::Concrete(crate::types::TypeId::UNIT));
         }
+        if let Some(bounds) = name
+            .strip_prefix("dyn:")
+            .or_else(|| name.strip_prefix("dyn "))
+        {
+            let source = format!("dyn {bounds}");
+            let ty = verum_fast_parser::Parser::new(&source).parse_type().ok()?;
+            return self.explicit_type_witness(&ty, None);
+        }
         if name.starts_with('&') {
             let ty = verum_fast_parser::Parser::new(name).parse_type().ok()?;
             return self.explicit_type_witness(&ty, None);
@@ -17537,6 +17545,7 @@ impl VbcCodegen {
         fn has_shadow(ty: &crate::types::TypeRef) -> bool {
             use crate::types::TypeRef;
             match ty {
+                TypeRef::Dynamic(object) => object.types().any(has_shadow),
                 TypeRef::Generic(id) => id.0 >= 0x8000,
                 TypeRef::Instantiated { args, .. } | TypeRef::Tuple(args) => {
                     args.iter().any(has_shadow)
@@ -31743,12 +31752,14 @@ impl VbcCodegen {
     }
 
     pub(super) fn scoped_callable_type_name(
-        &self, ty: &crate::types::TypeRef,
+        &self,
+        ty: &crate::types::TypeRef,
         scope: Option<&std::collections::HashMap<String, u16>>,
     ) -> Option<verum_common::Text> {
         use crate::types::{CbgrTier, Mutability, TypeRef};
         let render = |ty| self.scoped_callable_type_name(ty, scope);
         match ty {
+            TypeRef::Dynamic(object) => self.dynamic_type_name(object, scope),
             TypeRef::Generic(id) => scope?.iter().find_map(|(name, value)|
                 (*value == id.0).then(|| name.as_str().into())),
             TypeRef::AssociatedProjection { base, qualifier: None, assoc, args } if args.is_empty() => {

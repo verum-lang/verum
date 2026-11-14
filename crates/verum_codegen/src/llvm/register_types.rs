@@ -46,8 +46,7 @@ use verum_vbc::types::{TypeId, TypeRef};
 /// This replaces all the individual boolean tracking sets (is_list, is_map, etc.)
 /// with a single enum that carries the full type + metadata needed for lowering.
 #[derive(Debug, Clone)]
-pub enum RegisterType {
-    /// Primitive integer (Int, I8, I16, I32, I64, U8, U16, U32, U64, ISize, USize).
+pub enum RegisterType {    /// Primitive integer (Int, I8, I16, I32, I64, U8, U16, U32, U64, ISize, USize).
     Int,
     /// Floating point (Float, F32).
     Float,
@@ -151,6 +150,9 @@ pub enum RegisterType {
     /// Descriptor-only record telescope, retained without a fabricated runtime
     /// representation. Type lowering refuses this declaration before codegen.
     UnresolvedRecordProjection(TypeRef),
+    /// An existential contract whose hidden owning representation is unresolved.
+    /// Borrowed dispatch can retain this contract without claiming a scalar layout.
+    Dynamic(TypeRef),
     /// Unknown type (fallback, treat as i64).
     Unknown,
 }
@@ -435,6 +437,7 @@ impl RegisterType {
             TypeRef::Instantiated { base, args } => Self::from_instantiated(*base, args),
 
             TypeRef::Generic(_) => Self::GenericParam,
+            TypeRef::Dynamic(_) => Self::Dynamic(ty.clone()),
 
             TypeRef::Function { return_type, .. } => Self::Function {
                 return_type: Some(Box::new(Self::from_type_ref(return_type))),

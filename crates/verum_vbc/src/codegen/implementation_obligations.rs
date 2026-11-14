@@ -93,6 +93,7 @@ impl Goal {
                         }
                     }
                 }
+                TypeRef::Dynamic(object) => object.types().for_each(push),
                 TypeRef::Concrete(_)
                 | TypeRef::Generic(_)
                 | TypeRef::ConstValue(_)

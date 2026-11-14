@@ -253,6 +253,12 @@ pub fn rewrite_type_ref_ids(ty: &mut crate::types::TypeRef, remap: &dyn IdRemap)
             }
             for arg in args { rewrite_type_ref_ids(arg, remap); }
         }
+        TypeRef::Dynamic(object) => {
+            for application in object.applications_mut() {
+                application.protocol = remap.map_protocol(application.protocol);
+            }
+            for ty in object.types_mut() { rewrite_type_ref_ids(ty, remap); }
+        }
         TypeRef::Generic(_) | TypeRef::ConstValue(_) | TypeRef::ConstSequence(_) => {}
     }
 }

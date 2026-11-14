@@ -70,7 +70,7 @@ fn signedness<'a>(
             }
         }
         TypeRef::Generic(_) | TypeRef::AssociatedProjection { .. } | TypeRef::RecordFieldProjection { .. }
-        | TypeRef::ConstValue(_) | TypeRef::ConstSequence(_) => None,
+        | TypeRef::ConstValue(_) | TypeRef::ConstSequence(_) | TypeRef::Dynamic(_) => None,
         TypeRef::Array { .. } | TypeRef::Slice(_) | TypeRef::Reference { .. } | TypeRef::Tuple(_)
         | TypeRef::Function { .. } | TypeRef::Rank2Function { .. } => Some(false),
     }
@@ -131,7 +131,7 @@ fn layout<'a>(
         | TypeRef::Slice(_)
         | TypeRef::AssociatedProjection { .. }
         | TypeRef::RecordFieldProjection { .. }
-        | TypeRef::ConstValue(_) | TypeRef::ConstSequence(_) => None,
+        | TypeRef::ConstValue(_) | TypeRef::ConstSequence(_) | TypeRef::Dynamic(_) => None,
     }
 }
 
@@ -146,7 +146,7 @@ fn unsized_pointee<'a>(
         return None;
     }
     match ty {
-        TypeRef::Slice(_) => Some(true),
+        TypeRef::Slice(_) | TypeRef::Dynamic(_) => Some(true),
         TypeRef::Generic(_) | TypeRef::AssociatedProjection { .. }
         | TypeRef::RecordFieldProjection { .. } => None,
         TypeRef::Concrete(id) | TypeRef::Instantiated { base: id, .. } => {

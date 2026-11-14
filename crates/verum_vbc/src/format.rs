@@ -147,7 +147,8 @@ pub const VERSION_MAJOR: u16 = 2;
 /// Minor 52 adds the declared storage-bit-count layout query.
 /// Minor 53 carries complete type identity queries.
 /// Minor 54 carries declaration-owned names and destruction-plan queries.
-pub const VERSION_MINOR: u16 = 54;
+/// Minor 55 carries scoped existential protocol witnesses.
+pub const VERSION_MINOR: u16 = 55;
 
 /// Minor-version floors for sections whose presence readers gate on.  The
 /// register-type-hints section has been written unconditionally since minor 2,

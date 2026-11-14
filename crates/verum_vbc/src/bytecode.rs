@@ -3257,6 +3257,18 @@ pub(crate) fn encode_type_ref(type_ref: &TypeRef, output: &mut Vec<u8>) {
             encode_varint(args.len() as u64, output);
             for argument in args { encode_type_ref(argument, output); }
         }
+        TypeRef::Dynamic(object) => {
+            output.push(0x10);
+            encode_varint(object.bounds.len() as u64, output);
+            for bound in &object.bounds { encode_protocol_application(bound, output); }
+            encode_varint(object.bindings.len() as u64, output);
+            for binding in &object.bindings {
+                encode_protocol_application(&binding.owner, output);
+                encode_varint(binding.member.len() as u64, output);
+                output.extend_from_slice(binding.member.as_bytes());
+                encode_type_ref(&binding.value, output);
+            }
+        }
         TypeRef::ConstSequence(values) => {
             output.push(0x0F);
             values.encode(output);
@@ -3273,6 +3285,17 @@ pub(crate) fn encode_type_ref(type_ref: &TypeRef, output: &mut Vec<u8>) {
             encode_varint(u64::from(owner.0), output);
             encode_varint(u64::from(*ordinal), output);
         }
+    }
+}
+
+fn encode_protocol_application(
+    application: &crate::types::ProtocolApplication,
+    output: &mut Vec<u8>,
+) {
+    encode_varint(u64::from(application.protocol.0), output);
+    encode_varint(application.args.len() as u64, output);
+    for argument in &application.args {
+        encode_type_ref(argument, output);
     }
 }
 
@@ -6154,6 +6177,22 @@ fn decode_extended_reg_operands(
 /// - 0x0E: AssociatedProjection { base, qualifier, assoc, args }
 /// - 0x0A: ConstValue(i64) — const-generic value argument
 pub(crate) fn decode_type_ref(data: &[u8], offset: &mut usize) -> VbcResult<TypeRef> {
+    let mut remaining = crate::types::MAX_TYPE_REF_NODES;
+    decode_type_ref_scoped(data, offset, 0, &mut remaining)
+}
+
+fn decode_type_ref_scoped(
+    data: &[u8],
+    offset: &mut usize,
+    depth: usize,
+    remaining: &mut usize,
+) -> VbcResult<TypeRef> {
+    if depth >= crate::types::MAX_TYPE_REF_DEPTH || *remaining == 0 {
+        return Err(VbcError::Deserialization(
+            "type reference exceeds structural resource limit".into(),
+        ));
+    }
+    *remaining -= 1;
     use smallvec::SmallVec;
 
     let discriminant = decode_u8(data, offset)?;
@@ -6177,7 +6216,7 @@ pub(crate) fn decode_type_ref(data: &[u8], offset: &mut usize) -> VbcResult<Type
             let arg_count = decode_varint(data, offset)? as usize;
             let mut args = decode_vec_with_capacity(arg_count, data, *offset);
             for _ in 0..arg_count {
-                args.push(decode_type_ref(data, offset)?);
+                args.push(decode_type_ref_scoped(data, offset, depth + 1, remaining)?);
             }
             Ok(TypeRef::Instantiated {
                 base: TypeId(base_id),
@@ -6189,9 +6228,9 @@ pub(crate) fn decode_type_ref(data: &[u8], offset: &mut usize) -> VbcResult<Type
             let param_count = decode_varint(data, offset)? as usize;
             let mut params = decode_vec_with_capacity(param_count, data, *offset);
             for _ in 0..param_count {
-                params.push(decode_type_ref(data, offset)?);
+                params.push(decode_type_ref_scoped(data, offset, depth + 1, remaining)?);
             }
-            let return_type = Box::new(decode_type_ref(data, offset)?);
+            let return_type = Box::new(decode_type_ref_scoped(data, offset, depth + 1, remaining)?);
             let ctx_count = decode_varint(data, offset)? as usize;
             let mut contexts = SmallVec::with_capacity(ctx_count);
             for _ in 0..ctx_count {
@@ -6206,7 +6245,7 @@ pub(crate) fn decode_type_ref(data: &[u8], offset: &mut usize) -> VbcResult<Type
         }
         0x04 => {
             // Reference { inner, mutability, tier }
-            let inner = Box::new(decode_type_ref(data, offset)?);
+            let inner = Box::new(decode_type_ref_scoped(data, offset, depth + 1, remaining)?);
             let mutability_byte = decode_u8(data, offset)?;
             let tier_byte = decode_u8(data, offset)?;
             let mutability = match mutability_byte {
@@ -6229,19 +6268,19 @@ pub(crate) fn decode_type_ref(data: &[u8], offset: &mut usize) -> VbcResult<Type
             let elem_count = decode_varint(data, offset)? as usize;
             let mut elems = decode_vec_with_capacity(elem_count, data, *offset);
             for _ in 0..elem_count {
-                elems.push(decode_type_ref(data, offset)?);
+                elems.push(decode_type_ref_scoped(data, offset, depth + 1, remaining)?);
             }
             Ok(TypeRef::Tuple(elems))
         }
         0x06 => {
             // Array { element, length }
-            let element = Box::new(decode_type_ref(data, offset)?);
+            let element = Box::new(decode_type_ref_scoped(data, offset, depth + 1, remaining)?);
             let length = decode_varint(data, offset)?;
             Ok(TypeRef::Array { element, length })
         }
         0x07 => {
             // Slice(inner)
-            let inner = Box::new(decode_type_ref(data, offset)?);
+            let inner = Box::new(decode_type_ref_scoped(data, offset, depth + 1, remaining)?);
             Ok(TypeRef::Slice(inner))
         }
         0x0C | 0x1C => {
@@ -6252,9 +6291,9 @@ pub(crate) fn decode_type_ref(data: &[u8], offset: &mut usize) -> VbcResult<Type
             let param_count = decode_varint(data, offset)? as usize;
             let mut params = decode_vec_with_capacity(param_count, data, *offset);
             for _ in 0..param_count {
-                params.push(decode_type_ref(data, offset)?);
+                params.push(decode_type_ref_scoped(data, offset, depth + 1, remaining)?);
             }
-            let return_type = Box::new(decode_type_ref(data, offset)?);
+            let return_type = Box::new(decode_type_ref_scoped(data, offset, depth + 1, remaining)?);
             let ctx_count = decode_varint(data, offset)? as usize;
             let mut contexts = SmallVec::new();
             for _ in 0..ctx_count {
@@ -6270,7 +6309,7 @@ pub(crate) fn decode_type_ref(data: &[u8], offset: &mut usize) -> VbcResult<Type
         }
         0x09 => {
             // AssociatedProjection { base, assoc }
-            let base = Box::new(decode_type_ref(data, offset)?);
+            let base = Box::new(decode_type_ref_scoped(data, offset, depth + 1, remaining)?);
             let len = decode_varint(data, offset)? as usize;
             if *offset + len > data.len() {
                 return Err(VbcError::InvalidTypeRef {
@@ -6283,7 +6322,7 @@ pub(crate) fn decode_type_ref(data: &[u8], offset: &mut usize) -> VbcResult<Type
             Ok(TypeRef::AssociatedProjection { base, assoc, qualifier: None, args: Vec::new() })
         }
         0x0E => {
-            let base = Box::new(decode_type_ref(data, offset)?);
+            let base = Box::new(decode_type_ref_scoped(data, offset, depth + 1, remaining)?);
             let qualifier = match decode_u8(data, offset)? {
                 0 => None,
                 1 => {
@@ -6291,7 +6330,7 @@ pub(crate) fn decode_type_ref(data: &[u8], offset: &mut usize) -> VbcResult<Type
                         .map_err(|_| VbcError::InvalidTypeRef { offset: *offset as u32, discriminant })?;
                     Some(crate::types::ProtocolApplication {
                         protocol: crate::types::ProtocolId(protocol),
-                        args: decode_application_arguments(data, offset)?,
+                        args: decode_application_arguments(data, offset, depth + 1, remaining)?,
                     })
                 }
                 _ => return Err(VbcError::InvalidTypeRef { offset: *offset as u32, discriminant }),
@@ -6303,9 +6342,29 @@ pub(crate) fn decode_type_ref(data: &[u8], offset: &mut usize) -> VbcResult<Type
             let assoc = std::str::from_utf8(&data[*offset..end])
                 .map_err(|_| VbcError::InvalidTypeRef { offset: *offset as u32, discriminant })?.to_owned();
             *offset = end;
-            let args = decode_application_arguments(data, offset)?;
+            let args = decode_application_arguments(data, offset, depth + 1, remaining)?;
             if assoc.is_empty() { return Err(VbcError::InvalidTypeRef { offset: *offset as u32, discriminant }); }
             Ok(TypeRef::AssociatedProjection { base, qualifier, assoc, args })
+        }
+        0x10 => {
+            let count = decode_dynamic_count(data, offset, remaining)?;
+            let bounds = (0..count).map(|_| decode_protocol_application(data, offset, depth + 1, remaining))
+                .collect::<VbcResult<_>>()?;
+            let count = decode_dynamic_count(data, offset, remaining)?;
+            let mut bindings = verum_common::List::new();
+            for _ in 0..count {
+                let owner = decode_protocol_application(data, offset, depth + 1, remaining)?;
+                let length = usize::try_from(decode_varint(data, offset)?)
+                    .map_err(|_| VbcError::InvalidTypeRef {offset: *offset as u32, discriminant})?;
+                let end = offset.checked_add(length).filter(|end| *end <= data.len())
+                    .ok_or(VbcError::InvalidTypeRef {offset: *offset as u32, discriminant})?;
+                let member = std::str::from_utf8(&data[*offset..end])
+                    .map_err(|_| VbcError::InvalidTypeRef {offset: *offset as u32, discriminant})?.into();
+                *offset = end;
+                let value = decode_type_ref_scoped(data, offset, depth + 1, remaining)?;
+                bindings.push(crate::types::DynamicAssociatedBinding {owner, member, value});
+            }
+            Ok(TypeRef::Dynamic(crate::types::DynamicProtocolType {bounds, bindings}))
         }
         0x0F => crate::const_sequence::ConstSequence::decode(data, offset).map(TypeRef::ConstSequence),
         0x0A => {
@@ -6327,14 +6386,51 @@ pub(crate) fn decode_type_ref(data: &[u8], offset: &mut usize) -> VbcResult<Type
     }
 }
 
-fn decode_application_arguments(data: &[u8], offset: &mut usize) -> VbcResult<Vec<TypeRef>> {
+fn decode_application_arguments(
+    data: &[u8],
+    offset: &mut usize,
+    depth: usize,
+    remaining: &mut usize,
+) -> VbcResult<Vec<TypeRef>> {
     let count = decode_varint(data, offset)?;
     if count > crate::types::MAX_TYPE_APPLICATION_ARGUMENTS as u64 {
         return Err(VbcError::TableTooLarge { field: "type_application_args",
             count: count.min(u64::from(u32::MAX)) as u32,
             max: crate::types::MAX_TYPE_APPLICATION_ARGUMENTS as u32 });
     }
-    (0..count).map(|_| decode_type_ref(data, offset)).collect()
+    (0..count)
+        .map(|_| decode_type_ref_scoped(data, offset, depth, remaining))
+        .collect()
+}
+
+fn decode_dynamic_count(
+    data: &[u8],
+    offset: &mut usize,
+    remaining: &mut usize,
+) -> VbcResult<usize> {
+    let count = decode_varint(data, offset)?;
+    if count > *remaining as u64 {
+        return Err(VbcError::Deserialization(
+            "dynamic protocol exceeds structural resource limit".into(),
+        ));
+    }
+    *remaining -= count as usize;
+    Ok(count as usize)
+}
+
+fn decode_protocol_application(
+    data: &[u8],
+    offset: &mut usize,
+    depth: usize,
+    remaining: &mut usize,
+) -> VbcResult<crate::types::ProtocolApplication> {
+    let protocol = u32::try_from(decode_varint(data, offset)?)
+        .map_err(|_| VbcError::Deserialization("invalid protocol identity".into()))?;
+    let args = decode_application_arguments(data, offset, depth, remaining)?;
+    Ok(crate::types::ProtocolApplication {
+        protocol: crate::types::ProtocolId(protocol),
+        args,
+    })
 }
 
 /// Decodes a binary integer instruction.

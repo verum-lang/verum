@@ -9,6 +9,7 @@
 use bitflags::bitflags;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
+use verum_common::{List, Text};
 
 // ============================================================================
 // Identifiers
@@ -577,8 +578,7 @@ pub struct ContextRef(pub u32);
 /// TypeRef represents types as they appear in function signatures and expressions,
 /// potentially containing unresolved generic parameters.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum TypeRef {
-    /// Concrete type (no generics).
+pub enum TypeRef {    /// Concrete type (no generics).
     Concrete(TypeId),
 
     /// Generic type parameter (T, K, V, etc.).
@@ -698,15 +698,121 @@ pub enum TypeRef {
     RecordFieldProjection { owner: TypeId, ordinal: u32 },
     /// A closed generic value argument. Its shape and elements survive the wire.
     ConstSequence(crate::const_sequence::ConstSequence),
+
+    /// An existential subject constrained by exact protocol applications.
+    /// The local subject is Generic(0) within this object's bounds and
+    /// equalities. Outer parameters are lifted by one, as under a rank-2 binder.
+    /// This semantic contract alone establishes no owning runtime layout.
+    Dynamic(DynamicProtocolType),
+
 }
 
 pub(crate) const MAX_TYPE_APPLICATION_ARGUMENTS: usize = 64;
+/// Maximum structural depth admitted by the VBC type codecs and consumers.
+pub const MAX_TYPE_REF_DEPTH: usize = 64;
+/// Maximum number of components in a single VBC semantic type.
+pub const MAX_TYPE_REF_NODES: usize = 4096;
 
 /// A complete protocol application; arguments remain typed values or types.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ProtocolApplication {
     pub protocol: ProtocolId,
     pub args: Vec<TypeRef>,
+}
+
+/// A protocol object's declaration-owned constraints. All component types
+/// share one lexical existential subject binder. Neither a protocol ID nor an
+/// erased machine pointer identifies the hidden value's resource discipline.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct DynamicProtocolType {
+    /// Explicit protocol applications, including their type and value arguments.
+    pub bounds: List<ProtocolApplication>,
+    /// Associated equalities retain the exact declaration that owns the member.
+    pub bindings: List<DynamicAssociatedBinding>,
+}
+
+/// One equality for a member of a selected protocol application.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct DynamicAssociatedBinding {
+    /// The member's declaring protocol, with its own applied arguments.
+    pub owner: ProtocolApplication,
+    /// Declaration-local associated-type name.
+    pub member: Text,
+    /// The equality's right hand side, under the object's subject binder.
+    pub value: TypeRef,
+}
+
+impl DynamicProtocolType {
+    /// Every nested type, with one additional local subject in scope.
+    pub fn types(&self) -> impl Iterator<Item = &TypeRef> {
+        self.bounds
+            .iter()
+            .flat_map(|bound| &bound.args)
+            .chain(self.bindings.iter().flat_map(|binding| {
+                binding
+                    .owner
+                    .args
+                    .iter()
+                    .chain(std::iter::once(&binding.value))
+            }))
+    }
+
+    /// Every nested type, with one additional local subject in scope.
+    pub fn types_mut(&mut self) -> impl Iterator<Item = &mut TypeRef> {
+        self.bounds
+            .iter_mut()
+            .flat_map(|bound| &mut bound.args)
+            .chain(self.bindings.iter_mut().flat_map(|binding| {
+                binding
+                    .owner
+                    .args
+                    .iter_mut()
+                    .chain(std::iter::once(&mut binding.value))
+            }))
+    }
+
+    /// All declaration identities requiring relocation when modules are linked.
+    pub fn applications_mut(&mut self) -> impl Iterator<Item = &mut ProtocolApplication> {
+        self.bounds
+            .iter_mut()
+            .chain(self.bindings.iter_mut().map(|binding| &mut binding.owner))
+    }
+
+    /// Transform component types without changing member or protocol identities.
+    pub fn try_map<E>(
+        &self,
+        mut map: impl FnMut(&TypeRef) -> Result<TypeRef, E>,
+    ) -> Result<Self, E> {
+        let mut application = |bound: &ProtocolApplication| -> Result<ProtocolApplication, E> {
+            Ok(ProtocolApplication {
+                protocol: bound.protocol,
+                args: bound.args.iter().map(&mut map).collect::<Result<_, _>>()?,
+            })
+        };
+        let bounds = self
+            .bounds
+            .iter()
+            .map(&mut application)
+            .collect::<Result<_, _>>()?;
+        let mut bindings = List::new();
+        for binding in &self.bindings {
+            let owner = ProtocolApplication {
+                protocol: binding.owner.protocol,
+                args: binding
+                    .owner
+                    .args
+                    .iter()
+                    .map(&mut map)
+                    .collect::<Result<_, _>>()?,
+            };
+            bindings.push(DynamicAssociatedBinding {
+                owner,
+                member: binding.member.clone(),
+                value: map(&binding.value)?,
+            });
+        }
+        Ok(Self { bounds, bindings })
+    }
 }
 
 // Non-self-describing serializers identify variants by their ordinal, ignoring
@@ -751,12 +857,56 @@ impl TypeRef {
                     || return_type.contains_record_field_projection(),
             Self::Reference { inner, .. } | Self::Slice(inner)
             | Self::Array { element: inner, .. } => inner.contains_record_field_projection(),
+            Self::Dynamic(object) => object.types().any(Self::contains_record_field_projection),
             Self::AssociatedProjection { base, qualifier, args, .. } => {
                 base.contains_record_field_projection()
                     || args.iter().any(Self::contains_record_field_projection)
                     || qualifier.as_ref().is_some_and(|application|
                         application.args.iter().any(Self::contains_record_field_projection))
             }
+        }
+    }
+
+    /// Visit the immediate structural components. A rank-2 function and a
+    /// dynamic protocol introduce their declared binders for these children.
+    pub fn for_each_child<'a>(&'a self, mut visit: impl FnMut(&'a TypeRef)) {
+        match self {
+            Self::Instantiated { args, .. } | Self::Tuple(args) => args.iter().for_each(visit),
+            Self::Function {
+                params,
+                return_type,
+                ..
+            }
+            | Self::Rank2Function {
+                params,
+                return_type,
+                ..
+            } => {
+                params.iter().for_each(&mut visit);
+                visit(return_type);
+            }
+            Self::Dynamic(object) => object.types().for_each(visit),
+            Self::Reference { inner, .. }
+            | Self::Slice(inner)
+            | Self::Array { element: inner, .. } => visit(inner),
+            Self::AssociatedProjection {
+                base,
+                qualifier,
+                args,
+                ..
+            } => {
+                visit(base);
+                args.iter().for_each(&mut visit);
+                qualifier
+                    .iter()
+                    .flat_map(|application| &application.args)
+                    .for_each(visit);
+            }
+            Self::Concrete(_)
+            | Self::Generic(_)
+            | Self::ConstValue(_)
+            | Self::ConstSequence(_)
+            | Self::RecordFieldProjection { .. } => {}
         }
     }
 
@@ -787,35 +937,63 @@ impl TypeRef {
         }
     }
 
-    /// Checks if this type contains any generic parameters.
+    /// Whether this type contains free generic parameters or receiver projections.
+    /// Local rank-2 and existential binders do not require a caller witness.
     pub fn is_generic(&self) -> bool {
-        match self {
-            TypeRef::Concrete(_) => false,
-            TypeRef::Generic(_) => true,
-            TypeRef::Instantiated { args, .. } => args.iter().any(|a| a.is_generic()),
-            TypeRef::Function {
-                params,
-                return_type,
-                ..
-            } => params.iter().any(|p| p.is_generic()) || return_type.is_generic(),
-            TypeRef::Rank2Function {
-                params,
-                return_type,
-                ..
-            } => params.iter().any(|p| p.is_generic()) || return_type.is_generic(),
-            TypeRef::Reference { inner, .. } => inner.is_generic(),
-            TypeRef::Tuple(elems) => elems.iter().any(|e| e.is_generic()),
-            TypeRef::Array { element, .. } => element.is_generic(),
-            TypeRef::Slice(inner) => inner.is_generic(),
-            // A projection `F.Output` is generic iff its base is (it references
-            // the type param `F`).
-            TypeRef::AssociatedProjection { base, qualifier, args, .. } => base.is_generic()
-                || args.iter().any(Self::is_generic)
-                || qualifier.as_ref().is_some_and(|application| application.args.iter().any(Self::is_generic)),
-            // A carried const VALUE is fully concrete.
-            TypeRef::ConstValue(_) | TypeRef::ConstSequence(_) => false,
-            TypeRef::RecordFieldProjection { .. } => true,
+        let mut pending = List::from_iter([(self, 0u32)]);
+        while let Some((ty, binders)) = pending.pop() {
+            match ty {
+                Self::Generic(id) if u32::from(id.0) >= binders => return true,
+                Self::RecordFieldProjection { .. } => return true,
+                Self::Instantiated { args, .. } | Self::Tuple(args) => {
+                    pending.extend(args.iter().map(|arg| (arg, binders)))
+                }
+                Self::Function {
+                    params,
+                    return_type,
+                    ..
+                } => {
+                    pending.extend(params.iter().map(|param| (param, binders)));
+                    pending.push((return_type, binders));
+                }
+                Self::Rank2Function {
+                    type_param_count,
+                    params,
+                    return_type,
+                    ..
+                } => {
+                    let binders = binders.saturating_add(u32::from(*type_param_count));
+                    pending.extend(params.iter().map(|param| (param, binders)));
+                    pending.push((return_type, binders));
+                }
+                Self::Dynamic(object) => {
+                    pending.extend(object.types().map(|ty| (ty, binders.saturating_add(1))))
+                }
+                Self::Reference { inner, .. }
+                | Self::Slice(inner)
+                | Self::Array { element: inner, .. } => pending.push((inner, binders)),
+                Self::AssociatedProjection {
+                    base,
+                    qualifier,
+                    args,
+                    ..
+                } => {
+                    pending.push((base, binders));
+                    pending.extend(args.iter().map(|arg| (arg, binders)));
+                    pending.extend(
+                        qualifier
+                            .iter()
+                            .flat_map(|bound| &bound.args)
+                            .map(|arg| (arg, binders)),
+                    );
+                }
+                Self::Concrete(_)
+                | Self::Generic(_)
+                | Self::ConstValue(_)
+                | Self::ConstSequence(_) => {}
+            }
         }
+        false
     }
 
     /// Returns the base type ID if this is a concrete or instantiated type.

@@ -134,7 +134,7 @@ impl InstantiationKey {
 /// 64 levels comfortably accommodates any realistic hand-written code
 /// while aborting runaway macro/generated code before it consumes
 /// gigabytes of compiler memory.
-pub const MAX_TYPE_REF_DEPTH: usize = 64;
+pub use crate::types::MAX_TYPE_REF_DEPTH;
 
 /// Computes the maximum nesting depth of a TypeRef tree.
 pub fn type_ref_depth(type_ref: &TypeRef) -> usize {
@@ -143,6 +143,7 @@ pub fn type_ref_depth(type_ref: &TypeRef) -> usize {
         TypeRef::Instantiated { args, .. } | TypeRef::Tuple(args) => {
             1 + args.iter().map(type_ref_depth).max().unwrap_or(0)
         }
+        TypeRef::Dynamic(object) => 1 + object.types().map(type_ref_depth).max().unwrap_or(0),
         TypeRef::Function {
             params,
             return_type,
@@ -248,6 +249,10 @@ fn hash_type_ref<H: Hasher>(type_ref: &TypeRef, hasher: &mut H) {
             for arg in args {
                 hash_type_ref(arg, hasher);
             }
+        }
+        TypeRef::Dynamic(object) => {
+            15u8.hash(hasher);
+            object.hash(hasher);
         }
         TypeRef::RecordFieldProjection { owner, ordinal } => {
             12u8.hash(hasher);

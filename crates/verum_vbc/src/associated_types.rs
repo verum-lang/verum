@@ -70,7 +70,12 @@ pub(crate) fn instantiate_witness(
 /// An unresolved member stays explicit for the consumer that requires it.
 /// Bound both depth and expansion work, including branching recursive families.
 pub(crate) fn normalize_projections(module: &VbcModule, ty: &mut TypeRef) -> VbcResult<()> {
-    fn normalize(module: &VbcModule, ty: &mut TypeRef, depth: usize, remaining: &mut usize) -> VbcResult<()> {
+    fn normalize(
+        module: &VbcModule,
+        ty: &mut TypeRef,
+        depth: usize,
+        remaining: &mut usize,
+    ) -> VbcResult<()> {
         if depth > crate::mono::MAX_TYPE_REF_DEPTH || *remaining == 0 {
             return Err(VbcError::AssociatedType("associated-type expansion exceeds the type nesting or work limit".into()));
         }
@@ -91,6 +96,7 @@ pub(crate) fn normalize_projections(module: &VbcModule, ty: &mut TypeRef) -> Vbc
                     child(ty)?;
                 }
             }
+            TypeRef::Dynamic(object) => object.types_mut().try_for_each(child)?,
             TypeRef::Instantiated { args, .. } | TypeRef::Tuple(args) => {
                 args.iter_mut().try_for_each(child)?;
             }

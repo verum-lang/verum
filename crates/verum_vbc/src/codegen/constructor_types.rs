@@ -688,6 +688,8 @@ impl VbcCodegen {
                     .map(|arg| self.resolve_declared_projections(arg, depth + 1))
                     .collect::<Option<_>>()?,
             },
+            TypeRef::Dynamic(object) => TypeRef::Dynamic(object.try_map(|ty|
+                self.resolve_declared_projections(ty, depth + 1).ok_or(())).ok()?),
             TypeRef::Tuple(parts) => TypeRef::Tuple(
                 parts
                     .iter()
@@ -735,6 +737,8 @@ fn fully_bound_at(ty: &TypeRef, bindings: &TypeSubstitution, depth: u32) -> bool
             params.iter().all(|ty| fully_bound_at(ty, bindings, depth))
                 && fully_bound_at(return_type, bindings, depth)
         }
+        TypeRef::Dynamic(object) => depth.checked_add(1).is_some_and(|depth|
+            object.types().all(|ty| fully_bound_at(ty, bindings, depth))),
         TypeRef::AssociatedProjection { base, qualifier, args, .. } => fully_bound_at(base, bindings, depth)
             && args.iter().all(|argument| fully_bound_at(argument, bindings, depth))
             && qualifier.as_ref().is_none_or(|application| application.args.iter().all(|argument| fully_bound_at(argument, bindings, depth))),

@@ -14,7 +14,7 @@ pub(crate) fn concrete(ty: &TypeRef) -> bool {
         TypeRef::Generic(_)
         | TypeRef::AssociatedProjection { .. }
         | TypeRef::RecordFieldProjection { .. }
-        | TypeRef::Rank2Function { .. } => false,
+        | TypeRef::Rank2Function { .. } | TypeRef::Dynamic(_) => false,
         TypeRef::Instantiated { args, .. } | TypeRef::Tuple(args) => args.iter().all(concrete),
         TypeRef::Function {
             params,

@@ -922,6 +922,13 @@ impl VbcLinker {
                 assoc: assoc.clone(),
                 args: args.iter().map(|ty| self.remap_type_ref(ty, remap)).collect::<Result<_, _>>()?,
             },
+            TypeRef::Dynamic(object) => {
+                let mut mapped = object.try_map(|ty| self.remap_type_ref(ty, remap))?;
+                for application in mapped.applications_mut() {
+                    application.protocol = remap.map_protocol(application.protocol)?;
+                }
+                TypeRef::Dynamic(mapped)
+            }
             // Const-generic VALUE — no ids to remap.
             TypeRef::ConstValue(_) | TypeRef::ConstSequence(_) => src.clone(),
             TypeRef::RecordFieldProjection { owner, ordinal } => TypeRef::RecordFieldProjection {

@@ -699,6 +699,20 @@ impl Serializer {
                 encode_u32(owner.0, &mut self.output);
                 encode_u32(*ordinal, &mut self.output);
             }
+            TypeRef::Dynamic(object) => {
+                self.output.push(0x10);
+                encode_varint(object.bounds.len() as u64, &mut self.output);
+                for bound in &object.bounds {
+                    self.serialize_protocol_application(bound)?;
+                }
+                encode_varint(object.bindings.len() as u64, &mut self.output);
+                for binding in &object.bindings {
+                    self.serialize_protocol_application(&binding.owner)?;
+                    encode_varint(binding.member.len() as u64, &mut self.output);
+                    self.output.extend_from_slice(binding.member.as_bytes());
+                    self.serialize_type_ref(&binding.value)?;
+                }
+            }
             TypeRef::ConstSequence(values) => {
                 values.validate()?;
                 self.output.push(0x0F);
@@ -713,6 +727,18 @@ impl Serializer {
                 self.output.push(0x0B);
                 encode_u64(*v as u64, &mut self.output);
             }
+        }
+        Ok(())
+    }
+
+    fn serialize_protocol_application(
+        &mut self,
+        application: &crate::types::ProtocolApplication,
+    ) -> VbcResult<()> {
+        encode_u32(application.protocol.0, &mut self.output);
+        encode_varint(application.args.len() as u64, &mut self.output);
+        for argument in &application.args {
+            self.serialize_type_ref(argument)?;
         }
         Ok(())
     }

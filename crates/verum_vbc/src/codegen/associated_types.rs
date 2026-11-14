@@ -470,6 +470,8 @@ impl VbcCodegen {
                     length: *length,
                 }),
                 TypeRef::Slice(inner) => Some(TypeRef::Slice(Box::new(nested(inner, active)?))),
+                TypeRef::Dynamic(object) => object.try_map(|ty| resolve(codegen, ty, active, depth + 1).ok_or(()))
+                    .ok().map(TypeRef::Dynamic),
                 // Rank-2 signatures are not certified as ordinary callables.
                 TypeRef::Rank2Function { .. } => None,
                 TypeRef::Concrete(_) | TypeRef::Generic(_) | TypeRef::ConstValue(_) | TypeRef::ConstSequence(_) => {

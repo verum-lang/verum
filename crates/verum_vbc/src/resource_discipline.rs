@@ -104,7 +104,7 @@ fn resource_discipline_inner<'a>(
         TypeRef::Generic(_)
         | TypeRef::AssociatedProjection { .. }
         | TypeRef::RecordFieldProjection { .. }
-        | TypeRef::ConstValue(_) | TypeRef::ConstSequence(_) => return Unknown,
+        | TypeRef::ConstValue(_) | TypeRef::ConstSequence(_) | TypeRef::Dynamic(_) => return Unknown,
     };
     // Intrinsic primitives have a language-defined discipline. Registering
     // their methods may create a descriptor with no resource modifier; that

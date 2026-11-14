@@ -946,6 +946,7 @@ impl VbcModule {
             } else { render(base) };
             format!("{base}.{assoc}{}", suffix(args))
         }
+            TypeRef::Dynamic(object) => self.display_dynamic_protocol(object),
             // Const-generic VALUE argument renders as its literal —
             // `StackAllocator<256>` round-trips as written.
             TypeRef::ConstValue(v) => v.to_string(),
@@ -953,6 +954,44 @@ impl VbcModule {
             TypeRef::RecordFieldProjection { owner, ordinal } =>
                 format!("<record-field {}#{ordinal}>", self.display_type_id(*owner)),
         }
+    }
+
+    fn display_dynamic_protocol(&self, object: &crate::types::DynamicProtocolType) -> String {
+        let render = |application: &crate::types::ProtocolApplication| {
+            let name = self.display_type_id(TypeId(application.protocol.0));
+            let mut arguments: verum_common::List<String> = application
+                .args
+                .iter()
+                .map(|argument| self.display_type_ref(argument))
+                .collect();
+            arguments.extend(
+                object
+                    .bindings
+                    .iter()
+                    .filter(|binding| &binding.owner == application)
+                    .map(|binding| {
+                        format!(
+                            "{} = {}",
+                            binding.member,
+                            self.display_type_ref(&binding.value)
+                        )
+                    }),
+            );
+            if arguments.is_empty() {
+                name
+            } else {
+                format!("{name}<{}>", arguments.join(", "))
+            }
+        };
+        format!(
+            "dyn {}",
+            object
+                .bounds
+                .iter()
+                .map(render)
+                .collect::<verum_common::List<_>>()
+                .join(" + ")
+        )
     }
 
     /// Renders a `TypeId` as a human-readable string.

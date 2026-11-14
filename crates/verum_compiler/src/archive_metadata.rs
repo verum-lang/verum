@@ -106,6 +106,7 @@ fn validate_projection_metadata_carriers(module: &VbcModule) -> Result<(), Text>
         match ty {
             TypeRef::AssociatedProjection { base, qualifier, args, .. } => qualifier.is_some()
                 || (!qualified_only && !args.is_empty()) || nested(base) || args.iter().any(nested),
+            TypeRef::Dynamic(object) => object.types().any(nested),
             TypeRef::Instantiated { args, .. } | TypeRef::Tuple(args) => args.iter().any(nested),
             TypeRef::Reference { inner, .. } | TypeRef::Slice(inner) | TypeRef::Array { element: inner, .. } => nested(inner),
             TypeRef::Function { params, return_type, .. } | TypeRef::Rank2Function { params, return_type, .. } => params.iter().any(nested) || nested(return_type),
@@ -113,6 +114,24 @@ fn validate_projection_metadata_carriers(module: &VbcModule) -> Result<(), Text>
         }
     }
     let check = |ty: &TypeRef, has_source: bool| {
+        let mut pending = verum_common::List::from_iter([ty]);
+        let mut remaining = verum_vbc::types::MAX_TYPE_REF_NODES;
+        while let Some(ty) = pending.pop() {
+            if remaining == 0 {
+                return Err(Text::from("metadata type resource limit exceeded"));
+            }
+            remaining -= 1;
+            if let TypeRef::Dynamic(object) = ty
+                && !has_source
+                && (!object.bindings.is_empty()
+                    || object.bounds.iter().any(|bound| !bound.args.is_empty()))
+            {
+                return Err(Text::from(
+                    "applied dynamic contract lacks its declaration-owned source signature; publication refused",
+                ));
+            }
+            ty.for_each_child(|child| pending.push(child));
+        }
         if contains(ty, 0, true) {
             Err(Text::from("qualified associated projection requires a typed metadata carrier; publication refused"))
         } else if !has_source && contains(ty, 0, false) {
@@ -2197,6 +2216,23 @@ fn render_type_ref(
                 p.join(", "),
                 render_type_ref(return_type, declared_name, param_id_to_name)
             )
+        }
+        TypeRef::Dynamic(object) => {
+            let mut inner = HashMap::new();
+            for (index, name) in param_id_to_name {
+                if let Some(index) = index.checked_add(1) { inner.insert(index, name.clone()); }
+            }
+            inner.insert(0, "Self".into());
+            let render = |ty| render_type_ref(ty, declared_name, &inner);
+            let bounds: verum_common::List<_> = object.bounds.iter().map(|application| {
+                let name = declared_name(application.protocol.0)
+                    .unwrap_or_else(|| format!("__opaque_type_{}", application.protocol.0));
+                let mut arguments: verum_common::List<_> = application.args.iter().map(render).collect();
+                arguments.extend(object.bindings.iter().filter(|binding| &binding.owner == application)
+                    .map(|binding| format!("{}={}", binding.member, render(&binding.value))));
+                if arguments.is_empty() { name } else { format!("{name}<{}>", arguments.join(",")) }
+            }).collect();
+            format!("dyn {}", bounds.join(" + "))
         }
         TypeRef::Reference {
             inner,

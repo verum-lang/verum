@@ -234,13 +234,20 @@ impl<'a> Validator<'a> {
             self.errors.push(VbcError::InvalidStringId(desc.name.0));
         }
 
+        let scope = Some(WitnessScope {
+            parameters: &desc.type_params,
+            local_binders: 0,
+        });
+        if let Some(target) = &desc.alias_target {
+            self.validate_scoped_type_ref(target, 0, false, scope);
+        }
         // Validate field types
         for field in &desc.fields {
             // The integrity check above establishes the exact declaration,
             // prefix and universe-valued owner for any record projection.
-            self.validate_type_ref_in_record(&field.type_ref, 0, true);
+            self.validate_scoped_type_ref(&field.type_ref, 0, true, scope);
             if let Some(declaration) = &field.declaration_type {
-                self.validate_type_ref_in_record(declaration, 0, true);
+                self.validate_scoped_type_ref(declaration, 0, true, scope);
             }
         }
 
@@ -380,6 +387,20 @@ impl<'a> Validator<'a> {
                     }
                 }
             }
+            TypeRef::Dynamic(object) => {
+                if let Err(message) = crate::dynamic_protocol::validate(object, &|id| self.module.get_type(id)) {
+                    self.errors.push(VbcError::Deserialization(message.into_string()));
+                }
+                let scope = scope.unwrap_or(WitnessScope {parameters: &[], local_binders: 0});
+                let Some(local_binders) = scope.local_binders.checked_add(1) else {
+                    self.errors.push(VbcError::Deserialization("dynamic subject scope overflow".into()));
+                    return;
+                };
+                let scope = Some(WitnessScope {local_binders, ..scope});
+                for ty in object.types() {
+                    self.validate_scoped_type_ref(ty, depth + 1, record_field, scope);
+                }
+            }
             TypeRef::ConstSequence(values) => {
                 if let Err(error) = values.validate() { self.errors.push(error); }
             }
@@ -448,8 +469,12 @@ impl<'a> Validator<'a> {
 
         // All declaration-owned types share the same function scope, including
         // semantic signatures, yielded values, generic defaults and bounds.
+        let scope = WitnessScope {
+            parameters: &desc.type_params,
+            local_binders: 0,
+        };
         for ty in desc.type_references() {
-            self.validate_type_ref(ty, 0);
+            self.validate_scoped_type_ref(ty, 0, false, Some(scope));
         }
 
         // Validate register count is reasonable (max ~16K for good performance)

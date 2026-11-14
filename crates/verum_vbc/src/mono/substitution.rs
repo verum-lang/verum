@@ -186,6 +186,10 @@ fn map_free_parameters(
                 contexts: contexts.clone(),
             }
         }
+        TypeRef::Dynamic(object) => {
+            let depth = depth.checked_add(1).ok_or(SubstitutionError::BinderDepthOverflow)?;
+            TypeRef::Dynamic(object.try_map(|ty| map_free_parameters(ty, depth, map))?)
+        }
         TypeRef::Reference {
             inner,
             mutability,

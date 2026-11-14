@@ -68,6 +68,7 @@ mod statements;
 mod value_uses;
 mod place_copies;
 mod formal_parameters;
+mod dynamic_protocol;
 mod source_substitution;
 mod protocol_applications;
 mod impl_generic_rosters;
@@ -3394,7 +3395,12 @@ impl VbcCodegen {
     ///
     /// Idempotent per module: declaration passes run more than once over a
     /// module; only that module's first claim allocates/evicts.
-    fn claim_user_type_name(&mut self, module_name: &str, declaration: &verum_ast::TypeDecl) {
+    fn claim_user_type_name(
+        &mut self,
+        module_name: &str,
+        source_owner: Option<&str>,
+        declaration: &verum_ast::TypeDecl,
+    ) {
         let type_name = declaration.name.name.as_str();
         let qualified = crate::module::qualify_module_name(module_name, type_name);
         let source = match verum_ast::source_signature::source_type_declaration(declaration) {
@@ -3537,6 +3543,29 @@ impl VbcCodegen {
                 td.name = sid;
             }
             self.type_name_to_id.entry(qualified).or_insert(old_id);
+        }
+        if complete_id.is_none()
+            && let Some(source) = source
+            && matches!(source.body, TypeDeclBody::Protocol(_))
+        {
+            // Dynamic references can appear before this protocol's file or
+            // inside mutually recursive protocol signatures. Publish its exact
+            // declaration now; the ordinary body pass completes the same ID.
+            let header = TypeDescriptor {
+                id: type_id,
+                name: StringId(self.ctx.intern_string_raw(type_name)),
+                origin_module: source_owner
+                    .map(|owner| StringId(self.ctx.intern_string_raw(owner))),
+                kind: crate::types::TypeKind::Protocol,
+                source_declaration: Some(source),
+                resource_discipline: declaration.resource_discipline(),
+                ..Default::default()
+            };
+            let owner = self
+                .type_declaration_identity(&header)
+                .expect("declared protocol identity");
+            self.push_type_descriptor(header);
+            self.bootstrap_local_forwards.insert(owner);
         }
     }
 
@@ -7032,6 +7061,7 @@ impl VbcCodegen {
             }
         };
         match ty {
+            TypeRef::Dynamic(object) => self.dynamic_type_name(object, None).map(|name| name.to_string()),
             TypeRef::Concrete(tid) => {
                 if let Some(prim) = self.primitive_type_id_to_name(*tid) {
                     return Some(prim.to_string());
@@ -8649,14 +8679,17 @@ impl VbcCodegen {
     /// Inline declarations participate in the same unit prepass as file types.
     /// Every declaring owner has an ID before any field or body refers to it.
     fn claim_declared_type_items(
-        &mut self, items: &[verum_ast::Item], owner: &str, source_owner: Option<&str>,
+        &mut self,
+        items: &[verum_ast::Item],
+        owner: &str,
+        source_owner: Option<&str>,
     ) {
         self.source_type_mounts
             .entry(source_owner.unwrap_or(&self.config.module_name).into()).or_default();
         for item in items {
             if !self.should_compile_item(item) { continue; }
             match &item.kind {
-                ItemKind::Type(declaration) => self.claim_user_type_name(owner, declaration),
+                ItemKind::Type(declaration) => self.claim_user_type_name(owner, source_owner, declaration),
                 ItemKind::Mount(mount) => {
                     let owner = source_owner.unwrap_or(&self.config.module_name).to_owned();
                     self.publish_source_type_mount(&owner, mount);
@@ -16411,6 +16444,8 @@ impl VbcCodegen {
                 let type_id = self.claim_local_type_id(&type_name);
 
                 let mut type_desc = TypeDescriptor {
+                    source_declaration: verum_ast::source_signature::source_type_declaration(type_decl)
+                        .map_err(|message| CodegenError::new(CodegenErrorKind::InvalidSourceSignature(message.into_string())))?,
                     resource_discipline: type_decl.resource_discipline(),
                     id: type_id,
                     name: StringId(self.ctx.intern_string_raw(&type_name)),
@@ -17970,6 +18005,16 @@ impl VbcCodegen {
     ) -> CodegenResult<TypeRef> {
         use verum_ast::ty::{PathSegment, TypeKind};
         associated_types::require_projection_application_evidence(ty)?;
+        if matches!(ty.kind, TypeKind::DynProtocol { .. }) {
+            return self.resolve_dynamic_type(
+                ty,
+                generic_param_map,
+                declaration_scope,
+                array_count,
+                values,
+                nominal_defaults,
+            );
+        }
         // Generic instantiation: recurse into args with the same map
         // so nested type-param references (`Result<T, E>` from
         // `type IoResult<T> is Result<T, StreamError>;`) preserve
@@ -18007,7 +18052,9 @@ impl VbcCodegen {
                         _ => Err(CodegenError::with_span(CodegenErrorKind::InvalidSourceSignature(
                             "nominal argument has no scoped witness representation".into()), ty.span)),
                     }}).collect::<CodegenResult<_>>()?;
-                let arg_refs = self.complete_nominal_arguments(base_id, arg_refs, ty.span, nominal_defaults, None)?;
+                let receiver = self_type.filter(|_| self.type_by_id(base_id)
+                    .is_some_and(|descriptor| descriptor.kind == crate::types::TypeKind::Protocol));
+                let arg_refs = self.complete_nominal_arguments(base_id, arg_refs, ty.span, nominal_defaults, receiver)?;
                 if arg_refs.is_empty() { return Ok(TypeRef::Concrete(base_id)); }
                 return Ok(TypeRef::Instantiated {
                     base: base_id,
@@ -18589,10 +18636,7 @@ impl VbcCodegen {
                     contexts: ctx_refs,
                 }
             }
-            TypeKind::DynProtocol { .. } => {
-                // Dynamic protocol objects are fat pointers (vtable + data pointer)
-                TypeRef::Concrete(TypeId::PTR)
-            }
+            TypeKind::DynProtocol { .. } => self.resolve_signature_type_ref(ty, &self.ctx.current_generic_param_ids)?,
             TypeKind::CapabilityRestricted { base, .. } => {
                 // Capability restrictions are compile-time only; unwrap to base type
                 self.ast_type_to_type_ref(base)?
@@ -18854,22 +18898,11 @@ impl VbcCodegen {
             TypeKind::UnsafeReference { inner, .. } => self
                 .extract_type_name_at(inner, false)
                 .map(|n| format!("&unsafe {}", n)),
-            TypeKind::DynProtocol { bounds, .. } => {
-                let names: Vec<String> = bounds
-                    .iter()
-                    .filter_map(|b| {
-                        if let verum_ast::ty::TypeBoundKind::Protocol(path) = &b.kind {
-                            Some(self.declared_dyn_path(path))
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
-                if names.is_empty() {
-                    None
-                } else {
-                    Some(format!("dyn:{}", names.join("+")))
-                }
+            TypeKind::DynProtocol { .. } => {
+                let TypeRef::Dynamic(object) = self.resolve_signature_type_ref(ty, &self.ctx.current_generic_param_ids).ok()? else {
+                    return None;
+                };
+                self.dynamic_type_name(&object, Some(&self.ctx.current_generic_param_ids)).map(|name| name.to_string())
             }
             // T0701: associated-type projections (`I.Item`,
             // `Self.Item`) render in the canonical parseable spelling
@@ -22977,7 +23010,11 @@ impl VbcCodegen {
         Self::render_type_name(ty, qualified_paths, &Self::format_type_path)
     }
 
-    fn render_type_name(ty: &verum_ast::ty::Type, qualified_paths: bool, bound_path: &impl Fn(&verum_ast::Path) -> String) -> String {
+    fn render_type_name(
+        ty: &verum_ast::ty::Type,
+        qualified_paths: bool,
+        bound_path: &impl Fn(&verum_ast::Path) -> String,
+    ) -> String {
         use verum_ast::ty::{GenericArg, PathSegment, TypeKind};
         if let Some(name) = ty.kind.primitive_name() {
             return name.to_string();
@@ -23104,19 +23141,20 @@ impl VbcCodegen {
                     .collect();
                 format!("({})", elem_names.join(", "))
             }
-            TypeKind::DynProtocol { bounds, .. } => {
-                // dyn Protocol → "dyn:Protocol" for dispatch tracking
-                let bound_names: Vec<String> = bounds
-                    .iter()
-                    .filter_map(|b| {
-                        if let verum_ast::ty::TypeBoundKind::Protocol(path) = &b.kind {
-                            Some(bound_path(path))
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
-                format!("dyn:{}", bound_names.join("+"))
+            TypeKind::DynProtocol { bounds, bindings } => {
+                let mut rendered: Vec<String> = bounds.iter().map(|bound| match &bound.kind {
+                    verum_ast::ty::TypeBoundKind::Protocol(path) => bound_path(path),
+                    verum_ast::ty::TypeBoundKind::GenericProtocol(ty) => Self::render_type_name(ty, qualified_paths, bound_path),
+                    _ => format!("{:?}", bound.kind),
+                }).collect();
+                if let Some(bindings) = bindings {
+                    let values: Vec<_> = bindings.iter().map(|binding| format!("{}={}", binding.name.name,
+                        Self::render_type_name(&binding.ty, qualified_paths, bound_path))).collect();
+                    if let Some(last) = rendered.last_mut() {
+                        last.push_str(&format!("<{}>", values.join(",")));
+                    }
+                }
+                format!("dyn:{}", rendered.join("+"))
             }
             // Function types render the canonical `fn(A, B) -> R`
             // notation — the exact spelling
@@ -28087,6 +28125,9 @@ fn remap_type_ref_archive(
 ) -> crate::types::TypeRef {
     struct NominalRemap<'a>(&'a std::collections::HashMap<u32, u32>);
     impl crate::bytecode_remap::IdRemap for NominalRemap<'_> {
+        fn map_protocol(&self, id: crate::types::ProtocolId) -> crate::types::ProtocolId {
+            crate::types::ProtocolId(self.map_type_id(TypeId(id.0)).0)
+        }
         fn map_type_id(&self, id: TypeId) -> TypeId {
             self.0.get(&id.0).copied().map(TypeId).unwrap_or(id)
         }

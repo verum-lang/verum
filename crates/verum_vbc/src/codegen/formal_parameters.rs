@@ -429,6 +429,9 @@ impl VbcCodegen {
                         && params.iter().all(|p| supported(p, depth + 1, budget, cg, &inner, declared_ids, binders, retained))
                         && supported(return_type, depth + 1, budget, cg, &inner, declared_ids, binders, retained)
                 }
+                TypeKind::DynProtocol { .. } => cg.resolve_signature_type_ref(ty, scope)
+                    .is_ok_and(|resolved| resolved_in_scope(&resolved,
+                        &mut |id| declared_ids.contains(&id), depth + 1, binders)),
                 // Raw pointers and unsupported forms do not establish an
                 // exact declaration-owned semantic type.
                 _ => false,
@@ -510,6 +513,9 @@ fn remapped_declaration_type(
                 || (id.is_builtin() && id != TypeId::PTR && id != TypeId::RESERVED)
         };
         match ty {
+            TypeRef::Dynamic(object) => object.bounds.iter().chain(object.bindings.iter().map(|binding| &binding.owner))
+                .all(|application| id_known(TypeId(application.protocol.0)))
+                && object.types().all(|ty| known(ty, map, depth + 1)),
             TypeRef::Concrete(id) => id_known(*id),
             TypeRef::RecordFieldProjection { owner, .. } => map.contains_key(&owner.0),
             TypeRef::Generic(_) | TypeRef::ConstValue(_) | TypeRef::ConstSequence(_) => true,
@@ -549,7 +555,12 @@ pub(super) fn resolved(ty: &TypeRef, declared_ids: &[TypeParamId], depth: usize)
     resolved_in_scope(ty, &mut |id| declared_ids.contains(&id), depth, 0)
 }
 
-fn resolved_in_scope(ty: &TypeRef, parameter: &mut impl FnMut(TypeParamId) -> bool, depth: usize, binders: u32) -> bool {
+fn resolved_in_scope(
+    ty: &TypeRef,
+    parameter: &mut impl FnMut(TypeParamId) -> bool,
+    depth: usize,
+    binders: u32,
+) -> bool {
     if depth > 64 {
         return false;
     }
@@ -560,6 +571,8 @@ fn resolved_in_scope(ty: &TypeRef, parameter: &mut impl FnMut(TypeParamId) -> bo
             let index = u32::from(id.0);
             index < binders || parameter(TypeParamId((index - binders) as u16))
         }
+        TypeRef::Dynamic(object) => binders.checked_add(1).is_some_and(|binders|
+            object.types().all(|ty| resolved_in_scope(ty, parameter, depth + 1, binders))),
         TypeRef::ConstValue(_) | TypeRef::ConstSequence(_) => true,
         // The record telescope supplies this binder, not the callable's scope.
         TypeRef::RecordFieldProjection { .. } => false,

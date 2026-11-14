@@ -430,6 +430,7 @@ fn validate_record_projections(descriptor: &TypeDescriptor) -> Result<(), Text> 
                     );
                 }
             }
+            TypeRef::Dynamic(object) => pending.extend(object.types().map(|ty| (ty, scope))),
             TypeRef::Instantiated { args, .. } | TypeRef::Tuple(args) => {
                 pending.extend(args.iter().map(|ty| (ty, scope)));
             }

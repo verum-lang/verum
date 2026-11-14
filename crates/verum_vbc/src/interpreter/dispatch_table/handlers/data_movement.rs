@@ -126,9 +126,10 @@ pub(in super::super) fn handle_loadt(
         state.set_reg(dst, value);
         return Ok(DispatchResult::Continue);
     }
-    fn dispatch_head(ty: &crate::types::TypeRef, depth: usize)
-        -> Result<Option<crate::types::TypeId>, String>
-    {
+    fn dispatch_head(
+        ty: &crate::types::TypeRef,
+        depth: usize,
+    ) -> Result<Option<crate::types::TypeId>, String> {
         use crate::types::TypeRef;
         if depth >= 64 { return Err("cyclic or excessively deep associated type witness".into()); }
         match ty {
@@ -138,6 +139,7 @@ pub(in super::super) fn handle_loadt(
             TypeRef::AssociatedProjection { .. } => Err(
                 "associated type requires an unambiguous declaration-owned binding and family telescope".into()),
             TypeRef::Function { .. } | TypeRef::Rank2Function { .. } | TypeRef::Tuple(_) => Ok(Some(crate::types::TypeId::UNIT)),
+            TypeRef::Dynamic(_) => Err("dynamic subject requires an actual runtime type descriptor".into()),
             TypeRef::Generic(id) => Err(format!("unresolved generic witness slot {}", id.0)),
             TypeRef::RecordFieldProjection { .. } => Err("unresolved dependent field witness".into()),
             TypeRef::ConstValue(_) | TypeRef::ConstSequence(_) => Err("a value witness cannot be used as a type head".into()),

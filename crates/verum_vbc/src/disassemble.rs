@@ -229,6 +229,7 @@ fn format_type_ref(module: &VbcModule, tr: &TypeRef) -> String {
             } else { render(base) };
             format!("{base}.{assoc}{}", suffix(args))
         }
+        TypeRef::Dynamic(_) => module.display_type_ref(tr),
         // Const-generic VALUE argument — renders as its literal.
         TypeRef::ConstValue(v) => v.to_string(),
             TypeRef::ConstSequence(values) => values.to_string(),

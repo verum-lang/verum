@@ -89,6 +89,9 @@ impl<'ctx> TypeLowering<'ctx> {
             TypeRef::AssociatedProjection { .. } => Err(LlvmLoweringError::type_lowering(
                 "Associated-type projections should be resolved before lowering",
             )),
+            TypeRef::Dynamic(_) => Err(LlvmLoweringError::type_lowering(
+                "Dynamic value layout requires its actual owning runtime descriptor",
+            )),
             TypeRef::RecordFieldProjection { .. } => Err(LlvmLoweringError::type_lowering(
                 "Unresolved record-field projection",
             )),

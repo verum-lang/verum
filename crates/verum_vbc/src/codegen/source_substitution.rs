@@ -290,6 +290,9 @@ fn reserve_indices(ty: &TypeRef, reserved: &mut BTreeSet<u16>) {
                 for argument in &application.args { reserve_indices(argument, reserved); }
             }
         },
+        TypeRef::Dynamic(object) => {
+            for ty in object.types() { reserve_indices(ty, reserved); }
+        }
         TypeRef::Concrete(_) | TypeRef::ConstValue(_) | TypeRef::ConstSequence(_) | TypeRef::RecordFieldProjection { .. } => {}
     }
 }

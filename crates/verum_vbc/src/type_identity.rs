@@ -7,8 +7,7 @@ use crate::{
 };
 use verum_common::{List, Map, Text};
 
-const MAX_DEPTH: usize = 64;
-const MAX_NODES: usize = 4096;
+use crate::types::{MAX_TYPE_REF_DEPTH as MAX_DEPTH, MAX_TYPE_REF_NODES as MAX_NODES};
 
 /// Evidence belongs to one assembled program, not to reusable VM settings.
 /// Arc<VbcModule> users share it; cloning a mutable module starts a fresh scope.
@@ -72,7 +71,7 @@ impl TypeIdentities {
 pub fn canonical_type(module: &VbcModule, ty: &TypeRef) -> Result<TypeRef, Text> {
     check_shape(ty)?;
     let mut remaining = MAX_NODES;
-    normalize(module, ty, 0, false, &mut remaining)
+    normalize(module, ty, 0, 0, false, &mut remaining)
 }
 
 // Validate before cloning/substitution. The recursive construction below only
@@ -96,6 +95,9 @@ fn check_shape(ty: &TypeRef) -> Result<(), Text> {
                 pending.push((inner, depth + 1))
             }
             TypeRef::Array { element, .. } => pending.push((element, depth + 1)),
+            TypeRef::Dynamic(object) => {
+                pending.extend(object.types().map(|ty| (ty, depth + 1)));
+            }
             TypeRef::Function { .. } | TypeRef::Rank2Function { .. } => {
                 return Err(
                     "callable type identity requires its full computational contract".into(),
@@ -126,6 +128,7 @@ fn normalize(
     module: &VbcModule,
     ty: &TypeRef,
     depth: usize,
+    binders: u32,
     value_argument: bool,
     remaining: &mut usize,
 ) -> Result<TypeRef, Text> {
@@ -133,7 +136,8 @@ fn normalize(
         return Err("type reflection resource limit exceeded".into());
     }
     *remaining -= 1;
-    let child = |ty, remaining: &mut usize| normalize(module, ty, depth + 1, false, remaining);
+    let child =
+        |ty, remaining: &mut usize| normalize(module, ty, depth + 1, binders, false, remaining);
     Ok(match ty {
         TypeRef::Concrete(id) | TypeRef::Instantiated { base: id, .. } => {
             let args = match ty {
@@ -178,12 +182,18 @@ fn normalize(
                         base: *id,
                         args: args
                             .iter()
-                            .map(|arg| normalize(module, arg, depth + 1, true, remaining))
+                            .map(|arg| normalize(module, arg, depth + 1, binders, true, remaining))
                             .collect::<Result<_, _>>()?,
                     }
                 }
             }
         }
+        TypeRef::Dynamic(object) => {
+            crate::dynamic_protocol::validate(object, &|id| module.get_type(id))?;
+            let binders = binders.checked_add(1).ok_or_else(|| Text::from("type binder scope overflow"))?;
+            TypeRef::Dynamic(object.try_map(|ty| normalize(module, ty, depth + 1, binders, true, remaining))?)
+        }
+        TypeRef::Generic(id) if u32::from(id.0) < binders => ty.clone(),
         TypeRef::Reference {
             inner,
             mutability,

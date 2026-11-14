@@ -319,21 +319,25 @@ const MAX_DECOMPRESSED_BYTECODE_BYTES: u32 = 1 << 30; // 1 GB
 
 /// VBC module deserializer.
 struct Deserializer<'a> {
- /// Input data.
- data: &'a [u8],
- /// Current read position.
- offset: usize,
- /// Parsed header.
- header: Option<VbcHeader>,
+    /// Input data.
+    data: &'a [u8],
+    /// Current read position.
+    offset: usize,
+    /// Parsed header.
+    header: Option<VbcHeader>,
+    type_depth: usize,
+    type_nodes_remaining: usize,
 }
 
 impl<'a> Deserializer<'a> {
- /// Creates a new deserializer.
+    /// Creates a new deserializer.
  fn new(data: &'a [u8]) -> Self {
  Self {
  data,
  offset: 0,
  header: None,
+ type_depth: 0,
+ type_nodes_remaining: 0,
  }
  }
 
@@ -1362,6 +1366,22 @@ impl<'a> Deserializer<'a> {
 
  /// Parses a type reference.
  fn parse_type_ref(&mut self) -> VbcResult<TypeRef> {
+        if self.type_depth == 0 {
+            self.type_nodes_remaining = crate::types::MAX_TYPE_REF_NODES;
+        }
+        if self.type_depth >= crate::types::MAX_TYPE_REF_DEPTH || self.type_nodes_remaining == 0 {
+            return Err(VbcError::Deserialization(
+                "type reference exceeds structural resource limit".into(),
+            ));
+        }
+        self.type_depth += 1;
+        self.type_nodes_remaining -= 1;
+        let result = self.parse_type_ref_inner();
+        self.type_depth -= 1;
+        result
+    }
+
+    fn parse_type_ref_inner(&mut self) -> VbcResult<TypeRef> {
  let tag = decode_u8(self.data, &mut self.offset)?;
 
  match tag & 0x0F {
@@ -1526,6 +1546,25 @@ impl<'a> Deserializer<'a> {
      if assoc.is_empty() { return Err(VbcError::InvalidTypeRefTag(tag)); }
      Ok(TypeRef::AssociatedProjection { base, qualifier, assoc, args })
  }
+ 0x00 if tag == 0x10 && self.header.as_ref().is_some_and(|header| header.version_minor >= 55) => {
+     let bounds_count = self.parse_dynamic_count()?;
+     let bounds = (0..bounds_count).map(|_| self.parse_protocol_application()).collect::<VbcResult<_>>()?;
+     let binding_count = self.parse_dynamic_count()?;
+     let mut bindings = verum_common::List::new();
+     for _ in 0..binding_count {
+         let owner = self.parse_protocol_application()?;
+         let length = decode_varint(self.data, &mut self.offset)?;
+         let end = usize::try_from(length).ok().and_then(|length| self.offset.checked_add(length))
+             .filter(|end| *end <= self.data.len())
+             .ok_or(VbcError::InvalidTypeRefTag(tag))?;
+         let member = std::str::from_utf8(&self.data[self.offset..end])
+             .map_err(|_| VbcError::InvalidTypeRefTag(tag))?.into();
+         self.offset = end;
+         let value = self.parse_type_ref()?;
+         bindings.push(crate::types::DynamicAssociatedBinding {owner, member, value});
+     }
+     Ok(TypeRef::Dynamic(crate::types::DynamicProtocolType {bounds, bindings}))
+ }
  0x0F if self.header.as_ref().is_some_and(|header| header.version_minor >= 48) =>
      crate::const_sequence::ConstSequence::decode(self.data, &mut self.offset).map(TypeRef::ConstSequence),
  0x0B => {
@@ -1541,7 +1580,25 @@ impl<'a> Deserializer<'a> {
  }
  }
 
- fn parse_application_arguments(&mut self) -> VbcResult<Vec<TypeRef>> {
+    fn parse_dynamic_count(&mut self) -> VbcResult<usize> {
+        let count = decode_varint(self.data, &mut self.offset)?;
+        if count > self.type_nodes_remaining as u64 {
+            return Err(VbcError::Deserialization(
+                "dynamic protocol exceeds structural resource limit".into(),
+            ));
+        }
+        self.type_nodes_remaining -= count as usize;
+        Ok(count as usize)
+    }
+
+    fn parse_protocol_application(&mut self) -> VbcResult<crate::types::ProtocolApplication> {
+        Ok(crate::types::ProtocolApplication {
+            protocol: ProtocolId(decode_u32(self.data, &mut self.offset)?),
+            args: self.parse_application_arguments()?,
+        })
+    }
+
+    fn parse_application_arguments(&mut self) -> VbcResult<Vec<TypeRef>> {
      let count = decode_varint(self.data, &mut self.offset)?;
      if count > MAX_TYPE_REF_INSTANTIATION_ARGS as u64 {
          return Err(VbcError::TableTooLarge { field: "type_application_args",

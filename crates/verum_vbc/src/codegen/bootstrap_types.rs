@@ -84,6 +84,16 @@ fn type_ids(ty: &TypeRef, ids: &mut Vec<TypeId>) {
                 type_ids(element, ids);
             }
         }
+        TypeRef::Dynamic(object) => {
+            ids.extend(
+                object.bounds.iter()
+                    .chain(object.bindings.iter().map(|binding| &binding.owner))
+                    .map(|application| TypeId(application.protocol.0)),
+            );
+            for ty in object.types() {
+                type_ids(ty, ids);
+            }
+        }
         TypeRef::Generic(_) | TypeRef::ConstValue(_) | TypeRef::ConstSequence(_) => {}
     }
 }

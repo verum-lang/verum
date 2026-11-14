@@ -76,6 +76,7 @@ pub mod target;
 pub mod const_sequence;
 pub mod drop_plan;
 pub mod types;
+mod dynamic_protocol;
 mod resource_discipline;
 pub mod value;
 pub mod value_use;
