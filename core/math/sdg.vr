@@ -48,7 +48,6 @@
 )
 module core.math.sdg;
 
-mount core.math.cohesive;
 mount core.math.hott;
 mount core.collections.list;
 
@@ -788,13 +787,10 @@ public fn im_to_rh<X>(imx: ImModality<X>) -> RhModality<X> {
     RhModality { underlying: imx.underlying }
 }
 
-/// Full cohesive tower: ʃ X → X → ♭ X → ℑ X → ℜ X.
-public type CohesiveTower<X> is {
-    shape:    cohesive.ShapeModality<X>,
-    flat:     cohesive.FlatModality<X>,
-    im_shape: ImModality<X>,
-    rh_stack: RhModality<X>,
-};
+// Operator data for an ambient topos H are declared separately as
+// core.math.cohesive.DifferentiallyCohesiveData<H>. They do not provide
+// transformed objects or comparison maps for an arbitrary payload X;
+// the wrappers above alone do not define a cohesive tower.
 
 // =============================================================================
 // 7. Theorems (formal statements)
