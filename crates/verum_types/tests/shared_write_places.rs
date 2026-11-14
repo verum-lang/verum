@@ -294,3 +294,35 @@ fn implicit_clone_borrows_only_duplicable_layouts() {
     let messages = errors("implement Boxed { fn clone(&mut self) -> Boxed { self.value += 1; Boxed { value: self.value } } } fn duplicate(p: &Boxed) -> Boxed { p.clone() }");
     assert!(messages.iter().any(|m| m.contains("shared reference")), "{messages:?}");
 }
+
+#[test]
+fn declaration_owned_variant_receivers_are_values_not_field_places() {
+    let declarations = "type State is Closed | Open; implement State { fn code(self)->Int { match self { Closed=>73, Open=>0 } } fn replace(&mut self)->Int { *self=State.Open; 73 } }";
+    for body in [
+        "fn probe()->Int { State.Closed.code() }",
+        "fn probe()->Int { (State.Closed).code() }",
+        "type Alias is State; fn probe()->Int { Alias.Closed.code() }",
+        "fn probe()->Int { State.Closed.replace() }",
+    ] {
+        let found = errors(&format!("{declarations} {body}"));
+        assert!(found.is_empty(), "{body}: {found:?}");
+    }
+}
+
+#[test]
+fn type_spelling_does_not_hide_a_real_shared_field_receiver() {
+    let declarations = "type State is Closed | Open; type Holder is { Closed:Boxed }; implement Boxed { fn replace(&mut self) { self.value=73; } }";
+    for body in [
+        "fn reject(State:&Holder) { State.Closed.replace(); }",
+        "fn reject(State:&Holder) { (State.Closed).replace(); }",
+    ] {
+        let found = errors(&format!("{declarations} {body}"));
+        assert!(found.iter().any(|e| e.contains("cannot write through a shared reference")), "{body}: {found:?}");
+    }
+}
+
+#[test]
+fn a_variant_constructor_cannot_be_assigned_as_a_storage_field() {
+    let found = errors("type State is Closed | Open; fn reject() { State.Closed=State.Open; }");
+    assert!(!found.is_empty(), "a constructor is not an assignable place");
+}

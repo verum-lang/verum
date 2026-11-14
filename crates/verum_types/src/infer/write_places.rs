@@ -122,6 +122,17 @@ impl TypeChecker {
         let mut step = unparen(place);
         let mut target = true;
         while let Some((operand, auto_deref)) = place_operand(step) {
+            // A selected member of a declared type is a produced value, not
+            // storage reached through that type name. Receiver borrows may
+            // use the temporary, but assignment still requires a real place.
+            // Use the same declaration authority as field resolution; lexical
+            // values shadow types and retain every reference permission check.
+            if method_receiver.is_some()
+                && matches!(step.kind, ExprKind::Field { .. })
+                && self.declaration_property_operand(operand).is_some()
+            {
+                break;
+            }
             let ty = self.place_operand_type(operand)?;
             self.check_write_through_reference(&ty, auto_deref, operand.span)?;
             if auto_deref && self.projection_carrier(&ty, operand.span)?.refined {
