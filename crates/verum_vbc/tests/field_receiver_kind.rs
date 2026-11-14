@@ -2,14 +2,16 @@
 #![cfg(feature = "codegen")]
 
 use std::sync::Arc;
-use verum_common::List;
+use verum_common::{List, Text};
 use verum_fast_parser::Parser;
 use verum_vbc::bytecode::encode_instruction;
-use verum_vbc::codegen::VbcCodegen;
+use verum_vbc::codegen::{CodegenConfig, VbcCodegen};
 use verum_vbc::instruction::{CbgrSubOpcode, Instruction, Reg};
 use verum_vbc::interpreter::Interpreter;
-use verum_vbc::module::{FunctionDescriptor, FunctionId, StringTable, VbcModule};
-use verum_vbc::types::{TypeDescriptor, TypeId, TypeKind, VariantDescriptor, VariantKind};
+use verum_vbc::module::{FunctionDescriptor, FunctionId, VbcModule};
+use verum_vbc::types::{
+    StringId, TypeDescriptor, TypeId, TypeKind, VariantDescriptor, VariantKind,
+};
 
 const HIGH: u32 = 36_161;
 
@@ -18,17 +20,43 @@ fn source_module(source: &str, high: bool) -> VbcModule {
     let mut codegen = VbcCodegen::new();
     codegen.initialize();
     if high {
-        let mut strings = StringTable::new();
+        // Reserve a high archive identity with an actual source declaration.
+        // This empty record has no type references to relocate when assigning
+        // the controlled ID; its two StringIds must use the consumer's pool.
+        let archive_ast = Parser::new("module archive; public type ExistingArchiveType is {};")
+            .parse_module()
+            .expect("archive source grammar");
+        let archive = VbcCodegen::with_config(CodegenConfig::new("archive"))
+            .compile_module(&archive_ast)
+            .expect("archive source declaration");
+        let archive = verum_vbc::deserialize::deserialize_module(
+            &verum_vbc::serialize::serialize_module(&archive).expect("serialize archive"),
+        )
+        .expect("decode archive");
+        let mut descriptor = archive
+            .types
+            .iter()
+            .find(|ty| archive.get_string(ty.name) == Some("ExistingArchiveType"))
+            .expect("declared archive record")
+            .clone();
+        assert!(descriptor.source_declaration.is_some());
+        assert!(descriptor.fields.is_empty() && descriptor.variants.is_empty());
+        assert!(descriptor.type_params.is_empty());
+        descriptor.id = TypeId(HIGH);
+        descriptor.name = StringId(
+            codegen
+                .intern_string_for_test(archive.get_string(descriptor.name).expect("archive name")),
+        );
+        descriptor.origin_module = descriptor.origin_module.map(|owner| {
+            StringId(
+                codegen.intern_string_for_test(archive.get_string(owner).expect("archive owner")),
+            )
+        });
         codegen.register_archive_type_qualified(
-            TypeDescriptor {
-                id: TypeId(HIGH),
-                name: strings.intern("ExistingArchiveType"),
-                kind: TypeKind::Record,
-                ..Default::default()
-            },
+            descriptor,
             "ExistingArchiveType".into(),
             Some("archive"),
-            Some(&strings),
+            None,
         );
     }
     codegen
@@ -580,4 +608,84 @@ fn public_variant_producer_survives_clone_and_field_read() {
         .execute_function_with_args(FunctionId(0), &[wrapper])
         .unwrap();
     assert_eq!(result.as_i64(), 37);
+}
+
+// T1746: reduce the preparation-copy failure without authentication, decoding
+// or a precompiled stdlib. These controls identify a carrier failure; they do
+// not assert that copying through a shared projection makes a deep snapshot.
+fn projected_source_and_wire(source: &str, expected: i64) {
+    let mut failures: List<Text> = List::new();
+    for high in [false, true] {
+        let source_module = source_module(source, high);
+        let wire =
+            verum_vbc::serialize::serialize_module(&source_module).expect("serialize source");
+        let decoded = verum_vbc::deserialize::deserialize_module(&wire).expect("decode source");
+        for (route, module) in [("source", source_module), ("wire", decoded)] {
+            let entry = module
+                .functions
+                .iter()
+                .find(|function| module.get_string(function.name) == Some("probe"))
+                .expect("probe")
+                .id;
+            match Interpreter::new(Arc::new(module)).execute_function(entry) {
+                Ok(actual) if actual.is_int() && actual.as_i64() == expected => {}
+                Ok(actual) => failures.push(
+                    format!("{route}, high={high}: expected Int {expected}, got {actual:?}").into(),
+                ),
+                Err(error) => failures.push(format!("{route}, high={high}: {error}").into()),
+            }
+        }
+    }
+    // Measure every runtime route even when the first returns a guarded error.
+    // A parser/codegen/codec setup failure remains a distinct immediate failure.
+    assert!(failures.is_empty(), "field receiver routes: {failures:?}");
+}
+
+const PROJECTED_RECORD: &str = r#"
+type Cell is { padding: Int, value: Int };
+type Outer is { padding: Int, inner: Cell };
+implement Outer {
+    fn publication(&self) -> &Cell { &self.inner }
+}
+fn forward(value: &Cell) -> &Cell { value }
+"#;
+
+#[test]
+fn a_shared_record_projection_preserves_the_selected_field_owner() {
+    for expression in [
+        "&outer.inner",
+        "outer.publication()",
+        "forward(outer.publication())",
+    ] {
+        let source: Text = format!(
+            r#"{PROJECTED_RECORD}
+fn probe() -> Int {{
+    let outer = Outer {{ padding: 91, inner: Cell {{ padding: 93, value: 7 }} }};
+    let received: &Cell = {expression};
+    outer.padding * 10000 + received.padding * 100 + received.value
+}}
+"#
+        )
+        .into();
+        projected_source_and_wire(source.as_str(), 919307);
+    }
+}
+
+#[test]
+fn a_dereferenced_projection_can_be_read_and_mutated_as_a_value() {
+    let source: Text = format!(
+        r#"{PROJECTED_RECORD}
+fn probe() -> Int {{
+    let outer = Outer {{ padding: 91, inner: Cell {{ padding: 93, value: 7 }} }};
+    let mut copied: Cell = *outer.publication();
+    assert_eq(copied.padding, 93);
+    assert_eq(copied.value, 7);
+    copied.padding = 37;
+    copied.value = 11;
+    copied.padding * 100 + copied.value
+}}
+"#
+    )
+    .into();
+    projected_source_and_wire(source.as_str(), 3711);
 }
