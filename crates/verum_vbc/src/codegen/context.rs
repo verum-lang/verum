@@ -745,30 +745,6 @@ pub struct CodegenContext {
     /// afterwards.
     pub carried_mount_bindings: HashMap<String, String>,
 
-    /// Module aliases populated from bare-path `mount X.Y.Z;` declarations.
-    ///
-    /// Each entry maps the rightmost path segment (`Z`) to the **full
-    /// module-path segments** (`["X", "Y", "Z"]`). When the user later
-    /// writes `Z.fn(args)` or `Z.CONST`, the codegen path-resolution
-    /// (`try_flatten_module_path`) consults this table and expands the
-    /// single-segment receiver to the full module path, so the
-    /// downstream qualified-function lookup finds
-    /// `X.Y.Z.fn` / `X.Y.Z.CONST` in the registry.
-    ///
-    /// Distinct from the function-alias registration that
-    /// `process_import_tree` already does for `mount X.Y.fn` — that
-    /// path imports a *function* under its simple name. Module aliases
-    /// import a *module* under its rightmost segment, so callers reach
-    /// every exported function/const via qualified access.
-    ///
-    /// Without this table, `mount core.sys.bitfield;` followed by
-    /// `bitfield.test_bit(v, 7)` fails at codegen with `unbound
-    /// variable: bitfield`, blocking every cross-module conformance
-    /// suite that relies on the canonical module-qualified call form
-    /// (`core-tests/sys/bitfield`, `core-tests/collections/union_find`,
-    /// `core-tests/collections/toposort`).
-    pub module_aliases: HashMap<String, Vec<String>>,
-
     /// Declaration identities that hold byte arrays (contiguous buffers).
     /// Counts and strides use the same identity: shadowing a spelling cannot
     /// steal its outer binding's layout or erase it at scope exit (T1615).
@@ -1764,7 +1740,6 @@ impl CodegenContext {
             mounted_fns: HashMap::new(),
             mounted_fn_paths: HashMap::new(),
             carried_mount_bindings: HashMap::new(),
-            module_aliases: HashMap::new(),
             byte_array_vars: HashSet::new(),
             fixed_array_counts: HashMap::new(),
             current_fn_escaping_vars: HashSet::new(),
@@ -4284,23 +4259,24 @@ impl CodegenContext {
     /// `core.sys.monotonic_nanos` mutual recursion → StackOverflow in
     /// every Bencher/sleep test).
     ///
+    /// Source mount heads are selected by VbcCodegen in the declaration
+    /// owner before this registry lookup; this context owns no alias scope.
+    ///
     /// Resolution order (all stages arity-filtered, deterministic):
     ///  1. the literal spelling, both separators (`a.b.c` / `a::b::c`),
     ///     with the `#arity` alt-key probed on arity mismatch;
-    ///  2. `module_aliases` head expansion (`mount X.Y.Z;` makes
-    ///     `Z.f()` reach `X.Y.Z.f`), plus its `core.`-stripped twin;
-    ///  3. `current_source_module`-anchored candidates, deepest anchor
+    ///  2. `current_source_module`-anchored candidates, deepest anchor
     ///     first (relative-path shadowing semantics), each probed
     ///     verbatim AND `core.`-stripped (source files declare
     ///     `module sys.darwin.time;` without the `core.` root while
     ///     mod.vr scopes may carry it), plus a `core.`-PREFIXED probe
     ///     of the literal spelling;
-    ///  4. ranked qualified-suffix scan: any key ending in
+    ///  3. ranked qualified-suffix scan: any key ending in
     ///     `.<dotted>` — ranked by the `process_import_tree` re-export
     ///     tie-break (fewest dots → module-parent before type-parent →
     ///     lexicographic) so the pick is stable across bakes.
     ///
-    /// The user-written segment count is the ambiguity FLOOR: stage 4
+    /// The user-written segment count is the ambiguity FLOOR: stage 3
     /// never matches on fewer segments than the call spelled, so this
     /// can never degrade into the bare-leaf first-match disease it
     /// replaces.
@@ -4396,21 +4372,7 @@ impl CodegenContext {
                 return Some(hit);
             }
         }
-        // Stage 2: module-alias head expansion.
-        if let Some(full) = self.module_aliases.get(parts[0].as_str()) {
-            let mut expanded = full.clone();
-            expanded.extend(parts[1..].iter().cloned());
-            let exp = expanded.join(".");
-            if let Some(hit) = probe(&exp, "alias") {
-                return Some(hit);
-            }
-            if let Some(stripped) = exp.strip_prefix("core.")
-                && let Some(hit) = probe(stripped, "alias-core-strip")
-            {
-                return Some(hit);
-            }
-        }
-        // Stage 3: current-module-anchored candidates, deepest first.
+        // Stage 2: current-module-anchored candidates, deepest first.
         if let Some(cur) = scope
             && !cur.is_empty()
             && cur != "main"
@@ -5821,29 +5783,24 @@ mod tests {
         assert!(ctx.resolve_qualified_dotted_call(&parts, 2).is_none());
     }
 
-    /// QUALIFIED-CALL-FIRST-MATCH-1 — module-alias head expansion and
+    /// QUALIFIED-CALL-FIRST-MATCH-1 — canonical path resolution and
     /// the deterministic suffix ranking (fewest dots → module-parent
     /// before type-parent → lexicographic).
     #[test]
-    fn resolve_qualified_dotted_call_alias_and_ranked_suffix() {
+    fn resolve_qualified_dotted_call_canonical_and_ranked_suffix() {
         let mut ctx = CodegenContext::new();
-        // `mount core.sys.bitfield;` installs the module alias.
-        ctx.module_aliases.insert(
-            "bitfield".to_string(),
-            vec!["core".to_string(), "sys".to_string(), "bitfield".to_string()],
-        );
         // Registration is `core.`-stripped (module decl `sys.bitfield;`).
         ctx.register_function(
             "sys.bitfield.test_bit".to_string(),
             plain_info(42, 2),
         );
-        let parts: Vec<String> = ["bitfield", "test_bit"]
+        let parts: Vec<String> = ["core", "sys", "bitfield", "test_bit"]
             .iter()
             .map(|s| s.to_string())
             .collect();
         let (key, info) = ctx
             .resolve_qualified_dotted_call(&parts, 2)
-            .expect("alias expansion + core-strip must resolve");
+            .expect("the selected canonical path + core-strip must resolve");
         assert_eq!(key, "sys.bitfield.test_bit");
         assert_eq!(info.id.0, 42);
 

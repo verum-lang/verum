@@ -95,11 +95,10 @@ fn qualified_calls_select_their_own_field_indices_and_values() {
 
 #[test]
 fn aliases_rooted_paths_and_arity_use_the_call_declaration() {
-    let mut cg = registered(&format!("{ALPHA}\n{BETA}"));
-    cg.ctx_mut()
-        .module_aliases
-        .insert("chosen".into(), vec!["alpha".into()]);
-    cg.ctx_mut().current_source_module = Some("alpha.inner".into());
+    let mut cg = registered(&format!("{}\n{BETA}", ALPHA
+        .replace("module alpha", "public module alpha")
+        .replace("type Alpha", "mount cog.alpha as chosen; module inner {} type Alpha")));
+    cg.ctx_mut().current_source_module = Some("consumer.alpha.inner".into());
     for call in ["chosen.select()", "super.select()"] {
         let expression = Parser::new(call).parse_expr().unwrap();
         assert_eq!(
@@ -119,11 +118,14 @@ fn aliases_rooted_paths_and_arity_use_the_call_declaration() {
 #[test]
 fn namespace_result_pattern_retains_the_error_payload_layout() {
     let source = r#"
+public type Result<T, E> is Ok(T) | Err(E);
 module alpha {
+    mount cog.Result;
     type Alpha is { label: Int };
     public fn select() -> Result<Int, Alpha> { Err(Alpha { label: 37 }) }
 }
 module beta {
+    mount cog.Result;
     type Beta is { other: Int, label: Int };
     public fn select() -> Result<Int, Beta> { Err(Beta { other: 90, label: 41 }) }
 }

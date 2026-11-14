@@ -12044,7 +12044,6 @@ impl VbcCodegen {
                 if self.declared_namespace_mount(&written, &source_owner)?
                     || self.unit_module_paths.contains(&written)
                 {
-                    self.ctx.module_aliases.insert(alias_name, full_path);
                     return Ok(());
                 }
 
@@ -12568,22 +12567,7 @@ impl VbcCodegen {
                         });
                     }
                     if module_has_exports {
-                        let module_leaf = full_path.last().cloned().unwrap_or_default();
-                        // Honour the alias precedence — if the user wrote
-                        // `mount X.Y.Z as W;`, the module is accessible
-                        // under `W`, not `Z`. Otherwise the leaf name.
-                        let module_alias_name = match entry.alias {
-                            verum_common::Maybe::Some(a) => a.name.to_string(),
-                            verum_common::Maybe::None => match outer_alias {
-                                Some(ident) => ident.name.to_string(),
-                                None => module_leaf,
-                            },
-                        };
-                        if !module_alias_name.is_empty() {
-                            self.ctx
-                                .module_aliases
-                                .insert(module_alias_name, full_path.clone());
-                        }
+                        // The declaring owner already retained this mount above.
                         return Ok(());
                     }
                 }
@@ -12989,39 +12973,6 @@ impl VbcCodegen {
                     );
                 }
                 continue;
-            }
-
-            // Deferred bare-mount module-alias check.  Mirror of the
-            // synchronous branch in `process_import_path` — by the time
-            // this fires the archive has finished loading, so if a
-            // `mount X.Y.Z;` couldn't resolve as a function/type/const
-            // during the first pass, it may still be a *module* with
-            // exported items registered under the `X.Y.Z.` prefix that
-            // landed between the two passes.
-            if full_path.len() >= 2 {
-                let prefix_verum = format!("{}.", full_path.join("."));
-                let prefix_rust = format!("{}::", full_path.join("::"));
-                let mut module_has_exports = self
-                    .ctx
-                    .functions
-                    .keys()
-                    .any(|k| k.starts_with(&prefix_verum) || k.starts_with(&prefix_rust));
-                if !module_has_exports
-                    && full_path.first().map(|s| s.as_str()) == Some("core")
-                    && full_path.len() >= 3
-                {
-                    let stripped_verum = format!("{}.", full_path[1..].join("."));
-                    let stripped_rust = format!("{}::", full_path[1..].join("::"));
-                    module_has_exports = self.ctx.functions.keys().any(|k| {
-                        k.starts_with(&stripped_verum) || k.starts_with(&stripped_rust)
-                    });
-                }
-                if module_has_exports && !alias_name.is_empty() {
-                    self.ctx
-                        .module_aliases
-                        .insert(alias_name, full_path.clone());
-                    continue;
-                }
             }
 
             // Still not found - this is OK, the stub mechanism will handle it at call time

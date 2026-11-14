@@ -324,6 +324,48 @@ impl VbcCodegen {
         }
     }
 
+    /// Select the written type/namespace mount in its declaring lexical scope.
+    /// A binding (including a blocked one) shadows outer bindings. A dotted
+    /// file owner is not a lexical parent, and cycles never authorize a name.
+    /// The selected path still requires ordinary declaration/visibility checks.
+    pub fn source_mount_binding(&self, owner: &str, name: &str) -> Option<Option<&Text>> {
+        // Count expressions name the anonymous source owner with an empty
+        // path; declaration mounts use its configured output owner. This is
+        // the same root scope, not a fallback to an enclosing named file.
+        let mut scope = if owner.is_empty() && self.source_module_root().is_empty() {
+            self.config.module_name.as_str()
+        } else { owner };
+        let mut visited = Set::new();
+        loop {
+            if !visited.insert(scope) { return Some(None); }
+            if let Some(binding) = self.source_type_binding(scope, name) {
+                return Some(binding);
+            }
+            scope = match self.lexical_type_parent(scope) {
+                Some(Some(parent)) => parent,
+                Some(None) => return Some(None),
+                None => return None,
+            };
+        }
+    }
+
+    /// Context registry lookup receives a canonical mount selection, never a
+    /// process-wide short-name alias. Missing members of a selected mount do
+    /// not fall through to another declaration with the same leaf.
+    pub(super) fn resolve_qualified_source_call(
+        &self, parts: &[String], arity: usize,
+    ) -> Option<(String, FunctionInfo)> {
+        if parts.len() < 2 { return None; }
+        let scope = self.lexical_type_scope();
+        if let Some(binding) = self.source_mount_binding(scope, &parts[0]) {
+            let target = binding?;
+            let path = format!("{target}.{}", parts[1..].join("."));
+            return self.resolve_source_value_export(&path, scope).ok().flatten()
+                .filter(|(_, info)| info.id.0 != u32::MAX && info.param_count == arity);
+        }
+        self.ctx.resolve_qualified_dotted_call_in_scope(parts, arity, Some(scope))
+    }
+
     /// A known value declaration contributes no binding in type position.
     /// Unknown, inaccessible and conflicting imports retain their refusal.
     pub(super) fn select_type_mount<'a>(

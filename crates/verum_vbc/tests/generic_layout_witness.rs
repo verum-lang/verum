@@ -429,7 +429,14 @@ fn qualified_property_receivers_preserve_declarations_and_value_roots() {
         "module alpha { type Cell is {a:Int,b:Int}; } module beta { type Cell is {a:Int}; } fn probe()->Int {alpha.Cell.size+beta.Cell.size}",
         "module beta { type Cell is {a:Int}; } module alpha { type Cell is {a:Int,b:Int}; } fn probe()->Int {alpha.Cell.size+beta.Cell.size}",
     ] {
-        assert_eq!(run(roundtrip(&compile(source)), "probe"), 24, "{source}");
+        // A qualified layout query does not bypass the declaration's visibility.
+        let ast = Parser::new(source).parse_module().expect("private source grammar");
+        let error = VbcCodegen::new().compile_module(&ast)
+            .expect_err("a parent cannot query a private child type");
+        assert!(error.to_string().contains("alpha.Cell")
+            && error.to_string().contains("inaccessible"), "{error}");
+        let exported = source.replace("type Cell", "public type Cell");
+        assert_eq!(run(roundtrip(&compile(&exported)), "probe"), 24, "{exported}");
     }
     assert_eq!(
         run(
@@ -639,19 +646,40 @@ fn module_alias_layout_property_preserves_value_root() {
 }
 
 #[test]
-fn module_alias_publication_does_not_export_nested_or_file_owned_leaves() {
+fn module_alias_publication_does_not_export_nested_leaves() {
     for source in [
         "module alpha {module child {public type Cell is {a:Int};}} module beta {module child {public type Cell is {a:Int,b:Int};}} mount child as short;",
         "module beta {module child {public type Cell is {a:Int,b:Int};}} module alpha {module child {public type Cell is {a:Int};}} mount child as short;",
-        "module alpha; module child {public type Cell is {a:Int};} mount child as short;",
     ] {
         let ast = Parser::new(source).parse_module().expect("source grammar");
         let mut codegen = VbcCodegen::new();
         codegen.compile_module(&ast).expect("compile declarations");
-        assert!(
-            !codegen.ctx_mut().module_aliases.contains_key("short"),
-            "unqualified child exported from {source}"
-        );
+        let probe = Parser::new("short.Cell.size").parse_expr().expect("property grammar");
+        let error = codegen.compile_expr(&probe).expect_err("a nested child has no bare namespace binding");
+        assert!(error.to_string().contains("short"), "{source}: {error}");
+    }
+}
+
+#[test]
+fn a_file_owned_alias_resolves_its_own_child_without_exporting_to_other_owners() {
+    use verum_vbc::codegen::{CodegenConfig, ItemFailurePolicy};
+    let alpha = Parser::new("module alpha; module child {public type Cell is {a:Int};} mount child as short; fn probe()->Int {short.Cell.size}")
+        .parse_module().expect("file source grammar");
+    let mut codegen = VbcCodegen::new();
+    let module = codegen.compile_module(&alpha).expect("owner-local child alias");
+    assert_eq!(codegen.source_mount_binding("alpha", "short").flatten().map(|path| path.as_str()),
+        Some("alpha.child"));
+    assert_eq!(run(roundtrip(&module), "alpha.probe"), 8);
+
+    let beta = Parser::new("module beta; fn probe()->Int {short.Cell.size}")
+        .parse_module().expect("foreign source grammar");
+    for modules in [[&alpha, &beta], [&beta, &alpha]] {
+        let mut codegen = VbcCodegen::with_config(CodegenConfig::new("consumer"));
+        codegen.collect_unit_declarations(&modules).expect("source declarations");
+        codegen.resolve_pending_imports();
+        let error = codegen.compile_unit_items(&modules, ItemFailurePolicy::Strict)
+            .expect_err("a private file alias cannot become a foreign binding");
+        assert!(error.to_string().contains("short"), "{error}");
     }
 }
 

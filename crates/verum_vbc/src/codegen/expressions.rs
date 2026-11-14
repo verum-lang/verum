@@ -7647,8 +7647,7 @@ impl VbcCodegen {
                 }
                 let parts: Vec<String> =
                     func_name.split("::").map(str::to_string).collect();
-                self.ctx
-                    .resolve_qualified_dotted_call(&parts, args.len())
+                self.resolve_qualified_source_call(&parts, args.len())
                     .filter(|(_, info)| is_free_fn(info))
             })
         {
@@ -23576,14 +23575,17 @@ impl VbcCodegen {
                 }
                 if path.segments.len() > 1
                     && let Some(PathSegment::Name(root)) = path.segments.first()
-                    && let Some(owner) = self.ctx.module_aliases.get(root.as_str())
+                    && let Some(binding) = self.source_mount_binding(
+                        scope.unwrap_or_else(|| self.lexical_type_scope()), root.as_str(),
+                    )
                 {
                     // The explicit mount owns this prefix. Expand it only
                     // after lexical values and generic roots have been ruled out.
-                    let segments = owner
-                        .iter()
+                    let owner = binding?;
+                    let segments = owner.as_str()
+                        .split('.')
                         .map(|part| {
-                            PathSegment::Name(verum_ast::Ident::new(part.as_str(), root.span))
+                            PathSegment::Name(verum_ast::Ident::new(part, root.span))
                         })
                         .chain(path.segments.iter().skip(1).cloned())
                         .collect();
@@ -23683,24 +23685,13 @@ impl VbcCodegen {
                             // receiver is loaded. Use the declaration registry,
                             // not the binding's spelling or initializer shape.
                             if !self.is_value_receiver_binding(&ident.name) && !is_type_name(&ident.name) {
-                                // Bare-mount module-alias expansion. When the
-                                // user wrote `mount X.Y.Z;` at module top, the
-                                // import processor registered `Z` →
-                                // `["X", "Y", "Z"]` in `module_aliases`. A use
-                                // site of `Z.fn(args)` / `Z.CONST` then arrives
-                                // here as a single-segment receiver Path; the
-                                // qualified-function registry stores the
-                                // function under the *full* module path
-                                // (`X.Y.Z.fn` / `X.Y.Z.CONST`), so we must
-                                // expand the receiver before the downstream
-                                // qualified-lookup runs. Without this branch
-                                // the lookup probes the unqualified leaf
-                                // (`Z.fn`) and silently misses, surfacing as
-                                // `unbound variable: Z` at codegen.
-                                if let Some(full_path) =
-                                    self.ctx.module_aliases.get(ident.name.as_str())
-                                {
-                                    Some(full_path.clone())
+                                // Imports belong to the receiver's lexical owner.
+                                // Values were excluded above; an unresolved mount
+                                // cannot borrow a different file's namespace.
+                                if let Some(binding) = self.source_mount_binding(
+                                    self.lexical_type_scope(), ident.name.as_str(),
+                                ) {
+                                    Some(binding?.as_str().split('.').map(str::to_owned).collect())
                                 } else {
                                     Some(vec![ident.name.to_string()])
                                 }
@@ -24320,80 +24311,9 @@ impl VbcCodegen {
             // intent-to-be-rooted information is lost.
             let is_qualified_module_path = self.path_was_rooted_module_path(base);
 
-            // **Type.CONST.field bypass** — when `parts[0]` is a registered
-            // type name AND `parts[0].parts[1]` resolves to a function with
-            // `is_const = true`, this is a `Type.CONST.field` chain (e.g.
-            // `MemProt.READ.read`).  The simple-name fallback below
-            // (`lookup_function(field)`) would match an unrelated function
-            // (any `<X>.read` registered in the function table — Read.read,
-            // BufRead.read, etc.) and emit a Call returning junk integer
-            // (e.g. `20`) for what the user expects to be `MemProt.READ.read
-            // = true`.  Skip the fallback and let the general
-            // `compile_expr(base) + GetF` path at the bottom of this
-            // function evaluate the const value and project the field.
-            //
-            // Same class as task #25 (`&Type.Variant`) and the sister fix
-            // for `&Type.CONST` (`inner_is_type_namespace_chain` in
-            // `compile_unary`) — every codegen site walking a `Type.X.Y`
-            // chain MUST gate the "Type.CONST" segment against `is_const`
-            // before falling into bare-name lookups.
-            let is_type_const_chain = parts.len() >= 3 && {
-                let type_seg = &parts[0];
-                let const_seg = &parts[1];
-                let is_type = self.type_name_to_id.contains_key(type_seg.as_str())
-                    || self
-                        .ctx
-                        .has_functions_with_prefix(&format!("{}.", type_seg));
-                let qualified_const = format!("{}.{}", type_seg, const_seg);
-                let is_assoc_const = self
-                    .ctx
-                    .lookup_function(&qualified_const)
-                    .map(|fi| fi.is_const)
-                    .unwrap_or(false);
-                is_type && is_assoc_const
-            };
-
-            if !is_qualified_module_path && !is_type_const_chain {
-                // Try just the last segment (function name) as a simple function lookup.
-                // This handles cases where imports have already resolved the module path.
-                if let Some(func_info) = self.ctx.lookup_function_in_scope(field).cloned() {
-                    // If it's a variant constructor, emit MakeVariant instead of Call
-                    if func_info.variant_tag.is_some() {
-                        let qualifier = match parts.as_slice() {
-                            [owner, _] if self.nominal_type_id(owner).is_some()
-                                && self.ctx.get_var_reg(owner).is_err() => Some(owner.as_str()),
-                            _ => None,
-                        };
-                        return self.compile_variant_constructor_hinted(field, &verum_common::List::new(), qualifier);
-                    }
-                    let dest = self.ctx.alloc_temp();
-                    if func_info.param_count == 0 && !func_info.is_async && !func_info.is_generator
-                    {
-                        // Check if this is an inlineable constant (__const_val_N)
-                        if let Some(value) = Self::inline_scalar(&func_info).transpose()? {
-                            let load = self.load_scalar_constant(dest, value);
-                            self.ctx.emit(load);
-                            return Ok(Some(dest));
-                        }
-                        self.ctx.emit(Instruction::Call {
-                            dst: dest,
-                            func_id: func_info.id.0,
-                            args: crate::instruction::RegRange::new(Reg(0), 0),
-                        });
-                    } else {
-                        // Function-reference HOF case (#110). See NewClosure
-                        // comment at the qualified-rust branch above.
-                        self.ctx.emit(Instruction::NewClosure {
-                            lexical_types: self.named_callable_lexical_types(&func_info),
-                            dst: dest,
-                            func_id: func_info.id.0,
-                            captures: vec![],
-                            capture_types: Some(vec![]),
-                        });
-                    }
-                    return Ok(Some(dest));
-                }
-            }
+            // A dotted member retains its namespace. Imports are resolved
+            // above through their declaration-owned path; a bare same-leaf
+            // callable cannot repair a missing or inaccessible prefix.
 
             // An unresolved rooted namespace is not a runtime value. A
             // declared constant receiver can continue to ordinary field
@@ -44805,19 +44725,10 @@ impl VbcCodegen {
                 return exact(key.as_str());
             }
             let (head, tail) = name.split_once('.')?;
-            let mut anchor = Some(scope.unwrap_or_default());
-            while let Some(owner) = anchor {
-                if let Some(binding) = self.source_type_mounts.get(&verum_common::Text::from(owner))
-                    .and_then(|bindings| bindings.get(&verum_common::Text::from(head)))
-                {
-                    let target = self.select_type_mount(binding, owner)??;
-                    return exact(&format!("{target}.{tail}"));
-                }
-                anchor = if owner.is_empty() { None }
-                    else { Some(owner.rsplit_once('.').map_or("", |(parent, _)| parent)) };
-            }
-            if let Some(owner) = self.ctx.module_aliases.get(head) {
-                return exact(&format!("{}.{tail}", owner.join(".")));
+            if let Some(binding) = self.source_mount_binding(
+                scope.unwrap_or_else(|| self.lexical_type_scope()), head,
+            ) {
+                return exact(&format!("{}.{tail}", binding?));
             }
             return self.ctx.functions.get(name).cloned()
                 .filter(|info| !self.constant_initializers.contains_key(&info.id));
