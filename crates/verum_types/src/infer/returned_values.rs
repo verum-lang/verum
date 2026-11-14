@@ -6,7 +6,16 @@ use verum_ast::{
     BinOp, Expr, ExprKind, FunctionBody, FunctionDecl, FunctionParamKind, LiteralKind, PatternKind,
     StmtKind, TypeDeclBody,
 };
-use verum_common::{List, Map, Shared, Text};
+use verum_common::{List, Map, Set, Shared, Text};
+
+const MAX_RETURNED_VALUE_STEPS: usize = 4096;
+
+struct ScalarCallProof {
+    parameters: List<Type>,
+    receiver: Option<Type>,
+    result: Type,
+    structural: bool,
+}
 
 struct ReturnedBodyTypes {
     nodes: List<Type>,
@@ -21,7 +30,8 @@ fn unparen(mut expression: &Expr) -> &Expr {
 }
 
 /// A closed structural body: explicit values and direct field assignments.
-/// Calls, control flow and hidden inputs keep the conservative caller rule.
+/// Branches, loops and selected calls need the same typed proof at their use;
+/// unknown control flow and hidden inputs keep the conservative caller rule.
 /// Assignment targets are validated against the selected types before use;
 /// source syntax alone never proves that a write preserves stored loans.
 pub(super) fn returned_value(
@@ -47,6 +57,7 @@ pub(super) fn returned_value(
     let mut locals = List::new();
     let mut writes = List::new();
     let mut argument = 0;
+    if function.params.len() > MAX_RETURNED_VALUE_STEPS { return None; }
     for (index, parameter) in function.params.iter().enumerate() {
         if !parameter.attributes.is_empty() {
             return None;
@@ -99,74 +110,13 @@ pub(super) fn returned_value(
             },
         },
     };
-    for statement in statements {
-        if !statement.attributes.is_empty() {
-            return None;
-        }
-        match &statement.kind {
-            StmtKind::Let {
-                pattern,
-                ty: None,
-                value: Some(value),
-            } => {
-                let PatternKind::Ident {
-                    name,
-                    mutable: false,
-                    by_ref: false,
-                    subpattern: None,
-                } = &pattern.kind
-                else {
-                    return None;
-                };
-                let result = append_expression(checker, value, &bindings, &mut nodes)?;
-                bindings.insert(name.name.clone(), result);
-                locals.push(result);
-            }
-            StmtKind::Expr { expr, .. } => {
-                let ExprKind::Binary {
-                    op,
-                    left,
-                    right,
-                } = &unparen(expr).kind
-                else {
-                    return None;
-                };
-                if !op.is_assignment() {
-                    return None;
-                }
-                let mut fields = List::new();
-                let mut root = unparen(left);
-                while let ExprKind::Field { expr, field } = &root.kind {
-                    fields.push(field.name.clone());
-                    root = unparen(expr);
-                }
-                if fields.is_empty() {
-                    return None;
-                }
-                fields.reverse();
-                let input = append_expression(checker, root, &bindings, &mut nodes)?;
-                if !matches!(
-                    nodes.get(input)?,
-                    ReturnedValueNode::Parameter(_) | ReturnedValueNode::Receiver
-                ) {
-                    return None;
-                }
-                let mut value = append_expression(checker, right, &bindings, &mut nodes)?;
-                if *op != BinOp::Assign {
-                    let left = append_expression(checker, left, &bindings, &mut nodes)?;
-                    let right = value;
-                    value = nodes.len();
-                    nodes.push(ReturnedValueNode::Compound { op: *op, left, right });
-                }
-                writes.push(InputFieldWrite {
-                    input,
-                    fields,
-                    value,
-                });
-            }
-            _ => return None,
-        }
+    let control = value.filter(|value| matches!(unparen(value).kind,
+        ExprKind::If { .. } | ExprKind::While { .. } | ExprKind::Block(_)));
+    if let Some(control) = control {
+        if !control_tail_is_unit(control) { return None; }
     }
+    append_statements(checker, statements, control, &mut bindings, &mut nodes, &mut locals, &mut writes)?;
+    let value = value.filter(|_| control.is_none());
     let result = match value {
         Some(value) => append_expression(checker, value, &bindings, &mut nodes)?,
         None => {
@@ -181,6 +131,156 @@ pub(super) fn returned_value(
         locals,
         writes,
     }))
+}
+
+/// Do not invent a Unit result for an unannotated value-producing branch.
+/// This proof only flattens control flow whose tail is structurally Unit.
+fn control_tail_is_unit(value: &Expr) -> bool {
+    let mut pending = List::from_iter([value]);
+    let mut remaining = MAX_RETURNED_VALUE_STEPS;
+    while let Some(value) = pending.pop() {
+        let Some(next) = remaining.checked_sub(1) else { return false; };
+        remaining = next;
+        match &unparen(value).kind {
+            ExprKind::While { .. } => (),
+            ExprKind::Block(block) => {
+                if let Some(value) = &block.expr { pending.push(value); }
+            }
+            ExprKind::If { then_branch, else_branch, .. } => {
+                if let Some(value) = &then_branch.expr { pending.push(value); }
+                if let Some(value) = else_branch { pending.push(value); }
+            }
+            ExprKind::Binary { op, .. } if op.is_assignment() => (),
+            ExprKind::Break { value: None, .. } | ExprKind::Continue { .. } => (),
+            _ => return false,
+        }
+        if pending.len() > remaining { return false; }
+    }
+    true
+}
+
+/// Flatten all possible scalar writes, preserving lexical scopes. A loop does
+/// not need unrolling: every admitted write preserves the same stored loans.
+/// Unknown control flow, mutable locals and early value returns stay unknown.
+fn append_statements(
+    checker: &TypeChecker,
+    statements: &[verum_ast::Stmt],
+    tail: Option<&Expr>,
+    bindings: &mut Map<Text, usize>,
+    nodes: &mut List<ReturnedValueNode>,
+    locals: &mut List<usize>,
+    writes: &mut List<InputFieldWrite>,
+) -> Option<()> {
+    enum Work<'a> {
+        Statement(&'a verum_ast::Stmt),
+        Expression(&'a Expr),
+        Block(&'a verum_ast::Block, usize),
+        Restore(Map<Text, usize>, usize),
+    }
+    let mut pending = List::new();
+    if let Some(tail) = tail { pending.push(Work::Expression(tail)); }
+    if statements.len() > MAX_RETURNED_VALUE_STEPS { return None; }
+    pending.extend(statements.iter().rev().map(Work::Statement));
+    let mut loops = 0;
+    let mut remaining = MAX_RETURNED_VALUE_STEPS;
+    while let Some(work) = pending.pop() {
+        remaining = remaining.checked_sub(1)?;
+        if pending.len() > remaining || nodes.len() > MAX_RETURNED_VALUE_STEPS { return None; }
+        match work {
+            Work::Restore(previous, depth) => { *bindings = previous; loops = depth; }
+            Work::Block(block, depth) => {
+                remaining = remaining.checked_sub(bindings.len())?;
+                if block.stmts.len() > remaining { return None; }
+                pending.push(Work::Restore(bindings.clone(), loops));
+                loops = depth;
+                if let Some(tail) = &block.expr { pending.push(Work::Expression(tail)); }
+                pending.extend(block.stmts.iter().rev().map(Work::Statement));
+            }
+            Work::Statement(statement) => {
+                if !statement.attributes.is_empty() { return None; }
+                match &statement.kind {
+                    StmtKind::Let {
+                        pattern,
+                        ty: None,
+                        value: Some(value),
+                    } => {
+                        let PatternKind::Ident {
+                            name,
+                            mutable: false,
+                            by_ref: false,
+                            subpattern: None,
+                        } = &pattern.kind
+                        else {
+                            return None;
+                        };
+                        let result = append_expression(checker, value, bindings, nodes)?;
+                        bindings.insert(name.name.clone(), result);
+                        locals.push(result);
+                    }
+                    StmtKind::Expr { expr, .. } => pending.push(Work::Expression(expr)),
+                    _ => return None,
+                }
+            }
+            Work::Expression(expression) => match &unparen(expression).kind {
+                ExprKind::Block(block) => pending.push(Work::Block(block, loops)),
+                ExprKind::If { condition, then_branch, else_branch } => {
+                    if condition.conditions.len() > remaining { return None; }
+                    for condition in &condition.conditions {
+                        let verum_ast::expr::ConditionKind::Expr(condition) = condition else { return None; };
+                        let source = append_expression(checker, condition, bindings, nodes)?;
+                        nodes.push(ReturnedValueNode::Condition(source));
+                    }
+                    if let Some(branch) = else_branch { pending.push(Work::Expression(branch)); }
+                    pending.push(Work::Block(then_branch, loops));
+                }
+                ExprKind::While { label: None, condition, body, invariants, decreases }
+                    if invariants.is_empty() && decreases.is_empty() =>
+                {
+                    let source = append_expression(checker, condition, bindings, nodes)?;
+                    nodes.push(ReturnedValueNode::Condition(source));
+                    pending.push(Work::Block(body, loops + 1));
+                }
+                ExprKind::Break { label: None, value: None } | ExprKind::Continue { label: None }
+                    if loops > 0 => (),
+                ExprKind::Binary { op, left, right } if op.is_assignment() => {
+                    let mut fields = List::new();
+                    let mut root = unparen(left);
+                    while let ExprKind::Field { expr, field } = &root.kind {
+                        fields.push(field.name.clone());
+                        root = unparen(expr);
+                    }
+                    if fields.is_empty() {
+                        return None;
+                    }
+                    fields.reverse();
+                    let input = append_expression(checker, root, bindings, nodes)?;
+                    if !matches!(
+                        nodes.get(input)?,
+                        ReturnedValueNode::Parameter(_) | ReturnedValueNode::Receiver
+                    ) {
+                        return None;
+                    }
+                    let mut value = append_expression(checker, right, bindings, nodes)?;
+                    if *op != BinOp::Assign {
+                        let left = append_expression(checker, left, bindings, nodes)?;
+                        let right = value;
+                        value = nodes.len();
+                        nodes.push(ReturnedValueNode::Compound { op: *op, left, right });
+                    }
+                    writes.push(InputFieldWrite {
+                        input,
+                        fields,
+                        value,
+                    });
+                }
+                _ => {
+                    let value = append_expression(checker, expression, bindings, nodes)?;
+                    locals.push(value);
+                }
+            },
+        }
+    }
+    Some(())
 }
 
 /// Select a sum constructor in the declaration's lexical scope. A value with
@@ -238,10 +338,15 @@ fn append_expression(
         Record(Text, List<Text>),
         Variant(Text, Text, usize),
         Call(verum_ast::Span, bool, usize),
+        Binary(BinOp),
+        Index,
     }
     let mut pending = List::from_iter([Step::Enter(value)]);
     let mut values = List::new();
+    let mut remaining = MAX_RETURNED_VALUE_STEPS;
     while let Some(step) = pending.pop() {
+        remaining = remaining.checked_sub(1)?;
+        if pending.len() > remaining || nodes.len() >= MAX_RETURNED_VALUE_STEPS { return None; }
         let node = match step {
             Step::Enter(expression) => match &unparen(expression).kind {
                 ExprKind::Path(path) => {
@@ -257,16 +362,28 @@ fn append_expression(
                 }
                 ExprKind::Literal(literal) => {
                     match &literal.kind {
-                        LiteralKind::Int(value) if value.suffix.is_none() => {}
-                        LiteralKind::Float(value) if value.suffix.is_none() => {}
+                        LiteralKind::Int(_) | LiteralKind::Float(_) => {}
                         LiteralKind::Bool(_) | LiteralKind::Char(_) | LiteralKind::Text(_) => {}
                         _ => return None,
                     }
                     ReturnedValueNode::Literal(checker.infer_literal(literal))
                 }
+                ExprKind::Binary { op, left, right } if !op.is_assignment() => {
+                    pending.push(Step::Binary(*op));
+                    pending.push(Step::Enter(right));
+                    pending.push(Step::Enter(left));
+                    continue;
+                }
+                ExprKind::Index { expr, index } => {
+                    pending.push(Step::Index);
+                    pending.push(Step::Enter(index));
+                    pending.push(Step::Enter(expr));
+                    continue;
+                }
                 ExprKind::Call { func, args, type_args }
                     if type_args.is_empty() && matches!(unparen(func).kind, ExprKind::Path(_)) =>
                 {
+                    if args.len() > remaining { return None; }
                     pending.push(Step::Call(expression.span, false, args.len()));
                     pending.extend(args.iter().rev().map(Step::Enter));
                     continue;
@@ -274,6 +391,7 @@ fn append_expression(
                 ExprKind::MethodCall { receiver, method, args, type_args }
                     if type_args.is_empty() =>
                 {
+                    if args.len() > remaining { return None; }
                     if let Some(owner) = variant_constructor(checker, receiver, &method.name, args.len(), bindings) {
                         pending.push(Step::Variant(owner, method.name.clone(), args.len()));
                         pending.extend(args.iter().rev().map(Step::Enter));
@@ -299,6 +417,7 @@ fn append_expression(
                     continue;
                 }
                 ExprKind::Tuple(parts) => {
+                    if parts.len() > remaining { return None; }
                     pending.push(Step::Tuple(parts.len()));
                     pending.extend(parts.iter().rev().map(Step::Enter));
                     continue;
@@ -308,6 +427,7 @@ fn append_expression(
                     fields,
                     base: None,
                 } => {
+                    if fields.len() > remaining { return None; }
                     // Every field must be explicit. A default initializer can
                     // execute a user function before the result is returned.
                     let name = checker.path_to_string(path);
@@ -360,6 +480,16 @@ fn append_expression(
             Step::Tuple(count) => {
                 let start = values.len().checked_sub(count)?;
                 ReturnedValueNode::Tuple(values.split_off(start))
+            }
+            Step::Binary(op) => {
+                let right = values.pop()?;
+                let left = values.pop()?;
+                ReturnedValueNode::ScalarBinary { op, left, right }
+            }
+            Step::Index => {
+                let index = values.pop()?;
+                let source = values.pop()?;
+                ReturnedValueNode::Index { source, index }
             }
             Step::Call(span, has_receiver, count) => {
                 let start = values.len().checked_sub(count)?;
@@ -478,6 +608,35 @@ impl TypeChecker {
             if !self.write_value_has_structural_cleanup(ty, span) { return None; }
         }
 
+        // Only result dependencies carry origins out of this invocation.
+        // The complete typed graph and every write were checked above; all
+        // inputs and local/field cleanup are still checked below. Querying an
+        // unrelated intermediate's payload is not a read of the returned value
+        // and must not create diagnostics while attempting this optional proof.
+        let mut needed: List<bool> = (0..derivation.nodes.len()).map(|_| false).collect();
+        *needed.get_mut(derivation.result)? = true;
+        for (index, node) in derivation.nodes.iter().enumerate().rev() {
+            if !needed[index] || !self.carries_stored_loan(facts.nodes.get(index)?) {
+                needed[index] = false;
+                continue;
+            }
+            let mut mark = |source: usize| -> Option<()> {
+                *needed.get_mut(source)? = true;
+                Some(())
+            };
+            match node {
+                ReturnedValueNode::Field { source, .. }
+                | ReturnedValueNode::TupleIndex { source, .. } => mark(*source)?,
+                ReturnedValueNode::Tuple(parts)
+                | ReturnedValueNode::Variant { fields: parts, .. } => {
+                    for part in parts { mark(*part)?; }
+                }
+                ReturnedValueNode::Record { fields, .. } => {
+                    for (_, part) in fields { mark(*part)?; }
+                }
+                _ => (),
+            }
+        }
         let mut values: List<List<RecordReceiver>> = List::new();
         for (index, node) in derivation.nodes.iter().enumerate() {
             let ty = facts.nodes.get(index)?;
@@ -487,7 +646,8 @@ impl TypeChecker {
                 }
                 ReturnedValueNode::Receiver => self.closed_call_input_origins(receiver?, ty)?,
                 ReturnedValueNode::Literal(_) | ReturnedValueNode::Compound { .. }
-                | ReturnedValueNode::SelectedCall { .. } => List::new(),
+                | ReturnedValueNode::ScalarBinary { .. } | ReturnedValueNode::Condition(_)
+                | ReturnedValueNode::Index { .. } | ReturnedValueNode::SelectedCall { .. } => List::new(),
                 ReturnedValueNode::Field { source, .. }
                 | ReturnedValueNode::TupleIndex { source, .. } => {
                     // The type derivation admits only direct declared projections.
@@ -495,15 +655,15 @@ impl TypeChecker {
                     if !self.return_value_has_trivial_cleanup(ty) {
                         return None;
                     }
-                    let (_, mut origins) = self.projected_origins_for_type(
-                        facts.nodes.get(*source)?.clone(),
-                        values.get(*source)?.clone(),
-                        span,
-                    )?;
-                    if !self.carries_stored_loan(ty) {
-                        origins.clear();
+                    if needed[index] {
+                        self.projected_origins_for_type(
+                            facts.nodes.get(*source)?.clone(),
+                            values.get(*source)?.clone(),
+                            span,
+                        )?.1
+                    } else {
+                        List::new()
                     }
-                    origins
                 }
                 ReturnedValueNode::Tuple(parts)
                 | ReturnedValueNode::Variant { fields: parts, .. } => {
@@ -562,6 +722,14 @@ impl TypeChecker {
         receiver: Option<&Type>,
         result: Option<&Type>,
         span: verum_ast::Span,
+    ) -> Option<ReturnedBodyTypes> {
+        let calls = self.scalar_call_proofs(body)?;
+        self.returned_body_types_with_calls(body, parameters, receiver, result, span, &calls)
+    }
+
+    fn returned_body_types_with_calls(
+        &mut self, body: &ReturnedValue, parameters: &[Type], receiver: Option<&Type>,
+        result: Option<&Type>, span: verum_ast::Span, calls: &Map<verum_ast::Span, ScalarCallProof>,
     ) -> Option<ReturnedBodyTypes> {
         let mut expected: List<Option<Type>> = (0..body.nodes.len()).map(|_| None).collect();
         *expected.get_mut(body.result)? = result.map(|ty| self.unifier.apply(ty));
@@ -701,7 +869,37 @@ impl TypeChecker {
                     let arguments = arguments.iter().map(|index| nodes.get(*index).cloned())
                         .collect::<Option<List<_>>>()?;
                     let receiver = match receiver { Some(index) => Some(nodes.get(*index)?), None => None };
-                    self.source_scalar_call_result(*span, &arguments, receiver)?
+                    self.scalar_call_result(calls.get(span)?, *span, &arguments, receiver)?
+                }
+                ReturnedValueNode::Condition(source) => {
+                    if nodes.get(*source)? != &Type::Bool { return None; }
+                    Type::Unit
+                }
+                ReturnedValueNode::Index { source, index } => {
+                    if nodes.get(*index)? != &Type::Int { return None; }
+                    let source = self.place_reference_head(nodes.get(*source)?, span).ok()?;
+                    let inner = match source {
+                        Type::Reference { inner, .. } | Type::CheckedReference { inner, .. } => *inner,
+                        _ => return None,
+                    };
+                    let element = match inner {
+                        Type::Slice { element } | Type::Array { element, .. } => *element,
+                        _ => return None,
+                    };
+                    if !self.forwarding_scalar(&element) { return None; }
+                    element
+                }
+                ReturnedValueNode::ScalarBinary { op, left, right } => {
+                    let left = nodes.get(*left)?;
+                    let right = nodes.get(*right)?;
+                    if left != right || !self.forwarding_scalar(left) { return None; }
+                    match op {
+                        BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => Type::Bool,
+                        BinOp::And | BinOp::Or if *left == Type::Bool => Type::Bool,
+                        BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Rem
+                            if !matches!(left, Type::Bool | Type::Char) => left.clone(),
+                        _ => return None,
+                    }
                 }
                 ReturnedValueNode::Compound { op, left, right } => {
                     let left = nodes.get(*left)?;
@@ -730,34 +928,94 @@ impl TypeChecker {
         Some(ReturnedBodyTypes { nodes, writes })
     }
 
-    /// Reuse the body attached to the exact selected source call. A scalar
-    /// result or a property bound alone cannot account for implicit cleanup.
-    /// This leaf proof deliberately refuses nested calls, so the shared flat
-    /// derivation never recursively walks a source call graph.
-    fn source_scalar_call_result(
-        &mut self,
-        span: verum_ast::Span,
-        arguments: &[Type],
-        receiver: Option<&Type>,
+    /// Validate the selected source-call graph in postorder. Cycles, missing
+    /// declarations and exhausted proof resources retain the unknown-write rule.
+    /// The operation graph is flat; neither syntax nor call depth grows the stack.
+    fn scalar_call_proofs(&mut self, root: &ReturnedValue) -> Option<Map<verum_ast::Span, ScalarCallProof>> {
+        enum Work {
+            Enter(verum_ast::Span),
+            Finish(verum_ast::Span, Shared<ReturnedValue>, ScalarCallProof),
+        }
+        let mut pending = List::new();
+        if root.nodes.len() > MAX_RETURNED_VALUE_STEPS { return None; }
+        for node in &root.nodes {
+            if let ReturnedValueNode::SelectedCall { span, .. } = node { pending.push(Work::Enter(*span)); }
+        }
+        let mut proofs = Map::new();
+        let mut active = Set::new();
+        let mut remaining = MAX_RETURNED_VALUE_STEPS;
+        while let Some(work) = pending.pop() {
+            remaining = remaining.checked_sub(1)?;
+            if pending.len() > remaining { return None; }
+            match work {
+                Work::Enter(span) => {
+                    if proofs.contains_key(&span) { continue; }
+                    if !active.insert(span) { return None; }
+                    let Type::Function { params, return_type, contexts, .. } =
+                        self.type_registry.lookup_call_target(span)?.clone() else { return None; };
+                    if contexts.as_ref().is_some_and(|contexts| !contexts.is_empty()) { return None; }
+                    let structural = self.type_registry.structural_call_target(span)
+                        .map(|(_, receiver)| receiver.clone());
+                    let receiver = structural.clone().or_else(|| self.type_registry.declared_receiver(span).cloned());
+                    let proof = ScalarCallProof {
+                        parameters: params, receiver, result: self.unifier.apply(&return_type),
+                        structural: structural.is_some(),
+                    };
+                    if !matches!(proof.result, Type::Unit | Type::Never)
+                        && !self.forwarding_scalar(&proof.result) { return None; }
+                    if proof.parameters.iter().any(|ty| !self.return_value_has_trivial_cleanup(ty)) { return None; }
+                    if structural.is_some() {
+                        // This receipt is issued only by the structural operation
+                        // resolver. A same-shaped callable or property is no receipt.
+                        proofs.insert(span, proof);
+                        active.remove(&span);
+                        continue;
+                    }
+                    if proof.receiver.is_none() && self.type_registry.explicit_input_target(span).is_none() { return None; }
+                    let body = self.type_registry.returned_value(span)?.clone();
+                    remaining = remaining.checked_sub(body.nodes.len())?;
+                    let calls: List<_> = body.nodes.iter().filter_map(|node| match node {
+                        ReturnedValueNode::SelectedCall { span, .. } => Some(*span), _ => None,
+                    }).collect();
+                    pending.push(Work::Finish(span, body, proof));
+                    pending.extend(calls.into_iter().map(Work::Enter));
+                }
+                Work::Finish(span, body, proof) => {
+                    let facts = self.returned_body_types_with_calls(
+                        &body, &proof.parameters, proof.receiver.as_ref(), Some(&proof.result), span, &proofs,
+                    )?;
+                    if facts.nodes.iter().any(|ty| !self.return_value_has_trivial_cleanup(ty)) { return None; }
+                    for write in &facts.writes {
+                        if !self.write_value_has_structural_cleanup(write, span) { return None; }
+                    }
+                    proofs.insert(span, proof);
+                    active.remove(&span);
+                }
+            }
+        }
+        Some(proofs)
+    }
+
+    fn scalar_call_result(
+        &self, proof: &ScalarCallProof, span: verum_ast::Span, arguments: &[Type], receiver: Option<&Type>,
     ) -> Option<Type> {
-        let body = self.type_registry.returned_value(span)?.clone();
-        if !body.writes.is_empty()
-            || body.nodes.iter().any(|node| matches!(node, ReturnedValueNode::SelectedCall { .. }))
-        { return None; }
-        let declared_receiver = self.type_registry.declared_receiver(span).cloned();
-        if receiver.is_some() != declared_receiver.is_some()
-            || (receiver.is_none() && self.type_registry.explicit_input_target(span).is_none())
-        { return None; }
-        let Type::Function { params, return_type, contexts, .. } =
-            self.type_registry.lookup_call_target(span)?.clone() else { return None; };
-        if params.len() != arguments.len()
-            || contexts.as_ref().is_some_and(|contexts| !contexts.is_empty())
-        { return None; }
-        for (actual, declared) in arguments.iter().zip(&params)
-            .chain(receiver.zip(declared_receiver.as_ref()))
+        if proof.parameters.len() != arguments.len() || receiver.is_some() != proof.receiver.is_some() { return None; }
+        for (actual, declared) in arguments.iter().zip(&proof.parameters)
+            .chain(receiver.zip(proof.receiver.as_ref()))
         {
-            let actual = self.place_reference_head(actual, span).ok()?;
+            let mut actual = self.place_reference_head(actual, span).ok()?;
             let declared = self.place_reference_head(declared, span).ok()?;
+            if proof.structural {
+                // Structural receiver selection may cross ordinary reference
+                // layers, but never executes a user Deref conversion.
+                for _ in 0..64 {
+                    if actual == declared { break; }
+                    actual = match actual {
+                        Type::Reference { inner, .. } | Type::CheckedReference { inner, .. } => *inner,
+                        _ => return None,
+                    };
+                }
+            }
             let autoref = match &declared {
                 Type::Reference { inner, .. } | Type::CheckedReference { inner, .. }
                 | Type::UnsafeReference { inner, .. } => inner.as_ref() == &actual,
@@ -765,15 +1023,7 @@ impl TypeChecker {
             };
             if actual != declared && !autoref { return None; }
         }
-        let facts = self.returned_body_types(&body, &params, declared_receiver.as_ref(), Some(&return_type), span)?;
-        // Covers unused parameters and intermediate/local values too: a hidden
-        // user Drop or value copy is not proved by a scalar terminal result.
-        if facts.nodes.iter().any(|ty| !self.return_value_has_trivial_cleanup(ty)) {
-            return None;
-        }
-        let result = facts.nodes.get(body.result)?;
-        matches!(result, Type::Unit | Type::Never | Type::Bool | Type::Int | Type::Float | Type::Char)
-            .then(|| result.clone())
+        Some(proof.result.clone())
     }
 
     /// A scalar-only sum with no selected destructor has structural cleanup.
@@ -787,6 +1037,7 @@ impl TypeChecker {
         while let Some(ty) = pending.pop() {
             let Some(next) = remaining.checked_sub(1) else { return false; };
             remaining = next;
+            if self.forwarding_scalar(&ty) { continue; }
             match ty {
                 Type::Unit | Type::Never | Type::Bool | Type::Int | Type::Float | Type::Char => (),
                 Type::Named { .. } | Type::Generic { .. } => {
@@ -853,7 +1104,7 @@ impl TypeChecker {
     }
 
     fn return_value_has_trivial_cleanup(&self, ty: &Type) -> bool {
-        matches!(
+        self.forwarding_scalar(&self.unifier.apply(ty)) || matches!(
             self.unifier.apply(ty),
             Type::Unit
                 | Type::Never

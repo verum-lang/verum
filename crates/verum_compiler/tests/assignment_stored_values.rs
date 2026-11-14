@@ -508,3 +508,37 @@ fn a_mixed_scalar_and_reference_write_cannot_publish_a_dangling_archive() {
     let error=result.expect_err("scalar writes must not hide a stored reference write");
     assert!(error.contains("local") && error.contains("does not live long enough"),"{error}");
 }
+
+#[test]
+fn a_selected_loop_writer_preserves_existing_payloads_through_wire() {
+    execute(r#"
+        module core;
+        type Cursor is {input:&Int,pos:Int};
+        fn step(p:&mut Cursor) {if p.pos < 73 {p.pos+=1;}}
+        fn walk(p:&mut Cursor) {while p.pos < 73 {step(p);}}
+        fn parse(p:&mut Cursor)->Int {walk(p);p.pos}
+        public fn probe()->Int {
+            let input=37;
+            let mut p=Cursor{input:&input,pos:0};
+            parse(&mut p)
+        }
+    "#,73);
+}
+
+#[test]
+fn a_loop_writer_cannot_publish_a_dangling_payload_archive() {
+    let result=produce(r#"
+        module core;
+        type Cursor is {input:&Int,pos:Int};
+        fn update(p:&mut Cursor,value:&Int) {
+            while p.pos < 73 {p.input=value;p.pos=73;}
+        }
+        public fn probe(input:&Int)->Cursor {
+            let mut p=Cursor{input,pos:0};
+            {let local=73;update(&mut p,&local);}
+            p
+        }
+    "#);
+    let error=result.expect_err("loop writes must preserve incoming local loans");
+    assert!(error.contains("local") && error.contains("does not live long enough"),"{error}");
+}

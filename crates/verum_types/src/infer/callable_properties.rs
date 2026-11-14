@@ -218,10 +218,10 @@ impl TypeChecker {
     /// A selected structural view reads its receiver and constructs fresh
     /// metadata, possibly allocating or failing. It neither writes through that
     /// view nor invokes user code. Operand computations are joined separately.
-    pub(super) fn record_structural_call(&mut self, span: Span, params: List<Type>, result: Type) {
-        self.type_registry.register_call_target(span, Type::function_with_requirement(
+    pub(super) fn record_structural_call(&mut self, span: Span, receiver: &Type, params: List<Type>, result: Type) {
+        self.type_registry.register_structural_call_target(span, Type::function_with_requirement(
             params, result, PropertyRequirement::value_construction(),
-        ));
+        ), receiver.clone());
     }
 
     pub(super) fn callable_body_bound(&mut self, body: &Expr) -> PropertyRequirement {
@@ -277,7 +277,7 @@ impl TypeChecker {
 
     /// Numeric conversions are supplied by the language registrar. A foreign
     /// nominal with a scalar-looking name cannot authorize its own conversion.
-    fn forwarding_scalar(&self, ty: &Type) -> bool {
+    pub(super) fn forwarding_scalar(&self, ty: &Type) -> bool {
         match ty {
             Type::Int | Type::Float | Type::Bool | Type::Char => true,
             Type::Named { path, args } if args.is_empty() => path.as_ident().is_some_and(|name| {

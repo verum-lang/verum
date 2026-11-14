@@ -19048,7 +19048,7 @@ impl TypeChecker {
             | (Type::UnsafeReference { .. } | Type::Pointer { .. }, "offset" | "byte_offset" | "add" | "sub"));
         if shifts_pointer && args.len() == 1 {
             self.check_expr(&args[0], &Type::Int)?;
-            self.record_structural_call(span, List::from_single(Type::Int), recv_ty_raw.clone());
+            self.record_structural_call(span, &recv_ty_raw, List::from_single(Type::Int), recv_ty_raw.clone());
             return Ok(Some(InferResult::new(recv_ty_raw.clone())));
         }
         match (&recv_ty_raw, method_name_str) {
@@ -19060,7 +19060,7 @@ impl TypeChecker {
                 | Type::Pointer { .. },
                 "is_null",
             ) if args.is_empty() => {
-                self.record_structural_call(span, List::new(), Type::bool());
+                self.record_structural_call(span, &recv_ty_raw, List::new(), Type::bool());
                 return Ok(Some(InferResult::new(Type::bool())));
             }
             // cast<U>() -> &unsafe U (pointer cast)
@@ -22263,17 +22263,17 @@ impl TypeChecker {
                         use crate::core_metadata::ReceiverKind::{SelfMut, SelfRef};
                         let mutable = method_name_str == "as_mut_ptr";
                         let pointer = Type::Pointer { inner: Box::new(elem), mutable };
-                        self.record_structural_call(span, List::new(), pointer.clone());
+                        self.record_structural_call(span, recv_ty, List::new(), pointer.clone());
                         return Ok(Some(InferResult::method(pointer, Some(if mutable { SelfMut } else { SelfRef }))));
                     }
                     "len" if args.is_empty() => {
-                        self.record_structural_call(span, List::new(), Type::int());
+                        self.record_structural_call(span, recv_ty, List::new(), Type::int());
                         return Ok(Some(InferResult::method(Type::int(), Some(crate::core_metadata::ReceiverKind::SelfRef))));
                     }
                     "offset" if args.len() == 1 => {
                         self.check_expr(&args[0], &Type::Int)?;
                         let pointer = Type::Pointer { inner: Box::new(elem), mutable: false };
-                        self.record_structural_call(span, List::from_single(Type::Int), pointer.clone());
+                        self.record_structural_call(span, recv_ty, List::from_single(Type::Int), pointer.clone());
                         return Ok(Some(InferResult::method(pointer, Some(crate::core_metadata::ReceiverKind::SelfRef))));
                     }
                     "from_bytes" if args.len() <= 1 => {
