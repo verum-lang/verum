@@ -31,6 +31,7 @@ mod drop_typed;
 mod retain_copy;
 mod copy_typed;
 mod target_query;
+mod field_carrier;
 
 /// Emit a diagnosable runtime abort for an operation that has no honest
 /// Tier-1 lowering.
@@ -43540,7 +43541,19 @@ fn lower_get_field<'ctx>(
     obj: Reg,
     field_idx: u32,
 ) -> Result<()> {
-    let field_idx = field_idx;
+    // Snapshot the owner before writing dst: VBC may reuse the receiver register.
+    let mut field_owner_name = ctx.get_obj_register_type(obj.0).map(str::to_owned);
+    let mut field_owner_args: verum_common::List<TypeRef> = ctx.get_generic_type_args(obj.0).cloned().unwrap_or_default().into();
+    let mut transparent = None;
+    if let Some(module) = ctx.vbc_module()
+        && let Some(owner) = field_owner_name.as_deref().and_then(|name| ctx.find_type_by_name(name))
+    {
+        transparent = field_carrier::transparent_carrier(module, owner, &field_owner_args)?;
+        if let Some((owner, args)) = transparent.as_ref().and_then(field_carrier::nominal_parts) {
+            field_owner_name = module.get_type_name(owner);
+            field_owner_args = args;
+        }
+    }
     let obj_val = ctx.get_register(obj.0)?;
     let obj_val = ctx.reference_value_view(obj.0, obj_val)?;
 
@@ -43617,6 +43630,30 @@ fn lower_get_field<'ctx>(
     } else {
         deref_if_tagged(ctx, obj_val, "getf_base")?
     };
+    if let Some(TypeRef::Concrete(payload)) = &transparent
+        && (payload.is_numeric() || matches!(*payload, TypeId::BOOL | TypeId::CHAR | TypeId::UNIT))
+    {
+        if field_idx != 0 {
+            return Err(LlvmLoweringError::InvalidType("scalar transparent carrier has only field zero".into()));
+        }
+        let value = if payload.is_float() {
+            if !obj_val.is_float_value() && !matches!(obj_val, BasicValueEnum::IntValue(bits) if bits.get_type().get_bit_width() == 64) {
+                return Err(LlvmLoweringError::InvalidType(format!(
+                    "GetF r{} field {}: {:?} cannot carry declared {payload:?}", obj.0, field_idx, obj_val.get_type(),
+                ).into()));
+            }
+            // The existing slot ABI widens F32 to F64 before storing its bits.
+            // Decode that ABI and narrow to the declared payload's native type.
+            coerce_value(ctx, obj_val, ctx.types().lower_type_id(*payload)?, "transparent_float")?
+        } else if obj_val.is_int_value() {
+            obj_val
+        } else {
+            return Err(LlvmLoweringError::InvalidType("transparent scalar has an incompatible native carrier".into()));
+        };
+        ctx.set_register(dst.0, value);
+        mark_register_from_return_type(ctx, dst.0, &TypeRef::Concrete(*payload));
+        return Ok(());
+    }
     match obj_val {
         BasicValueEnum::StructValue(sv) if sv.get_type().count_fields() > field_idx => {
             // Stack struct with enough fields: use extract_value
@@ -43711,85 +43748,6 @@ fn lower_get_field<'ctx>(
             }
         }
         BasicValueEnum::IntValue(iv) if iv.get_type().get_bit_width() == 64 => {
-            // Check for newtype field access: e.g. FileDesc(Int).0
-            // For newtypes, the i64 IS the value, not a pointer.
-            // Use VBC type metadata (TypeKind::Newtype) for detection.
-            // Check for newtype/single-field-tuple field access.
-            // Both `type X is (T);` (Tuple) and `type X is T;` (Newtype) produce
-            // single-field types where the i64 IS the value.
-            let is_single_field_type = if field_idx == 0 {
-                if let Some(vbc_mod) = ctx.vbc_module() {
-                    if let Some(type_name) = ctx.get_obj_register_type(obj.0).map(|s| s.to_string())
-                    {
-                        vbc_mod.types.iter().any(|td| {
-                            let tname = vbc_mod.get_string(td.name).unwrap_or("");
-                            tname == type_name
-                                // `is_transparent_wrapper` is the SOURCE OF
-                                // TRUTH for newtype-ness — the field's own
-                                // docstring says so, and names
-                                // `CodegenContext::newtype_names` as its
-                                // redundant cache (verum_vbc/src/types.rs:1022).
-                                //
-                                // The two kind tests below it were the whole
-                                // guard, and they can never fire for a newtype
-                                // DECLARED IN VERUM: both `type X is T;` and
-                                // `type X is (T);` compile to
-                                // `kind: TypeKind::Record` with
-                                // `is_transparent_wrapper: true` and one field
-                                // `_0` (codegen/mod.rs:15664 and :15813).
-                                // `TypeKind::Newtype` is produced by NOTHING in
-                                // the compile path — only by tests and
-                                // `TypeKind::try_from` — so this branch had
-                                // never run for a real newtype (T1263).
-                                //
-                                // Kept alongside rather than replaced: a
-                                // descriptor arriving from elsewhere with the
-                                // old kinds still means the same thing.
-                                && (td.is_transparent_wrapper && td.fields.len() == 1
-                                    || td.kind == verum_vbc::types::TypeKind::Newtype
-                                    || (td.kind == verum_vbc::types::TypeKind::Tuple
-                                        && td.fields.len() == 1))
-                        })
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                }
-            } else {
-                false
-            };
-
-            if is_single_field_type {
-                // Single-field type unwrap: value IS the single field.
-                // If the type wraps a Float, the i64 contains float bits —
-                // bitcast back to f64 for correct float arithmetic.
-                let wraps_float = if let Some(vbc_mod) = ctx.vbc_module() {
-                    if let Some(type_name) = ctx.get_obj_register_type(obj.0).map(|s| s.to_string())
-                    {
-                        vbc_mod.types.iter().any(|td| {
-                            let tname = vbc_mod.get_string(td.name).unwrap_or("");
-                            tname == type_name && td.fields.first().map_or(false, |f|
-                                matches!(f.type_ref, TypeRef::Concrete(tid) if tid == TypeId::FLOAT || tid == TypeId::F32))
-                        })
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                } || ctx.is_prescan_float_register(obj.0);
-
-                if wraps_float {
-                    let f64_val = ctx
-                        .builder()
-                        .build_bit_cast(iv, ctx.types().f64_type(), "newtype_f64")
-                        .or_llvm_err()?;
-                    ctx.set_register(dst.0, f64_val);
-                    ctx.mark_float_register(dst.0);
-                } else {
-                    ctx.set_register(dst.0, BasicValueEnum::IntValue(iv));
-                }
-            } else {
                 // i64 that is actually a heap pointer (from function return coercion)
                 // Convert back to pointer and do heap access
                 let i8_type = ctx.types().i8_type();
@@ -43845,12 +43803,11 @@ fn lower_get_field<'ctx>(
                 {
                     ctx.set_element_stride(dst.0, 1);
                 }
-            } // end else (not newtype)
         }
-        _ => {
-            // Fallback: return zero
-            ctx.set_register(dst.0, ctx.types().i64_type().const_zero().into());
-        }
+        _ => return Err(LlvmLoweringError::InvalidType(format!(
+            "GetF r{} <- r{} field {}: {:?} has no declared scalar payload or native record carrier (owner {:?})",
+            dst.0, obj.0, field_idx, obj_val.get_type(), field_owner_name,
+        ).into())),
     }
     // Propagate register tracking from struct field metadata (same-function SetF tracking)
     if ctx.is_struct_list_field(obj.0, field_idx) {
@@ -43867,15 +43824,39 @@ fn lower_get_field<'ctx>(
     {
         // Always run TypeDescriptor lookup for obj_register_type propagation
         if let Some(vbc_mod) = ctx.vbc_module() {
-            let obj_type_name = ctx.get_obj_register_type(obj.0).map(|s| s.to_string());
-            if let Some(type_name) = obj_type_name {
-                // Find the TypeDescriptor for this type
-                for type_desc in &vbc_mod.types {
-                    let tname = vbc_mod.get_string(type_desc.name).unwrap_or("");
-                    if tname == type_name {
+            if let Some(type_name) = field_owner_name {
+                // Find the physical payload declaration, which may differ from
+                // the nominal transparent wrapper retained by an identity Mov.
+                if let Some(type_desc) = ctx.find_type_by_name(&type_name) {
                         // Check if the field at field_idx has List or Text type
                         if let Some(field_desc) = type_desc.fields.get(field_idx as usize) {
-                            match &field_desc.type_ref {
+                            let declared = field_desc.declaration_type.as_ref().unwrap_or(&field_desc.type_ref);
+                            let field_type = if type_desc.type_params.len() == field_owner_args.len() {
+                                verum_vbc::mono::TypeSubstitution::new(&type_desc.type_params, &field_owner_args)
+                                    .apply(declared).map_err(|error| LlvmLoweringError::InvalidType(error.to_string().into()))?
+                            } else if declared.is_generic() {
+                                if !field_owner_args.is_empty() {
+                                    return Err(LlvmLoweringError::InvalidType(format!(
+                                        "GetF r{} field {}: owner {} requires {} arguments, found {}",
+                                        obj.0, field_idx, type_name, type_desc.type_params.len(), field_owner_args.len(),
+                                    ).into()));
+                                }
+                                // New provides the record's Value-slot layout, but no
+                                // generic application. The loaded word is valid; its
+                                // semantic type remains unknown. Clear even sticky hints
+                                // instead of publishing an uninstantiated declaration.
+                                let value = ctx.get_register(dst.0)?;
+                                ctx.set_register(dst.0, value);
+                                ctx.clear_sticky_type_hint(dst.0);
+                                return Ok(());
+                            } else {
+                                // A closed field does not depend on the missing owner arguments.
+                                declared.clone()
+                            };
+                            if let TypeRef::Instantiated { args, .. } = &field_type {
+                                ctx.set_generic_type_args(dst.0, args.clone());
+                            }
+                            match &field_type {
                                 TypeRef::Concrete(tid) if *tid == TypeId::BOOL => {
                                     ctx.mark_bool_register(dst.0);
                                 }
@@ -44160,8 +44141,6 @@ fn lower_get_field<'ctx>(
                                 _ => {}
                             }
                         }
-                        break;
-                    }
                 }
             }
         }

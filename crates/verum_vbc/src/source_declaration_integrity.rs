@@ -72,7 +72,7 @@ pub fn validate_type_descriptor(
 /// Resolve the payload of a representation-erasing declaration. A descriptor
 /// flag is not authority by itself: retained source must declare that exact
 /// shape. Ordinary single-field records keep their object carrier.
-pub(crate) fn transparent_value_type<'a>(
+pub fn transparent_value_type<'a>(
     descriptor: &'a TypeDescriptor,
     strings: &StringTable,
 ) -> Result<Option<&'a TypeRef>, Text> {

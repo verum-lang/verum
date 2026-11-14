@@ -2107,5 +2107,10 @@ pub(super) fn lower<'ctx>(
         .build_int_to_ptr(value, ptr_type, "typed_copy_result")
         .or_llvm_err()?;
     ctx.set_register(dst.0, value.into());
+    // The checked plan preserves this exact owner application. Publishing only
+    // its spelling would lose generic field layouts after the copied result.
+    if matches!(ty, TypeRef::Concrete(_) | TypeRef::Instantiated { .. }) {
+        mark_register_from_return_type(ctx, dst.0, ty);
+    }
     Ok(())
 }
