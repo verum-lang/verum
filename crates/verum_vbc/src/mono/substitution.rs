@@ -1,9 +1,11 @@
 //! Type substitution for monomorphization.
 
-use std::collections::HashMap;
+use verum_common::{List, Map};
 
 use crate::module::FunctionDescriptor;
-use crate::types::{TypeParamDescriptor, TypeParamId, TypeRef};
+use crate::types::{
+    MAX_TYPE_REF_DEPTH, MAX_TYPE_REF_NODES, TypeParamDescriptor, TypeParamId, TypeRef,
+};
 
 /// Type substitution environment for monomorphization.
 ///
@@ -11,13 +13,13 @@ use crate::types::{TypeParamDescriptor, TypeParamId, TypeRef};
 #[derive(Clone, PartialEq, Eq)]
 pub struct TypeSubstitution {
     /// Type parameter bindings: TypeParamId -> concrete TypeRef.
-    bindings: HashMap<TypeParamId, TypeRef>,
+    bindings: Map<TypeParamId, TypeRef>,
 }
 
 impl TypeSubstitution {
     /// Creates a new substitution from type parameters and arguments.
     pub fn new(params: &[TypeParamDescriptor], args: &[TypeRef]) -> Self {
-        let mut bindings = HashMap::new();
+        let mut bindings = Map::new();
         for (param, arg) in params.iter().zip(args.iter()) {
             bindings.insert(param.id, arg.clone());
         }
@@ -44,7 +46,7 @@ impl TypeSubstitution {
         }
         // Metadata-free and legacy surplus vectors are indexed by ID. The
         // surplus can contain real const arguments omitted from old rosters.
-        let mut bindings = HashMap::new();
+        let mut bindings = Map::new();
         for (i, arg) in args.iter().enumerate() {
             bindings.insert(crate::types::TypeParamId(i as u16), arg.clone());
         }
@@ -54,7 +56,7 @@ impl TypeSubstitution {
     /// Creates an empty substitution.
     pub fn empty() -> Self {
         Self {
-            bindings: HashMap::new(),
+            bindings: Map::new(),
         }
     }
 
@@ -70,10 +72,11 @@ impl TypeSubstitution {
 
     /// Applies the substitution to a type reference.
     ///
-    /// Recursively substitutes type parameters with their bindings.
+    /// Check the complete output shape before constructing any replacements.
     pub fn apply(&self, type_ref: &TypeRef) -> Result<TypeRef, SubstitutionError> {
+        validate_mapped_shape(type_ref, ParameterMapping::Substitute(self))?;
         map_free_parameters(type_ref, 0, &mut |id, depth| match self.bindings.get(&id) {
-            Some(replacement) => lift_free_parameters(replacement, depth),
+            Some(replacement) => lift_free_parameters_checked(replacement, depth),
             None => lifted_parameter(id, depth),
         })
     }
@@ -92,8 +95,17 @@ impl TypeSubstitution {
 /// Substitution must not silently wrap a representable type parameter index.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SubstitutionError {
-    GenericIndexOverflow { index: u16, shift: u32 },
+    GenericIndexOverflow {
+        index: u16,
+        shift: u32,
+    },
     BinderDepthOverflow,
+    /// The substituted result exceeds the shared structural-depth boundary.
+    TypeDepthLimit,
+    /// The substituted result exceeds the shared total-component boundary.
+    TypeNodeLimit,
+    /// A closed sequence violates its independent payload extent or depth limit.
+    ConstSequenceLimit,
 }
 
 impl std::fmt::Display for SubstitutionError {
@@ -104,6 +116,19 @@ impl std::fmt::Display for SubstitutionError {
                 "type parameter index {index} cannot be lifted by {shift} in the VBC binder representation"
             ),
             Self::BinderDepthOverflow => write!(f, "VBC type binder depth is not representable"),
+            Self::TypeDepthLimit => write!(
+                f,
+                "substituted VBC type exceeds depth limit {MAX_TYPE_REF_DEPTH}"
+            ),
+            Self::TypeNodeLimit => write!(
+                f,
+                "substituted VBC type exceeds component limit {MAX_TYPE_REF_NODES}"
+            ),
+
+            Self::ConstSequenceLimit => write!(
+                f,
+                "substituted VBC constant sequence exceeds its structural limit"
+            ),
         }
     }
 }
@@ -120,12 +145,97 @@ fn lifted_parameter(id: TypeParamId, shift: u32) -> Result<TypeRef, Substitution
 /// Move free parameters under additional binders. Local variables in nested
 /// rank-2 types remain local; replacement types cannot capture those variables.
 pub fn lift_free_parameters(ty: &TypeRef, amount: u32) -> Result<TypeRef, SubstitutionError> {
+    validate_mapped_shape(ty, ParameterMapping::Lift(amount))?;
+    lift_free_parameters_checked(ty, amount)
+}
+
+fn lift_free_parameters_checked(ty: &TypeRef, amount: u32) -> Result<TypeRef, SubstitutionError> {
     map_free_parameters(ty, 0, &mut |id, depth| {
         let shift = depth
             .checked_add(amount)
             .ok_or(SubstitutionError::BinderDepthOverflow)?;
         lifted_parameter(id, shift)
     })
+}
+
+#[derive(Clone, Copy)]
+enum ParameterMapping<'a> {
+    Substitute(&'a TypeSubstitution),
+    Lift(u32),
+}
+
+/// Walk the prospective result without cloning its inputs. A replacement is
+/// simultaneous: its free parameters are lifted, never substituted again.
+/// The final bounded mapper can then use small, structurally bounded calls.
+fn validate_mapped_shape<'a>(
+    ty: &'a TypeRef,
+    mapping: ParameterMapping<'a>,
+) -> Result<(), SubstitutionError> {
+    let mut pending = List::new();
+    pending.push((ty, 0usize, 0u32, mapping));
+    let mut remaining = MAX_TYPE_REF_NODES;
+    while let Some((ty, depth, scope, mapping)) = pending.pop() {
+        if depth >= MAX_TYPE_REF_DEPTH {
+            return Err(SubstitutionError::TypeDepthLimit);
+        }
+        if let TypeRef::ConstSequence(sequence) = ty {
+            sequence
+                .validate()
+                .map_err(|_| SubstitutionError::ConstSequenceLimit)?;
+        }
+        if let TypeRef::Generic(id) = ty
+            && u32::from(id.0) >= scope
+        {
+            let free = TypeParamId((u32::from(id.0) - scope) as u16);
+            match mapping {
+                ParameterMapping::Substitute(substitution) => {
+                    if let Some(replacement) = substitution.get(free) {
+                        pending.push((replacement, depth, 0, ParameterMapping::Lift(scope)));
+                        continue;
+                    }
+                }
+                ParameterMapping::Lift(amount) => {
+                    let shift = scope
+                        .checked_add(amount)
+                        .ok_or(SubstitutionError::BinderDepthOverflow)?;
+                    lifted_parameter(free, shift)?;
+                }
+            }
+        }
+        remaining = remaining
+            .checked_sub(1)
+            .ok_or(SubstitutionError::TypeNodeLimit)?;
+        let introduced = match ty {
+            TypeRef::Rank2Function {
+                type_param_count, ..
+            } => u32::from(*type_param_count),
+            TypeRef::Dynamic(object) => {
+                // Protocol applications and equalities carry metadata even when
+                // their immediate type-argument lists are empty, as in the codec.
+                remaining = remaining
+                    .checked_sub(object.bounds.len())
+                    .and_then(|count| count.checked_sub(object.bindings.len()))
+                    .ok_or(SubstitutionError::TypeNodeLimit)?;
+                1
+            }
+            _ => 0,
+        };
+        let scope = scope
+            .checked_add(introduced)
+            .ok_or(SubstitutionError::BinderDepthOverflow)?;
+        let mut exceeded = false;
+        ty.for_each_child(|child| {
+            if pending.len() >= remaining {
+                exceeded = true;
+            } else {
+                pending.push((child, depth + 1, scope, mapping));
+            }
+        });
+        if exceeded {
+            return Err(SubstitutionError::TypeNodeLimit);
+        }
+    }
+    Ok(())
 }
 
 /// Map only free parameters, presenting their IDs in the outer scope and the
