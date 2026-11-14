@@ -115,9 +115,9 @@ public unsafe fn cbgr_realloc(user_ptr: Int, new_size: Int) -> Int;
 @intrinsic("cbgr_validate_ref")
 public unsafe fn cbgr_validate_ref(user_ptr: Int, expected_gen_epoch: Int) -> Int;
 
-/// Bump the generation counter on `user_ptr`'s allocation, invalidating
-/// every existing `ThinRef` that points into it.  Used at scope exit
-/// to revoke borrowed references without immediate deallocation.
+/// Retire the allocation identity, invalidating every existing reference.
+/// Storage remains allocated, but cannot issue a new valid snapshot.
+/// Used at scope exit to revoke references before deallocation.
 @intrinsic("cbgr_invalidate")
 public unsafe fn cbgr_invalidate(user_ptr: Int);
 
@@ -133,9 +133,9 @@ public fn cbgr_epoch_begin() -> Int;
 // only effect was to be a third description of one concept. One
 // concept, one name (T0846).
 
-/// Advance the global generation counter — invalidates ALL
-/// outstanding references with the previous generation.  Heavy
-/// hammer; use sparingly (e.g. arena reset).
+/// Reserve a fresh allocation generation from the shared bounded issuer.
+/// Does not change existing allocations. Exhaustion raises a runtime failure
+/// instead of reusing an earlier generation or the invalid zero sentinel.
 @intrinsic("cbgr_new_generation")
 public fn cbgr_new_generation() -> Int;
 

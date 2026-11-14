@@ -757,13 +757,10 @@ pub struct InterpreterState {
     /// `env_flags`.
     pub intercept_verdicts: Vec<u8>,
 
-    /// Global generation-id counter — the Tier-0 twin of the AOT's
-    /// `verum_ir_generation_counter` global (runtime.rs
-    /// `emit_cbgr_new_generation`): starts at 1, and
-    /// `CbgrSubOpcode::NewGeneration` returns a fresh monotone id per
-    /// call.  Distinct from `cbgr_epoch` — the historical arm returned
-    /// `epoch + 1`, which repeated the same id until an epoch advance
-    /// and could COLLIDE with epoch numbering (T0846).
+    /// Last identity issued by the shared bridge allocation/generation issuer.
+    /// Its native counterpart is `verum_ir_generation_counter`. The counter
+    /// never wraps; allocation and explicit reservation refuse on exhaustion.
+    /// This is independent of the epoch and survives interpreter reset.
     pub cbgr_generation_counter: u64,
 
     /// Tracks base addresses of raw CBGR allocations (AllocationHeader starts).
@@ -2698,7 +2695,7 @@ impl InterpreterState {
             cbgr_epoch: 1,
             cbgr_bypass_depth: 0,
             intercept_verdicts: Vec::new(),
-            cbgr_generation_counter: 1,
+            cbgr_generation_counter: u64::from(verum_common::cbgr::GEN_INITIAL),
             cbgr_allocations: HashSet::new(),
             cbgr_bridge_extents: std::collections::BTreeMap::new(),
             user_tls_slots: std::collections::HashMap::new(),
@@ -3091,6 +3088,18 @@ impl InterpreterState {
                 descriptor.type_params.len(), args.len()) });
         }
         Ok(args)
+    }
+
+    /// Reserve an allocation incarnation from the existing CBGR issuer.
+    /// Header generations are u32; zero and the permanent sentinel are never
+    /// issued, and exhaustion does not wrap or mutate the counter.
+    pub(crate) fn try_next_cbgr_generation(&mut self) -> Option<u32> {
+        let next = self.cbgr_generation_counter.checked_add(1)?;
+        if next > u64::from(verum_common::cbgr::GEN_MAX) {
+            return None;
+        }
+        self.cbgr_generation_counter = next;
+        Some(next as u32)
     }
 
     /// Gets a constant from the current module.

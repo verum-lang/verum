@@ -27146,8 +27146,15 @@ fn lower_cbgr_extended<'ctx>(
             let invalidate_fn = module
                 .get_function("verum_cbgr_invalidate")
                 .unwrap_or_else(|| module.add_function("verum_cbgr_invalidate", fn_type, None));
+            let address = match src {
+                BasicValueEnum::PointerValue(_) | BasicValueEnum::IntValue(_) =>
+                    as_ptr(ctx, src, "invalidate_ptr")?,
+                _ => return Err(LlvmLoweringError::TypeLowering(
+                    "CBGR invalidate requires an address operand".into(),
+                )),
+            };
             ctx.builder()
-                .build_call(invalidate_fn, &[src.into()], "")
+                .build_call(invalidate_fn, &[address.into()], "")
                 .or_llvm_err()?;
             Ok(())
         }
@@ -27249,7 +27256,7 @@ fn lower_cbgr_extended<'ctx>(
         }
         0x56 => {
             // Revoke — `cbgr_revoke(user_ptr)`: invalidate (generation
-            // bump via verum_cbgr_invalidate) + deallocate, in that
+            // retirement via verum_cbgr_invalidate) + deallocate, in that
             // order — the cbgr.vr contract and the Tier-0 arm's exact
             // sequence (T0846).  The pre-fix arm preferred a
             // `ThinRef.revoke` .vr symbol that expects the ADDRESS OF A

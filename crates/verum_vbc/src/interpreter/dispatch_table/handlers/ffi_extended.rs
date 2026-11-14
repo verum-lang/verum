@@ -2203,6 +2203,9 @@ pub(super) fn cbgr_user_allocate(state: &mut InterpreterState, raw_size: i64, ra
         Ok(layout) => layout,
         Err(_) => return 0,
     };
+    let Some(generation) = state.try_next_cbgr_generation() else {
+        return 0;
+    };
     // SAFETY: total is non-zero and the alignment is valid by construction.
     // Zero-initialised so uninitialised reads behave deterministically under
     // the interpreter (AOT inherits its runtime allocator's behaviour).
@@ -2221,7 +2224,7 @@ pub(super) fn cbgr_user_allocate(state: &mut InterpreterState, raw_size: i64, ra
             align as u16;
         *((header_addr + l::ALLOCATION_HEADER_BASE_OFFSET_OFFSET as usize) as *mut u16) =
             (header_addr - base_addr) as u16;
-        *((header_addr + l::ALLOCATION_HEADER_GENERATION_OFFSET as usize) as *mut u32) = 1;
+        *((header_addr + l::ALLOCATION_HEADER_GENERATION_OFFSET as usize) as *mut u32) = generation;
         *((header_addr + l::ALLOCATION_HEADER_EPOCH_OFFSET as usize) as *mut u16) =
             state.cbgr_epoch as u16;
         *((header_addr + l::ALLOCATION_HEADER_CAPABILITIES_OFFSET as usize) as *mut u16) =
@@ -2344,6 +2347,8 @@ pub(super) fn cbgr_user_deallocate(state: &mut InterpreterState, user: i64) {
     // SAFETY: liveness gated by the tracked-set removal above; the header
     // fields were written by `cbgr_user_allocate`.
     unsafe {
+        *((header_addr + l::ALLOCATION_HEADER_GENERATION_OFFSET as usize) as *mut u32) =
+            verum_common::cbgr::GEN_UNALLOCATED;
         let flags_ptr = (header_addr + l::ALLOCATION_HEADER_FLAGS_OFFSET as usize) as *mut u32;
         *flags_ptr |= verum_common::cbgr::flags::FREED;
         let base_offset = *((header_addr + l::ALLOCATION_HEADER_BASE_OFFSET_OFFSET as usize)

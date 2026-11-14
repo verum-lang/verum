@@ -22,6 +22,11 @@ pub fn module(source: &str) -> verum_vbc::VbcModule {
 }
 
 pub fn run(source: &str) {
+    run_with(source, |_| {});
+}
+
+/// Set a runtime resource boundary before emitting the ordinary native image.
+pub fn run_with(source: &str, configure: impl FnOnce(&verum_llvm::module::Module<'_>)) {
     let mut wire = module(source);
     let mut graph = verum_vbc::mono::InstantiationGraph::new();
     for function in &mut wire.functions {
@@ -68,6 +73,7 @@ pub fn run(source: &str) {
     let native = lowering.module();
     native.set_triple(&triple);
     native.set_data_layout(&machine.get_target_data().get_data_layout());
+    configure(native);
     native.verify().expect("complete native IR");
     let directory = tempfile::tempdir().unwrap();
     let object = directory.path().join("copy.o");

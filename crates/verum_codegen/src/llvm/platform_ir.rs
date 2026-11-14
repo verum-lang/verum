@@ -3521,7 +3521,7 @@ impl<'ctx> PlatformIR<'ctx> {
             }
         }
 
-        // verum_cbgr_allocate(size: i64, align: i64) -> i64: extern (C provides body)
+        // The body is emitted as target LLVM IR by RuntimeLowering::emit_cbgr_allocate.
         {
             let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
             if module.get_function("verum_cbgr_allocate").is_none() {

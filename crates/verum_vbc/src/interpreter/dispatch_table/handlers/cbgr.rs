@@ -1883,14 +1883,14 @@ pub(in super::super) fn handle_drop_ref(
         let header_addr =
             data_ptr.wrapping_sub(verum_common::layout::ALLOCATION_HEADER_SIZE as usize);
         if state.cbgr_allocations.contains(&header_addr) {
-            // Bump generation and set FREED flag in AllocationHeader.
+            // Retire the allocation identity and set FREED in its header.
             // Field offsets and the FREED bit value live in
             // `verum_common::{layout, cbgr::flags}`.
             unsafe {
                 let gen_ptr = (header_addr
                     + verum_common::layout::ALLOCATION_HEADER_GENERATION_OFFSET as usize)
                     as *mut u32;
-                *gen_ptr = (*gen_ptr).wrapping_add(1);
+                *gen_ptr = verum_common::cbgr::GEN_UNALLOCATED;
                 let flags_ptr = (header_addr
                     + verum_common::layout::ALLOCATION_HEADER_FLAGS_OFFSET as usize)
                     as *mut u32;
@@ -3631,15 +3631,19 @@ fn cbgr_extended_body(
             // advance and could collide with epoch numbering (T0846).
             // Format: dst:reg
             let dst = read_reg(state)?;
-            state.cbgr_generation_counter = state.cbgr_generation_counter.wrapping_add(1);
-            state.set_reg(dst, Value::from_i64(state.cbgr_generation_counter as i64));
+            let generation = state.try_next_cbgr_generation().ok_or_else(|| {
+                InterpreterError::Panic {
+                    message: "CBGR generation space exhausted".into(),
+                }
+            })?;
+            state.set_reg(dst, Value::from_i64(i64::from(generation)));
             Ok(DispatchResult::Continue)
         }
 
         Some(CbgrSubOpcode::Invalidate) => {
             // Format: src:reg
             // TWO models, disambiguated by the VALUE (T0846):
-            //  * user pointer into a live bridge allocation → bump the
+            //  * user pointer into a live bridge allocation → retire the
             //    canonical gen@8 header slot, revoking every
             //    outstanding heap reference (the cbgr.vr semantics of
             //    `cbgr_invalidate(user_ptr)`; the AOT twin is
@@ -3660,7 +3664,7 @@ fn cbgr_extended_body(
                     let gen_ptr = ((user as usize) - hdr
                         + verum_common::layout::ALLOCATION_HEADER_GENERATION_OFFSET as usize)
                         as *mut u32;
-                    *gen_ptr = (*gen_ptr).wrapping_add(1);
+                    *gen_ptr = verum_common::cbgr::GEN_UNALLOCATED;
                 }
             } else {
                 let abs_index = state.reg_base() + src_reg.0 as u32;
@@ -3683,7 +3687,7 @@ fn cbgr_extended_body(
 
         Some(CbgrSubOpcode::Revoke) => {
             // cbgr_revoke(user_ptr): invalidate + deallocate in one
-            // step (cbgr.vr).  Generation bump FIRST — the dealloc
+            // step (cbgr.vr).  Retire generation FIRST — the dealloc
             // sets FREED and releases the block.  Untracked pointers
             // are a no-op on both halves.  Format: ptr:reg (void)
             let src_reg = read_reg(state)?;
@@ -3699,7 +3703,7 @@ fn cbgr_extended_body(
                     let gen_ptr = ((user as usize) - hdr
                         + verum_common::layout::ALLOCATION_HEADER_GENERATION_OFFSET as usize)
                         as *mut u32;
-                    *gen_ptr = (*gen_ptr).wrapping_add(1);
+                    *gen_ptr = verum_common::cbgr::GEN_UNALLOCATED;
                 }
                 super::ffi_extended::cbgr_user_deallocate(state, user);
             }

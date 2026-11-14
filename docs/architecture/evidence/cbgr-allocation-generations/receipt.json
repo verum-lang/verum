@@ -1,0 +1,118 @@
+{
+  "task": "T2720",
+  "base_commit": "0b1bfddfe2cedc9d25e0d0d0f0a221e8a43f25d6",
+  "scope": "Existing VM bridge allocation issuer and emitted native CBGR allocation runtime; no VBC source-codegen changes.",
+  "contract": {
+    "last_issuable_generation": 4294967294,
+    "retired_generation": 0,
+    "authority": "Existing InterpreterState.cbgr_generation_counter and emitted verum_ir_generation_counter; allocation and explicit generation reservation share each tier authority.",
+    "exhaustion": "Allocator returns zero before OS allocation/publication; explicit generation reservation raises the ordinary runtime failure. Native CAS cannot wrap under competing issuers.",
+    "retirement": "Invalidate/deallocation/revoke retire to zero; they never increment an allocation into another incarnation identity.",
+    "failed_os_allocation": "May consume an identity; reserved identities are not reused."
+  },
+  "verification": {
+    "matched_baseline": {
+      "passed": 0,
+      "failed": 2,
+      "observation": "The unchanged fresh-allocation source returns0 rather than73 in both VM and complete native image."
+    },
+    "producer_runtime": {
+      "passed": 7,
+      "failed": 0,
+      "includes": [
+        "source→wire VM/native monotone identities",
+        "actual producer at GEN_MAX−1",
+        "recoverable explicit exhaustion versus allocation0",
+        "retirement0 in both tiers",
+        "actual native issuer:8 threads,512 calls,128 distinct final IDs,384 refusals,then persistent refusal"
+      ]
+    },
+    "native_neighbors": {
+      "passed": 7,
+      "failed": 0,
+      "targets": [
+        "cbgr_reference_encoding",
+        "retain_copy"
+      ]
+    },
+    "invalid_native_operand": {
+      "passed": 1,
+      "failed": 0,
+      "observation": "Invalidate rejects a floating operand before emitting a runtime call."
+    },
+    "runtime_library": {
+      "passed": 1444,
+      "failed": 0,
+      "ignored": 1,
+      "filtered": 0,
+      "features": "compression,table_dispatch,ffi",
+      "threads": 8,
+      "ignored_test": "interpreter::dispatch_table::handlers::heap_helpers::record_probe_tests::measure_archived_descriptor_lookup"
+    },
+    "vm_neighbors": {
+      "passed": 37,
+      "failed": 0,
+      "targets": [
+        "cbgr_source_encoding",
+        "cbgr_runtime_diagnostics",
+        "managed_field_lifetime",
+        "raw_record_fields",
+        "retain_copy"
+      ],
+      "features": "compression,table_dispatch,codegen,ffi"
+    },
+    "public_file_gate": "make check-internal-refs passed",
+    "environment": {
+      "toolchain": "nightly-2026-08-20",
+      "CARGO_PROFILE_DEV_DEBUG": "0",
+      "CARGO_PROFILE_TEST_DEBUG": "0",
+      "CARGO_INCREMENTAL": "0",
+      "VERUM_NO_AUTO_PRECOMPILE": "1",
+      "RUST_MIN_STACK": "unset",
+      "target_dir": "/Volumes/AGI-Dev/work/verum/configuration-runtime-build-cow"
+    }
+  },
+  "limits": [
+    "Native page-release metadata addressability remains the independent open T2719 defect. No post-free native safety claim.",
+    "This runtime-only receipt does not replace the parent immutable full codegen/library composition gate.",
+    "Shared integration, parameter ownership and nested JSON copying remain separate unfinished work.",
+    "Native execution is on the available macOS target; other target execution is not claimed."
+  ],
+  "sources_sha256": {
+    "core/intrinsics/runtime/cbgr.vr": "2381ae9bc0aeef8814d7b3c16deca7cdb682cefacb9dd5de423d928a98930202",
+    "crates/verum_codegen/src/llvm/instruction.rs": "cdb5a09df36f185d52dad46f68dcd86e7b350f43da88fd1563c0bb34622675bf",
+    "crates/verum_codegen/src/llvm/platform_ir.rs": "d11463a09b74d9e37d06ed3ebd55e55afab066d12916e367057261f9864c0de0",
+    "crates/verum_codegen/src/llvm/runtime.rs": "48106166b9b66fcfdb2f16c180a7933e08a738c8f91ae5f6c829b1b9f24f2066",
+    "crates/verum_codegen/tests/support/source_image.rs": "8d935b858c3a83109da8f500e98c5386a0c4f9abd1a8a8c30eac66f8323c6483",
+    "crates/verum_codegen/tests/cbgr_allocation_identity.rs": "2e8a3f86dadd222e939d43f40ed15d292dcab84d4e4ea30617ab599e513bcabb",
+    "crates/verum_vbc/src/interpreter/dispatch_table/handlers/cbgr.rs": "f2f6eca031216254dd9e1811a63240fa50f297a8f10ac99d7d1b5d709d18fb95",
+    "crates/verum_vbc/src/interpreter/dispatch_table/handlers/ffi_extended.rs": "e7e86901bbe97b6a38d21a1a8888a9719a17c5a9f80d347db1c9e3b6cb77a68a",
+    "crates/verum_vbc/src/interpreter/state.rs": "6a142f6f2f0db2c4ae4ff6753c1784c57ff77778337d3a26a54e186345696d68"
+  },
+  "logs": {
+    "baseline": {
+      "path": "/private/tmp/verum-t2720-before.log",
+      "sha256": "317bd5a89b11b37eb2407e07f0246dd63ebf9e2a9304819795d237a17e07ec4a"
+    },
+    "native_and_vm": {
+      "path": "/private/tmp/verum-t2720-after.log",
+      "sha256": "f533b2b44e24c0a69db450ee75f6976d714e1ff6abb61b1a2220e9e03d894a88"
+    },
+    "invalid_operand": {
+      "path": "/private/tmp/verum-t2720-invalid-carrier.log",
+      "sha256": "07718c378df65c527b984c2b2c10f4da715fd517eda4baf1bf3faceb2a8412bb"
+    },
+    "runtime_library": {
+      "path": "/private/tmp/verum-t2720-runtime-full-final.log",
+      "sha256": "7ad82be6fd1d633a95890a496aebc1aea0e6fc4d1697e9ffc931bd5be6c57c49"
+    },
+    "vm_neighbors": {
+      "path": "/private/tmp/verum-t2720-vm-neighbors.log",
+      "sha256": "a452d13a8286b721c9be9b50bb66be0fbad33f3ae69d7d0c3de1d08e66d2fd87"
+    },
+    "public_file_gate": {
+      "path": "/private/tmp/verum-t2720-public-files.log",
+      "sha256": "499230755390166a119f99c478ee5194d11704b9208a7c0c92767d0906741664"
+    }
+  }
+}

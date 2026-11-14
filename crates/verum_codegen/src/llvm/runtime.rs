@@ -15464,52 +15464,18 @@ impl<'ctx> RuntimeLowering<'ctx> {
     // CBGR Memory Management — LLVM IR emission
     // ========================================================================
     //
-    // **Layout is private to the codegen-emitted allocator.** The 32-byte
-    // header below is consumed only by the IR functions in this section
-    // (`verum_cbgr_allocate`, `verum_cbgr_revoke`, `emit_cbgr_get_header`,
-    // and the `ref_count`/`flags` accessors). It is NOT the same struct
-    // as `verum_common::cbgr::AllocationHeader`, which is the **runtime
-    // metadata header** consumed by the Tier-0 interpreter, the SMT
-    // verifier, and the static-analysis layer. Both are 32-byte / 32-byte-
-    // aligned headers preceding heap data, but their field semantics
-    // diverge:
-    //
-    //   codegen-private (this section):
-    //     0..4   generation (i32, atomic, GEN_INITIAL on alloc)
-    //     4..8   size       (i32, allocation user-payload size)
-    //     8..10  epoch      (i16, atomic, mirrors global_epoch)
-    //     10..12 capabilities (i16, init to CAP_FULL)
-    //     12..16 ref_count  (i32, atomic, init to 1)
-    //     16..24 flags      (i64, atomic — FLAG_REVOKED bit set on revoke)
-    //     24..32 next_free  (ptr, allocator free-list link)
-    //
-    //   canonical runtime metadata (`verum_common::cbgr::AllocationHeader`):
-    //     0..4   size, 4..8 alignment, 8..12 generation,
-    //     12..14 epoch, 14..16 capabilities, 16..20 type_id,
-    //     20..24 flags, 24..32 reserved
-    //
-    // The two schemes coexist because they answer different questions —
-    // the codegen layout is what `verum_alloc` (the bump allocator
-    // emitted in `platform_ir.rs::emit_allocator`) writes; the canonical
-    // layout is what the interpreter and verification code consult.
-    // **Drift contract:** *within* the codegen scheme, every field
-    // offset that appears below MUST be consistent across allocate /
-    // revoke / get_header / ref_release / ref_count / invalidate. When
-    // adding a new emitter or changing a field offset, audit the full
-    // section.
-    //
-    // The user pointer is at (raw_ptr + 32). get_header subtracts 32.
+    // Allocation and validation share verum_common::cbgr::AllocationHeader.
+    // Every field offset below comes from the canonical layout constants.
+    // The user pointer follows the header; an aligned allocation records its
+    // original base separately so deallocation frees the correct extent.
+    // Generations identify allocation incarnations, never mutable versions:
+    // allocation reserves a fresh identity and retirement writes zero.
 
     /// AllocationHeader size in bytes — re-exports the canonical
     /// [`verum_common::layout::ALLOCATION_HEADER_SIZE`].
     const ALLOC_HEADER_SIZE: u64 = verum_common::layout::ALLOCATION_HEADER_SIZE;
-    /// Initial generation value for fresh allocations — re-exports
-    /// [`verum_common::cbgr::GEN_INITIAL`] (matches stdlib
-    /// `core/mem/allocator.vr` `GEN_INITIAL: UInt32 = 1`).
-    const GEN_INITIAL: u64 = verum_common::cbgr::GEN_INITIAL as u64;
-    /// Maximum non-wraparound generation — re-exports
-    /// [`verum_common::cbgr::GEN_MAX`] (`0xFFFF_FFFE`). Reaching this
-    /// value triggers an epoch advance.
+    /// Last issuable allocation identity. Exhaustion refuses further issuance
+    /// without wrapping or changing already published allocations.
     const GEN_MAX: u64 = verum_common::cbgr::GEN_MAX as u64;
     /// All standard capabilities (bits 0-7) — re-exports
     /// [`verum_common::cbgr::caps::ALL`]. Initial allocations grant
@@ -15521,36 +15487,11 @@ impl<'ctx> RuntimeLowering<'ctx> {
     const FLAG_REVOKED: u64 = verum_common::cbgr::flags::REVOKED as u64;
 
     // ----------------------------------------------------------------
-    // Codegen-private AllocationHeader field offsets
+    // Canonical AllocationHeader field offsets
     // ----------------------------------------------------------------
-    //
-    // The 32-byte header consumed by the IR functions in this section
-    // (allocate / revoke / get_header / ref_release / ref_count /
-    // invalidate / realloc) is structurally separate from the canonical
-    // `verum_common::cbgr::AllocationHeader` — see the section header
-    // comment for the two-scheme rationale.
-    //
-    // Pre-this-block, every emitter open-coded field offsets as raw
-    // `i64_type.const_int(4, false)` / `const_int(10, false)` /
-    // `const_int(12, false)` / `const_int(16, false)` literals across
-    // 10+ sites. A single misplaced digit would have allocate write
-    // a field at one offset while revoke read it at another, silently
-    // splitting allocations into halves visible to one path but not
-    // the other.
 
-    /// Offset of the `size` u32 field.
-    ///
-    /// These eight aliases ARE `verum_common::layout::ALLOCATION_HEADER_*`
-    /// — the ONE allocation-header layout both tiers share (T0846
-    /// layer 2). This section used to carry its own `AOT_HDR_*`
-    /// arrangement (`gen@0/size@4/epoch@8/caps@10/rc@12/flags@16`),
-    /// which meant a Tier-0 header and a Tier-1 header for the same
-    /// declared contract had different shapes, and the ThinRef
-    /// constructors — following a THIRD arrangement — read the low
-    /// half of `size` wherever they meant `epoch`, degenerating the
-    /// Tier-1 epoch validation into `size == size`. The aliases exist
-    /// so the emitters below stay readable; their values are the
-    /// canonical constants, pinned by verum_common's offset tests.
+    /// Offset of the `size` u32 field, shared with the interpreter and
+    /// native reference validators through the common layout authority.
     const AOT_HDR_SIZE_OFFSET: u64 = verum_common::layout::ALLOCATION_HEADER_SIZE_OFFSET;
 
     /// Offset of the `alignment` u16 field.
@@ -15600,8 +15541,8 @@ impl<'ctx> RuntimeLowering<'ctx> {
         self.emit_cbgr_ref_release(module)?;
         self.emit_cbgr_ref_count(module)?;
         self.emit_cbgr_invalidate(module)?;
-        // verum_cbgr_check, check_write, check_fat, epoch_begin kept in C
-        // because they access ExecutionContext (platform-dependent struct layout).
+        // Reference validators and epoch operations are emitted by PlatformIR
+        // using the common CBGR layout and target-selected runtime boundary.
         Ok(())
     }
 
@@ -15769,6 +15710,19 @@ impl<'ctx> RuntimeLowering<'ctx> {
             .or_internal("missing align param")?
             .into_int_value();
 
+        let issuer = self.emit_cbgr_try_new_generation(module)?;
+        let generation = builder.build_call(issuer, &[], "allocation_identity").or_llvm_err()?
+            .basic_value_or("generation issuer result")?.into_int_value();
+        let issued = builder.build_int_compare(verum_llvm::IntPredicate::NE, generation,
+            i64_type.const_zero(), "identity_available").or_llvm_err()?;
+        let allocation = self.context.append_basic_block(func, "allocation");
+        let exhausted = self.context.append_basic_block(func, "identity_exhausted");
+        builder.build_conditional_branch(issued, allocation, exhausted).or_llvm_err()?;
+        builder.position_at_end(exhausted);
+        builder.build_return(Some(&ptr_type.const_null())).or_llvm_err()?;
+        builder.position_at_end(allocation);
+        let generation = builder.build_int_truncate(generation, i32_type, "header_generation").or_llvm_err()?;
+
         // align = max(align_req, 32): the header model needs 32-byte
         // granularity, and every smaller request is satisfied by it.
         let thirty_two = i64_type.const_int(32, false);
@@ -15866,7 +15820,7 @@ impl<'ctx> RuntimeLowering<'ctx> {
 
         store_u32(
             Self::AOT_HDR_GENERATION_OFFSET,
-            i32_type.const_int(Self::GEN_INITIAL, false),
+            generation,
             "gen_ptr",
         )?;
         let size_u32 = builder
@@ -16063,76 +16017,16 @@ impl<'ctx> RuntimeLowering<'ctx> {
         // header = ptr - 32
         let header = self.emit_cbgr_get_header(&builder, ptr)?;
 
-        // generation = atomic_fetch_add(&header->generation, 1) + 1
-        // SAFETY: fixed in-header offset (canonical layout, gen@8).
-        let gen_ptr = unsafe {
-            builder
-                .build_gep(
-                    i8_type,
-                    header,
-                    &[i64_type.const_int(Self::AOT_HDR_GENERATION_OFFSET, false)],
-                    "gen_ptr",
-                )
-                .or_llvm_err()?
-        };
-        let old_gen = builder
-            .build_atomicrmw(
-                verum_llvm::AtomicRMWBinOp::Add,
-                gen_ptr,
-                i32_type.const_int(1, false),
-                verum_llvm::AtomicOrdering::AcquireRelease,
-            )
-            .or_llvm_err()?;
-        let new_gen = builder
-            .build_int_add(old_gen, i32_type.const_int(1, false), "new_gen")
-            .or_llvm_err()?;
-
-        // if (new_gen >= GEN_MAX || new_gen < old_gen) — overflow check
-        let ge_max = builder
-            .build_int_compare(
-                verum_llvm::IntPredicate::UGE,
-                new_gen,
-                i32_type.const_int(Self::GEN_MAX as u64, false),
-                "ge_max",
-            )
-            .or_llvm_err()?;
-        let lt_old = builder
-            .build_int_compare(verum_llvm::IntPredicate::ULT, new_gen, old_gen, "lt_old")
-            .or_llvm_err()?;
-        let overflow = builder.build_or(ge_max, lt_old, "overflow").or_llvm_err()?;
-
-        let overflow_bb = self.context.append_basic_block(func, "overflow");
-        let set_ref = self.context.append_basic_block(func, "set_ref");
-        builder
-            .build_conditional_branch(overflow, overflow_bb, set_ref)
-            .or_llvm_err()?;
-
-        // Overflow: reset generation, bump epoch
-        builder.position_at_end(overflow_bb);
-        builder
-            .build_store(gen_ptr, i32_type.const_int(Self::GEN_INITIAL, false))
-            .or_llvm_err()?;
-        // epoch at offset 8 (i16) — atomic_fetch_add
-        // SAFETY: GEP into the CBGR header to access the epoch field at a fixed offset; the header layout is defined by the allocator
-        let epoch_ptr = unsafe {
-            builder
-                .build_gep(i8_type, header, &[i64_type.const_int(Self::AOT_HDR_EPOCH_OFFSET, false)], "epoch_ptr")
-                .or_llvm_err()?
-        };
-        let i16_type = self.context.i16_type();
-        builder
-            .build_atomicrmw(
-                verum_llvm::AtomicRMWBinOp::Add,
-                epoch_ptr,
-                i16_type.const_int(1, false),
-                verum_llvm::AtomicOrdering::Release,
-            )
-            .or_llvm_err()?;
-        builder.build_unconditional_branch(set_ref).or_llvm_err()?;
+        // Retirement is the invalid zero state, never another live identity.
+        // SAFETY: the caller owns this live allocation's canonical header.
+        let gen_ptr = unsafe { builder.build_gep(i8_type, header,
+            &[i64_type.const_int(Self::AOT_HDR_GENERATION_OFFSET, false)], "gen_ptr").or_llvm_err()? };
+        builder.build_store(gen_ptr, i32_type.const_zero()).or_llvm_err()?
+            .set_atomic_ordering(verum_llvm::AtomicOrdering::Release)
+            .map_err(|_| LlvmLoweringError::internal("retire generation ordering"))?;
 
         // Set ref_count = 0, then free
-        builder.position_at_end(set_ref);
-        // offset 12 = ref_count (i32)
+        // ref_count uses the canonical header offset.
         // SAFETY: GEP into the CBGR header to access the reference count at a fixed offset; the header is valid for all managed allocations
         let rc_ptr = unsafe {
             builder
@@ -16415,51 +16309,153 @@ impl<'ctx> RuntimeLowering<'ctx> {
         Ok(())
     }
 
-    /// verum_cbgr_new_generation() -> i64
-    fn emit_cbgr_new_generation(&self, module: &Module<'ctx>) -> Result<()> {
-        let name = "verum_cbgr_new_generation";
-        if let Some(f) = module.get_function(name) {
-            if f.count_basic_blocks() > 0 {
-                return Ok(());
-            }
+    /// The existing generation counter is the sole issuer for bridge
+    /// allocations and explicit requests. Zero reports resource exhaustion;
+    /// compare/exchange prevents wrapping even under concurrent issuance.
+    fn emit_cbgr_try_new_generation(&self, module: &Module<'ctx>) -> Result<FunctionValue<'ctx>> {
+        use verum_llvm::{AtomicOrdering, IntPredicate};
+        let name = "verum_cbgr_try_new_generation";
+        if let Some(function) = module.get_function(name)
+            && function.count_basic_blocks() != 0
+        {
+            return Ok(function);
         }
-
-        let i64_type = self.context.i64_type();
-        let fn_type = i64_type.fn_type(&[], false);
-        let func = module
-            .get_function(name)
-            .unwrap_or_else(|| module.add_function(name, fn_type, None));
-        func.set_linkage(verum_llvm::module::Linkage::Internal);
-
-        let entry = self.context.append_basic_block(func, "entry");
+        let ty = self.context.i64_type();
+        let function = self.get_or_declare_fn(module, name, ty.fn_type(&[], false));
+        function.set_linkage(verum_llvm::module::Linkage::Internal);
+        let counter = module
+            .get_global("verum_ir_generation_counter")
+            .unwrap_or_else(|| {
+                let global = module.add_global(ty, None, "verum_ir_generation_counter");
+                global.set_linkage(verum_llvm::module::Linkage::Internal);
+                global.set_initializer(
+                    &ty.const_int(u64::from(verum_common::cbgr::GEN_INITIAL), false),
+                );
+                global
+            });
         let builder = self.context.create_builder();
+        let entry = self.context.append_basic_block(function, "entry");
+        let probe = self.context.append_basic_block(function, "probe");
+        let reserve = self.context.append_basic_block(function, "reserve");
+        let success = self.context.append_basic_block(function, "issued");
+        let exhausted = self.context.append_basic_block(function, "exhausted");
         builder.position_at_end(entry);
-
-        // verum_generation_counter is a static global in verum_runtime.c
-        // We define our own IR-local version with Internal linkage
-        let counter_name = "verum_ir_generation_counter";
-        let counter = module.get_global(counter_name).unwrap_or_else(|| {
-            let g = module.add_global(i64_type, None, counter_name);
-            g.set_linkage(verum_llvm::module::Linkage::Internal);
-            g.set_initializer(&i64_type.const_int(1, false));
-            g
-        });
-        let old = builder
-            .build_atomicrmw(
-                verum_llvm::AtomicRMWBinOp::Add,
-                counter.as_pointer_value(),
-                i64_type.const_int(1, false),
-                verum_llvm::AtomicOrdering::Monotonic,
+        builder.build_unconditional_branch(probe).or_llvm_err()?;
+        builder.position_at_end(probe);
+        let observed = builder
+            .build_load(ty, counter.as_pointer_value(), "observed")
+            .or_llvm_err()?;
+        observed
+            .as_instruction_value()
+            .or_internal("generation load")?
+            .set_atomic_ordering(AtomicOrdering::Monotonic)
+            .map_err(|_| LlvmLoweringError::internal("generation atomic load"))?;
+        let observed = observed.into_int_value();
+        let room = builder
+            .build_int_compare(
+                IntPredicate::ULT,
+                observed,
+                ty.const_int(Self::GEN_MAX, false),
+                "has_identity",
             )
             .or_llvm_err()?;
-        // Return the NEW id (old + 1) — `cbgr_new_generation` advances
-        // and reports the advanced value on both tiers (T0846; the
-        // Tier-0 twin is state.cbgr_generation_counter, also starting
-        // at 1 and answering 2, 3, … in call order).
-        let new_id = builder
-            .build_int_add(old, i64_type.const_int(1, false), "new_gen_id")
+        builder
+            .build_conditional_branch(room, reserve, exhausted)
             .or_llvm_err()?;
-        builder.build_return(Some(&new_id)).or_llvm_err()?;
+        builder.position_at_end(reserve);
+        let next = builder
+            .build_int_add(observed, ty.const_int(1, false), "next_identity")
+            .or_llvm_err()?;
+        let exchange = builder
+            .build_cmpxchg(
+                counter.as_pointer_value(),
+                observed,
+                next,
+                AtomicOrdering::Monotonic,
+                AtomicOrdering::Monotonic,
+            )
+            .or_llvm_err()?;
+        let issued = builder
+            .build_extract_value(exchange, 1, "issued_identity")
+            .or_llvm_err()?
+            .into_int_value();
+        builder
+            .build_conditional_branch(issued, success, probe)
+            .or_llvm_err()?;
+        builder.position_at_end(success);
+        builder.build_return(Some(&next)).or_llvm_err()?;
+        builder.position_at_end(exhausted);
+        builder.build_return(Some(&ty.const_zero())).or_llvm_err()?;
+        Ok(function)
+    }
+
+    /// Explicit generation requests fail through the ordinary panic policy;
+    /// fallible allocations consume the same issuer's zero refusal directly.
+    fn emit_cbgr_new_generation(&self, module: &Module<'ctx>) -> Result<()> {
+        let issuer = self.emit_cbgr_try_new_generation(module)?;
+        let name = "verum_cbgr_new_generation";
+        if let Some(function) = module.get_function(name)
+            && function.count_basic_blocks() != 0
+        {
+            return Ok(());
+        }
+        let ty = self.context.i64_type();
+        let pointer = self.context.ptr_type(AddressSpace::default());
+        let function = self.get_or_declare_fn(module, name, ty.fn_type(&[], false));
+        function.set_linkage(verum_llvm::module::Linkage::Internal);
+        let builder = self.context.create_builder();
+        builder.position_at_end(self.context.append_basic_block(function, "entry"));
+        let generation = builder
+            .build_call(issuer, &[], "generation")
+            .or_llvm_err()?
+            .basic_value_or("generation issuer result")?
+            .into_int_value();
+        let valid = builder
+            .build_int_compare(
+                verum_llvm::IntPredicate::NE,
+                generation,
+                ty.const_zero(),
+                "issued",
+            )
+            .or_llvm_err()?;
+        let success = self.context.append_basic_block(function, "success");
+        let failure = self.context.append_basic_block(function, "failure");
+        builder
+            .build_conditional_branch(valid, success, failure)
+            .or_llvm_err()?;
+        builder.position_at_end(success);
+        builder.build_return(Some(&generation)).or_llvm_err()?;
+        builder.position_at_end(failure);
+        let message = "CBGR generation space exhausted";
+        let text = builder
+            .build_global_string_ptr(message, "generation_failure")
+            .or_llvm_err()?;
+        let panic = self.get_or_declare_fn(
+            module,
+            "verum_panic",
+            self.context.void_type().fn_type(
+                &[
+                    pointer.into(),
+                    ty.into(),
+                    pointer.into(),
+                    self.context.i32_type().into(),
+                ],
+                false,
+            ),
+        );
+        builder
+            .build_call(
+                panic,
+                &[
+                    text.as_pointer_value().into(),
+                    ty.const_int(message.len() as u64, false).into(),
+                    pointer.const_null().into(),
+                    self.context.i32_type().const_zero().into(),
+                ],
+                "",
+            )
+            .or_llvm_err()?;
+        builder.build_unreachable().or_llvm_err()?;
         Ok(())
     }
 
@@ -16534,26 +16530,13 @@ impl<'ctx> RuntimeLowering<'ctx> {
         builder.position_at_end(do_revoke);
         let header = self.emit_cbgr_get_header(&builder, ptr)?;
 
-        // atomic_fetch_add(&header->generation, 1) — canonical gen@8.
-        // SAFETY: fixed in-header offset.
-        let gen_ptr = unsafe {
-            builder
-                .build_gep(
-                    i8_type,
-                    header,
-                    &[i64_type.const_int(Self::AOT_HDR_GENERATION_OFFSET, false)],
-                    "gen_ptr",
-                )
-                .or_llvm_err()?
-        };
-        builder
-            .build_atomicrmw(
-                verum_llvm::AtomicRMWBinOp::Add,
-                gen_ptr,
-                i32_type.const_int(1, false),
-                verum_llvm::AtomicOrdering::AcquireRelease,
-            )
-            .or_llvm_err()?;
+        // Revoke, without assigning an identity that a later allocation could use.
+        // SAFETY: fixed field in the caller's live allocation header.
+        let gen_ptr = unsafe { builder.build_gep(i8_type, header,
+            &[i64_type.const_int(Self::AOT_HDR_GENERATION_OFFSET, false)], "gen_ptr").or_llvm_err()? };
+        builder.build_store(gen_ptr, i32_type.const_zero()).or_llvm_err()?
+            .set_atomic_ordering(verum_llvm::AtomicOrdering::Release)
+            .map_err(|_| LlvmLoweringError::internal("revoke generation ordering"))?;
 
         // atomic_fetch_or(&header->flags, FLAG_REVOKED) — flags is a
         // canonical u32 slot; an i64 RMW here would also clobber
@@ -16794,9 +16777,9 @@ impl<'ctx> RuntimeLowering<'ctx> {
                 )
                 .or_llvm_err()?
         };
-        builder
-            .build_store(gen_ptr, i32_type.const_zero())
-            .or_llvm_err()?;
+        builder.build_store(gen_ptr, i32_type.const_zero()).or_llvm_err()?
+            .set_atomic_ordering(verum_llvm::AtomicOrdering::Release)
+            .map_err(|_| LlvmLoweringError::internal("invalidate generation ordering"))?;
         builder.build_return(None).or_llvm_err()?;
         Ok(())
     }
