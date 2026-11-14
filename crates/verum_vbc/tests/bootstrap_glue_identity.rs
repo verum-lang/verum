@@ -1,4 +1,7 @@
 #![cfg(feature = "codegen")]
+#[path = "fixtures/canonical_drop.rs"]
+mod canonical_drop;
+
 use std::collections::HashMap;
 use verum_fast_parser::Parser;
 use verum_vbc::codegen::{CodegenConfig, VbcCodegen, context::FunctionInfo};
@@ -19,11 +22,11 @@ fn producer() -> VbcModule {
 }
 fn producer_at(owner: &str) -> VbcModule {
     let source = ast(&format!(
-        "module {owner}; type Drop is protocol {{ fn drop(&mut self); }}; type Token is {{ value: Int }}; implement Drop for Token {{ fn drop(&mut self) {{}} }} implement Token {{ fn duplicate(&self) -> Token {{ Token(value: self.value) }} }}"
+        "module {owner}; mount core.base.protocols.Drop; public type Token is {{ value: Int }}; implement Drop for Token {{ fn drop(&mut self) {{}} }} implement Token {{ fn duplicate(&self) -> Token {{ Token(value: self.value) }} }}"
     ));
-    let mut module = VbcCodegen::with_config(CodegenConfig::new("alpha"))
-        .compile_module(&source)
-        .unwrap();
+    let mut producer = VbcCodegen::with_config(CodegenConfig::new("alpha"));
+    canonical_drop::initialize(&mut producer);
+    let mut module = producer.compile_additional_module(&source).unwrap();
     // Clone registration is a separate producer boundary. Supply a genuine
     // source body's local id to exercise the existing descriptor wire field.
     let clone = module
@@ -187,10 +190,11 @@ fn bundled_file_origin_is_preserved_in_glue_name() {
 #[test]
 fn actual_source_registry_carries_bundled_drop_without_a_synthetic_binding() {
     let declaration = ast(
-        "module alpha.memory; type Drop is protocol { fn drop(&mut self); }; type Token is { value: Int }; implement Drop for Token { fn drop(&mut self) {} }",
+        "module alpha.memory; mount core.base.protocols.Drop; public type Token is { value: Int }; implement Drop for Token { fn drop(&mut self) {} }",
     );
     let mut producer = VbcCodegen::with_config(CodegenConfig::new("alpha"));
-    let module = producer.compile_module(&declaration).unwrap();
+    canonical_drop::initialize(&mut producer);
+    let module = producer.compile_additional_module(&declaration).unwrap();
     let source =
         ast("module dependent; mount alpha.memory.Token; fn inspect(t: Token) -> Int { 7 }");
     let mut consumer = VbcCodegen::with_config(CodegenConfig::new("dependent"));

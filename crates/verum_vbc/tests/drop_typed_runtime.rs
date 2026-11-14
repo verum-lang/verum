@@ -2,6 +2,9 @@
 //! Execute declaration-owned destruction against compiled source constructors and
 //! user Drop bodies. Only the disposal boundary is an explicit bytecode fixture;
 //! select lowering has its own integration tests.
+#[path = "fixtures/canonical_drop.rs"]
+mod canonical_drop;
+
 use std::sync::Arc;
 use verum_fast_parser::Parser;
 use verum_vbc::{
@@ -16,6 +19,7 @@ use verum_vbc::{
 };
 
 const DECLARATIONS: &str = r#"
+mount core.base.protocols.Drop;
 type Maybe<T> is None | Some(T);
 type Guard is { drops: &mut Int, marker: Int };
 implement Drop for Guard { fn drop(&mut self) { *self.drops = *self.drops + 1; } }
@@ -30,6 +34,7 @@ fn compile_in(owner: &str, body: &str, bootstrap: bool) -> VbcModule {
     let source = format!("module {owner};\n{DECLARATIONS}\n{body}");
     let ast = Parser::new(&source).parse_module().expect("source grammar");
     let mut compiler = VbcCodegen::with_config(CodegenConfig::new(owner));
+    canonical_drop::initialize(&mut compiler);
     let mut module = if bootstrap {
         compiler
             .collect_unit_declarations(&[&ast])
@@ -39,7 +44,7 @@ fn compile_in(owner: &str, body: &str, bootstrap: bool) -> VbcModule {
             .expect("items");
         compiler.finalize_module_from_state().expect("finalize")
     } else {
-        compiler.compile_module(&ast).expect("source codegen")
+        compiler.compile_additional_module(&ast).expect("source codegen")
     };
     let dispose = module
         .find_function_by_name(&format!("{owner}.dispose"))

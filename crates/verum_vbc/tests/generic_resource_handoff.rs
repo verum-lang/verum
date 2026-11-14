@@ -1,5 +1,8 @@
 //! T1807: generic aggregate handoffs preserve declared resource ownership.
 #![cfg(feature = "codegen")]
+#[path = "fixtures/canonical_drop.rs"]
+mod canonical_drop;
+
 use std::sync::Arc;
 use verum_fast_parser::Parser;
 use verum_vbc::{
@@ -8,6 +11,7 @@ use verum_vbc::{
     interpreter::Interpreter,
 };
 const DECLARATIONS: &str = r#"
+mount core.base.protocols.Drop;
 type Count is { value: Int };
 type affine Handle is { counter: &mut Count, digit: Int };
 implement Drop for Handle { fn drop(&mut self) { self.counter.value = self.counter.value * 10 + self.digit; } }
@@ -23,6 +27,7 @@ fn compile(body: &str, bootstrap: bool) -> VbcModule {
         .parse_module()
         .unwrap();
     let mut codegen = VbcCodegen::with_config(CodegenConfig::new("generic_transfer"));
+    canonical_drop::initialize(&mut codegen);
     let mut module = if bootstrap {
         codegen.collect_unit_declarations(&[&ast]).unwrap();
         codegen
@@ -30,7 +35,7 @@ fn compile(body: &str, bootstrap: bool) -> VbcModule {
             .unwrap();
         codegen.finalize_module_from_state().unwrap()
     } else {
-        codegen.compile_module(&ast).unwrap()
+        codegen.compile_additional_module(&ast).unwrap()
     };
     for f in &mut module.functions {
         f.value_uses = None;

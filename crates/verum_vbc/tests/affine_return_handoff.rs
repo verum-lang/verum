@@ -1,5 +1,8 @@
 //! T1602: direct affine return transfers its slot before lexical exit cleanup.
 #![cfg(feature = "codegen")]
+#[path = "fixtures/canonical_drop.rs"]
+mod canonical_drop;
+
 use std::sync::Arc;
 use verum_common::Text;
 use verum_fast_parser::Parser;
@@ -10,6 +13,7 @@ use verum_vbc::{
 };
 
 const DECLARATIONS: &str = r#"
+mount core.base.protocols.Drop;
 type Count is { value: Int };
 type affine Watch is { counter: &mut Count, digit: Int };
 implement Drop for Watch {
@@ -20,6 +24,7 @@ fn compile(body: &str, bootstrap: bool) -> Result<VbcModule, Text> {
     let source = format!("{DECLARATIONS}\n{body}");
     let ast = Parser::new(&source).parse_module().expect("source grammar");
     let mut codegen = VbcCodegen::with_config(CodegenConfig::new("return_transfer"));
+    canonical_drop::initialize(&mut codegen);
     if bootstrap {
         codegen
             .collect_unit_declarations(&[&ast])
@@ -32,7 +37,7 @@ fn compile(body: &str, bootstrap: bool) -> Result<VbcModule, Text> {
             .map_err(|e| Text::from(e.to_string()))
     } else {
         codegen
-            .compile_module(&ast)
+            .compile_additional_module(&ast)
             .map_err(|e| Text::from(e.to_string()))
     }
 }

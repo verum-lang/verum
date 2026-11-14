@@ -1,6 +1,9 @@
 //! Pooled resources retain exactly one owner across extraction and return.
 #![cfg(feature = "codegen")]
 
+#[path = "fixtures/canonical_drop.rs"]
+mod canonical_drop;
+
 use std::sync::Arc;
 use verum_fast_parser::Parser;
 use verum_vbc::{
@@ -11,6 +14,7 @@ use verum_vbc::{
 };
 
 const TYPES: &str = r#"
+mount core.base.protocols.Drop;
 type Count is { value: Int };
 type affine Ticket is { count: &mut Count };
 implement Drop for Ticket { fn drop(&mut self) { self.count.value = self.count.value + 1; } }
@@ -28,13 +32,14 @@ fn run(source: &str) {
         .unwrap();
     for bootstrap in [false, true] {
         let mut cg = VbcCodegen::with_config(CodegenConfig::new("pooled_handoff"));
+        canonical_drop::initialize(&mut cg);
         let mut module = if bootstrap {
             cg.collect_unit_declarations(&[&ast]).unwrap();
             cg.compile_unit_items(&[&ast], ItemFailurePolicy::Strict)
                 .unwrap();
             cg.finalize_module_from_state().unwrap()
         } else {
-            cg.compile_module(&ast).unwrap()
+            cg.compile_additional_module(&ast).unwrap()
         };
         for function in &mut module.functions {
             function.value_uses = None;

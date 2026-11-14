@@ -1,5 +1,8 @@
 //! T1602: consuming local initialization transfers the existing cleanup obligation.
 #![cfg(feature = "codegen")]
+#[path = "fixtures/canonical_drop.rs"]
+mod canonical_drop;
+
 use std::sync::Arc;
 use verum_common::Text;
 use verum_fast_parser::Parser;
@@ -10,6 +13,7 @@ use verum_vbc::{
 };
 
 const DECLARATIONS: &str = r#"
+mount core.base.protocols.Drop;
 type Count is { value: Int };
 type affine Watch is { counter: &mut Count, digit: Int };
 implement Drop for Watch {
@@ -22,6 +26,7 @@ fn compile(source: &str, bootstrap: bool) -> VbcModule {
         .parse_module()
         .expect("grammar-valid source");
     let mut codegen = VbcCodegen::with_config(CodegenConfig::new("transfer"));
+    canonical_drop::initialize(&mut codegen);
     if bootstrap {
         codegen.collect_unit_declarations(&[&ast]).unwrap();
         codegen
@@ -29,7 +34,7 @@ fn compile(source: &str, bootstrap: bool) -> VbcModule {
             .unwrap();
         codegen.finalize_module_from_state().unwrap()
     } else {
-        codegen.compile_module(&ast).expect("compile")
+        codegen.compile_additional_module(&ast).expect("compile")
     }
 }
 fn run(source: &str, bootstrap: bool) -> i64 {
