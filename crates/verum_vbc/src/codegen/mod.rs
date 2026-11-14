@@ -10206,23 +10206,9 @@ impl VbcCodegen {
                             // Cleanup follows the selected protocol row, including
                             // renamed imports and owners declared later in the unit.
                             // An inherent namesake is not an implementation body.
-                            let drop_method = if self.declared_protocol_role(proto_type_id)
-                                == Some(verum_common::well_known_types::WellKnownProtocol::Drop)
-                            {
-                                let slot = method_names.iter().position(|name| name == "drop")
-                                    .ok_or_else(|| CodegenError::new(
-                                        CodegenErrorKind::InvalidSourceSignature(
-                                            "canonical Drop protocol has no declared drop member".into(),
-                                        ),
-                                    ))?;
-                                let id = method_fn_ids.get(slot).copied().filter(|id| *id != u32::MAX)
-                                    .ok_or_else(|| CodegenError::new(
-                                        CodegenErrorKind::InvalidSourceSignature(
-                                            "canonical Drop implementation has no selected drop body".into(),
-                                        ),
-                                    ))?;
-                                Some(FunctionId(id))
-                            } else { None };
+                            let lifecycle = self.declared_lifecycle_method(
+                                proto_type_id, &method_names, &method_fn_ids,
+                            )?;
                             let impl_record = crate::types::ProtocolImpl {
                                 source_implementation: Some(source),
                                 protocol: crate::types::ProtocolId(proto_type_id.0),
@@ -10239,7 +10225,7 @@ impl VbcCodegen {
                             // actually carries the impl.
                             self.attach_declared_implementation(
                                 &impl_decl.kind, ty_name, protocol_attachments::ImplementationAttachment::Protocol {
-                                    implementation: impl_record, drop_method,
+                                    implementation: impl_record, lifecycle,
                                 },
                             )?;
                         }

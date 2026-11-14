@@ -6,19 +6,27 @@ use verum_ast::decl::ImplKind;
 use verum_common::{Maybe, well_known_types::WellKnownProtocol};
 
 #[derive(Clone, PartialEq)]
+pub(super) enum LifecycleMethod {
+    Drop(crate::module::FunctionId),
+    Clone(crate::module::FunctionId),
+}
+
+#[derive(Clone, PartialEq)]
 pub(super) enum ImplementationAttachment {
     Protocol {
         implementation: ProtocolImpl,
-        drop_method: Maybe<crate::module::FunctionId>,
+        lifecycle: Maybe<LifecycleMethod>,
     },
     Inherent(verum_ast::source_implementation::AssociatedImplementationSource),
 }
 impl ImplementationAttachment {
     pub(super) fn attach(self, target: &mut TypeDescriptor) {
         match self {
-            Self::Protocol { implementation, drop_method } => {
-                if let Some(method) = drop_method {
-                    target.drop_fn = Some(method.0);
+            Self::Protocol { implementation, lifecycle } => {
+                match lifecycle {
+                    Some(LifecycleMethod::Drop(method)) => target.drop_fn = Some(method.0),
+                    Some(LifecycleMethod::Clone(method)) => target.clone_fn = Some(method.0),
+                    None => (),
                 }
                 target.register_implementation(implementation);
             }
@@ -78,6 +86,29 @@ impl VbcCodegen {
         let (owner, name) = identity.rsplit_once('.')?;
         let role = WellKnownProtocol::from_name(name)?;
         (role.canonical_archive_modules().first().copied() == Some(owner)).then_some(role)
+    }
+
+    /// Lifecycle members belong to their canonical source protocol, even
+    /// through renamed mounts. Recording one does not grant permission to
+    /// execute a forward descriptor or invoke user Clone at a value-copy site.
+    pub(super) fn declared_lifecycle_method(
+        &self, protocol: TypeId, names: &[impl AsRef<str>], methods: &[u32],
+    ) -> CodegenResult<Maybe<LifecycleMethod>> {
+        let (member, constructor): (&str, fn(crate::module::FunctionId) -> LifecycleMethod) =
+            match self.declared_protocol_role(protocol) {
+                Some(WellKnownProtocol::Drop) => ("drop", LifecycleMethod::Drop),
+                Some(WellKnownProtocol::Clone) => ("clone", LifecycleMethod::Clone),
+                _ => return Ok(None),
+            };
+        let slot = names.iter().position(|name| name.as_ref() == member)
+            .ok_or_else(|| CodegenError::new(CodegenErrorKind::InvalidSourceSignature(
+                format!("canonical lifecycle protocol has no declared {member} member"),
+            )))?;
+        let id = methods.get(slot).copied().filter(|id| *id != u32::MAX)
+            .ok_or_else(|| CodegenError::new(CodegenErrorKind::InvalidSourceSignature(
+                format!("canonical lifecycle implementation has no selected {member} body"),
+            )))?;
+        Ok(Some(constructor(crate::module::FunctionId(id))))
     }
 
     pub(super) fn attach_declared_implementation(
