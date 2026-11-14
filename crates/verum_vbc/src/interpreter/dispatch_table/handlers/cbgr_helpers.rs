@@ -20,13 +20,12 @@
 //! `TAG_UNIT` with a marker bit — see `value.rs`), disjoint from `TAG_INTEGER`,
 //! so `is_cbgr_ref` is an EXACT tag test and a user `Int` can never collide.
 //!
-//! `VERUM_CBGR_LEGACY_INT_REFS=1` restores the pre-T0367 int-space encoding
-//! (with its soundness hole) for A/B differential comparison ONLY.
+//! Register references always use the discriminated representation. Process
+//! environment settings cannot change which values count as references.
 
 use super::super::super::error::{InterpreterError, InterpreterResult};
 use super::super::super::state::InterpreterState;
 use crate::value::{Capabilities, Value};
-use std::sync::OnceLock;
 
 /// Sentinel generation value that disables generation checks on deref.
 /// Fits in the tagged encoding's 22-bit generation field.
@@ -44,64 +43,20 @@ const CBGR_REGREF_GEN_BITS: u32 = 22;
 /// Mask for the low `CBGR_REGREF_GEN_BITS` of a generation counter.
 const CBGR_REGREF_GEN_MASK: u32 = (1u32 << CBGR_REGREF_GEN_BITS) - 1;
 
-// --- Kill-switch: legacy int-space encoding (A/B only) ----------------------
-
-/// `VERUM_CBGR_LEGACY_INT_REFS=1` (or `true`) restores the pre-T0367
-/// negative-inline-`Int` register-ref encoding. Read once and cached. Default
-/// off. Exists solely so a differential run can confirm the tagged encoding is
-/// what closed the T0367 soundness hole.
-#[inline(always)]
-fn legacy_int_refs() -> bool {
-    static CELL: OnceLock<bool> = OnceLock::new();
-    *CELL.get_or_init(|| {
-        crate::interpreter::env_flags::get(crate::interpreter::env_flags::Flag::CbgrLegacyIntRefs).map(std::ffi::OsString::from)
-            .map(|v| v == "1" || v == "true")
-            .unwrap_or(false)
-    })
-}
-
-/// Legacy mutability bit (bit 31 of the abs word) — legacy encoding only.
-const LEGACY_CBGR_MUTABLE_BIT: u32 = 0x8000_0000;
-/// Legacy abs-index sanity ceiling (the `1 << 24` window that never closed the
-/// hole) — legacy `is_cbgr_ref` only.
-const LEGACY_CBGR_REF_ABS_INDEX_MAX: u32 = 1 << 24;
-
-#[inline(always)]
-fn legacy_encode(abs_index: u32, generation: u32) -> i64 {
-    -1i64 - (abs_index as i64) - ((generation as i64) << 32)
-}
-
-#[inline(always)]
-fn legacy_decode(encoded: i64) -> (u32, u32) {
-    let raw = -(encoded + 1);
-    let abs_index = ((raw & 0xFFFF_FFFF) as u32) & !LEGACY_CBGR_MUTABLE_BIT;
-    let generation = ((raw >> 32) & 0xFFFF_FFFF) as u32;
-    (abs_index, generation)
-}
-
 // --- Encode / decode / classify (SOLE authority) ----------------------------
 
 /// Encodes an immutable register-based reference with CBGR generation tracking.
 ///
-/// Returns a discriminated tagged `Value` (never an `Int`) — see the module
-/// docs. Under the kill-switch it returns the legacy negative-`Int` form.
+/// Returns a discriminated tagged `Value` (never an `Int`).
 #[inline(always)]
 pub(super) fn encode_cbgr_ref(abs_index: u32, generation: u32) -> Value {
-    if legacy_int_refs() {
-        Value::from_i64(legacy_encode(abs_index, generation))
-    } else {
-        Value::cbgr_regref(abs_index, generation, false)
-    }
+    Value::cbgr_regref(abs_index, generation, false)
 }
 
 /// Encodes a mutable (`&mut`) register-based reference.
 #[inline(always)]
 pub(super) fn encode_cbgr_ref_mut(abs_index: u32, generation: u32) -> Value {
-    if legacy_int_refs() {
-        Value::from_i64(legacy_encode(abs_index | LEGACY_CBGR_MUTABLE_BIT, generation))
-    } else {
-        Value::cbgr_regref(abs_index, generation, true)
-    }
+    Value::cbgr_regref(abs_index, generation, true)
 }
 
 /// Decodes a register-based reference into `(abs_index, generation)`.
@@ -116,11 +71,7 @@ pub(super) fn encode_cbgr_ref_mut(abs_index: u32, generation: u32) -> Value {
 /// `dispatch_table::mod.rs` can read the ref's `abs_index`.
 #[inline(always)]
 pub(in crate::interpreter) fn decode_cbgr_ref(encoded: Value) -> (u32, u32) {
-    if legacy_int_refs() {
-        legacy_decode(encoded.as_i64())
-    } else {
-        (encoded.cbgr_regref_abs(), encoded.cbgr_regref_generation())
-    }
+    (encoded.cbgr_regref_abs(), encoded.cbgr_regref_generation())
 }
 
 /// Checks if a CBGR register reference is mutable (created via RefMut).
@@ -128,12 +79,7 @@ pub(in crate::interpreter) fn decode_cbgr_ref(encoded: Value) -> (u32, u32) {
 /// PRECONDITION: `encoded` is a register-ref ([`is_cbgr_ref`] returned true).
 #[inline(always)]
 pub(super) fn is_cbgr_ref_mutable(encoded: Value) -> bool {
-    if legacy_int_refs() {
-        let raw = -(encoded.as_i64() + 1);
-        ((raw & 0xFFFF_FFFF) as u32) & LEGACY_CBGR_MUTABLE_BIT != 0
-    } else {
-        encoded.cbgr_regref_is_mut()
-    }
+    encoded.cbgr_regref_is_mut()
 }
 
 /// Strips the mutability bit from a CBGR register reference, making it immutable.
@@ -155,28 +101,12 @@ pub(super) fn strip_cbgr_ref_mutability(encoded: Value) -> Value {
 /// so no user integer, of any value or sign, can be misclassified. There is no
 /// arithmetic-range guessing and no residual collision window.
 ///
-/// Under `VERUM_CBGR_LEGACY_INT_REFS=1` this falls back to the pre-T0367
-/// negative-`Int` range guess (which carries the soundness hole BY DESIGN, for
-/// A/B comparison only).
-///
 /// Visibility is `pub(in crate::interpreter)` for the `do_return` frame-escape
 /// gate in `dispatch_table::mod.rs` and the collection normaliser in
 /// `interpreter::state`.
 #[inline(always)]
 pub(in crate::interpreter) fn is_cbgr_ref(val: &Value) -> bool {
-    if legacy_int_refs() {
-        if !val.is_inline_int() {
-            return false;
-        }
-        let encoded = val.as_i64();
-        if encoded >= -(1i64 << 32) {
-            return false;
-        }
-        let (abs_index, _) = legacy_decode(encoded);
-        abs_index <= LEGACY_CBGR_REF_ABS_INDEX_MAX
-    } else {
-        val.is_cbgr_regref()
-    }
+    val.is_cbgr_regref()
 }
 
 /// Resolve a method-call argument Value to its underlying scalar Value,
@@ -1030,75 +960,8 @@ pub(super) fn validate_epoch_window(ref_epoch: u16, current_epoch: u64, window_s
 }
 
 #[cfg(test)]
-mod tests {
-    //! Authority-level tests for the T0367 tagged register-ref encoding.
-    //! These run in the DEFAULT (tagged) mode — the kill-switch is off unless
-    //! `VERUM_CBGR_LEGACY_INT_REFS` is set in the environment.
-    use super::*;
-
-    /// The soundness property at the authority boundary: no user `Int` — of any
-    /// value or sign — is classified as a register-ref. This is the exact
-    /// function (and the exact seed value) from the T0367 acceptance.
-    #[test]
-    fn is_cbgr_ref_rejects_user_ints() {
-        assert!(!is_cbgr_ref(&Value::from_i64(-131008744790)));
-        // The full collision family -(k·2^32 + m) - 1 the legacy encoding
-        // decoded to a small abs-index, plus assorted user ints and both
-        // inline boundaries.
-        for k in 0..64i64 {
-            for m in [0i64, 1, 2, 1647571, 12242261, (1 << 24) - 1] {
-                let bad = -(k * (1i64 << 32) + m) - 1;
-                assert!(
-                    !is_cbgr_ref(&Value::from_i64(bad)),
-                    "user Int {} (k={}, m={}) misclassified as a register-ref",
-                    bad,
-                    k,
-                    m
-                );
-            }
-        }
-        for &i in &[0i64, 1, -1, i64::MIN, i64::MAX, -4296614867] {
-            assert!(!is_cbgr_ref(&Value::from_i64(i)), "user Int {} misread", i);
-        }
-        // Other Value kinds are not register-refs either.
-        assert!(!is_cbgr_ref(&Value::unit()));
-        assert!(!is_cbgr_ref(&Value::from_bool(true)));
-        assert!(!is_cbgr_ref(&Value::from_f64(1.5)));
-    }
-
-    /// A genuinely-encoded register-ref round-trips through the authority:
-    /// encode → is_cbgr_ref true → decode → same (abs, gen); mutability
-    /// preserved and strippable.
-    #[test]
-    fn encoded_regref_roundtrips() {
-        let cases = [
-            (0u32, 1u32, false),
-            (7, 3, true),
-            (1023, CBGR_NO_CHECK_GENERATION, false),
-            (12242261, 42, true), // the T0367 abs — a *legitimate* ref here
-            ((1 << 24) - 1, (1 << 22) - 1, true),
-        ];
-        for (abs, generation, mutable) in cases {
-            let enc = if mutable {
-                encode_cbgr_ref_mut(abs, generation)
-            } else {
-                encode_cbgr_ref(abs, generation)
-            };
-            assert!(is_cbgr_ref(&enc), "encoded regref not classified (abs={})", abs);
-            assert!(!enc.is_int(), "a tagged regref must not be an Int");
-            let (dabs, dgen) = decode_cbgr_ref(enc);
-            assert_eq!(dabs, abs, "abs round-trip");
-            assert_eq!(dgen, generation & ((1 << 22) - 1), "gen round-trip mod 2^22");
-            assert_eq!(is_cbgr_ref_mutable(enc), mutable, "mutability round-trip");
-
-            let shared = strip_cbgr_ref_mutability(enc);
-            assert!(is_cbgr_ref(&shared));
-            assert!(!is_cbgr_ref_mutable(shared), "strip must clear mutability");
-            let (sabs, sgen) = decode_cbgr_ref(shared);
-            assert_eq!((sabs, sgen), (abs, generation & ((1 << 22) - 1)));
-        }
-    }
-}
+#[path = "../../../../tests/unit/cbgr_register_references.rs"]
+mod tests;
 
 #[cfg(test)]
 #[path = "../../../../tests/unit/receiver_writeback.rs"]

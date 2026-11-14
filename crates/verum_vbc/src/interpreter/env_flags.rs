@@ -16,179 +16,62 @@
 
 use std::sync::OnceLock;
 
-/// Every cached flag.  Adding a variant takes THREE edits, not one:
-/// the variant, its `name()` arm, and its `index()` arm — both matches
-/// are exhaustive, so the compiler names each omission in turn. (The
-/// header used to say adding a variant was the only step; `index()` is
-/// hand-numbered and refutes that.)
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Flag {
-    /// `VERUM_CBGR_LEGACY_ALLOC`
-    CbgrLegacyAlloc,
-    /// `VERUM_CBGR_LEGACY_INT_REFS`
-    CbgrLegacyIntRefs,
-    /// `VERUM_DEBUG_FS`
-    DebugFs,
-    /// `VERUM_DISABLE_UNIT_DYN_DISPATCH`
-    DisableUnitDynDispatch,
-    /// `VERUM_SUFFIX_COMPAT_LEGACY`
-    SuffixCompatLegacy,
-    /// `VERUM_TRACE_ASPTR`
-    TraceAsptr,
-    /// `VERUM_TRACE_CALLM_EQ`
-    TraceCallmEq,
-    /// `VERUM_TRACE_CALLM_FAIL`
-    TraceCallmFail,
-    /// `VERUM_TRACE_CALLM_FLOW`
-    TraceCallmFlow,
-    /// `VERUM_TRACE_CALLS`
-    TraceCalls,
-    /// `VERUM_TRACE_DEREF`
-    TraceDeref,
-    /// `VERUM_TRACE_DISPATCH`
-    TraceDispatch,
-    /// `VERUM_TRACE_DROPFN`
-    TraceDropfn,
-    /// `VERUM_TRACE_ENCBUF`
-    TraceEncbuf,
-    /// `VERUM_TRACE_ENVSTUB`
-    TraceEnvstub,
-    /// `VERUM_TRACE_EQ_RUNTIME`
-    TraceEqRuntime,
-    /// `VERUM_TRACE_FATREF_ROUTE`
-    TraceFatrefRoute,
-    /// `VERUM_TRACE_FIELDADDR`
-    TraceFieldaddr,
-    /// `VERUM_TRACE_GETF`
-    TraceGetf,
-    /// `VERUM_TRACE_GVD`
-    TraceGvd,
-    /// `VERUM_TRACE_HASHER`
-    TraceHasher,
-    /// `VERUM_TRACE_LISTREPR`
-    TraceListrepr,
-    /// `VERUM_TRACE_MATCHTAG`
-    TraceMatchtag,
-    /// `VERUM_TRACE_PC`
-    TracePc,
-    /// `VERUM_TRACE_PC_DECODE`
-    TracePcDecode,
-    /// `VERUM_TRACE_POOL`
-    TracePool,
-    /// `VERUM_TRACE_PROCESS`
-    TraceProcess,
-    /// `VERUM_TRACE_PROTOCOL_DISPATCH`
-    TraceProtocolDispatch,
-    /// `VERUM_TRACE_PTRWRITE`
-    TracePtrwrite,
-    /// `VERUM_TRACE_PUSH_STR`
-    TracePushStr,
-    /// `VERUM_TRACE_PUSH_STR_X`
-    TracePushStrX,
-    /// `VERUM_TRACE_SPECFACT` — same name the AOT lowering uses for
-    /// the SAME instruction (verum_codegen/src/llvm/instruction.rs),
-    /// so one env var shows both tiers' reading of one `Spec`.
-    TraceSpecfact,
-    /// `VERUM_TRACE_STATICMUT`
-    TraceStaticmut,
-    /// `VERUM_TRACE_STATIC_CALL`
-    TraceStaticCall,
-    /// `VERUM_TRACE_TCP`
-    TraceTcp,
-    /// `VERUM_TRAP_SELFREF`
-    TrapSelfref,
+/// Names, cache indices and capacity derive from the same private roster.
+/// Cache indices are process-local and are never serialized.
+macro_rules! interpreter_flags {
+    ($($flag:ident => $name:literal),+ $(,)?) => {
+        #[derive(Clone, Copy, PartialEq, Eq)]
+        pub(crate) enum Flag {
+            $(#[doc = $name] $flag,)+
+        }
+        impl Flag {
+            const COUNT: usize = [$($name),+].len();
+
+            fn name(self) -> &'static str {
+                match self { $(Self::$flag => $name,)+ }
+            }
+
+            fn index(self) -> usize { self as usize }
+        }
+    };
 }
 
-impl Flag {
-    const COUNT: usize = 36;
-
-    fn name(self) -> &'static str {
-        match self {
-            Flag::CbgrLegacyAlloc => "VERUM_CBGR_LEGACY_ALLOC",
-            Flag::CbgrLegacyIntRefs => "VERUM_CBGR_LEGACY_INT_REFS",
-            Flag::DebugFs => "VERUM_DEBUG_FS",
-            Flag::DisableUnitDynDispatch => "VERUM_DISABLE_UNIT_DYN_DISPATCH",
-            Flag::SuffixCompatLegacy => "VERUM_SUFFIX_COMPAT_LEGACY",
-            Flag::TraceAsptr => "VERUM_TRACE_ASPTR",
-            Flag::TraceCallmEq => "VERUM_TRACE_CALLM_EQ",
-            Flag::TraceCallmFail => "VERUM_TRACE_CALLM_FAIL",
-            Flag::TraceCallmFlow => "VERUM_TRACE_CALLM_FLOW",
-            Flag::TraceCalls => "VERUM_TRACE_CALLS",
-            Flag::TraceDeref => "VERUM_TRACE_DEREF",
-            Flag::TraceDispatch => "VERUM_TRACE_DISPATCH",
-            Flag::TraceDropfn => "VERUM_TRACE_DROPFN",
-            Flag::TraceEncbuf => "VERUM_TRACE_ENCBUF",
-            Flag::TraceEnvstub => "VERUM_TRACE_ENVSTUB",
-            Flag::TraceEqRuntime => "VERUM_TRACE_EQ_RUNTIME",
-            Flag::TraceFatrefRoute => "VERUM_TRACE_FATREF_ROUTE",
-            Flag::TraceFieldaddr => "VERUM_TRACE_FIELDADDR",
-            Flag::TraceGetf => "VERUM_TRACE_GETF",
-            Flag::TraceGvd => "VERUM_TRACE_GVD",
-            Flag::TraceHasher => "VERUM_TRACE_HASHER",
-            Flag::TraceListrepr => "VERUM_TRACE_LISTREPR",
-            Flag::TraceMatchtag => "VERUM_TRACE_MATCHTAG",
-            Flag::TracePc => "VERUM_TRACE_PC",
-            Flag::TracePcDecode => "VERUM_TRACE_PC_DECODE",
-            Flag::TracePool => "VERUM_TRACE_POOL",
-            Flag::TraceProcess => "VERUM_TRACE_PROCESS",
-            Flag::TraceProtocolDispatch => "VERUM_TRACE_PROTOCOL_DISPATCH",
-            Flag::TracePtrwrite => "VERUM_TRACE_PTRWRITE",
-            Flag::TracePushStr => "VERUM_TRACE_PUSH_STR",
-            Flag::TracePushStrX => "VERUM_TRACE_PUSH_STR_X",
-            Flag::TraceSpecfact => "VERUM_TRACE_SPECFACT",
-            Flag::TraceStaticmut => "VERUM_TRACE_STATICMUT",
-            Flag::TraceStaticCall => "VERUM_TRACE_STATIC_CALL",
-            Flag::TraceTcp => "VERUM_TRACE_TCP",
-            Flag::TrapSelfref => "VERUM_TRAP_SELFREF",
-        }
-    }
-
-    fn index(self) -> usize {
-        match self {
-            Flag::CbgrLegacyAlloc => 0,
-            Flag::CbgrLegacyIntRefs => 1,
-            Flag::DebugFs => 2,
-            Flag::DisableUnitDynDispatch => 3,
-            // 4 was a HOLE — the numbering jumped 3 -> 5, so `COUNT`
-            // (36) sized an array whose last index (35) was one past
-            // the 35 flags that existed. Taking the hole keeps every
-            // other flag's index fixed: renumbering would silently
-            // re-point every cached entry if some other table ever
-            // hard-codes one.
-            Flag::TraceSpecfact => 4,
-            Flag::SuffixCompatLegacy => 5,
-            Flag::TraceAsptr => 6,
-            Flag::TraceCallmEq => 7,
-            Flag::TraceCallmFail => 8,
-            Flag::TraceCallmFlow => 9,
-            Flag::TraceCalls => 10,
-            Flag::TraceDeref => 11,
-            Flag::TraceDispatch => 12,
-            Flag::TraceDropfn => 13,
-            Flag::TraceEncbuf => 14,
-            Flag::TraceEnvstub => 15,
-            Flag::TraceEqRuntime => 16,
-            Flag::TraceFatrefRoute => 17,
-            Flag::TraceFieldaddr => 18,
-            Flag::TraceGetf => 19,
-            Flag::TraceGvd => 20,
-            Flag::TraceHasher => 21,
-            Flag::TraceListrepr => 22,
-            Flag::TraceMatchtag => 23,
-            Flag::TracePc => 24,
-            Flag::TracePcDecode => 25,
-            Flag::TracePool => 26,
-            Flag::TraceProcess => 27,
-            Flag::TraceProtocolDispatch => 28,
-            Flag::TracePtrwrite => 29,
-            Flag::TracePushStr => 30,
-            Flag::TracePushStrX => 31,
-            Flag::TraceStaticmut => 32,
-            Flag::TraceStaticCall => 33,
-            Flag::TraceTcp => 34,
-            Flag::TrapSelfref => 35,
-        }
-    }
+interpreter_flags! {
+    CbgrLegacyAlloc => "VERUM_CBGR_LEGACY_ALLOC",
+    DebugFs => "VERUM_DEBUG_FS",
+    DisableUnitDynDispatch => "VERUM_DISABLE_UNIT_DYN_DISPATCH",
+    SuffixCompatLegacy => "VERUM_SUFFIX_COMPAT_LEGACY",
+    TraceAsptr => "VERUM_TRACE_ASPTR",
+    TraceCallmEq => "VERUM_TRACE_CALLM_EQ",
+    TraceCallmFail => "VERUM_TRACE_CALLM_FAIL",
+    TraceCallmFlow => "VERUM_TRACE_CALLM_FLOW",
+    TraceCalls => "VERUM_TRACE_CALLS",
+    TraceDeref => "VERUM_TRACE_DEREF",
+    TraceDispatch => "VERUM_TRACE_DISPATCH",
+    TraceDropfn => "VERUM_TRACE_DROPFN",
+    TraceEncbuf => "VERUM_TRACE_ENCBUF",
+    TraceEnvstub => "VERUM_TRACE_ENVSTUB",
+    TraceEqRuntime => "VERUM_TRACE_EQ_RUNTIME",
+    TraceFatrefRoute => "VERUM_TRACE_FATREF_ROUTE",
+    TraceFieldaddr => "VERUM_TRACE_FIELDADDR",
+    TraceGetf => "VERUM_TRACE_GETF",
+    TraceGvd => "VERUM_TRACE_GVD",
+    TraceHasher => "VERUM_TRACE_HASHER",
+    TraceListrepr => "VERUM_TRACE_LISTREPR",
+    TraceMatchtag => "VERUM_TRACE_MATCHTAG",
+    TracePc => "VERUM_TRACE_PC",
+    TracePcDecode => "VERUM_TRACE_PC_DECODE",
+    TracePool => "VERUM_TRACE_POOL",
+    TraceProcess => "VERUM_TRACE_PROCESS",
+    TraceProtocolDispatch => "VERUM_TRACE_PROTOCOL_DISPATCH",
+    TracePtrwrite => "VERUM_TRACE_PTRWRITE",
+    TracePushStr => "VERUM_TRACE_PUSH_STR",
+    TracePushStrX => "VERUM_TRACE_PUSH_STR_X",
+    TraceSpecfact => "VERUM_TRACE_SPECFACT",
+    TraceStaticmut => "VERUM_TRACE_STATICMUT",
+    TraceStaticCall => "VERUM_TRACE_STATIC_CALL",
+    TraceTcp => "VERUM_TRACE_TCP",
+    TrapSelfref => "VERUM_TRAP_SELFREF",
 }
 
 static CACHE: [OnceLock<Option<String>>; Flag::COUNT] =
