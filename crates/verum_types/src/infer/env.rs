@@ -7161,12 +7161,15 @@ impl TypeChecker {
         self.define_builtin_value(verum_common::Text::from("watch_channel"), watch_scheme);
 
         // Register panic function: fn panic(&Text) -> Never
-        // Note: Takes &Text to match stdlib definition in core/panic.vr
         let panic_params = List::from_iter([Type::Reference {
             inner: Box::new(Type::text()),
             mutable: false,
         }]);
-        let panic_ty = Type::function(panic_params, Type::never());
+        // The builtin lowers to the registered panic operation. Preserve that
+        // operation's bound without claiming purity or trusting a source homonym.
+        let panic_requirement = super::callable_properties::intrinsic_requirement("panic")
+            .unwrap_or(crate::computational_properties::PropertyRequirement::Unrestricted);
+        let panic_ty = Type::function_with_requirement(panic_params, Type::never(), panic_requirement);
         self.define_builtin_value("panic", TypeScheme::mono(panic_ty));
 
         // Register drop function: fn drop<T>(T) -> Unit
