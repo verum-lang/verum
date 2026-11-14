@@ -11,7 +11,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use verum_error::breadcrumb;
-use verum_error::crash::{self, CrashReporterConfig};
+use verum_error::crash::{self, BuildIdentity, CrashReporterConfig};
 
 // The crash reporter installs process-wide state (panic hook + global
 // config). All tests that touch it must run serially so they don't
@@ -34,6 +34,15 @@ fn install_for_test(dir: &PathBuf) {
     crash::install(CrashReporterConfig {
         app_name: "verum-test".into(),
         app_version: "0.0.0-test".into(),
+        build: BuildIdentity {
+            profile: "consumer-profile",
+            target: "consumer-target",
+            host: "consumer-host",
+            rustc: "consumer-rustc",
+            git_sha: "0123456789ab",
+            git_dirty: "dirty",
+            timestamp: "1234567890",
+        },
         report_dir: Some(dir.clone()),
         retention: 50,
         capture_backtrace: false,
@@ -125,10 +134,13 @@ fn env_snapshot_is_populated() {
     assert!(!snap.arch.is_empty());
     assert!(snap.cpu_cores >= 1);
     assert!(snap.pid > 0);
-    // VERUM_BUILD_* flow through build.rs → build profile should be
-    // non-default here since we're running under `cargo test`.
-    assert!(!snap.build_profile.is_empty());
-    assert!(!snap.build_target.is_empty());
+    assert_eq!(snap.build_profile, "consumer-profile");
+    assert_eq!(snap.build_target, "consumer-target");
+    assert_eq!(snap.build_host, "consumer-host");
+    assert_eq!(snap.build_rustc, "consumer-rustc");
+    assert_eq!(snap.build_git_sha, "0123456789ab");
+    assert_eq!(snap.build_git_dirty, "dirty");
+    assert_eq!(snap.build_timestamp, "1234567890");
 }
 
 #[test]
@@ -163,4 +175,12 @@ fn reports_are_rotated_against_retention_limit() {
         "expected rotation to cap entries, got {}",
         files.len()
     );
+}
+
+#[test]
+fn unspecified_identity_does_not_impersonate_a_dependency_build() {
+    let identity = CrashReporterConfig::default().build;
+    assert_eq!(identity.git_sha, "not supplied");
+    assert_eq!(identity.target, "not supplied");
+    assert_eq!(identity.timestamp, "not supplied");
 }

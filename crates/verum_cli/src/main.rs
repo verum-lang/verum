@@ -26,6 +26,7 @@ use std::path::PathBuf;
 use std::process;
 use verum_common::{List, Text};
 
+mod build_identity;
 mod cache;
 mod cog;
 mod cog_manager;
@@ -2767,7 +2768,11 @@ enum WorkspaceCommands {
 fn main() {
  // Industrial crash reporter: panic hook + fatal-signal handlers +
  // breadcrumb-enriched structured reports to `~/.verum/crashes/`.
-    verum_error::crash::install(verum_error::crash::CrashReporterConfig::default());
+    verum_error::crash::install(verum_error::crash::CrashReporterConfig {
+        app_version: env!("CARGO_PKG_VERSION").into(),
+        build: build_identity::BUILD_IDENTITY,
+        ..Default::default()
+    });
 
  // Eagerly initialise the LLVM native target on the main thread,
  // before any rayon worker or Z3 context exists.

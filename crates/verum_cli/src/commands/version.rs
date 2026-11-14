@@ -1,6 +1,6 @@
 // Version command
 
-use crate::error::Result;
+use crate::{build_identity::BUILD_IDENTITY, error::Result};
 use colored::Colorize;
 
 pub fn execute(verbose: bool) -> Result<()> {
@@ -13,21 +13,12 @@ pub fn execute(verbose: bool) -> Result<()> {
     if verbose {
         println!();
         println!("{}", "Build information:".bold());
-        println!(
-            "  Commit:       {}",
-            option_env!("GIT_HASH").unwrap_or("unknown")
-        );
-        println!(
-            "  Build date:   {}",
-            option_env!("BUILD_DATE").unwrap_or("unknown")
-        );
-        println!("  Rust version: {}", env!("CARGO_PKG_RUST_VERSION"));
+        println!("  Commit:       {}", BUILD_IDENTITY.git_sha);
+        println!("  Built at (Unix seconds): {}", BUILD_IDENTITY.timestamp);
+        println!("  Worktree:     {}", BUILD_IDENTITY.git_dirty);
+        println!("  Rust version: {}", BUILD_IDENTITY.rustc);
         println!("  LLVM version: {}", verum_codegen::llvm::LLVM_VERSION);
-        println!(
-            "  Host target:  {}-{}",
-            std::env::consts::ARCH,
-            std::env::consts::OS
-        );
+        println!("  Target:       {}", BUILD_IDENTITY.target);
         println!();
         println!("{}", "Capabilities:".bold());
         println!("  AOT backend:    {}", "LLVM".green());

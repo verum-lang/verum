@@ -5,6 +5,7 @@
 // Exposes modules for testing purposes
 #![allow(dead_code)]
 
+pub mod build_identity;
 pub mod cache;
 pub mod commands;
 // NOTE: Old compiler module removed - now using verum_compiler crate

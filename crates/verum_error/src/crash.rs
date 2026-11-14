@@ -56,6 +56,33 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub const REPORT_SCHEMA_VERSION: u32 = 1;
 
+/// Identity supplied by the final executable, rather than a shared dependency.
+/// Build scripts that change on Git/source updates belong to that executable.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BuildIdentity {
+    pub profile: &'static str,
+    pub target: &'static str,
+    pub host: &'static str,
+    pub rustc: &'static str,
+    pub git_sha: &'static str,
+    pub git_dirty: &'static str,
+    pub timestamp: &'static str,
+}
+
+impl Default for BuildIdentity {
+    fn default() -> Self {
+        Self {
+            profile: "not supplied",
+            target: "not supplied",
+            host: "not supplied",
+            rustc: "not supplied",
+            git_sha: "not supplied",
+            git_dirty: "not supplied",
+            timestamp: "not supplied",
+        }
+    }
+}
+
 /// Public configuration for the crash reporter.
 #[derive(Clone)]
 pub struct CrashReporterConfig {
@@ -63,6 +90,8 @@ pub struct CrashReporterConfig {
     pub app_name: String,
     /// Application version (typically `env!("CARGO_PKG_VERSION")`).
     pub app_version: String,
+    /// Metadata embedded by the application that owns this process.
+    pub build: BuildIdentity,
     /// Where to store reports. Defaults to `~/.verum/crashes/`.
     pub report_dir: Option<PathBuf>,
     /// Maximum number of reports to keep. Older ones are rotated off.
@@ -83,6 +112,7 @@ impl Default for CrashReporterConfig {
         Self {
             app_name: "verum".into(),
             app_version: env!("CARGO_PKG_VERSION").into(),
+            build: BuildIdentity::default(),
             report_dir: None,
             retention: 50,
             capture_backtrace: true,
@@ -147,21 +177,13 @@ impl EnvSnapshot {
         Self {
             app_name: config.app_name.clone(),
             verum_version: config.app_version.clone(),
-            build_profile: option_env!("VERUM_BUILD_PROFILE")
-                .unwrap_or("unknown")
-                .into(),
-            build_target: option_env!("VERUM_BUILD_TARGET")
-                .unwrap_or("unknown")
-                .into(),
-            build_host: option_env!("VERUM_BUILD_HOST").unwrap_or("unknown").into(),
-            build_rustc: option_env!("VERUM_BUILD_RUSTC").unwrap_or("unknown").into(),
-            build_git_sha: option_env!("VERUM_BUILD_GIT_SHA")
-                .unwrap_or("unknown")
-                .into(),
-            build_git_dirty: option_env!("VERUM_BUILD_GIT_DIRTY")
-                .unwrap_or("unknown")
-                .into(),
-            build_timestamp: option_env!("VERUM_BUILD_TIMESTAMP").unwrap_or("0").into(),
+            build_profile: config.build.profile.into(),
+            build_target: config.build.target.into(),
+            build_host: config.build.host.into(),
+            build_rustc: config.build.rustc.into(),
+            build_git_sha: config.build.git_sha.into(),
+            build_git_dirty: config.build.git_dirty.into(),
+            build_timestamp: config.build.timestamp.into(),
             os: std::env::consts::OS.into(),
             arch: std::env::consts::ARCH.into(),
             os_family: std::env::consts::FAMILY.into(),
