@@ -1,5 +1,5 @@
 //! Recover imported receiver-owned roles only from exact semantic receiver
-//! applications and their nominal declaration headers. Method-local slots remain
+//! applications and their retained implementation declarations. Method-local slots remain
 //! separate, including same-spelled shadowing parameters.
 use super::impl_generic_rosters::{DeclaredGenericParameter, GenericRoster};
 use super::{CodegenError, CodegenErrorKind, CodegenResult, VbcCodegen};
@@ -71,7 +71,7 @@ impl VbcCodegen {
         if descriptor.parent_type.is_some()
             && !selected_source.is_method()
         {
-            roles = self.imported_implementation_owner_roles(module, descriptor, remap, &owner)?;
+            roles = self.imported_implementation_owner_roles(module, descriptor, remap, &owner, None)?;
         } else if descriptor.parent_type.is_some() {
             let receiver = super::formal_parameters::remapped_parameters(descriptor, remap)
                 .and_then(|parameters| parameters.first().cloned().flatten());
@@ -81,17 +81,33 @@ impl VbcCodegen {
                         CodegenErrorKind::InvalidSourceSignature("receiver has no remapped declaring nominal".into())))?;
                 let mut nominal = &receiver;
                 while let TypeRef::Reference { inner, .. } = nominal { nominal = inner; }
-                let selected = match nominal {
-                    TypeRef::Instantiated { base, .. } => Some(*base),
-                    TypeRef::Concrete(id) if self.declaration_generic_roster(*id)
-                        .is_some_and(|parameters| parameters.is_empty()) => Some(*id),
-                    _ => None,
-                };
-                if selected != Some(parent) {
-                    return Err(CodegenError::new(CodegenErrorKind::InvalidSourceSignature(
-                        "semantic receiver lacks its declaration-owned nominal application".into())));
+                if matches!(nominal, TypeRef::Slice(_) | TypeRef::Array { .. }) {
+                    // Structural receivers have no nominal application. The
+                    // catalogue only identifies the method family; the retained
+                    // implementation owns the element/extent binder roles.
+                    let kind = self.type_by_id(parent).map(|catalogue| catalogue.kind);
+                    if !matches!((nominal, kind),
+                        (TypeRef::Slice(_), Some(crate::types::TypeKind::Slice))
+                        | (TypeRef::Array { .. }, Some(crate::types::TypeKind::Array)))
+                    {
+                        return Err(CodegenError::new(CodegenErrorKind::InvalidSourceSignature(
+                            "structural receiver conflicts with its declaring method catalogue".into())));
+                    }
+                    roles = self.imported_implementation_owner_roles(
+                        module, descriptor, remap, &owner, Some(&receiver))?;
+                } else {
+                    let selected = match nominal {
+                        TypeRef::Instantiated { base, .. } => Some(*base),
+                        TypeRef::Concrete(id) if self.declaration_generic_roster(*id)
+                            .is_some_and(|parameters| parameters.is_empty()) => Some(*id),
+                        _ => None,
+                    };
+                    if selected != Some(parent) {
+                        return Err(CodegenError::new(CodegenErrorKind::InvalidSourceSignature(
+                            "semantic receiver lacks its declaration-owned nominal application".into())));
+                    }
+                    self.collect_receiver_value_roles(&receiver, &owner, &mut roles, 0, &mut 4096)?;
                 }
-                self.collect_receiver_value_roles(&receiver, &owner, &mut roles, 0, &mut 4096)?;
             } else {
                 let parent = descriptor
                     .parent_type
@@ -112,7 +128,7 @@ impl VbcCodegen {
             // bounds (for example B in F: fn(I.Item) -> B). They belong to
             // the exact implementation even though Self<I, F> omits them.
             if roles.len() != owner.len() {
-                let declared = self.imported_implementation_owner_roles(module, descriptor, remap, &owner)?;
+                let declared = self.imported_implementation_owner_roles(module, descriptor, remap, &owner, None)?;
                 for (id, receiver_role) in &roles {
                     let corresponding = declared.get(id).ok_or_else(|| CodegenError::new(
                         CodegenErrorKind::InvalidSourceSignature("receiver slot is absent from its selected implementation".into())))?;
@@ -151,16 +167,21 @@ impl VbcCodegen {
     fn imported_implementation_owner_roles(
         &mut self, module: &VbcModule, descriptor: &FunctionDescriptor,
         remap: &std::collections::HashMap<u32, u32>, owned: &Set<TypeParamId>,
+        structural_parameter: Option<&TypeRef>,
     ) -> CodegenResult<Map<TypeParamId, DeclaredGenericParameter>> {
-        let identity = format!("{}.{}",
-            descriptor.origin_module.and_then(|id| module.strings.get(id)).unwrap_or("<missing owner>"),
+        // None is the descriptor contract for a declaration at this archive
+        // entry's top level. A present but invalid string ID is not that case.
+        let owner = match descriptor.origin_module {
+            None => module.name.as_str(),
+            Some(id) => module.strings.get(id).ok_or_else(|| CodegenError::new(
+                CodegenErrorKind::InvalidSourceSignature("invalid declaration owner string".into())))?,
+        };
+        let identity = format!("{}.{}", owner,
             module.strings.get(descriptor.name).unwrap_or("<missing name>"));
         let invalid = |message: &str| CodegenError::new(CodegenErrorKind::InvalidSourceSignature(
             format!("imported callable {identity}: {message}")));
         let source = descriptor.source_signature.as_ref()
             .ok_or_else(|| invalid("missing selected source signature"))?;
-        let owner = descriptor.origin_module.and_then(|id| module.strings.get(id))
-            .ok_or_else(|| invalid("missing declaration owner"))?;
         let parent_id = descriptor.parent_type.ok_or_else(|| invalid("missing declaring nominal"))?;
         let parent = module.types.iter().find(|ty| ty.id == parent_id)
             .ok_or_else(|| invalid("missing declaring nominal descriptor"))?;
@@ -198,6 +219,24 @@ impl VbcCodegen {
         }).collect::<CodegenResult<std::collections::BTreeSet<_>>>()?;
         if expected != actual || actual.len() != descriptor.type_params.len() {
             return Err(invalid("generic slots differ from the selected implementation and method"));
+        }
+        if let Some(parameter) = structural_parameter {
+            let receiver = self.resolve_impl_receiver(&implementation, &dense, &names)?;
+            if !receiver.semantic
+                || super::formal_parameters::remapped_receiver(descriptor, remap).as_ref()
+                    != Some(&receiver.ty)
+            {
+                return Err(invalid("structural receiver differs from its selected implementation"));
+            }
+            let ids = Self::ordered_generic_param_ids(&dense, &shadow);
+            let mut parameter_scope = dense.clone();
+            parameter_scope.extend(shadow.iter().map(|(name, id)| (name.clone(), *id)));
+            let previous_receiver = self.current_impl_receiver.replace(receiver);
+            let parameters = self.source_semantic_parameters(source, &parameter_scope, &dense, &ids);
+            self.current_impl_receiver = previous_receiver;
+            if parameters.first().and_then(Option::as_ref) != Some(parameter) {
+                return Err(invalid("structural receiver parameter differs from its selected source signature"));
+            }
         }
         let scope = self.declared_impl_generic_scope(&implementation.kind, &names);
         let mut roles = Map::new();

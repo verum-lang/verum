@@ -129,24 +129,24 @@ impl VbcCodegen {
                 return Err(CodegenError::internal("imported callable lexical parent has no relocation"));
             }
             Ok(crate::module::CallableDeclarationIdentity {
-                source_name: self.import_forward_string(module, identity.source_name)?,
+                source_name: self.import_forward_string(module, identity.source_name, "source declaration name")?,
                 lexical_parent,
             })
         }).transpose()?;
-        descriptor.name = self.import_forward_string(module, source.name)?;
+        descriptor.name = self.import_forward_string(module, source.name, "callable name")?;
         descriptor.origin_module = Some(match source.origin_module {
-            Some(owner) => self.import_forward_string(module, owner)?,
+            Some(owner) => self.import_forward_string(module, owner, "declaration owner")?,
             None => StringId(self.ctx.intern_string_raw(&module.name)),
         });
         descriptor.return_type_name = source.return_type_name
-            .map(|name| self.import_forward_string(module, name)).transpose()?;
+            .map(|name| self.import_forward_string(module, name, "return type name")).transpose()?;
         descriptor.intrinsic_name = source.intrinsic_name
-            .map(|name| self.import_forward_string(module, name)).transpose()?;
+            .map(|name| self.import_forward_string(module, name, "intrinsic name")).transpose()?;
         descriptor.parent_type = source.parent_type.map(|parent| TypeId(*types.get(&parent.0).unwrap_or(&parent.0)));
         for parameter in &mut descriptor.params {
-            parameter.name = self.import_forward_string(module, parameter.name)?;
+            parameter.name = self.import_forward_string(module, parameter.name, "parameter name")?;
             if parameter.type_name != StringId::EMPTY {
-                parameter.type_name = self.import_forward_string(module, parameter.type_name)?;
+                parameter.type_name = self.import_forward_string(module, parameter.type_name, "parameter type name")?;
             }
             parameter.type_ref = remap_type_ref_archive(&parameter.type_ref, types);
             parameter.default = parameter.default
@@ -154,7 +154,7 @@ impl VbcCodegen {
         }
         for parameter in &mut descriptor.type_params {
             if parameter.name != StringId::EMPTY {
-                parameter.name = self.import_forward_string(module, parameter.name)?;
+                parameter.name = self.import_forward_string(module, parameter.name, "parameter name")?;
             }
             for bound in &mut parameter.bounds {
                 *bound = ProtocolId(*types.get(&bound.0).unwrap_or(&bound.0));
@@ -185,9 +185,14 @@ impl VbcCodegen {
         Ok(descriptor)
     }
 
-    fn import_forward_string(&mut self, module: &VbcModule, name: StringId) -> CodegenResult<StringId> {
-        let name = module.strings.get(name)
-            .ok_or_else(|| CodegenError::internal("missing forward callable declaration string"))?;
+    fn import_forward_string(
+        &mut self, module: &VbcModule, id: StringId, role: &str,
+    ) -> CodegenResult<StringId> {
+        let name = module.strings.get(id).ok_or_else(|| {
+            CodegenError::new(CodegenErrorKind::InvalidSourceSignature(format!(
+                "imported callable from '{}': invalid {role} string #{}", module.name, id.0,
+            )))
+        })?;
         Ok(StringId(self.ctx.intern_string_raw(name)))
     }
 

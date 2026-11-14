@@ -13373,11 +13373,10 @@ impl VbcCodegen {
             ));
         }
 
-        // T1615: a packed fixed array borrows the structural Slice method
-        // surface. Its allocation has no List owner fields. Carry the known
-        // count and stride into a FatRef BEFORE any nominal or pre-resolved
-        // call path can select a List body. Parentheses preserve the place;
-        // references already arrive as FatRefs and have no packed-local mark.
+        // A packed array has no List owner fields. Its borrowed carrier keeps
+        // the known count and stride. Select an actual array implementation
+        // before considering the slice method surface; a storage adjustment
+        // must not discard the declaration's extent or generic parameters.
         let mut array_receiver = receiver;
         while let ExprKind::Paren(inner) = &array_receiver.kind {
             array_receiver = inner;
@@ -13388,6 +13387,21 @@ impl VbcCodegen {
             && let Some(stride) = self.ctx.get_typed_array_elem_size(&name.name)
             && let Some(count) = self.ctx.fixed_array_count(&name.name)
         {
+            let declaration = self.declared_expression_result(array_receiver, None, 0, 0);
+            let array_method = declaration.as_ref().map(|receiver|
+                self.structural_receiver_method_key(receiver, method.name.as_str(), args.len() + 1))
+                .transpose()?.flatten();
+            let retained = if array_method.is_some() {
+                declaration.as_ref().and_then(|receiver|
+                    self.scoped_callable_type_name(receiver, Some(&self.ctx.current_generic_param_ids)))
+                    .map(|name| (name.to_string(), declaration.clone()))
+                    .ok_or_else(|| CodegenError::internal("selected array receiver lost its declaration"))?
+            } else {
+                let target = self.ctx.array_element_type_name(name.name.as_str())
+                    .map_or_else(|| "Slice".to_string(), |element| format!("Slice<{element}>"));
+                let semantic = self.semantic_type_in_current_scope(&target);
+                (target, semantic)
+            };
             let value = self.compile_expr(array_receiver)?
                 .or_internal("fixed-array receiver has no value")?;
             let start = self.ctx.alloc_temp();
@@ -13406,10 +13420,8 @@ impl VbcCodegen {
             self.ctx.free_temp(value);
             self.ctx.free_temp(start);
             self.ctx.free_temp(length);
-            let target = self.ctx.array_element_type_name(name.name.as_str())
-                .map_or_else(|| "Slice".to_string(), |element| format!("Slice<{element}>"));
             return self.compile_method_on_adjusted_value(
-                slice, &target, self.semantic_type_in_current_scope(&target), receiver.span,
+                slice, &retained.0, retained.1, receiver.span,
                 method, args, resolved_target, type_args, false,
             );
         }
@@ -14759,9 +14771,7 @@ impl VbcCodegen {
             // CURRENT module (the `darwin.time.monotonic_nanos()` →
             // `core.sys.monotonic_nanos` mutual-recursion class).
             if parts.len() >= 2
-                && let Some((_qkey, func_info)) = self
-                    .ctx
-                    .resolve_qualified_dotted_call(&parts, args.len())
+                && let Some((_qkey, func_info)) = self.ctx.resolve_qualified_dotted_call(&parts, args.len())
             {
                 if let Some(tag) = func_info.variant_tag {
                     return self.compile_variant_constructor_with_tag(tag, args);
@@ -16487,16 +16497,11 @@ impl VbcCodegen {
         let effective_method_name =
             Self::method_receiver_type_name(&effective_method_name).to_string();
 
-        // The declaration, before nominal argument stripping, chooses the
-        // structural Slice owner. Nested elements such as [Cell<Int>] must not
-        // become a guessed `[Cell.method` prefix (T1615).
-        let effective_method_name = if self.infer_expr_type_name(receiver)
-            .and_then(|name| Self::structural_receiver_element(&name)).is_some()
-        {
-            format!("Slice.{}", method.name)
-        } else {
-            effective_method_name
-        };
+        // Structural dispatch follows the complete source receiver, including
+        // fixed-array extent, rather than its legacy display hint.
+        let effective_method_name = receiver_result_declaration.as_ref()
+            .map(|receiver| self.structural_receiver_method_key(receiver, method.name.as_str(), args.len() + 1))
+            .transpose()?.flatten().unwrap_or(effective_method_name);
         // A declared alias can carry arguments that have no parseable display
         // spelling. Select its callable and self witness structurally. A Deref
         // adjustment must already have been emitted before using the target.

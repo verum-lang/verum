@@ -48,6 +48,11 @@ impl VbcCodegen {
                 return self.declared_dynamic_method(object, method, arity.saturating_sub(1))
                     .map(|member| member.map(DeclaredReceiverMethod::Protocol));
             }
+            if let Some(key) = self.structural_receiver_method_key(&owner, method, arity)? {
+                let function = self.receiver_specialization(&key, Some(&owner), arity)?
+                    .or_else(|| self.ctx.lookup_qualified_function(&key));
+                return Ok(function.map(|function| DeclaredReceiverMethod::Function(function, owner)));
+            }
             let Some(descriptor) = owner.base_type_id().and_then(|id| self.type_by_id(id)) else {
                 return Ok(None);
             };
