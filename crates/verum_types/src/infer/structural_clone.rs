@@ -15,7 +15,7 @@ impl TypeChecker {
             })
     }
 
-    fn check_clone_layout(&self, ty: &Type) -> std::result::Result<(), String> {
+    fn check_clone_layout(&self, ty: &Type) -> std::result::Result<(), Text> {
         // Consume expanded components instead of recursively cloning a subtree
         // at each edge. Bound both expansion depth and total work, including
         // cycles and nonregular generic declarations.
@@ -23,12 +23,12 @@ impl TypeChecker {
         let mut remaining = 4096usize;
         while let Some((ty, depth)) = pending.pop() {
             if depth >= 64 || remaining == 0 {
-                return Err("copy layout exceeds the finite declaration boundary".to_owned());
+                return Err(Text::from("copy layout exceeds the finite declaration boundary"));
             }
             remaining -= 1;
             let mut enqueue = |component| {
                 if pending.len() >= remaining {
-                    return Err("copy layout exceeds the finite declaration boundary".to_owned());
+                    return Err(Text::from("copy layout exceeds the finite declaration boundary"));
                 }
                 pending.push((component, depth + 1));
                 Ok(())
@@ -77,7 +77,7 @@ impl TypeChecker {
                     };
                     let discipline = self.declared_resource_discipline(&key);
                     if discipline != ResourceDiscipline::Unrestricted {
-                        return Err(format!("`{key}` has {discipline:?} resource discipline"));
+                        return Err(format!("`{key}` has {discipline:?} resource discipline").into());
                     }
                     let fields: Text = format!("__struct_fields_{key}").into();
                     let layout = self
@@ -87,14 +87,14 @@ impl TypeChecker {
                         .or_else(|| self.ctx.lookup_type(&format!("__tuple_fields_{key}")))
                         .or_else(|| self.ctx.type_aliases.get(&key))
                         .or_else(|| self.ctx.lookup_type(&key))
-                        .ok_or_else(|| format!("layout of `{key}` is unavailable"))?;
+                        .ok_or_else(|| Text::from(format!("layout of `{key}` is unavailable")))?;
                     let instantiated = self.substitute_with_params(&key, layout, args);
                     if instantiated == ty {
-                        return Err(format!("layout of `{key}` is opaque"));
+                        return Err(format!("layout of `{key}` is opaque").into());
                     }
                     enqueue(instantiated)?;
                 }
-                _ => return Err(format!("component `{ty}` requires a declared clone")),
+                _ => return Err(format!("component `{ty}` requires a declared clone").into()),
             }
         }
         Ok(())
