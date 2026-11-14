@@ -158,6 +158,22 @@ impl TypeChecker {
         self.stored_loan_shape(ty, LoanInspection::Writable)
     }
 
+    /// Use the same exact runtime declaration authority as VBC. A short name,
+    /// archive bundle name or unresolved forward declaration owns no storage.
+    fn declared_owned_storage_parameters(&self, name: &verum_common::Text) -> Option<&'static [usize]> {
+        let (owner, _) = name.rsplit_once('.')?;
+        let declaration = self.source_type_registration.completed_declaration(name)?;
+        if !matches!(declaration.body, verum_ast::TypeDeclBody::Record(_)) {
+            return None;
+        }
+        let carrier = verum_common::well_known_types::WellKnownType::from_declaration(
+            declaration.name.name.as_str(),
+            owner,
+        )?;
+        let positions = carrier.owned_storage_parameters();
+        (!positions.is_empty()).then_some(positions)
+    }
+
     fn stored_loan_shape(&self, ty: &Type, inspection: LoanInspection) -> bool {
         if let Some(present) = immediate(ty, inspection) {
             return present;
@@ -255,6 +271,27 @@ impl TypeChecker {
                         None if args.is_empty() => None,
                         _ => return true,
                     };
+                    if let Some(positions) = self.declared_owned_storage_parameters(&name)
+                        && positions.len() == args.len()
+                        && positions.iter().all(|position| *position < args.len())
+                    {
+                        // The runtime owns the backing allocation. Stored
+                        // elements still carry their actual nested references.
+                        // Its buffer can be exposed by an opaque call even when
+                        // the elements themselves contain no references.
+                        if inspection == LoanInspection::Exposable {
+                            return true;
+                        }
+                        if !queue(
+                            &mut pending,
+                            positions.iter().map(|position| &args[*position]),
+                            node.scope,
+                            remaining,
+                        ) {
+                            return true;
+                        }
+                        continue;
+                    }
                     let mut bindings = List::new();
                     let mut key = List::new();
                     if let Some(parameters) = parameters {
