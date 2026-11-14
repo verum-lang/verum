@@ -13,6 +13,11 @@ use verum_ast::span::Span;
 use verum_common::well_known_types::WellKnownType as WKT;
 use verum_common::{List, Map, Maybe, Set, Text, ToText};
 
+pub(super) struct PatternBorrow {
+    pub name: Text,
+    pub mutable: bool,
+    pub fields: List<Text>,
+}
 
 /// TEMPLATE-VAR-FRESHEN (#41): the get_constructors fallbacks below build a
 /// `Type::Variant` from the REGISTRY TEMPLATE payload types, whose free
@@ -2851,7 +2856,7 @@ impl TypeChecker {
             PatternKind::Wildcard => Ok(List::new()),
 
             PatternKind::Ident {
-                name, subpattern, ..
+                name, subpattern, by_ref, mutable,
             } => {
                 // Check if this identifier is actually a variant constructor (unit variant)
                 // when the type context is a variant type
@@ -2866,7 +2871,10 @@ impl TypeChecker {
                 }
 
                 // Normal variable binding
-                let mut bindings = List::from_iter([(name.name.clone(), ty.clone())]);
+                let binding_ty = if *by_ref {
+                    Type::Reference { inner: Box::new(ty.clone()), mutable: *mutable }
+                } else { ty.clone() };
+                let mut bindings = List::from_iter([(name.name.clone(), binding_ty)]);
                 if let Some(sub) = subpattern {
                     let sub_bindings = self.collect_pattern_bindings(sub, ty)?;
                     bindings.extend(sub_bindings);
@@ -3221,6 +3229,76 @@ impl TypeChecker {
                 Ok(bindings)
             }
         }
+    }
+
+    /// Inspect structural patterns without transferring their subject. The
+    /// established binding types decide which payloads require ownership;
+    /// computed patterns retain the ordinary consuming contract.
+    pub(super) fn match_pattern_use(
+        &self, pattern: &Pattern, bindings: &[(Text, Type)],
+    ) -> (bool, List<PatternBorrow>) {
+        use verum_ast::pattern::{PatternKind as P, VariantPatternData as V};
+        let mut pending = List::from_iter([(pattern, List::<Text>::new())]);
+        let mut consumes = false;
+        let mut borrows = List::new();
+        let owns = |name: &Text| {
+            let Some((_, ty)) = bindings.iter().find(|(bound, _)| bound == name) else { return true };
+            self.type_contains_affine(ty) || !ty.is_monotype()
+                || matches!(ty, Type::Unknown | Type::Placeholder { .. })
+                || self.conversion_nominal_head(ty).is_some_and(|(key, _)|
+                    self.declared_resource_discipline(&key) == verum_common::ResourceDiscipline::Unknown)
+        };
+        while let Some((pattern, fields)) = pending.pop() {
+            match &pattern.kind {
+                P::Wildcard | P::Rest | P::Literal(_) | P::Range { .. } => {},
+                P::Ident { name, by_ref, mutable, subpattern } => {
+                    if *by_ref {
+                        if !borrows.iter().any(|binding: &PatternBorrow| binding.name == name.name
+                            && binding.mutable == *mutable && binding.fields == fields)
+                        {
+                            borrows.push(PatternBorrow { name: name.name.clone(), mutable: *mutable, fields: fields.clone() });
+                        }
+                    } else { consumes |= owns(&name.name); }
+                    if let Some(inner) = subpattern.as_deref() { pending.push((inner, fields)); }
+                }
+                P::Tuple(parts) | P::Variant { data: Some(V::Tuple(parts)), .. } => {
+                    for (index, part) in parts.iter().enumerate() {
+                        let mut projection = fields.clone();
+                        projection.push(index.to_string().into());
+                        pending.push((part, projection));
+                    }
+                }
+                P::Array(parts) => {
+                    for (index, part) in parts.iter().enumerate() {
+                        let mut projection = fields.clone();
+                        projection.push(format!("[{index}]").into());
+                        pending.push((part, projection));
+                    }
+                }
+                P::Or(parts) | P::And(parts) => pending.extend(parts.iter().map(|part| (part, fields.clone()))),
+                P::Paren(inner) | P::Reference { inner, .. } => pending.push((inner, fields)),
+                P::Record { fields: members, .. } | P::Variant { data: Some(V::Record { fields: members, .. }), .. } => {
+                    for field in members {
+                        if let Some(pattern) = &field.pattern {
+                            let mut projection = fields.clone();
+                            projection.push(field.name.name.clone());
+                            pending.push((pattern, projection));
+                        } else { consumes |= owns(&field.name.name); }
+                    }
+                }
+                P::Variant { data: None, .. } => {},
+                P::Slice { before, rest, after } => {
+                    // Without a fixed length, a suffix/rest binding may alias
+                    // the same element; retain the enclosing storage.
+                    pending.extend(before.iter().chain(rest.as_deref()).chain(after.iter())
+                        .map(|part| (part, fields.clone())));
+                }
+                // These patterns invoke computations or establish a narrowed
+                // carrier. Their independent contracts still govern transfer.
+                _ => consumes = true,
+            }
+        }
+        (consumes, borrows)
     }
 
     /// Check if a pattern contains complex forms that the exhaustiveness checker

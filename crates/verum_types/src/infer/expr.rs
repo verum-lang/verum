@@ -1118,7 +1118,7 @@ impl TypeChecker {
         arms: &List<verum_ast::pattern::MatchArm>,
     ) -> Result<InferResult> {
         use ExprKind::*;
-        let scrutinee_ty = self.synth_expr(scrutinee)?.ty;
+        let scrutinee_ty = self.synth_borrowed_operand(scrutinee)?.ty;
         // Resolve any associated-type projection in the scrutinee (e.g.
         // `y.poll(cx)` returning `Poll<Y.Output>`) so pattern binding and
         // exhaustiveness see the concrete payload (`Poll<Unit>`).
@@ -1146,7 +1146,7 @@ impl TypeChecker {
             self.affine_tracker.restore_alternatives(&affine_at_match);
             self.borrow_tracker = loans_at_match.clone_for_branch();
             let arm_result =
-                self.infer_scoped_match_arm(arm, &scrutinee_ty, None, Some(expected), &sources)?;
+                self.infer_scoped_match_arm(arm, scrutinee, &scrutinee_ty, None, Some(expected), &sources)?;
             // An arm that diverges never reaches the code after the
             // match, so what it consumed cannot reach it either.
             if !self.is_never_type(&arm_result.ty) {
@@ -5762,12 +5762,25 @@ impl TypeChecker {
     fn infer_scoped_match_arm(
         &mut self,
         arm: &verum_ast::pattern::MatchArm,
+        scrutinee: &Expr,
         scrutinee_ty: &Type,
         scrutinee_name: Option<&Text>,
         expected: Option<&Type>,
         sources: &[crate::ty::RecordReceiver],
     ) -> Result<InferResult> {
         let bindings = self.collect_pattern_bindings(&arm.pattern, scrutinee_ty)?;
+        let (consumes, ref_bindings) = self.match_pattern_use(&arm.pattern, &bindings);
+        if consumes {
+            if scrutinee_ty.reference_parts().is_some() {
+                for (_, ty) in &bindings { self.check_resource_copy(ty, arm.pattern.span)?; }
+            }
+            self.consume_affine_call_args(std::slice::from_ref(scrutinee), std::slice::from_ref(scrutinee_ty))?;
+        }
+        let borrowed_place = self.borrow_place_projection(scrutinee);
+        let mut borrowed_sources = List::new();
+        if !ref_bindings.is_empty() {
+            self.collect_borrowed_place_candidates(scrutinee, &mut borrowed_sources);
+        }
         let ownership = self.affine_tracker.enter_pattern_scope(bindings.iter().map(|(name, _)| name.clone()));
         self.borrow_tracker.enter_scope();
         self.ctx.enter_scope();
@@ -5776,10 +5789,54 @@ impl TypeChecker {
             if let Some(name) = scrutinee_name {
                 self.add_pattern_evidence(&arm.pattern, name.clone(), arm.pattern.span);
             }
+            if !ref_bindings.is_empty() && borrowed_sources.is_empty() {
+                // A computed subject owns storage only for this match arm.
+                // Its payload can be inspected but a reference cannot escape.
+                let temporary = "<temporary match subject>";
+                self.ctx.env.insert_mono(temporary, scrutinee_ty.clone());
+                self.ctx.env.set_binding_loan_region(temporary, self.borrow_tracker.scope_depth());
+                borrowed_sources.extend(self.ctx.env.record_source(temporary, false));
+            }
+            if ref_bindings.iter().any(|binding| binding.mutable) {
+                self.with_checked_write(scrutinee, |_| Ok(()))?;
+            }
+            let mut binding_sources: Map<Text, List<crate::ty::RecordReceiver>> = Map::new();
+            for binding in &ref_bindings {
+                // Distinct declared payload fields can be borrowed independently.
+                // Keep these loans even when the match is itself a call argument.
+                if let Some((root, projection, exact)) = &borrowed_place {
+                    let path = projection.iter().cloned()
+                        .chain(binding.fields.iter().filter(|_| *exact).map(ToString::to_string))
+                        .collect::<List<_>>().join(".");
+                    let field = (!path.is_empty()).then_some(path);
+                    if let Some(error) = self.borrow_tracker.check_place_borrow(
+                        &root, field.as_deref(), binding.mutable, arm.pattern.span,
+                    ) { return Err(error); }
+                    match (field, binding.mutable) {
+                        (Some(field), true) => self.borrow_tracker.borrow_field_mut(root.clone(), field, arm.pattern.span)?,
+                        (Some(field), false) => self.borrow_tracker.borrow_field_immut(root.clone(), field, arm.pattern.span)?,
+                        (None, true) => self.borrow_tracker.borrow_mut(root.clone(), arm.pattern.span)?,
+                        (None, false) => self.borrow_tracker.borrow_immut(root.clone(), arm.pattern.span)?,
+                    };
+                    self.borrow_tracker.clear_last_borrow();
+                }
+                let origins = binding_sources.entry(binding.name.clone()).or_default();
+                for source in &borrowed_sources {
+                    let mut source = source.clone();
+                    if borrowed_place.as_ref().is_some_and(|(_, _, exact)| *exact) {
+                        source.fields.extend(binding.fields.iter().cloned());
+                    }
+                    if !origins.contains(&source) { origins.push(source); }
+                }
+            }
             self.bind_pattern(&arm.pattern, scrutinee_ty)?;
+            for (name, origins) in binding_sources {
+                self.ctx.env.set_reference_origin(&name,
+                    crate::context::ReferenceOrigin::Candidates(origins.into_boxed_slice()));
+            }
             if !sources.is_empty() {
                 for (name, ty) in &bindings {
-                    if self.carries_stored_loan(ty) {
+                    if self.carries_stored_loan(ty) && !ref_bindings.iter().any(|binding| &binding.name == name) {
                         // Borrowed patterns project the scrutinee's existing
                         // loan. Only owned aggregates need new retained loans.
                         if scrutinee_ty.reference_parts().is_none() {
@@ -5801,7 +5858,10 @@ impl TypeChecker {
         })();
         let carries_loans = result.as_ref()
             .is_ok_and(|inferred| self.carries_stored_loan(&self.unifier.apply(&inferred.ty)));
-        self.observe_match_arm_origins(&arm.body, carries_loans && !sources.is_empty());
+        self.observe_match_arm_origins(&arm.body, carries_loans && (!sources.is_empty() || !borrowed_sources.is_empty()));
+        let escapes = if carries_loans && !ref_bindings.is_empty() {
+            self.check_aggregate_escape(&arm.body, &result.as_ref().expect("inferred result").ty, false)
+        } else { Ok(()) };
         let linear_errors = self.affine_tracker.exit_pattern_scope(ownership, arm.body.span);
         self.refinement_evidence.pop_scope();
         if carries_loans {
@@ -5813,6 +5873,7 @@ impl TypeChecker {
         // Restore lexical state even when the arm failed. Outer consumption
         // remains in the tracker; only arm-owned pattern names leave scope.
         let inferred = result?;
+        escapes?;
         if let Some(error) = linear_errors.into_iter().next() { return Err(error); }
         Ok(inferred)
     }
@@ -5829,10 +5890,9 @@ impl TypeChecker {
             eprintln!("[affine] match walker=SYNTH (infer_match_expr), {} arms", arms.len());
         }
 
-                    // NOTE: Affine tracking for scrutinee is handled by synth_expr
-                    // Do NOT add explicit use_value here - it would cause double-consume errors
-                    // since infer_path_expr already calls use_value for Path expressions
-                    let scrut_result = self.synth_expr(scrutinee)?;
+                    // Evaluate the place once. Selected pattern bindings,
+                    // not the enclosing sum's resource kind, decide transfer.
+                    let scrut_result = self.synth_borrowed_operand(scrutinee)?;
                     // Resolve associated-type projections in the scrutinee (e.g.
                     // `y.poll(cx)` returning `Poll<Y.Output>`) so pattern binding
                     // and exhaustiveness see the concrete payload.
@@ -5877,6 +5937,7 @@ impl TypeChecker {
                             if std::env::var_os("VERUM_TRACE_AFFINE").is_some() {
                                 eprintln!("[affine] match walker=SYNTH -> DEPENDENT, early return");
                             }
+                            self.consume_affine_call_args(std::slice::from_ref(scrutinee), std::slice::from_ref(&binding_ty))?;
                             let dep_result =
                                 self.check_dependent_match(&scrut_ty, arms, expr.span);
                             return dep_result;
@@ -5918,7 +5979,7 @@ impl TypeChecker {
                         self.borrow_tracker = loans_at_match.clone_for_branch();
                         let resolved_scrut_ty = self.unifier.apply(&binding_ty);
                         let arm_result = self.infer_scoped_match_arm(
-                            arm, &resolved_scrut_ty, scrutinee_var.as_ref(), None, &sources,
+                            arm, scrutinee, &resolved_scrut_ty, scrutinee_var.as_ref(), None, &sources,
                         )?;
                         let is_arm_never = self.is_never_type(&arm_result.ty);
 

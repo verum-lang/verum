@@ -484,22 +484,7 @@ impl TypeChecker {
                     | UnOp::RefUnsafeMut,
                 expr,
             } => {
-                if let Some((root, path)) = self.borrow_place(expr) {
-                    let referents = self.ctx.env.reference_candidates(&root);
-                    // Taking the address of a field of *r can borrow each
-                    // possible referent. Taking &r borrows the slot holding r.
-                    let slot = if !referents.is_empty() && self.borrows_referent_field(expr) {
-                        None
-                    } else {
-                        self.ctx.env.record_source(&root, false)
-                    };
-                    for mut source in slot.into_iter().chain(referents) {
-                        if let Some(path) = &path {
-                            source.fields.extend(path.split('.').map(Into::into));
-                        }
-                        add(found, source);
-                    }
-                }
+                self.collect_borrowed_place_candidates(expr, found);
             }
             ExprKind::Block(block) | ExprKind::Async(block) => {
                 self.collect_block_candidates(block, found)
@@ -623,6 +608,27 @@ impl TypeChecker {
         }
         if let Some(tail) = &block.expr {
             self.collect_reference_candidates(tail, found);
+        }
+    }
+
+    /// The storage addressed by an explicit borrow or a `ref` pattern.
+    /// This is separate from references already stored inside the value.
+    pub(super) fn collect_borrowed_place_candidates(
+        &mut self, expr: &Expr, found: &mut List<RecordReceiver>,
+    ) {
+        if let Some((root, path)) = self.borrow_place(expr) {
+            let referents = self.ctx.env.reference_candidates(&root);
+            let slot = if !referents.is_empty() && self.borrows_referent_field(expr) {
+                None
+            } else {
+                self.ctx.env.record_source(&root, false)
+            };
+            for mut source in slot.into_iter().chain(referents) {
+                if let Some(path) = &path {
+                    source.fields.extend(path.split('.').map(Into::into));
+                }
+                if !found.contains(&source) { found.push(source); }
+            }
         }
     }
 

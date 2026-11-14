@@ -240,8 +240,17 @@ impl TypeChecker {
     /// Resolve the storage a borrow or write may touch. Dynamic projections
     /// cover their enclosing place; computed receiver values have no lexical root.
     pub(super) fn borrow_place(&mut self, place: &Expr) -> Option<(Text, Option<String>)> {
+        self.borrow_place_projection(place).map(|(root, path, _)| (root, path))
+    }
+
+    /// A coarsened place still protects its enclosing storage, but must not be
+    /// refined with a payload path belonging to the original computed place.
+    pub(super) fn borrow_place_projection(
+        &mut self, place: &Expr,
+    ) -> Option<(Text, Option<String>, bool)> {
         let mut step = unparen(place);
         let mut projection = Vec::new();
+        let mut exact = true;
         while let Some((operand, _)) = place_operand(step) {
             match &step.kind {
                 ExprKind::Field { field, .. } => projection.push(field.name.to_string()),
@@ -251,11 +260,12 @@ impl TypeChecker {
                     } else {
                         // A dynamic subscript can select any element.
                         projection.clear();
+                        exact = false;
                     }
                 }
                 // The borrow tracker has no finer location for a pointer
                 // dereference or tuple projection.
-                _ => projection.clear(),
+                _ => { projection.clear(); exact = false; },
             }
             step = unparen(operand);
         }
@@ -268,7 +278,7 @@ impl TypeChecker {
             _ => return None,
         };
         projection.reverse();
-        Some((root, (!projection.is_empty()).then(|| projection.join("."))))
+        Some((root, (!projection.is_empty()).then(|| projection.join(".")), exact))
     }
 
     /// A statically named field path can be tracked independently from its siblings.
