@@ -153,17 +153,28 @@ impl TypeChecker {
         scheme: &TypeScheme,
         span: Span,
     ) -> Result<InstantiatedScheme> {
-        if let Some(declaration) = &scheme.value_declaration {
-            self.check_declared_member_visibility(
-                &declaration.owner, &declaration.name,
-                &Some(declaration.visibility.clone()), span,
-            )?;
-        }
+        self.check_value_declaration_visibility(scheme, span)?;
         let instance = scheme
             .try_instantiate()
             .map_err(|message| TypeError::UniverseBinding { message, span })?;
         self.retain_value_instance_obligations(&instance, span)?;
         Ok(instance)
+    }
+
+    pub(super) fn check_value_declaration_visibility(&self, scheme: &TypeScheme, span: Span) -> Result<()> {
+        if let Some(declaration) = &scheme.value_declaration {
+            self.check_declared_member_visibility(
+                &declaration.owner, &declaration.name,
+                &Some(declaration.visibility.clone()), span,
+            )?;
+            if let Some(owner) = &declaration.constructor_owner {
+                self.check_variant_construction_visibility(
+                    &Type::Named { path: Self::text_to_path(owner), args: List::new() },
+                    declaration.name.as_str(), span,
+                )?;
+            }
+        }
+        Ok(())
     }
 
     /// A selected method candidate retains the same fresh signature and

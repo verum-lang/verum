@@ -878,7 +878,7 @@ pub struct TypeChecker {
     /// Resolve imported signatures in their declaring source scope.
     pub(crate) resolving_source_signature: bool,
     loaded_source_receiver_methods: Set<Text>,
-    source_record_field_visibility: Map<Text, field_visibility::RecordVisibility>,
+    source_record_field_visibility: Map<(Text, Maybe<Text>), field_visibility::RecordVisibility>,
     /// Registry of inline module declarations for qualified path resolution
     /// Maps module path (e.g., "cog.api.v1") to its declaration
     /// Module declaration: inline "module name { ... }" or file-based (foo.vr defines module foo) — Inline Modules

@@ -153,6 +153,9 @@ pub(crate) struct ValueDeclaration {
     pub name: Text,
     pub owner: Text,
     pub visibility: verum_ast::Visibility,
+    /// A data constructor retains the exact sum declaration independently of
+    /// its callable signature. Ordinary functions and constants have no case.
+    pub constructor_owner: Option<Text>,
 }
 
 /// Well-formedness required by one exact nominal declaration application.

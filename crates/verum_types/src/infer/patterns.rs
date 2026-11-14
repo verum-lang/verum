@@ -3351,6 +3351,7 @@ impl TypeChecker {
         span: Span,
         scrutinee: &Type,
     ) -> Result<()> {
+        self.check_variant_construction_visibility(scrutinee, tag, span)?;
         let fields = variant_tuple_fields(tag, patterns, payload_ty, span)?;
         for (pattern, field) in patterns.iter().zip(fields) {
             self.bind_pattern(pattern, &pattern_field_type(scrutinee, field))?;
@@ -3374,6 +3375,9 @@ impl TypeChecker {
         span: Span,
         scrutinee: &Type,
     ) -> Result<()> {
+        for field in field_patterns {
+            self.check_variant_field_visibility(scrutinee, tag, field.name.name.as_str(), field.span)?;
+        }
         // Payload must be a record type.
         // Handle both direct Type::Record AND Type::Named that resolves to a record.
         let resolved_payload = match payload_ty {

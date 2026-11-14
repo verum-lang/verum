@@ -1,9 +1,9 @@
 //! Authorize declaration and callable contracts before value conversion.
 
 use super::TypeChecker;
-use crate::core_metadata::{TypeDescriptor, TypeDescriptorKind};
+use crate::core_metadata::{TypeDescriptor, TypeDescriptorKind, VariantPayload};
 use crate::{Result, Type, TypeError};
-use verum_ast::{Span, Visibility, decl::TypeDeclBody};
+use verum_ast::{Span, Visibility, decl::{TypeDeclBody, VariantData, Variant}};
 use verum_common::{List, Maybe, Text};
 use verum_modules::{ModulePath, VisibilityChecker};
 
@@ -20,7 +20,7 @@ impl TypeChecker {
         fields: &[verum_ast::decl::RecordField],
     ) {
         self.source_record_field_visibility.insert(
-            self.declared_type_key(name),
+            Self::field_policy_key(&self.declared_type_key(name), None),
             RecordVisibility {
                 owner: self.current_module_path.clone(),
                 fields: fields
@@ -31,15 +31,50 @@ impl TypeChecker {
         );
     }
 
+    pub(super) fn register_variant_field_visibility(
+        &mut self,
+        name: &str,
+        variants: &[Variant],
+    ) {
+        let owner = self.declared_type_key(name);
+        for variant in variants {
+            let fields = match &variant.data {
+                Some(VariantData::Record(fields)) => fields.iter().map(|field|
+                    (field.name.name.clone(), Some(field.visibility.clone()))).collect(),
+                // A declared unit or tuple case has no named-field policy.
+                // Retain that fact instead of confusing it with absent authority.
+                _ => List::new(),
+            };
+            self.source_record_field_visibility.insert(
+                Self::field_policy_key(&owner, Some(variant.name.name.as_str())),
+                RecordVisibility { owner: self.current_module_path.clone(), fields },
+            );
+        }
+    }
+
+    fn field_policy_key(owner: &Text, variant: Option<&str>) -> (Text, Maybe<Text>) {
+        (owner.clone(), variant.map(Text::from))
+    }
+
     pub(super) fn scalar_representation_key(receiver: &Type) -> Option<Text> {
         let name = receiver.primitive_name()?;
         let owner = verum_common::well_known_types::WellKnownType::declaring_source_module(name)?;
         Some(Self::source_type_declaration_key(owner, name))
     }
 
-    fn metadata_record_visibility(descriptor: &TypeDescriptor) -> Option<RecordVisibility> {
-        let TypeDescriptorKind::Record { fields } = &descriptor.kind else {
-            return None;
+    fn metadata_field_visibility(
+        descriptor: &TypeDescriptor,
+        variant: Option<&str>,
+    ) -> Option<RecordVisibility> {
+        let fields = match (&descriptor.kind, variant) {
+            (TypeDescriptorKind::Record { fields }, None) => fields,
+            (TypeDescriptorKind::Variant { cases }, Some(name)) => {
+                match &cases.iter().find(|case| case.name.as_str() == name)?.payload {
+                    Some(VariantPayload::Record(fields)) => fields,
+                    _ => return None,
+                }
+            }
+            _ => return None,
         };
         let owner = descriptor.origin_module_path.as_ref()
             .filter(|owner| !owner.is_empty()).unwrap_or(&descriptor.module_path);
@@ -66,9 +101,10 @@ impl TypeChecker {
     /// Preserve the nominal head through instantiated aliases and the same
     /// automatic dereferencing used by field lookup. Unknown nominal authority
     /// is a refusal; anonymous structural records have no declaration policy.
-    fn record_visibility(
+    fn declared_field_visibility(
         &self,
         receiver: &Type,
+        variant: Option<&str>,
         member: &str,
         span: Span,
     ) -> Result<Option<RecordVisibility>> {
@@ -97,12 +133,12 @@ impl TypeChecker {
                 _ => {}
             }
             if let Some(key) = Self::scalar_representation_key(&current) {
-                if let Some(policy) = self.source_record_field_visibility.get(&key) {
+                if let Some(policy) = self.source_record_field_visibility.get(&Self::field_policy_key(&key, variant)) {
                     return Ok(Some(policy.clone()));
                 }
                 return Ok(self.core_metadata.as_ref()
                     .and_then(|metadata| Self::metadata_type_with_declaring_key(metadata, &key))
-                    .and_then(Self::metadata_record_visibility));
+                    .and_then(|descriptor| Self::metadata_field_visibility(descriptor, variant)));
             }
             let (key, args) = match &current {
                 Type::Named { path, args } => (self.path_to_string(path), args),
@@ -114,7 +150,7 @@ impl TypeChecker {
                 return Err(self.unknown_record_visibility(&key, member, span));
             }
             visited.push(current.clone());
-            if let Some(policy) = self.source_record_field_visibility.get(&key) {
+            if let Some(policy) = self.source_record_field_visibility.get(&Self::field_policy_key(&key, variant)) {
                 return Ok(Some(policy.clone()));
             }
             if let Some(target) = self.ctx.type_aliases.get(&key) {
@@ -126,7 +162,7 @@ impl TypeChecker {
                 // stand-alone checker has no ModuleRegistry. Imports have their
                 // declaring keys and cannot populate this local owner's entry.
                 let local_key = self.declared_type_key(key.as_str());
-                if let Some(policy) = self.source_record_field_visibility.get(&local_key) {
+                if let Some(policy) = self.source_record_field_visibility.get(&Self::field_policy_key(&local_key, variant)) {
                     return Ok(Some(policy.clone()));
                 }
                 if let Some(target @ (Type::Named { .. } | Type::Generic { .. })) =
@@ -138,21 +174,27 @@ impl TypeChecker {
                 }
             }
             if let Some((module, declaration)) = self.source_receiver_declaration(&current) {
-                match &declaration.body {
-                    TypeDeclBody::Record(fields) => {
-                        return Ok(Some(RecordVisibility {
+                let fields = match (&declaration.body, variant) {
+                    (TypeDeclBody::Record(fields), None) => Some(fields.as_slice()),
+                    (TypeDeclBody::Variant(cases), Some(name)) => {
+                        cases.iter().find(|case| case.name.name.as_str() == name)
+                            .and_then(|case| match &case.data {
+                                Some(VariantData::Record(fields)) => Some(fields.as_slice()),
+                                _ => None,
+                            })
+                    }
+                    (TypeDeclBody::Alias(_), _) => {
+                        return Err(self.unknown_record_visibility(&key, member, span));
+                    }
+                    _ => None,
+                };
+                return Ok(fields.map(|fields| RecordVisibility {
                             owner: module.path.to_string().into(),
                             fields: fields
                                 .into_iter()
                                 .map(|field| (field.name.name.clone(), Some(field.visibility.clone())))
                                 .collect(),
-                        }));
-                    }
-                    TypeDeclBody::Alias(_) => {
-                        return Err(self.unknown_record_visibility(&key, member, span));
-                    }
-                    _ => return Ok(None),
-                }
+                }));
             }
             if let Some(metadata) = &self.core_metadata
                 && let Some(descriptor) = Self::metadata_type_with_declaring_key(metadata, &key)
@@ -160,7 +202,7 @@ impl TypeChecker {
                 if matches!(descriptor.kind, TypeDescriptorKind::Alias { .. }) {
                     return Err(self.unknown_record_visibility(&key, member, span));
                 }
-                return Ok(Self::metadata_record_visibility(descriptor));
+                return Ok(Self::metadata_field_visibility(descriptor, variant));
             }
             // A module mount changes the spelling of a nominal path, not its
             // field policy. Follow only the registered owner after exact
@@ -545,19 +587,52 @@ impl TypeChecker {
         result
     }
 
+    /// A nominal record declaration outranks an ambient case with the same
+    /// spelling. Payload field maps and their shape cannot establish this.
+    pub(super) fn has_declared_record_field_policy(&self, name: &str, span: Span) -> bool {
+        let receiver = Type::Named { path: Self::text_to_path(&Text::from(name)), args: List::new() };
+        self.declared_field_visibility(&receiver, None, "record construction", span)
+            .is_ok_and(|policy| policy.is_some())
+    }
+
     pub(super) fn check_record_field_visibility(
         &self,
         receiver: &Type,
         field: &str,
         span: Span,
     ) -> Result<()> {
-        if let Some(record) = self.record_visibility(receiver, field, span)?
+        if let Some(record) = self.declared_field_visibility(receiver, None, field, span)?
             && let Some((name, visibility)) = record
                 .fields
                 .iter()
                 .find(|(name, _)| name.as_str() == field)
         {
             self.check_declared_member_visibility(&record.owner, name, visibility, span)?;
+        }
+        Ok(())
+    }
+
+    /// The selected nominal sum owns each named payload field. Pattern
+    /// rest syntax does not access omitted fields; an explicit `_` still does.
+    pub(super) fn check_variant_field_visibility(
+        &self, receiver: &Type, variant: &str, field: &str, span: Span,
+    ) -> Result<()> {
+        if let Some(record) = self.declared_field_visibility(receiver, Some(variant), field, span)?
+            && let Some((name, visibility)) = record.fields.iter().find(|(name, _)| name.as_str() == field)
+        {
+            self.check_declared_member_visibility(&record.owner, name, visibility, span)?;
+        }
+        Ok(())
+    }
+
+    /// Both named and positional construction supply the whole payload.
+    pub(super) fn check_variant_construction_visibility(
+        &self, receiver: &Type, variant: &str, span: Span,
+    ) -> Result<()> {
+        if let Some(record) = self.declared_field_visibility(receiver, Some(variant), "variant construction", span)? {
+            for (name, visibility) in &record.fields {
+                self.check_declared_member_visibility(&record.owner, name, visibility, span)?;
+            }
         }
         Ok(())
     }
@@ -569,7 +644,7 @@ impl TypeChecker {
         receiver: &Type,
         span: Span,
     ) -> Result<()> {
-        if let Some(record) = self.record_visibility(receiver, "record construction", span)? {
+        if let Some(record) = self.declared_field_visibility(receiver, None, "record construction", span)? {
             for (name, visibility) in &record.fields {
                 self.check_declared_member_visibility(&record.owner, name, visibility, span)?;
             }

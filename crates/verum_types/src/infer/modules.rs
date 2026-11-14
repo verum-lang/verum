@@ -5357,7 +5357,7 @@ impl TypeChecker {
                     };
                     const_scheme.value_declaration = Some(verum_common::Shared::new(crate::context::ValueDeclaration {
                         name: name.name.clone(), owner: self.current_module_path.clone(),
-                        visibility: item.visibility.clone(),
+                        visibility: item.visibility.clone(), constructor_owner: None,
                     }));
 
                     // Collect for registration after scope exit
@@ -15958,14 +15958,17 @@ impl TypeChecker {
         let fresh_args: List<Type> = (0..generics_count)
             .map(|_| Type::Var(crate::ty::TypeVar::fresh()))
             .collect();
+        // The parent slot can be a local import spelling. Keep the exact
+        // declaration owner when carrying the constructor out of this lookup.
+        let result_owner = self.declared_sum_key(&parent_name).unwrap_or_else(|| parent_name.clone());
         let return_type = if generics_count == 0 {
             Type::Named {
-                path: Self::text_to_path(&parent_name),
+                path: Self::text_to_path(&result_owner),
                 args: List::new(),
             }
         } else {
             Type::Generic {
-                name: parent_name.clone(),
+                name: result_owner,
                 args: fresh_args.clone(),
             }
         };
@@ -17564,6 +17567,7 @@ impl TypeChecker {
                     _ => false,
                 };
                 if parent_matches {
+                    self.check_sum_constructor_visibility(&return_type, method.name.as_str(), span)?;
                     if let Some(params) = params_opt {
                         if params.len() == args.len() {
                             if crate::ctor_trace_enabled() {
@@ -22776,6 +22780,7 @@ bake to have this verified.",
             // Also check for variant constructors like Maybe<Int>.Some(42)
             let qualified_name = format!("{}.{}", type_name, method_name);
             if let Some(scheme) = self.lookup_static_or_load_from_metadata(&qualified_name) {
+                self.check_value_declaration_visibility(&scheme, span)?;
                 let instance = scheme.try_instantiate()
                     .map_err(|message| TypeError::UniverseBinding { message, span })?;
                 let receiver_pattern = &instance.impl_self_type;
@@ -22889,6 +22894,10 @@ bake to have this verified.",
                     .iter()
                     .find(|c| c.name == method_name_for_ctor)
                 {
+                    self.check_sum_constructor_visibility(
+                        &Type::Named { path: Self::text_to_path(&type_name_text), args: List::new() },
+                        method_name, span,
+                    )?;
                     // A variant constructor has no receiver, so there is
                     // no self-parameter to be ±1 about: the counts match
                     // or the call is wrong. The tolerance that stood here
@@ -24160,6 +24169,7 @@ bake to have this verified.",
                         .filter(|scheme| scheme.callable_source.is_some())
                         .cloned());
                 if let Some(scheme) = declared {
+                    self.check_value_declaration_visibility(&scheme, span)?;
                     let instance = scheme.try_instantiate()
                         .map_err(|message| TypeError::UniverseBinding { message, span })?;
 
@@ -24330,6 +24340,10 @@ bake to have this verified.",
                             .iter()
                             .find(|c| c.name == ctor_method_name)
                         {
+                            self.check_sum_constructor_visibility(
+                                &Type::Named { path: Self::text_to_path(&type_name_text), args: List::new() },
+                                method_name, span,
+                            )?;
                             // A variant constructor has no receiver — see
                             // the sibling arm above. (T1270)
                             if ctor.args.len() != args.len() {

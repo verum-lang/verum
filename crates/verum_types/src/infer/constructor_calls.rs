@@ -92,6 +92,25 @@ impl TypeChecker {
         )
     }
 
+    /// Acquiring a constructor grants access to every supplied payload field.
+    /// Merely inspecting a tag or matching public fields does not.
+    pub(super) fn check_sum_constructor_visibility(
+        &self, receiver: &Type, case: &str, span: Span,
+    ) -> Result<()> {
+        self.check_sum_case_visibility(receiver, case, span)?;
+        self.check_variant_construction_visibility(receiver, case, span)
+    }
+
+    pub(super) fn check_selected_constructor_type_visibility(
+        &self, constructor: &Type, case: &str, span: Span,
+    ) -> Result<()> {
+        let result = match constructor {
+            Type::Function { return_type, .. } => return_type.as_ref(),
+            other => other,
+        };
+        self.check_sum_constructor_visibility(result, case, span)
+    }
+
     /// Value-position constructors retain the same nominal application and
     /// fresh parameter telescope as call-position constructors.
     pub(super) fn selected_constructor_value(
@@ -118,8 +137,10 @@ impl TypeChecker {
         let params = match payload {
             Type::Unit => None,
             Type::Tuple(params) => Some(params.clone()),
+            Type::Record(fields) => Some(fields.values().cloned().collect()),
             other => Some(List::from_single(other.clone())),
         };
+        self.check_sum_constructor_visibility(&Type::Named { path: Self::text_to_path(&owner), args: parameters.clone() }, case, span)?;
         let constructor = self.nominal_constructor_scheme(&owner, parameters, params, span)?;
         self.instantiate_value_scheme(&constructor, span)
     }

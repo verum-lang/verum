@@ -455,7 +455,7 @@ impl TypeChecker {
     /// directly), and 0-arg ctors (`None`) keep their variant VALUE typing
     /// (`params.is_empty()` → no override). Returns None when `name` is not a
     /// registered payload constructor.
-    fn bare_payload_ctor_as_fn(&self, name: &str, resolved_ty: &Type) -> Option<Type> {
+    fn bare_payload_ctor_as_fn(&self, name: &str, resolved_ty: &Type, span: Span) -> Result<Option<Type>> {
         if crate::ctor_trace_enabled() {
             eprintln!(
                 "[ctor-trace] bare_payload_ctor_as_fn: name={:?} resolved={:?} in_parents={}",
@@ -466,10 +466,10 @@ impl TypeChecker {
             );
         }
         if matches!(resolved_ty, Type::Function { .. }) {
-            return None;
+            return Ok(None);
         }
         let Some(parents) = self.variant_constructor_parents.get(&Text::from(name)) else {
-            return None;
+            return Ok(None);
         };
         // GENUINE-VALUE-BINDING GUARD (T0617): the ctor-as-fn synth is only
         // correct when `env.lookup` returned the ctor's OWN nominal binding — a
@@ -531,17 +531,19 @@ impl TypeChecker {
             );
         }
         if !is_ctor_nominal {
-            return None;
+            return Ok(None);
         }
-        let ctor_ty = self.try_resolve_variant_constructor_with_arity(name, None)?;
+        let Some(ctor_ty) = self.try_resolve_variant_constructor_with_arity(name, None) else {
+            return Ok(None);
+        };
         if let Type::Function { ref params, .. } = ctor_ty
             && !params.is_empty()
         {
-            return Some(ctor_ty);
+            self.check_selected_constructor_type_visibility(&ctor_ty, name, span)?;
+            return Ok(Some(ctor_ty));
         }
-        None
+        Ok(None)
     }
-
 
 
     /// EXHAUSTIVENESS-DEEP-EXPAND (#41): expand nested variant payloads for
@@ -1007,7 +1009,7 @@ impl TypeChecker {
         if let Type::Variant(ref variants) = expanded_expected {
             if let Some(payload_ty) = variants.get(name) {
                 if matches!(payload_ty, Type::Unit) {
-                    self.check_sum_case_visibility(&resolved_expected, name, expr.span)?;
+                    self.check_sum_constructor_visibility(&resolved_expected, name, expr.span)?;
                     return Ok(InferResult::new(expected.clone()));
                 }
             }
@@ -1077,7 +1079,7 @@ impl TypeChecker {
                 // usable at this type, and a genuine mismatch
                 // must still be reported rather than waved
                 // through by having named the right variant.
-                self.check_sum_case_visibility(return_type, name, expr.span)?;
+                self.check_sum_constructor_visibility(return_type, name, expr.span)?;
                 let payload = payload.clone();
                 let param0 = param0.clone();
                 let taken = resolved_expected.clone();
@@ -1282,13 +1284,14 @@ impl TypeChecker {
                     // user's concrete args + unifier's bindings).
                     let params: List<_> = params.iter().map(|ty|
                         Self::substitute_named_params_in_type(ty, &subst)).collect();
+                    self.check_sum_constructor_visibility(expected, constructor_name, expr.span)?;
                     return self.check_constructor_call(call_args, &params, expected, expr.span).map(Some);
                 }
             }
         }
         if let Type::Variant(ref variants) = expanded_expected {
             if let Some(payload_ty) = variants.get(constructor_name) {
-                self.check_sum_case_visibility(&resolved_expected_call, constructor_name, expr.span)?;
+                self.check_sum_constructor_visibility(&resolved_expected_call, constructor_name, expr.span)?;
                 // The expected variant type has this constructor — use it
                 // Check call args against the payload type
                 if call_args.len() == 1 {
@@ -1366,6 +1369,7 @@ impl TypeChecker {
                 if let Type::Variant(variants) = &expanded
                     && let Some(payload_ty) = variants.get(method.name.as_str())
                 {
+                    self.check_sum_constructor_visibility(&resolved_expected, method.name.as_str(), expr.span)?;
                     let payload_ty = payload_ty.clone();
                     // Contextual nullary and positional constructors share
                     // argument, ownership and callable checking. Named fields
@@ -2116,19 +2120,9 @@ impl TypeChecker {
                 let type_name = self.path_to_string(lookup_path);
                 let struct_key = format!("__struct_fields_{}", type_name);
 
-                // Check if type_name is a variant record constructor by looking it up in the env.
-                // If it's a constructor function returning a Variant type, delegate to synth_and_check
-                // which correctly handles variant record constructors via env lookup.
-                // This prevents stdlib struct "Rect { x, y, width, height }" from shadowing
-                // user-defined variant "Rect { w, h }" in `type Shape is ... | Rect { w: Int, h: Int }`
                 let is_variant_constructor =
-                    if let Some(scheme) = self.ctx.env.lookup(type_name.as_str()) {
-                        let ty = scheme.instantiate();
-                        matches!(&ty, Type::Function { return_type, .. }
-                        if matches!(return_type.as_ref(), Type::Variant(_)))
-                    } else {
-                        false
-                    };
+                    !self.has_declared_record_field_policy(type_name.as_str(), expr.span)
+                    && self.try_resolve_variant_constructor(type_name.as_str()).is_some();
 
                 // Aliases do not publish a second constructor function. Use
                 // their resolved parent declaration before the record guard;
@@ -4570,7 +4564,7 @@ impl TypeChecker {
                     // eprintln!("[DEBUG infer_path_expr] Looked up '{}' in env: scheme={:?}, ty={:?}, resolved={:?}", name, scheme, ty, resolved_ty);
                 }
                 // CTOR-AS-FN-SYNTH (#31): see bare_payload_ctor_as_fn.
-                if let Some(ctor_fn) = self.bare_payload_ctor_as_fn(name, &resolved_ty) {
+                if let Some(ctor_fn) = self.bare_payload_ctor_as_fn(name, &resolved_ty, span)? {
                     return Ok(ctor_fn);
                 }
                 Ok(resolved_ty.into_expression_type())
@@ -4579,7 +4573,7 @@ impl TypeChecker {
                 if let Maybe::Some(scheme) = self.lookup_function_in_module(name) {
                     let ty = self.instantiate_value_scheme(&scheme, span)?;
                     let resolved_ty = self.unifier.apply(&ty);
-                    if let Some(ctor_fn) = self.bare_payload_ctor_as_fn(name, &resolved_ty) {
+                    if let Some(ctor_fn) = self.bare_payload_ctor_as_fn(name, &resolved_ty, span)? {
                         return Ok(ctor_fn);
                     }
                     Ok(resolved_ty)
@@ -4641,7 +4635,7 @@ impl TypeChecker {
                     // (and cascading ~30 base/maybe property tests). Payload
                     // ctors yield their fn type; unit ctors (`None`) fall
                     // through unchanged (params.is_empty() → None).
-                    if let Some(ctor_fn) = self.bare_payload_ctor_as_fn(name, &Type::Unknown) {
+                    if let Some(ctor_fn) = self.bare_payload_ctor_as_fn(name, &Type::Unknown, span)? {
                         return Ok(ctor_fn);
                     }
                     // UNIT-CTOR twin of the payload arm above (T0555 layer 4):
@@ -4670,6 +4664,7 @@ impl TypeChecker {
                         )
                         && let Some(ctor_ty) = self.try_resolve_variant_constructor(name)
                     {
+                        self.check_selected_constructor_type_visibility(&ctor_ty, name, span)?;
                         return Ok(ctor_ty);
                     }
                     // IMPORTANT: If this type has generic parameters but was referenced without
@@ -4718,6 +4713,7 @@ impl TypeChecker {
                     // Mirror that for value-position by building a
                     // `fn(payload) -> Variant<freshvars>`
                     // constructor type from the registry.
+                    self.check_selected_constructor_type_visibility(&ctor_ty, name, span)?;
                     Ok(ctor_ty)
                 } else {
                     // NO stdlib exemption here (T0777).  `stdlib_single_file_mode`
@@ -6722,7 +6718,7 @@ impl TypeChecker {
                     // When we have e.g. `wrapper: Wrapper<τ59>` and τ59 was unified with Text,
                     // we need to return `Wrapper<Text>` so field access works correctly.
                     let resolved_ty = self.unifier.apply(&ty);
-                    if let Some(ctor_fn) = self.bare_payload_ctor_as_fn(name, &resolved_ty) {
+                    if let Some(ctor_fn) = self.bare_payload_ctor_as_fn(name, &resolved_ty, expr.span)? {
                         return Ok(InferResult::new(ctor_fn));
                     }
                     Ok(InferResult::new(resolved_ty.into_expression_type()))
@@ -6732,7 +6728,7 @@ impl TypeChecker {
                     if let Maybe::Some(scheme) = self.lookup_function_in_module(name) {
                         let ty = self.instantiate_value_scheme(&scheme, expr.span)?;
                         let resolved_ty = self.unifier.apply(&ty);
-                        if let Some(ctor_fn) = self.bare_payload_ctor_as_fn(name, &resolved_ty)
+                        if let Some(ctor_fn) = self.bare_payload_ctor_as_fn(name, &resolved_ty, expr.span)?
                         {
                             return Ok(InferResult::new(ctor_fn));
                         }
@@ -7187,6 +7183,7 @@ impl TypeChecker {
                             )),
                         ));
                     }
+                    self.check_sum_constructor_visibility(&return_type, name.as_str(), expr.span)?;
                     return self.check_constructor_call(args, &params, &return_type, expr.span)
                         .map(CallPreparation::Inferred);
                 }
@@ -10107,6 +10104,11 @@ impl TypeChecker {
             // has the same payload contract as a locally mounted constructor.
             let type_name = parent_name.as_str();
             let variant_name = variant_name.as_str();
+            self.check_variant_construction_visibility(
+                &Type::Named { path: Self::text_to_path(&parent_name), args: List::new() },
+                variant_name,
+                expr.span,
+            )?;
 
             // Look up the type to see if it's a variant type.
             //
@@ -10302,145 +10304,19 @@ impl TypeChecker {
         {
             let variant_name = ident.name.as_str();
 
-            // (is_variant_ctor check removed — a local record type with
-            // matching fields takes precedence over a cross-module variant
-            // constructor of the same name; see the has_matching_struct
-            // comment below.)
-
-            // PRIORITY CHECK: If a struct type exists with matching fields,
-            // prefer struct construction over variant construction.
-            //
-
-            // Per the architectural rule in crates/verum_types/src/AGENTS.md —
-            // "user-defined variant names must freely override built-in
-            // convenience aliases"; symmetrically, a user module's record
-            // type must override a cross-module variant of the same name
-            // when the provided field names match the record's fields.
-            //
-
-            // Record variants also register `__struct_fields_<Variant>`
-            // (so pattern matching sees their fields), so the struct-key
-            // lookup alone can't tell a user record from a variant payload.
-            // Distinguish by checking whether `variant_name` is itself a
-            // registered top-level *type*: only a user-defined standalone
-            // record like `type Box<T> is { content: T }` will have
-            // `lookup_type(variant_name)` return a concrete type. Record
-            // variants don't register their name as a standalone type —
-            // the parent (e.g. `Expr`) does — so the variant path stays
-            // available for `Binary { op, lhs, rhs }` inside
-            // `type Expr is IntLit(_) | … | Binary({op, lhs, rhs}) | …`.
-            // Variant record payloads and standalone records register
-            // similar metadata (`__struct_fields_<Name>`, a Record in
-            // `type_defs`). Distinguish by checking BOTH halves and
-            // letting the *exact field-set match* on the struct_fields
-            // table win when (and only when) the provided fields cover
-            // the standalone record exactly:
-            //  - Variant constructor with fn-type in env → is a variant.
-            //  - Separate `__struct_fields_<Name>` with exact-match
-            //  field coverage → is the user's standalone record.
-            //  - Both present + exact match on record fields → record
-            //  wins (e.g. `Box { content: T.default() }` in
-            //  `type Box<T> is { content: T }` overrides a stdlib
-            //  `Box { inner: … }` variant).
-            //  - Variant present but fields don't cover exactly → fall
-            //  through to variant constructor.
-            let struct_key = format!("__struct_fields_{}", variant_name);
-            // §Y close: mount-scoped probe FIRST so an explicit
-            // `mount A.{Foo}` overrides whichever sibling module's
-            // `Foo` happened to land later in the unqualified slot.
-            //
-            // REEXPORT-FIELDS-LAZY-1 (see the env.rs field-read twin):
-            // a re-export-hop mount's field maps exist only after the
-            // metadata lazy loader ran — on a miss, drive it once and
-            // retry before conceding to the flat slot.
-            let mount_scoped_struct = match self
-                .lookup_type_mount_scoped(variant_name, "__struct_fields_")
-            {
-                Some(ty) => Some(ty),
-                None => {
-                    self.ensure_mounted_record_fields_loaded(variant_name);
-                    self.lookup_type_mount_scoped(variant_name, "__struct_fields_")
-                }
-            };
-            let resolved_struct_lookup = match mount_scoped_struct {
-                Some(ref ty) => Some(ty.clone()),
-                None => self.ctx.lookup_type(struct_key.as_str()).cloned(),
-            };
-            let has_matching_struct = if let Option::Some(Type::Record(struct_fields)) =
-                resolved_struct_lookup
-            {
-                let all_provided_valid = fields
-                    .iter()
-                    .all(|f| struct_fields.contains_key(f.name.name.as_str()));
-                let covers_all_required = struct_fields.keys().all(|required| {
-                    fields
-                        .iter()
-                        .any(|f| f.name.name.as_str() == required.as_str())
-                });
-                let exact_match = all_provided_valid && covers_all_required;
-
-                if !exact_match {
-                    false
-                } else {
-                    // Fields match exactly — do we also have a variant
-                    // constructor for this name? When only the record
-                    // exists, trivially route to record. When the
-                    // variant also exists AND its payload record
-                    // matches the provided fields by name, route to
-                    // variant (that's the local variant case like
-                    // `Binary { op, lhs, rhs }` inside `type Expr is ... |
-                    // Binary { op, lhs, rhs }`). Only when the variant's
-                    // *payload* disagrees with the field set do we keep
-                    // the record path, which is the cross-module
-                    // `Box { content: ... }` override case.
-                    let variant_ctor_info = self
-                        .ctx
-                        .env
-                        .lookup(variant_name)
-                        .map(|scheme| scheme.instantiate());
-                    match variant_ctor_info {
-                        Some(Type::Function { params, .. }) => {
-                            // Variant constructor: inspect its payload.
-                            let variant_record_fields: Option<
-                                indexmap::IndexMap<verum_common::Text, Type>,
-                            > = params.first().and_then(|p| match p {
-                                Type::Record(m) => Some(m.clone()),
-                                _ => None,
-                            });
-                            if let Some(vrf) = variant_record_fields {
-                                let variant_matches = fields
-                                    .iter()
-                                    .all(|f| vrf.contains_key(f.name.name.as_str()))
-                                    && vrf.keys().all(|required| {
-                                        fields.iter().any(|f| {
-                                            f.name.name.as_str() == required.as_str()
-                                        })
-                                    });
-                                // Variant's payload also matches: prefer
-                                // variant (same-module case). Record
-                                // wins only when the variant's payload
-                                // shape *differs* from the provided
-                                // fields (cross-module collision case).
-                                !variant_matches
-                            } else {
-                                // Variant has non-record payload (tuple,
-                                // unit). Record wins.
-                                true
-                            }
-                        }
-                        _ => true, // No variant constructor in env — record wins.
-                    }
-                }
-            } else {
-                false
-            };
+            // Only a real record declaration can outrank the selected case.
+            // A cached payload map with matching fields grants no namespace authority.
+            let has_record_declaration = self.has_declared_record_field_policy(variant_name, expr.span);
 
             // Look up the variant constructor in the environment
             // Variant constructors are registered with type Constructor -> VariantType
-            if !has_matching_struct
-                && let Some(scheme) = self.ctx.env.lookup(variant_name)
+            if !has_record_declaration
+                && !self.explicit_value_outranks_constructor(variant_name)
+                && let Some(ty) = self.try_resolve_variant_constructor(variant_name)
             {
-                let ty = scheme.instantiate();
+                if self.diagnose_ambiguous_constructor(variant_name, None, expr.span)? {
+                    return Ok(InferResult::new(Type::Unknown));
+                }
 
                 // Check if this value has a Named type (unit variant like Leaf)
                 // or if it's a function returning a Named type (payload variant like Node)
@@ -10448,20 +10324,21 @@ impl TypeChecker {
                     Type::Named { .. } => Some(ty.clone()),
                     Type::Function {
                         return_type,
-                        params,
                         ..
                     } => {
                         // Check if return type is a variant type (Named or inline Variant)
                         // Named types are used for imported variants, Variant for local definitions
                         if matches!(
                             return_type.as_ref(),
-                            Type::Named { .. } | Type::Variant(_)
+                            Type::Named { .. } | Type::Generic { .. } | Type::Variant(_)
                         ) {
-                            // This is a variant constructor function!
-                            // The params should be a single Record type
-                            if params.len() == 1
-                                && let Type::Record(expected_field_types) = &params[0]
+                            // Payload names and types come from the selected
+                            // nominal sum, independently of positional arguments.
+                            let expanded = self.expand_generic_to_variant(return_type)?;
+                            if let Type::Variant(cases) = &expanded
+                                && let Some(Type::Record(expected_field_types)) = cases.get(variant_name)
                             {
+                                self.check_variant_construction_visibility(return_type, variant_name, expr.span)?;
                                 // Type check the record fields
                                 let expected_field_types = expected_field_types.clone();
                                 let mut provided_fields: indexmap::IndexMap<

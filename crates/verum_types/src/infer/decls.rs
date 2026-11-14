@@ -209,8 +209,26 @@ impl TypeChecker {
     ) -> Result<()> {
         let owner = self.declared_type_key(&declaration.name.name);
         let parameters = self.declared_nominal_arguments(&declaration.name.name, declaration.span)?;
-        let params = match ty { Type::Function { params, .. } => Some(params), _ => None };
-        let scheme = self.nominal_constructor_scheme(&owner, &parameters, params, declaration.span)?;
+        let params = match ty {
+            Type::Function { params, .. } => {
+                // Named payloads and their InductiveConstructor use the same
+                // declared field order in positional application. A tuple
+                // containing a structural record remains a single argument.
+                let named_payload = matches!(&declaration.body, TypeDeclBody::Variant(cases)
+                    if cases.iter().any(|case| &case.name.name == name
+                        && matches!(&case.data, Some(verum_ast::decl::VariantData::Record(_)))));
+                match params.as_slice() {
+                    [Type::Record(fields)] if named_payload => Some(fields.values().cloned().collect()),
+                    _ => Some(params),
+                }
+            }
+            _ => None,
+        };
+        let mut scheme = self.nominal_constructor_scheme(&owner, &parameters, params, declaration.span)?;
+        scheme.value_declaration = Some(verum_common::Shared::new(crate::context::ValueDeclaration {
+            name: name.clone(), owner: self.current_module_path.clone(),
+            visibility: declaration.visibility.clone(), constructor_owner: Some(owner.clone()),
+        }));
         if publish_short { self.ctx.env.insert(name.clone(), scheme.clone()); }
         // Lazy source loading uses a temporary lexical scope. Keep the exact
         // constructor with the same transaction as its owning declaration;
@@ -1158,6 +1176,8 @@ impl TypeChecker {
                         }
                     }
                 }
+
+                self.register_variant_field_visibility(&type_name, variants);
 
                 // Register a placeholder type name FIRST to handle recursive type definitions
                 // like: type List<T> is Nil | Cons(T, List<T>)
@@ -2758,6 +2778,8 @@ impl TypeChecker {
                         }
                     }
                 }
+
+                self.register_variant_field_visibility(&type_name, variants);
 
                 // CRITICAL: Register a placeholder type FIRST to handle recursive type definitions
                 // like: type List<T> is Nil | Cons(T, List<T>)
@@ -5265,7 +5287,7 @@ impl TypeChecker {
                             inherit_domain(&mut const_scheme);
                             const_scheme.value_declaration = Some(verum_common::Shared::new(crate::context::ValueDeclaration {
                                 name: name.name.clone(), owner: self.current_module_path.clone(),
-                                visibility: item.visibility.clone(),
+                                visibility: item.visibility.clone(), constructor_owner: None,
                             }));
 
                             // Register in environment with qualified name

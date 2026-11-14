@@ -2320,8 +2320,17 @@ impl TypeChecker {
         name: &str,
         canonical_module: &str,
     ) -> Option<Type> {
-        self.load_mounted_type(name, canonical_module, true)
-            .map(|(ty, _)| ty)
+        let (ty, key) = self.load_mounted_type(name, canonical_module, true)?;
+        if matches!(ty, Type::Variant(_)) {
+            // A mount carries the selected sum's identity, not just its payload
+            // map. Renames must retain that owner for construction and patterns.
+            let descriptor = self.core_metadata.as_ref()?.types.get(&key)?;
+            return Some(Type::Named {
+                path: Self::text_to_path(&Self::metadata_declaring_key(descriptor)),
+                args: List::new(),
+            });
+        }
+        Some(ty)
     }
 
     /// Keep the selected registration key with its template. A same-owner
