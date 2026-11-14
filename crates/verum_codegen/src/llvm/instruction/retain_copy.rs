@@ -1,6 +1,5 @@
 //! Atomic retain is the final fallible transition: allocation precedes it.
 use super::*;
-use verum_llvm::AtomicOrdering;
 
 fn guard(ctx: &FunctionContext<'_, '_>, condition: IntValue<'_>, message: &str) -> Result<()> {
     let context = ctx.llvm_context();
@@ -203,71 +202,13 @@ pub(super) fn lower<'ctx>(
         "",
     )
     .or_llvm_err()?;
-    let predecessor = b.get_insert_block().or_internal("retain predecessor")?;
-    let initial = b
-        .build_load(i32_type, counter_pointer, "retain_count")
-        .or_llvm_err()?;
-    initial
-        .as_instruction_value()
-        .or_internal("atomic counter load")?
-        .set_atomic_ordering(AtomicOrdering::Monotonic)
-        .map_err(|_| LlvmLoweringError::internal("retain atomic ordering"))?;
-    let probe = c.append_basic_block(ctx.function(), "retain_probe");
-    let cas = c.append_basic_block(ctx.function(), "retain_cas");
+    let cache = ctx.retained_counters.as_ref().or_internal("retain_copy requires module-owned lowering state")?;
+    let (transition, _) = cache.get()?;
+    let success = b.build_call(transition, &[counter_pointer.into()], "retained")
+        .or_llvm_err()?.try_as_basic_value().basic().or_internal("retained counter result")?.into_int_value();
     let failed = c.append_basic_block(ctx.function(), "retain_count_refused");
     let done = c.append_basic_block(ctx.function(), "retain_done");
-    b.build_unconditional_branch(probe).or_llvm_err()?;
-    b.position_at_end(probe);
-    let observed = b.build_phi(i32_type, "retain_observed").or_llvm_err()?;
-    observed.add_incoming(&[(&initial.into_int_value(), predecessor)]);
-    let value = observed.as_basic_value().into_int_value();
-    let nonzero = b
-        .build_int_compare(
-            IntPredicate::NE,
-            value,
-            i32_type.const_zero(),
-            "retain_nonzero",
-        )
-        .or_llvm_err()?;
-    let room = b
-        .build_int_compare(
-            IntPredicate::NE,
-            value,
-            i32_type.const_all_ones(),
-            "retain_room",
-        )
-        .or_llvm_err()?;
-    b.build_conditional_branch(
-        b.build_and(nonzero, room, "retain_count_valid")
-            .or_llvm_err()?,
-        cas,
-        failed,
-    )
-    .or_llvm_err()?;
-    b.position_at_end(cas);
-    let next = b
-        .build_int_add(value, i32_type.const_int(1, false), "retained_count")
-        .or_llvm_err()?;
-    let result = b
-        .build_cmpxchg(
-            counter_pointer,
-            value,
-            next,
-            AtomicOrdering::Monotonic,
-            AtomicOrdering::Monotonic,
-        )
-        .or_llvm_err()?;
-    let actual = b
-        .build_extract_value(result, 0, "retain_actual")
-        .or_llvm_err()?
-        .into_int_value();
-    let success = b
-        .build_extract_value(result, 1, "retain_success")
-        .or_llvm_err()?
-        .into_int_value();
-    observed.add_incoming(&[(&actual, cas)]);
-    b.build_conditional_branch(success, done, probe)
-        .or_llvm_err()?;
+    b.build_conditional_branch(success, done, failed).or_llvm_err()?;
     b.position_at_end(failed);
     let release = super::super::error::get_or_declare_function(
         ctx.get_module(),

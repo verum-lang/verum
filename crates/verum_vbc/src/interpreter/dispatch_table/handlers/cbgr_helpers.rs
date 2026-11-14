@@ -262,50 +262,33 @@ impl MutableValueSlot {
         reference_value_slot(state, reference)?.map(Self::Memory).ok_or_else(invalid)
     }
 
-    /// Increment only a live nonzero UInt32. No allocation occurs after CAS.
-    pub(super) fn retain_u32(&self, state: &mut InterpreterState) -> InterpreterResult<()> {
-        use std::sync::atomic::{AtomicU32, Ordering};
-        let next = |value: Value| -> InterpreterResult<Value> {
-            let value = value.try_as_i64().filter(|v| *v > 0 && *v < i64::from(u32::MAX))
-                .ok_or_else(|| InterpreterError::Panic { message: "retain_copy requires a nonzero, non-overflowing UInt32 counter".into() })?;
-            Ok(Value::from_i64(value + 1))
-        };
-        match *self {
+    /// Validate the storage before any ownership-changing operation. The
+    /// returned counter does not own a reference; the unsafe retain contract
+    /// keeps the allocation and its immutable UInt32 tag alive through rollback.
+    pub(super) fn prepare_counter(self, state: &InterpreterState) -> InterpreterResult<RetainCounter> {
+        match self {
             Self::Register(index) => {
-                // Registers are local to this interpreter; the reference was
-                // checked before allocation, which cannot relocate register slots.
-                let value = next(state.registers.get_absolute(index))?;
-                state.registers.set_absolute(index, value);
+                let value = state.registers.get_absolute(index);
+                if !value.try_as_i64().is_some_and(|v| (0..=i64::from(u32::MAX)).contains(&v)) {
+                    return Err(InterpreterError::InvalidOperand { message: "retain_copy counter has no UInt32 Value representation".into() });
+                }
+                Ok(RetainCounter::Register(index))
             }
             Self::Memory(address) => {
-                // Value's tag word is immutable for this UInt32 storage. Use
-                // exactly the existing UInt32 atomic width, never an overlapping
-                // AtomicU64 access while other owners perform 32-bit release.
                 let little_endian = 1u64.to_ne_bytes()[0] == 1;
                 let low = usize::from(!little_endian);
                 let words = address.cast::<u32>();
-                // SAFETY: resolve checked an aligned live Value slot. The tag
-                // occupies disjoint immutable bytes; the payload is atomic.
+                // SAFETY: resolve established an aligned, live Value slot.
+                // UInt32's tag occupies disjoint, immutable bytes.
                 let tag = unsafe { words.add(1 - low).read() };
                 if tag != (Value::from_i64(1).bits() >> 32) as u32 {
                     return Err(InterpreterError::InvalidOperand { message: "retain_copy counter has no UInt32 Value representation".into() });
                 }
-                // SAFETY: the unsafe contract requires all owners to use this
-                // same UInt32 atomic counter and keep its containing slot alive.
-                let counter = unsafe { &*words.add(low).cast::<AtomicU32>() };
-                let mut observed = counter.load(Ordering::Relaxed);
-                loop {
-                    if observed == 0 || observed == u32::MAX {
-                        return Err(InterpreterError::Panic { message: "retain_copy requires a nonzero, non-overflowing UInt32 counter".into() });
-                    }
-                    match counter.compare_exchange_weak(observed, observed + 1, Ordering::Relaxed, Ordering::Relaxed) {
-                        Ok(_) => break,
-                        Err(current) => observed = current,
-                    }
-                }
+                // SAFETY: this explicit unsafe contract uses the same UInt32
+                // atomic width as every other owner of this counter.
+                Ok(RetainCounter::Memory(unsafe { words.add(low).cast() }))
             }
         }
-        Ok(())
     }
 
     fn read(&self, state: &InterpreterState) -> Value {
@@ -322,6 +305,61 @@ impl MutableValueSlot {
             // SAFETY: resolve established write access to this exact slot.
             Self::Memory(address) => unsafe { address.write(value); },
         }
+    }
+}
+
+/// A checked counter place, stable for one local retained-copy transaction.
+/// No general write operation or old-count restoration is exposed.
+pub(super) enum RetainCounter {
+    Register(u32),
+    Memory(*mut std::sync::atomic::AtomicU32),
+}
+impl RetainCounter {
+    /// The only ownership acquisition: reject zero/overflow before changing it.
+    pub(super) fn retain(&self, state: &mut InterpreterState) -> InterpreterResult<()> {
+        self.adjust(state, true)
+    }
+    /// Undo exactly this transaction's successful increment. Its borrowed
+    /// original owner remains alive, so the last original retain is preserved.
+    pub(super) fn release_retained(&self, state: &mut InterpreterState) -> InterpreterResult<()> {
+        self.adjust(state, false)
+    }
+    fn adjust(&self, state: &mut InterpreterState, retain: bool) -> InterpreterResult<()> {
+        use std::sync::atomic::Ordering;
+        let next = |count: u32| -> InterpreterResult<u32> {
+            if retain {
+                count.checked_add(1).filter(|_| count != 0).ok_or_else(|| InterpreterError::Panic {
+                    message: "retain_copy requires a nonzero, non-overflowing UInt32 counter".into(),
+                })
+            } else {
+                count.checked_sub(1).filter(|remaining| *remaining != 0).ok_or_else(|| InterpreterError::InvalidOperand {
+                    message: "retained-copy rollback lost its live original owner".into(),
+                })
+            }
+        };
+        match *self {
+            Self::Register(index) => {
+                let count = state.registers.get_absolute(index).try_as_i64()
+                    .and_then(|v| u32::try_from(v).ok()).ok_or_else(|| InterpreterError::InvalidOperand {
+                        message: "retained-copy counter changed representation".into(),
+                    })?;
+                state.registers.set_absolute(index, Value::from_i64(i64::from(next(count)?)));
+            }
+            Self::Memory(address) => {
+                // SAFETY: preparation checked this place; the primitive's
+                // explicit unsafe contract keeps it live until publication or rollback.
+                let counter = unsafe { &*address };
+                let mut observed = counter.load(Ordering::Relaxed);
+                loop {
+                    let changed = next(observed)?;
+                    match counter.compare_exchange_weak(observed, changed, Ordering::Relaxed, Ordering::Relaxed) {
+                        Ok(_) => break,
+                        Err(current) => observed = current,
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 }
 

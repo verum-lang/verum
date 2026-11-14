@@ -577,6 +577,7 @@ pub struct VbcToLlvmLowering<'ctx> {
     /// Function map (VBC function ID → LLVM function).
     functions: HashMap<u32, FunctionValue<'ctx>>,
     signal_runtime: std::cell::OnceCell<FunctionValue<'ctx>>,
+    retained_counters: std::cell::OnceCell<super::retained_counter::EmittedCounters<'ctx>>,
     native_calls: super::native_call::NativeCallAuthority<'ctx>,
     array_returns: verum_common::Shared<super::array_storage::ArrayReturns<'ctx>>,
     /// Capture kinds per closure func-id (T0241 facet-2), harvested from each
@@ -846,6 +847,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             config,
             functions: HashMap::new(),
             signal_runtime: Default::default(),
+            retained_counters: Default::default(),
             native_calls: super::native_call::NativeCallAuthority::default(),
             array_returns: verum_common::Shared::new(Map::new()),
             closure_capture_kinds: std::cell::RefCell::new(HashMap::new()),
@@ -2644,6 +2646,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             func_name,
         );
         ctx.signal_runtime = Some(&self.signal_runtime);
+        ctx.retained_counters = Some(super::retained_counter::RetainedCounters::for_lowering(&self.module, &self.retained_counters));
         ctx.target_machine = self.target_machine.as_ref();
 
         // Hand the AOT permission policy to the function context so

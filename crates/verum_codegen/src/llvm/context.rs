@@ -663,6 +663,8 @@ pub struct FunctionContext<'a, 'ctx> {
     /// Shared via `Arc` so every lowered function in the module sees
     /// the same policy without any cloning of the underlying tables.
     pub(super) signal_runtime: Option<&'a std::cell::OnceCell<FunctionValue<'ctx>>>,
+    /// Exact atomic ownership helpers emitted by this module's lowering run.
+    pub(super) retained_counters: Option<super::retained_counter::RetainedCounters<'a, 'ctx>>,
     permission_policy: Option<Arc<super::permissions::AotPermissionPolicy>>,
 
     /// Manifest-driven `[runtime].futures` gate (#262-AOT, task #281).
@@ -970,6 +972,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             pending_branch_hint: None,
             vbc_escape_tiers: HashMap::new(),
             signal_runtime: None,
+            retained_counters: None,
             permission_policy: None,
             futures_enabled: true,
             nurseries_enabled: true,
@@ -1092,6 +1095,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             pending_branch_hint: None,
             vbc_escape_tiers: HashMap::new(),
             signal_runtime: None,
+            retained_counters: None,
             permission_policy: None,
             futures_enabled: true,
             nurseries_enabled: true,

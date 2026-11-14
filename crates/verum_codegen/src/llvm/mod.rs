@@ -86,6 +86,7 @@ pub mod types;
 
 // CBGR lowering (tier-aware reference operations)
 pub mod cbgr;
+pub mod retained_counter;
 
 // Per-function lowering context
 pub mod context;
