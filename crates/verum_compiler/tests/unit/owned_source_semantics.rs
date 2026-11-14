@@ -711,7 +711,8 @@ fn release_stdlib_graph(session: &crate::Session) -> (SourceRegistry, crate::pha
     use crate::phases::semantic_analysis::SemanticAnalysisPhase;
     use verum_fast_parser::FastParser;
 
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../core");
+    let root = std::env::var_os("VERUM_TEST_SOURCE_ROOT").map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../core"));
     let target = session.cfg_evaluator().config().clone();
     let mut resolver = StdlibModuleResolver::with_target(&root, target.clone());
     resolver.discover().unwrap();
@@ -771,3 +772,6 @@ mod stdlib_local_file_readers;
 
 #[path = "infinity_classifier_contract.rs"]
 mod infinity_classifier_contract;
+
+#[path = "reference_method_authority.rs"]
+mod reference_method_authority;

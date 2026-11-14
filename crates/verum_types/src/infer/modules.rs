@@ -17681,26 +17681,6 @@ impl TypeChecker {
         self.load_source_receiver_methods(recv_ty_raw)?;
         self.check_source_method_visibility(recv_ty_raw, method.name.as_str(), span)?;
 
-        if let Some(mut r) = self.resolve_reference_type_method(recv_ty_raw, method, args, span)? {
-            // These intrinsics inspect a reference or reborrow its target.
-            // Returning a mutable handle retains the receiver's write authority.
-            use crate::core_metadata::ReceiverKind;
-            r.receiver_kind = Some(match &r.ty {
-                Type::Reference { mutable: true, .. }
-                | Type::CheckedReference { mutable: true, .. }
-                | Type::UnsafeReference { mutable: true, .. }
-                | Type::Pointer { mutable: true, .. } => ReceiverKind::SelfMut,
-                _ => ReceiverKind::SelfRef,
-            });
-            if crate::ctor_trace_enabled() {
-                eprintln!(
-                    "[ctor-trace] reference-resolver {} -> {}",
-                    method.name, r.ty
-                );
-            }
-            return Ok(r);
-        }
-
         let method_name_str = method.name.as_str();
 
         // AUTO-DEREFERENCE: For method calls on references/Heap, use the underlying type
@@ -18084,9 +18064,6 @@ impl TypeChecker {
     /// search candidates, select best match, type-check arguments, return type).
     /// Called after all pre-receiver and receiver-type-based fast paths are exhausted.
     #[inline(never)]
-    /// Dispatch CBGR intrinsic methods and reference tier-conversion methods.
-    /// Fires BEFORE auto-deref so operations on the reference itself (not the
-    /// referent) are intercepted first.
     /// Try to resolve a method call via the early inherent-methods table
     /// (methods registered from parsed .vr stdlib files) and the C-runtime
     /// collection method fallbacks (Map/Set/Deque).
@@ -18856,108 +18833,10 @@ impl TypeChecker {
         args: &[Expr],
         span: Span,
     ) -> Result<Option<InferResult>> {
-        // ============================================================
-        // CBGR INTRINSIC METHODS: Handle reference-specific methods BEFORE auto-dereference
-        // CBGR implementation: epoch-based generation tracking, acquire-release memory ordering, lock-free ABA-protected maps, ThinRef 16 bytes, FatRef 24 bytes — #reference-intrinsics
-        //
-
-        // These methods operate on the reference itself, not the underlying value:
-        // - stored_generation() -> Int: Get the generation counter captured when reference was created
-        // - is_valid() -> Bool: Check if reference is still valid (generation matches)
-        // - epoch() -> Int: Get the epoch from epoch_caps field (bits 0-15)
-        // - capabilities() -> Int: Get the capabilities from epoch_caps field (bits 16-31)
-        // - epoch_caps() -> Int: Get the raw epoch_caps u32 value
-        // ============================================================
         let method_name_str = method.name.as_str();
-        let is_reference_type = match &recv_ty_raw {
-            Type::Reference { .. }
-            | Type::CheckedReference { .. }
-            | Type::UnsafeReference { .. } => true,
-            Type::Generic { name, .. } if WKT::is_smart_pointer_name(name.as_str()) => true,
-            _ => false,
-        };
-
-        if is_reference_type {
-            match method_name_str {
-                "stored_generation" if args.is_empty() => {
-                    // stored_generation() -> Int
-                    return Ok(Some(InferResult::new(Type::Int)));
-                }
-                "is_valid" if args.is_empty() => {
-                    // is_valid() -> Bool
-                    return Ok(Some(InferResult::new(Type::Bool)));
-                }
-                "epoch" if args.is_empty() => {
-                    // epoch() -> Int (u16 extracted from epoch_caps)
-                    return Ok(Some(InferResult::new(Type::Int)));
-                }
-                "capabilities" if args.is_empty() => {
-                    // capabilities() -> Int (u16 extracted from epoch_caps)
-                    return Ok(Some(InferResult::new(Type::Int)));
-                }
-                "epoch_caps" | "epoch_caps_raw" | "raw_epoch_caps" if args.is_empty() => {
-                    // epoch_caps() -> Int (raw u32 packed value)
-                    return Ok(Some(InferResult::new(Type::Int)));
-                }
-                "generation" if args.is_empty() => {
-                    // generation() -> Int (stored generation from reference)
-                    return Ok(Some(InferResult::new(Type::Int)));
-                }
-                "raw_ptr" if args.is_empty() => {
-                    // raw_ptr() -> *const T (raw pointer to inner type)
-                    // Extract inner type from reference for pointer construction
-                    let inner_ty = match &recv_ty_raw {
-                        Type::Reference { inner, .. }
-                        | Type::CheckedReference { inner, .. }
-                        | Type::UnsafeReference { inner, .. } => (**inner).clone(),
-                        Type::Generic {
-                            args: type_args, ..
-                        } => type_args.first().cloned().unwrap_or(Type::Int),
-                        _ => Type::Int,
-                    };
-                    return Ok(Some(InferResult::new(Type::Pointer {
-                        inner: Box::new(inner_ty),
-                        mutable: false,
-                    })));
-                }
-                "can_read" if args.is_empty() => {
-                    // can_read() -> Bool (check read capability on reference)
-                    return Ok(Some(InferResult::new(Type::Bool)));
-                }
-                "can_write" if args.is_empty() => {
-                    // can_write() -> Bool (check write capability on reference)
-                    return Ok(Some(InferResult::new(Type::Bool)));
-                }
-                "is_epoch_valid" if args.is_empty() => {
-                    // is_epoch_valid() -> Bool (check if reference epoch within validity window)
-                    return Ok(Some(InferResult::new(Type::Bool)));
-                }
-                "header_generation" if args.is_empty() => {
-                    // header_generation() -> Int (read generation from CBGR AllocationHeader)
-                    return Ok(Some(InferResult::new(Type::Int)));
-                }
-                "header_size" if args.is_empty() => {
-                    // header_size() -> Int (read data size from CBGR AllocationHeader)
-                    return Ok(Some(InferResult::new(Type::Int)));
-                }
-                "header_epoch" if args.is_empty() => {
-                    // header_epoch() -> Int (read epoch from CBGR AllocationHeader)
-                    return Ok(Some(InferResult::new(Type::Int)));
-                }
-                "is_allocated" if args.is_empty() => {
-                    // is_allocated() -> Bool (check if CBGR allocation is still live)
-                    return Ok(Some(InferResult::new(Type::Bool)));
-                }
-                "is_freed" if args.is_empty() => {
-                    // is_freed() -> Bool (check if CBGR allocation has been freed)
-                    return Ok(Some(InferResult::new(Type::Bool)));
-                }
-                _ => {}
-            }
-        }
 
         // ============================================================
-        // TIER CONVERSION METHODS - Must be handled BEFORE auto-dereference
+        // TIER CONVERSION METHODS - Read the original, undereferenced receiver
         // These methods convert between reference tiers:
         // - to_checked() / as_checked(): Tier 0 (&T) -> Tier 1 (&checked T)
         // - to_managed() / as_managed(): Tier 1 (&checked T) -> Tier 0 (&T)
@@ -19144,56 +19023,10 @@ impl TypeChecker {
         }
 
         // ============================================================
-        // CBGR INTRINSIC METHODS - Reference metadata access
-        // These provide access to CBGR reference internals:
-        // - stored_generation(): Get generation from reference -> Int
-        // - epoch_caps(): Get packed epoch+capabilities -> Int
-        // - epoch(): Get just the epoch -> Int
-        // - raw_ptr(): Get raw pointer address -> Int
-        // ============================================================
-        match (&recv_ty_raw, method_name_str) {
-            // stored_generation() - Get the generation value stored in a managed reference
-            (Type::Reference { .. }, "stored_generation") if args.is_empty() => {
-                return Ok(Some(InferResult::new(Type::Int)));
-            }
-            // epoch_caps() - Get the packed epoch+capabilities value
-            (Type::Reference { .. }, "epoch_caps") if args.is_empty() => {
-                // Returns an EpochCaps struct or Int for now
-                return Ok(Some(InferResult::new(Type::Int)));
-            }
-            // epoch() - Get just the epoch value
-            (Type::Reference { .. }, "epoch") if args.is_empty() => {
-                return Ok(Some(InferResult::new(Type::Int)));
-            }
-            // raw_ptr() - Get the raw pointer to inner type
-            (Type::Reference { inner, .. }, "raw_ptr") if args.is_empty() => {
-                return Ok(Some(InferResult::new(Type::Pointer {
-                    inner: inner.clone(),
-                    mutable: false,
-                })));
-            }
-            // generation() - Get generation for Heap<T> allocations
-            (
-                Type::Generic {
-                    name,
-                    args: type_args,
-                },
-                "generation",
-            ) if args.is_empty() && WKT::Heap.matches(name.as_str()) => {
-                return Ok(Some(InferResult::new(Type::Int)));
-            }
-            // allocation_generation() - Get current generation of the pointed-to allocation
-            (Type::Reference { .. }, "allocation_generation") if args.is_empty() => {
-                return Ok(Some(InferResult::new(Type::Int)));
-            }
-            _ => {}
-        }
-
-        // ============================================================
-        // POINTER/REFERENCE INTRINSIC METHODS - Must be BEFORE auto-deref
+        // POINTER/REFERENCE INTRINSIC METHODS - Read the original receiver
         // Methods like offset(), is_null() operate on the reference itself,
-        // not on the pointed-to value. Auto-deref would strip the reference
-        // and lose the ability to find these methods.
+        // not on the pointed-to value. The raw receiver retains the reference
+        // shape after declared methods have been considered.
         // ============================================================
         let shifts_pointer = matches!((&recv_ty_raw, method_name_str),
             (Type::Reference { .. } | Type::CheckedReference { .. }, "offset")
@@ -20857,6 +20690,32 @@ impl TypeChecker {
             self.try_concrete_protocol_impl_method_dispatch(&recv_ty, method, args, span)?
         {
             return Ok(r);
+        }
+
+        // Reference operations are structural fallbacks. A selected declaration
+        // owns its result, arguments and receiver permissions even when its
+        // method has the same spelling. A rejected specialization cannot lend
+        // authority to a structural operation either.
+        if !specialization_rejected {
+            if let Some(mut r) = self.resolve_reference_type_method(recv_ty_raw, method, args, span)? {
+                // These intrinsics inspect a reference or reborrow its target.
+                // Returning a mutable handle retains the receiver's write authority.
+                use crate::core_metadata::ReceiverKind;
+                r.receiver_kind = Some(match &r.ty {
+                    Type::Reference { mutable: true, .. }
+                    | Type::CheckedReference { mutable: true, .. }
+                    | Type::UnsafeReference { mutable: true, .. }
+                    | Type::Pointer { mutable: true, .. } => ReceiverKind::SelfMut,
+                    _ => ReceiverKind::SelfRef,
+                });
+                if crate::ctor_trace_enabled() {
+                    eprintln!(
+                        "[ctor-trace] reference-resolver {} -> {}",
+                        method.name, r.ty
+                    );
+                }
+                return Ok(r);
+            }
         }
 
         return self.emit_method_not_found(
