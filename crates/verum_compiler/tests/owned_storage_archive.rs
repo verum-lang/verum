@@ -64,6 +64,11 @@ fn archived_owned_container_declarations_preserve_element_and_buffer_loans() {
                 false,
             ),
             (
+                "core.base.memory.{Heap,Shared}",
+                "fn preserve(value:Shared<Heap<Int>>)->Shared<Heap<Int>> {let first=value; let second=value; first}",
+                true,
+            ),
+            (
                 "core.base.memory.Heap",
                 "fn preserve(mut values:Heap<Int>, change:fn(&mut Heap<Int>))->Heap<Int> {change(&mut values); values}",
                 true,

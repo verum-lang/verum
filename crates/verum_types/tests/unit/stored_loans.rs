@@ -415,3 +415,50 @@ fn retained_allocation_payloads_preserve_loans_but_not_backing_address_loans() {
         assert!(checker.carries_stored_loan(&owned_container_type(name, List::from_iter([Type::Int]))));
     }
 }
+
+
+#[test]
+fn retained_payload_does_not_transfer_its_resource_mode_to_a_handle() {
+    let mut checker = TypeChecker::with_minimal_context();
+    checker.register_primitives();
+    for (owner, source) in [
+        ("core.base.memory", "type affine Heap<T> is {ptr:&unsafe T}; type Shared<T> is {ptr:&unsafe T}; type Alias<T> is Shared<T>;"),
+        ("core.collections.list", "type List<T> is {ptr:&unsafe T};"),
+        ("foreign", "type Shared<T> is {value:T};"),
+    ] {
+        checker.set_current_module_path(owner);
+        let module = verum_fast_parser::Parser::new(source).parse_module().unwrap();
+        let errors = checker.prepare_module_declarations(&module);
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+    let owned = owned_container_type("core.base.memory.Heap", List::from_iter([Type::Int]));
+    assert!(checker.type_contains_affine(&owned));
+    for (owner, affine) in [
+        ("core.base.memory.Shared", false),
+        ("core.base.memory.Alias", false),
+        ("core.collections.list.List", true),
+        ("foreign.Shared", true),
+    ] {
+        let ty = owned_container_type(owner, List::from_iter([owned.clone()]));
+        assert_eq!(checker.type_contains_affine(&ty), affine, "{ty:?}");
+    }
+    let malformed = owned_container_type("core.base.memory.Shared", List::from_iter([Type::Int, owned]));
+    assert!(checker.type_contains_affine(&malformed));
+}
+
+#[test]
+fn storage_authority_requires_the_complete_type_parameter_roster() {
+    for source in [
+        "type Shared<A,B> is {ptr:&unsafe A};",
+        "type Shared<N:meta Int> is {ptr:&unsafe Int};",
+        "type Shared<T> is (&unsafe T);",
+    ] {
+        let mut checker = TypeChecker::with_minimal_context();
+        checker.register_primitives();
+        checker.set_current_module_path("core.base.memory");
+        let module = verum_fast_parser::Parser::new(source).parse_module().unwrap();
+        let errors = checker.prepare_module_declarations(&module);
+        assert!(errors.is_empty(), "{source}: {errors:?}");
+        assert!(checker.declared_runtime_storage_carrier(&"core.base.memory.Shared".into()).is_none());
+    }
+}

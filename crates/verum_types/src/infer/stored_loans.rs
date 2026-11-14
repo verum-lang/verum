@@ -160,18 +160,23 @@ impl TypeChecker {
 
     /// Use the same exact runtime declaration authority as VBC. A short name,
     /// archive bundle name or unresolved forward declaration owns no storage.
-    fn declared_retained_storage_parameters(&self, name: &verum_common::Text) -> Option<&'static [usize]> {
+    pub(super) fn declared_runtime_storage_carrier(
+        &self, name: &verum_common::Text,
+    ) -> Option<verum_common::well_known_types::WellKnownType> {
         let (owner, _) = name.rsplit_once('.')?;
         let declaration = self.source_type_registration.completed_declaration(name)?;
-        if !matches!(declaration.body, verum_ast::TypeDeclBody::Record(_)) {
+        if !matches!(declaration.body, verum_ast::TypeDeclBody::Record(_))
+            || !declaration.value_params.is_empty()
+            || declaration.generics.iter().any(|parameter|
+                !matches!(parameter.kind, verum_ast::ty::GenericParamKind::Type { .. }))
+        {
             return None;
         }
         let carrier = verum_common::well_known_types::WellKnownType::from_declaration(
-            declaration.name.name.as_str(),
-            owner,
+            declaration.name.name.as_str(), owner,
         )?;
         let positions = carrier.retained_storage_parameters();
-        (!positions.is_empty()).then_some(positions)
+        (!positions.is_empty() && positions.len() == declaration.generics.len()).then_some(carrier)
     }
 
     fn stored_loan_shape(&self, ty: &Type, inspection: LoanInspection) -> bool {
@@ -271,7 +276,8 @@ impl TypeChecker {
                         None if args.is_empty() => None,
                         _ => return true,
                     };
-                    if let Some(positions) = self.declared_retained_storage_parameters(&name)
+                    if let Some(carrier) = self.declared_runtime_storage_carrier(&name)
+                        && let positions = carrier.retained_storage_parameters()
                         && positions.len() == args.len()
                         && positions.iter().all(|position| *position < args.len())
                     {

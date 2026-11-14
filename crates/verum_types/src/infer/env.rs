@@ -1585,11 +1585,7 @@ impl TypeChecker {
                         }
                     }
                 }
-                // AFFINE CONTAGION: Check type arguments for affine types
-                // e.g., Wrapper<Handle> where Handle is affine -> Wrapper<Handle> contains affine
-                // Memory model: three-tier references (&T managed, &checked T verified, &unsafe T raw) with CBGR runtime checking — #affine-contagion
-                args.iter()
-                    .any(|arg| self.type_contains_affine_impl(arg, visited))
+                self.resource_arguments_contain_affine(&name_text, args, visited)
             }
             Type::Generic { name, args } => {
                 // Check if the base type is affine
@@ -1606,9 +1602,7 @@ impl TypeChecker {
                         }
                     }
                 }
-                // Check if any type argument contains affine types
-                args.iter()
-                    .any(|arg| self.type_contains_affine_impl(arg, visited))
+                self.resource_arguments_contain_affine(name, args, visited)
             }
             Type::Tuple(types) => types
                 .iter()
@@ -1628,6 +1622,25 @@ impl TypeChecker {
             | Type::UnsafeReference { .. } => false,
             _ => false,
         }
+    }
+
+    /// Runtime storage declarations distinguish owned value slots from retained
+    /// allocation payloads. The latter do not transfer their copy restriction to
+    /// a handle. Ordinary declarations keep their existing resource propagation.
+    fn resource_arguments_contain_affine(
+        &self,
+        name: &Text,
+        args: &[Type],
+        visited: &mut std::collections::HashSet<Text>,
+    ) -> bool {
+        if let Some(carrier) = self.declared_runtime_storage_carrier(name)
+            && carrier.retained_storage_parameters().len() == args.len()
+        {
+            return carrier.owned_storage_parameters().iter().any(|position|
+                args.get(*position).is_none_or(|argument|
+                    self.type_contains_affine_impl(argument, visited)));
+        }
+        args.iter().any(|argument| self.type_contains_affine_impl(argument, visited))
     }
 
     /// Inspect the resolved type namespace without parsing or inventing a signature.

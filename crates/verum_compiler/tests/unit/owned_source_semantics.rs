@@ -775,3 +775,6 @@ mod infinity_classifier_contract;
 
 #[path = "reference_method_authority.rs"]
 mod reference_method_authority;
+
+#[path = "configuration_owned_payloads.rs"]
+mod configuration_owned_payloads;
