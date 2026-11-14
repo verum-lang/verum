@@ -47,6 +47,43 @@ fn reexported_duplicate_nominal_carrier_retains_constructor_witnesses() {
     check_forward_constructor(true, true);
 }
 
+#[test]
+fn bootstrap_reexports_preserve_target_visibility() {
+    let provider = Parser::new(&PROVIDER.replace("public type Holder", "type Holder"))
+        .parse_module().unwrap();
+    let mut declarations = VbcCodegen::with_config(CodegenConfig::new("core.provider"));
+    let interface = declarations.collect_declaration_interface(&[&provider]).unwrap();
+    let consumer = Parser::new(
+        "module core.consumer; mount core.exports.Holder; fn inspect(value: Holder<Int>) -> Int {73}",
+    ).parse_module().unwrap();
+    let mut compiler = VbcCodegen::with_config(CodegenConfig::new("core.consumer"));
+    compiler.import_bootstrap_nominal_dependencies_with_resolver(
+        &[&consumer], &[&interface], |path| {
+            Some(if path == "core.exports.Holder" {"core.provider.Holder"} else {path}.into())
+        },
+    ).unwrap();
+    let error = compiler.collect_unit_declarations(&[&consumer]).unwrap_err();
+    assert!(error.to_string().contains("unresolved nominal type 'Holder'"), "{error}");
+}
+
+#[test]
+fn bootstrap_reexports_cannot_select_an_unrelated_same_leaf_type() {
+    let provider = Parser::new(PROVIDER).parse_module().unwrap();
+    let mut declarations = VbcCodegen::with_config(CodegenConfig::new("core.provider"));
+    let interface = declarations.collect_declaration_interface(&[&provider]).unwrap();
+    let consumer = Parser::new(
+        "module core.consumer; mount core.exports.Holder; fn inspect(value: Holder<Int>) -> Int {73}",
+    ).parse_module().unwrap();
+    let mut compiler = VbcCodegen::with_config(CodegenConfig::new("core.consumer"));
+    compiler.import_bootstrap_nominal_dependencies_with_resolver(
+        &[&consumer], &[&interface], |path| {
+            Some(if path == "core.exports.Holder" {"missing.owner.Holder"} else {path}.into())
+        },
+    ).unwrap();
+    let error = compiler.collect_unit_declarations(&[&consumer]).unwrap_err();
+    assert!(error.to_string().contains("unresolved nominal type 'Holder'"), "{error}");
+}
+
 fn check_forward_constructor(reexported: bool, duplicate_parent: bool) {
     let provider = Parser::new(PROVIDER).parse_module().unwrap();
     let source = if reexported {

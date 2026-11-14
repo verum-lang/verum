@@ -604,6 +604,7 @@ impl VbcCodegen {
             if let Some(id) = target_ids.get(declared.as_str()) {
                 self.type_name_to_id.insert(written.to_string(), *id);
                 if written != declared {
+                    self.retain_bootstrap_type_export(&written, &declared);
                     method_exports.entry(declared.into_string()).or_default()
                         .push(written.into_string());
                 }

@@ -2,7 +2,7 @@
 use super::{FunctionInfo, VbcCodegen};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use verum_ast::{Item, ItemKind, MountTree, MountTreeKind};
-use verum_common::Text;
+use verum_common::{Map, Set, Text};
 
 pub(super) fn mount_path_parts(written: &str) -> Vec<String> {
     if let Some(tail) = written.strip_prefix("..") {
@@ -49,6 +49,9 @@ pub(super) fn visit_named_mounts(
 pub struct SourceExports {
     pub(super) ambiguous_variants: HashSet<String>,
     modules: HashMap<String, ModuleExports>,
+    // A bootstrap resolver may supply a type export before its facade's AST
+    // is available. Its exact target remains an edge in the type namespace.
+    nominal_reexports: Map<Text, Set<Text>>,
 }
 
 #[derive(Default)]
@@ -402,6 +405,9 @@ impl VbcCodegen {
         for (owner, exports) in unit.modules {
             index.merge_module(owner, exports);
         }
+        for (written, targets) in unit.nominal_reexports {
+            index.nominal_reexports.entry(written).or_default().extend(targets);
+        }
     }
 
     /// Constructors are inline values. Their source-owned names, tags and
@@ -429,6 +435,18 @@ impl VbcCodegen {
         self.source_exports.modules.get(owner).or_else(|| {
             self.dependency_source_exports.as_ref()?.modules.get(owner)
         })
+    }
+
+    pub(super) fn retain_bootstrap_type_export(&mut self, written: &str, declared: &str) {
+        self.source_exports.nominal_reexports.entry(written.into())
+            .or_default().insert(declared.into());
+    }
+
+    fn bootstrap_type_exports<'a>(&'a self, path: &'a str) -> impl Iterator<Item = &'a Text> {
+        let key = Text::from(path);
+        self.source_exports.nominal_reexports.get(&key).into_iter().flatten()
+            .chain(self.dependency_source_exports.as_ref()
+                .and_then(|index| index.nominal_reexports.get(&key)).into_iter().flatten())
     }
 
     pub(super) fn record_inline_type_parent(&mut self, child: &str, parent: &str) {
@@ -668,6 +686,9 @@ impl VbcCodegen {
             if !visited.insert((path.clone(), include_declarations)) { continue; }
             let Some((owner, name)) = path.rsplit_once('.') else { continue };
             let Some(source) = self.source_export_scope(owner) else {
+                if self.bootstrap_type_exports(&path).next().is_some() {
+                    found.insert(DeclarationNamespace::Type);
+                }
                 if self.type_name_to_id.get(&path).and_then(|id| self.type_by_id(*id))
                     .and_then(|ty| self.type_declaration_identity(ty)).is_some_and(|key| key.as_str() == path)
                 { found.insert(DeclarationNamespace::Type); }
@@ -712,6 +733,10 @@ impl VbcCodegen {
             if !visited.insert((path.clone(), include_declarations, namespace)) { continue; }
             let Some((owner, name)) = path.rsplit_once('.') else { continue };
             let Some(source) = self.source_export_scope(owner) else {
+                if namespace == DeclarationNamespace::Type {
+                    pending.extend(self.bootstrap_type_exports(&path)
+                        .map(|target| (target.to_string(), true, namespace)));
+                }
                 if namespace == DeclarationNamespace::Type
                     && let Some(id) = self.type_name_to_id.get(&path)
                     && let Some(descriptor) = self.type_by_id(*id)
