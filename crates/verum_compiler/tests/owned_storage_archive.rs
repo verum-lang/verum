@@ -20,8 +20,16 @@ fn archived_owned_container_declarations_preserve_element_and_buffer_loans() {
                 public type List<T> is {len:Int,cap:Int,ptr:&unsafe T};
             }
         }
+        public module base {
+            public module memory {
+                public type affine Heap<T> is {ptr:&unsafe T};
+                public type Shared<T> is {ptr:&unsafe T};
+            }
+        }
         public module foreign {
             public type List<T> is {ptr:&unsafe T};
+            public type Heap<T> is {ptr:&unsafe T};
+            public type Shared<T> is {ptr:&unsafe T};
         }
     "#,
     )
@@ -53,6 +61,36 @@ fn archived_owned_container_declarations_preserve_element_and_buffer_loans() {
             (
                 "core.collections.list.List",
                 "fn invalid(values:List<Int>, read:fn(&List<Int>)->&Int)->&Int {let local=values; read(&local)}",
+                false,
+            ),
+            (
+                "core.base.memory.Heap",
+                "fn preserve(mut values:Heap<Int>, change:fn(&mut Heap<Int>))->Heap<Int> {change(&mut values); values}",
+                true,
+            ),
+            (
+                "core.base.memory.Shared",
+                "fn preserve(mut values:Shared<Int>, change:fn(&mut Shared<Int>))->Shared<Int> {change(&mut values); values}",
+                true,
+            ),
+            (
+                "core.base.memory.Heap",
+                "fn invalid(mut values:Heap<&Int>, change:fn(&mut Heap<&Int>))->Heap<&Int> {change(&mut values); values}",
+                false,
+            ),
+            (
+                "core.base.memory.Shared",
+                "fn invalid(mut values:Shared<&Int>, change:fn(&mut Shared<&Int>))->Shared<&Int> {change(&mut values); values}",
+                false,
+            ),
+            (
+                "core.foreign.Heap",
+                "fn invalid(mut values:Heap<Int>, change:fn(&mut Heap<Int>))->Heap<Int> {change(&mut values); values}",
+                false,
+            ),
+            (
+                "core.foreign.Shared",
+                "fn invalid(mut values:Shared<Int>, change:fn(&mut Shared<Int>))->Shared<Int> {change(&mut values); values}",
                 false,
             ),
             (

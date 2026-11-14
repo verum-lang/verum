@@ -370,3 +370,48 @@ fn owned_container_unknown_arguments_and_invalid_rosters_remain_conservative() {
         assert!(checker.carries_stored_loan(&ty), "{ty:?}");
     }
 }
+
+
+#[test]
+fn retained_allocation_payloads_preserve_loans_but_not_backing_address_loans() {
+    for owner in ["core.base.memory", "foreign.memory"] {
+        let mut checker = TypeChecker::with_minimal_context();
+        checker.register_primitives();
+        checker.set_current_module_path(owner);
+        let module = verum_fast_parser::Parser::new(
+            "type affine Heap<T> is {ptr:&unsafe T}; type Shared<T> is {ptr:&unsafe T};"
+        ).parse_module().unwrap();
+        assert!(checker.prepare_module_declarations(&module).is_empty());
+        for name in ["Heap", "Shared"] {
+            let declaration = format!("{owner}.{name}");
+            for (payload, stored, writable) in [
+                (Type::Int, false, false),
+                (Type::reference(false, Type::Int), true, false),
+                (Type::reference(true, Type::Int), true, true),
+            ] {
+                let ty = owned_container_type(&declaration, List::from_iter([payload]));
+                if owner == "core.base.memory" {
+                    assert_eq!(checker.carries_stored_loan(&ty), stored, "{ty:?}");
+                    assert_eq!(checker.may_store_writable_reference(&ty), writable, "{ty:?}");
+                } else {
+                    assert!(checker.carries_stored_loan(&ty), "{ty:?}");
+                }
+                assert!(checker.may_supply_call_borrow(&ty), "{ty:?}");
+            }
+            for arguments in [List::new(), List::from_iter([Type::Int, Type::Bool])] {
+                assert!(checker.carries_stored_loan(&owned_container_type(&declaration, arguments)));
+            }
+        }
+        for mutable in [false, true] {
+            let inner = owned_container_type(&format!("{owner}.Heap"),
+                List::from_iter([Type::reference(mutable, Type::Int)]));
+            let outer = owned_container_type(&format!("{owner}.Shared"), List::from_iter([inner]));
+            assert!(checker.carries_stored_loan(&outer));
+            if owner == "core.base.memory" { assert_eq!(checker.may_store_writable_reference(&outer), mutable); }
+        }
+    }
+    let checker = TypeChecker::with_minimal_context();
+    for name in ["core.base.memory.Heap", "core.base.memory.Shared"] {
+        assert!(checker.carries_stored_loan(&owned_container_type(name, List::from_iter([Type::Int]))));
+    }
+}

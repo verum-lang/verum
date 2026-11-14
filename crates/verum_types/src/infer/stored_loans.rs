@@ -160,7 +160,7 @@ impl TypeChecker {
 
     /// Use the same exact runtime declaration authority as VBC. A short name,
     /// archive bundle name or unresolved forward declaration owns no storage.
-    fn declared_owned_storage_parameters(&self, name: &verum_common::Text) -> Option<&'static [usize]> {
+    fn declared_retained_storage_parameters(&self, name: &verum_common::Text) -> Option<&'static [usize]> {
         let (owner, _) = name.rsplit_once('.')?;
         let declaration = self.source_type_registration.completed_declaration(name)?;
         if !matches!(declaration.body, verum_ast::TypeDeclBody::Record(_)) {
@@ -170,7 +170,7 @@ impl TypeChecker {
             declaration.name.name.as_str(),
             owner,
         )?;
-        let positions = carrier.owned_storage_parameters();
+        let positions = carrier.retained_storage_parameters();
         (!positions.is_empty()).then_some(positions)
     }
 
@@ -271,12 +271,13 @@ impl TypeChecker {
                         None if args.is_empty() => None,
                         _ => return true,
                     };
-                    if let Some(positions) = self.declared_owned_storage_parameters(&name)
+                    if let Some(positions) = self.declared_retained_storage_parameters(&name)
                         && positions.len() == args.len()
                         && positions.iter().all(|position| *position < args.len())
                     {
-                        // The runtime owns the backing allocation. Stored
-                        // elements still carry their actual nested references.
+                        // This exact runtime declaration owns or retains its
+                        // backing allocation. Payloads still carry their actual
+                        // nested references; allocation ownership erases none.
                         // Its buffer can be exposed by an opaque call even when
                         // the elements themselves contain no references.
                         if inspection == LoanInspection::Exposable {

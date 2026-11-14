@@ -237,14 +237,29 @@ impl WellKnownType {
         Self::from_name(name).is_some()
     }
 
-    /// Type arguments whose values belong to this runtime container's storage.
-    /// Callers must first establish the canonical declaring owner. Raw-pointer
-    /// fields describe its storage address, not ownership of stored elements.
+    /// Stored type arguments whose resource discipline the container inherits.
+    /// Callers must first establish the canonical declaring owner. This is not
+    /// the complete retained-content relation: retaining an allocation does not
+    /// make its handle inherit the payload's copy permission.
     pub const fn owned_storage_parameters(self) -> &'static [usize] {
         match self {
             Self::List | Self::Set | Self::Deque => &[0],
             Self::Map => &[0, 1],
             _ => &[],
+        }
+    }
+
+    /// Type arguments whose values remain reachable through this storage owner.
+    /// Their nested loans remain live even when the allocation address itself is
+    /// owned. The declaring owner and its complete parameter roster must already
+    /// be established; a matching short name supplies no storage authority.
+    ///
+    /// Unique and shared allocation handles retain their payloads. This relation
+    /// does not grant copy permission, transfer capability or a longer lifetime.
+    pub const fn retained_storage_parameters(self) -> &'static [usize] {
+        match self {
+            Self::Heap | Self::Shared => &[0],
+            _ => self.owned_storage_parameters(),
         }
     }
 
