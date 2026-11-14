@@ -5097,10 +5097,14 @@ impl VbcCodegen {
         // `Maybe.Some(unsafe { &mut (*self.ptr).value })` was a 6-line
         // reproducible crash (exit 139), and 10 of
         // base/memory/cbgr_test's 36 failures are this class. The
-        // principled lowering is the same as the cast idiom's:
-        // compute the interior ADDRESS with StructFieldAddr — never
-        // load through the pointer.
-        if matches!(op, UnOp::Ref | UnOp::RefMut | UnOp::RefUnsafe | UnOp::RefUnsafeMut)
+        // Project the declared storage directly. Value slots carry a revocable
+        // field reference. Explicit unsafe references and repr(C) fields use
+        // their declared byte layout through StructFieldAddr.
+        if matches!(
+            op,
+            UnOp::Ref | UnOp::RefMut | UnOp::RefChecked | UnOp::RefCheckedMut
+                | UnOp::RefUnsafe | UnOp::RefUnsafeMut
+        )
             && let ExprKind::Field {
                 expr: field_base,
                 field,
@@ -5117,6 +5121,38 @@ impl VbcCodegen {
                     && let Some(ptr_reg) = self.compile_expr(raw_ptr_expr)?
                 {
                     let dst = self.ctx.alloc_temp();
+                    let packed = self.repr_c_field_offset(&type_name, field.as_str()).is_some()
+                        || self.repr_c_field_offset(
+                            Self::strip_generic_args(&type_name), field.as_str(),
+                        ).is_some();
+                    if !packed && !matches!(op, UnOp::RefUnsafe | UnOp::RefUnsafeMut) {
+                        let (ordinal, guessed) = self.resolve_field_index_flagged(
+                            Some(&type_name), field.as_str(),
+                        );
+                        if guessed {
+                            return Err(CodegenError::with_span(
+                                CodegenErrorKind::TypeInference(format!(
+                                    "cannot project undeclared field `{field}` of `{type_name}`",
+                                )),
+                                inner.span,
+                            ));
+                        }
+                        self.emit_field_reference(dst, ptr_reg, ordinal);
+                        if matches!(op, UnOp::Ref | UnOp::RefChecked) {
+                            let mut operands = verum_common::List::<u8>::with_capacity(6).into();
+                            Self::write_reg(&mut operands, dst.0);
+                            Self::write_reg(&mut operands, dst.0);
+                            operands.extend_from_slice(
+                                &crate::value::Capabilities::READ_ONLY.0.to_le_bytes(),
+                            );
+                            self.ctx.emit(Instruction::CbgrExtended {
+                                sub_op: crate::instruction::CbgrSubOpcode::CapAttenuate as u8,
+                                operands,
+                            });
+                        }
+                        self.ctx.free_temp(ptr_reg);
+                        return Ok(Some(dst));
+                    }
                     let off = field_offset as u16;
                     let mut operands = Vec::<u8>::with_capacity(6);
                     Self::write_reg(&mut operands, dst.0);

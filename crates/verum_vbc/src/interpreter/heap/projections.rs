@@ -3,16 +3,16 @@
 use super::{Heap, OBJECT_HEADER_SIZE, ObjectHeader};
 use crate::interpreter::{CbgrViolationKind, InterpreterError, InterpreterResult};
 use crate::value::{Capabilities, ThinRef, Value};
-use std::collections::HashMap;
+use verum_common::Map;
 
 #[derive(Debug, Default)]
 pub(super) struct ProjectionTable {
-    owners: HashMap<usize, OwnerProjections>,
-    slots: HashMap<u64, HeapSlotRef>,
+    owners: Map<usize, OwnerProjections>,
+    slots: Map<u64, HeapSlotRef>,
 }
 #[derive(Debug, Default)]
 struct OwnerProjections {
-    slots: HashMap<HeapSlotRef, u64>,
+    slots: Map<HeapSlotRef, u64>,
     exclusive: bool,
 }
 
@@ -21,12 +21,22 @@ struct OwnerProjections {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct HeapSlotRef {
     owner: usize,
-    backing: usize,
-    backing_field: usize,
     offset: usize,
-    generation: u32,
-    epoch: u16,
     caps: Capabilities,
+    storage: SlotStorage,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum SlotStorage {
+    Object {
+        backing: usize,
+        backing_field: usize,
+        generation: u32,
+        epoch: u16,
+    },
+    Raw {
+        len: usize,
+    },
 }
 
 impl Heap {
@@ -41,8 +51,6 @@ impl Heap {
         offset: usize,
         caps: Capabilities,
     ) -> InterpreterResult<Value> {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static NEXT_TICKET: AtomicU64 = AtomicU64::new(1);
         if !self.contains(backing as *const ObjectHeader) {
             return Err(InterpreterError::CbgrViolation {
                 kind: CbgrViolationKind::UseAfterFree,
@@ -53,15 +61,43 @@ impl Heap {
         let header = unsafe { &*(backing as *const ObjectHeader) };
         let target = HeapSlotRef {
             owner,
-            backing_field,
-            backing,
             offset,
             caps,
-            generation: header.generation,
-            epoch: header.epoch,
+            storage: SlotStorage::Object {
+                backing_field,
+                backing,
+                generation: header.generation,
+                epoch: header.epoch,
+            },
+        };
+        self.issue_projection(target)
+    }
+
+    /// The caller proves the live raw allocation's base and extent. Its
+    /// deallocator revokes the owner's tickets before releasing that storage.
+    pub(crate) fn project_raw_slot(
+        &mut self,
+        owner: usize,
+        len: usize,
+        offset: usize,
+        caps: Capabilities,
+    ) -> InterpreterResult<Value> {
+        let target = HeapSlotRef {
+            owner,
+            offset,
+            caps,
+            storage: SlotStorage::Raw { len },
         };
         self.resolve_slot(target)?;
-        let exclusive = caps.has(Capabilities::WRITE);
+        // A field projection keeps the allocation's storage fixed. Other
+        // fields and shared views retain their tickets until owner retirement.
+        self.cache_projection(target)
+    }
+
+    fn issue_projection(&mut self, target: HeapSlotRef) -> InterpreterResult<Value> {
+        self.resolve_slot(target)?;
+        let owner = target.owner;
+        let exclusive = target.caps.has(Capabilities::WRITE);
         if exclusive
             || self
                 .projections
@@ -71,8 +107,14 @@ impl Heap {
         {
             self.revoke_projections(owner);
         }
-        let owner_slots = self.projections.owners.entry(owner).or_default();
-        owner_slots.exclusive = exclusive;
+        self.cache_projection(target)
+    }
+
+    fn cache_projection(&mut self, target: HeapSlotRef) -> InterpreterResult<Value> {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT_TICKET: AtomicU64 = AtomicU64::new(1);
+        let owner_slots = self.projections.owners.entry(target.owner).or_default();
+        owner_slots.exclusive |= target.caps.has(Capabilities::WRITE);
         let id = match owner_slots.slots.entry(target) {
             std::collections::hash_map::Entry::Occupied(previous) => *previous.get(),
             std::collections::hash_map::Entry::Vacant(vacant) => {
@@ -89,6 +131,22 @@ impl Heap {
             }
         };
         Ok(Value::projected_slot(id).expect("ticket bounded by the handle format"))
+    }
+
+    /// Derive a restricted view while retaining the same revocable owner.
+    pub(crate) fn attenuate_reference(
+        &mut self,
+        value: Value,
+        allowed: u16,
+    ) -> InterpreterResult<Value> {
+        let reference = self.thin_ref(value)?;
+        if let Some(id) = value.projection_id() {
+            let mut target = self.projections.slots[&id];
+            target.caps = target.caps.attenuate(!allowed);
+            self.cache_projection(target)
+        } else {
+            Ok(Value::from_thin_ref(reference.attenuate(!allowed)))
+        }
     }
 
     pub(crate) fn revoke_projections(&mut self, owner: usize) {
@@ -120,16 +178,37 @@ impl Heap {
             kind: CbgrViolationKind::UseAfterFree,
             ptr: slot.owner,
         };
+        let (backing, backing_field, generation, epoch) = match slot.storage {
+            SlotStorage::Raw { len } => {
+                let address = slot.owner.checked_add(slot.offset).ok_or_else(stale)?;
+                if !address.is_multiple_of(std::mem::align_of::<Value>())
+                    || slot
+                        .offset
+                        .checked_add(std::mem::size_of::<Value>())
+                        .is_none_or(|end| end > len)
+                {
+                    return Err(stale());
+                }
+                // Raw allocations use revocable tickets as their lifetime
+                // authority. A freed allocation cannot reissue an old ticket.
+                return Ok(ThinRef::new(address as *mut u8, 0, 0, slot.caps));
+            }
+            SlotStorage::Object {
+                backing,
+                backing_field,
+                generation,
+                epoch,
+            } => (backing, backing_field, generation, epoch),
+        };
         if !self.contains(slot.owner as *const ObjectHeader)
-            || !self.contains(slot.backing as *const ObjectHeader)
+            || !self.contains(backing as *const ObjectHeader)
         {
             return Err(stale());
         }
         // SAFETY: both bases belong to this heap. No heap mutation or callback
         // occurs between this extent check and the caller's immediate access.
         let owner = unsafe { &*(slot.owner as *const ObjectHeader) };
-        let field_offset = slot
-            .backing_field
+        let field_offset = backing_field
             .checked_mul(std::mem::size_of::<Value>())
             .ok_or_else(stale)?;
         if !owner.is_valid()
@@ -144,14 +223,12 @@ impl Heap {
                 .add(OBJECT_HEADER_SIZE + field_offset)
                 .cast::<Value>())
         };
-        if !current_backing.is_regular_ptr()
-            || current_backing.as_ptr::<u8>() as usize != slot.backing
-        {
+        if !current_backing.is_regular_ptr() || current_backing.as_ptr::<u8>() as usize != backing {
             return Err(stale());
         }
-        let header = unsafe { &*(slot.backing as *const ObjectHeader) };
-        if header.generation != slot.generation
-            || header.epoch != slot.epoch
+        let header = unsafe { &*(backing as *const ObjectHeader) };
+        if header.generation != generation
+            || header.epoch != epoch
             || !header.is_valid()
             || slot.offset % std::mem::align_of::<Value>() != 0
             || slot
@@ -161,7 +238,7 @@ impl Heap {
         {
             return Err(stale());
         }
-        let ptr = unsafe { (slot.backing as *mut u8).add(OBJECT_HEADER_SIZE + slot.offset) };
+        let ptr = unsafe { (backing as *mut u8).add(OBJECT_HEADER_SIZE + slot.offset) };
         Ok(ThinRef::new(
             ptr,
             header.generation,

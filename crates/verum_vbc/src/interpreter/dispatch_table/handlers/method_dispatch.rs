@@ -5446,6 +5446,8 @@ pub(super) fn dispatch_primitive_method(
                     // it from the live-set and bumping generation.
                     // Mirrors the stdlib body's `cbgr_dealloc` call.
                     state.cbgr_allocations.remove(&header_addr);
+                    state.cbgr_bridge_extents.remove(&data_ptr);
+                    state.heap.revoke_projections(data_ptr);
                     // Note: we don't actually free the memory here
                     // (matching cbgr_dealloc's semantics — it bumps
                     // generation but keeps the pointer live until GC).

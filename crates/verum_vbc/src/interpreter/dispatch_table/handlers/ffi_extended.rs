@@ -2319,6 +2319,7 @@ pub(super) fn cbgr_user_deallocate(state: &mut InterpreterState, user: i64) {
     if !state.cbgr_allocations.remove(&header_addr) {
         return;
     }
+    state.heap.revoke_projections(user as usize);
     // T0108 — the payload extent dies with the header entry; leaving it
     // behind would let a freed interval keep answering the bridge-address
     // provenance query in `handle_deref`/`handle_deref_mut`.

@@ -467,12 +467,18 @@ pub(super) fn bridge_extent_room(
     state: &InterpreterState,
     addr: usize,
 ) -> Option<usize> {
+    let (user, len) = bridge_extent(state, addr)?;
+    Some(len - (addr - user))
+}
+
+/// Base and extent of the live raw allocation containing an address.
+pub(super) fn bridge_extent(state: &InterpreterState, addr: usize) -> Option<(usize, usize)> {
     let (&user, &len) = state.cbgr_bridge_extents.range(..=addr).next_back()?;
     let offset = addr.checked_sub(user)?;
     if offset >= len {
         return None;
     }
-    Some(len - offset)
+    Some((user, len))
 }
 
 /// Why [`bridge_extent_room`] answered `None` — TRACE ONLY.
@@ -2340,6 +2346,21 @@ fn cbgr_extended_body(
                 super::cbgr_helpers::resolve_receiver(state, base_val)?
             };
 
+            let field_offset = field_idx.checked_mul(std::mem::size_of::<Value>())
+                .ok_or_else(|| InterpreterError::InvalidOperand {
+                    message: "RefField: field offset overflow".into(),
+                })?;
+            if let Some(slot) = super::cbgr_helpers::raw_record_field_slot(state, base_val, field_offset)? {
+                let address = slot as usize;
+                let (owner, len) = bridge_extent(state, address)
+                    .expect("raw_record_field_slot established a live allocation");
+                let reference = state.heap.project_raw_slot(
+                    owner, len, address - owner, Capabilities::MUT_EXCLUSIVE,
+                )?;
+                state.set_reg(dst, reference);
+                return Ok(DispatchResult::Continue);
+            }
+
             if !base_val.is_ptr() || base_val.is_nil() {
                 return Err(InterpreterError::NullPointer);
             }
@@ -2389,6 +2410,12 @@ fn cbgr_extended_body(
                 }
             }
 
+            if !state.heap.contains(ptr.cast::<heap::ObjectHeader>()) {
+                return Err(InterpreterError::InvalidOperand {
+                    message: "field reference receiver has no live object or raw allocation".into(),
+                });
+            }
+
             // Object-header alignment + Shared<T> / variant unwrap.
             if !(ptr as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>()) {
                 return Err(InterpreterError::Panic {
@@ -2432,11 +2459,6 @@ fn cbgr_extended_body(
             // header.
             let header = unsafe { heap::ObjectHeader::ref_or_stub(ptr) };
 
-            let field_offset = field_idx
-                .checked_mul(std::mem::size_of::<Value>())
-                .ok_or_else(|| InterpreterError::Panic {
-                    message: "RefField: field offset overflow".into(),
-                })?;
             let field_end = field_offset
                 .checked_add(std::mem::size_of::<Value>())
                 .ok_or_else(|| InterpreterError::Panic {
@@ -3172,7 +3194,10 @@ fn cbgr_extended_body(
 
             let src_val = state.get_reg(src_reg);
 
-            if is_cbgr_ref(&src_val) {
+            if src_val.is_thin_ref() {
+                let attenuated = state.heap.attenuate_reference(src_val, cap_mask as u16)?;
+                state.set_reg(dst, attenuated);
+            } else if is_cbgr_ref(&src_val) {
                 // Register-based CBGR reference: attenuate by stripping mutability if WRITE not in mask
                 let can_write = (cap_mask & caps::WRITE) != 0;
                 if can_write {
