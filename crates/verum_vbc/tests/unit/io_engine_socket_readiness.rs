@@ -1,12 +1,13 @@
 //! Bounded host fixtures for real IoEngine readiness and byte transfer (T1650).
 use super::super::dispatch_table::handlers::net_runtime::{
-    tcp_close, tcp_listen_v2, tcp_local_port, tcp_peer_addr,
+    socket_diagnostics, tcp_close, tcp_listen_v2, tcp_local_port, tcp_peer_addr,
 };
 use super::*;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::os::unix::io::AsRawFd;
 use std::time::{Duration, Instant};
+use verum_common::Text;
 
 const FIXTURE_DEADLINE: Duration = Duration::from_secs(2);
 
@@ -30,6 +31,18 @@ impl RuntimeSocket {
         assert!(handle > 0, "{operation}: {handle}");
         Self(handle)
     }
+
+    fn listener_snapshot(&self) -> Text {
+        // SAFETY: RuntimeSocket owns the live Unix descriptor returned by
+        // tcp_listen_v2. This borrow cannot outlive self and does not close it.
+        let socket = unsafe { std::os::fd::BorrowedFd::borrow_raw(self.0 as libc::c_int) };
+        format!(
+            "local_port={} {}",
+            tcp_local_port(self.0),
+            socket_diagnostics::socket_snapshot(socket)
+        )
+        .into()
+    }
 }
 impl Drop for RuntimeSocket {
     fn drop(&mut self) {
@@ -37,9 +50,19 @@ impl Drop for RuntimeSocket {
     }
 }
 
-fn connect(address: SocketAddr) -> TcpStream {
-    let stream = TcpStream::connect_timeout(&address, FIXTURE_DEADLINE)
-        .expect("fixture TCP connection must complete before readiness is tested");
+fn connect(address: SocketAddr, listener_snapshot: impl FnOnce() -> Text) -> TcpStream {
+    let result = socket_diagnostics::connect_timeout(
+        "io_engine.fixture.connect",
+        &address,
+        FIXTURE_DEADLINE,
+    );
+    if result.is_err() {
+        eprintln!(
+            "[socket-diagnostic] operation=io_engine.fixture.connect destination={address} listener={}",
+            listener_snapshot()
+        );
+    }
+    let stream = result.expect("fixture TCP connection must complete before readiness is tested");
     stream.set_read_timeout(Some(FIXTURE_DEADLINE)).unwrap();
     stream.set_write_timeout(Some(FIXTURE_DEADLINE)).unwrap();
     stream
@@ -48,7 +71,9 @@ fn connect(address: SocketAddr) -> TcpStream {
 fn connected_pair() -> (TcpStream, TcpStream) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     listener.set_nonblocking(true).unwrap();
-    let peer = connect(listener.local_addr().unwrap());
+    let peer = connect(listener.local_addr().unwrap(), || {
+        socket_diagnostics::listener_snapshot(&listener)
+    });
     let deadline = Instant::now() + FIXTURE_DEADLINE;
     let stream = loop {
         match listener.accept() {
@@ -72,7 +97,9 @@ fn poll_signals_ready_on_pending_connection() {
     assert_eq!(submit(engine.0, fd, FLAG_READ as i64), 0);
     // Keep the established peer alive through observation; a failed connect
     // is a fixture failure, not a missing readiness event.
-    let _peer = connect(listener.local_addr().unwrap());
+    let _peer = connect(listener.local_addr().unwrap(), || {
+        socket_diagnostics::listener_snapshot(&listener)
+    });
     let n = poll(engine.0, 16, 1_000_000_000);
     assert!(
         n > 0,
@@ -90,7 +117,9 @@ fn async_accept_round_trip_via_io_engine() {
     let listener = RuntimeSocket::checked(tcp_listen_v2("127.0.0.1", 0, 8, 0), "listen");
     let port = tcp_local_port(listener.0);
     assert!((1..=65535).contains(&port), "listener port: {port}");
-    let peer = connect(SocketAddr::from(([127, 0, 0, 1], port as u16)));
+    let peer = connect(SocketAddr::from(([127, 0, 0, 1], port as u16)), || {
+        listener.listener_snapshot()
+    });
     let accepted = RuntimeSocket::checked(
         async_accept(engine.0, listener.0, 1_500_000_000),
         "async accept",

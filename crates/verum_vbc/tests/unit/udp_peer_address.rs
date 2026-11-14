@@ -40,8 +40,13 @@ fn udp_recv_from_returns_peer_address() {
         udp_send(sender.0, b"ping", "127.0.0.1", receive_port as i64),
         4
     );
-    let received = udp_recv_from(receiver.0, 64)
-        .expect("UDP fixture receive must complete within its socket deadline");
+    let started = std::time::Instant::now();
+    let received = udp_recv_from(receiver.0, 64).unwrap_or_else(|| {
+        panic!(
+            "UDP fixture receive returned None; receiver_fd={} receive_port={} sender_fd={} send_port={} elapsed={:?}; see socket-diagnostic for the original error phase",
+            receiver.0, receive_port, sender.0, send_port, started.elapsed()
+        )
+    });
     assert_eq!(received.0, "ping");
     let (family, host, port) = received.1.expect("peer reported");
     assert_eq!(family, 4);

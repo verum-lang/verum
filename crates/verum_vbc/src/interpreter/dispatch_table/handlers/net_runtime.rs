@@ -718,10 +718,7 @@ pub fn udp_recv(fd: i64, max_len: i64) -> Option<String> {
 /// build a `SocketAddr.V4 | SocketAddr.V6` via the shared
 /// `SocketAddrCodec` (avoiding the placeholder `0.0.0.0:0` that
 /// the pre-fix intercept fell back to).
-pub fn udp_recv_from(
-    fd: i64,
-    max_len: i64,
-) -> Option<(String, Option<(u8, String, i64)>)> {
+pub fn udp_recv_from(fd: i64, max_len: i64) -> Option<(String, Option<(u8, String, i64)>)> {
     if max_len <= 0 {
         return Some((String::new(), None));
     }
@@ -731,15 +728,50 @@ pub fn udp_recv_from(
     // Holding the REGISTRY lock across that wait would serialise
     // ALL other net_runtime intrinsics — the canonical UDP-server
     // anti-pattern.
-    let clone_result: Option<UdpSocket> = {
+    // Keep the original clone error until after releasing REGISTRY. Test-only
+    // diagnostics must never print while the registry mutex is held.
+    let clone_result: std::io::Result<verum_common::Maybe<UdpSocket>> = {
         let map = REGISTRY.lock().unwrap();
         match map.get(&fd) {
-            Some(NetResource::Udp(s)) => s.try_clone().ok(),
-            _ => None,
+            Some(NetResource::Udp(s)) => s.try_clone().map(Some),
+            _ => Ok(None),
         }
     };
-    let socket = clone_result?;
-    let (n, peer_sock) = socket.recv_from(&mut buf).ok()?;
+    let socket = match clone_result {
+        Ok(Some(socket)) => socket,
+        Ok(None) => {
+            #[cfg(test)]
+            eprintln!(
+                "[socket-diagnostic] operation=udp_recv_from phase=registry_lookup fd={fd} no_udp_resource=true"
+            );
+            return None;
+        }
+        Err(_error) => {
+            #[cfg(test)]
+            socket_diagnostics::io_failure(
+                "udp_recv_from.clone",
+                format_args!("fd={fd}"),
+                &_error,
+                None,
+            );
+            return None;
+        }
+    };
+    #[cfg(test)]
+    let started = std::time::Instant::now();
+    let (n, peer_sock) = match socket.recv_from(&mut buf) {
+        Ok(received) => received,
+        Err(_error) => {
+            #[cfg(test)]
+            socket_diagnostics::io_failure(
+                "udp_recv_from.recv",
+                format_args!("fd={fd} local={:?}", socket.local_addr()),
+                &_error,
+                Some(started.elapsed()),
+            );
+            return None;
+        }
+    };
     buf.truncate(n);
     let peer_tuple = match peer_sock {
         std::net::SocketAddr::V4(v4) => Some((4u8, v4.ip().to_string(), v4.port() as i64)),
@@ -1256,7 +1288,16 @@ pub fn tcp_connect_timeout(host: &str, port: i64, timeout_ms: i64) -> i64 {
     use std::net::ToSocketAddrs;
     let addrs = match (host, port as u16).to_socket_addrs() {
         Ok(a) => a,
-        Err(_) => return NET_STATUS_IO_ERROR,
+        Err(_error) => {
+            #[cfg(test)]
+            socket_diagnostics::io_failure(
+                "tcp_connect_timeout.resolve",
+                format_args!("host={host:?} port={port}"),
+                &_error,
+                None,
+            );
+            return NET_STATUS_IO_ERROR;
+        }
     };
     let dur = if timeout_ms <= 0 {
         Duration::from_millis(1) // tiny non-zero — connect_timeout rejects 0
@@ -1264,12 +1305,32 @@ pub fn tcp_connect_timeout(host: &str, port: i64, timeout_ms: i64) -> i64 {
         Duration::from_millis(timeout_ms as u64)
     };
     for addr in addrs {
+        #[cfg(test)]
+        let started = std::time::Instant::now();
         match TcpStream::connect_timeout(&addr, dur) {
             Ok(stream) => {
                 return register_with_error(NetResource::Stream(stream), NET_STATUS_IO_ERROR);
             }
-            Err(e) if e.kind() == std::io::ErrorKind::TimedOut => return NET_STATUS_TIMEOUT,
-            Err(_) => continue,
+            Err(e) if e.kind() == std::io::ErrorKind::TimedOut => {
+                #[cfg(test)]
+                socket_diagnostics::io_failure(
+                    "tcp_connect_timeout.connect",
+                    format_args!("destination={addr} budget={dur:?}"),
+                    &e,
+                    Some(started.elapsed()),
+                );
+                return NET_STATUS_TIMEOUT;
+            }
+            Err(_error) => {
+                #[cfg(test)]
+                socket_diagnostics::io_failure(
+                    "tcp_connect_timeout.connect",
+                    format_args!("destination={addr} budget={dur:?}"),
+                    &_error,
+                    Some(started.elapsed()),
+                );
+                continue;
+            }
         }
     }
     NET_STATUS_IO_ERROR
@@ -2455,6 +2516,10 @@ fn intercept_tcp_read(
         &[Value::from_i64(n)],
     )?))
 }
+
+#[cfg(test)]
+#[path = "../../../../tests/unit/net_runtime_socket_diagnostics.rs"]
+pub(crate) mod socket_diagnostics;
 
 #[cfg(test)]
 #[path = "../../../../tests/unit/udp_peer_address.rs"]

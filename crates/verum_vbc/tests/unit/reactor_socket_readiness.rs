@@ -1,4 +1,5 @@
 //! Bounded, owned peer setup for actual reactor readiness checks (T1650).
+use super::super::dispatch_table::handlers::net_runtime::socket_diagnostics;
 use super::{wait_readable, wait_writable, WaitOutcome};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::os::fd::AsRawFd;
@@ -14,8 +15,19 @@ fn connected_pair() -> (TcpStream, TcpStream) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind reactor fixture listener");
     listener.set_nonblocking(true).unwrap();
     let address = listener.local_addr().unwrap();
-    let client = TcpStream::connect_timeout(&address, FIXTURE_DEADLINE)
-        .expect("reactor fixture connect deadline; writable readiness was not tested");
+    let connection = socket_diagnostics::connect_timeout(
+        "reactor.fixture.writable_connect",
+        &address,
+        FIXTURE_DEADLINE,
+    );
+    if connection.is_err() {
+        eprintln!(
+            "[socket-diagnostic] operation=reactor.fixture.writable_connect destination={address} listener={}",
+            socket_diagnostics::listener_snapshot(&listener)
+        );
+    }
+    let client =
+        connection.expect("reactor fixture connect deadline; writable readiness was not tested");
     let deadline = Instant::now() + FIXTURE_DEADLINE;
     let (server, peer) = loop {
         match listener.accept() {
@@ -61,7 +73,11 @@ impl ConnectingPeer {
                 // Preserve the arrival-style fixture's scheduling. This delay
                 // does not establish registration-before-arrival ordering.
                 thread::sleep(ARRIVAL_DELAY);
-                TcpStream::connect_timeout(&address, FIXTURE_DEADLINE)
+                socket_diagnostics::connect_timeout(
+                    "reactor.fixture.arrival_connect",
+                    &address,
+                    FIXTURE_DEADLINE,
+                )
             })),
         }
     }
@@ -114,9 +130,15 @@ fn ready_signalled_when_connection_arrives() {
     // Complete and join the bounded setup before classifying a reactor result.
     // The peer stays owned through this assertion even if the worker finished
     // earlier; a failed connect never becomes a missing-readiness verdict.
-    let peer = connector
-        .finish()
-        .expect("reactor fixture connect failed; readable readiness is inconclusive");
+    let connection = connector.finish();
+    if connection.is_err() {
+        eprintln!(
+            "[socket-diagnostic] operation=reactor.fixture.arrival_connect destination={address} readiness={result:?} listener={}",
+            socket_diagnostics::listener_snapshot(&listener)
+        );
+    }
+    let peer =
+        connection.expect("reactor fixture connect failed; readable readiness is inconclusive");
     assert_eq!(peer.peer_addr().unwrap(), address);
     assert_eq!(result, WaitOutcome::Ready);
     drop(peer);

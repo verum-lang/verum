@@ -126,11 +126,14 @@ impl Stream {
     }
 
     fn connect(listener: &Listener) -> Self {
-        let fd = tcp_connect_timeout("127.0.0.1", listener.port(), IO_DEADLINE.as_millis() as i64);
+        let port = listener.port();
+        let started = Instant::now();
+        let fd = tcp_connect_timeout("127.0.0.1", port, IO_DEADLINE.as_millis() as i64);
         assert!(
             fd > 0,
-            "tcp_connect_timeout to 127.0.0.1:{}: {fd}",
-            listener.port()
+            "tcp_connect_timeout to 127.0.0.1:{port}: {fd}; elapsed={:?}; listener={}",
+            started.elapsed(),
+            socket_diagnostics::listener_snapshot(&listener.socket)
         );
         Self::new(fd, IO_DEADLINE)
     }
