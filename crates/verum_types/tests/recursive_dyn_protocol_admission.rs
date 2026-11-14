@@ -737,3 +737,24 @@ fn dynamic_inheritance_cannot_erase_an_unproved_refined_value_domain() {
         error.contains("refined protocol values require a checked refinement witness")),
         "{diagnostics:?}");
 }
+
+#[test]
+fn generic_dynamic_bounds_are_never_silently_erased() {
+    for source in [
+        "type Policy<T> is protocol {fn read(&self)->Int;}; fn inspect(value:&dyn Policy<Int>)->Int {73}",
+        "type Policy<T> is protocol {fn read(&self)->Int;}; fn inspect<T>(value:&dyn Policy<T>)->Int {73}",
+        "type Policy<T> is protocol {fn read(&self)->Int;}; type Plain is protocol {fn read(&self)->Int;}; fn inspect(value:&dyn Policy<Int>+Plain)->Int {73}",
+    ] {
+        let failures = errors(source);
+        assert!(failures.iter().any(|error| error.contains("generic dynamic protocol bounds require declaration-owned argument support")),
+            "unsupported application disappeared: {source}\n{failures:#?}");
+    }
+}
+
+#[test]
+fn imported_generic_dynamic_bounds_keep_the_same_refusal() {
+    let failures = imported("mount fixture.lib.Policy; fn inspect(value:&dyn Policy<Int>)->Int {73}",
+        "public type Policy<T> is protocol {fn read(&self)->Int;};", None);
+    assert!(failures.iter().any(|error| error.contains("generic dynamic protocol bounds require declaration-owned argument support")),
+        "{failures:#?}");
+}

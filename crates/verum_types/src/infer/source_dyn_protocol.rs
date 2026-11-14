@@ -77,7 +77,13 @@ impl TypeChecker {
         }
         let mut bound_members = Set::new();
         for bound in bounds {
-            let TypeBoundKind::Protocol(path) = &bound.kind else { continue; };
+            let TypeBoundKind::Protocol(path) = &bound.kind else {
+                return Err(binding_error(bound.span, match &bound.kind {
+                    TypeBoundKind::GenericProtocol(_) =>
+                        "generic dynamic protocol bounds require declaration-owned argument support",
+                    _ => "dynamic bound requires a supported protocol declaration",
+                }));
+            };
             let lexical = self.path_to_string(path);
             let (ty, key) = self.resolve_qualified_type_with_parameter_key(path, span)?;
             let declaration = match &ty {

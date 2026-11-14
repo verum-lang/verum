@@ -295,3 +295,29 @@ fn test_dyn_with_complex_type_binding() {
         _ => panic!("Expected DynProtocol type, got: {:?}", ty.kind),
     }
 }
+
+
+#[test]
+fn dynamic_protocol_applications_preserve_every_argument() {
+    for source in ["dyn Policy<Int>", "dyn Policy<Self>", "dyn Plain + Policy<List<Int>>"] {
+        let ty = parse_type(source);
+        let TypeKind::DynProtocol {bounds, bindings} = ty.kind else {panic!("dynamic type")};
+        assert!(bindings.is_none());
+        let TypeBoundKind::GenericProtocol(application) = &bounds.last().unwrap().kind else {
+            panic!("dynamic application was erased: {source}: {bounds:?}");
+        };
+        let TypeKind::Generic {base, args} = &application.kind else {panic!("application")};
+        assert!(matches!(base.kind, TypeKind::Path(_)));
+        assert_eq!(args.len(), 1);
+        let GenericArg::Type(argument) = &args[0] else {panic!("type argument")};
+        if source.contains("List") {
+            let TypeKind::Generic {base, args} = &argument.kind else {panic!("nested List argument")};
+            assert!(matches!(&base.kind, TypeKind::Path(path) if path.to_string() == "List"));
+            assert!(matches!(&args[0], GenericArg::Type(ty) if matches!(ty.kind, TypeKind::Int)));
+        } else if source.contains("Self") {
+            assert!(matches!(&argument.kind, TypeKind::Path(path) if path.segments.as_slice() == [verum_ast::ty::PathSegment::SelfValue]));
+        } else {
+            assert!(matches!(argument.kind, TypeKind::Int));
+        }
+    }
+}

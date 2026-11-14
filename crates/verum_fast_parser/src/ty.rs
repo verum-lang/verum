@@ -3933,8 +3933,7 @@ impl<'a> RecursiveParser<'a> {
 
         // Dynamic protocol: dyn Display + Debug
         // With optional associated type bindings: dyn Container<Item = Int> + Display
-        // Note: For dyn types, we parse protocol paths WITHOUT generic arguments,
-        // because `<Item = Int>` is for associated type bindings, not type parameters.
+        // Retain protocol arguments separately from associated type equalities.
         if self.is_ident()
             && let Some(Token {
                 kind: TokenKind::Ident(name),
@@ -3960,79 +3959,43 @@ impl<'a> RecursiveParser<'a> {
                 ));
             }
 
-            // Parse first protocol bound (just the path, without type arguments)
-            let mut bounds = Vec::new();
-            let bound_start = self.stream.position();
-
-            // Negative bound: !Protocol
-            if self.stream.consume(&TokenKind::Bang).is_some() {
-                let path = self.parse_path()?;
-                let span = self.stream.make_span(bound_start);
-                bounds.push(TypeBound {
-                    kind: TypeBoundKind::NegativeProtocol(path),
-                    span,
-                });
-            } else {
-                // Positive bound: just the protocol path (not consuming <...>)
-                let path = self.parse_path()?;
-                let span = self.stream.make_span(bound_start);
-                bounds.push(TypeBound {
-                    kind: TypeBoundKind::Protocol(path),
-                    span,
-                });
-            }
-
-            // Parse optional associated type bindings: <Item = Int, State = String>
-            // — OR generic type parameters of the protocol path: `Sieve<C>`.
-            //
-
-            // The stdlib uses `&dyn Sieve<C>` (generic protocol) widely,
-            // alongside `dyn Container<Item = Int>` (associated-type
-            // bindings). Peek at the second token after `<`: an `=` means
-            // a binding (`Item = …`), anything else is a type parameter
-            // list. We do not mix the two — that would require grammar
-            // support we don't need in today's stdlib.
-            let bindings = if self.stream.check(&TokenKind::Lt) {
-                let is_binding = matches!(self.stream.peek_nth_kind(1), Some(TokenKind::Ident(_)))
-                    && self.stream.peek_nth_kind(2) == Some(&TokenKind::Eq);
-                if is_binding {
-                    self.stream.advance(); // consume '<'
-                    let bindings = self.parse_type_bindings()?;
-                    self.expect_gt()?;
-                    Maybe::Some(bindings)
-                } else {
-                    // Generic type parameters on the protocol path —
-                    // discard for now; the dyn protocol's erased
-                    // representation doesn't capture them. This keeps
-                    // `&dyn Sieve<C>` parseable without perturbing the
-                    // runtime `DynProtocol` shape.
-                    let _args = self.parse_generic_args()?;
-                    Maybe::None
-                }
-            } else {
-                Maybe::None
-            };
-
-            // Continue parsing additional bounds after type bindings: + Display + Debug
-            while self.stream.consume(&TokenKind::Plus).is_some() {
+            let mut bounds = List::new();
+            let mut bindings: Maybe<List<TypeBinding>> = Maybe::None;
+            loop {
                 let bound_start = self.stream.position();
-
-                // Negative bound: !Protocol
-                if self.stream.consume(&TokenKind::Bang).is_some() {
-                    let path = self.parse_path()?;
-                    let span = self.stream.make_span(bound_start);
-                    bounds.push(TypeBound {
-                        kind: TypeBoundKind::NegativeProtocol(path),
-                        span,
-                    });
+                let negative = self.stream.consume(&TokenKind::Bang).is_some();
+                let path = self.parse_path()?;
+                let mut kind = if negative {
+                    TypeBoundKind::NegativeProtocol(path.clone())
                 } else {
-                    // Positive bound: Protocol
-                    let path = self.parse_path()?;
-                    let span = self.stream.make_span(bound_start);
-                    bounds.push(TypeBound {
-                        kind: TypeBoundKind::Protocol(path),
-                        span,
-                    });
+                    TypeBoundKind::Protocol(path.clone())
+                };
+                if self.stream.check(&TokenKind::Lt) {
+                    let is_binding = matches!(self.stream.peek_nth_kind(1), Some(TokenKind::Ident(_)))
+                        && self.stream.peek_nth_kind(2) == Some(&TokenKind::Eq);
+                    if is_binding {
+                        self.stream.advance();
+                        let parsed = self.parse_type_bindings()?;
+                        self.expect_gt()?;
+                        bindings.get_or_insert_with(List::new).extend(parsed);
+                    } else {
+                        if negative {
+                            return Err(ParseError::invalid_syntax(
+                                "negative dynamic bounds cannot carry type arguments",
+                                self.stream.make_span(bound_start),
+                            ));
+                        }
+                        let args = self.parse_generic_args()?;
+                        let base = Type::new(TypeKind::Path(path.clone()), path.span);
+                        kind = TypeBoundKind::GenericProtocol(Type::new(
+                            TypeKind::Generic { base: Heap::new(base), args: args.into() },
+                            self.stream.make_span(bound_start),
+                        ));
+                    }
+                }
+                bounds.push(TypeBound { kind, span: self.stream.make_span(bound_start) });
+                if self.stream.consume(&TokenKind::Plus).is_none() {
+                    break;
                 }
             }
 
@@ -4040,7 +4003,7 @@ impl<'a> RecursiveParser<'a> {
 
             return Ok(Type::new(
                 TypeKind::DynProtocol {
-                    bounds: bounds.into_iter().collect::<List<_>>(),
+                    bounds,
                     bindings,
                 },
                 span,
