@@ -1775,6 +1775,9 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         // spelling would turn every twin into verum_main.
         // Source bodies are emitted after this declaration pass. Their LLVM
         // symbols are still bodyless here, but are not disposable forward stubs.
+        // Symbols installed by the backend belong to its ABI, independently
+        // of their spelling, signature or whether their bodies are emitted yet.
+        let native_symbols: Set<_> = self.module.get_functions().collect();
         let mut pending_source_bodies = Set::new();
         for (func_idx, func_desc) in vbc_module.functions.iter().enumerate() {
             // ABI normalization must never erase a declaration-only telescope
@@ -1909,8 +1912,8 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             // intrinsic identity and an exactly matching physical ABI.
             let intrinsic_declaration = func_desc.requires_intrinsic_implementation();
 
-            // Rename the ENTRY function to "verum_main" so the C
-            // runtime shim can call it. The entry is picked by the
+            // Publish the selected entry as "verum_main" for the native
+            // process entry. The declaration is selected by the
             // same rule the interpreter uses (VbcModule::entry_main):
             // matching the literal spelling "main" here left a
             // `module X;` program's `X.main` unrenamed — the shim's
@@ -1939,7 +1942,12 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             let llvm_fn = if intrinsic_declaration {
                 self.module.add_function(&func_name, fn_type, None)
             } else if let Some(existing) = self.module.get_function(&func_name) {
-                if existing.count_params() as usize != effective_params.len()
+                if native_symbols.contains(&existing) {
+                    // A source declaration never completes or replaces a native
+                    // declaration. Calls retain the exact VBC FunctionId binding.
+                    let source_name: Text = format!("{func_name}.__source_{}", func_desc.id.0).into();
+                    self.module.add_function(&source_name, fn_type, None)
+                } else if existing.count_params() as usize != effective_params.len()
                     && existing.count_basic_blocks() == 0
                     && !pending_source_bodies.contains(&existing)
                     && existing.as_global_value().as_pointer_value().get_first_use().is_none()

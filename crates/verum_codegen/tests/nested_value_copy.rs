@@ -407,7 +407,6 @@ fn transparent_fields_preserve_float_and_borrowed_carriers() {
 }
 
 #[test]
-#[ignore = "T2767: source read function collides with the native system ABI symbol"]
 fn a_float_returning_source_read_keeps_its_declared_identity() {
     run_native(
         r#"
