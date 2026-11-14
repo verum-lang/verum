@@ -35,14 +35,31 @@ fn queue<'a>(
     true
 }
 
-fn immediate(ty: &Type, borrowed_views: bool) -> Option<bool> {
+#[derive(Clone, Copy, PartialEq)]
+enum LoanInspection {
+    Stored,
+    Exposable,
+    Writable,
+}
+
+fn immediate(ty: &Type, inspection: LoanInspection) -> Option<bool> {
     match ty {
-        Type::Reference { .. }
-        | Type::CheckedReference { .. }
-        | Type::UnsafeReference { .. }
-        | Type::GenRef { .. } => Some(true),
+        Type::Reference { mutable, .. }
+        | Type::CheckedReference { mutable, .. }
+        | Type::UnsafeReference { mutable, .. } => {
+            Some(inspection != LoanInspection::Writable || *mutable)
+        }
+        Type::GenRef { .. } => Some(true),
+        Type::Pointer { mutable, .. } | Type::VolatilePointer { mutable, .. }
+            if inspection == LoanInspection::Writable =>
+        {
+            Some(*mutable)
+        }
         Type::Pointer { .. } | Type::VolatilePointer { .. } | Type::Slice { .. }
-            if borrowed_views => Some(true),
+            if inspection == LoanInspection::Exposable =>
+        {
+            Some(true)
+        }
         Type::Unit
         | Type::Never
         | Type::Bool
@@ -105,7 +122,8 @@ impl TypeChecker {
                     }
                     // A forward field has an owner but no arguments. Interpret
                     // a completed, closed declaration in its own lexical scope.
-                    Type::Placeholder { name, .. } => self.source_type_registration
+                    Type::Placeholder { name, .. } => self
+                        .source_type_registration
                         .completed_declaration(name)
                         .filter(|decl| decl.generics.is_empty() && decl.value_params.is_empty())
                         .and_then(|_| self.ctx.type_defs.get(name))
@@ -127,17 +145,21 @@ impl TypeChecker {
     /// A callable signature does not describe its captures, so callable storage
     /// remains unknown, like any other missing layout evidence.
     pub(super) fn carries_stored_loan(&self, ty: &Type) -> bool {
-        self.stored_loan_shape(ty, false)
+        self.stored_loan_shape(ty, LoanInspection::Stored)
     }
 
     /// An opaque call can re-expose a raw address or a borrowed view even if
     /// reading its elements would yield only scalars.
     pub(super) fn may_supply_call_borrow(&self, ty: &Type) -> bool {
-        self.stored_loan_shape(ty, true)
+        self.stored_loan_shape(ty, LoanInspection::Exposable)
     }
 
-    fn stored_loan_shape(&self, ty: &Type, borrowed_views: bool) -> bool {
-        if let Some(present) = immediate(ty, borrowed_views) {
+    pub(super) fn may_store_writable_reference(&self, ty: &Type) -> bool {
+        self.stored_loan_shape(ty, LoanInspection::Writable)
+    }
+
+    fn stored_loan_shape(&self, ty: &Type, inspection: LoanInspection) -> bool {
+        if let Some(present) = immediate(ty, inspection) {
             return present;
         }
         let mut pending = List::from_iter([Node { ty, scope: 0 }]);
@@ -154,7 +176,7 @@ impl TypeChecker {
             if !visited.insert(node.key()) {
                 continue;
             }
-            if let Some(present) = immediate(node.ty, borrowed_views) {
+            if let Some(present) = immediate(node.ty, inspection) {
                 if present {
                     return true;
                 }
@@ -202,7 +224,9 @@ impl TypeChecker {
                     // a same-named source record still needs its real layout.
                     if args.is_empty()
                         && self.ctx.builtin_type_definition(&name) == Some(node.ty)
-                        && verum_common::well_known_types::type_names::is_primitive_value_type(&name)
+                        && verum_common::well_known_types::type_names::is_primitive_value_type(
+                            &name,
+                        )
                     {
                         continue;
                     }

@@ -666,6 +666,11 @@ impl TypeChecker {
             }
             ExprKind::Call { args, .. } | ExprKind::MethodCall { args, .. } => {
                 let index = self.type_registry.returned_value(expr.span)?.forwarded_parameter()?;
+                let Type::Function { params, return_type, .. } =
+                    self.type_registry.lookup_call_target(expr.span)? else { return None };
+                if self.unifier.apply(params.get(index)?) != self.unifier.apply(return_type) {
+                    return None;
+                }
                 self.reference_result_origin(args.get(index)?)
             }
             _ => None,
@@ -814,6 +819,7 @@ impl TypeChecker {
     ) -> crate::Result<()> {
         let mut sources = List::new();
         let mut destinations = List::new();
+        let mut unknown_write = None;
         for (argument, receiver_mode, declared) in receiver.into_iter()
             .map(|(value, mode, ty)| (value, Some(mode), ty))
             .chain(args.iter().enumerate().map(|(index, value)|
@@ -854,14 +860,21 @@ impl TypeChecker {
             for origin in &origins {
                 if !sources.contains(origin) { sources.push(origin.clone()); }
             }
-            if mode == Some(true) && self.carries_stored_loan(payload) {
+            let writes_payload = mode == Some(true) && self.carries_stored_loan(payload);
+            let writes_through_value = mode.is_none()
+                && self.may_store_writable_reference(payload)
+                && !self.callable_has_closed_environment(argument);
+            if writes_payload || writes_through_value {
                 if origins.is_empty() {
-                    return Err(crate::TypeError::UnknownRecordOrigin { span: argument.span });
+                    unknown_write = Some(argument.span);
                 }
                 for origin in origins {
                     destinations.push((origin, argument.span));
                 }
             }
+        }
+        if let Some(span) = unknown_write {
+            self.ctx.env.invalidate_unknown_payload_write(span);
         }
         for (destination, span) in destinations {
             self.ctx.env.invalidate_payload_origins(&destination, span);

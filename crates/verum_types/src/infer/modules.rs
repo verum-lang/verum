@@ -10024,7 +10024,7 @@ impl TypeChecker {
             .map_err(|message| TypeError::UniverseBinding { message, span: func.span })?;
         scheme.where_clauses = structural_conditions.clone();
         self.record_callable_declaration(&mut scheme, func);
-        scheme.returned_value = super::returned_values::returned_value(func);
+        scheme.returned_value = super::returned_values::returned_value(self, func);
         let source_returned_value = scheme.returned_value.clone();
         let source_callable_declaration = scheme.callable_source.clone();
         let source_explicit_slots = scheme.explicit_method_vars.clone();

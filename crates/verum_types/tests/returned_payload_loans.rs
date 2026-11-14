@@ -233,3 +233,142 @@ fn renamed_imports_keep_the_selected_owners_return_rule() {
         }
     }
 }
+
+#[test]
+fn implicit_local_cleanup_cannot_hide_a_payload_write() {
+    let declarations = "type Drop is protocol {fn drop(&mut self);};
+        type affine DeferredWrite is {target:&mut Payload,source:&Int};
+        implement Drop for DeferredWrite {fn drop(&mut self) {self.target.ptr=self.source;}}
+        fn replace_later(target:&mut Payload,source:&Int) {
+            let pending=DeferredWrite{target,source}; ()
+        }";
+    assert!(
+        diagnostics(declarations, "").is_empty(),
+        "the destructor and callable must be valid"
+    );
+    let errors = diagnostics(
+        declarations,
+        "fn receive(input:&Int)->Payload {let mut container=Payload{ptr:input,marker:2};
+         {let local=3;replace_later(&mut container,&local);}
+         Payload{ptr:container.ptr,marker:container.marker}}",
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("does not live long enough")
+                || error.contains("cannot establish the lifetime")),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn owned_arguments_carry_mutable_storage_into_implicit_cleanup() {
+    let declarations = "type Drop is protocol {fn drop(&mut self);};
+        type affine DeferredWrite is {target:&mut Payload,source:&Int};
+        implement Drop for DeferredWrite {fn drop(&mut self) {self.target.ptr=self.source;}}
+        fn finish(pending:DeferredWrite) {}";
+    assert!(
+        diagnostics(declarations, "").is_empty(),
+        "the destructor and callable must be valid"
+    );
+    let errors = diagnostics(
+        declarations,
+        "fn receive(input:&Int)->Payload {let mut container=Payload{ptr:input,marker:2};
+         {let local=3;finish(DeferredWrite{target:&mut container,source:&local});}
+         Payload{ptr:container.ptr,marker:container.marker}}",
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("does not live long enough")
+                || error.contains("cannot establish the lifetime")),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn reference_and_scalar_locals_have_closed_cleanup() {
+    let errors = diagnostics(
+        "fn selected(source:&mut Payload,key:&Int)->Payload {
+            let alias=source; let marker=alias.marker;
+            Payload{ptr:alias.ptr,marker}
+        }",
+        "fn receive(input:&Int)->Payload {let mut container=Payload{ptr:input,marker:2};
+         let key=3;selected(&mut container,&key)}",
+    );
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn a_user_deref_body_is_not_a_direct_field_derivation() {
+    let declarations = "type Deref is protocol {type Target;fn deref(&self)->&Self.Target;};
+        type Wrapper is {value:Payload};
+        implement Deref for Wrapper {
+            type Target=Payload;
+            fn deref(&self)->&Payload {&self.value}
+        }
+        fn selected(source:&Wrapper,key:&Int)->Payload {
+            Payload{ptr:source.ptr,marker:source.marker}
+        }";
+    assert!(
+        diagnostics(declarations, "").is_empty(),
+        "the selected Deref body must be valid"
+    );
+    let errors = diagnostics(
+        declarations,
+        "fn receive(input:&Int)->Payload {let local=3;
+         let wrapper=Wrapper{value:Payload{ptr:&local,marker:2}};
+         selected(&wrapper,input)}",
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("does not live long enough")),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn an_unknown_callable_environment_invalidates_reachable_payload_facts() {
+    let errors = diagnostics(
+        "fn execute(operation:fn()) {operation();}",
+        "fn receive(input:&Int)->Payload {let mut container=Payload{ptr:input,marker:2};
+         {let local=3;execute(|| {container.ptr=&local;});}
+         Payload{ptr:container.ptr,marker:container.marker}}",
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("does not live long enough")
+                || error.contains("cannot establish the lifetime")),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn a_closed_callback_does_not_erase_unrelated_payload_facts() {
+    let errors = diagnostics(
+        "fn execute(operation:fn(Int)->Int) {operation(3);}",
+        "fn receive(input:&Int)->Payload {let container=Payload{ptr:input,marker:2};
+         execute(|value| value);
+         Payload{ptr:container.ptr,marker:container.marker}}",
+    );
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn empty_record_layouts_preserve_nominal_identity() {
+    let declarations = "type First is {}; type Second is {};
+        fn consume(first:First) {}";
+    let valid = diagnostics(
+        declarations,
+        "fn receive(input:&Int)->Payload {let container=Payload{ptr:input,marker:2};
+         consume(First{}); Payload{ptr:container.ptr,marker:container.marker}}",
+    );
+    assert!(valid.is_empty(), "{valid:?}");
+    let invalid = diagnostics(declarations, "fn wrong(second:Second) {consume(second);}");
+    assert!(
+        invalid.iter().any(|error| error.contains("mismatch")),
+        "{invalid:?}"
+    );
+}

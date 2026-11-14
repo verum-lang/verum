@@ -167,15 +167,17 @@ pub(crate) struct NominalApplication {
 pub(crate) struct ReturnedValue {
     pub nodes: List<ReturnedValueNode>,
     pub result: usize,
+    pub locals: List<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum ReturnedValueNode {
     Parameter(usize),
-    Independent,
+    Literal(Type),
     Field { source: usize, name: Text },
     TupleIndex { source: usize, index: usize },
-    Aggregate(List<usize>),
+    Tuple(List<usize>),
+    Record { owner: Text, fields: List<(Text, usize)> },
 }
 
 impl ReturnedValue {
@@ -1685,6 +1687,21 @@ impl TypeEnv {
             }
             let Some(parent) = scope.parent.as_deref_mut() else { return; };
             scope = parent;
+        }
+    }
+
+    /// A value with unknown captured storage can reach any live lexical place.
+    /// Keep the call valid while withdrawing payload facts that cannot survive
+    /// that write. A later dominating assignment establishes fresh facts.
+    pub(crate) fn invalidate_unknown_payload_write(&mut self, span: Span) {
+        let mut scope = self;
+        while scope.parent.is_some() {
+            for name in scope.bindings.keys() {
+                if !scope.type_parameter_mirrors.contains(name) {
+                    scope.record_places.entry(name.clone()).or_default().unverified_write = Some(span);
+                }
+            }
+            scope = scope.parent.as_deref_mut().expect("lexical parent");
         }
     }
 

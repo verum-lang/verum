@@ -338,3 +338,33 @@ fn a_mutating_call_cannot_publish_a_dangling_payload_archive() {
     let error = result.expect_err("a stored local loan must refuse archive publication");
     assert!(error.contains("does not live long enough"), "{error}");
 }
+
+#[test]
+fn implicit_user_cleanup_cannot_publish_a_dangling_payload_archive() {
+    let result = produce(
+        r#"
+        module core;
+        public module base {
+            public module protocols {
+                public type Drop is protocol {fn drop(&mut self);};
+            }
+        }
+        mount core.base.protocols.Drop;
+        type Payload is {ptr:&Int,marker:Int};
+        type affine DeferredWrite is {target:&mut Payload,source:&Int};
+        implement Drop for DeferredWrite {
+            fn drop(&mut self) {self.target.ptr=self.source;}
+        }
+        fn replace_later(target:&mut Payload,source:&Int) {
+            let pending=DeferredWrite{target,source}; ()
+        }
+        public fn probe(input:&Int)->Payload {
+            let mut container=Payload{ptr:input,marker:2};
+            {let local=3;replace_later(&mut container,&local);}
+            Payload{ptr:container.ptr,marker:container.marker}
+        }
+    "#,
+    );
+    let error = result.expect_err("user cleanup must retain the stored local loan");
+    assert!(error.contains("does not live long enough"), "{error}");
+}

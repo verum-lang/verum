@@ -1684,26 +1684,12 @@ impl TypeChecker {
                     });
                 }
 
-                // CRITICAL: Empty records (e.g., `type AtomicUsize is { };`) are opaque builtin types.
-                // These are used for types that have runtime representations but no accessible fields.
-                // They must be treated as opaque Named types, NOT as structural empty records.
-                //
-
-                // Examples:
-                // - `type AtomicUsize is { };` - Opaque atomic type for thread-safe counters
-                // - `type Mutex<T> is { };` - Opaque synchronization primitive
-                //
-
-                // Empty records are registered ONLY as Named types without field information.
-                // This prevents type checker from treating them as structural `{ }` types.
+                // A nominal identity and its storage layout are separate.
+                // Publish an explicit empty layout in both declaration passes.
                 if fields.is_empty() {
-                    // Register as opaque Named type (no field structure)
                     let named_type = self.declared_record_type(type_decl)?;
-                    // Store ONLY the named type, no __struct_fields_ entry
                     self.define_type_in_current_module(type_name.clone(), named_type);
-
-                    // Skip field structure registration for empty records
-                    // This prevents `{ }` from being used as the type in error messages
+                    self.publish_record_fields(&type_name, record_map, type_decl.span)?;
                 } else {
                     // Non-empty record: Register as Named type with field structure
 
@@ -6447,7 +6433,7 @@ impl TypeChecker {
         let mut scheme = scheme.with_universe_parameters(self.current_universe_parameters())
             .map_err(|message| TypeError::UniverseBinding { message, span: func.span })?;
         scheme.where_clauses = structural_conditions;
-        scheme.returned_value = super::returned_values::returned_value(func);
+        scheme.returned_value = super::returned_values::returned_value(self, func);
         self.record_callable_declaration(&mut scheme, func);
         Ok(scheme)
         })();
