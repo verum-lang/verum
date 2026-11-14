@@ -135,15 +135,17 @@ pub fn resource_discipline_with<'a>(
                 let substitution = TypeSubstitution::new(&descriptor.type_params, args);
                 let mut add_declared = |declared: Option<&TypeRef>| -> Option<()> {
                     let declared = declared?;
-                    if is_reference_or_callable(declared) {
-                        return Some(());
-                    }
                     if children.len() >= remaining || !bounded_type_shape(declared) {
                         return None;
                     }
                     let value = substitution.apply(declared).ok()?;
                     if !bounded_type_shape(&value) {
                         return None;
+                    }
+                    // The borrowed boundary changes ownership, not the validity
+                    // of its declaration-owned parameter substitution.
+                    if is_reference_or_callable(&value) {
+                        return Some(());
                     }
                     children.push((value, false));
                     Some(())
