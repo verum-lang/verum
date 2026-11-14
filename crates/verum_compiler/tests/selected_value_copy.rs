@@ -282,3 +282,88 @@ fn source_homonyms_do_not_inherit_registered_scalar_copy_permission() {
         assert!(errors.iter().any(|error| error.to_diagnostic().code() == Some("E400")), "{source}: {errors:?}");
     }
 }
+
+
+fn execute_nested_archive(source: &str, entry: &str, expected: i64) {
+    use verum_compiler::{CompilationPipeline, CompilerOptions, CoreConfig, Session};
+    let directory = tempfile::tempdir().unwrap();
+    let core = directory.path().join("core");
+    std::fs::create_dir(&core).unwrap();
+    std::fs::write(core.join("mod.vr"), source).unwrap();
+    let output = directory.path().join("selected.vbca");
+    let mut session = Session::new(CompilerOptions { input: core.join("mod.vr"), ..Default::default() });
+    let result = CompilationPipeline::new_core(&mut session, CoreConfig::new(&core).with_output(&output))
+        .compile_core().unwrap_or_else(|error| panic!("{error}\n{}", session.format_diagnostics()));
+    assert!(result.errors.is_empty(), "{:?}", result.errors);
+    let archive = verum_vbc::archive::read_archive_from_file(&output).unwrap();
+    let produced = archive.load_module("core").unwrap();
+    let wire = deserialize_module(&serialize_module(&produced).unwrap()).unwrap();
+    for (route, module) in [("archive", produced), ("wire", wire)] {
+        verum_vbc::validate::validate_module(&module).unwrap();
+        let function=module.find_function_by_name(entry).expect("declared archive entry");
+        let mut vm=Interpreter::try_new_validated(module.into()).unwrap();
+        vm.run_global_ctors().unwrap();
+        assert_eq!(vm.execute_function(function).unwrap_or_else(|error| panic!("{route}: {error:?}")).try_as_i64(), Some(expected), "{route}");
+    }
+}
+
+#[test]
+fn nested_namespaces_preserve_selected_copy_through_archive_and_wire() {
+    execute_nested_archive(r#"
+        module core;
+        public module outer { public module inner {
+            type Leaf is {value:Int};
+            fn duplicate(source:&Leaf)->Leaf {source.clone()}
+            public fn probe()->Int {
+                let mut original=Leaf {value:73};
+                let copied=duplicate(&original);
+                original.value=0;
+                copied.value+original.value
+            }
+        }}
+    "#, "core.outer.inner.probe", 73);
+}
+
+#[test]
+fn generic_protocol_default_preserves_selected_copy_through_archive_and_wire() {
+    execute_nested_archive(r#"
+        module core;
+        type Leaf is {value:Int};
+        type Factory<A> is protocol {
+            fn duplicate(&self, source:&Leaf)->Leaf {source.clone()}
+            fn marker(&self, value:A)->A;
+        };
+        type Maker is {seed:Int};
+        implement Factory<Int> for Maker {fn marker(&self, value:Int)->Int {value}}
+        public fn probe()->Int {
+            let maker=Maker {seed:0};
+            let mut original=Leaf {value:73};
+            let copied=maker.duplicate(&original);
+            original.value=0;
+            copied.value+original.value
+        }
+    "#, "core.probe", 73);
+}
+
+#[test]
+fn explicit_protocol_override_preserves_declared_behavior_through_archive_and_wire() {
+    execute_nested_archive(r#"
+        module core;
+            type Leaf is {value:Int};
+            implement Leaf {fn next(&self)->Leaf {Leaf {value:self.value+1}}}
+            type Factory<A> is protocol {
+                fn duplicate(&self, source:&Leaf)->Leaf {source.clone()}
+                fn marker(&self, value:A)->A;
+            };
+            type Maker is {seed:Int};
+            implement Factory<Int> for Maker {
+                fn duplicate(&self, source:&Leaf)->Leaf {source.next()}
+                fn marker(&self, value:Int)->Int {value}
+            }
+            public fn probe()->Int {
+                let maker=Maker {seed:0};
+                let original=Leaf {value:72};
+                maker.duplicate(&original).value
+            }
+    "#, "core.probe", 73);
+}

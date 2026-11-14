@@ -252,9 +252,7 @@ impl TypeChecker {
             calls: &self.resolved_call_targets,
             derefs: &self.deref_adjustments,
         };
-        for item in module.items.iter_mut() {
-            commit_resolved_in_item(item, &table);
-        }
+        commit_resolved_in_items(&mut module.items, &table);
     }
 
     /// Take ownership of the resolved-call-target side-table,
@@ -326,35 +324,64 @@ pub fn apply_resolved_call_targets(
         return;
     }
     let table = CommitTables { calls, derefs };
-    for item in module.items.iter_mut() {
-        commit_resolved_in_item(item, &table);
-    }
+    commit_resolved_in_items(&mut module.items, &table);
 }
 
-fn commit_resolved_in_item(
-    item: &mut verum_ast::decl::Item,
+fn commit_resolved_in_items(
+    items: &mut [verum_ast::decl::Item],
     table: &CommitTables<'_>,
 ) {
-    use verum_ast::decl::ItemKind;
-    use verum_common::Maybe;
-    match &mut item.kind {
-        ItemKind::Function(func) => {
-            if let Maybe::Some(body) = &mut func.body {
-                commit_resolved_in_function_body(body, table);
+    use verum_ast::decl::{ItemKind, TypeDeclBody};
+    use verum_common::{List, Maybe};
+    // Each pending reference names a distinct existing item. Namespace depth
+    // consumes worklist storage bounded by the admitted AST, not Rust frames.
+    let mut pending: List<_> = items.iter_mut().rev().collect();
+    while let Some(item) = pending.pop() {
+        match &mut item.kind {
+            ItemKind::Module(module) => {
+                if let Some(items) = &mut module.items {
+                    pending.extend(items.iter_mut().rev());
+                }
             }
-        }
-        ItemKind::Impl(impl_decl) => {
-            for impl_item in impl_decl.items.iter_mut() {
-                if let verum_ast::decl::ImplItemKind::Function(func) = &mut impl_item.kind
-                    && let Maybe::Some(body) = &mut func.body
-                {
+            ItemKind::Function(func) => {
+                if let Maybe::Some(body) = &mut func.body {
                     commit_resolved_in_function_body(body, table);
                 }
             }
+            ItemKind::Impl(impl_decl) => {
+                for impl_item in impl_decl.items.iter_mut() {
+                    if let verum_ast::decl::ImplItemKind::Function(func) = &mut impl_item.kind
+                        && let Maybe::Some(body) = &mut func.body
+                    {
+                        commit_resolved_in_function_body(body, table);
+                    }
+                }
+            }
+            ItemKind::Type(decl) => {
+                if let TypeDeclBody::Protocol(body) = &mut decl.body {
+                    commit_resolved_in_protocol_items(&mut body.items, table);
+                }
+            }
+            ItemKind::Protocol(decl) => {
+                commit_resolved_in_protocol_items(&mut decl.items, table);
+            }
+            ItemKind::Const(decl) => commit_resolved_in_expr(&mut decl.value, table, false),
+            ItemKind::Static(decl) => commit_resolved_in_expr(&mut decl.value, table, false),
+            _ => {}
         }
-        ItemKind::Const(decl) => commit_resolved_in_expr(&mut decl.value, table, false),
-        ItemKind::Static(decl) => commit_resolved_in_expr(&mut decl.value, table, false),
-        _ => {}
+    }
+}
+
+fn commit_resolved_in_protocol_items(
+    items: &mut [verum_ast::decl::ProtocolItem],
+    table: &CommitTables<'_>,
+) {
+    for item in items {
+        if let verum_ast::decl::ProtocolItemKind::Function { decl, default_impl } = &mut item.kind {
+            for body in decl.body.iter_mut().chain(default_impl.iter_mut()) {
+                commit_resolved_in_function_body(body, table);
+            }
+        }
     }
 }
 
@@ -401,7 +428,7 @@ fn commit_resolved_in_stmt(
             commit_resolved_in_block(else_block, table);
         }
         StmtKind::Expr { expr, .. } => commit_resolved_in_expr(expr, table, false),
-        StmtKind::Item(item) => commit_resolved_in_item(item, table),
+        StmtKind::Item(item) => commit_resolved_in_items(std::slice::from_mut(item), table),
         StmtKind::Defer(e) | StmtKind::Errdefer(e) => commit_resolved_in_expr(e, table, false),
         StmtKind::Provide { value, .. } => commit_resolved_in_expr(value, table, false),
         StmtKind::ProvideScope { value, block, .. } => {
