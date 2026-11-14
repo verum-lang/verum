@@ -226,3 +226,40 @@ fn actual_ntype_references_the_completed_local_istrunc_identity() {
     };
     assert_eq!(*base, protocol.id);
 }
+
+#[test]
+fn repeated_source_completion_keeps_declared_type_visibility() {
+    for (visibility, expected) in [
+        ("", verum_vbc::types::Visibility::Private),
+        ("public(cog)", verum_vbc::types::Visibility::Cog),
+        ("public", verum_vbc::types::Visibility::Public),
+    ] {
+        for body in [
+            "{ value: &Int }",
+            "fn(&Int) -> &Int",
+            "protocol { fn value(&self) -> &Int; }",
+        ] {
+            let ast = parsed("owner", &format!("{visibility} type Carrier is {body};"));
+            let first = interface("owner", &ast);
+            let second = complete("owner", &first, &ast).unwrap();
+            let third = complete("owner", &second, &ast).unwrap();
+            for module in [&first, &second, &third] {
+                let descriptor = module.types.iter()
+                    .find(|descriptor| module.get_string(descriptor.name)
+                        .is_some_and(|name| name == "Carrier" || name == "owner.Carrier"))
+                    .expect("the declared nominal owner exists after every completion");
+                assert_eq!(descriptor.visibility, expected, "{visibility}: {body}");
+            }
+        }
+    }
+}
+
+#[test]
+fn source_completion_rejects_forged_visibility() {
+    let ast = parsed("owner", "type Carrier is { value: &Int };");
+    let mut altered = interface("owner", &ast);
+    altered.types.iter_mut()
+        .find(|descriptor| descriptor.source_declaration.is_some()).unwrap()
+        .visibility = verum_vbc::types::Visibility::Public;
+    assert_fatal(complete("owner", &altered, &ast).unwrap_err());
+}

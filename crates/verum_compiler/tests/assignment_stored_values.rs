@@ -453,3 +453,58 @@ fn implicit_user_cleanup_cannot_publish_a_dangling_payload_archive() {
     let error = result.expect_err("user cleanup must retain the stored local loan");
     assert!(error.contains("does not live long enough"), "{error}");
 }
+
+
+#[test]
+fn a_proved_scalar_field_write_preserves_the_existing_payload_through_wire() {
+    execute(r#"
+        module core;
+        type Cell is {pointer:&Int,value:Int};
+        fn update(value:Int,unrelated:&Int,cell:&mut Cell) {cell.value=value;}
+        fn preserve(mut cell:Cell)->Cell {
+            let unrelated=4;
+            update(36,&unrelated,&mut cell);
+            cell
+        }
+        public fn probe()->Int {
+            let input=37;
+            let result=preserve(Cell{pointer:&input,value:0});
+            *result.pointer+result.value
+        }
+    "#,73);
+}
+
+#[test]
+fn a_proved_scalar_receiver_write_preserves_the_existing_payload_through_wire() {
+    execute(r#"
+        module core;
+        type Cell is {pointer:&Int,value:Int};
+        implement Cell {fn update(&mut self,value:Int,unrelated:&Int) {self.value=value;}}
+        fn preserve(mut cell:Cell)->Cell {
+            let unrelated=4;
+            cell.update(36,&unrelated);
+            cell
+        }
+        public fn probe()->Int {
+            let input=37;
+            let result=preserve(Cell{pointer:&input,value:0});
+            *result.pointer+result.value
+        }
+    "#,73);
+}
+
+#[test]
+fn a_mixed_scalar_and_reference_write_cannot_publish_a_dangling_archive() {
+    let result=produce(r#"
+        module core;
+        type Cell is {pointer:&Int,value:Int};
+        fn update(cell:&mut Cell,source:&Int) {cell.value=73;cell.pointer=source;}
+        public fn probe(input:&Int)->Cell {
+            let mut cell=Cell{pointer:input,value:0};
+            {let local=73;update(&mut cell,&local);}
+            cell
+        }
+    "#);
+    let error=result.expect_err("scalar writes must not hide a stored reference write");
+    assert!(error.contains("local") && error.contains("does not live long enough"),"{error}");
+}

@@ -65,6 +65,33 @@ fn selected(module: &VbcModule) -> &verum_vbc::module::FunctionDescriptor {
     function
 }
 
+fn import_bodies(codegen: &mut VbcCodegen, archived: &VbcModule) {
+    use verum_vbc::codegen::context::FunctionInfo;
+    // This is the existing archive body import interface. Only IDs are
+    // relocated; no lifecycle descriptor or body is supplied by the fixture.
+    let mut remap = Map::new();
+    for function in &archived.functions {
+        let id = FunctionId(5000 + function.id.0);
+        let name = archived.get_string(function.name).unwrap();
+        let owner = function
+            .origin_module
+            .and_then(|n| archived.get_string(n))
+            .unwrap_or(&archived.name);
+        let name = verum_vbc::module::qualify_module_name(owner, name);
+        codegen.ctx_mut().register_function(
+            name,
+            FunctionInfo {
+                id,
+                param_count: function.params.len(),
+                ..Default::default()
+            },
+        );
+        codegen.record_archive_function_descriptor(archived, function, id);
+        remap.insert(function.id.0, id);
+    }
+    codegen.merge_archive_function_bodies(archived, &remap.into_iter().collect());
+}
+
 #[test]
 fn canonical_generic_clone_keeps_its_receiver_telescope_through_wire() {
     let module = compile(
@@ -184,7 +211,6 @@ fn declaration_headers_do_not_advertise_an_uncompiled_clone_body() {
 
 #[test]
 fn actual_archive_import_remaps_clone_to_its_original_declaring_owner() {
-    use verum_vbc::codegen::context::FunctionInfo;
     let archived = wire(&compile(
         r#"
         module app;
@@ -196,29 +222,7 @@ fn actual_archive_import_remaps_clone_to_its_original_declaring_owner() {
     let original = selected(&archived).id;
     let mut codegen = VbcCodegen::with_config(CodegenConfig::new("consumer"));
     codegen.import_archive_module_types(&archived);
-    // This is the existing archive body import interface. Only IDs are
-    // relocated; no lifecycle descriptor or body is supplied by the fixture.
-    let mut remap = Map::new();
-    for function in &archived.functions {
-        let id = FunctionId(5000 + function.id.0);
-        let name = archived.get_string(function.name).unwrap();
-        let owner = function
-            .origin_module
-            .and_then(|n| archived.get_string(n))
-            .unwrap_or(&archived.name);
-        let name = verum_vbc::module::qualify_module_name(owner, name);
-        codegen.ctx_mut().register_function(
-            name,
-            FunctionInfo {
-                id,
-                param_count: function.params.len(),
-                ..Default::default()
-            },
-        );
-        codegen.record_archive_function_descriptor(&archived, function, id);
-        remap.insert(function.id.0, id);
-    }
-    codegen.merge_archive_function_bodies(&archived, &remap.into_iter().collect());
+    import_bodies(&mut codegen, &archived);
     let imported = wire(&codegen.finalize_module_from_state().unwrap());
     let clone = selected(&imported);
     let original = archived.get_function(original).unwrap();
@@ -245,4 +249,113 @@ fn an_inherent_namesake_does_not_replace_the_selected_protocol_body() {
         selected(&module).semantic_return,
         Some(TypeRef::Concrete(token(&module).id))
     );
+}
+
+#[test]
+fn nominal_header_completion_retains_the_selected_clone() {
+    let protocol = protocol();
+    let source = Parser::new(r#"
+        module app;
+        mount core.base.protocols.Clone as Reproduce;
+        type Token is { value: Int };
+        implement Reproduce for Token {
+            fn clone(&self)->Token { Token { value: self.value } }
+        }
+        public fn main()->Int { let original=Token{value:73}; original.clone().value }
+    "#).parse_module().unwrap();
+    let units: List<_> = [&protocol, &source].into_iter().collect();
+    let mut producer = VbcCodegen::with_config(CodegenConfig::new("app"));
+    producer.collect_unit_declarations(&units).unwrap();
+    // Replay the actual nominal header, preserving its lexical mounts. The
+    // implementation and every executable body remain the original source.
+    let mut header = source.clone();
+    header.items.retain(|item| matches!(&item.kind,
+        ItemKind::Module(_) | ItemKind::Mount(_) | ItemKind::Type(_)));
+    producer.collect_unit_declarations(&[&header]).unwrap();
+    producer.resolve_pending_imports();
+    producer.compile_unit_items(&units, ItemFailurePolicy::Strict).unwrap();
+    let produced = producer.finalize_module_from_state().unwrap();
+    let archived = wire(&produced);
+    let mut consumer = VbcCodegen::with_config(CodegenConfig::new("app"));
+    consumer.import_archive_module_types(&archived);
+    import_bodies(&mut consumer, &archived);
+    consumer.collect_unit_declarations(&[&header]).unwrap();
+    let completed = consumer.finalize_module_from_state().unwrap();
+    for module in [produced, archived, wire(&completed)] {
+        assert_eq!(token(&module).visibility, verum_vbc::types::Visibility::Private);
+        selected(&module);
+        let entry = module.find_function_by_name("app.main").unwrap();
+        let mut vm = verum_vbc::interpreter::Interpreter::new(module.into());
+        assert_eq!(vm.execute_function(entry).unwrap().try_as_i64(), Some(73));
+    }
+}
+
+#[test]
+fn a_foreign_owners_lifecycle_row_cannot_complete_a_same_shaped_record() {
+    let source = r#"
+        module app;
+        mount core.base.protocols.Clone;
+        type Token is { value: Int };
+        type Other is { value: Int };
+        implement Clone for Other {
+            fn clone(&self)->Other { Other { value: self.value } }
+        }
+    "#;
+    let original = compile(source);
+    let foreign = original.types.iter().find(|descriptor|
+        original.get_string(descriptor.name).is_some_and(|name|
+            name == "Other" || name == "app.Other")).unwrap().clone();
+    let target = token(&original).id;
+    for transfer_row in [false, true] {
+        let mut altered_module = original.clone();
+        let altered = altered_module.types.iter_mut()
+            .find(|descriptor| descriptor.id == target).unwrap();
+        altered.clone_fn = foreign.clone_fn;
+        if transfer_row { altered.protocols = foreign.protocols.clone(); }
+        assert!(altered.clone_fn.is_some());
+        let protocol = protocol();
+        let ast = Parser::new(source).parse_module().unwrap();
+        let mut consumer = VbcCodegen::with_config(CodegenConfig::new("app"));
+        consumer.import_archive_module_types(&altered_module);
+        // The type-only importer deliberately clears executable slots. Merge
+        // the actual selected source bodies before exercising completion.
+        import_bodies(&mut consumer, &altered_module);
+        let error = consumer.collect_declaration_interface(&[&protocol, &ast])
+            .expect_err("a real foreign body cannot acquire this declaration's lifecycle");
+        assert!(matches!(error.kind, verum_vbc::codegen::CodegenErrorKind::InvalidSourceSignature(_)),
+            "transfer_row={transfer_row}: {error:?}");
+    }
+}
+
+#[test]
+fn an_unrelated_declared_protocol_cannot_supply_canonical_clone_completion() {
+    let source = r#"
+        module app;
+        mount core.base.protocols.Clone;
+        type Token is { value: Int };
+        type LocalClone is protocol { fn clone(&self)->Self; };
+        implement LocalClone for Token {
+            fn clone(&self)->Token { Token { value: self.value } }
+        }
+    "#;
+    let mut altered = compile(source);
+    let canonical = altered.types.iter().find(|descriptor|
+        altered.get_string(descriptor.name) == Some("Clone")
+            && descriptor.origin_module.and_then(|owner| altered.get_string(owner))
+                == Some("core.base.protocols")).unwrap().id;
+    let target_id = token(&altered).id;
+    let target = altered.types.iter_mut().find(|descriptor| descriptor.id == target_id).unwrap();
+    assert_eq!(target.clone_fn, None);
+    assert_eq!(target.protocols.len(), 1);
+    target.clone_fn = Some(target.protocols[0].methods[0]);
+    target.protocols[0].protocol = verum_vbc::types::ProtocolId(canonical.0);
+    let protocol = protocol();
+    let ast = Parser::new(source).parse_module().unwrap();
+    let mut consumer = VbcCodegen::with_config(CodegenConfig::new("app"));
+    consumer.import_archive_module_types(&altered);
+    import_bodies(&mut consumer, &altered);
+    let error = consumer.collect_declaration_interface(&[&protocol, &ast])
+        .expect_err("the selected implementation must actually declare canonical Clone");
+    assert!(matches!(error.kind, verum_vbc::codegen::CodegenErrorKind::InvalidSourceSignature(_)),
+        "{error:?}");
 }

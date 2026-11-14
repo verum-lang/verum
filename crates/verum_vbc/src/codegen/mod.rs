@@ -7118,8 +7118,14 @@ impl VbcCodegen {
         self.push_type_with_carrier_eligibility(ty, eligible, false);
     }
 
-    fn push_declared_type(&mut self, mut ty: TypeDescriptor) {
+    fn push_declared_type(
+        &mut self, mut ty: TypeDescriptor, declaration: &verum_ast::TypeDecl,
+    ) -> CodegenResult<()> {
+        // Source policy belongs to the descriptor before it is observed or
+        // compared with an earlier interface of this same declaration.
+        ty.visibility = self.lower_field_visibility(&declaration.visibility)?.0;
         self.take_pending_implementation_attachments(&mut ty);
+        self.complete_declared_lifecycle(&mut ty)?;
         let complete_forward = self.type_declaration_identity(&ty).is_some_and(|owner| {
             self.type_by_id(ty.id)
                 .is_some_and(|prior| self.type_declaration_identity(prior).as_ref() == Some(&owner))
@@ -7127,6 +7133,7 @@ impl VbcCodegen {
         });
         let eligible = self.impl_only_scalar_carrier(&ty);
         self.push_type_with_carrier_eligibility(ty, eligible, complete_forward);
+        self.check_source_declaration_error()
     }
 
     /// Canonical declaration identity in this codegen's string pool. Semantic
@@ -10266,20 +10273,6 @@ impl VbcCodegen {
                         )));
                     }
                     self.attach_source_declaration(index, source_declaration);
-                }
-                // Descriptor constructors default to public. The source
-                // declaration owns export policy, including glob imports.
-                let (visibility, _) = self.lower_field_visibility(&type_decl.visibility)?;
-                let owner = self.ctx.current_source_module.as_deref()
-                    .unwrap_or(&self.config.module_name);
-                let qualified = format!("{owner}.{}", type_decl.name.name);
-                if let Some(id) = self.type_name_to_id.get(&qualified)
-                    .or_else(|| self.type_name_to_id.get(type_decl.name.name.as_str())).copied()
-                    && let Some(declaration) = self.types.iter_mut().find(|ty| ty.id == id
-                        && self.ctx.strings.get(ty.name.0 as usize).is_some_and(|name|
-                            name == type_decl.name.name.as_str() || name == &qualified))
-                {
-                    declaration.visibility = visibility;
                 }
                 // Register record field layouts for sequential field indexing
                 if let TypeDeclBody::Record(fields) = &type_decl.body {
@@ -15373,7 +15366,7 @@ impl VbcCodegen {
                             alias_target_name: Some(target_name),
                             ..Default::default()
                         };
-                        self.push_declared_type(type_desc);
+                        self.push_declared_type(type_desc, type_decl)?;
                         return Ok(());
                     }
                 }
@@ -15836,7 +15829,7 @@ impl VbcCodegen {
                     type_id.0,
                     sum_desc.variants.len(),
                 );
-                self.push_declared_type(sum_desc);
+                self.push_declared_type(sum_desc, type_decl)?;
             }
 
             // Record types: register the type name as a constructor
@@ -16002,7 +15995,7 @@ impl VbcCodegen {
                     }
                 }
 
-                self.push_declared_type(type_desc);
+                self.push_declared_type(type_desc, type_decl)?;
 
                 self.register_nominal_constructor(type_id, &type_name)?;
             }
@@ -16110,7 +16103,7 @@ impl VbcCodegen {
                     }
                 }
 
-                self.push_declared_type(type_desc);
+                self.push_declared_type(type_desc, type_decl)?;
             }
 
             // Type aliases: register mapping from alias name to base type
@@ -16220,7 +16213,7 @@ impl VbcCodegen {
                     source_declaration: None,
                     source_inherent_implementations: Default::default(),
                 };
-                self.push_declared_type(type_desc);
+                self.push_declared_type(type_desc, type_decl)?;
             }
 
             // Newtype and tuple types: register the type name as constructor
@@ -16293,7 +16286,7 @@ impl VbcCodegen {
                     ),
                     });
                 type_desc.size = 8; // single inner value (one Value-slot)
-                self.push_declared_type(type_desc);
+                self.push_declared_type(type_desc, type_decl)?;
 
                 self.register_nominal_constructor(type_id, &type_name)?;
             }
@@ -16369,7 +16362,7 @@ impl VbcCodegen {
                     });
                 }
                 type_desc.size = (types.len() as u32) * 8;
-                self.push_declared_type(type_desc);
+                self.push_declared_type(type_desc, type_decl)?;
 
                 self.register_nominal_constructor(type_id, &type_name)?;
             }
@@ -16404,7 +16397,7 @@ impl VbcCodegen {
                     type_params: generics.parameters,
                     ..Default::default()
                 };
-                self.push_declared_type(type_desc);
+                self.push_declared_type(type_desc, type_decl)?;
 
                 self.register_nominal_constructor(type_id, &type_name)?;
             }
@@ -16566,7 +16559,7 @@ impl VbcCodegen {
                     ..Default::default()
                 };
                 type_desc.size = 8;
-                self.push_declared_type(type_desc);
+                self.push_declared_type(type_desc, type_decl)?;
             }
         }
         Ok(())
@@ -26228,6 +26221,12 @@ impl VbcCodegen {
             };
             let drop_fn = source.drop_fn.and_then(resolve);
             let clone_fn = source.clone_fn.and_then(resolve);
+            if let Err(error) = self.complete_imported_lifecycle_slots(
+                archive_module, source, local, drop_fn, clone_fn,
+            ) {
+                self.record_source_declaration_error(error);
+                return 0;
+            }
             if let Some(target) = self.types.iter_mut().find(|ty| ty.id == local) {
                 if drop_fn.is_some() {
                     target.drop_fn = drop_fn;

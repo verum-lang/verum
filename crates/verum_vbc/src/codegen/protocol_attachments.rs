@@ -146,6 +146,99 @@ impl VbcCodegen {
         self.attach_impl_to_undeclared_target(name, fact)
     }
 
+    /// Archive body transport changes the selected function ID. Carry the
+    /// corresponding lifecycle slot only when the existing importer proves
+    /// its source member, target and complete callable signature. Numeric ID
+    /// remapping alone cannot establish a protocol slot's ownership.
+    pub(super) fn complete_imported_lifecycle_slots(
+        &mut self, module: &crate::module::VbcModule, source: &TypeDescriptor,
+        local: TypeId, drop_fn: Maybe<u32>, clone_fn: Maybe<u32>,
+    ) -> CodegenResult<()> {
+        for row in &source.protocols {
+            let Some(declaration) = module.get_type(TypeId(row.protocol.0)) else { continue; };
+            let Some(key) = super::bootstrap_types::identity(module, declaration) else { continue; };
+            let Some(&protocol) = self.type_name_to_id.get(&key) else { continue; };
+            let (member, source_id, target_id) = match self.declared_protocol_role(protocol) {
+                Some(WellKnownProtocol::Drop) => ("drop", source.drop_fn, drop_fn),
+                Some(WellKnownProtocol::Clone) => ("clone", source.clone_fn, clone_fn),
+                _ => continue,
+            };
+            let (Some(source_id), Some(target_id)) = (source_id, target_id) else { continue; };
+            let Some(member) = declaration.variants.iter()
+                .find(|variant| module.strings.get(variant.name) == Some(member)) else { continue; };
+            let slot = member.tag as usize;
+            if row.methods.get(slot) != Some(&source_id) { continue; }
+            let slots = self.import_protocol_slots(module, source, row)?;
+            if slots.get(slot) != Some(&target_id) { continue; }
+            if let Some(target) = self.types.iter_mut().find(|ty| ty.id == local) {
+                for imported in &mut target.protocols {
+                    if imported.protocol.0 == protocol.0
+                        && imported.source_implementation == row.source_implementation
+                        && imported.methods.get(slot) == Some(&source_id)
+                    {
+                        imported.methods[slot] = target_id;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Rebuilding a source descriptor must retain its selected lifecycle
+    /// implementation, not invent a fresh default slot. The exact protocol
+    /// row and its declaring target establish this fact; a same-spelled type
+    /// or a bare function ID does not. Conflicting incoming slots remain
+    /// unchanged so the ordinary descriptor equality gate rejects them.
+    pub(super) fn complete_declared_lifecycle(
+        &mut self, target: &mut TypeDescriptor,
+    ) -> CodegenResult<()> {
+        let Some(owner) = self.type_declaration_identity(target) else { return Ok(()); };
+        let Some(previous) = self.type_by_id(target.id).filter(|previous|
+            self.type_declaration_identity(previous).as_ref() == Some(&owner)
+        ) else { return Ok(()); };
+        if previous.drop_fn.is_none() && previous.clone_fn.is_none() { return Ok(()); }
+        let mut selected = verum_common::List::new();
+        for row in &previous.protocols {
+            let Some(source) = row.source_implementation.as_ref() else { continue; };
+            let protocol = TypeId(row.protocol.0);
+            let Some(declaration) = self.type_by_id(protocol) else { continue; };
+            let names: verum_common::List<_> = declaration.variants.iter()
+                .filter_map(|member| self.ctx.strings.get(member.name.0 as usize))
+                .collect();
+            // Missing strings must not compact the vtable slot numbering.
+            if names.len() != declaration.variants.len() { continue; }
+            let Some(method) = self.declared_lifecycle_method(protocol, &names, &row.methods)?
+                else { continue; };
+            let retained = match method {
+                LifecycleMethod::Drop(id) => previous.drop_fn == Some(id.0),
+                LifecycleMethod::Clone(id) => previous.clone_fn == Some(id.0),
+            };
+            if retained { selected.push((source.clone(), protocol, method)); }
+        }
+        for (source, protocol, method) in selected {
+            let declaration = source.declaration().map_err(|message| CodegenError::new(
+                CodegenErrorKind::InvalidSourceSignature(message.into_string()),
+            ))?;
+            let same_target = self.with_protocol_source_scope(
+                Some(source.origin_module().into()), Default::default(), None,
+                |codegen| {
+                    let ImplKind::Protocol { protocol: written, .. } = &declaration.kind else {
+                        return Ok(false);
+                    };
+                    Ok(codegen.implementation_nominal_id(&declaration.kind) == Some(target.id)
+                        && codegen.nominal_type_id(&Self::format_type_path(written)) == Some(protocol))
+                },
+            )?;
+            if same_target {
+                match method {
+                    LifecycleMethod::Drop(id) => { target.drop_fn.get_or_insert(id.0); }
+                    LifecycleMethod::Clone(id) => { target.clone_fn.get_or_insert(id.0); }
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn take_pending_implementation_attachments(&mut self, target: &mut TypeDescriptor) {
         if let Some(facts) = self.pending_implementation_attachments.remove(&target.id) {
             for fact in facts {

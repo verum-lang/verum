@@ -916,7 +916,7 @@ impl VbcCodegen {
     /// A source-local function ID is only a hint. Transfer an explicit slot
     /// when its protocol member, owning implementation and retained callable
     /// signature identify the same declaration in the producer.
-    fn import_protocol_slots(
+    pub(super) fn import_protocol_slots(
         &self, module: &VbcModule, receiver: &TypeDescriptor, row: &crate::types::ProtocolImpl,
     ) -> CodegenResult<Vec<u32>> {
         let Some(source) = row.source_implementation.as_ref().filter(|_| !row.methods.is_empty()) else {
