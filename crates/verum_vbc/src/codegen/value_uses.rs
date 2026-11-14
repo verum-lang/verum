@@ -399,7 +399,8 @@ impl super::VbcCodegen {
     pub(super) fn emit_local_drop(&mut self, src: Reg, declared: Option<&TypeRef>) {
         if let Some(ty) = declared
             && (matches!(ty, TypeRef::Reference { .. })
-                || matches!(ty, TypeRef::Instantiated { base, .. } if !base.is_semantic_type()
+                || matches!(ty, TypeRef::Concrete(base) | TypeRef::Instantiated { base, .. }
+                    if !base.is_semantic_type()
                     && self.type_by_id(*base).is_some_and(|descriptor| descriptor.drop_fn.is_some())))
         {
             // The typed reference plan retires the binding slot and leaves its referent live.

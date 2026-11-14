@@ -62,6 +62,34 @@ fn execute(source: &str, expected: i64) {
 }
 
 #[test]
+fn automatic_user_cleanup_runs_its_declared_mutation() {
+    execute(
+        r#"
+        module core;
+        public module base {
+            public module protocols {
+                public type Drop is protocol {fn drop(&mut self);};
+            }
+        }
+        mount core.base.protocols.Drop;
+        type affine DeferredWrite is {target:&mut Int};
+        implement Drop for DeferredWrite {
+            fn drop(&mut self) {*self.target=73;}
+        }
+        fn replace_later(target:&mut Int) {
+            let pending=DeferredWrite{target}; ()
+        }
+        public fn probe()->Int {
+            let mut value=0;
+            replace_later(&mut value);
+            value
+        }
+    "#,
+        73,
+    );
+}
+
+#[test]
 fn borrowed_variant_payloads_update_successive_fields() {
     execute(
         r#"
