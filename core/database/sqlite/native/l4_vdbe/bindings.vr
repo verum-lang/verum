@@ -45,7 +45,7 @@ module core.database.sqlite.native.l4_vdbe.bindings;
 
 mount collections.{List, Map};
 mount base.{Text, Maybe};
-mount core.database.sqlite.native.l4_vdbe.register.{Register, Register.RNull};
+mount core.database.sqlite.native.l4_vdbe.register.Register;
 
 // -----------------------------------------------------------------------------
 // Binding table
@@ -102,8 +102,7 @@ implement ParamBindings {
 
     /// Read named slot `name`. Returns `RNull` when absent.
     public fn get_named(&self, name: &Text) -> Register {
-        if !self.named.contains_key(name.clone()) { return Register.RNull; }
-        self.named.get(name.clone())
+        self.named.get_or(name.clone(), Register.RNull)
     }
 
     /// Number of positional slots currently populated (highest 1-based
@@ -113,4 +112,14 @@ implement ParamBindings {
 
     /// Snapshot of the named-binding key set for introspection.
     public fn named_count(&self) -> Int { self.named.len() }
+}
+
+// Each statement step installs a snapshot whose containers own their storage.
+implement Clone for ParamBindings {
+    fn clone(&self) -> ParamBindings {
+        ParamBindings {
+            positional: self.positional.clone(),
+            named: self.named.clone(),
+        }
+    }
 }

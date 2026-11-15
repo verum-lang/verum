@@ -35,9 +35,12 @@ public mount .connection.{
     mode_can_write, mode_can_ddl, mode_name,
 };
 
+public mount core.database.sqlite.native.l4_vdbe.bindings.{
+    ParamBindings, param_bindings_new,
+};
+
 public mount .statement.{
-    ParamBindings, PreparedStatement, StmtError,
-    param_bindings_new, prepare, prepare_with_schema,
+    PreparedStatement, StmtError, prepare, prepare_with_schema,
 };
 
 public mount .bridge.{

@@ -1,0 +1,36 @@
+mount core.database.sqlite.native.l4_vdbe.bindings.param_bindings_new;
+mount core.database.sqlite.native.l4_vdbe.register.Register;
+
+@test
+fn cloned_bindings_own_independent_positional_storage() {
+    let mut original = param_bindings_new();
+    original.set_positional(2, Register.RInt(73_i64));
+    let mut copied = original.clone();
+    original.set_positional(2, Register.RInt(91_i64));
+    assert_eq(match copied.get_positional(2) { Register.RInt(n) => n, _ => -1_i64 }, 73_i64);
+    assert_eq(match original.get_positional(2) { Register.RInt(n) => n, _ => -1_i64 }, 91_i64);
+    original.clear();
+    assert_eq(copied.positional_count(), 2);
+    assert_eq(match copied.get_positional(2) { Register.RInt(n) => n, _ => -1_i64 }, 73_i64);
+    copied.clear();
+    assert_eq(copied.positional_count(), 0);
+}
+
+@test
+fn cloned_bindings_own_independent_named_storage() {
+    let mut original = param_bindings_new();
+    original.set_named("key", Register.RInt(73_i64));
+    let mut copied = original.clone();
+    original.set_named("key", Register.RInt(91_i64));
+    assert_eq(match copied.get_named(&"key") { Register.RInt(n) => n, _ => -1_i64 }, 73_i64);
+    assert_eq(match original.get_named(&"key") { Register.RInt(n) => n, _ => -1_i64 }, 91_i64);
+    copied.set_named("other", Register.RInt(19_i64));
+    assert_eq(original.named_count(), 1);
+    assert_eq(copied.named_count(), 2);
+    original.clear();
+    assert_eq(match copied.get_named(&"key") { Register.RInt(n) => n, _ => -1_i64 }, 73_i64);
+    copied.clear();
+    assert_eq(copied.named_count(), 0);
+}
+
+fn main() {}

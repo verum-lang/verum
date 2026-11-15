@@ -32,67 +32,18 @@ module core.database.sqlite.native.l6_session.statement;
 // new one while preserving the compiled program.
 // =============================================================================
 
-mount collections.{List, Map};
-mount base.{Result, Ok, Err, Text, Maybe};
+mount collections.List;
+mount base.{Result, Ok, Err, Text};
 mount core.database.sqlite.native.l4_vdbe.{
     Register, RegisterFile, register_file_new,
     Opcode, VdbeProgram, VdbeState, vdbe_state_new, step, StepResult,
     run_until_row, CursorTable, cursor_table_new,
-    CursorSlotKind,
+    CursorSlotKind, ParamBindings, param_bindings_new,
 };
 mount core.database.sqlite.native.l5_sql.{
-    compile, compile_with_schema, CompileError, VdbeProgram as _VdbeProgram,
+    compile, compile_with_schema, CompileError,
 };
 mount core.database.sqlite.native.l6_session.schema_cache.SchemaCache;
-
-// -----------------------------------------------------------------------------
-// Binding table
-// -----------------------------------------------------------------------------
-
-public type ParamBindings is {
-    // Indexed params: `?1` / `?`. Slot 0 holds `?1`; `?` auto-index.
-    positional: List<Register>,
-    // Named params: `:name` / `@name` / `$name`.
-    named: Map<Text, Register>,
-};
-
-public fn param_bindings_new() -> ParamBindings {
-    ParamBindings {
-        positional: List.new(),
-        named: Map.new(),
-    }
-}
-
-implement ParamBindings {
-    public fn clear(&mut self) {
-        self.positional = List.new();
-        self.named = Map.new();
-    }
-
-    /// Ensure the positional slot `idx` (1-based per SQLite convention)
-    /// exists, padding with RNull as needed.
-    public fn set_positional(&mut self, idx: Int, value: Register) {
-        if idx < 1 { return; }
-        while self.positional.len() < idx {
-            self.positional.push(Register.RNull);
-        }
-        self.positional[idx - 1] = value;
-    }
-
-    public fn set_named(&mut self, name: Text, value: Register) {
-        let _ = self.named.insert(name, value);
-    }
-
-    public fn get_positional(&self, idx: Int) -> Register {
-        if idx < 1 || idx > self.positional.len() { return Register.RNull; }
-        self.positional[idx - 1]
-    }
-
-    public fn get_named(&self, name: &Text) -> Register {
-        if !self.named.contains_key(name.clone()) { return Register.RNull; }
-        self.named.get(name.clone())
-    }
-}
 
 // -----------------------------------------------------------------------------
 // PreparedStatement
