@@ -8011,7 +8011,8 @@ impl TypeChecker {
         else {
             unreachable!()
         };
-        let preserves_input_payloads = self.returned_value_origins(expr).is_some();
+        let preserves_input_payloads = self.type_registry.constructed_value(expr.span).is_some()
+            || self.returned_value_origins(expr).is_some();
         self.check_call_loans(args, Some(&params), None, !preserves_input_payloads)?;
 
         // Consume affine values passed by value

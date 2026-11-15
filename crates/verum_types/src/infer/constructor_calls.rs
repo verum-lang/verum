@@ -167,6 +167,9 @@ impl TypeChecker {
             }
             Ok(())
         })?;
+        // Construction does not execute a callee, but its payloads still
+        // coexist and must obey the same argument-loan and move rules.
+        self.check_call_loans(args, Some(params), None, false)?;
         self.consume_affine_call_args(args, params)?;
         let result = self.unifier.apply(result);
         let result = if Self::contains_type_app(&result) {
@@ -184,7 +187,7 @@ impl TypeChecker {
             result.clone(),
             PropertyRequirement::value_construction(),
         );
-        self.type_registry.register_call_target(span, target);
+        self.type_registry.register_data_constructor_target(span, target, result.clone());
         Ok(InferResult::method(
             result,
             Some(crate::core_metadata::ReceiverKind::None),

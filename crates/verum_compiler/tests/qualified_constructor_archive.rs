@@ -243,3 +243,24 @@ fn an_eager_constructor_rejects_a_changed_source_registry() {
         "{errors:?}"
     );
 }
+
+#[test]
+fn archive_constructor_selection_preserves_payload_loan_rules() {
+    let provider = "module core.provider; public type Choice<T> is Empty | Hold(T);";
+    let archive = compile_provider(provider, "public fn probe()->Int {73}").unwrap();
+    for eager in [false, true] {
+        for source in [
+            "mount core.provider.Choice; fn wrap(callback:fn()->Int)->Choice<fn()->Int> {let value=Choice.Hold(callback);value}",
+        ] {
+            let found = archive_errors(&mut archive_checker(&archive, eager), source);
+            assert!(found.is_empty(), "eager={eager}, {source}: {found:?}");
+        }
+        for (source, expected) in [
+            ("mount core.provider.Choice; fn invoke(callback:fn()->Int)->Choice<fn()->Int>; fn invalid(callback:fn()->Int)->Choice<fn()->Int> {let value=invoke(callback);value}", "cannot establish the lifetime"),
+            ("mount core.provider.Choice; fn invalid()->Choice<&Int> {let local=73;let value=Choice.Hold(&local);value}", "DanglingReference"),
+        ] {
+            let found = archive_errors(&mut archive_checker(&archive, eager), source);
+            assert!(found.iter().any(|e| e.contains(expected)), "eager={eager}, {source}: {found:?}");
+        }
+    }
+}

@@ -17279,7 +17279,8 @@ impl TypeChecker {
                 Some(Type::Function { params, .. }) if params.len() == args.len() => Some(params.as_slice()),
                 _ => None,
             };
-            let preserves_input_payloads = tc.returned_call_value_origins(span, args, Some(receiver)).is_some();
+            let preserves_input_payloads = tc.type_registry.constructed_value(span).is_some()
+                || tc.returned_call_value_origins(span, args, Some(receiver)).is_some();
             tc.check_call_loans(args, parameters, borrow, !preserves_input_payloads)?;
             match kind {
                 Some(kind) if !kind.meta().allows_mutation => {}
@@ -24215,6 +24216,11 @@ bake to have this verified.",
                         };
 
                         self.retain_value_instance_obligations(&instance, span)?;
+                        if scheme.value_declaration.as_ref()
+                            .is_some_and(|declaration| declaration.constructor_owner.is_some())
+                        {
+                            return self.check_constructor_call(args, params, return_type, span).map(Some);
+                        }
                         for (arg, param_ty) in args.iter().zip(params.iter()) {
                             let resolved_param = self.unifier.apply(param_ty);
                             self.check_expr(arg, &resolved_param)?;

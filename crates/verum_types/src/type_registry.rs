@@ -50,6 +50,8 @@ struct CallTarget {
     declared_receiver: Option<Type>,
     returned_value: Option<Shared<crate::context::ReturnedValue>>,
     structural_receiver: Option<Type>,
+    /// The resolver selected data construction, independently of callable properties.
+    constructed_value: Option<Type>,
 }
 
 /// Registry mapping AST nodes to inferred types
@@ -114,7 +116,7 @@ impl TypeRegistry {
     }
 
     pub fn register_call_target(&mut self, span: Span, ty: Type) {
-        self.record_call_target(span, ty, false, None, None, None);
+        self.record_call_target(span, ty, false, None, None, None, None);
     }
 
     pub(crate) fn register_declared_static_target(
@@ -134,7 +136,13 @@ impl TypeRegistry {
                 && !source.is_variadic
                 && source.body.is_some()
         });
-        self.record_call_target(span, ty, explicit_inputs, None, scheme.returned_value.clone(), None);
+        let constructed_value = scheme.value_declaration.as_ref()
+            .filter(|declaration| declaration.constructor_owner.is_some())
+            .and_then(|_| match &ty {
+                Type::Function { return_type, .. } => Some(return_type.as_ref().clone()),
+                _ => None,
+            });
+        self.record_call_target(span, ty, explicit_inputs, None, scheme.returned_value.clone(), None, constructed_value);
     }
 
     /// A selected source receiver is separate from the explicit argument list.
@@ -160,18 +168,28 @@ impl TypeRegistry {
             };
             Some(Type::Reference { inner: Box::new(receiver), mutable })
         });
-        self.record_call_target(span, ty, false, declared_receiver, scheme.returned_value.clone(), None);
+        self.record_call_target(span, ty, false, declared_receiver, scheme.returned_value.clone(), None, None);
     }
 
     /// The structural operation resolver, rather than a callable property,
     /// certifies that this selected operation reads a declared receiver.
     pub(crate) fn register_structural_call_target(&mut self, span: Span, ty: Type, receiver: Type) {
-        self.record_call_target(span, ty, false, None, None, Some(receiver));
+        self.record_call_target(span, ty, false, None, None, Some(receiver), None);
     }
 
     pub(crate) fn structural_call_target(&self, span: Span) -> Option<(&Type, &Type)> {
         let target = self.call_targets.get(&span)?;
         Some((&target.ty, target.structural_receiver.as_ref()?))
+    }
+
+    /// Contextual constructor checking has already selected and checked the
+    /// data operation. Its arguments still undergo ordinary loan checking.
+    pub(crate) fn register_data_constructor_target(&mut self, span: Span, ty: Type, result: Type) {
+        self.record_call_target(span, ty, false, None, None, None, Some(result));
+    }
+
+    pub(crate) fn constructed_value(&self, span: Span) -> Option<&Type> {
+        self.call_targets.get(&span)?.constructed_value.as_ref()
     }
 
     fn record_call_target(
@@ -182,22 +200,25 @@ impl TypeRegistry {
         declared_receiver: Option<Type>,
         returned_value: Option<Shared<crate::context::ReturnedValue>>,
         structural_receiver: Option<Type>,
+        constructed_value: Option<Type>,
     ) {
         let previous = self.call_targets.get(&span);
         let agreed = !span.is_empty() && explicit_inputs
             && previous.is_none_or(|previous| previous.explicit_inputs && previous.ty == ty);
-        let same_rule = !span.is_empty() && (explicit_inputs || declared_receiver.is_some() || structural_receiver.is_some())
+        let same_rule = !span.is_empty() && (explicit_inputs || declared_receiver.is_some() || structural_receiver.is_some() || constructed_value.is_some())
             && previous.is_none_or(|previous| previous.ty == ty
                 && previous.explicit_inputs == explicit_inputs
                 && previous.declared_receiver == declared_receiver
                 && previous.returned_value == returned_value
-                && previous.structural_receiver == structural_receiver);
+                && previous.structural_receiver == structural_receiver
+                && previous.constructed_value == constructed_value);
         self.call_targets.insert(span, CallTarget {
             ty,
             explicit_inputs: agreed,
             declared_receiver: same_rule.then_some(declared_receiver).flatten(),
             returned_value: same_rule.then_some(returned_value).flatten(),
             structural_receiver: same_rule.then_some(structural_receiver).flatten(),
+            constructed_value: same_rule.then_some(constructed_value).flatten(),
         });
     }
 
@@ -380,7 +401,10 @@ impl TypeRegistry {
     ///
     /// * `unifier` - The unifier containing the accumulated substitutions
     pub fn apply_substitution(&mut self, unifier: &crate::unify::Unifier) {
-        for target in self.call_targets.values_mut() { target.ty = unifier.apply(&target.ty); }
+        for target in self.call_targets.values_mut() {
+            target.ty = unifier.apply(&target.ty);
+            if let Some(value) = &mut target.constructed_value { *value = unifier.apply(value); }
+        }
         // Apply substitution to all expression types
         for ty in self.expr_types.values_mut() {
             *ty = unifier.apply(ty);
