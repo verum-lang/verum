@@ -151,7 +151,8 @@ pub const VERSION_MAJOR: u16 = 2;
 /// Minor 56 adds failure-atomic retain of a declared shallow handle.
 /// Minor 57 adds declaration-owned copying of nested values.
 // v2.58: versioned complete source-definition identity for strict body replay.
-pub const VERSION_MINOR: u16 = 58;
+// v2.59: declaration-owned finite numeric bounds after witness substitution.
+pub const VERSION_MINOR: u16 = 59;
 
 /// Minor-version floors for sections whose presence readers gate on.  The
 /// register-type-hints section has been written unconditionally since minor 2,

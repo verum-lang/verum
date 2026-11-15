@@ -215,6 +215,16 @@ pub(in super::super) fn handle_extended(
                         .map_err(|message| InterpreterError::Panic { message: message.into() })?;
                     crate::value::Value::from_bool(needs_drop)
                 }
+                TypeInspection::Min | TypeInspection::Max => {
+                    let bound = crate::type_information::numeric_bound(&state.module, &ty, query == TypeInspection::Max)
+                        .map_err(|message| InterpreterError::Panic { message: message.into() })?;
+                    match bound {
+                        crate::type_layout::NumericBound::Integer { raw, bits, signed } if bits > 64 =>
+                            crate::value::Value::from_i128_raw_signed(raw, signed),
+                        crate::type_layout::NumericBound::Integer { raw, .. } => crate::value::Value::from_i64(raw as i64),
+                        crate::type_layout::NumericBound::Float { value, .. } => crate::value::Value::from_f64(value),
+                    }
+                }
             };
             state.set_reg(dst, value);
             Ok(DispatchResult::Continue)

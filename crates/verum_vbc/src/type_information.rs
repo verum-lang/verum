@@ -84,3 +84,9 @@ pub fn needs_drop(module: &VbcModule, ty: &TypeRef) -> Result<bool, Text> {
     let plan = crate::drop_plan::build(module, &ty)?;
     Ok(!matches!(plan, crate::drop_plan::DropPlan::Ignore))
 }
+
+/// Query the domain of the actual substituted scalar declaration.
+pub fn numeric_bound(module: &VbcModule, ty: &TypeRef, maximum: bool) -> Result<crate::type_layout::NumericBound, Text> {
+    crate::type_layout::numeric_bound_with(ty, maximum, |id| module.get_type(id))
+        .ok_or_else(|| format!("numeric bounds require a complete numeric scalar witness, got {ty:?}").into())
+}

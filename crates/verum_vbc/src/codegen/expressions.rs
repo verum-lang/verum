@@ -44314,115 +44314,36 @@ impl VbcCodegen {
             return Ok(Some(dest));
         }
 
-        // Extract the type name string for property resolution
-        let type_name = self.extract_display_type_name(ty);
-
-        // Get bits for the type
-        let bits = match type_name.as_str() {
-            "Int" | "Int64" | "i64" => 64i64,
-            "Int8" | "i8" => 8,
-            "Int16" | "i16" => 16,
-            "Int32" | "i32" => 32,
-            "Int128" | "i128" => 128,
-            "IntSize" | "ISize" | "isize" => 64,
-            "UInt8" | "u8" | "Byte" => 8,
-            "UInt16" | "u16" => 16,
-            "UInt32" | "u32" => 32,
-            "UInt64" | "u64" => 64,
-            "UInt128" | "u128" => 128,
-            "UIntSize" | "USize" | "usize" => 64,
-            "Float" | "Float64" | "f64" => 64,
-            "Float32" | "f32" => 32,
-            "Bool" => 8,
-            "Char" => 32,
-            _ => 64, // default
+        let type_ref = self.resolve_query_type(ty)?;
+        let maximum = match property {
+            TypeProperty::Min => false,
+            TypeProperty::Max => true,
+            _ => unreachable!("other properties resolved by declaration queries above"),
         };
-
-        let is_signed = matches!(
-            type_name.as_str(),
-            "Int"
-                | "Int8"
-                | "Int16"
-                | "Int32"
-                | "Int64"
-                | "Int128"
-                | "IntSize"
-                | "i8"
-                | "i16"
-                | "i32"
-                | "i64"
-                | "i128"
-                | "isize"
-        );
-        let is_float = matches!(
-            type_name.as_str(),
-            "Float" | "Float32" | "Float64" | "f32" | "f64"
-        );
-
-        match property {
-            TypeProperty::Min => {
-                if is_float {
-                    let f = if bits == 32 {
-                        f32::MIN as f64
-                    } else {
-                        f64::MIN
-                    };
-                    self.ctx.emit(Instruction::LoadF {
-                        dst: dest,
-                        value: f,
-                    });
-                } else if is_signed {
-                    let min_val = if bits == 64 {
-                        i64::MIN
-                    } else {
-                        -(1i64 << (bits - 1))
-                    };
-                    self.ctx.emit(Instruction::LoadI {
-                        dst: dest,
-                        value: min_val,
-                    });
+        if type_ref.is_generic() {
+            self.ctx.emit(Instruction::TypeInspect {
+                dst: dest, type_ref,
+                query: if maximum { crate::instruction::TypeInspection::Max } else { crate::instruction::TypeInspection::Min },
+            });
+            return Ok(Some(dest));
+        }
+        let bound = crate::type_layout::numeric_bound_with(&type_ref, maximum, |id| {
+            self.types.iter().find(|descriptor| descriptor.id == id)
+        }).ok_or_else(|| CodegenError::not_implemented(format!(
+            "numeric bounds require a resolved numeric scalar declaration, got {type_ref:?}",
+        )))?;
+        match bound {
+            crate::type_layout::NumericBound::Integer { raw, bits, signed } => {
+                if bits > 64 {
+                    let constant = self.ctx.add_const_i128(raw, signed);
+                    self.ctx.emit(Instruction::LoadK { dst: dest, const_id: constant.0 });
                 } else {
-                    self.ctx.emit(Instruction::LoadI {
-                        dst: dest,
-                        value: 0,
-                    });
+                    self.ctx.emit(Instruction::LoadI { dst: dest, value: raw as i64 });
                 }
             }
-            TypeProperty::Max => {
-                if is_float {
-                    let f = if bits == 32 {
-                        f32::MAX as f64
-                    } else {
-                        f64::MAX
-                    };
-                    self.ctx.emit(Instruction::LoadF {
-                        dst: dest,
-                        value: f,
-                    });
-                } else if is_signed {
-                    let max_val = if bits == 64 {
-                        i64::MAX
-                    } else {
-                        (1i64 << (bits - 1)) - 1
-                    };
-                    self.ctx.emit(Instruction::LoadI {
-                        dst: dest,
-                        value: max_val,
-                    });
-                } else {
-                    let max_val = if bits == 64 {
-                        u64::MAX as i64
-                    } else {
-                        (1i64 << bits) - 1
-                    };
-                    self.ctx.emit(Instruction::LoadI {
-                        dst: dest,
-                        value: max_val,
-                    });
-                }
+            crate::type_layout::NumericBound::Float { value, .. } => {
+                self.ctx.emit(Instruction::LoadF { dst: dest, value });
             }
-            TypeProperty::Size | TypeProperty::Alignment | TypeProperty::Stride
-            | TypeProperty::Bits | TypeProperty::IsSigned | TypeProperty::Id | TypeProperty::Name => unreachable!("resolved by the declaration query"),
         }
 
         Ok(Some(dest))

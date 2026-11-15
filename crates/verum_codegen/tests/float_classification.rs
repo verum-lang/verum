@@ -71,7 +71,9 @@ fn probe(op: MathSubOpcode, wide: bool, preserve: bool) -> VbcModule {
     wire
 }
 
-fn values() -> [f64; 18] {
+fn values() -> [f64; 27] {
+    // Exact ties-to-even midpoint between f32::MAX and 2^128.
+    const F32_OVERFLOW_THRESHOLD: f64 = 3.4028235677973366e38;
     [
         0.0,
         -0.0,
@@ -79,6 +81,15 @@ fn values() -> [f64; 18] {
         -1.0,
         f64::from(f32::MAX),
         -f64::from(f32::MAX),
+        F32_OVERFLOW_THRESHOLD.next_down(),
+        F32_OVERFLOW_THRESHOLD,
+        F32_OVERFLOW_THRESHOLD.next_up(),
+        -F32_OVERFLOW_THRESHOLD.next_down(),
+        -F32_OVERFLOW_THRESHOLD,
+        -F32_OVERFLOW_THRESHOLD.next_up(),
+        f64::from_bits(0x7ff0_0000_0000_0001),
+        f64::from_bits(0xfff8_0000_0000_0000),
+        1e-50,
         1e300,
         -1e300,
         f64::MAX,

@@ -527,6 +527,29 @@ mod llvm_calling_conventions {
     pub const X86_INTR: u32 = 83;
 }
 
+/// Preserve the declared sign when a narrow native parameter enters the
+/// uniform register carrier. This is shared by ordinary and closure arguments;
+/// register storage itself cannot recover signedness from an LLVM integer.
+fn lower_parameter_value<'ctx>(
+    ctx: &FunctionContext<'_, 'ctx>,
+    value: BasicValueEnum<'ctx>,
+    declared: &TypeRef,
+) -> Result<BasicValueEnum<'ctx>> {
+    if let BasicValueEnum::IntValue(integer) = value
+        && integer.get_type().get_bit_width() < 64
+    {
+        let module = ctx.vbc_module().or_internal("parameter requires declaration metadata")?;
+        if matches!(verum_vbc::type_layout::numeric_representation_with(
+            declared, |id| module.get_type(id)),
+            Some(verum_vbc::type_layout::NumericRepresentation::Integer { signed: true, .. })) {
+            return Ok(ctx.builder().build_int_s_extend(
+                integer, ctx.types().i64_type(), "signed_parameter",
+            ).or_llvm_err()?.into());
+        }
+    }
+    Ok(value)
+}
+
 /// Map VBC CallingConvention to LLVM calling convention ID.
 fn to_llvm_calling_convention(cc: &CallingConvention) -> u32 {
     use llvm_calling_conventions::*;
@@ -1789,7 +1812,14 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             // - If instructions available and only RetV (void return), use UNIT
             // - If instructions not available, default to i64 (most functions return values)
             // - User-defined types in return position → i64 (heap pointer representation)
-            let effective_return_type = match &func_desc.return_type {
+            // Transparent aliases carry their declaring scalar's ABI. Narrow
+            // integer results retain the established extended-i64 convention.
+            let numeric_type = |ty: &TypeRef| {
+                verum_vbc::type_layout::numeric_identity_with(ty, |id| vbc_module.get_type(id))
+                    .map(TypeRef::Concrete).unwrap_or_else(|| ty.clone())
+            };
+            let return_type = numeric_type(&func_desc.return_type);
+            let effective_return_type = match &return_type {
                 TypeRef::Concrete(TypeId::UNIT) if func_desc.requires_intrinsic_implementation() => {
                     TypeRef::Concrete(TypeId::UNIT)
                 }
@@ -1820,7 +1850,9 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                         | TypeId::PTR
                         | TypeId::NEVER
                         | TypeId::U64
-                        | TypeId::F32 => func_desc.return_type.clone(),
+                        | TypeId::F32
+                        | TypeId::I128
+                        | TypeId::U128 => return_type.clone(),
                         // Narrow integer returns (I8/U8/I16/U16/I32/U32) use the
                         // i64 register model rather than their native LLVM width.
                         // The body's `apply_int_width` already sign/zero-extends
@@ -1862,9 +1894,9 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     let eff_type = if is_spawn_func {
                         TypeRef::Concrete(TypeId::INT)
                     } else {
-                        match &p.type_ref {
+                        match numeric_type(&p.type_ref) {
                             TypeRef::Concrete(tid) => {
-                                match *tid {
+                                match tid {
                                     TypeId::INT
                                     | TypeId::FLOAT
                                     | TypeId::BOOL
@@ -1878,7 +1910,9 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                                     | TypeId::U32
                                     | TypeId::I32
                                     | TypeId::U64
-                                    | TypeId::F32 => p.type_ref.clone(),
+                                    | TypeId::F32
+                                    | TypeId::I128
+                                    | TypeId::U128 => TypeRef::Concrete(tid),
                                     // UNIT and user-defined types → i64 (heap pointer representation)
                                     _ => TypeRef::Concrete(TypeId::INT),
                                 }
@@ -2966,6 +3000,68 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         // the full `default<O2>` pipeline reactivates — unblocking
         // SROA, GVN, instcombine, loop opts, vectorization for
         // every user binary.
+        // Choose wide slots before the first parameter store. Facts come
+        // from the physical function ABI and declaration-owned producers;
+        // no source spelling is used to guess an integer representation.
+        let is_closure = func_name.contains("$closure$") && !vbc_func.descriptor.params.is_empty();
+        let mut wide_int_regs = Set::new();
+        for (index, param) in llvm_fn.get_param_iter().enumerate() {
+            if param.is_int_value() && param.into_int_value().get_type().get_bit_width() == 128 {
+                let reg = if is_closure {
+                    if index == 0 { continue; }
+                    vbc_func.descriptor.max_stack as usize + index - 1
+                } else { index };
+                wide_int_regs.insert(reg as u16);
+            }
+        }
+        let mut copies: Map<u16, verum_common::List<u16>> = Map::new();
+        for instr in &vbc_func.instructions {
+            match instr {
+                Instruction::LoadK { dst, const_id } => {
+                    if matches!(vbc_module.constants.get(*const_id as usize),
+                        Some(verum_vbc::module::Constant::Int128 { .. })) {
+                        wide_int_regs.insert(dst.0);
+                    }
+                }
+                Instruction::TypeInspect { dst, type_ref, query }
+                    if matches!(query, verum_vbc::instruction::TypeInspection::Min
+                        | verum_vbc::instruction::TypeInspection::Max) => {
+                    if matches!(verum_vbc::type_layout::numeric_representation_with(
+                        type_ref, |id| vbc_module.get_type(id)),
+                        Some(verum_vbc::type_layout::NumericRepresentation::Integer { bits: 128, .. })) {
+                        wide_int_regs.insert(dst.0);
+                    }
+                }
+                Instruction::Call { dst, func_id, .. } => {
+                    if let Some(return_type) = ctx.resolve_call_declaration(*func_id).ok()
+                        .and_then(|declaration| ctx.resolve_declared_function(declaration).ok())
+                        .and_then(|function| function.get_type().get_return_type())
+                        && return_type.is_int_type() && return_type.into_int_type().get_bit_width() == 128 {
+                        wide_int_regs.insert(dst.0);
+                    }
+                }
+                Instruction::Mov { dst, src } | Instruction::UnaryI { dst, src, .. } => {
+                    copies.entry(src.0).or_default().push(dst.0);
+                }
+                Instruction::BinaryI { dst, a, b, .. } | Instruction::Bitwise { dst, a, b, .. } => {
+                    copies.entry(a.0).or_default().push(dst.0);
+                    copies.entry(b.0).or_default().push(dst.0);
+                }
+                _ => {}
+            }
+        }
+        // Each register enters the queue once; each propagation edge is
+        // visited once, including loop back-edges in the instruction stream.
+        let mut pending: verum_common::List<_> = wide_int_regs.iter().copied().collect();
+        while let Some(source) = pending.pop() {
+            if let Some(destinations) = copies.get(&source) {
+                for &destination in destinations {
+                    if wide_int_regs.insert(destination) { pending.push(destination); }
+                }
+            }
+        }
+        ctx.set_wide_int_registers(wide_int_regs.into_iter().collect());
+
         ctx.enable_alloca_mode();
 
         // Set up entry block — always position at the very first block (block_0)
@@ -3011,7 +3107,6 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         // Closure functions use env_ptr convention: fn(env_ptr, user_arg0, arg1, ...)
         // VBC register layout for closures: [captures...][user_args...]
         // We detect closures by the "$closure$" naming convention.
-        let is_closure = func_name.contains("$closure$") && !vbc_func.descriptor.params.is_empty();
         if is_closure {
             let capture_count = vbc_func.descriptor.max_stack as usize;
 
@@ -3076,7 +3171,10 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
 
             // Map user args (LLVM params 1..N) to registers after captures
             for (j, param) in llvm_fn.get_param_iter().skip(1).enumerate() {
-                ctx.set_register((capture_count + j) as u16, param);
+                let declared = &vbc_func.descriptor.params.get(j + 1)
+                    .or_internal("closure parameter lacks its declaration")?.type_ref;
+                let value = lower_parameter_value(&ctx, param, declared)?;
+                ctx.set_register((capture_count + j) as u16, value);
             }
 
             // Mark closure user-parameter registers based on VBC type info.
@@ -3143,7 +3241,10 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         } else {
             // Regular function: straightforward parameter mapping
             for (i, param) in llvm_fn.get_param_iter().enumerate() {
-                ctx.set_register(i as u16, param);
+                let declared = &vbc_func.descriptor.params.get(i)
+                    .or_internal("native parameter lacks its declaration")?.type_ref;
+                let value = lower_parameter_value(&ctx, param, declared)?;
+                ctx.set_register(i as u16, value);
                 // Mark string registers for Text parameters so that CmpG/Print
                 // can correctly dispatch string comparison/printing.
                 // Mark list registers for List parameters so that GetE/SetE
@@ -4282,55 +4383,6 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         }
         if !float_regs_from_prescan.is_empty() {
             ctx.set_prescan_float_registers(float_regs_from_prescan);
-        }
-
-        // Pre-scan (T0272): registers that carry 128-bit integers get a WIDE
-        // (i128) alloca slot for the whole function — see
-        // `FunctionContext::wide_int_registers` for the slot invariant.
-        // Seed: `LoadK` of an `Int128` pool constant. Propagate forward
-        // through Mov and the integer ALU families; iterate to fixpoint
-        // because a loop back-edge can consume a wide register whose
-        // defining instruction appears later in the linear stream.
-        {
-            let mut wide_int_regs: std::collections::HashSet<u16> =
-                std::collections::HashSet::new();
-            loop {
-                let before = wide_int_regs.len();
-                for instr in vbc_func.instructions.iter() {
-                    match instr {
-                        Instruction::LoadK { dst, const_id } => {
-                            if let Some(verum_vbc::module::Constant::Int128 { .. }) =
-                                vbc_module.constants.get(*const_id as usize)
-                            {
-                                wide_int_regs.insert(dst.0);
-                            }
-                        }
-                        Instruction::Mov { dst, src } => {
-                            if wide_int_regs.contains(&src.0) {
-                                wide_int_regs.insert(dst.0);
-                            }
-                        }
-                        Instruction::BinaryI { dst, a, b, .. }
-                        | Instruction::Bitwise { dst, a, b, .. } => {
-                            if wide_int_regs.contains(&a.0) || wide_int_regs.contains(&b.0) {
-                                wide_int_regs.insert(dst.0);
-                            }
-                        }
-                        Instruction::UnaryI { dst, src, .. } => {
-                            if wide_int_regs.contains(&src.0) {
-                                wide_int_regs.insert(dst.0);
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-                if wide_int_regs.len() == before {
-                    break;
-                }
-            }
-            if !wide_int_regs.is_empty() {
-                ctx.set_wide_int_registers(wide_int_regs);
-            }
         }
 
         // Pre-scan: mark registers that receive text values (Concat/ToString/CharToStr/LoadK String).

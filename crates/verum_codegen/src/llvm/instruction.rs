@@ -11141,10 +11141,6 @@ fn lower_call<'ctx>(
     // function has already taken it).
     let call_witness = ctx.take_pending_call_witness();
     let vbc_mod = ctx.vbc_module().or_internal("Call requires VBC module for function resolution")?;
-    // Apply func_id_base offset for merged stdlib modules.
-    // Bytecode-embedded func_ids are relative to the source module;
-    // func_id_base converts them to the merged module's function table.
-    let resolved_id = func_id + ctx.func_id_base();
 
     // `0x7FFFFFFF` (i32::MAX) is the codegen-emitted sentinel for an
     // unresolved function reference — typically an inner closure or
@@ -11156,8 +11152,7 @@ fn lower_call<'ctx>(
     // function can finish lowering. The trap manifests as a no-op at
     // runtime — same semantics as the bodyless-decl safety net but
     // localised to the Call instruction. Tracked under #106 Path B.
-    const UNRESOLVED_FN_ID: u32 = 0x7FFFFFFF;
-    if func_id == UNRESOLVED_FN_ID {
+    if func_id == super::context::UNRESOLVED_CALL_ID {
         // Emit a const-zero into dst as the call's "return value".
         // Subsequent code reads the default and degrades gracefully — but
         // RECORD it so the monomorphization-completeness diagnostic can
@@ -11177,310 +11172,198 @@ fn lower_call<'ctx>(
         return Ok(());
     }
 
-    // L3.11 — cross-module Call function-id resolution.  Mirror of
-    // Tier-0's `archive_func_name_to_fid` Tier-2b discipline (commit
-    // `f13390ba5` task #12): when `resolved_id` (base + local-id) misses
-    // in the VBC module table, fall back to the raw `func_id` (pre-base)
-    // which may directly index a globally-loaded archive function.  If
-    // BOTH miss, degrade to const-zero stub instead of erroring out — the
-    // same defensive discipline already in place for `UNRESOLVED_FN_ID`
-    // above.  Pre-fix every transitively-cross-module Call whose target
-    // lives in an unmounted archive module aborted the entire AOT lowering
-    // of the enclosing function, cascading into ~50+ skipped fn warnings.
-    // T0144: carried-fact band resolution first — computed once at
-    // module assembly; a hit yields the FINAL merged-table id (no
-    // func_id_base rebase applies). Misses fall through to the legacy
-    // per-site chase unchanged.
-    let func_desc = if let Some(d) = vbc_mod
-        .resolve_band_id(func_id)
-        .and_then(|fid| vbc_mod.get_function(fid))
-    {
-        d
-    } else {
-        match vbc_mod.get_function(FunctionId(resolved_id)) {
-        Some(d) => d,
-        None => match vbc_mod.get_function(FunctionId(func_id)) {
-            Some(d) => d,
-            None => {
-                // XMOD-BAND-RESOLVE (#38): a cross-module callee re-homed into
-                // the XMOD id band [0x2000_0000, 0x4000_0000) (module.rs:64) is
-                // not a valid function-table index, so both lookups above miss
-                // and — before this fix — the call degraded to a wrong-result /
-                // SIGSEGV const-zero stub (os_mmap→mmap, os_munmap→munmap,
-                // __platform_fd_close→close, ReadDir.drop→closedir). Recover the
-                // callee's qualified name from `external_function_names` (the
-                // lean name table already serialized in archive section 0x80 —
-                // NOT the reverted per-reference descriptor-stub explosion) and
-                // resolve it to a concrete function in the module, so the call
-                // lowers through the normal path (and its name-intercept /
-                // get_or_declare_ ABI routing) instead of const-zero'ing.
-                // AOT-STUB-SENTINEL-CHASE-1: stage-band stub sentinels
-                // (stub_ranges near u32::MAX) survive serialization since
-                // SERIALIZE-STUB-IDENTITY-1 — they are BY-NAME references
-                // exactly like XMOD-band ids and chase the same way.
-                // XMOD-FRESH-BAND-WINDOW-1: canonical name-reference
-                // predicate (emission band + fresh band, gap excluded).
-                let xmod_name: Option<&str> = if verum_vbc::stub_ranges::is_xmod_name_reference(
-                    func_id,
-                ) || verum_vbc::stub_ranges::is_stub_id(func_id)
+    let func_desc = match ctx.resolve_call_declaration(func_id) {
+        Ok(declaration) => declaration,
+        Err(xmod_name) => {
+            // XMOD Phase 2 (#38): the recovered callee is a BODYLESS
+            // FFI extern pruned from the function table
+            // (`find_function_by_name` → None): a libSystem symbol
+            // declared in core/sys/*/libsystem.vr with no Verum body
+            // (os_munmap→munmap, __platform_fd_close→close,
+            // Child.read_stdout→read, sleep_ms→nanosleep,
+            // ReadDir.drop→closedir). Such a symbol can only be
+            // resolved by NAME to the native C symbol. Route the
+            // last path segment through the canonical
+            // syscall-registry ABI (`POSIX_SYSCALLS`) — the same
+            // source of truth `predeclare_all` seeds — and emit the
+            // call directly, instead of degrading to a wrong-result
+            // const-zero stub.
+            if let Some(qname) = xmod_name {
+                let c_name = qname.rsplit('.').next().unwrap_or(qname);
+                if let Some(sig) = super::syscall_registry::lookup_sig(c_name)
+                    && sig.args.len() == args.count as usize
                 {
-                    vbc_mod
-                        .external_function_names
-                        .iter()
-                        .find(|(fid, _)| fid.0 == func_id)
-                        .and_then(|(_, sid)| vbc_mod.get_string(*sid))
-                } else {
-                    None
-                };
-                // Ranked resolution (T0103 LEG-2a): exact, then
-                // head-strip, then ranked qualified-suffix — the same
-                // discipline the interpreter's merge path applies, so
-                // `Mutex.new` recorded against a table that registers
-                // `core.sync.mutex.Mutex.new` resolves instead of
-                // degrading to a const-zero stub.
-                let xmod_recovered = xmod_name
-                    .and_then(|name| {
-                        vbc_mod.resolve_function_by_name_ranked(name).or_else(|| {
-                            // **T1461 — ASK THE MOUNT-ALIAS TABLE BEFORE
-                            // GIVING UP.** `external_function_names`
-                            // records a cross-module call under the
-                            // spelling the CONSUMING module used, and for
-                            // a MOUNTED function that is
-                            // `<consumer module>.<leaf>` — a name no
-                            // descriptor carries, because the body lives
-                            // under the declaring path. The ranked chase
-                            // therefore answers None, correctly and
-                            // uselessly.
-                            //
-                            // `mount_aliases` holds, under that exact
-                            // alias, both the real id and the canonical
-                            // spelling. Measured on the shipped archive:
-                            // three consumers of `aes128_encrypt_block`
-                            // record three alias spellings and all three
-                            // point at fid 27860, canonical
-                            // `core.security.cipher.aes.aes128_encrypt_block`.
-                            // Nothing was lost; one of the two readers was
-                            // looking in the wrong table.
-                            //
-                            // THE CANONICAL NAME, NEVER THE RECORDED ID.
-                            // The alias entry carries a FunctionId, and
-                            // using it here would be the misroute class
-                            // this file has fought before
-                            // (`Deque.reallocate`'s `realloc` landing on
-                            // `AdjacencyList.add_edge`): that id is the
-                            // producing archive module's own numbering,
-                            // the assembled module renumbers, and an id
-                            // that merely EXISTS after renumbering names
-                            // an unrelated function. A wrong body binds
-                            // silently; an unresolved call at least says
-                            // so. The name is renumber-proof, so the name
-                            // is what we chase.
-                            vbc_mod
-                                .mount_alias_target(name)
-                                .and_then(|(_id, canon)| {
-                                    vbc_mod.resolve_function_by_name_ranked(canon)
-                                })
-                        })
-                    })
-                    .and_then(|fid| vbc_mod.get_function(fid));
-                match xmod_recovered {
-                    Some(d) => d,
-                    None => {
-                        // XMOD Phase 2 (#38): the recovered callee is a BODYLESS
-                        // FFI extern pruned from the function table
-                        // (`find_function_by_name` → None): a libSystem symbol
-                        // declared in core/sys/*/libsystem.vr with no Verum body
-                        // (os_munmap→munmap, __platform_fd_close→close,
-                        // Child.read_stdout→read, sleep_ms→nanosleep,
-                        // ReadDir.drop→closedir). Such a symbol can only be
-                        // resolved by NAME to the native C symbol. Route the
-                        // last path segment through the canonical
-                        // syscall-registry ABI (`POSIX_SYSCALLS`) — the same
-                        // source of truth `predeclare_all` seeds — and emit the
-                        // call directly, instead of degrading to a wrong-result
-                        // const-zero stub.
-                        if let Some(qname) = xmod_name {
-                            let c_name = qname.rsplit('.').next().unwrap_or(qname);
-                            if let Some(sig) = super::syscall_registry::lookup_sig(c_name)
-                                && sig.args.len() == args.count as usize
-                            {
-                                let cfn = super::syscall_registry::get_or_declare(
-                                    ctx.get_module(),
-                                    ctx.llvm_context(),
-                                    c_name,
-                                )?;
-                                let mut call_args: Vec<BasicMetadataValueEnum> =
-                                    Vec::with_capacity(sig.args.len());
-                                for (i, abi) in sig.args.iter().enumerate() {
-                                    let raw = ctx.get_register(args.start.0 + i as u16)?;
-                                    match abi {
-                                        super::syscall_registry::AbiTy::Ptr => {
-                                            call_args.push(
-                                                as_ptr(ctx, raw, "xmod_arg_ptr")?.into(),
-                                            );
-                                        }
-                                        _ => {
-                                            call_args.push(
-                                                as_i64(ctx, raw, "xmod_arg_i64")?.into(),
-                                            );
-                                        }
-                                    }
-                                }
-                                let raw_ret = ctx
-                                    .builder()
-                                    .build_call(cfn, &call_args, "xmod_posix_call")
-                                    .or_llvm_err()?
-                                    .basic_value_or("xmod posix call: expected return value")?;
-                                let result: BasicValueEnum =
-                                    if let BasicValueEnum::PointerValue(pv) = raw_ret {
-                                        ctx.builder()
-                                            .build_ptr_to_int(
-                                                pv,
-                                                ctx.types().i64_type(),
-                                                "xmod_ret_i64",
-                                            )
-                                            .or_llvm_err()?
-                                            .into()
-                                    } else {
-                                        raw_ret
-                                    };
-                                ctx.set_register(dst.0, result);
-                                return Ok(());
-                            }
-                        }
-                        let cur_fn = ctx.function().get_name().to_string_lossy().to_string();
-                        // `VERUM_AOT_TRACE_EXTNAMES` — census of the name
-                        // table the chase reads, printed ONCE per lowering.
-                        //
-                        // It exists because the per-site note cannot answer the
-                        // question the per-site note raises. "no
-                        // external_function_names entry for this id" is true of
-                        // a table that never had the row AND of a table that
-                        // lost it, and those have different fixes. The census
-                        // says which: it prints the table's size, its split by
-                        // band, and every stub row with its name.
-                        //
-                        // Earned its place on 2026-09-12 (T1172): before the
-                        // merge carried stub names the census read
-                        // `total=… stub=0` and 27 sites blamed a missing row;
-                        // after, `total=249 xmod=187 stub=62` with
-                        // `4269801458 -> core.sys.darwin.libsystem.open` — the
-                        // exact id two sessions had chased by hand as a bare
-                        // number.
-                        if std::env::var_os("VERUM_AOT_TRACE_EXTNAMES").is_some() {
-                            static ONCE: std::sync::Once = std::sync::Once::new();
-                            ONCE.call_once(|| {
-                                let tbl = &vbc_mod.external_function_names;
-                                let mut xmod = 0usize;
-                                let mut stub = 0usize;
-                                let mut other = 0usize;
-                                let mut s5: Vec<(u32, String)> = Vec::new();
-                                for (fid, sid) in tbl.iter() {
-                                    let i = fid.0;
-                                    if verum_vbc::stub_ranges::is_stub_id(i) {
-                                        stub += 1;
-                                        if verum_vbc::stub_ranges::in_stage5(i) {
-                                            s5.push((
-                                                i,
-                                                vbc_mod
-                                                    .get_string(*sid)
-                                                    .unwrap_or("<no string>")
-                                                    .to_string(),
-                                            ));
-                                        }
-                                    } else if verum_vbc::stub_ranges::is_xmod_name_reference(i) {
-                                        xmod += 1;
-                                    } else {
-                                        other += 1;
-                                    }
-                                }
-                                eprintln!(
-                                    "[extnames] total={} xmod={} stub={} other={}",
-                                    tbl.len(),
-                                    xmod,
-                                    stub,
-                                    other
+                    let cfn = super::syscall_registry::get_or_declare(
+                        ctx.get_module(),
+                        ctx.llvm_context(),
+                        c_name,
+                    )?;
+                    let mut call_args: Vec<BasicMetadataValueEnum> =
+                        Vec::with_capacity(sig.args.len());
+                    for (i, abi) in sig.args.iter().enumerate() {
+                        let raw = ctx.get_register(args.start.0 + i as u16)?;
+                        match abi {
+                            super::syscall_registry::AbiTy::Ptr => {
+                                call_args.push(
+                                    as_ptr(ctx, raw, "xmod_arg_ptr")?.into(),
                                 );
-                                s5.sort();
-                                for (i, n) in s5.iter() {
-                                    eprintln!("[extnames] stage5 {} -> '{}'", i, n);
-                                }
-                            });
-                        }
-                        // Classification note for the strict-mono campaign
-                        // (T0103): say WHY the name chase failed, not just
-                        // that the table lookup missed — the three causes
-                        // have three different fixes (name-table gap vs
-                        // absent target vs non-band id).
-                        let chase_note = match xmod_name {
-                            // T1461: "absent" covered THREE outcomes with three
-                            // different roots, and one message for all of them
-                            // is why the population read as homogeneous. Say
-                            // which: whether the exact name is in the table at
-                            // all, whether the ranked chase reaches anything,
-                            // and how many BODIED functions end with `.<name>`
-                            // — the last one separates "the producing module is
-                            // outside the merge set" from "the body is right
-                            // there under a qualified key the chase cannot
-                            // reach from a bare spelling" (`resolve_function_
-                            // by_name_ranked` returns None for a dotless name
-                            // the moment the exact lookup misses).
-                            Some(n) => {
-                                let exact = vbc_mod.find_function_by_name(n).is_some();
-                                let ranked =
-                                    vbc_mod.resolve_function_by_name_ranked(n).is_some();
-                                let suffix = format!(".{}", n);
-                                let mut suffix_hits = 0usize;
-                                let mut suffix_bodied = 0usize;
-                                for d in vbc_mod.functions.iter() {
-                                    if let Some(dn) = vbc_mod.get_string(d.name)
-                                        && dn.ends_with(&suffix)
-                                    {
-                                        suffix_hits += 1;
-                                        if d.bytecode_length > 0 {
-                                            suffix_bodied += 1;
-                                        }
-                                    }
-                                }
-                                format!(
-                                    "name-chase: '{}' named but absent from the module \
-                                     (exact={} ranked={} suffix={} bodied={})",
-                                    n, exact, ranked, suffix_hits, suffix_bodied
-                                )
                             }
-                            None if verum_vbc::stub_ranges::is_xmod_name_reference(func_id)
-                                || verum_vbc::stub_ranges::is_stub_id(func_id) =>
-                            {
-                                "name-chase: no external_function_names entry for this id"
-                                    .to_string()
+                            _ => {
+                                call_args.push(
+                                    as_i64(ctx, raw, "xmod_arg_i64")?.into(),
+                                );
                             }
-                            None => "id outside XMOD/stub name-reference bands".to_string(),
-                        };
-                        super::error::record_unresolved_generic_call(
-                            &cur_fn,
-                            format!(
-                                "Call fn-id {} (base {} + {}) missing in the VBC module table ({})",
-                                resolved_id,
-                                ctx.func_id_base(),
-                                func_id,
-                                chase_note
-                            ),
-                        );
-                        if std::env::var_os("VERUM_AOT_TRACE_UNRESOLVED").is_some() {
-                            eprintln!(
-                                "[aot-unresolved] Call: fn_id={} (base {} + {}) miss in vbc_mod, const-zero in {}",
-                                resolved_id,
-                                ctx.func_id_base(),
-                                func_id,
-                                cur_fn
-                            );
                         }
-                        ctx.set_register(dst.0, ctx.types().i64_type().const_zero().into());
-                        return Ok(());
                     }
+                    let raw_ret = ctx
+                        .builder()
+                        .build_call(cfn, &call_args, "xmod_posix_call")
+                        .or_llvm_err()?
+                        .basic_value_or("xmod posix call: expected return value")?;
+                    let result: BasicValueEnum =
+                        if let BasicValueEnum::PointerValue(pv) = raw_ret {
+                            ctx.builder()
+                                .build_ptr_to_int(
+                                    pv,
+                                    ctx.types().i64_type(),
+                                    "xmod_ret_i64",
+                                )
+                                .or_llvm_err()?
+                                .into()
+                        } else {
+                            raw_ret
+                        };
+                    ctx.set_register(dst.0, result);
+                    return Ok(());
                 }
             }
-        },
+            let cur_fn = ctx.function().get_name().to_string_lossy().to_string();
+            // `VERUM_AOT_TRACE_EXTNAMES` — census of the name
+            // table the chase reads, printed ONCE per lowering.
+            //
+            // It exists because the per-site note cannot answer the
+            // question the per-site note raises. "no
+            // external_function_names entry for this id" is true of
+            // a table that never had the row AND of a table that
+            // lost it, and those have different fixes. The census
+            // says which: it prints the table's size, its split by
+            // band, and every stub row with its name.
+            //
+            // Earned its place on 2026-09-12 (T1172): before the
+            // merge carried stub names the census read
+            // `total=… stub=0` and 27 sites blamed a missing row;
+            // after, `total=249 xmod=187 stub=62` with
+            // `4269801458 -> core.sys.darwin.libsystem.open` — the
+            // exact id two sessions had chased by hand as a bare
+            // number.
+            if std::env::var_os("VERUM_AOT_TRACE_EXTNAMES").is_some() {
+                static ONCE: std::sync::Once = std::sync::Once::new();
+                ONCE.call_once(|| {
+                    let tbl = &vbc_mod.external_function_names;
+                    let mut xmod = 0usize;
+                    let mut stub = 0usize;
+                    let mut other = 0usize;
+                    let mut s5: Vec<(u32, String)> = Vec::new();
+                    for (fid, sid) in tbl.iter() {
+                        let i = fid.0;
+                        if verum_vbc::stub_ranges::is_stub_id(i) {
+                            stub += 1;
+                            if verum_vbc::stub_ranges::in_stage5(i) {
+                                s5.push((
+                                    i,
+                                    vbc_mod
+                                        .get_string(*sid)
+                                        .unwrap_or("<no string>")
+                                        .to_string(),
+                                ));
+                            }
+                        } else if verum_vbc::stub_ranges::is_xmod_name_reference(i) {
+                            xmod += 1;
+                        } else {
+                            other += 1;
+                        }
+                    }
+                    eprintln!(
+                        "[extnames] total={} xmod={} stub={} other={}",
+                        tbl.len(),
+                        xmod,
+                        stub,
+                        other
+                    );
+                    s5.sort();
+                    for (i, n) in s5.iter() {
+                        eprintln!("[extnames] stage5 {} -> '{}'", i, n);
+                    }
+                });
+            }
+            // Classification note for the strict-mono campaign
+            // (T0103): say WHY the name chase failed, not just
+            // that the table lookup missed — the three causes
+            // have three different fixes (name-table gap vs
+            // absent target vs non-band id).
+            let chase_note = match xmod_name {
+                // T1461: "absent" covered THREE outcomes with three
+                // different roots, and one message for all of them
+                // is why the population read as homogeneous. Say
+                // which: whether the exact name is in the table at
+                // all, whether the ranked chase reaches anything,
+                // and how many BODIED functions end with `.<name>`
+                // — the last one separates "the producing module is
+                // outside the merge set" from "the body is right
+                // there under a qualified key the chase cannot
+                // reach from a bare spelling" (`resolve_function_
+                // by_name_ranked` returns None for a dotless name
+                // the moment the exact lookup misses).
+                Some(n) => {
+                    let exact = vbc_mod.find_function_by_name(n).is_some();
+                    let ranked =
+                        vbc_mod.resolve_function_by_name_ranked(n).is_some();
+                    let suffix = format!(".{}", n);
+                    let mut suffix_hits = 0usize;
+                    let mut suffix_bodied = 0usize;
+                    for d in vbc_mod.functions.iter() {
+                        if let Some(dn) = vbc_mod.get_string(d.name)
+                            && dn.ends_with(&suffix)
+                        {
+                            suffix_hits += 1;
+                            if d.bytecode_length > 0 {
+                                suffix_bodied += 1;
+                            }
+                        }
+                    }
+                    format!(
+                        "name-chase: '{}' named but absent from the module \
+                         (exact={} ranked={} suffix={} bodied={})",
+                        n, exact, ranked, suffix_hits, suffix_bodied
+                    )
+                }
+                None if verum_vbc::stub_ranges::is_xmod_name_reference(func_id)
+                    || verum_vbc::stub_ranges::is_stub_id(func_id) =>
+                {
+                    "name-chase: no external_function_names entry for this id"
+                        .to_string()
+                }
+                None => "id outside XMOD/stub name-reference bands".to_string(),
+            };
+            super::error::record_unresolved_generic_call(
+                &cur_fn,
+                format!(
+                    "Call raw fn-id {} (base {}) missing in the VBC module table ({})",
+                    func_id,
+                    ctx.func_id_base(),
+                    chase_note
+                ),
+            );
+            if std::env::var_os("VERUM_AOT_TRACE_UNRESOLVED").is_some() {
+                eprintln!(
+                    "[aot-unresolved] Call: raw_fn_id={} (base {}) miss in vbc_mod, const-zero in {}",
+                    func_id,
+                    ctx.func_id_base(),
+                    cur_fn
+                );
+            }
+            ctx.set_register(dst.0, ctx.types().i64_type().const_zero().into());
+            return Ok(());
         }
     };
     let func_name = vbc_mod.get_string(func_desc.name).unwrap_or("<unknown>");
@@ -42874,6 +42757,19 @@ fn lower_type_inspection<'ctx>(
                 .map(Into::into).map_err(|error| error.to_string().into())),
         TypeInspection::NeedsDrop => verum_vbc::type_information::needs_drop(module, ty)
             .map(|value| ctx.types().bool_type().const_int(u64::from(value), false).into()),
+        TypeInspection::Min | TypeInspection::Max => verum_vbc::type_information::numeric_bound(
+            module, ty, query == TypeInspection::Max,
+        ).map(|bound| match bound {
+            verum_vbc::type_layout::NumericBound::Integer { raw, bits: 128, .. } => {
+                ctx.types().i128_type().const_int_arbitrary_precision(&[raw as u64, (raw >> 64) as u64]).into()
+            }
+            verum_vbc::type_layout::NumericBound::Integer { raw, .. } => {
+                ctx.types().i64_type().const_int(raw as u64, false).into()
+            }
+            verum_vbc::type_layout::NumericBound::Float { value, .. } => {
+                ctx.types().f64_type().const_float(value).into()
+            }
+        }),
     };
     match result {
         Ok(value) => {
@@ -42881,6 +42777,9 @@ fn lower_type_inspection<'ctx>(
             match query {
                 TypeInspection::Name => ctx.mark_string_register(dst.0),
                 TypeInspection::NeedsDrop => ctx.mark_bool_register(dst.0),
+                TypeInspection::Min | TypeInspection::Max => {
+                    if value.is_float_value() { ctx.mark_float_register(dst.0); }
+                }
             }
         }
         Err(reason) if ty.is_generic() => {

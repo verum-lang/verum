@@ -10543,6 +10543,10 @@ pub enum TypeInspection {
     Name = 0,
     /// Whether the selected destruction plan performs cleanup.
     NeedsDrop = 1,
+    /// Finite lower bound of the resolved numeric scalar.
+    Min = 2,
+    /// Finite upper bound of the resolved numeric scalar.
+    Max = 3,
 }
 
 impl TypeInspection {
@@ -10551,6 +10555,8 @@ impl TypeInspection {
         match value {
             0 => Some(Self::Name),
             1 => Some(Self::NeedsDrop),
+            2 => Some(Self::Min),
+            3 => Some(Self::Max),
             _ => None,
         }
     }

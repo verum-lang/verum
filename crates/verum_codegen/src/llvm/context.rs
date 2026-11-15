@@ -19,6 +19,9 @@ use verum_vbc::{
     module::{FunctionDescriptor, ParamDescriptor, VbcModule},
 };
 
+/// Codegen sentinel for a Call with no selected declaration.
+pub(super) const UNRESOLVED_CALL_ID: u32 = 0x7fff_ffff;
+
 /// Exception handler info for structured exception handling.
 #[derive(Debug, Clone)]
 pub struct ExceptionHandler<'ctx> {
@@ -1142,6 +1145,44 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
     /// with an appropriate error if no VBC module is set.
     pub fn vbc_module(&self) -> Option<&'a VbcModule> {
         self.vbc_module
+    }
+
+    /// Select the declaration used by an ordinary native Call. A missing
+    /// declaration retains its carried name for the existing FFI/missing path.
+    pub(super) fn resolve_call_declaration(
+        &self,
+        func_id: u32,
+    ) -> std::result::Result<&'a FunctionDescriptor, Option<&'a str>> {
+        if func_id == UNRESOLVED_CALL_ID {
+            return Err(None);
+        }
+        let module = self.vbc_module.ok_or(None)?;
+        let selected = module.resolve_band_id(func_id)
+            .and_then(|id| module.get_function(id))
+            .or_else(|| func_id.checked_add(self.func_id_base)
+                .and_then(|id| module.get_function(verum_vbc::module::FunctionId(id))))
+            .or_else(|| module.get_function(verum_vbc::module::FunctionId(func_id)));
+        if let Some(declaration) = selected {
+            return Ok(declaration);
+        }
+        let carried_name = if verum_vbc::stub_ranges::is_xmod_name_reference(func_id)
+            || verum_vbc::stub_ranges::is_stub_id(func_id)
+        {
+            module.external_function_names.iter()
+                .find(|(id, _)| id.0 == func_id)
+                .and_then(|(_, name)| module.get_string(*name))
+        } else {
+            None
+        };
+        carried_name.and_then(|name| {
+            module.resolve_function_by_name_ranked(name).or_else(|| {
+                // A mount's recorded id belongs to its producing module;
+                // only its canonical name survives function-table rebasing.
+                module.mount_alias_target(name).and_then(|(_, canonical)| {
+                    module.resolve_function_by_name_ranked(canonical)
+                })
+            })
+        }).and_then(|id| module.get_function(id)).ok_or(carried_name)
     }
 
     /// Get the function name index for O(1) lookups.

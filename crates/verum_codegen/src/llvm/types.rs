@@ -117,6 +117,7 @@ impl<'ctx> TypeLowering<'ctx> {
             TypeId::U16 | TypeId::I16 => self.i16_type.into(),
             TypeId::U32 | TypeId::I32 => self.i32_type.into(),
             TypeId::U64 => self.i64_type.into(),
+            TypeId::I128 | TypeId::U128 => self.i128_type.into(),
             TypeId::F32 => self.f32_type.into(),
             // PTR and user-defined types are heap-allocated objects represented as
             // opaque pointers. Using LLVM `ptr` preserves pointer provenance for

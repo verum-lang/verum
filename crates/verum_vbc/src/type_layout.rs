@@ -39,6 +39,87 @@ pub fn query_with<'a>(
     result.filter(|value| i64::try_from(*value).is_ok())
 }
 
+/// Numeric meaning of a resolved scalar, distinct from an object's storage size.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NumericRepresentation {
+    Integer { bits: u32, signed: bool },
+    Float { bits: u32 },
+}
+
+/// Resolve numeric identity through exact alias declarations. A record with
+/// integer-sized storage does not acquire scalar meaning. Traversal shares
+/// layout queries' resource bound and uses no recursive call stack.
+pub fn numeric_identity_with<'a>(
+    ty: &TypeRef,
+    lookup: impl Fn(TypeId) -> Option<&'a TypeDescriptor>,
+) -> Option<TypeId> {
+    let mut current = ty.clone();
+    for _ in 0..64 {
+        let id = match &current {
+            TypeRef::Concrete(id) => *id,
+            TypeRef::Instantiated { base, .. } => *base,
+            _ => return None,
+        };
+        if id.is_numeric() {
+            return matches!(current, TypeRef::Concrete(_)).then_some(id);
+        }
+        let descriptor = lookup(id)?;
+        if descriptor.kind != TypeKind::Alias { return None; }
+        current = alias_target(&current, descriptor)?;
+    }
+    None
+}
+
+pub fn numeric_representation_with<'a>(
+    ty: &TypeRef,
+    lookup: impl Fn(TypeId) -> Option<&'a TypeDescriptor>,
+) -> Option<NumericRepresentation> {
+    let id = numeric_identity_with(ty, lookup)?;
+    let name = id.well_known_name()?;
+    let bits = u32::try_from(abi::primitive_size_by_name(name)?.checked_mul(8)?).ok()?;
+    if id.is_integer() {
+        Some(NumericRepresentation::Integer {
+            bits,
+            signed: verum_common::well_known_types::type_names::is_signed_integer_type(name),
+        })
+    } else {
+        Some(NumericRepresentation::Float { bits })
+    }
+}
+
+/// Exact finite scalar bound, before either tier chooses its value carrier.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum NumericBound {
+    Integer { raw: u128, bits: u32, signed: bool },
+    Float { value: f64, bits: u32 },
+}
+
+pub fn numeric_bound_with<'a>(
+    ty: &TypeRef, maximum: bool,
+    lookup: impl Fn(TypeId) -> Option<&'a TypeDescriptor>,
+) -> Option<NumericBound> {
+    match numeric_representation_with(ty, lookup)? {
+        NumericRepresentation::Integer { bits, signed } => {
+            if !(1..=128).contains(&bits) { return None; }
+            // No shift by the carrier width, and no negation of signed MIN.
+            let mask = u128::MAX >> (128 - bits);
+            let raw = if signed {
+                let upper = (mask >> 1) as i128;
+                (if maximum { upper } else { -upper - 1 }) as u128
+            } else if maximum { mask } else { 0 };
+            Some(NumericBound::Integer { raw, bits, signed })
+        }
+        NumericRepresentation::Float { bits } => {
+            let value = match (bits, maximum) {
+                (32, false) => f64::from(f32::MIN), (32, true) => f64::from(f32::MAX),
+                (64, false) => f64::MIN, (64, true) => f64::MAX,
+                _ => return None,
+            };
+            Some(NumericBound::Float { value, bits })
+        }
+    }
+}
+
 fn alias_target(ty: &TypeRef, descriptor: &TypeDescriptor) -> Option<TypeRef> {
     let args = match ty {
         TypeRef::Instantiated { args, .. } => args.as_slice(),
