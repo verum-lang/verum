@@ -1972,6 +1972,7 @@ impl VbcModule {
                 let desc = FunctionDescriptor {
                     has_source_body: false,
                     owned_value_parameters: false,
+                    closure_capture_count: None,
                     value_uses: None,
                     semantic_params: None,
                     semantic_return: None,
@@ -2845,6 +2846,11 @@ pub struct FunctionDescriptor {
     /// declaration, not an independent proof of ownership correctness.
     #[serde(default)]
     pub owned_value_parameters: bool,
+    /// Generated closure-body ABI: one native environment parameter, with
+    /// this many captures preceding user arguments in the VM register frame.
+    /// None denotes an ordinary function. Names never establish this layout.
+    #[serde(default)]
+    pub closure_capture_count: Option<u16>,
     /// Body-sealed production facts, without ownership/cleanup authorization.
     #[serde(default)]
     pub value_uses: Option<crate::value_use::ValueUsePlan>,
@@ -3138,6 +3144,7 @@ impl Default for FunctionDescriptor {
         Self {
             has_source_body: false,
             owned_value_parameters: false,
+            closure_capture_count: None,
             value_uses: None,
             semantic_params: None,
             semantic_return: None,
@@ -3235,10 +3242,24 @@ impl FunctionDescriptor {
         if self.is_generator || !self.contexts.is_empty() { return None; }
         Some(TypeRef::Function {
             is_async: self.properties.contains(PropertySet::ASYNC),
-            params: self.semantic_parameter_types()?.iter().cloned().collect::<Option<_>>()?,
+            params: self.semantic_parameter_types()?.iter()
+                .skip(usize::from(self.closure_capture_count.is_some()))
+                .cloned().collect::<Option<_>>()?,
             return_type: Box::new(self.semantic_return.clone()?),
             contexts: Default::default(),
         })
+    }
+
+    /// User-visible arity, excluding only an explicitly declared environment.
+    pub fn callable_parameter_count(&self) -> Option<usize> {
+        self.params.len().checked_sub(usize::from(self.closure_capture_count.is_some()))
+    }
+
+    pub fn validate_closure_environment(&self, captures: usize) -> Result<(), Text> {
+        if captures != usize::from(self.closure_capture_count.unwrap_or(0)) {
+            return Err("callable capture count differs from its declared environment".into());
+        }
+        Ok(())
     }
 
     /// Semantic formals belonging to this exact descriptor. Legacy ABI types
@@ -4561,6 +4582,7 @@ mod precompile_extension_tests {
         let mut desc = FunctionDescriptor {
             has_source_body: false,
             owned_value_parameters: false,
+            closure_capture_count: None,
             explicit_type_param_ids: Vec::new(),
             id: FunctionId(0),
             name: m.intern_string("hello"),
@@ -4625,6 +4647,7 @@ mod precompile_extension_tests {
         let desc = FunctionDescriptor {
             has_source_body: false,
             owned_value_parameters: false,
+            closure_capture_count: None,
             explicit_type_param_ids: Vec::new(),
             id: FunctionId(0),
             name: m.intern_string("syscall_x"),

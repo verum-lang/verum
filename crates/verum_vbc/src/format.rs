@@ -153,7 +153,8 @@ pub const VERSION_MAJOR: u16 = 2;
 // v2.58: versioned complete source-definition identity for strict body replay.
 // v2.59: declaration-owned finite numeric bounds after witness substitution.
 // v2.60: emitted-body owned-value-parameter calling convention.
-pub const VERSION_MINOR: u16 = 60;
+// v2.61: explicit generated closure environment ABI, independent of its name.
+pub const VERSION_MINOR: u16 = 61;
 
 /// Minor-version floors for sections whose presence readers gate on.  The
 /// register-type-hints section has been written unconditionally since minor 2,

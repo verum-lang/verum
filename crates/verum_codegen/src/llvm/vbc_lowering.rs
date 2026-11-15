@@ -3004,13 +3004,14 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         // Choose wide slots before the first parameter store. Facts come
         // from the physical function ABI and declaration-owned producers;
         // no source spelling is used to guess an integer representation.
-        let is_closure = func_name.contains("$closure$") && !vbc_func.descriptor.params.is_empty();
+        let closure_captures = vbc_func.descriptor.closure_capture_count;
+        let is_closure = closure_captures.is_some();
         let mut wide_int_regs = Set::new();
         for (index, param) in llvm_fn.get_param_iter().enumerate() {
             if param.is_int_value() && param.into_int_value().get_type().get_bit_width() == 128 {
                 let reg = if is_closure {
                     if index == 0 { continue; }
-                    vbc_func.descriptor.max_stack as usize + index - 1
+                    usize::from(closure_captures.unwrap()) + index - 1
                 } else { index };
                 wide_int_regs.insert(reg as u16);
             }
@@ -3114,9 +3115,9 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         // Initialize parameters as registers
         // Closure functions use env_ptr convention: fn(env_ptr, user_arg0, arg1, ...)
         // VBC register layout for closures: [captures...][user_args...]
-        // We detect closures by the "$closure$" naming convention.
-        if is_closure {
-            let capture_count = vbc_func.descriptor.max_stack as usize;
+        // The producer explicitly declares the environment convention.
+        if let Some(capture_count) = closure_captures {
+            let capture_count = usize::from(capture_count);
 
             // Load captures from env_ptr (LLVM param 0) into registers 0..capture_count-1
             if capture_count > 0 {

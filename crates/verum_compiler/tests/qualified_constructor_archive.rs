@@ -245,6 +245,21 @@ fn an_eager_constructor_rejects_a_changed_source_registry() {
 }
 
 #[test]
+fn constructor_payloads_survive_source_archive_and_wire() {
+    let provider = "module core.provider; public type Choice<T> is Empty | Hold(T);";
+    let consumer = "mount core.provider.Choice;
+        fn wrap(callback:fn()->Int)->Choice<fn()->Int> {
+            let value=Choice.Hold(callback);value
+        }
+        fn answer()->Int {73}
+        public fn probe()->Int {
+            match wrap(answer) {Choice.Hold(callback)=>callback(), Choice.Empty=>0}
+        }";
+    let archive = compile_provider(provider, consumer).unwrap();
+    execute(&archive, "module app; mount core.consumer.probe; fn main()->Int {probe()}");
+}
+
+#[test]
 fn archive_constructor_selection_preserves_payload_loan_rules() {
     let provider = "module core.provider; public type Choice<T> is Empty | Hold(T);";
     let archive = compile_provider(provider, "public fn probe()->Int {73}").unwrap();

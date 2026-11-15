@@ -67,6 +67,9 @@ pub struct NodeId(pub usize);
 pub enum CopyNode {
     /// Scalars, immutable text and explicit references retain their carrier.
     Identity,
+    /// The signature is necessary, but not sufficient: execution must also
+    /// establish an exact producer with no owned captured environment.
+    Callable(TypeRef),
     /// An explicit alias preserves the target's copy operation.
     Alias(NodeId),
     /// Record and tuple slots in declaration order.
@@ -146,6 +149,12 @@ impl Builder<'_> {
     fn node(&mut self, ty: &TypeRef) -> Result<CopyNode, Text> {
         let (owner, args) = match ty {
             TypeRef::Reference { .. } => return Ok(CopyNode::Identity),
+            TypeRef::Function { .. } => {
+                if !crate::mono::is_concrete_type(ty) {
+                    return Err("typed callable copy requires a resolved semantic signature".into());
+                }
+                return Ok(CopyNode::Callable(ty.clone()));
+            }
             TypeRef::Concrete(id)
                 if id.is_builtin()
                     && *id != TypeId::PTR

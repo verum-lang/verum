@@ -1254,7 +1254,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
         if let Some(target) = self.selected_callable_target(register)
             && let Some(declaration) = self.vbc_module.and_then(|module| module.get_function(target))
         {
-            if declaration.params.len() != argument_count {
+            if declaration.callable_parameter_count() != Some(argument_count) {
                 return Err(LlvmLoweringError::unsupported(
                     "native callable argument count differs from its selected producer"));
             }
@@ -1269,6 +1269,23 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
         self.selected_callable_targets.get(&register.0).copied()
     }
 
+    pub(super) fn require_callable_copy(&self, register: Reg, expected: &verum_vbc::TypeRef) -> Result<()> {
+        let declaration = self.selected_callable_target(register)
+            .and_then(|target| self.vbc_module.and_then(|module| module.get_function(target)))
+            .ok_or_else(|| LlvmLoweringError::unsupported(
+                "native callable copy requires its exact empty-environment producer"))?;
+        let signature = declaration.semantic_callable_signature()
+            .ok_or_else(|| LlvmLoweringError::unsupported(
+                "native callable copy producer lacks its semantic signature"))?;
+        // CopyPlan already established that the expected signature is concrete.
+        if &signature != expected {
+            return Err(LlvmLoweringError::unsupported(
+                "native callable copy producer does not match the declared signature"));
+        }
+        self.resolve_declared_function(declaration)?;
+        Ok(())
+    }
+
     pub(super) fn record_selected_callable(&mut self, register: Reg, target: verum_vbc::module::FunctionId) {
         self.selected_callable_targets.insert(register.0, target);
     }
@@ -1278,11 +1295,12 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
     }
 
     /// Only carrier-preserving moves and immediate register writes retain a
-    /// producer. Calls, memory writes and unsupported operations may replace
-    /// an aliased callable; they cannot preserve this local proof.
+    /// producer. CloneTyped checks its plan before preserving a callable;
+    /// other copies, calls and memory writes invalidate this local proof.
     pub(super) fn begin_callable_instruction(&mut self, instruction: &Instruction) {
         if !matches!(instruction,
             Instruction::Mov { .. } | Instruction::NewClosure { .. }
+            | Instruction::CloneTyped { .. }
             | Instruction::CallClosure { .. } | Instruction::LoadK { .. }
             | Instruction::LoadI { .. } | Instruction::LoadSmallI { .. }
             | Instruction::LoadF { .. } | Instruction::LoadTrue { .. }

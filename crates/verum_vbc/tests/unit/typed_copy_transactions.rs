@@ -338,7 +338,21 @@ fn affine_and_callable_values_do_not_gain_identity_copy_authority() {
     .parse_module()
     .unwrap();
     let module = VbcCodegen::new().compile_module(&source).unwrap();
-    assert!(copy_plan::build(&module, &TypeRef::Concrete(owner(&module, "Holder"))).is_err());
+    let plan = copy_plan::build(&module, &TypeRef::Concrete(owner(&module, "Holder"))).unwrap();
+    assert!(plan.nodes.iter().any(|node| matches!(node, CopyNode::Callable(_))));
+    let callback = Value::from_function(module.find_function_by_name("callback").unwrap());
+    let mut vm = Interpreter::new(module.into());
+    let invalid = named(&mut vm, "Holder", &[Value::unit()]);
+    let allocations = vm.state.heap.stats().total_allocs;
+    let error = execute(&mut vm.state, invalid, &plan, copy_plan::DEFAULT_COPY_LIMITS).unwrap_err();
+    assert!(error.to_string().contains("requires a declared function carrier"), "{error}");
+    assert_eq!(vm.state.heap.stats().total_allocs, allocations);
+    assert_eq!(field(invalid, 0), Value::unit());
+    let source = named(&mut vm, "Holder", &[callback]);
+    let copied = execute(&mut vm.state, source, &plan, copy_plan::DEFAULT_COPY_LIMITS).unwrap();
+    assert_ne!(source, copied);
+    assert_eq!(field(source, 0), callback);
+    assert_eq!(field(copied, 0), callback);
 }
 
 #[test]

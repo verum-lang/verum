@@ -118,6 +118,39 @@ fn a_generic_receiver_keeps_its_owned_value_inside_the_native_result() {
     }
 }
 
+#[test]
+fn a_selected_native_callable_keeps_its_scalar_argument_abi() {
+    for body in [
+        "let selected:fn(Int,Int)->Int=add; let callback=selected; callback(70,3)",
+        "let callback:fn(Int)->Int=|value:Int| value+3; callback(70)",
+        "let callback:fn(Float)->Int=convert; callback(3.5)",
+    ] {
+        run_native(&format!(r#"
+            fn add(left:Int,right:Int)->Int {{left+right}}
+            fn convert(value:Float)->Int {{(value as Int)+70}}
+            fn main()->Int {{{body}}}
+        "#));
+    }
+}
+
+#[test]
+fn native_callable_frame_layout_is_independent_of_its_linkage_name() {
+    for closure_body in [false, true] {
+        let source = if closure_body {
+            "fn main()->Int {let callback:fn(Int)->Int=|value:Int| value+1;callback(72)}"
+        } else {
+            "fn known(value:Int)->Int {value+1} fn main()->Int {let callback:fn(Int)->Int=known;callback(72)}"
+        };
+        let mut wire = module(source);
+        let target = if closure_body {
+            wire.functions.iter().find(|f| f.closure_capture_count.is_some()).unwrap().id
+        } else { wire.find_function_by_name("known").unwrap() };
+        let name = wire.strings.intern(if closure_body { "renamed_callback" } else { "ordinary$closure$spelling" });
+        wire.functions.iter_mut().find(|f| f.id == target).unwrap().name = name;
+        run_native_module(wire);
+    }
+}
+
 fn run_native(source: &str) {
     run_native_module(module(source));
 }

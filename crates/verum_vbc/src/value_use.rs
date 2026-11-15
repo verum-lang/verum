@@ -86,6 +86,10 @@ impl ValueUsePlan {
             // Declaration ASTs carry lexical names, not VBC TypeParam IDs.
             encoded.extend(bincode::serialize(signature).ok()?);
         }
+        if let Some(captures) = descriptor.closure_capture_count {
+            encoded.extend_from_slice(b"verum.closure-environment/1\0");
+            encoded.extend_from_slice(&captures.to_le_bytes());
+        }
         Some(*blake3::hash(&encoded).as_bytes())
     }
     /// Any semantic signature rewrite needs an explicit producer revalidation.

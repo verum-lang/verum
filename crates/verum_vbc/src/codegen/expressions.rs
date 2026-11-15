@@ -32749,8 +32749,15 @@ impl VbcCodegen {
                 type_name: crate::types::StringId::EMPTY,
             });
         }
-        // Store capture count in max_stack for LLVM prologue generation
-        descriptor.max_stack = captures.len() as u16;
+        descriptor.closure_capture_count = Some(u16::try_from(captures.len())
+            .map_err(|_| CodegenError::internal("closure capture count exceeds the register limit"))?);
+        if signature_is_plain {
+            // The ABI environment has no source parameter. Preserve its slot
+            // explicitly instead of deriving a semantic type from raw storage.
+            descriptor.semantic_params = Some(std::iter::once(None)
+                .chain(param_type_refs.iter().cloned()).collect());
+        }
+        descriptor.semantic_return = closure_return_type_ref.clone();
         // Prefer the declared or proven body result. Keep the legacy ABI
         // fallback only when no structural result was established.
         descriptor.return_type = closure_return_type_ref

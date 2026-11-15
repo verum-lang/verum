@@ -1714,6 +1714,8 @@ impl<'a, 'ctx> Emitter<'a, 'ctx> {
                 self.store(frame, 32, self.load(frame, 0)?)?;
                 self.jump(self.finish)
             }
+            CopyNode::Callable(_) => Err(LlvmLoweringError::unsupported(
+                "native nested callable copy requires its producer-issued environment receipt")),
             CopyNode::Alias(next) => {
                 self.store(frame, 16, self.integer(next.0 as u64))?;
                 self.jump(self.top)
@@ -1783,6 +1785,7 @@ pub(super) fn lower<'ctx>(
         Ok(plan) => plan,
         Err(reason) if !ty.is_generic() => return Err(LlvmLoweringError::Internal(reason)),
         Err(reason) => {
+            ctx.clear_callable_producers();
             emit_runtime_abort(ctx, &reason, "copy_unresolved")?;
             ctx.set_register(dst.0, ctx.types().i64_type().const_zero().into());
             return Ok(());
@@ -1794,15 +1797,23 @@ pub(super) fn lower<'ctx>(
     // 64-bit slots. The checked plan rejects alias cycles before this walk.
     let mut root = NodeId(0);
     for _ in 0..plan.nodes.len() {
-        match plan.nodes[root.0] {
+        match &plan.nodes[root.0] {
             CopyNode::Identity => {
+                ctx.clear_callable_producers();
                 ctx.set_register(dst.0, source);
                 return Ok(());
             }
-            CopyNode::Alias(next) => root = next,
+            CopyNode::Callable(signature) => {
+                ctx.require_callable_copy(src, signature)?;
+                return super::lower_mov(ctx, dst, src);
+            }
+            CopyNode::Alias(next) => root = *next,
             _ => break,
         }
     }
+    // A structural copy can invoke declared retain code, whose writes are
+    // outside the local empty-environment producer proof.
+    ctx.clear_callable_producers();
     let counters = if plan
         .nodes
         .iter()

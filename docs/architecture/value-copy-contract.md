@@ -110,13 +110,24 @@ discard this producer fact. Erased native indirect calls remain refused when
 an owned-body target may occur. The flag declares an ABI, not an independent
 ownership proof.
 
-Callable cleanup has a separate producer check. The VM accepts a known function
-ID only with its actual semantic signature, or a registered empty environment
-with its exact live allocation and lexical witnesses. A captured environment
-without an owned lifecycle is refused. Native callable cleanup emits an
-executable refusal until it has an environment ownership receipt. Copying a
-callable into an owned aggregate payload remains unsupported (T2793); a cleanup
-receipt does not authorize a callable copy. These checks
+VBC minor 61 also carries an explicit closure environment convention and capture
+count. Its native environment parameter has no source parameter type; the retained
+semantic signature contains only the declared user arguments. Both execution
+tiers check formation against the selected descriptor's capture count. The native
+prologue and callable adapter use this metadata, never a generated name or the
+unrelated stack-size field. Changing the convention invalidates a body-use receipt.
+
+Callable copy and cleanup share an empty-environment producer check. The VM
+accepts a known function ID only with its actual semantic signature, or a
+registered empty environment with its exact live allocation and lexical
+witnesses. The copy plan retains a callable check at every owned payload;
+it does not turn a function type into unconditional identity-copy permission.
+Native local copies also require the exact selected empty-environment producer
+and semantic signature. Native aggregate copies containing callables remain
+refused because their payloads do not yet retain this producer evidence.
+A captured environment without an owned lifecycle is refused in either tier.
+Native callable cleanup emits an executable refusal until it has an environment
+ownership receipt. These checks
 do not complete the closure lifecycle or native released-owner checks, which
 remain separately tracked by T1807 and T2719. Taking a reference to a by-value
 parameter is also a frontend lifetime question: the accepted parameter-store
@@ -128,6 +139,7 @@ case tracked by T2785 is not repaired by runtime cleanup.
 |----------------|-----------|
 | Scalar and immutable text | Preserve the value. |
 | Reference | Preserve the reference and its qualifiers; do not traverse it. |
+| Callable | Check its actual empty-environment producer and signature before preserving the carrier. |
 | Record or tuple | Allocate independent storage and copy each owned field. |
 | Sum | Copy the active declared payload into independent storage. |
 | Fixed array | Copy exactly the declared number of elements. |

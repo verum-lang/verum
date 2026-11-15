@@ -401,6 +401,10 @@ fn inspect<'a>(
             CopyNode::Identity => {
                 return Ok((Operation::Identity(source), Children::None, 0, false));
             }
+            CopyNode::Callable(signature) => {
+                state.heap.validate_empty_callable(&state.module, source, signature)?;
+                return Ok((Operation::Identity(source), Children::None, 0, false));
+            }
             CopyNode::Record {
                 owner,
                 fields: declared,

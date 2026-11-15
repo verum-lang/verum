@@ -146,3 +146,35 @@ fn a_selected_callable_keeps_its_declared_argument_count() {
     let error = lowering.lower_module(&module).unwrap_err();
     assert!(error.to_string().contains("argument count differs from its selected producer"), "{error}");
 }
+
+#[test]
+fn an_erased_callable_signature_cannot_authorize_a_native_copy() {
+    let module = compile("fn duplicate(selected:fn()->Int)->Int {let copied=selected;copied()} fn known()->Int {73} fn main()->Int {duplicate(known)}");
+    let context = Context::create();
+    let mut lowering = VbcToLlvmLowering::new(
+        &context, LoweringConfig::debug("erased_callable_copy").with_debug_info(false),
+    );
+    let error = lowering.lower_module(&module).unwrap_err();
+    assert!(error.to_string().contains("native callable copy requires its exact empty-environment producer"), "{error}");
+}
+
+#[test]
+fn native_callable_copy_checks_the_producers_semantic_signature() {
+    let mut module = compile("fn known()->Int {73} fn main()->Int {let selected:fn()->Int=known;let copied=selected;copied()}");
+    let mut changed = false;
+    for function in &mut module.functions {
+        for instruction in function.instructions.iter_mut().flatten() {
+            if let verum_vbc::Instruction::CloneTyped { type_ref: verum_vbc::TypeRef::Function { return_type, .. }, .. } = instruction {
+                **return_type = verum_vbc::TypeRef::Concrete(verum_vbc::TypeId::BOOL);
+                changed = true;
+            }
+        }
+    }
+    assert!(changed, "actual source callable copy");
+    let context = Context::create();
+    let mut lowering = VbcToLlvmLowering::new(
+        &context, LoweringConfig::debug("mismatched_callable_copy").with_debug_info(false),
+    );
+    let error = lowering.lower_module(&module).unwrap_err();
+    assert!(error.to_string().contains("copy producer does not match the declared signature"), "{error}");
+}

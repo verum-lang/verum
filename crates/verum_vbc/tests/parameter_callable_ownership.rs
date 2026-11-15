@@ -33,6 +33,52 @@ fn wrong(value: Int) -> Int { value }
 fn dispose(selected: fn() -> Int) -> Int { 73 }
 ";
 
+const COPIES: &str = "
+fn known() -> Int { 73 }
+fn wrong(value: Int) -> Int { value }
+fn duplicate(selected: fn() -> Int) -> Int { let copied = selected; copied() }
+";
+
+#[test]
+fn empty_callable_copies_preserve_the_selected_function() {
+    for unit in [false, true] {
+        for formation in ["known", "|| 73"] {
+            let source = format!("{COPIES} fn probe()->Int {{duplicate({formation})}}");
+            let module = compile(&source, unit);
+            let entry = module.find_function_by_name("callable_parameter.probe").unwrap();
+            assert_eq!(Interpreter::new(module.into()).execute_function(entry).unwrap().try_as_i64(), Some(73));
+        }
+    }
+}
+
+#[test]
+fn copying_a_callable_requires_the_actual_producer_and_signature() {
+    for unit in [false, true] {
+        let module = compile(COPIES, unit);
+        let entry = module.find_function_by_name("callable_parameter.duplicate").unwrap();
+        let wrong = module.find_function_by_name("callable_parameter.wrong").unwrap();
+        for (value, required) in [
+            (Value::from_function(wrong), "parameter signature"),
+            (Value::from_function(FunctionId(u32::MAX)), "function identity is not declared"),
+            (Value::from_ptr(std::ptr::NonNull::<u8>::dangling().as_ptr()), "producer-issued environment receipt"),
+        ] {
+            let mut vm = Interpreter::new(module.clone().into());
+            let error = vm.execute_function_with_args(entry, &[value]).unwrap_err();
+            assert!(error.to_string().contains(required), "{error}");
+        }
+    }
+}
+
+#[test]
+fn copying_a_captured_environment_requires_its_owned_lifecycle() {
+    for unit in [false, true] {
+        let module = compile(&format!("{COPIES} fn probe()->Int {{let value=73;duplicate(|| value)}}"), unit);
+        let entry = module.find_function_by_name("callable_parameter.probe").unwrap();
+        let error = Interpreter::new(module.into()).execute_function(entry).unwrap_err();
+        assert!(error.to_string().contains("captured environment requires an owned lifecycle"), "{error}");
+    }
+}
+
 #[test]
 fn a_known_function_reference_has_no_environment_obligation() {
     for unit in [false, true] {

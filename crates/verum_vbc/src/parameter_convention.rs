@@ -4,6 +4,15 @@ use verum_common::Text;
 
 /// A declaration flag cannot manufacture an executable parameter lifecycle.
 pub fn validate_body(function: &FunctionDescriptor) -> Result<(), Text> {
+    if let Some(captures) = function.closure_capture_count {
+        if function.params.first().is_none_or(|parameter|
+            parameter.type_ref != crate::TypeRef::Concrete(crate::TypeId::PTR))
+            || usize::from(captures) + function.params.len().saturating_sub(1)
+                > usize::from(function.register_count)
+        {
+            return Err("closure environment convention requires its parameter and register layout".into());
+        }
+    }
     if function.owned_value_parameters
         && (!function.has_source_body
             || function.is_generator

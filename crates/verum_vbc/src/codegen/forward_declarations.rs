@@ -235,6 +235,7 @@ impl VbcCodegen {
 /// Exhaustive destructuring makes new descriptor fields require classification.
 #[derive(PartialEq)]
 struct CallableContract<'a> {
+    closure_capture_count: Option<u16>,
     declaration_identity: &'a Option<crate::module::CallableDeclarationIdentity>,
     parent_type: Option<TypeId>,
     type_params: &'a [crate::types::TypeParamDescriptor],
@@ -266,6 +267,7 @@ impl<'a> From<&'a FunctionDescriptor> for CallableContract<'a> {
             id: _, name: _, origin_module: _, params: _, source_signature: _,
             // Body layout, diagnostics and optimization receipts are not declarations.
             owned_value_parameters: _, value_uses: _, bytecode_offset: _, bytecode_length: _, locals_count: _,
+            closure_capture_count,
             register_count: _, max_stack: _, is_inline_candidate: _, suspend_point_count: _,
             instructions: _, func_id_base: _, debug_variables: _, register_type_hints: _,
             parent_type, type_params, return_type, contexts, properties, is_generic,
@@ -274,6 +276,7 @@ impl<'a> From<&'a FunctionDescriptor> for CallableContract<'a> {
             explicit_type_param_ids, semantic_params, semantic_return, source_receiver, has_source_body, source_definition, declaration_identity,
         } = descriptor;
         Self {
+            closure_capture_count: *closure_capture_count,
             parent_type: *parent_type, type_params, return_type, contexts, properties: *properties,
             is_generic: *is_generic, visibility: *visibility, is_generator: *is_generator,
             yield_type, calling_convention: *calling_convention, optimization_hints,

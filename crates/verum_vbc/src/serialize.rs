@@ -757,7 +757,8 @@ impl Serializer {
             | ((desc.is_generic as u8) << 1)
             | ((desc.is_generator as u8) << 2)
             | ((desc.has_source_body as u8) << 3)
-            | ((desc.owned_value_parameters as u8) << 4);
+            | ((desc.owned_value_parameters as u8) << 4)
+            | ((desc.closure_capture_count.is_some() as u8) << 5);
         self.output.push(flags);
 
         // Properties
@@ -769,6 +770,9 @@ impl Serializer {
         encode_u16(desc.locals_count, &mut self.output);
         encode_u16(desc.register_count, &mut self.output);
         encode_u16(desc.max_stack, &mut self.output);
+        if let Some(count) = desc.closure_capture_count {
+            encode_u16(count, &mut self.output);
+        }
 
         // Type parameters
         encode_varint(desc.type_params.len() as u64, &mut self.output);

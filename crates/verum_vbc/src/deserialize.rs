@@ -1622,10 +1622,14 @@ impl<'a> Deserializer<'a> {
  })?;
 
  let flags = decode_u8(self.data, &mut self.offset)?;
- if flags & !0x1f != 0 {
+ if flags & !0x3f != 0 {
      return Err(VbcError::Deserialization("unknown function descriptor flags".into()));
  }
  let owned_value_parameters = flags & 0x10 != 0;
+ let has_closure_environment = flags & 0x20 != 0;
+ if has_closure_environment && !self.header.as_ref().is_some_and(|h| h.version_minor >= 61) {
+     return Err(VbcError::Deserialization("closure environment convention requires VBC minor 61".into()));
+ }
  if owned_value_parameters && !self.header.as_ref().is_some_and(|h| h.version_minor >= 60) {
      return Err(VbcError::Deserialization("owned parameter convention requires VBC minor 60".into()));
  }
@@ -1643,6 +1647,9 @@ impl<'a> Deserializer<'a> {
  let locals_count = decode_u16(self.data, &mut self.offset)?;
  let register_count = decode_u16(self.data, &mut self.offset)?;
  let max_stack = decode_u16(self.data, &mut self.offset)?;
+ let closure_capture_count = if has_closure_environment {
+     Some(decode_u16(self.data, &mut self.offset)?)
+ } else { None };
 
  // Type parameters — same bound as type-descriptor's
  // type_params, since both describe the same generic
@@ -2035,6 +2042,7 @@ impl<'a> Deserializer<'a> {
  declaration_identity,
  has_source_body,
  owned_value_parameters,
+ closure_capture_count,
  semantic_params,
  semantic_return,
  source_signature,

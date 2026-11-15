@@ -3830,7 +3830,6 @@ fn lower_instruction_impl<'ctx>(
                     ).into()));
                 }
             };
-            let func_name = vbc_mod.get_string(func_desc.name).unwrap_or("<unknown>");
             if !func_desc.type_params.is_empty() {
                 emit_runtime_abort(ctx, "native callable has missing lexical witnesses", "closure_witness")?;
                 ctx.builder().build_unreachable().or_llvm_err()?;
@@ -3841,11 +3840,14 @@ fn lower_instruction_impl<'ctx>(
             }
             let llvm_fn = ctx.resolve_declared_function(func_desc)?;
 
+            func_desc.validate_closure_environment(captures.len())
+                .map_err(LlvmLoweringError::UnprovenCallableEnvironment)?;
+
             // Preserve the existing generated closure-body environment
             // convention. Adapt the exact declared LLVM signature, including
             // lambdas with typed scalar parameters/results, to CallClosure's
             // single slot ABI. Ordinary functions ignore the extra env slot.
-            let is_closure_fn = func_name.contains("$closure$");
+            let is_closure_fn = func_desc.closure_capture_count.is_some();
             let native_params = llvm_fn.get_type().get_param_types();
             let i64_type = ctx.types().i64_type();
             let ptr_type = ctx.types().ptr_type();

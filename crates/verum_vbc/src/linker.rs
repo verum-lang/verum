@@ -1372,6 +1372,7 @@ mod tests {
         let mk_fn = |id: u32, name_id: StringId| FunctionDescriptor {
             has_source_body: false,
             owned_value_parameters: false,
+            closure_capture_count: None,
             explicit_type_param_ids: Vec::new(),
             id: FunctionId(id),
             name: name_id,

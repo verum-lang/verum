@@ -1148,6 +1148,8 @@ pub(in super::super) fn handle_call_closure(
 
     let reg_count = func.register_count;
     let intrinsic_stub = func.requires_intrinsic_implementation();
+    func.validate_closure_environment(capture_count)
+        .map_err(|message| InterpreterError::InvalidOperand { message: message.into_string() })?;
     if intrinsic_stub {
         if capture_count != 0 {
             return Err(InterpreterError::InvalidBytecode {
@@ -1367,6 +1369,10 @@ fn create_closure(state: &mut InterpreterState, typed: bool, witnessed: bool) ->
     // an executable body only at invocation; declaration-only dependencies
     // can otherwise make an unused callable abort module initialization.
     let func_id = state.module.resolve_band_id(func_id).unwrap_or(FunctionId(func_id));
+    if let Some(declaration) = state.module.get_function(func_id) {
+        declaration.validate_closure_environment(capture_count)
+            .map_err(|message| InterpreterError::InvalidOperand { message: message.into_string() })?;
+    }
     let func_id = func_id.0;
 
     // Allocate closure object on heap.
