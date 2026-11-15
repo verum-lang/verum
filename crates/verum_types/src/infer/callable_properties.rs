@@ -55,6 +55,68 @@ struct SourceCalls {
     nested_item: bool,
 }
 
+// This is a work budget for preliminary evidence, not a semantic call-depth
+// limit. Exhaustion leaves the callable's contract open for ordinary checking.
+const MAX_SOURCE_CALL_STEPS: usize = 4096;
+
+#[derive(Clone)]
+enum CallableSource {
+    Registered(Shared<verum_modules::ModuleInfo>),
+    Lexical(Shared<verum_ast::Module>),
+}
+
+impl CallableSource {
+    fn module(&self) -> &verum_ast::Module {
+        match self {
+            Self::Registered(module) => &module.ast,
+            Self::Lexical(module) => module,
+        }
+    }
+}
+
+// Retain the immutable snapshot and the selected declaration's location.
+// Generated functions may share a name and span; neither identifies a node.
+#[derive(Clone)]
+struct SourceFunction {
+    source: CallableSource,
+    item: usize,
+    member: Option<usize>,
+}
+
+impl SourceFunction {
+    fn declaration(&self) -> &FunctionDecl {
+        match (&self.source.module().items[self.item].kind, self.member) {
+            (ItemKind::Function(function), None) => function,
+            (ItemKind::ExternBlock(block), Some(member)) => &block.functions[member],
+            (ItemKind::Impl(implementation), Some(member)) => {
+                let verum_ast::decl::ImplItemKind::Function(function) =
+                    &implementation.items[member].kind else {
+                        unreachable!("selected source method in immutable snapshot")
+                    };
+                function
+            }
+            _ => unreachable!("selected source function in immutable snapshot"),
+        }
+    }
+
+    fn identity(&self) -> usize {
+        // This address is used only as identity, never dereferenced. Every
+        // active/proven entry retains its snapshot until this query finishes.
+        std::ptr::from_ref(self.declaration()) as usize
+    }
+}
+
+enum SourceCall {
+    Known(bool),
+    Declaration(Text, SourceFunction),
+}
+
+struct SourceCallFrame {
+    owner: Text,
+    declaration: Option<SourceFunction>,
+    remaining: List<verum_ast::Path>,
+}
+
 // Only lexical paths can supply declaration evidence before expression
 // inference. Value receivers and computed callees remain unknown. Walk field
 // chains iteratively so qualified calls do not amplify the host stack.
@@ -343,8 +405,8 @@ impl TypeChecker {
             )?;
             // Do not recursively speculate through arbitrary source calls.
             // A leaf is either the declared intrinsic or its exact operation.
-            if intrinsic_declaration_bound(&declaration).is_none()
-                && Self::source_forwarding_expression(&declaration)
+            if intrinsic_declaration_bound(declaration.declaration()).is_none()
+                && Self::source_forwarding_expression(declaration.declaration())
                     .and_then(Self::direct_intrinsic_operands).is_none() { return None; }
             selected = Some((callee.name.clone(), owner, declaration));
             args.as_slice()
@@ -401,7 +463,7 @@ impl TypeChecker {
             let previous_self = checker.current_self_type.clone();
             checker.set_current_self_type(None);
             checker.push_decl_param_frame(indexmap::IndexMap::new());
-            let scheme = checker.source_function_scheme(&declaration).ok();
+            let scheme = checker.source_function_scheme(declaration.declaration()).ok();
             checker.pop_decl_param_frame();
             checker.set_current_self_type(previous_self);
             scheme
@@ -452,36 +514,69 @@ impl TypeChecker {
         }
         let declared = PropertyRequirement::declared_function(function.is_pure, function.is_meta);
         if declared.may_be_async()
-            && self.source_body_is_sync(function, &self.current_module_path.clone(), &mut List::new())
+            && self.source_body_is_sync(function, &self.current_module_path.clone())
         {
             return PropertyRequirement::source_callable(false);
         }
         declared
     }
 
-    fn source_body_is_sync(
-        &mut self,
-        function: &FunctionDecl,
-        owner: &Text,
-        active: &mut List<(Text, Span)>,
-    ) -> bool {
+    fn source_body_is_sync(&mut self, function: &FunctionDecl, owner: &Text) -> bool {
+        let Some(mut calls) = self.source_body_calls(function) else { return false; };
+        calls.reverse();
+        let mut pending = List::from_single(SourceCallFrame {
+            owner: owner.clone(), declaration: None, remaining: calls,
+        });
+        let mut active = Set::new();
+        let mut proven = Map::new();
+        let mut remaining = MAX_SOURCE_CALL_STEPS;
+        while let Some(frame) = pending.last_mut() {
+            let Some(path) = frame.remaining.pop() else {
+                let frame = pending.pop().expect("active source call frame");
+                if let Some(declaration) = frame.declaration {
+                    let key = (frame.owner, declaration.identity());
+                    active.remove(&key);
+                    proven.insert(key, declaration);
+                }
+                continue;
+            };
+            let Some(next) = remaining.checked_sub(1) else { return false; };
+            remaining = next;
+            let (owner, declaration) = match self.source_call_for_properties(&frame.owner, &path) {
+                SourceCall::Known(true) => continue,
+                SourceCall::Known(false) => return false,
+                SourceCall::Declaration(owner, declaration) => (owner, declaration),
+            };
+            let key = (owner.clone(), declaration.identity());
+            if proven.contains_key(&key) { continue; }
+            // Recursive source contracts remain unproved. Re-entering an
+            // active node cannot borrow evidence from an unfinished body.
+            if !active.insert(key) { return false; }
+            let Some(mut calls) = self.source_body_calls(declaration.declaration()) else {
+                return false;
+            };
+            calls.reverse();
+            pending.push(SourceCallFrame { owner, declaration: Some(declaration), remaining: calls });
+        }
+        true
+    }
+
+    /// Analyze local computation once; unresolved source edges are handled by
+    /// the bounded graph traversal, without recursively analyzing callees.
+    fn source_body_calls(&mut self, function: &FunctionDecl) -> Option<List<verum_ast::Path>> {
         if function.is_async || function.is_generator {
-            return false;
+            return None;
         }
         if let Some(bound) = intrinsic_declaration_bound(function) {
-            return !bound.may_be_async();
+            return (!bound.may_be_async()).then(List::new);
         }
         // The ABI is carried by the declaration, including across imports and
         // metadata. Foreign calls return on the calling stack. They may perform
         // IO, mutate and fail; synchronous is not a promise of purity.
         if function.extern_abi.is_some() {
-            return true;
+            return Some(List::new());
         }
-        let Some(body) = &function.body else { return false; };
-        let key = (owner.clone(), function.span);
-        if active.len() >= 32 || active.contains(&key) {
-            return false;
-        }
+        let Some(body) = &function.body else { return None; };
         let mut local = self.property_inferrer.infer_function_body(body);
         for param in &function.params {
             if let verum_ast::FunctionParamKind::Regular {
@@ -516,10 +611,10 @@ impl TypeChecker {
             verum_ast::FunctionBody::Expr(expr) => calls.visit_expr(expr),
         }
         if calls.bound.may_be_async() {
-            return false;
+            return None;
         }
         if source.unresolved.is_empty() {
-            return true;
+            return Some(List::new());
         }
         if source.nested_item
             || source
@@ -528,32 +623,27 @@ impl TypeChecker {
                 .any(|path| matches!(path.segments.first(), Some(verum_ast::ty::PathSegment::Name(name))
                     if source.bindings.contains(&name.name)))
         {
-            return false;
+            return None;
         }
-        active.push(key);
-        let proven = source.unresolved.iter().all(|path|
-            self.source_call_is_sync(owner, path, active));
-        active.pop();
-        proven
+        Some(source.unresolved)
     }
 
-    fn source_call_is_sync(
+    fn source_call_for_properties(
         &mut self,
         owner: &Text,
         path: &verum_ast::Path,
-        active: &mut List<(Text, Span)>,
-    ) -> bool {
+    ) -> SourceCall {
         use verum_ast::{TypeDeclBody, ty::PathSegment};
         if let Some(name) = path.as_ident() {
             if let Some((target, declaration)) = self.source_function_for_properties(owner, &name.name) {
-                return self.source_body_is_sync(&declaration, &target, active);
+                return SourceCall::Declaration(target, declaration);
             }
-            if self.source_receiver_shadowing(owner, &name.name).0 { return false; }
-            return self.with_source_signature_scope(owner, |checker|
+            if self.source_receiver_shadowing(owner, &name.name).0 { return SourceCall::Known(false); }
+            return SourceCall::Known(self.with_source_signature_scope(owner, |checker|
                 checker.declaring_source_type_declaration(&name.name))
-                .is_some_and(|(declaration, _)| matches!(declaration.body, TypeDeclBody::Tuple(_)));
+                .is_some_and(|(declaration, _)| matches!(declaration.body, TypeDeclBody::Tuple(_))));
         }
-        let Some(PathSegment::Name(member)) = path.segments.last() else { return false; };
+        let Some(PathSegment::Name(member)) = path.segments.last() else { return SourceCall::Known(false); };
         let mut receiver = path.clone();
         receiver.segments.pop();
         // Resolve the written module path exactly once, using the same relative
@@ -564,41 +654,40 @@ impl TypeChecker {
             Some(PathSegment::Name(name)) => self.source_receiver_shadowing(owner, &name.name),
             _ => (false, false),
         };
-        if value_bound { return false; }
+        if value_bound { return SourceCall::Known(false); }
         let module = if lexical_bound { None } else {
             self.module_registry.read().get_by_path_aliased(&module_path.to_string())
         };
         if let Some(module) = module {
             if !module.exports.is_visible_from_path(&member.name,
-                &verum_modules::ModulePath::from_str(owner)) { return false; }
-            let Some(export) = module.exports.get(&member.name) else { return false; };
+                &verum_modules::ModulePath::from_str(owner)) { return SourceCall::Known(false); }
+            let Some(export) = module.exports.get(&member.name) else { return SourceCall::Known(false); };
             let origin = self.module_registry.read().get(export.source_module);
-            let Some(origin) = origin else { return false; };
+            let Some(origin) = origin else { return SourceCall::Known(false); };
             let original = export.original_name.as_ref().unwrap_or(&member.name);
-            let declaration = origin.ast.items.iter()
-                .filter(|item| self.cfg_evaluator.should_include(&item.attributes))
-                .find_map(|item| self.imported_function(item, original))
-                .filter(|function| self.cfg_evaluator.should_include(&function.attributes)).cloned();
-            return declaration.is_some_and(|function|
-                self.source_body_is_sync(&function, &origin.path.to_string().into(), active));
+            let owner = origin.path.to_string().into();
+            return match self.source_function_in(CallableSource::Registered(origin), original) {
+                Some(function) => SourceCall::Declaration(owner, function),
+                None => SourceCall::Known(false),
+            };
         }
         // A nominal receiver selects its own declaration and implementation,
         // never a same-named method belonging to the importing module.
-        let Some(name) = receiver.as_ident() else { return false; };
+        let Some(name) = receiver.as_ident() else { return SourceCall::Known(false); };
         let selected = self.with_source_signature_scope(owner, |checker|
             checker.declaring_source_type_declaration(name.name.as_str()));
-        let Some((declaration, target)) = selected else { return false; };
+        let Some((declaration, target)) = selected else { return SourceCall::Known(false); };
         match self.source_static_function_for_properties(&target, &declaration.name.name, &member.name) {
             Ok(Some(function)) => {
-                if target != *owner && function.visibility != verum_ast::Visibility::Public { return false; }
-                return self.source_body_is_sync(&function, &target, active);
+                if target != *owner && function.declaration().visibility != verum_ast::Visibility::Public { return SourceCall::Known(false); }
+                return SourceCall::Declaration(target, function);
             }
-            Err(()) => return false,
+            Err(()) => return SourceCall::Known(false),
             Ok(None) => {},
         }
-        matches!(&declaration.body, TypeDeclBody::Variant(variants) | TypeDeclBody::Inductive(variants)
+        SourceCall::Known(matches!(&declaration.body, TypeDeclBody::Variant(variants) | TypeDeclBody::Inductive(variants)
             if variants.iter().any(|variant| variant.name.name == member.name
-                && self.cfg_evaluator.should_include(&variant.attributes)))
+                && self.cfg_evaluator.should_include(&variant.attributes))))
     }
 
     // A local binding owns its spelling. In particular an imported namespace,
@@ -650,15 +739,16 @@ impl TypeChecker {
 
     fn source_static_function_for_properties(
         &self, owner: &Text, receiver: &Text, name: &Text,
-    ) -> std::result::Result<Option<FunctionDecl>, ()> {
+    ) -> std::result::Result<Option<SourceFunction>, ()> {
         use verum_ast::{decl::{ImplKind, ImplItemKind, FunctionParamKind}, TypeKind};
         let registry = self.module_registry.read();
         let registered = registry.get_by_path_aliased(owner);
-        let module = self.source_type_registration.local_declarations.iter().rev()
-            .find(|(path, _)| path == owner).map(|(_, module)| module.as_ref())
-            .or_else(|| registered.as_ref().map(|module| &module.ast)).ok_or(())?;
+        let source = self.source_type_registration.local_declarations.iter().rev()
+            .find(|(path, _)| path == owner).map(|(_, module)| CallableSource::Lexical(module.clone()))
+            .or_else(|| registered.clone().map(CallableSource::Registered)).ok_or(())?;
+        let module = source.module();
         let mut selected = None;
-        for item in &module.items {
+        for (item_index, item) in module.items.iter().enumerate() {
             if !self.cfg_evaluator.should_include(&item.attributes) { continue; }
             let ItemKind::Impl(implementation) = &item.kind else { continue; };
             // A generic or constrained implementation requires ordinary typed
@@ -666,7 +756,7 @@ impl TypeChecker {
             let ImplKind::Inherent(target) = &implementation.kind else { continue; };
             let TypeKind::Path(target) = &target.kind else { continue; };
             if !target.as_ident().is_some_and(|name| &name.name == receiver) { continue; }
-            for method in &implementation.items {
+            for (member, method) in implementation.items.iter().enumerate() {
                 let ImplItemKind::Function(function) = &method.kind else { continue; };
                 if &function.name.name != name || !self.cfg_evaluator.should_include(&method.attributes)
                     || !self.cfg_evaluator.should_include(&function.attributes) { continue; }
@@ -676,7 +766,7 @@ impl TypeChecker {
                     || implementation.specialize_attr.is_some()
                     || function.params.iter()
                     .any(|param| !matches!(param.kind, FunctionParamKind::Regular { .. })) { return Err(()); }
-                selected = Some(function.clone());
+                selected = Some(SourceFunction { source: source.clone(), item: item_index, member: Some(member) });
             }
         }
         Ok(selected)
@@ -689,25 +779,21 @@ impl TypeChecker {
         &self,
         owner: &Text,
         name: &Text,
-    ) -> Option<(Text, FunctionDecl)> {
+    ) -> Option<(Text, SourceFunction)> {
         use super::source_declarations::{MountTargetKind, source_mount_targets};
         let registry = self.module_registry.read();
         let registered = self.get_module_with_path_aliases(owner, &registry);
         // A currently checked source need not yet be a registry entry. Its
         // complete lexical inventory (including mounts) still owns resolution.
-        let module = self.source_type_registration.local_declarations.iter().rev()
-            .find(|(path, _)| path == owner).map(|(_, module)| module.as_ref())
-            .or_else(|| registered.as_ref().map(|module| &module.ast))?;
+        let source = self.source_type_registration.local_declarations.iter().rev()
+            .find(|(path, _)| path == owner).map(|(_, module)| CallableSource::Lexical(module.clone()))
+            .or_else(|| registered.clone().map(CallableSource::Registered))?;
+        let module = source.module();
         let path = registered.as_ref().map_or_else(
             || verum_modules::ModulePath::from_str(owner), |module| module.path.clone(),
         );
         let included = |item: &&verum_ast::Item| self.cfg_evaluator.should_include(&item.attributes);
-        let local = |module: &verum_ast::Module, name: &Text| {
-            module.items.iter().filter(included)
-                .filter_map(|item| self.imported_function(item, name))
-                .find(|function| self.cfg_evaluator.should_include(&function.attributes)).cloned()
-        };
-        if let Some(function) = local(module, name) {
+        if let Some(function) = self.source_function_in(source.clone(), name) {
             return Some((path.to_string().into(), function));
         }
         if module.items.iter().filter(included).any(|item| match &item.kind {
@@ -748,14 +834,30 @@ impl TypeChecker {
             }
             let origin = registry.get(export.source_module)?;
             let original = export.original_name.as_ref().unwrap_or(&leaf);
-            let declaration = local(&origin.ast, original)?;
-            let key = (Text::from(origin.path.to_string()), declaration);
-            if selected.as_ref().is_some_and(|previous| previous != &key) {
+            let owner = Text::from(origin.path.to_string());
+            let declaration = self.source_function_in(CallableSource::Registered(origin), original)?;
+            let key = (owner, declaration);
+            if selected.as_ref().is_some_and(|previous: &(Text, SourceFunction)|
+                previous.0 != key.0 || previous.1.identity() != key.1.identity()) {
                 return None;
             }
             selected = Some(key);
         }
         selected
+    }
+
+    fn source_function_in(&self, source: CallableSource, name: &Text) -> Option<SourceFunction> {
+        for (index, item) in source.module().items.iter().enumerate() {
+            let Some(function) = self.imported_function(item, name) else { continue; };
+            if !self.cfg_evaluator.should_include(&function.attributes) { continue; }
+            let member = match &item.kind {
+                ItemKind::ExternBlock(block) => block.functions.iter()
+                    .position(|candidate| std::ptr::eq(candidate, function)),
+                _ => None,
+            };
+            return Some(SourceFunction { source, item: index, member });
+        }
+        None
     }
 
     pub(super) fn callable_bound_with_marker(
