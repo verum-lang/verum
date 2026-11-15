@@ -1358,12 +1358,13 @@ jobs:
         run: python3 scripts/ci/check_no_host_cfg.py --strict
 
       # **Panic-surface ratchet** (T0424).
-      # New IR-emitting code must use the fallible idiom
-      # (`.or_llvm_err()?`), not `.unwrap()`/`.expect()` — any NET
-      # INCREASE over the committed baseline blocks merge; the T0131
-      # sweeps re-rot without this gate.
+      # New IR-emitting code uses the fallible idiom (`.or_llvm_err()?`).
+      # The aggregate count includes unwrap/expect error variants and panic
+      # macros; any net increase over the committed baseline blocks merge.
       - name: Check codegen panic-surface ratchet
-        run: python3 scripts/ci/check_panic_surface_ratchet.py
+        run: |
+          python3 -B scripts/ci/tests/test_panic_surface_ratchet.py
+          python3 scripts/ci/check_panic_surface_ratchet.py
 
       # **Dup-emitter + dead-libc-body census** (T0438).
       # One definer per verum_* symbol (a losing emitter leaves no IR
