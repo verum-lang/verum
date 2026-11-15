@@ -54,8 +54,8 @@ public type ColumnMeta is {
 public type TableKind is TkTable | TkView | TkVirtual;
 
 public type TableMeta is {
-    schema: Text,                  // e.g. "main" / "temp"; "" = main
-    name: Text,
+    public(cog) schema: Text,     // e.g. "main" / "temp"; "" = main
+    public(cog) name: Text,
     kind: TableKind,
     root_page: Int,                // 1-based; 0 reserved/invalid
     columns: List<ColumnMeta>,

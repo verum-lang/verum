@@ -72,9 +72,9 @@ public type RowMutationKind is RmkInsert | RmkUpdate | RmkDelete;
 /// `cursor_id` → `(schema, table)` via `SqliteNativeConnection.schema`, and
 /// invokes the per-connection `update_hook` (when set).
 public type RowMutation is {
-    kind: RowMutationKind,
-    cursor_id: Int,
-    rowid: Int64,
+    public(cog) kind: RowMutationKind,
+    public(cog) cursor_id: Int,
+    public(cog) rowid: Int64,
 };
 
 /// Mutable interpreter state held across calls to `step`.

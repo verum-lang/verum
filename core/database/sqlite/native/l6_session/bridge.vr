@@ -145,17 +145,11 @@ public fn fire_update_hooks(stmt: &PreparedStatement, conn: &mut SqliteNativeCon
         i = i + 1;
     }
 
-    // Now invoke the hook with &mut access.
-    match &mut conn.registry_mut().update_hook {
-        Maybe.None => {}
-        Maybe.Some(h) => {
-            let hook_ref = &mut **h;
-            let mut k: Int = 0;
-            while k < staged.len() {
-                let entry = &staged[k];
-                hook_ref.on_update(entry.0, &entry.1, &entry.2, entry.3);
-                k = k + 1;
-            }
-        }
+    // The registry owns the mutable hook slot and its dispatch.
+    let mut k: Int = 0;
+    while k < staged.len() {
+        let entry = &staged[k];
+        conn.registry_mut().invoke_update_hook(entry.0, &entry.1, &entry.2, entry.3);
+        k = k + 1;
     }
 }
