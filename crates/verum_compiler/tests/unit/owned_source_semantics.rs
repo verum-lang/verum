@@ -7,6 +7,9 @@ use verum_fast_parser::Parser;
 #[path = "source_protocol_registration.rs"]
 mod source_protocol_registration;
 
+#[path = "typeid_clone_contract.rs"]
+mod typeid_clone_contract;
+
 fn select_source_module(
     owner: &str,
     module: &Module,

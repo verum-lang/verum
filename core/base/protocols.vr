@@ -1380,6 +1380,12 @@ implement SignedNumeric for Float32 {}
 /// Each distinct type has a unique TypeId at runtime.
 public type TypeId is (UInt64);
 
+implement Clone for TypeId {
+    fn clone(&self) -> Self {
+        TypeId(self.0)
+    }
+}
+
 implement TypeId {
     /// Create a TypeId from a raw value.
     fn from_raw(id: UInt64) -> TypeId {
