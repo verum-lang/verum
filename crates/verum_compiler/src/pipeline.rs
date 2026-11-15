@@ -43,7 +43,7 @@ use verum_diagnostics::DiagnosticBuilder;
 
 // Compilation path analysis
 use verum_modules::{
-    ModuleId, ModuleInfo, ModuleLoader, ModuleRegistry, SharedModuleResolver,
+    ModuleLoader, ModuleRegistry, SharedModuleResolver,
 };
 // CoherenceChecker / ImplEntry now used only inside
 // crate::pipeline::coherence (#106 Phase 6).
@@ -121,6 +121,9 @@ mod external_cog_source_tests;
 #[cfg(test)]
 #[path = "../tests/unit/project_forward_payloads.rs"]
 mod project_forward_payload_tests;
+#[cfg(all(test, unix))]
+#[path = "../tests/unit/source_stdlib_io.rs"]
+mod source_stdlib_io_tests;
 mod mlir;
 mod native_codegen;
 mod phase0;
@@ -133,31 +136,8 @@ mod theorem_proofs;
 mod tier_constructors;
 pub(crate) mod vbc_codegen;
 
-// ═══════════════════════════════════════════════════════════════════════════
-// GLOBAL STDLIB MODULE CACHE
-// ═══════════════════════════════════════════════════════════════════════════
-//
-
-// Caches parsed stdlib modules at the process level so that multiple
-// CompilationPipeline instances (e.g., one per test file) don't each re-parse
-// the 166+ stdlib .vr files. The cache stores Arc<Module> so they can be
-// shared across threads and pipeline instances.
-//
-
-// Cache key: workspace root path (canonicalized)
-// Cache value: Vec<(module_path, Arc<Module>)> + ModuleRegistry entries
-// ═══════════════════════════════════════════════════════════════════════════
-
-/// Cached fully-populated ModuleRegistry for process-level reuse.
-///
-/// This is the key optimization for test performance: instead of re-registering
-/// ~166 stdlib modules for every test (taking ~400-600ms), we cache the fully
-/// populated registry and deep_clone it for each pipeline instance.
-///
-/// The registry stores:
-/// - All stdlib modules registered with their exports
-/// - Glob re-exports resolved
-/// - Module path to ID mappings
+/// Complete archive projections can be reused across compilation sessions.
+/// Source ASTs are never cached here: their FileIds belong to their session.
 static GLOBAL_STDLIB_REGISTRY: std::sync::OnceLock<std::sync::RwLock<Option<ModuleRegistry>>> =
     std::sync::OnceLock::new();
 
@@ -264,228 +244,6 @@ pub fn clear_global_caches() {
         let cache = global_stdlib_registry_cache();
         if let Ok(mut guard) = cache.write() {
             *guard = None;
-        }
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// PERSISTENT STDLIB REGISTRY CACHE (DISK)
-// ═══════════════════════════════════════════════════════════════════════════
-//
-
-// Caches the fully-populated ModuleRegistry to disk so that separate process
-// invocations (e.g., repeated `verum run` commands) skip the ~500ms stdlib
-// parse + registration. Uses blake3 content hashing for invalidation.
-//
-
-// Cache location: target/.verum-cache/stdlib/registry_<hash>.bin
-// Format: bincode-serialized SerializableRegistryCache
-// ═══════════════════════════════════════════════════════════════════════════
-
-/// Serializable representation of a ModuleRegistry for disk caching.
-///
-/// ModuleRegistry contains `Shared<ModuleInfo>` (custom Arc) which doesn't
-/// implement Serialize. This wrapper extracts the data into plain types.
-#[derive(serde::Serialize, serde::Deserialize)]
-struct SerializableRegistryCache {
-    /// Cache format version — bump on breaking changes
-    format_version: u32,
-    /// Compiler version that produced this cache
-    compiler_version: String,
-    /// LLVM version that produced this cache — bincode-serialized layouts
-    /// can depend on LLVM types via transitive `ModuleInfo` fields.
-    llvm_version: String,
-    /// Blake3 hash of all core/*.vr file contents
-    content_hash: String,
-    /// Module entries: (module_id_u32, module_info)
-    modules: Vec<(u32, ModuleInfo)>,
-    /// Path-to-ID mapping
-    path_to_id: Vec<(String, u32)>,
-}
-
-/// Current cache format version. Bump when SerializableRegistryCache changes.
-/// Bumped to 2 after adding llvm_version field.
-/// Bumped to 3 after switching the on-disk format from bincode 1 to CBOR
-/// (ciborium). Any pre-existing `registry.bin` from older compilers will
-/// fail to parse and fall through to the full stdlib load.
-const REGISTRY_CACHE_FORMAT_VERSION: u32 = 3;
-
-/// Compute blake3 content hash of all .vr files under a directory.
-pub(super) fn compute_stdlib_content_hash(stdlib_path: &Path) -> String {
-    let mut hasher = blake3::Hasher::new();
-
-    // Collect all .vr files sorted for deterministic hashing
-    let mut files = Vec::new();
-    collect_vr_files(stdlib_path, &mut files, 0);
-    files.sort();
-
-    for path in &files {
-        // Hash relative path for location independence
-        if let Ok(rel) = path.strip_prefix(stdlib_path) {
-            hasher.update(rel.to_string_lossy().as_bytes());
-            hasher.update(b"\x00");
-        }
-        // Hash file content
-        if let Ok(content) = std::fs::read(path) {
-            hasher.update(&content);
-            hasher.update(b"\x00");
-        }
-    }
-
-    hasher.finalize().to_hex().to_string()
-}
-
-/// Recursively collect .vr files (for hashing).
-fn collect_vr_files(dir: &Path, files: &mut Vec<PathBuf>, depth: usize) {
-    if depth >= 10 || !dir.is_dir() {
-        return;
-    }
-    if let Ok(entries) = std::fs::read_dir(dir) {
-        for entry in entries.filter_map(|e| e.ok()) {
-            let path = entry.path();
-            if path.is_symlink() {
-                continue;
-            }
-            if path.is_dir() {
-                let dir_name = path.file_name().map(|n| n.to_string_lossy());
-                if dir_name.as_deref() != Some("examples") {
-                    collect_vr_files(&path, files, depth + 1);
-                }
-            } else if path.extension().is_some_and(|ext| ext == "vr") {
-                files.push(path);
-            }
-        }
-    }
-}
-
-/// Get the disk cache directory for stdlib registry.
-fn stdlib_cache_dir(workspace_root: &Path) -> PathBuf {
-    workspace_root
-        .join("target")
-        .join(".verum-cache")
-        .join("stdlib")
-}
-
-/// Try to load a cached ModuleRegistry from disk.
-///
-/// Returns `Some(registry)` if a valid cache exists matching the given content hash.
-pub(super) fn try_load_registry_from_disk(
-    workspace_root: &Path,
-    content_hash: &str,
-) -> Option<ModuleRegistry> {
-    let cache_dir = stdlib_cache_dir(workspace_root);
-    let cache_file = cache_dir.join("registry.bin");
-
-    if !cache_file.exists() {
-        return None;
-    }
-
-    let data = std::fs::read(&cache_file).ok()?;
-    // CBOR (via ciborium) instead of bincode 1 — see the note in
-    // verum_compiler/Cargo.toml. Skip quietly on any parse error so a
-    // stale cache from a previous compiler version falls through to the
-    // full stdlib load path instead of crashing startup.
-    let cached: SerializableRegistryCache =
-        ciborium::de::from_reader(std::io::Cursor::new(&data)).ok()?;
-
-    // Validate cache
-    if cached.format_version != REGISTRY_CACHE_FORMAT_VERSION {
-        debug!(
-            "Stdlib disk cache: format version mismatch ({} vs {})",
-            cached.format_version, REGISTRY_CACHE_FORMAT_VERSION
-        );
-        return None;
-    }
-    if cached.compiler_version != env!("CARGO_PKG_VERSION") {
-        debug!(
-            "Stdlib disk cache: compiler version mismatch ({} vs {})",
-            cached.compiler_version,
-            env!("CARGO_PKG_VERSION")
-        );
-        return None;
-    }
-    if cached.llvm_version != verum_codegen::llvm::LLVM_VERSION {
-        debug!(
-            "Stdlib disk cache: LLVM version mismatch ({} vs {})",
-            cached.llvm_version,
-            verum_codegen::llvm::LLVM_VERSION
-        );
-        return None;
-    }
-    if cached.content_hash != content_hash {
-        debug!("Stdlib disk cache: content hash mismatch");
-        return None;
-    }
-
-    // Reconstruct ModuleRegistry from serialized data
-    let mut registry = ModuleRegistry::new();
-    for (id, info) in cached.modules {
-        let module_id = ModuleId::new(id);
-        let mut info = info;
-        info.id = module_id;
-        registry.register(info);
-    }
-
-    Some(registry)
-}
-
-/// Save a ModuleRegistry to disk cache.
-pub(super) fn save_registry_to_disk(
-    workspace_root: &Path,
-    registry: &ModuleRegistry,
-    content_hash: &str,
-) {
-    let cache_dir = stdlib_cache_dir(workspace_root);
-    if std::fs::create_dir_all(&cache_dir).is_err() {
-        debug!("Failed to create stdlib cache directory");
-        return;
-    }
-
-    // Convert registry to serializable form. Sort by module path so the
-    // cache file content is byte-stable across processes — the `Map`
-    // backing `all_modules()` is a HashMap, so raw iteration leaks the
-    // per-process random hasher seed into the on-disk cache. Without
-    // this, the same workspace produces a different cache file on every
-    // run, and downstream consumers that walk `modules` in stored
-    // order assign different FunctionIds / TypeIds — the documented
-    // VBC-nondeterminism bug class.
-    let mut modules: Vec<(u32, ModuleInfo)> = Vec::new();
-    let mut path_to_id: Vec<(String, u32)> = Vec::new();
-    let mut entries: Vec<(String, u32, verum_modules::ModuleInfo)> = registry
-        .all_modules()
-        .map(|(id, info)| (info.path.to_string(), id.as_u32(), (**info).clone()))
-        .collect();
-    entries.sort_by(|a, b| a.0.cmp(&b.0));
-    for (path, id, info) in entries {
-        modules.push((id, info));
-        path_to_id.push((path, id));
-    }
-
-    let cached = SerializableRegistryCache {
-        format_version: REGISTRY_CACHE_FORMAT_VERSION,
-        compiler_version: env!("CARGO_PKG_VERSION").to_string(),
-        llvm_version: verum_codegen::llvm::LLVM_VERSION.to_string(),
-        content_hash: content_hash.to_string(),
-        modules,
-        path_to_id,
-    };
-
-    let cache_file = cache_dir.join("registry.bin");
-    let mut data: Vec<u8> = Vec::new();
-    match ciborium::ser::into_writer(&cached, &mut data) {
-        Ok(()) => {
-            if let Err(e) = std::fs::write(&cache_file, &data) {
-                debug!("Failed to write stdlib registry cache: {}", e);
-            } else {
-                info!(
-                    "Saved stdlib registry cache ({:.1} MB) to {}",
-                    data.len() as f64 / 1_048_576.0,
-                    cache_file.display()
-                );
-            }
-        }
-        Err(e) => {
-            debug!("Failed to serialize stdlib registry: {}", e);
         }
     }
 }

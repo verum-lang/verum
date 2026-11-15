@@ -43,9 +43,7 @@ use verum_modules::{
 
 
 use super::{
-    BuildMode, CompilationPipeline, compute_stdlib_content_hash,
-    global_stdlib_registry_cache, save_registry_to_disk,
-    should_parse_as_script, try_load_registry_from_disk,
+    BuildMode, CompilationPipeline, global_stdlib_registry_cache, should_parse_as_script,
 };
 
 impl<'s> CompilationPipeline<'s> {
@@ -58,29 +56,17 @@ impl<'s> CompilationPipeline<'s> {
     /// This enables cross-file imports from std.* modules.
     /// Must be called before processing user modules.
     ///
-    /// # Performance Optimization (Registry Caching)
-    ///
-    /// This function implements a two-level caching strategy:
-    /// 1. **Registry cache (FAST PATH)**: If we have a fully-populated registry
-    ///  cached, we deep_clone it (~1ms) instead of re-registering all modules
-    /// 2. **Module cache (FALLBACK)**: If no registry cache, we use cached parsed
-    ///  modules to avoid re-parsing, then populate and cache the registry
-    ///
-    /// The registry cache provides ~500ms speedup per compilation by avoiding:
-    /// - Module registration in ModuleRegistry (~166 modules)
-    /// - Export extraction from each module
-    /// - Glob re-export resolution (iterative)
-    ///
-    /// Loads stdlib with two-tier caching: (1) registry cache from prior compilation,
-    /// (2) parsed module cache to avoid re-parsing ~166 stdlib modules.
+    /// Archive metadata may reuse the process-level registry. Selected source
+    /// modules are parsed in this session so their file identities remain local.
     pub(super) fn load_stdlib_modules(&mut self) -> Result<()> {
         self.load_stdlib_modules_scoped(None)
     }
 
-    /// As [`Self::load_stdlib_modules`], materialising only the stdlib
-    /// modules in `scope` (the user file's mount closure ⋃ the implicit
-    /// prelude, as computed by
+    /// Load the selected source root, or project embedded archive modules in
+    /// `scope` (the user's mount closure plus the implicit prelude, computed by
     /// [`crate::stdlib_reachability::compute_reachable_stdlib_modules`]).
+    /// Source roots retain their own module roster; the embedded graph does not
+    /// define the contents of an independently selected source tree.
     ///
     /// STDLIB-LOAD-COST-1.  The pipeline's established shape is *load
     /// everything, then prune*: `run_check_only` builds the whole registry
@@ -131,10 +117,8 @@ impl<'s> CompilationPipeline<'s> {
         // submodule resolved as `module not found` despite the
         // typechecker having full type info.
         //
-        // Fall through to the in-memory / disk / source cache
-        // chain below; the in-memory cache hit is ~1ms after the
-        // first run, and subsequent runs reuse `STDLIB_REGISTRY`
-        // via `global_stdlib_registry_cache()`.
+        // Archive projections can reuse the process-level registry below.
+        // Selected sources must instead be admitted into the current session.
 
         // A source AST carries this session's FileIds. Only a projected
         // archive registry can be installed into a different session.
@@ -225,70 +209,18 @@ impl<'s> CompilationPipeline<'s> {
         let Some(stdlib_path) = selected_source else {
             return self.load_stdlib_from_embedded(scope);
         };
-        let workspace_root_for_cache: Option<PathBuf> = None;
 
         if !stdlib_path.exists() {
             debug!("Stdlib directory not found at {:?}, skipping", stdlib_path);
             return Ok(());
         }
 
-        // DISK CACHE: Persistent registry cache for cross-process reuse.
-        // Always enabled — disk cache avoids re-parsing 171 stdlib .vr files.
-        // Disable with VERUM_NO_DISK_CACHE=1 if needed.
-        let content_hash = if std::env::var("VERUM_NO_DISK_CACHE").is_ok() {
-            String::new() // Explicitly disabled
-        } else {
-            compute_stdlib_content_hash(&stdlib_path)
-        };
-        if !content_hash.is_empty() {
-            if let Some(ref ws_root) = workspace_root_for_cache {
-                if let Some(disk_registry) = try_load_registry_from_disk(ws_root, &content_hash) {
-                    let module_count = disk_registry.len();
-
-                    // Populate the session's registry
-                    {
-                        let registry_shared = self.session.module_registry();
-                        let mut session_registry = registry_shared.write();
-                        *session_registry = disk_registry.deep_clone();
-                    }
-
-                    // Populate local modules map (path-sorted — see #143).
-                    let session_registry = self.session.module_registry();
-                    let reg = session_registry.read();
-                    let mut entries: Vec<(String, Arc<verum_ast::Module>)> = reg
-                        .all_modules()
-                        .map(|(_id, info)| (info.path.to_string(), Arc::new(info.ast.clone())))
-                        .collect();
-                    entries.sort_by(|a, b| a.0.cmp(&b.0));
-                    for (path_str, ast_arc) in entries {
-                        self.modules.insert(Text::from(path_str), ast_arc);
-                    }
-                    drop(reg);
-
-                    let elapsed = start.elapsed();
-                    info!(
-                        "Loaded {} stdlib module(s) from disk cache in {:.2}ms",
-                        module_count,
-                        elapsed.as_secs_f64() * 1000.0
-                    );
-                    if trace {
-                        eprintln!(
-                            "[phase] load_stdlib_modules: DISK-CACHE HIT {} modules in {:.2}ms",
-                            module_count,
-                            elapsed.as_secs_f64() * 1000.0
-                        );
-                    }
-                    return Ok(());
-                }
-            }
-        }
-
-        // FULL LOAD: No cache available, parse everything from source
-        debug!("No disk cache, performing full stdlib load");
+        // Source registries contain session-owned FileIds and cannot be loaded
+        // from a cross-session disk cache. Read only the selected source files;
+        // a cache-key walk here has no consumer and repeats all source I/O.
+        debug!("Loading selected stdlib sources into the current session");
         if trace {
-            eprintln!(
-                "[phase] load_stdlib_modules: disk cache MISS, full SOURCE LOAD starting"
-            );
+            eprintln!("[phase] load_stdlib_modules: SOURCE LOAD starting");
         }
 
         let parsed_modules: Vec<(Text, Module, Text)> = {
@@ -495,14 +427,6 @@ impl<'s> CompilationPipeline<'s> {
                 stdlib_count,
                 elapsed.as_secs_f64() * 1000.0
             );
-        }
-
-        // Persist registry to disk for cross-process reuse (release builds or opt-in).
-        if !content_hash.is_empty() {
-            if let Some(ref ws_root) = workspace_root_for_cache {
-                let registry = self.session.module_registry().read().clone();
-                save_registry_to_disk(ws_root, &registry, &content_hash);
-            }
         }
 
         Ok(())
