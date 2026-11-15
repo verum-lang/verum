@@ -7,7 +7,11 @@ fn check(source: &str, stdlib_source: bool) -> List<Text> {
     let module = Parser::new(source).parse_module().expect("source grammar");
     let mut checker = TypeChecker::with_minimal_context();
     checker.register_primitives();
-    checker.stdlib_single_file_mode = stdlib_source;
+    checker.set_current_module_path(if stdlib_source {
+        "core.control"
+    } else {
+        "user.control"
+    });
     let mut errors: List<Text> = checker
         .prepare_module_declarations(&module)
         .into_iter()

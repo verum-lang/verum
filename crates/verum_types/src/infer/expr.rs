@@ -3888,8 +3888,6 @@ impl TypeChecker {
                     _ => {
                         if self.has_method(inner_ty, "not") {
                             Ok(inner_ty.clone())
-                        } else if self.stdlib_single_file_mode {
-                            Ok(Type::Unknown)
                         } else {
                             Err(TypeError::Other(verum_common::Text::from(format!(
                                 "Cannot apply NOT operator to type: {}. Expected Bool or integer type",
@@ -3956,25 +3954,17 @@ impl TypeChecker {
                                 Type::Int => Ok(Type::int()),
                                 Type::Float => Ok(Type::float()),
                                 _ => {
-                                    if self.stdlib_single_file_mode {
-                                        Ok(Type::Unknown)
-                                    } else {
-                                        Err(TypeError::Other(verum_common::Text::from(format!(
-                                            "Cannot negate type: {}. Expected signed numeric type",
-                                            inner_ty
-                                        ))))
-                                    }
+                                    Err(TypeError::Other(verum_common::Text::from(format!(
+                                        "Cannot negate type: {}. Expected signed numeric type",
+                                        inner_ty
+                                    ))))
                                 }
                             }
                         } else {
-                            if self.stdlib_single_file_mode {
-                                Ok(Type::Unknown)
-                            } else {
-                                Err(TypeError::Other(verum_common::Text::from(format!(
-                                    "Cannot negate type: {}. Expected signed numeric type",
-                                    inner_ty
-                                ))))
-                            }
+                            Err(TypeError::Other(verum_common::Text::from(format!(
+                                "Cannot negate type: {}. Expected signed numeric type",
+                                inner_ty
+                            ))))
                         }
                     }
                     Type::Refined { base, .. } => {
@@ -4716,16 +4706,6 @@ impl TypeChecker {
                     self.check_selected_constructor_type_visibility(&ctor_ty, name, span)?;
                     Ok(ctor_ty)
                 } else {
-                    // NO stdlib exemption here (T0777).  `stdlib_single_file_mode`
-                    // exists for CONTEXTS — sibling modules whose `provide`
-                    // blocks a single-file check cannot see — but it used to
-                    // swallow "this name does not exist" as well, and the
-                    // resulting `Type::Unknown` then made every downstream
-                    // check lenient.  Measured before removing it: an
-                    // undefined function was reported in 0 of 17 sampled
-                    // core/ files that "passed", and turning the exemption
-                    // off costs 19 files out of 2560 — every one of which
-                    // was already broken.
                     // "Did you mean ...?" — search visible scope names for
                     // a Levenshtein-close candidate. 80% of user typos are
                     // edit distance ≤ 2 from the intended name; threshold
@@ -7608,9 +7588,6 @@ impl TypeChecker {
             unreachable!()
         };
         match prepared.callable {
-            Type::Unknown | Type::Var(_) if self.stdlib_single_file_mode => {
-                Ok(InferResult::new(Type::Unknown))
-            }
             Type::Never => Ok(InferResult::new(Type::Never)),
             Type::Function { .. } => self.apply_function_call(expr, prepared),
             callable @ Type::Pi { .. } => self.apply_pi_call(expr, callable),
@@ -8162,7 +8139,7 @@ impl TypeChecker {
         // supply runtime values nor change its parameter count. The same
         // contract applies in unsafe bodies and standard-library sources.
         if provided_args < required_params {
-            return Err(self.local_error(|| TypeError::OtherWithCodeSpanned {
+            return Err(TypeError::OtherWithCodeSpanned {
                 code: verum_common::Text::from("E102"),
                 msg: verum_common::Text::from(format!(
                     "Function requires at least {} argument{}, got {}{}",
@@ -8175,11 +8152,11 @@ impl TypeChecker {
                         .unwrap_or_default()
                 )),
                 span: expr.span,
-            }));
+            });
         }
 
         if provided_args > total_params && !is_variadic {
-            return Err(self.local_error(|| TypeError::OtherWithCodeSpanned {
+            return Err(TypeError::OtherWithCodeSpanned {
                 code: verum_common::Text::from("E102"),
                 msg: verum_common::Text::from(format!(
                     "Function accepts at most {} argument{}, got {}{}",
@@ -8192,7 +8169,7 @@ impl TypeChecker {
                         .unwrap_or_default()
                 )),
                 span: expr.span,
-            }));
+            });
         }
 
         // ============================================================
@@ -10350,26 +10327,17 @@ impl TypeChecker {
                                 for field_init in fields {
                                     let field_name = field_init.name.name.as_str();
 
-                                    let unknown_fallback = Type::Unknown;
                                     let expected_field_ty = match expected_field_types
                                         .get(field_name)
                                     {
                                         Some(ty) => ty,
                                         None => {
-                                            // In lenient mode (stdlib files), accept
-                                            // unknown fields with Unknown type — the
-                                            // struct definition may reference types
-                                            // from unloaded sibling modules.
-                                            if self.stdlib_single_file_mode {
-                                                &unknown_fallback
-                                            } else {
-                                                return Err(TypeError::Other(
-                                                    verum_common::Text::from(format!(
-                                                        "field '{}' not found in type '{}' variant construction",
-                                                        field_name, variant_name
-                                                    )),
-                                                ));
-                                            }
+                                            return Err(TypeError::Other(
+                                                verum_common::Text::from(format!(
+                                                    "field '{}' not found in type '{}' variant construction",
+                                                    field_name, variant_name
+                                                )),
+                                            ));
                                         }
                                     };
 
@@ -10414,7 +10382,6 @@ impl TypeChecker {
                                     expected_field_types.iter()
                                 {
                                     if !provided_fields.contains_key(expected_name)
-                                        && !self.stdlib_single_file_mode
                                     {
                                         return Err(TypeError::Other(
                                             verum_common::Text::from(format!(
@@ -12686,7 +12653,7 @@ impl TypeChecker {
             // archive: compiled, with its types never inferred.
             //
             // So the counts came from `verum check` on individual `core/`
-            // files, which runs `stdlib_single_file_mode` — a route that
+            // files, which historically used a separate checking mode — a route that
             // cannot see sibling declarations and DOES infer bodies.
             // That is the route this arm actually guards, and the route
             // any decision about making it loud has to be measured on.

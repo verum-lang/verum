@@ -791,76 +791,8 @@ impl<'s> CompilationPipeline<'s> {
             checker.context_resolver_mut().set_lenient_contexts(true);
         }
 
-        // Enable lenient contexts for stdlib files (core/**/*.vr).
-        // Stdlib modules reference contexts from sibling modules that
-        // may not be fully loaded in single-file check mode. Lenient
-        // mode defers method-level validation to the call site where
-        // the context is `provide`d with a concrete implementation.
-        // T1041 — decided by the STANDARD LIBRARY's root, not by a path
-        // substring.  `contains("/core/")` gives this mode to any file
-        // under any directory that happens to be called `core`: a copy of
-        // one file placed in `<scratchpad>/core/` was checked under stdlib
-        // rules and reported 52 errors where the same bytes beside it
-        // reported 10.  A user's `src/core/` got the standard library's
-        // leniency without asking for it and without being told.
-        //
-        // The anchor is the tree's own marker: an ancestor directory named
-        // `core` that holds `mod.vr` IS the standard library's root — that
-        // file is what makes it one.  Every real `core/**` source keeps
-        // the mode it had; nothing else acquires it.
-        //
-        // The mode's EFFECT is a separate question and deliberately not
-        // touched here.  Measured over 25 files, it changes the verdict
-        // for 13 of them in BOTH directions (182 errors with, 189
-        // without): it is not simply lenient, because several of its arms
-        // answer `Type::Unknown` rather than suppressing, and an unknown
-        // surfaces later as "not fully determined".  Changing what it does
-        // is a design decision; changing WHO it applies to is a repair.
-        // …and until 2026-09-02 there was no way to ASK the question at
-        // all: the mode was decided by the path and by nothing else, so
-        // "what does `core/` look like under the same rules as user
-        // code" could not be measured without moving files out of the
-        // tree one at a time.  Two findings that day were both hidden
-        // behind exactly that:
-        //
-        //   * a mounted enum's inherent `implement` block silently not
-        //     loading (T0755) — invisible in-tree, E400 out of it;
-        //   * `Display.fmt(self, f)` in 33 files, a receiver-first call
-        //     form the language does not have.  The mode does not count
-        //     arguments at all: three arguments against two parameters
-        //     also passes in-tree (T1059).  Chasing that one down led to
-        //     transposed arguments in RSA-PSS signature verification.
-        //
-        // `VERUM_STRICT_STDLIB=1` turns the anchor off, so `core/` can be
-        // swept under user rules.  Opt-in and default-off: unset, every
-        // build behaves exactly as before.  It is a FLAG, not one of the
-        // `VERUM_TRACE_*` substring filters — any value enables it.
-        let strict_stdlib = std::env::var_os("VERUM_STRICT_STDLIB").is_some();
-        let is_stdlib_file = !strict_stdlib && {
-            let input = &self.session.options().input;
-            let mut dir = input.parent();
-            let mut found = false;
-            while let Some(d) = dir {
-                if d.file_name().is_some_and(|n| n == "core") && d.join("mod.vr").is_file() {
-                    found = true;
-                    break;
-                }
-                dir = d.parent();
-            }
-            found
-        };
-        if is_stdlib_file {
-            checker.context_resolver_mut().set_lenient_contexts(true);
-            checker.set_lenient_context_checking(true);
-        }
-
-        // For stdlib files, enable lenient mode that persists through
-        // all scope changes. This flag is never reset by any operation
-        // inside the type checker.
-        if is_stdlib_file {
-            checker.set_lenient_context_checking(true);
-            checker.stdlib_single_file_mode = true;
-        }
+        // Source location never relaxes type or context validation. Dependencies
+        // must be resolved before checking bodies, including standard-library bodies.
 
         crate::archive_ctx_loader::loadcost::record("tc_passes_0_to_4", t_passes.elapsed());
         let t_bodies = std::time::Instant::now();

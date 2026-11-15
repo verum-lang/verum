@@ -1328,24 +1328,6 @@ pub struct TypeChecker {
     /// `Variant::path_endpoints`. Consumed by HIT-aware tactics
     /// (cubical, descent) that need to know the topology of the type.
     pub hit_path_constructors: Map<Text, List<crate::ty::PathConstructor>>,
-    /// When true, the type checker is in stdlib single-file mode.
-    /// Field/method resolution failures are accepted with
-    /// Type::Unknown rather than erroring — sibling module types
-    /// may not be fully loaded. Set by pipeline for core/*.vr.
-    pub stdlib_single_file_mode: bool,
-
-    /// T1396 — `(method, receiver)` pairs already reported as swallowed by
-    /// `stdlib_single_file_mode`, so the same unresolved method is named
-    /// ONCE rather than once per call site.
-    ///
-    /// The count alone said the per-call line was fine: 17 suppressions
-    /// over 40 `core/` files, worst file 6. Reading the OUTPUT said
-    /// otherwise — all six in that file were the same
-    /// `weak` on `CancellationFlag`, and six identical lines teach a
-    /// reader nothing the first one did not. A diagnostic that repeats
-    /// itself is how a diagnostic stops being read.
-    pub lenient_method_reported: std::collections::HashSet<(String, String)>,
-
     /// A method found BY NAME on the early-inherent path whose declared
     /// parameter count did not match the call's argument count (T1060).
     ///

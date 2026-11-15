@@ -1108,8 +1108,6 @@ impl TypeChecker {
             pattern_declarations: Map::new(),
             hit_path_constructors: Map::new(),
             deferred_verification_goals: List::new(),
-            stdlib_single_file_mode: false,
-            lenient_method_reported: std::collections::HashSet::new(),
             pending_arity_mismatch: None,
             user_code_phase: false,
             explicit_imports: std::collections::HashSet::new(),
@@ -1272,8 +1270,6 @@ impl TypeChecker {
             pattern_declarations: Map::new(),
             hit_path_constructors: Map::new(),
             deferred_verification_goals: List::new(),
-            stdlib_single_file_mode: false,
-            lenient_method_reported: std::collections::HashSet::new(),
             pending_arity_mismatch: None,
             user_code_phase: false,
             explicit_imports: std::collections::HashSet::new(),
@@ -1437,8 +1433,6 @@ impl TypeChecker {
             pattern_declarations: Map::new(),
             hit_path_constructors: Map::new(),
             deferred_verification_goals: List::new(),
-            stdlib_single_file_mode: false,
-            lenient_method_reported: std::collections::HashSet::new(),
             pending_arity_mismatch: None,
             user_code_phase: false,
             explicit_imports: std::collections::HashSet::new(),
@@ -9110,27 +9104,7 @@ impl TypeChecker {
         matches!(recv, Some(r) if p == peel(r))
     }
 
-    /// Build a `WrongArgCount` and, under stdlib single-file mode, RECORD
-    /// it as a diagnostic before returning it.
-    ///
-    /// The mode exists so that a CROSS-MODULE resolution failure does not
-    /// fail the bake — a sibling module's types may not be loaded yet.
-    /// Counting a call's arguments needs no sibling module: it is a purely
-    /// LOCAL fact, the same argument that narrowed the empty-body check
-    /// (T0118, `stdlib_single_file_mode` arm in `modules.rs`).
-    ///
-    /// Measured before this existed (T1058): `verum check` on
-    /// `core/configuration/error.vr` was silent while the same bytes
-    /// outside `core/` reported E102, and a probe under `core/` passing
-    /// THREE arguments to a two-parameter method also checked clean. The
-    /// leniency was not a different calling convention; arity was not
-    /// counted. Forty calls in core/ were written in a form the language
-    /// does not have, and the first real defect underneath them was RSA
-    /// signature verification called with permuted arguments (T1059).
-    ///
-    /// The Err is still returned, so recovery paths that swallow it for
-    /// the bake's sake keep working — but the local verdict is on the
-    /// record either way. Leniency where it was earned, not everywhere.
+    /// Report the arity of the resolved declaration.
     #[track_caller]
     pub(crate) fn arity_error(
         &mut self,
@@ -9139,21 +9113,7 @@ impl TypeChecker {
         actual: usize,
         span: verum_ast::span::Span,
     ) -> crate::TypeError {
-        self.local_error(|| crate::TypeError::wrong_arg_count(
-            method.clone(), expected, actual, span,
-        ))
-    }
-
-    /// Preserve a verdict established from resolved local facts even when the
-    /// surrounding single-file recovery tolerates unavailable dependencies.
-    pub(crate) fn local_error(
-        &mut self,
-        make_error: impl Fn() -> crate::TypeError,
-    ) -> crate::TypeError {
-        if self.stdlib_single_file_mode {
-            self.push_diagnostic_for(make_error());
-        }
-        make_error()
+        crate::TypeError::wrong_arg_count(method, expected, actual, span)
     }
 
     /// Add a diagnostic (warning, note, etc.)
@@ -12204,8 +12164,6 @@ with .to_float() or .to_int() (at {:?})",
                             || self.has_method(&result.ty, "not")
                         {
                             Ok(InferResult::new(result.ty.clone()))
-                        } else if self.stdlib_single_file_mode {
-                            Ok(InferResult::new(Type::Unknown))
                         } else {
                             Err(TypeError::Other(verum_common::Text::from(format!(
                                 "Cannot apply NOT operator to type: {}. Expected Bool or integer type",
@@ -12216,9 +12174,6 @@ with .to_float() or .to_int() (at {:?})",
                     _ => {
                         if self.has_method(&result.ty, "not") {
                             return Ok(InferResult::new(result.ty.clone()));
-                        }
-                        if self.stdlib_single_file_mode {
-                            return Ok(InferResult::new(Type::Unknown));
                         }
                         Err(TypeError::Other(verum_common::Text::from(format!(
                             "Cannot apply NOT operator to type: {}. Expected Bool or integer type",

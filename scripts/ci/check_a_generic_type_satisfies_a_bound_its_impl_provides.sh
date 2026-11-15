@@ -130,7 +130,7 @@ implement Holder3 for Bare {
 VR
 
 count_e405() { # $1 file -> count, or MUTE
-  out=$(cd "$REPO" && env VERUM_STRICT_STDLIB=1 timeout 300 "$VERUM" check "$1" 2>&1)
+  out=$(cd "$REPO" && timeout 300 "$VERUM" check "$1" 2>&1)
   printf '%s' "$out" | grep -q 'Checking\|Finished\|error' || { echo MUTE; return; }
   printf '%s' "$out" | grep -c 'E405' | tr -d ' '
 }

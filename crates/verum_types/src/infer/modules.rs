@@ -71,47 +71,7 @@ use verum_common::{Heap, List, Map, Maybe, Set, Shared, Text, ToText};
 use verum_modules::{ModulePath, ModuleRegistry, NameResolver, resolve_import, resolver::NameKind};
 
 impl TypeChecker {
-    /// Is this body-check failure a verdict about the body ALONE?
-    ///
-    /// `stdlib_single_file_mode` tolerates failures caused by types a
-    /// sibling module has not loaded yet. It must not tolerate a verdict
-    /// that needed no sibling module at all — the canonical one being an
-    /// empty `{}` body, which is `Unit`, against a declared non-unit
-    /// return type. Those two are told apart by whether the ACTUAL type is
-    /// a concrete `Unit`: an unresolved cross-module type surfaces as
-    /// `Unknown` or a type variable, never as `Unit`.
-    fn is_local_body_verdict(err: &crate::TypeError) -> bool {
-        matches!(
-            err,
-            crate::TypeError::Mismatch { actual, .. } if actual.as_str() == "Unit"
-        )
-        // AN UNBOUND NAME DOES NOT NEED AN ARM HERE (T0777, measured
-        // 2026-09-03).  Adding `|| matches!(err, UnboundVariable { .. })`
-        // is INERT, and the measurement that says so also names what the
-        // remaining gap actually is.  Same file, same binary, two modes:
-        //
-        //     core/collections/deque.vr   plain 19   STRICT 20
-        //
-        // and the single diagnostic STRICT adds is not a name at all:
-        //
-        //     error<E404>: Ambiguous type for `inner`: the inferred type
-        //     `_` is not fully determined by this function
-        //
-        // An undefined name is already reported under `core/` — measured
-        // on the same undefined identifier placed under a `/core/` path
-        // and outside one: 2 diagnostics either way, and identically on a
-        // binary built before this arm was tried.  `63a77b4c7` closed
-        // that half by removing the leniency at the value-name site.
-        // What is still swallowed in lenient mode is UNDERDETERMINED
-        // TYPES, which is a different judgement with a different (and
-        // real) cross-module justification — so it needs its own root,
-        // not another arm bolted onto this predicate.
-    }
-
-    /// Type check a top-level item (function, type, protocol, etc.)
-    /// Type check an item declaration.
-    ///
-    /// Relies on RUST_MIN_STACK=16MB for stack safety on deep recursion.
+    /// Type check an item declaration using the bounded inference traversal.
     pub fn check_item(&mut self, item: &verum_ast::Item) -> Result<()> {
         self.check_item_in_scope(item, false)
     }
@@ -2735,8 +2695,6 @@ impl TypeChecker {
                     //    names at their use sites;
                     //  * an exact metadata type/value resolution above
                     //    proves this source exports the requested name;
-                    //  * `stdlib_single_file_mode` mirrors the in-body
-                    //    E401's opt-out;
                     //  * @cfg'd-out items never reach here: the export
                     //    table is built from the FULL unfiltered AST
                     //    (`extract_exports_from_module` checks only
@@ -2745,7 +2703,6 @@ impl TypeChecker {
                     if let Some(span) = import_span
                         && !value_bound_from_metadata
                         && !type_bound_from_metadata
-                        && !self.stdlib_single_file_mode
                     {
                         let available_items = probed_module_info.exports.public_export_names();
                         // T0555 module-surface trace: names WHICH of the three
@@ -3445,23 +3402,21 @@ impl TypeChecker {
                             // Return error if span is provided (user import)
                             let available_items = module_info.exports.public_export_names();
 
-                            if !self.stdlib_single_file_mode {
-                                // T0555 module-surface trace: names WHICH of the three
-                                // surface sources answered (and with what) before this E401.
-                                if std::env::var("VERUM_TRACE_MODSURFACE").is_ok() {
-                                    eprintln!(
-                                        "[modsurface] site=module_info-exports module={} item={} surface=ModuleInfo.exports count={}",
-                                        resolved_module_path.as_str(), item_name, available_items.len()
-                                    );
-                                }
-                                return Err(TypeError::ImportItemNotFound {
-                                    item_name: Text::from(item_name),
-                                    module_path: resolved_module_path.clone(),
-                                    available_items,
-                                    declared_in: self.modules_declaring(Text::from(item_name).as_str()),
-                                    span,
-                                });
+                            // T0555 module-surface trace: names WHICH of the three
+                            // surface sources answered (and with what) before this E401.
+                            if std::env::var("VERUM_TRACE_MODSURFACE").is_ok() {
+                                eprintln!(
+                                    "[modsurface] site=module_info-exports module={} item={} surface=ModuleInfo.exports count={}",
+                                    resolved_module_path.as_str(), item_name, available_items.len()
+                                );
                             }
+                            return Err(TypeError::ImportItemNotFound {
+                                item_name: Text::from(item_name),
+                                module_path: resolved_module_path.clone(),
+                                available_items,
+                                declared_in: self.modules_declaring(Text::from(item_name).as_str()),
+                                span,
+                            });
                         }
                     }
                 }
@@ -11046,27 +11001,7 @@ impl TypeChecker {
                         // `body: None` and never reach this arm, so they remain exempt.
                         // (Previously an `is_stub` guard skipped the check for empty
                         // blocks, which silently accepted any return type — T0118.)
-                        if self.stdlib_single_file_mode {
-                            // Single-file mode exists because a sibling
-                            // module's types may not be loaded yet, so a
-                            // CROSS-module resolution failure must not fail
-                            // the bake. Discarding the whole result was
-                            // broader than that reason: an empty body against
-                            // a non-Unit declared return is a purely LOCAL
-                            // fact that needs no sibling module, and the one
-                            // check that catches it was being thrown away for
-                            // every `core/*.vr` file.
-                            //
-                            // Keep the leniency where it was earned and
-                            // surface the local verdict.
-                            if let Err(e) = self.check_function_block(block, check_ty, !func.is_generator)
-                                && Self::is_local_body_verdict(&e)
-                            {
-                                return Err(e);
-                            }
-                        } else {
-                            self.check_function_block(block, check_ty, !func.is_generator)?;
-                        }
+                        self.check_function_block(block, check_ty, !func.is_generator)?;
                     }
                     FunctionBody::Expr(expr) => {
                         self.check_expr(expr, check_ty)?;
@@ -22349,58 +22284,6 @@ impl TypeChecker {
                 actual: format!("{}", recv_ty).into(),
                 span,
             });
-        }
-
-        // Method not found — but if the receiver is a context
-        // type and we're in lenient mode (stdlib pre-registered
-        // contexts whose method types can't be fully resolved),
-        // return Unknown instead of erroring. The actual method
-        // will be resolved at VBC codegen time.
-        // In stdlib lenient mode (single-file check on core/*.vr),
-        // accept unknown methods with Unknown return type. Methods
-        // from implement blocks in sibling modules may not be
-        // registered in single-file check mode.
-        if self.stdlib_single_file_mode {
-            // T1396 — THE RELAXATION IS SOUND; THE SILENCE IS NOT.
-            //
-            // Checking one `core/` file alone cannot see sibling modules'
-            // `implement` blocks, so refusing every unresolved method
-            // would report hundreds of false ones. But the run then ends
-            // on `Finished checking`, and a reader takes that for "this
-            // file checks" — while NO method call in it was checked for
-            // existence at all.
-            //
-            // Measured 2026-09-10: replacing a real call in
-            // `core/runtime/env.vr` with `cb.definitely_not_a_method(name)`
-            // — a name that occurs NOWHERE in the tree — changed nothing.
-            // The same shape reports `no method named …` as a user file
-            // and passes clean as a `core/` file, so any reasoning of the
-            // form "it is called in core and the checker does not object,
-            // therefore it exists" is void.
-            //
-            // Say what was swallowed, the way the bake already says
-            // `[lenient] SKIP <fn>` for every body it gives up on. Warn
-            // level, unconditional: a lever would put the reader back in
-            // the position of having to know to ask.
-            // Once per (method, receiver), not once per call site. The
-            // COUNT said a per-call line was fine — 17 suppressions over
-            // 40 `core/` files, worst file 6. Reading the OUTPUT said
-            // otherwise: all six in that file were the same `weak` on
-            // `CancellationFlag`, and six identical lines teach a reader
-            // nothing the first did not. A diagnostic that repeats itself
-            // is how a diagnostic stops being read.
-            let key = (method.name.as_str().to_string(), format!("{}", recv_ty));
-            if self.lenient_method_reported.insert(key) {
-                eprintln!(
-                    "[lenient-check] method `{}` on `{}` was NOT resolved and \
-accepted: a single-file check of a core/ module cannot see sibling \
-`implement` blocks, so method existence is not checked here. Run the \
-bake to have this verified.",
-                    method.name.as_str(),
-                    recv_ty
-                );
-            }
-            return Ok(InferResult::new(Type::Unknown));
         }
 
         // #112 Deref-coercion retry: if the receiver implements

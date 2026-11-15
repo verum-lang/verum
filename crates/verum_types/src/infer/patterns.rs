@@ -1763,15 +1763,11 @@ impl TypeChecker {
                     }
 
                     // Not a newtype or tuple struct
-                    if self.stdlib_single_file_mode {
-                        Ok(())
-                    } else {
-                        Err(TypeError::Other(verum_common::Text::from(format!(
-                            "Pattern expects a variant type, but scrutinee has type {} at {}",
-                            expanded_ty,
-                            span_to_line_col(pattern.span)
-                        ))))
-                    }
+                    Err(TypeError::Other(verum_common::Text::from(format!(
+                        "Pattern expects a variant type, but scrutinee has type {} at {}",
+                        expanded_ty,
+                        span_to_line_col(pattern.span)
+                    ))))
                 } else if let Type::Generic {
                     name: generic_name,
                     args,
