@@ -39,11 +39,19 @@ impl PreparedHeader {
     }
 }
 
+#[derive(Clone)]
 enum ProtocolHeadFilter {
     Unprepared,
     // Incomplete source identity cannot justify excluding this header.
     Unknown,
     Declared(List<TypeId>),
+}
+
+/// Declaration-only inventory for one prepared source graph. This does not
+/// retain a receiver, a caller premise, an imported witness or a proof result.
+#[derive(Default)]
+pub(super) struct ProtocolHeadPreparation {
+    heads: Map<AssociatedImplementationSource, ProtocolHeadFilter>,
 }
 
 struct PreparedImplementation {
@@ -441,6 +449,22 @@ impl VbcCodegen {
     /// This does not prove an application: every potentially matching header
     /// still enters the original receiver, argument and premise matcher.
     fn implementation_protocol_heads(
+        &mut self,
+        header: &ImplementationHeader,
+    ) -> CodegenResult<ProtocolHeadFilter> {
+        if let Some(heads) = self.implementation_head_preparation.as_ref()
+            .and_then(|prepared| prepared.heads.get(&header.source))
+        {
+            return Ok(heads.clone());
+        }
+        let heads = self.resolve_implementation_protocol_heads(header)?;
+        if let Some(prepared) = self.implementation_head_preparation.as_mut() {
+            prepared.heads.insert(header.source.clone(), heads.clone());
+        }
+        Ok(heads)
+    }
+
+    fn resolve_implementation_protocol_heads(
         &mut self,
         header: &ImplementationHeader,
     ) -> CodegenResult<ProtocolHeadFilter> {

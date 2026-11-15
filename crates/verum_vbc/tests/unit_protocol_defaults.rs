@@ -124,6 +124,47 @@ fn a_same_named_foreign_protocol_does_not_replace_the_selected_default() {
 }
 
 #[test]
+fn shared_protocol_heads_do_not_share_receiver_obligations() {
+    let provider = r#"
+        module gate;
+        public type Base is protocol {};
+        public type Evidence is protocol {};
+        public type Granted is protocol { fn token(&self) -> Int { 73 } };
+        implement<T: Base + Evidence> Granted for T {}
+    "#;
+    for count in [1, 8, 32] {
+        let mut consumer = verum_common::Text::from(
+            "module app; mount gate.{Base, Evidence, Granted};\n",
+        );
+        let mut total = verum_common::Text::from("0");
+        for index in 0..count {
+            consumer.push_str(&format!(
+                "type Item{index} is {{}}; implement Base for Item{index} {{}} \
+                 implement Evidence for Item{index} {{}}\n"
+            ));
+            total.push_str(&format!(" + Item{index} {{}}.token()"));
+        }
+        consumer.push_str("type Missing is {}; implement Base for Missing {}\n");
+        let valid = format!("{consumer} fn main() -> Int {{ {total} }}");
+        let invalid = format!("{consumer} fn main() -> Int {{ Missing {{}}.token() }}");
+        for consumer_first in [false, true] {
+            let sources = |source| if consumer_first {
+                [source, provider]
+            } else {
+                [provider, source]
+            };
+            run(&sources(valid.as_str()), count * 73);
+            let error = compile(&sources(invalid.as_str())).unwrap_err();
+            assert!(
+                matches!(&error.kind, CodegenErrorKind::UndefinedFunction(name)
+                    if name.ends_with("Missing.token")),
+                "unproved receiver acquired another receiver's evidence: {error:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn missing_implementation_and_invalid_default_bodies_refuse_publication() {
     for (consumer, missing) in [
         (

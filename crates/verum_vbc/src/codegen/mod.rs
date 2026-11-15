@@ -1223,6 +1223,7 @@ pub struct VbcCodegen {
     /// default body was registered under the generic-param name.
     blanket_impls: Vec<BlanketImpl>,
     implementation_headers: verum_common::List<implementation_obligations::ImplementationHeader>,
+    implementation_head_preparation: Option<implementation_obligations::ProtocolHeadPreparation>,
     obligation_blanket_cursor: usize,
 
     /// Static variable initializer function IDs.
@@ -2516,6 +2517,7 @@ impl VbcCodegen {
             concrete_impl_bindings: HashMap::new(),
             blanket_impls: Vec::new(),
             implementation_headers: Default::default(),
+            implementation_head_preparation: None,
             obligation_blanket_cursor: 0,
             // Static variable initializer functions (become global constructors)
             static_init_functions: Vec::new(),
@@ -8803,6 +8805,16 @@ impl VbcCodegen {
     /// Signatures can resolve only after the entire reachable source graph has
     /// published its exact namespaces and nominal declarations.
     fn collect_prepared_owned_declarations(&mut self, files: &[(&str, &Module)]) -> CodegenResult<()> {
+        // All owners, imports and protocol declarations were prepared across
+        // the complete graph. Reuse their head inventory across implementations,
+        // but never across a later declaration pass (including a failed pass).
+        self.implementation_head_preparation = Some(Default::default());
+        let result = self.collect_prepared_owned_declarations_inner(files);
+        self.implementation_head_preparation = None;
+        result
+    }
+
+    fn collect_prepared_owned_declarations_inner(&mut self, files: &[(&str, &Module)]) -> CodegenResult<()> {
         for (parent, module) in files {
             self.config.module_name = (*parent).to_owned();
             // Each file is collected under ITS OWN module path, taken
