@@ -528,7 +528,22 @@ impl<'s> CompilationPipeline<'s> {
             } else {
                 self.file_path_to_module_path(file_path, &src_root).to_string()
             };
+            current_module_path_str = crate::owned_source_semantics::declared_owner(
+                module, &current_module_path_str,
+            ).to_string();
             let path = verum_modules::ModulePath::from_str(&current_module_path_str);
+            // Declaration authority cannot let a differently named file replace
+            // an already loaded source unit under the same explicit owner.
+            if let Some(existing) = registry.read().get_by_path(&current_module_path_str) {
+                let same_unit = matches!(
+                    (self.source_unit_identity(&existing.ast), self.source_unit_identity(module)),
+                    (Some(previous), Some(current)) if previous == current
+                );
+                anyhow::ensure!(
+                    same_unit && self.same_source_snapshot(existing.file_id, module.file_id),
+                    "conflicting source parts for owner {current_module_path_str}"
+                );
+            }
             let id = registry.read().allocate_id();
             let exports = verum_modules::extract_exports_from_module(module, id, &path)?;
             let mut info = verum_modules::ModuleInfo::new(
@@ -709,7 +724,7 @@ impl<'s> CompilationPipeline<'s> {
         // Pass 3.5: Coherence checking (orphan rule, overlap detection)
         // Protocol coherence: at most one `implement Protocol for Type` per concrete
         // type in the entire dependency graph (orphan rule + overlap prevention).
-        self.check_protocol_coherence(module)?;
+        self.check_protocol_coherence(module, checker.current_module_path().as_str())?;
 
         // Pass 3.6: Profile boundary enforcement
         // Profile boundaries: Application modules cannot depend on Systems-profile code.

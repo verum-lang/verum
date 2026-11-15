@@ -981,7 +981,8 @@ impl<'s> CompilationPipeline<'s> {
         // The `path` parameter is already in module path format (e.g., "handlers.users")
         // after being processed by compile_project(). No need to recompute.
         // Module paths use dot-separated format (e.g., "handlers.users").
-        let current_module_path_str = path.as_str().to_string();
+        let current_module_path_str =
+            crate::owned_source_semantics::declared_owner(module, path.as_str());
 
         // MODULE-IDENTITY-1 (T0236): install the module's path as the
         // checker's CURRENT module identity (single authority) — the
@@ -1150,7 +1151,7 @@ impl<'s> CompilationPipeline<'s> {
         // Sub-pass 3.5: Protocol coherence checking (orphan rule, overlap, specialization)
         // Validates that protocol implementations follow coherence rules across the
         // entire dependency graph (user module + stdlib + project modules).
-        self.check_protocol_coherence(module)?;
+        self.check_protocol_coherence(module, checker.current_module_path().as_str())?;
 
         // Sub-pass 4: Register function signatures (enables forward references)
         // This allows functions to call other functions defined later in the file:
