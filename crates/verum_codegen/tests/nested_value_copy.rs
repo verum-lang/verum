@@ -73,6 +73,20 @@ fn a_native_array_copy_owns_its_nested_element() {
 }
 
 #[test]
+fn a_native_const_generic_packed_field_keeps_its_declared_cleanup() {
+    run_native(r#"
+        type Buffer<const N: Int> is { data: [Byte; N] };
+        implement<const N: Int> Buffer<N> {
+            fn new()->Self { Self { data: [0; N] } }
+            fn stride(&self)->Int {
+                (&self.data[3] as *const Byte as Int) - (&self.data[0] as *const Byte as Int)
+            }
+        }
+        fn main()->Int { let buffer = Buffer<8>.new(); 70 + buffer.stride() }
+    "#);
+}
+
+#[test]
 fn a_native_mutable_parameter_owns_its_nested_value() {
     run_native(r#"
         type Leaf is { value: Int };

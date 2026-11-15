@@ -456,3 +456,37 @@ fn transparent_scalar_has_no_fictitious_object_destructor() {
         37,
     );
 }
+
+#[test]
+fn array_destruction_depends_on_element_obligations_without_traversing_storage() {
+    use verum_vbc::{drop_plan::{build, DropPlan}, types::{TypeId, TypeParamId, TypeRef}};
+    let module = compile("", true);
+    for length in [0, 1, 8, u64::MAX] {
+        for element in [TypeId::INT, TypeId::U8, TypeId::U64] {
+            let array = TypeRef::Array { element: Box::new(TypeRef::Concrete(element)), length };
+            assert!(matches!(build(&module, &array).unwrap(), DropPlan::Ignore));
+            let nested = TypeRef::Array { element: Box::new(array), length };
+            assert!(matches!(build(&module, &nested).unwrap(), DropPlan::Ignore));
+        }
+        let guard = module.types.iter().find(|ty| module.get_string(ty.name) == Some("Guard")).unwrap().id;
+        let array = TypeRef::Array { element: Box::new(TypeRef::Concrete(guard)), length };
+        let error = build(&module, &array).unwrap_err();
+        assert!(error.contains("requires a checked storage traversal"), "{error}");
+        let unresolved = TypeRef::Array { element: Box::new(TypeRef::Generic(TypeParamId(0))), length };
+        assert!(build(&module, &unresolved).unwrap_err().contains("unresolved declaration witnesses"));
+    }
+}
+
+#[test]
+fn a_const_generic_packed_field_survives_declared_owner_cleanup() {
+    run(r#"
+        type Buffer<const N: Int> is { data: [Byte; N] };
+        implement<const N: Int> Buffer<N> {
+            fn new()->Self { Self { data: [0; N] } }
+            fn stride(&self)->Int {
+                (&self.data[3] as *const Byte as Int) - (&self.data[0] as *const Byte as Int)
+            }
+        }
+        fn probe()->Int { let buffer = Buffer<8>.new(); buffer.stride() }
+    "#, 3);
+}

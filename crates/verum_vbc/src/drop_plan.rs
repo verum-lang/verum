@@ -152,6 +152,17 @@ fn build_inner(
                 fields,
             });
         }
+        TypeRef::Array { element, .. } => {
+            active.push(ty.clone());
+            let element = build_inner(module, element, active, budget);
+            active.pop();
+            // No element has an ownership obligation, for every cardinality.
+            // This does not infer a runtime extent or authorize a traversal.
+            return match element? {
+                DropPlan::Ignore => Ok(DropPlan::Ignore),
+                _ => Err("typed destruction of owned array elements requires a checked storage traversal".into()),
+            };
+        }
         _ => {
             return Err(
                 format!("typed destruction lacks a concrete owned declaration: {ty:?}").into(),

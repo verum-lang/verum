@@ -170,7 +170,7 @@ fn direct_return_declines_name_only_escaping_even_for_a_shadowed_local() {
             .ctx
             .registers
             .value_uses
-            .set_type(returned, owned, ResourceDiscipline::Affine);
+            .set_type(returned, owned.clone(), ResourceDiscipline::Affine);
         if let Some(name) = escaping {
             codegen.ctx.current_fn_escaping_vars.insert(name.into());
         }
@@ -187,9 +187,12 @@ fn direct_return_declines_name_only_escaping_even_for_a_shadowed_local() {
             );
         } else {
             assert_eq!(result.unwrap(), true);
-            for expected in [outer, inner, returned] {
-                assert!(codegen.ctx.instructions.iter().any(|instruction| matches!(instruction, Instruction::DropRef { src } if *src == expected)));
+            for expected in [outer, returned] {
+                assert!(codegen.ctx.instructions.iter().any(|instruction| matches!(instruction,
+                    Instruction::DropTyped { src, type_ref } if *src == expected && type_ref == &owned)));
             }
+            assert!(codegen.ctx.instructions.iter().any(|instruction| matches!(instruction,
+                Instruction::DropRef { src } if *src == inner)));
         }
     }
 }
