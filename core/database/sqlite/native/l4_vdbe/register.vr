@@ -23,6 +23,7 @@ module core.database.sqlite.native.l4_vdbe.register;
 
 mount collections.List;
 mount base.{Text, Maybe};
+mount core.base.protocols.Clone;
 
 // -----------------------------------------------------------------------------
 // Register
@@ -38,6 +39,21 @@ public type Register is
     | RText(Text)
     | RBlob(List<Byte>)
     | RRowId(Int64);
+
+// A statement snapshot owns its SQL values. In particular, a blob clone must
+// use the collection's declared Clone operation, not duplicate its raw storage.
+implement Clone for Register {
+    fn clone(&self) -> Register {
+        match self {
+            RNull => RNull,
+            RInt(value) => RInt(*value),
+            RReal(value) => RReal(*value),
+            RText(value) => RText(value.clone()),
+            RBlob(value) => RBlob(value.clone()),
+            RRowId(value) => RRowId(*value),
+        }
+    }
+}
 
 public type RegisterKind is KNull | KInt | KReal | KText | KBlob | KRowId;
 

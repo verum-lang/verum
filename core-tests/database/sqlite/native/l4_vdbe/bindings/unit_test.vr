@@ -1,5 +1,38 @@
 mount core.database.sqlite.native.l4_vdbe.bindings.param_bindings_new;
 mount core.database.sqlite.native.l4_vdbe.register.Register;
+mount core.collections.list.List;
+
+@test
+fn cloned_registers_preserve_variants_and_owned_blob_storage() {
+    let absent = Register.RNull;
+    assert(absent.clone() is Register.RNull);
+    let integer = Register.RInt(73_i64);
+    assert_eq(match integer.clone() { Register.RInt(n) => n, _ => -1_i64 }, 73_i64);
+    let row = Register.RRowId(73_i64);
+    assert_eq(match row.clone() { Register.RRowId(n) => n, _ => -1_i64 }, 73_i64);
+    let real = Register.RReal(3.5);
+    assert(match real.clone() { Register.RReal(n) => n == 3.5, _ => false });
+    let text = Register.RText("payload");
+    assert_eq(match text.clone() { Register.RText(s) => s, _ => "wrong tag" }, "payload");
+
+    let mut bytes: List<Byte> = List.new();
+    bytes.push(17_u8);
+    bytes.push(29_u8);
+    let mut original = Register.RBlob(bytes);
+    let copied = original.clone();
+    match &mut original {
+        Register.RBlob(data) => { data[0] = 91_u8; data.clear(); },
+        _ => assert(false),
+    }
+    match copied {
+        Register.RBlob(data) => {
+            assert_eq(data.len(), 2);
+            assert_eq(data[0], 17_u8);
+            assert_eq(data[1], 29_u8);
+        },
+        _ => assert(false),
+    }
+}
 
 @test
 fn cloned_bindings_own_independent_positional_storage() {
