@@ -4463,6 +4463,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     }
                     ctx.position_at_end(block);
                     ctx.clear_array_storage_at_join();
+                    ctx.clear_callable_producers();
                     _current_block_start_idx = instr_idx;
                 }
             }

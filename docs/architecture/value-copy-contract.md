@@ -102,9 +102,13 @@ flag. Forward declarations cannot issue it; body imports and specialization
 carry it with the executable body, while declaration-only imports clear it.
 The actual VM frame checks caller/callee compatibility once before execution;
 TailCall checks before changing the frame. Mixed conventions are refused.
-Native direct calls check their selected descriptors; erased native indirect
-calls cannot establish the convention and are refused when an owned-body
-target may occur. The flag declares an ABI, not an independent ownership proof.
+Native direct calls check their selected descriptors. A native empty-environment
+callable also checks its selected producer, argument count and calling
+convention when that identity survives local moves and immediate writes in one
+basic block. Register overwrites, control-flow joins and unknown operations
+discard this producer fact. Erased native indirect calls remain refused when
+an owned-body target may occur. The flag declares an ABI, not an independent
+ownership proof.
 
 Callable cleanup has a separate producer check. The VM accepts a known function
 ID only with its actual semantic signature, or a registered empty environment

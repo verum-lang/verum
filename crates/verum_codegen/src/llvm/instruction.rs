@@ -2434,7 +2434,11 @@ pub fn lower_instruction<'ctx>(
 
     ctx.check_register_writes()?;
     ctx.begin_array_storage_instruction(instr);
+    ctx.begin_callable_instruction(instr);
     lower_instruction_impl(ctx, instr)?;
+    if matches!(instr, Instruction::CallClosure { .. }) {
+        ctx.clear_callable_producers();
+    }
     ctx.finish_array_storage_instruction(instr)?;
     ctx.check_register_writes()
 }
@@ -3687,7 +3691,7 @@ fn lower_instruction_impl<'ctx>(
         }
 
         Instruction::CallClosure { dst, closure, args } => {
-            ctx.require_indirect_parameter_convention()?;
+            ctx.require_closure_parameter_convention(*closure, usize::from(args.count))?;
             let closure_val = ctx.get_register(closure.0)?;
             let closure_ptr = match closure_val {
                 BasicValueEnum::PointerValue(p) => p,
@@ -3956,6 +3960,9 @@ fn lower_instruction_impl<'ctx>(
             ctx.set_register(dst.0, closure_ptr.into());
             // Track the closure's return type so CallClosure can mark dst correctly.
             ctx.set_closure_return_type(dst.0, func_desc.return_type.clone());
+            if captures.is_empty() {
+                ctx.record_selected_callable(*dst, func_desc.id);
+            }
             // T0241 facet-2: record each capture's kind from the enclosing fn's
             // live register marks, keyed by the closure's func-id, so the
             // closure body prologue can re-mark the capture registers. Without
@@ -42474,8 +42481,12 @@ fn lower_gpu_extended<'ctx>(
 
 fn lower_mov<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg) -> Result<()> {
     let value = ctx.get_register(src.0)?;
+    let callable = ctx.selected_callable_target(src);
     let field_address = ctx.field_reference_address(src.0)?;
     ctx.set_register(dst.0, value);
+    if let Some(target) = callable {
+        ctx.record_selected_callable(dst, target);
+    }
     if let Some(address) = field_address {
         ctx.set_field_reference_address(dst.0, address)?;
     }

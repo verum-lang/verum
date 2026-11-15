@@ -71,3 +71,78 @@ fn native_callable_cleanup_has_an_explicit_executable_refusal() {
         .to_string();
     assert!(body.contains("unreachable"), "{body}");
 }
+
+#[test]
+fn a_known_callable_producer_does_not_authorize_an_overwritten_register() {
+    let mut module = compile(
+        "fn known()->Int {73} fn main()->Int {let callback:fn()->Int=known; callback()}",
+    );
+    let entry = module.find_function_by_name("main").unwrap();
+    let function = module.functions.iter_mut().find(|function| function.id == entry).unwrap();
+    let instructions = function.instructions.as_mut().unwrap();
+    let (index, register) = instructions.iter().enumerate().find_map(|(index, instruction)| {
+        if let verum_vbc::Instruction::CallClosure { closure, .. } = instruction {
+            Some((index, *closure))
+        } else { None }
+    }).expect("ordinary source callable call");
+    instructions.insert(index, verum_vbc::Instruction::LoadUnit { dst: register });
+    let context = Context::create();
+    let mut lowering = VbcToLlvmLowering::new(
+        &context, LoweringConfig::debug("overwritten_callable").with_debug_info(false),
+    );
+    let error = lowering.lower_module(&module).unwrap_err();
+    assert!(error.to_string().contains("producer-issued parameter convention"), "{error}");
+}
+
+#[test]
+fn callable_parameters_and_control_flow_joins_require_their_own_producer_proof() {
+    for source in [
+        "fn invoke(callback:fn()->Int)->Int {callback()} fn known()->Int {73} fn main()->Int {invoke(known)}",
+        "fn known()->Int {73} fn other()->Int {19} fn choose(flag:Bool)->Int {let mut callback:fn()->Int=known; if flag {callback=other;} callback()} fn main()->Int {choose(false)}",
+    ] {
+        let module = compile(source);
+        let context = Context::create();
+        let mut lowering = VbcToLlvmLowering::new(
+            &context, LoweringConfig::debug("unproved_callable").with_debug_info(false),
+        );
+        let error = lowering.lower_module(&module).unwrap_err();
+        assert!(error.to_string().contains("producer-issued parameter convention"), "{error}");
+    }
+}
+
+#[test]
+fn a_selected_callable_cannot_acquire_a_different_body_convention() {
+    let mut module = compile(
+        "fn known()->Int {73} fn main()->Int {let callback:fn()->Int=known; callback()}",
+    );
+    let selected = module.find_function_by_name("known").unwrap();
+    let descriptor = module.functions.iter_mut().find(|function| function.id == selected).unwrap();
+    descriptor.owned_value_parameters = false;
+    descriptor.value_uses = None;
+    let context = Context::create();
+    let mut lowering = VbcToLlvmLowering::new(
+        &context, LoweringConfig::debug("mixed_callable").with_debug_info(false),
+    );
+    let error = lowering.lower_module(&module).unwrap_err();
+    assert!(error.to_string().contains("incompatible owned parameter"), "{error}");
+}
+
+#[test]
+fn a_selected_callable_keeps_its_declared_argument_count() {
+    let mut module = compile(
+        "fn known(value:Int)->Int {value} fn main()->Int {let callback:fn(Int)->Int=known; callback(73)}",
+    );
+    let entry = module.find_function_by_name("main").unwrap();
+    let function = module.functions.iter_mut().find(|function| function.id == entry).unwrap();
+    for instruction in function.instructions.as_mut().unwrap() {
+        if let verum_vbc::Instruction::CallClosure { args, .. } = instruction {
+            args.count = 0;
+        }
+    }
+    let context = Context::create();
+    let mut lowering = VbcToLlvmLowering::new(
+        &context, LoweringConfig::debug("callable_arity").with_debug_info(false),
+    );
+    let error = lowering.lower_module(&module).unwrap_err();
+    assert!(error.to_string().contains("argument count differs from its selected producer"), "{error}");
+}

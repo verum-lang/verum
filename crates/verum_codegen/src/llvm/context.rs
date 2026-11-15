@@ -564,6 +564,9 @@ pub struct FunctionContext<'a, 'ctx> {
     /// Used by CallClosure to mark the dst register with the correct type (List, Text, etc.)
     /// so downstream operations dispatch correctly.
     closure_return_types: HashMap<u16, verum_vbc::types::TypeRef>,
+    /// Exact empty-environment producers in the current basic block. A
+    /// callable signature alone never establishes this executable identity.
+    selected_callable_targets: verum_common::Map<u16, verum_vbc::module::FunctionId>,
 
     /// Capture kinds recorded per closure func-id at `NewClosure`, from the
     /// enclosing fn's live register marks. Drained by the lowerer into its
@@ -962,6 +965,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             variant_extraction: HashMap::new(),
 
             closure_return_types: HashMap::new(),
+            selected_callable_targets: verum_common::Map::new(),
             pending_closure_captures: Vec::new(),
             reg_types: RegisterTypeMap::new(),
             obj_alloc_sizes: std::collections::HashMap::new(),
@@ -1087,6 +1091,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             variant_extraction: HashMap::new(),
 
             closure_return_types: HashMap::new(),
+            selected_callable_targets: verum_common::Map::new(),
             pending_closure_captures: Vec::new(),
             reg_types: RegisterTypeMap::new(),
             obj_alloc_sizes: std::collections::HashMap::new(),
@@ -1243,6 +1248,49 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
                 "native indirect call requires a producer-issued parameter convention"));
         }
         Ok(())
+    }
+
+    pub(super) fn require_closure_parameter_convention(&self, register: Reg, argument_count: usize) -> Result<()> {
+        if let Some(target) = self.selected_callable_target(register)
+            && let Some(declaration) = self.vbc_module.and_then(|module| module.get_function(target))
+        {
+            if declaration.params.len() != argument_count {
+                return Err(LlvmLoweringError::unsupported(
+                    "native callable argument count differs from its selected producer"));
+            }
+            // Reuse the actual direct-call check, including both body seals.
+            self.resolve_declared_function(declaration)?;
+            return Ok(());
+        }
+        self.require_indirect_parameter_convention()
+    }
+
+    pub(super) fn selected_callable_target(&self, register: Reg) -> Option<verum_vbc::module::FunctionId> {
+        self.selected_callable_targets.get(&register.0).copied()
+    }
+
+    pub(super) fn record_selected_callable(&mut self, register: Reg, target: verum_vbc::module::FunctionId) {
+        self.selected_callable_targets.insert(register.0, target);
+    }
+
+    pub(super) fn clear_callable_producers(&mut self) {
+        self.selected_callable_targets.clear();
+    }
+
+    /// Only carrier-preserving moves and immediate register writes retain a
+    /// producer. Calls, memory writes and unsupported operations may replace
+    /// an aliased callable; they cannot preserve this local proof.
+    pub(super) fn begin_callable_instruction(&mut self, instruction: &Instruction) {
+        if !matches!(instruction,
+            Instruction::Mov { .. } | Instruction::NewClosure { .. }
+            | Instruction::CallClosure { .. } | Instruction::LoadK { .. }
+            | Instruction::LoadI { .. } | Instruction::LoadSmallI { .. }
+            | Instruction::LoadF { .. } | Instruction::LoadTrue { .. }
+            | Instruction::LoadFalse { .. } | Instruction::LoadUnit { .. }
+            | Instruction::LoadT { .. })
+        {
+            self.clear_callable_producers();
+        }
     }
 
     /// Resolve the declaration already selected by VBC identity.
@@ -3036,6 +3084,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
         self.maybe_inner_types.remove(&reg);
         self.tuple_element_types.remove(&reg);
         self.closure_return_types.remove(&reg);
+        self.selected_callable_targets.remove(&reg);
         // **T1441 — `obj_register_types` was in none of the categories
         // above.** Not cleared, not listed as deliberately held back, not
         // named as latent. It simply survived a store, so a register
