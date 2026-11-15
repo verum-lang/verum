@@ -12614,24 +12614,22 @@ with .to_float() or .to_int() (at {:?})",
                     }
                 }
 
-                // Min and max are valid for Numeric types
+                // A scalar representation supplies finite extrema. A marker
+                // protocol does not supply that representation or its bounds.
                 TypeProperty::Min | TypeProperty::Max => {
-                    if matches!(resolved_ty, Type::Int | Type::Float)
-                        || Self::is_sized_integer_type(&resolved_ty)
-                        || Self::is_float_like_type(&resolved_ty)
-                        || self
-                            .protocol_checker
-                            .read()
-                            .implements_protocol(&resolved_ty, "Numeric")
+                    let scalar = self.unifier.normalize_aliases(&resolved_ty);
+                    if matches!(scalar, Type::Var(_))
+                        || (self.forwarding_scalar(&scalar)
+                            && !matches!(scalar, Type::Bool | Type::Char))
                     {
                         Ok(InferResult::new(resolved_ty))
                     } else {
                         Err(TypeError::OtherWithCodeSpanned {
                             code: verum_common::Text::from("E428"),
                             msg: verum_common::Text::from(format!(
-                                "type property `{}` is only valid for numeric types, but `{}` is not one\n  \
-                                 help: `.{}` is defined on Int, Float and the sized integer/float types, \
-                                 and on any type implementing `Numeric`",
+                                "type property `{}` is only valid for numeric scalar types, but `{}` is not one\n  \
+                                 help: `.{}` is defined on the registered integer/float types \
+                                 and their transparent aliases",
                                 property, resolved_ty, property
                             )),
                             span,
