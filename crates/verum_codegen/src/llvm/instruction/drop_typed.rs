@@ -95,11 +95,22 @@ fn emit<'ctx>(
         .build_conditional_branch(empty, end, live)
         .or_llvm_err()?;
     ctx.builder().position_at_end(live);
+    if matches!(plan, DropPlan::Callable { .. }) {
+        // Native headerless closure carriers do not retain the producer's
+        // environment ownership receipt. Refuse on the executing path rather
+        // than trusting pointer bits or allowing a fallback body to omit drop.
+        emit_runtime_abort(ctx,
+            "native callable cleanup requires a producer-issued environment ownership receipt",
+            "drop_callable_receipt")?;
+        ctx.builder().build_unreachable().or_llvm_err()?;
+        ctx.builder().position_at_end(end);
+        return Ok(());
+    }
     let owner = match plan {
         DropPlan::Glue { owner, .. }
         | DropPlan::Record { owner, .. }
         | DropPlan::Sum { owner, .. } => *owner,
-        DropPlan::Ignore => unreachable!(),
+        DropPlan::Ignore | DropPlan::Callable { .. } => unreachable!(),
     };
     let actual = ctx
         .builder()
@@ -135,7 +146,7 @@ fn emit<'ctx>(
     ctx.builder().build_unreachable().or_llvm_err()?;
     ctx.builder().position_at_end(valid);
     match plan {
-        DropPlan::Ignore => unreachable!(),
+        DropPlan::Ignore | DropPlan::Callable { .. } => unreachable!(),
         DropPlan::Glue {
             function,
             type_args,

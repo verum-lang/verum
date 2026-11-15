@@ -1360,6 +1360,10 @@ fn typed_drop_fields<'a>(state: &InterpreterState, value: Value, plan: &'a crate
     if value.is_unit() || matches!(plan, DropPlan::Ignore) { return Ok(None); }
     let (owner, record, variants) = match plan {
         DropPlan::Ignore => return Ok(None),
+        DropPlan::Callable { signature } => {
+            state.heap.validate_empty_callable(&state.module, value, signature)?;
+            return Ok(None);
+        }
         DropPlan::Glue { owner, .. } => (*owner, None, None),
         DropPlan::Record { owner, fields, .. } => (*owner, Some(fields.as_slice()), None),
         DropPlan::Sum { owner, variants } => (*owner, None, Some(variants)),

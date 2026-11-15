@@ -2850,6 +2850,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         // When user and stdlib functions share a name, the arity-suffixed LLVM
         // function can only be found via func_id, not by name.
         ctx.set_func_id_map(Arc::new(self.functions.clone()));
+        ctx.set_vbc_function_id(vbc_func.descriptor.id);
         ctx.initialize_array_storage(
             self.array_returns.clone(),
             &vbc_func.instructions,
@@ -3020,6 +3021,13 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                 Instruction::LoadK { dst, const_id } => {
                     if matches!(vbc_module.constants.get(*const_id as usize),
                         Some(verum_vbc::module::Constant::Int128 { .. })) {
+                        wide_int_regs.insert(dst.0);
+                    }
+                }
+                Instruction::CloneTyped { dst, type_ref, .. } => {
+                    if matches!(verum_vbc::type_layout::numeric_representation_with(
+                        type_ref, |id| vbc_module.get_type(id)),
+                        Some(verum_vbc::type_layout::NumericRepresentation::Integer { bits: 128, .. })) {
                         wide_int_regs.insert(dst.0);
                     }
                 }

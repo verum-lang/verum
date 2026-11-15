@@ -1232,6 +1232,15 @@ pub(in super::super) fn handle_tail_call_op(
         .get_function(func_id)
         .ok_or(InterpreterError::FunctionNotFound(func_id))?;
 
+    if let Some(frame) = state.call_stack.current() {
+        let caller = state.module.get_function(frame.function)
+            .ok_or(InterpreterError::FunctionNotFound(frame.function))?;
+        crate::parameter_convention::validate_call(caller, func)
+            .map_err(|message| InterpreterError::InvalidBytecode {
+                pc: state.pc() as usize, message: message.into_string(),
+            })?;
+    }
+
     // TailCall has no type-argument operand. The old frame's evidence belongs
     // to its old declaration and cannot authorize a different generic target.
     if !func.type_params.is_empty() {
@@ -1260,6 +1269,7 @@ pub(in super::super) fn handle_tail_call_op(
     // Update current frame to new function
     if let Some(frame) = state.call_stack.current_mut() {
         frame.function = func_id;
+        frame.parameter_convention_checked = true;
         frame.pc = 0;
         frame.reg_count = reg_count;
     }
@@ -1329,6 +1339,7 @@ fn create_closure(state: &mut InterpreterState, typed: bool, witnessed: bool) ->
         Some(types)
     } else { None };
     let mut lexical_payload = Vec::new();
+    let mut lexical_types = verum_common::List::new();
     if witnessed {
         let count = read_varint(state)?;
         if count > u16::MAX as u64 {
@@ -1342,6 +1353,7 @@ fn create_closure(state: &mut InterpreterState, typed: bool, witnessed: bool) ->
                 return Err(InterpreterError::Panic { message: "unresolved closure lexical witness".into() });
             }
             crate::bytecode::encode_type_ref(&ty, &mut lexical_payload);
+            lexical_types.push(ty);
         }
     }
     let resolved_types = types.as_ref().map(|types| types.iter()
@@ -1394,6 +1406,12 @@ fn create_closure(state: &mut InterpreterState, typed: bool, witnessed: bool) ->
         }
     }
 
+    let capture_types = resolved_types.unwrap_or_default().into_iter()
+        .collect::<Option<verum_common::List<_>>>()
+        .ok_or_else(|| InterpreterError::InvalidBytecode {
+            pc: state.pc() as usize, message: "validated callable lost its capture declarations".into(),
+        })?;
+    state.heap.record_callable(&obj, FunctionId(func_id), capture_types, lexical_types);
     let closure_val = Value::from_ptr(base_ptr);
     state.set_reg(dst, closure_val);
     Ok(DispatchResult::Continue)

@@ -439,6 +439,12 @@ impl<'a> Validator<'a> {
 
     /// Validates a single function descriptor.
     fn validate_function_descriptor(&mut self, desc: &FunctionDescriptor, _index: usize) {
+        if desc.owned_value_parameters && self.module.header.version_minor < 60 {
+            self.errors.push(VbcError::Deserialization("owned parameter convention requires VBC minor 60".into()));
+        }
+        if let Err(message) = crate::parameter_convention::validate_body(desc) {
+            self.errors.push(VbcError::Deserialization(message.into_string()));
+        }
         // Validate name reference
         if self.module.get_string(desc.name).is_none() && desc.name.0 != 0 {
             self.errors.push(VbcError::InvalidStringId(desc.name.0));

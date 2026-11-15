@@ -1789,9 +1789,19 @@ pub(super) fn lower<'ctx>(
         }
     };
     let source = ctx.get_register(src.0)?;
-    if matches!(plan.nodes[0], CopyNode::Identity) {
-        ctx.set_register(dst.0, source);
-        return Ok(());
+    // Alias nodes preserve the target operation. Keep an identity carrier in
+    // its native width instead of passing it through the owned-storage helper's
+    // 64-bit slots. The checked plan rejects alias cycles before this walk.
+    let mut root = NodeId(0);
+    for _ in 0..plan.nodes.len() {
+        match plan.nodes[root.0] {
+            CopyNode::Identity => {
+                ctx.set_register(dst.0, source);
+                return Ok(());
+            }
+            CopyNode::Alias(next) => root = next,
+            _ => break,
+        }
     }
     let counters = if plan
         .nodes

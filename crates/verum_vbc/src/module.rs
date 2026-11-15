@@ -1971,6 +1971,7 @@ impl VbcModule {
                     .collect();
                 let desc = FunctionDescriptor {
                     has_source_body: false,
+                    owned_value_parameters: false,
                     value_uses: None,
                     semantic_params: None,
                     semantic_return: None,
@@ -2838,6 +2839,12 @@ pub struct FunctionDescriptor {
     /// it does not prove any return storage, transfer or cleanup convention.
     #[serde(default)]
     pub has_source_body: bool,
+    /// This emitted body uses the owned-value-parameter calling convention
+    /// (v2.60). The producer sets it after its prologue and exit cleanup exist;
+    /// signatures and forward declarations cannot supply it. This is an ABI
+    /// declaration, not an independent proof of ownership correctness.
+    #[serde(default)]
+    pub owned_value_parameters: bool,
     /// Body-sealed production facts, without ownership/cleanup authorization.
     #[serde(default)]
     pub value_uses: Option<crate::value_use::ValueUsePlan>,
@@ -3130,6 +3137,7 @@ impl Default for FunctionDescriptor {
     fn default() -> Self {
         Self {
             has_source_body: false,
+            owned_value_parameters: false,
             value_uses: None,
             semantic_params: None,
             semantic_return: None,
@@ -4552,6 +4560,7 @@ mod precompile_extension_tests {
         // Synthesise a function whose body is at offset 100, length 32.
         let mut desc = FunctionDescriptor {
             has_source_body: false,
+            owned_value_parameters: false,
             explicit_type_param_ids: Vec::new(),
             id: FunctionId(0),
             name: m.intern_string("hello"),
@@ -4615,6 +4624,7 @@ mod precompile_extension_tests {
         // One placeholder function so the variant lookup has a target.
         let desc = FunctionDescriptor {
             has_source_body: false,
+            owned_value_parameters: false,
             explicit_type_param_ids: Vec::new(),
             id: FunctionId(0),
             name: m.intern_string("syscall_x"),

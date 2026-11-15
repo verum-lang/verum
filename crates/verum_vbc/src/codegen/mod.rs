@@ -19077,25 +19077,43 @@ impl VbcCodegen {
         // current prologue operation is observed (T1599).
         // A local value of generic type F keeps F's ownership discipline. Its
         // callable bound supplies the result of invoking it (including aliases).
-        self.ctx.registers.callable_bound_results = Self::generic_callable_bounds(func)
+        self.ctx.registers.callable_bound_signatures = Self::generic_callable_bounds(func)
             .filter_map(|(name, bound)| {
-                let verum_ast::ty::TypeKind::Function { return_type, .. } = &bound.kind else { return None };
                 let id = self.ctx.current_generic_param_id(name)?;
-                let result = self.semantic_formal_type(
-                    return_type, &self.ctx.current_generic_param_ids, &declared_ids,
+                let signature = self.semantic_formal_type(
+                    bound, &self.ctx.current_generic_param_ids, &declared_ids,
                 )?;
-                Some((id, result))
+                matches!(signature, crate::types::TypeRef::Function { .. }).then_some((id, signature))
             }).collect();
         let parameter_types = self.source_semantic_parameters(
             func, &self.ctx.current_generic_param_ids, &receiver_generics, &declared_ids,
         );
+        let owns_parameters = func.body.is_some() && !func_info.is_async
+            && !func_info.is_generator && func_info.intrinsic_name.is_none();
         for (param, ty) in func.params.iter().zip(parameter_types) {
-            if let (Some((name, _)), Some(ty)) = (self.extract_param_name_and_mutable(param), ty)
-                && let Some(reg) = self.ctx.lookup_var(&name).map(|binding| binding.reg) {
+            let binding = self.extract_param_name_and_mutable(param)
+                .and_then(|(name, _)| self.ctx.lookup_var(&name).map(|binding| binding.reg));
+            if owns_parameters && let Some(reg) = binding {
+                let written = match &param.kind {
+                    verum_ast::FunctionParamKind::Regular { ty, .. } => Some(ty),
+                    _ => None,
+                };
+                if self.parameter_ownership(ty.as_ref(), written)? == value_uses::ParameterOwnership::RawAddress {
+                    self.ctx.mark_raw_pointer(reg);
+                    continue;
+                }
+            }
+            if let (Some(reg), Some(ty)) = (binding, ty) {
                 let discipline = self.value_resource_discipline(&ty);
-                self.ctx.registers.value_uses.set_type(reg, ty, discipline);
+                self.ctx.registers.value_uses.set_type(reg, ty.clone(), discipline);
+                if owns_parameters { self.establish_parameter_owner(reg, &ty)?; }
+            } else if owns_parameters {
+                return Err(CodegenError::unsupported_expr(
+                    "owned parameter requires a complete declaration and binding inventory"));
             }
         }
+
+        self.ctx.registers.emits_owned_parameter_calls = owns_parameters;
 
         // Register parameter types for proper instruction selection
         // This is critical for generating correct float vs integer operations
@@ -19184,68 +19202,55 @@ impl VbcCodegen {
             verum_common::Maybe::None => None,
         };
 
-        // VALUE SEMANTICS AT THE PARAMETER (T0832).
-        //
-        // A by-value parameter is a NEW variable initialized from the
-        // argument, so writing through it must not reach the caller's
-        // object. Registers hold pointers, so without a copy the callee
-        // writes into the caller's record — measured, `fn takes(mut h:
-        // Holder) { h.r = 3 }` left the caller's `h.r` at 3.
-        //
-        // Only `mut` parameters need it, and that is not a shortcut:
-        // an immutable binding cannot write through itself or lend a
-        // `&mut`, so no program can observe whether it shares. A callee
-        // that passes the value on to another `mut` parameter copies
-        // there in turn, so the chain stays honest. Reference params are
-        // excluded for the reason references exist.
-        //
-        // The copy sits in the PROLOGUE rather than at the call site
-        // because here the declaration is known exactly, including
-        // through dynamic dispatch, where the call site cannot see
-        // which body it will reach.
-        for (i, ((param_name, is_mut), param)) in params_with_mutability
-            .iter()
-            .zip(func.params.iter())
-            .enumerate()
-        {
-            if !*is_mut || self.ctx.reference_bindings.contains(param_name) {
-                continue;
-            }
-            let by_value_record = matches!(
-                &param.kind,
-                verum_ast::FunctionParamKind::Regular { ty, .. }
-                    if !matches!(
-                        ty.kind,
-                        verum_ast::ty::TypeKind::Reference { .. }
-                            | verum_ast::ty::TypeKind::CheckedReference { .. }
-                            | verum_ast::ty::TypeKind::UnsafeReference { .. }
-                            | verum_ast::ty::TypeKind::GenRef { .. }
-                            | verum_ast::ty::TypeKind::Pointer { .. }
-                    )
-                    && !matches!(
-                        self.type_kind_to_var_type(&ty.kind),
-                        context::VarTypeKind::Int
-                            | context::VarTypeKind::Float
-                            | context::VarTypeKind::Bool
-                            | context::VarTypeKind::Byte
-                            | context::VarTypeKind::Char
-                            | context::VarTypeKind::Unit
-                            | context::VarTypeKind::Int32
-                            | context::VarTypeKind::UInt64
-                            | context::VarTypeKind::Text
-                    )
-            );
-            if by_value_record {
-                // Param i occupies register i (`alloc_parameters`).
-                let reg = Reg(i as u16);
-                if self.consumes_named_binding(param_name, reg) {
-                    // The caller hands over this affine value.
-                } else if let Some(ty) = self.generic_named_binding(param_name, reg) {
-                    self.emit_generic_parameter_copy(reg, ty);
-                } else {
-                    self.ctx.emit(Instruction::CloneTyped { dst: reg, src: reg,
-                        type_ref: self.declared_named_binding_type(param_name, reg)
-                            .or_internal("parameter copy requires its source declaration")? });
+        // The owned convention copies once at the caller. Async, generator
+        // and intrinsic bodies retain their existing mutable-parameter copy
+        // convention until their separate lifecycle is implemented.
+        if !owns_parameters {
+            for (i, ((param_name, is_mut), param)) in params_with_mutability
+                .iter()
+                .zip(func.params.iter())
+                .enumerate()
+            {
+                if !*is_mut || self.ctx.reference_bindings.contains(param_name) {
+                    continue;
+                }
+                let by_value_record = matches!(
+                    &param.kind,
+                    verum_ast::FunctionParamKind::Regular { ty, .. }
+                        if !matches!(
+                            ty.kind,
+                            verum_ast::ty::TypeKind::Reference { .. }
+                                | verum_ast::ty::TypeKind::CheckedReference { .. }
+                                | verum_ast::ty::TypeKind::UnsafeReference { .. }
+                                | verum_ast::ty::TypeKind::GenRef { .. }
+                                | verum_ast::ty::TypeKind::Pointer { .. }
+                        )
+                        && !matches!(
+                            self.type_kind_to_var_type(&ty.kind),
+                            context::VarTypeKind::Int
+                                | context::VarTypeKind::Float
+                                | context::VarTypeKind::Bool
+                                | context::VarTypeKind::Byte
+                                | context::VarTypeKind::Char
+                                | context::VarTypeKind::Unit
+                                | context::VarTypeKind::Int32
+                                | context::VarTypeKind::UInt64
+                                | context::VarTypeKind::Text
+                        )
+                );
+                if by_value_record {
+                    // Param i occupies register i (`alloc_parameters`).
+                    let reg = Reg(i as u16);
+                    if self.consumes_named_binding(param_name, reg) {
+                        // The caller hands over this affine value.
+                    } else if let Some(ty) = self.generic_named_binding(param_name, reg) {
+                        let received = self.emit_generic_value_handoff(reg, ty, true);
+                        self.ctx.emit(Instruction::Mov { dst: reg, src: received });
+                    } else {
+                        self.ctx.emit(Instruction::CloneTyped { dst: reg, src: reg,
+                            type_ref: self.declared_named_binding_type(param_name, reg)
+                                .or_internal("parameter copy requires its source declaration")? });
+                    }
                 }
             }
         }
@@ -19256,8 +19261,8 @@ impl VbcCodegen {
                 // reference, not the referent — recorded because the type
                 // NAME loses that (`&NT` and `NT` both infer as "NT"), and
                 // the transparent-wrapper unwrap has to tell them apart
-                // (T1438). Same match as `by_value_record` above, which
-                // asks the same question for the opposite reason.
+                // (T1438). The parameter declaration retains the borrow
+                // independently of the argument ownership boundary.
                 if matches!(
                     ty.kind,
                     verum_ast::ty::TypeKind::Reference { .. }
@@ -19448,7 +19453,9 @@ impl VbcCodegen {
                             func.return_type.as_ref(),
                             &lookup_name,
                         )?;
-                        self.ctx.emit(Instruction::Ret { value: reg });
+                        self.emit_parameter_return(Some(reg));
+                    } else if !matches!(self.ctx.instructions.last(), Some(Instruction::Ret { .. } | Instruction::RetV)) {
+                        self.emit_parameter_return(None);
                     }
                 }
                 verum_ast::FunctionBody::Expr(expr) => {
@@ -19463,9 +19470,9 @@ impl VbcCodegen {
                             func.return_type.as_ref(),
                             &lookup_name,
                         )?;
-                        self.ctx.emit(Instruction::Ret { value: reg });
+                        self.emit_parameter_return(Some(reg));
                     } else {
-                        self.ctx.emit(Instruction::RetV);
+                        self.emit_parameter_return(None);
                     }
                 }
             }
@@ -19564,6 +19571,10 @@ impl VbcCodegen {
             });
         }
         descriptor.has_source_body = func.body.is_some();
+        // The body has now completed the common parameter inventory and every
+        // normal/explicit return has emitted its cleanup. Declaration collection
+        // above deliberately carries no calling-convention authorization.
+        descriptor.owned_value_parameters = owns_parameters;
         descriptor.source_definition = self.callable_source_definition(func, lexical_parent)?;
         descriptor.source_receiver = impl_type_name.as_ref().and(self.current_impl_receiver.as_ref()).filter(|receiver| receiver.semantic).map(|receiver| receiver.ty.clone());
         descriptor.source_signature = self.retain_callable_owner_signature(

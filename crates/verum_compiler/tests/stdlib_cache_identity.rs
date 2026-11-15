@@ -947,3 +947,20 @@ fn a_literal_backslash_in_a_resource_name_is_not_a_directory_separator() {
     write(root.path(), "crates/verum_types/data/shape/item.bin", b"same resource bytes");
     assert_ne!(one_component, key(root.path(), SCHEMA, CORE).0);
 }
+
+
+#[test]
+fn parameter_abi_source_changes_invalidate_the_producer() {
+    let root = producer_fixture();
+    for (path, source) in [
+        ("crates/verum_vbc/src/parameter_convention.rs", include_str!("../../verum_vbc/src/parameter_convention.rs")),
+        ("crates/verum_vbc/src/format.rs", include_str!("../../verum_vbc/src/format.rs")),
+        ("crates/verum_vbc/src/serialize.rs", include_str!("../../verum_vbc/src/serialize.rs")),
+        ("crates/verum_vbc/src/deserialize.rs", include_str!("../../verum_vbc/src/deserialize.rs")),
+    ] {
+        write(root.path(), path, source);
+        let original = key(root.path(), SCHEMA, CORE).0;
+        write(root.path(), path, format!("{source}\nconst PRODUCER_IDENTITY_CONTROL: bool = true;\n"));
+        assert_ne!(original, key(root.path(), SCHEMA, CORE).0, "actual ABI source not tracked: {path}");
+    }
+}

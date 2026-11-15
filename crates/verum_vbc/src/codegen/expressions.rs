@@ -546,6 +546,20 @@ impl VbcCodegen {
         }
     }
 
+    /// Keep the actual emitted sum owner with the source payload witnesses.
+    /// A legacy untyped producer cannot manufacture a nominal declaration.
+    fn retain_variant_result_declaration(&mut self, result: Reg, operands: &[Expr]) {
+        let Some(span) = self.ctx.selected_call_result_span else { return; };
+        let Some(Instruction::MakeVariantTyped { dst, type_id, tag, .. }) = self.ctx.instructions.last()
+            else { return; };
+        if *dst != result { return; }
+        let expected = (self.ctx.expected_value_span == Some(span))
+            .then_some(self.ctx.expected_value_type.as_ref()).flatten();
+        let declaration = self.selected_variant_declaration(
+            crate::types::TypeId(*type_id), *tag, operands, expected);
+        self.ctx.declared_result_types.insert(span, declaration);
+    }
+
     /// Best-effort parent-type extraction from a path / dotted-name
     /// like "ShellError.SpawnFailed" or "Result::Err". Returns the
     /// LEFT side of the rightmost separator, when that side is a
@@ -1706,7 +1720,22 @@ impl VbcCodegen {
             }
         }
         if demand == ResultDemand::CallableReturn {
-            result.map(|reg| self.materialize_list_return(reg)).transpose()
+            result.map(|reg| {
+                // A projected value cannot outlive its owner by sharing the
+                // owner's storage. Preserve its exact declaration before
+                // lexical or parameter cleanup destroys that owner.
+                let projection = matches!(Self::normalized_place(expr).kind,
+                    ExprKind::Field { .. } | ExprKind::Index { .. }
+                        | ExprKind::Unary { op: UnOp::Deref, .. });
+                let declared = self.copy_source_type(expr, reg, start, self.ctx.instructions.len());
+                let reg = if projection && self.binds_a_copy_of_a_place(expr, reg, declared.as_ref())? {
+                    let copied = self.ctx.registers.alloc_fresh();
+                    self.ctx.emit(Instruction::CloneTyped { dst: copied, src: reg,
+                        type_ref: declared.or_internal("projected return requires its source declaration")? });
+                    copied
+                } else { reg };
+                self.materialize_list_return(reg)
+            }).transpose()
         } else {
             Ok(result)
         }
@@ -7809,6 +7838,7 @@ impl VbcCodegen {
             // rationale (sum types sharing variant tags need the
             // concrete TypeId in the heap header to disambiguate).
             self.emit_make_variant(result, final_tag, args.len() as u32, parent.as_deref());
+            self.retain_variant_result_declaration(result, args);
             for (i, arg) in args.iter().enumerate() {
                 let copy_start = self.ctx.instructions.len();
                 let arg_val = self.compile_expr(arg)?.ok_or_else(|| {
@@ -8097,6 +8127,7 @@ impl VbcCodegen {
             // For function callbacks, compile using CreateCallback
             let mut arg_results: Vec<Reg> = Vec::with_capacity(args.len());
             let contexts = self.contextual_call_parameters(&func_info, type_args, args);
+            self.stage_selected_closure_parameters(&func_info, args, type_args);
             for (i, arg) in args.iter().enumerate() {
                 // Check if this argument is an array element reference
                 let is_array_ref = array_ref_infos.iter().any(|info| info.arg_idx == i as u8);
@@ -8191,6 +8222,7 @@ impl VbcCodegen {
                         .get(i)
                         .and_then(|t| Self::function_type_arity(t));
 
+                    let argument_start = self.ctx.instructions.len();
                     let arg_val = self
                         .compile_call_operand(arg, contexts.as_ref().and_then(|types| types.get(i)?.as_ref()))?
                         .or_internal("call arg has no value")?;
@@ -8199,7 +8231,8 @@ impl VbcCodegen {
                         self.ctx.pop_disambig_context(saved);
                     }
                     let arg_val = if is_ffi_call { arg_val } else {
-                        self.emit_owned_call_argument(&func_info, i, arg, arg_val)
+                        let actual = self.copy_source_type(arg, arg_val, argument_start, self.ctx.instructions.len());
+                        self.emit_owned_call_argument(&func_info, i, arg, arg_val, actual.as_ref())?
                     };
                     arg_results.push(arg_val);
                 }
@@ -11064,6 +11097,17 @@ impl VbcCodegen {
             .compile_expr(func)?
             .or_internal("indirect call func has no value")?;
 
+        let signature = self.compiled_callable_signature(func).cloned()
+            .or_else(|| self.declared_expression_result(func, Some(func_reg), 0, self.ctx.instructions.len()));
+        let signature = signature.and_then(|signature| match signature {
+            crate::types::TypeRef::Generic(id) => self.ctx.registers.callable_bound_signatures.get(&id).cloned(),
+            signature => Some(signature),
+        });
+        let parameters = match signature {
+            Some(crate::types::TypeRef::Function { is_async: false, params, .. }) => Some(params),
+            _ => None,
+        };
+
         // Compile arguments into consecutive registers
         // IMPORTANT: Use the same Phase 1/2/3 approach as compile_call to guarantee
         // consecutive fresh registers. alloc_temp() can recycle from the free list,
@@ -11071,10 +11115,13 @@ impl VbcCodegen {
         let args_start = if !args.is_empty() {
             // Phase 1: Compile all argument expressions
             let mut arg_results: Vec<Reg> = Vec::with_capacity(args.len());
-            for arg in args.iter() {
-                let arg_val = self
-                    .compile_expr(arg)?
+            for (index, arg) in args.iter().enumerate() {
+                let parameter = parameters.as_ref().and_then(|params| params.get(index));
+                let start = self.ctx.instructions.len();
+                let arg_val = self.compile_call_operand(arg, parameter)?
                     .or_internal("indirect call arg has no value")?;
+                let actual = self.copy_source_type(arg, arg_val, start, self.ctx.instructions.len());
+                let arg_val = self.emit_declared_call_argument(parameter, arg, arg_val, actual.as_ref())?;
                 arg_results.push(arg_val);
             }
 
@@ -11804,6 +11851,7 @@ impl VbcCodegen {
             })
         });
         self.emit_make_variant(result, tag, args.len() as u32, parent.as_deref());
+        self.retain_variant_result_declaration(result, args);
         if !args.is_empty() {
             let copy_start = self.ctx.instructions.len();
             let data_val = self
@@ -15698,7 +15746,7 @@ impl VbcCodegen {
             receiver_declaration.as_deref().and_then(|name|
                 self.dynamic_method(name, method.name.as_str(), args.len())).transpose()?
         };
-        let effective_method_name = if let Some(member) = dynamic
+        let effective_method_name = if let Some(member) = dynamic.as_ref()
             && let Some(identity) = self.type_by_id(member.owner).and_then(|ty| self.type_declaration_identity(ty))
         {
             format!("dyn:{identity}.{}", method.name)
@@ -16538,7 +16586,7 @@ impl VbcCodegen {
             if self.bind_source_declaration(formal, actual, &mut bindings) {
                 for (index, arg) in args.iter().enumerate() {
                     if matches!(arg.kind, ExprKind::Closure { .. }) && (arg.span.start != 0 || arg.span.end != 0)
-                        && let Some(hints) = self.selected_closure_param_hints(info, index, bindings.clone(), type_args, args)
+                        && let Some(hints) = self.selected_closure_param_hints(info, index, 1, bindings.clone(), type_args, args)
                     {
                         self.ctx.closure_param_type_hints.insert(arg.span, hints);
                     }
@@ -16656,7 +16704,9 @@ impl VbcCodegen {
                     || (stores_arguments && type_prefix_intercepted_by_runtime(&effective_method_name));
                 let source = arg_val;
                 let arg_val = if let Some(callable) = resolved_method.as_ref().filter(|_| receives_value) {
-                    self.emit_owned_call_argument(callable, i + 1, arg, source)
+                    self.emit_owned_call_argument(callable, i + 1, arg, source, copy_type.as_ref())?
+                } else if let Some(member) = dynamic.as_ref().filter(|member| !member.is_async) {
+                    self.emit_declared_call_argument(member.inputs.get(i), arg, source, copy_type.as_ref())?
                 } else { source };
                 copy_arguments.push(source == arg_val && stores_arguments
                     && self.binds_a_copy_of_a_place(arg, source, copy_type.as_ref())?);
@@ -16780,7 +16830,7 @@ impl VbcCodegen {
             && let Some(callable) = resolved_method.as_ref()
             && (devirt_func_id.is_some() || type_prefix_intercepted_by_runtime(&effective_method_name))
         {
-            self.emit_owned_call_argument(callable, 0, receiver, actual_receiver)
+            self.emit_owned_call_argument(callable, 0, receiver, actual_receiver, receiver_result_declaration.as_ref())?
         } else {
             actual_receiver
         };
@@ -18242,6 +18292,7 @@ impl VbcCodegen {
                 args.len() as u32,
                 func_info.parent_type_name.as_deref(),
             );
+            self.retain_variant_result_declaration(result, args);
             for (i, arg) in args.iter().enumerate() {
                 let copy_start = self.ctx.instructions.len();
                 let arg_val = self.compile_expr(arg)?.ok_or_else(|| {
@@ -18324,6 +18375,7 @@ impl VbcCodegen {
         let args_start = if !args.is_empty() {
             let mut arg_results: Vec<Reg> = Vec::with_capacity(args.len());
             let contexts = self.contextual_call_parameters(func_info, type_args, args);
+            self.stage_selected_closure_parameters(func_info, args, type_args);
             for (i, arg) in args.iter().enumerate() {
                 // **Closure expected-return-type plumbing (#26 residual).**
                 //
@@ -18352,9 +18404,12 @@ impl VbcCodegen {
                 } else {
                     None
                 };
+                let argument_start = self.ctx.instructions.len();
                 let arg_val = self
                     .compile_call_operand(arg, contexts.as_ref().and_then(|types| types.get(i)?.as_ref()))?
                     .or_internal("static method arg has no value")?;
+                let actual = self.copy_source_type(arg, arg_val, argument_start, self.ctx.instructions.len());
+                let arg_val = self.emit_owned_call_argument(func_info, i, arg, arg_val, actual.as_ref())?;
                 if let Some(saved) = saved_disambig {
                     self.ctx.pop_disambig_context(saved);
                 }
@@ -31913,15 +31968,17 @@ impl VbcCodegen {
         }
         let key = self.registered_receiver_method(&owner, method)?;
         let info = self.ctx.lookup_qualified_function(&key)?;
-        self.selected_closure_param_hints(info, argument, self.callable_owner_substitution(&owner)?, explicit, operands)
+        self.selected_closure_param_hints(info, argument,
+            usize::from(info.param_names.first().is_some_and(|name| name == "self")),
+            self.callable_owner_substitution(&owner)?, explicit, operands)
     }
 
     fn selected_closure_param_hints(
-        &self, info: &super::context::FunctionInfo, argument: usize, mut substitution: crate::mono::TypeSubstitution,
+        &self, info: &super::context::FunctionInfo, argument: usize, receiver_slots: usize,
+        mut substitution: crate::mono::TypeSubstitution,
         explicit: &verum_common::List<verum_ast::ty::GenericArg>, operands: &[Expr],
     ) -> Option<verum_common::List<Option<crate::types::TypeRef>>> {
         use crate::types::TypeRef;
-        let receiver_slots = usize::from(info.param_names.first().is_some_and(|name| name == "self"));
         let TypeRef::Function { params, .. } = self.callable_parameter_bound(info, argument + receiver_slots)? else { return None };
         for (arg, id) in explicit.iter().zip(&info.explicit_type_param_ids) {
             if let (Some(ty), Some(id)) = (arg.type_for_declared_slot(), id)
@@ -31952,6 +32009,25 @@ impl VbcCodegen {
                 && self.scoped_callable_type_name(&ty, Some(&self.ctx.current_generic_param_ids)).is_some()).then_some(ty)
         }).collect();
         hints.iter().any(Option::is_some).then_some(hints)
+    }
+
+    /// Direct and statically selected calls include every parameter in their
+    /// operand list, including an explicit receiver. Use the same declared
+    /// callback bound as method calls before compiling an inferred closure.
+    fn stage_selected_closure_parameters(
+        &mut self, info: &FunctionInfo, operands: &[Expr],
+        explicit: &verum_common::List<verum_ast::ty::GenericArg>,
+    ) {
+        for (index, operand) in operands.iter().enumerate() {
+            let closure = Self::normalized_place(operand);
+            if matches!(closure.kind, ExprKind::Closure { .. })
+                && (closure.span.start != 0 || closure.span.end != 0)
+                && let Some(hints) = self.selected_closure_param_hints(info, index, 0,
+                    crate::mono::TypeSubstitution::empty(), explicit, operands)
+            {
+                self.ctx.closure_param_type_hints.insert(closure.span, hints);
+            }
+        }
     }
 
     /// REFL-CLOSURE-XREC-1 (runtime leg): if `arg` is a closure argument of
@@ -32422,10 +32498,10 @@ impl VbcCodegen {
         // Begin closure function compilation
         let captured_bounds: Vec<_> = capture_types.iter().flatten().filter_map(|ty| {
             let crate::types::TypeRef::Generic(id) = ty else { return None };
-            self.ctx.registers.callable_bound_results.get(id).map(|result| (*id, result.clone()))
+            self.ctx.registers.callable_bound_signatures.get(id).map(|result| (*id, result.clone()))
         }).collect();
         self.ctx.begin_function(&closure_name, &all_params, closure_return_type_ref.clone());
-        self.ctx.registers.callable_bound_results.extend(captured_bounds);
+        self.ctx.registers.callable_bound_signatures.extend(captured_bounds);
         self.ctx.bind_captured_array_facts(captured_arrays);
         self.bind_capture_declarations(captures, capture_types);
 
@@ -32500,11 +32576,17 @@ impl VbcCodegen {
                 let reg = binding.reg;
                 let discipline = self.value_resource_discipline(ty);
                 self.ctx.registers.value_uses.set_type(reg, ty.clone(), discipline);
+                if !is_async { self.establish_parameter_owner(reg, ty)?; }
+            } else if !is_async {
+                return Err(CodegenError::unsupported_expr(
+                    "owned closure parameter requires a complete declaration and binding inventory"));
             }
             if matches!(ty, Some(crate::types::TypeRef::Reference { .. })) {
                 self.ctx.reference_bindings.insert(name.clone());
             }
         }
+
+        self.ctx.registers.emits_owned_parameter_calls = !is_async;
 
         // T1687: freeze the closure's own return boundary before compiling
         // nested field/argument/initializer expressions. Complete explicit or
@@ -32596,9 +32678,9 @@ impl VbcCodegen {
         // Emit return
         if let Some(reg) = result {
             let reg = self.materialize_list_return(reg)?;
-            self.ctx.emit(Instruction::Ret { value: reg });
+            self.emit_parameter_return(Some(reg));
         } else {
-            self.ctx.emit(Instruction::RetV);
+            self.emit_parameter_return(None);
         }
 
         // End function compilation
@@ -32629,6 +32711,8 @@ impl VbcCodegen {
         let name_id = crate::types::StringId(self.intern_string(&closure_name));
         let mut descriptor = crate::module::FunctionDescriptor::new(name_id);
         descriptor.id = crate::module::FunctionId(func_id);
+        descriptor.has_source_body = true;
+        descriptor.owned_value_parameters = !is_async;
         descriptor.is_generic = !lexical_param_ids.is_empty();
         if is_async { descriptor.properties |= crate::types::PropertySet::ASYNC; }
         for &id in lexical_param_ids {

@@ -1,6 +1,7 @@
 //! Declaration facts and emission observations shared by both source producers.
 //! Observations do not grant cleanup authority. A consuming source context may
 //! use an exact active declaration fact to select its explicit value handoff.
+use super::CodegenOptionExt;
 use crate::{
     Instruction,
     instruction::Reg,
@@ -11,6 +12,14 @@ use verum_common::value_use::{
     BindingId, DuplicationOperation, ValueUseEvent, ValueUseId, ValueUseOperation, ValueUseSite,
 };
 use verum_common::{List, Map, Maybe, ResourceDiscipline};
+
+/// Parameter obligations come from the selected declaration, never its ABI ID.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum ParameterOwnership {
+    Value,
+    Borrowed,
+    RawAddress,
+}
 
 #[derive(Debug, Clone)]
 pub(super) struct BindingFact {
@@ -354,45 +363,175 @@ impl super::VbcCodegen {
         result
     }
 
-    pub(super) fn emit_generic_parameter_copy(&mut self, source: Reg, ty: TypeRef) {
-        let unrestricted = self.resource_is_unrestricted(ty.clone());
-        let done = self.ctx.new_label("resource_parameter");
-        self.ctx.emit_forward_jump(&done, |offset| Instruction::JmpNot { cond: unrestricted, offset });
-        self.ctx.emit(Instruction::CloneTyped { dst: source, src: source, type_ref: ty });
-        self.ctx.define_label(&done);
-        self.ctx.free_temp(unrestricted);
+    /// One declaration-owned classifier for callee inventory and outgoing
+    /// handoffs. A complete semantic slot is authoritative. Only an explicitly
+    /// written raw type can explain an absent full semantic pointer witness.
+    /// Aliases follow exact declaration IDs, never names in the caller scope.
+    pub(super) fn parameter_ownership(
+        &self,
+        semantic: Option<&TypeRef>,
+        written: Option<&verum_ast::Type>,
+    ) -> super::CodegenResult<ParameterOwnership> {
+        use verum_ast::ty::TypeKind;
+        let raw_syntax = |ty: &verum_ast::Type|
+            matches!(ty.kind, TypeKind::Pointer { .. } | TypeKind::VolatilePointer { .. });
+        let Some(mut witness) = semantic.cloned() else {
+            return if written.is_some_and(raw_syntax) { Ok(ParameterOwnership::RawAddress) }
+                else { Err(super::CodegenError::unsupported_expr(
+                    "owned parameter requires a complete declaration and binding inventory")) };
+        };
+        let mut seen = verum_common::Set::new();
+        for _ in 0..crate::types::MAX_TYPE_REF_DEPTH {
+            let (id, arguments) = match &witness {
+                TypeRef::Reference { .. } => return Ok(ParameterOwnership::Borrowed),
+                TypeRef::Concrete(crate::types::TypeId::RESERVED) => return Err(
+                    super::CodegenError::unsupported_expr("parameter ownership requires a declared type")),
+                TypeRef::Concrete(id) => (*id, &[][..]),
+                TypeRef::Instantiated { base, args } => (*base, args.as_slice()),
+                _ => return Ok(ParameterOwnership::Value),
+            };
+            let Some(declaration) = self.type_by_id(id)
+                .filter(|declaration| declaration.kind == crate::types::TypeKind::Alias)
+                else { return Ok(ParameterOwnership::Value) };
+            if !seen.insert(id) || arguments.len() != declaration.type_params.len() {
+                return Err(super::CodegenError::unsupported_expr(
+                    "parameter ownership requires a complete acyclic alias declaration"));
+            }
+            let raw = match declaration.source_declaration.as_ref() {
+                Some(source) => matches!(&source.body,
+                    verum_ast::TypeDeclBody::Alias(target) if raw_syntax(target)),
+                None => declaration.alias_target_name
+                    .and_then(|id| self.ctx.strings.get(id.0 as usize))
+                    .and_then(|source| verum_fast_parser::Parser::new(source).parse_type().ok())
+                    .is_some_and(|target| raw_syntax(&target)),
+            };
+            if raw {
+                if declaration.alias_target.is_some() {
+                    return Err(super::CodegenError::unsupported_expr(
+                        "raw address alias contradicts its semantic target"));
+                }
+                return Ok(ParameterOwnership::RawAddress);
+            }
+            let target = declaration.alias_target.as_ref()
+                .or_internal("parameter ownership requires its resolved alias declaration")?;
+            witness = crate::mono::TypeSubstitution::new(&declaration.type_params, arguments)
+                .apply(target).map_err(|error| super::CodegenError::unsupported_expr(error.to_string()))?;
+        }
+        Err(super::CodegenError::unsupported_expr("parameter ownership alias depth exceeds the type limit"))
     }
 
-    /// The selected callable's semantic parameter declaration establishes a
-    /// by-value destination. ABI carriers and method spellings cannot grant it.
+    /// The selected callable owns this semantic slot. No ABI carrier, method
+    /// spelling or destructor lookup can authorize argument ownership.
     pub(super) fn emit_owned_call_argument(
         &mut self,
         callable: &super::FunctionInfo,
         index: usize,
         argument: &verum_ast::Expr,
         source: Reg,
-    ) -> Reg {
-        let generic = self.generic_named_place(argument, source);
-        let concrete = self.consumes_named_place(argument, source);
-        if generic.is_none() && !concrete { return source; }
-        let owns = !callable.is_async && !callable.is_generator
-            && callable.intrinsic_name.is_none()
-            && (callable.has_source_body || self.functions.iter().any(|f|
-                f.descriptor.id == callable.id && f.descriptor.has_source_body))
-            && self.ctx.semantic_fn_params.get(&callable.id)
-            .and_then(|params| params.get(index)).and_then(|ty| ty.as_ref())
-            .is_some_and(|ty| !matches!(ty, TypeRef::Reference { .. }));
-        if !owns { return source; }
-        self.ctx.registers.value_uses.capture_owned_call_argument();
-        if let Some(ty) = generic {
-            return self.emit_generic_value_handoff(source, ty, false);
+        actual: Option<&TypeRef>,
+    ) -> super::CodegenResult<Reg> {
+        if callable.is_async || callable.is_generator || callable.intrinsic_name.is_some()
+            || callable.foreign_declaration.is_some() {
+            return Ok(source);
         }
-        if concrete {
+        let parameter = self.ctx.semantic_fn_params.get(&callable.id)
+            .and_then(|params| params.get(index)).cloned().flatten();
+        let written = parameter.is_none().then(|| callable.param_type_names.get(index)
+            .and_then(|source| verum_fast_parser::Parser::new(source).parse_type().ok())).flatten();
+        if !self.ctx.registers.emits_owned_parameter_calls {
+            // Async and synthetic bodies keep their existing handoff. A new
+            // argument copy would silently change an unflagged caller's ABI.
+            let owns = (callable.has_source_body || self.functions.iter().any(|function|
+                function.descriptor.id == callable.id && function.descriptor.has_source_body))
+                && self.parameter_ownership(parameter.as_ref(), written.as_ref())
+                    .is_ok_and(|ownership| ownership == ParameterOwnership::Value);
+            if !owns { return Ok(source); }
+            if let Some(ty) = self.generic_named_place(argument, source) {
+                self.ctx.registers.value_uses.capture_owned_call_argument();
+                return Ok(self.emit_generic_value_handoff(source, ty, false));
+            }
+            if self.consumes_named_place(argument, source) {
+                self.ctx.registers.value_uses.capture_owned_call_argument();
+                let received = self.ctx.registers.alloc_fresh();
+                self.ctx.emit_transferring_value(received, source);
+                return Ok(received);
+            }
+            return Ok(source);
+        }
+        if self.parameter_ownership(parameter.as_ref(), written.as_ref())? != ParameterOwnership::Value {
+            return Ok(source);
+        }
+        self.emit_declared_call_argument(parameter.as_ref(), argument, source, actual)
+    }
+
+    /// The one argument boundary used by direct, method and callable-value
+    /// dispatch. A place keeps its owner only after a declared value copy;
+    /// a temporary or an exclusive named value transfers exactly once.
+    pub(super) fn emit_declared_call_argument(
+        &mut self,
+        parameter: Option<&TypeRef>,
+        argument: &verum_ast::Expr,
+        source: Reg,
+        actual: Option<&TypeRef>,
+    ) -> super::CodegenResult<Reg> {
+        if !self.ctx.registers.emits_owned_parameter_calls { return Ok(source); }
+        if self.parameter_ownership(parameter, None)? != ParameterOwnership::Value { return Ok(source); }
+        if actual.is_some_and(|ty| self.parameter_ownership(Some(ty), None)
+            .is_ok_and(|ownership| ownership != ParameterOwnership::Value)) || self.ctx.is_raw_pointer(source) {
+            return Ok(source);
+        }
+        if let Some(ty) = self.generic_named_place(argument, source) {
+            self.ctx.registers.value_uses.capture_owned_call_argument();
+            return Ok(self.emit_generic_value_handoff(source, ty, true));
+        }
+        if self.consumes_named_place(argument, source) {
+            self.ctx.registers.value_uses.capture_owned_call_argument();
             let received = self.ctx.registers.alloc_fresh();
             self.ctx.emit_transferring_value(received, source);
-            return received;
+            return Ok(received);
         }
-        source
+        let copy = self.binds_a_copy_of_a_place(argument, source, actual)?;
+        if copy {
+            let received = self.ctx.registers.alloc_fresh();
+            self.ctx.emit(Instruction::CloneTyped { dst: received, src: source,
+                type_ref: actual.cloned().or_internal("call argument copy requires its source declaration")? });
+            return Ok(received);
+        }
+        Ok(source)
+    }
+
+    /// Callee inventory is derived from exactly the semantic parameter which
+    /// the argument boundary uses, independently of mutability and use count.
+    pub(super) fn establish_parameter_owner(&mut self, reg: Reg, ty: &TypeRef) -> super::CodegenResult<()> {
+        if self.parameter_ownership(Some(ty), None)? == ParameterOwnership::Value {
+            let fact = self.ctx.registers.value_uses.active.get(&reg)
+                .or_internal("parameter ownership requires its active binding")?;
+            self.ctx.registers.parameter_owners.insert(reg, (fact.id, ty.clone()));
+        }
+        Ok(())
+    }
+
+    fn emit_parameter_cleanup(&mut self, returned: Option<BindingId>) {
+        for (_, binding) in self.ctx.registers.function_exit_bindings() {
+            let Some((identity, ty)) = self.ctx.registers.parameter_owners.get(&binding.reg).cloned()
+                else { continue };
+            if binding.kind != super::RegisterKind::Parameter || identity != binding.binding_id
+                || returned == Some(identity) || binding.is_cell || binding.is_pattern_alias {
+                continue;
+            }
+            // Generic parameters carry the selected caller's exact witness.
+            // A cleared slot is Unit and typed cleanup is idempotent for it.
+            self.ctx.emit(Instruction::DropTyped { src: binding.reg, type_ref: ty });
+        }
+    }
+
+    pub(super) fn emit_parameter_return(&mut self, value: Option<Reg>) {
+        let returned = value.and_then(|reg| self.ctx.registers.value_uses.fact(reg)).map(|fact| fact.id);
+        self.emit_parameter_cleanup(returned);
+        self.ctx.emit(match value {
+            Some(value) => Instruction::Ret { value },
+            None => Instruction::RetV,
+        });
     }
 
     /// Both generic and concrete transfers require the same active declaration.
@@ -436,6 +575,7 @@ impl super::VbcCodegen {
     pub(super) fn emit_lexical_return(
         &mut self, value: Option<Reg>, preserved: Option<Reg>, residual: bool, independent: bool,
     ) {
+        let returned = value.and_then(|reg| self.ctx.registers.value_uses.fact(reg)).map(|fact| fact.id);
         let has_defers = self.ctx.has_pending_defers();
         let value = if has_defers {
             value.map(|src| {
@@ -456,7 +596,8 @@ impl super::VbcCodegen {
                     }
                 }
                 while let Some((name, binding)) = bindings.next_if(|(_, b)| b.scope_level == level) {
-                    if !has_owners || preserved == Some(binding.reg) || binding.is_cell
+                    if binding.kind == super::RegisterKind::Parameter
+                        || !has_owners || preserved == Some(binding.reg) || binding.is_cell
                         || binding.is_pattern_alias || self.ctx.is_raw_pointer(binding.reg)
                         || self.ctx.current_fn_escaping_vars.contains(name.as_str())
                     {
@@ -472,6 +613,7 @@ impl super::VbcCodegen {
                 }
             }
         }
+        self.emit_parameter_cleanup(returned);
         self.ctx.emit(match value {
             Some(value) => Instruction::Ret { value },
             None => Instruction::RetV,
@@ -545,7 +687,7 @@ impl super::VbcCodegen {
         for (_, binding) in bindings {
             // Reuse the existing lexical cleanup policy, keyed by the actual
             // declaration register even when an inner declaration shadows it.
-            // Parameters never enter this inventory and acquire no obligation.
+            // Declared parameter owners share this exit inventory with locals.
             if self.ctx.is_raw_pointer(binding.reg) {
                 continue;
             }

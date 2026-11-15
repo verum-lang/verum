@@ -1268,6 +1268,25 @@ pub fn dispatch_loop_table_with_entry_depth(
                 limit: state.config.max_instructions,
             });
         }
+        // Every selected frame, including dynamic methods and synchronous
+        // runtime callbacks, is checked before its first instruction executes.
+        // Checking the actual frame avoids guessing an owner from a call name.
+        if state.call_stack.current().is_some_and(|frame| !frame.parameter_convention_checked) {
+            if let Some(frame) = state.call_stack.current() {
+                let callee = state.module.get_function(frame.function)
+                    .ok_or(InterpreterError::FunctionNotFound(frame.function))?;
+                let validity = if let Some(parent) = state.call_stack.parent() {
+                    let caller = state.module.get_function(parent.function)
+                        .ok_or(InterpreterError::FunctionNotFound(parent.function))?;
+                    crate::parameter_convention::validate_call(caller, callee)
+                } else { crate::parameter_convention::validate_body(callee) };
+                validity.map_err(|message| InterpreterError::InvalidBytecode {
+                    pc: 0, message: message.into_string(),
+                })?;
+                state.call_stack.current_mut().expect("validated current frame")
+                    .parameter_convention_checked = true;
+            }
+        }
         // Check if we have bytecode
         let bytecode = match state.current_bytecode() {
             Some(bc) => bc,

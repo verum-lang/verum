@@ -3687,6 +3687,7 @@ fn lower_instruction_impl<'ctx>(
         }
 
         Instruction::CallClosure { dst, closure, args } => {
+            ctx.require_indirect_parameter_convention()?;
             let closure_val = ctx.get_register(closure.0)?;
             let closure_ptr = match closure_val {
                 BasicValueEnum::PointerValue(p) => p,
@@ -6882,6 +6883,7 @@ fn lower_instruction_impl<'ctx>(
         // Call Variants: CallR, CallG, CallV
         // ====================================================================
         Instruction::CallR { dst, func, argc } => {
+            ctx.require_indirect_parameter_convention()?;
             // #24 CALLM-WITNESS-CONSUME-1 invariant: a pending call
             // witness never survives past ANY call-family instruction —
             // it belongs to the call it precedes.  CallR is dynamic
@@ -7032,6 +7034,7 @@ fn lower_instruction_impl<'ctx>(
             vtable_slot,
             args,
         } => {
+            ctx.require_indirect_parameter_convention()?;
             // Virtual dispatch via vtable
             // #24 witness invariant: clear-only (dynamic dispatch, no
             // static generic-arg application point).

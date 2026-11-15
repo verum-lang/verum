@@ -83,6 +83,7 @@ mod dynamic_protocol;
 mod resource_discipline;
 pub mod value;
 pub mod value_use;
+pub mod parameter_convention;
 
 pub mod bytecode;
 pub mod compression;

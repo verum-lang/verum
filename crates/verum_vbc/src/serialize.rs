@@ -745,6 +745,8 @@ impl Serializer {
 
     /// Serializes a function descriptor.
     fn serialize_function_descriptor(&mut self, desc: &FunctionDescriptor) -> VbcResult<()> {
+        crate::parameter_convention::validate_body(desc)
+            .map_err(|message| VbcError::Serialization(message.into_string()))?;
         encode_u32(desc.id.0, &mut self.output);
         encode_u32(desc.name.0, &mut self.output);
         self.serialize_optional_u32(desc.parent_type.map(|t| t.0));
@@ -754,7 +756,8 @@ impl Serializer {
         let flags = (desc.is_inline_candidate as u8)
             | ((desc.is_generic as u8) << 1)
             | ((desc.is_generator as u8) << 2)
-            | ((desc.has_source_body as u8) << 3);
+            | ((desc.has_source_body as u8) << 3)
+            | ((desc.owned_value_parameters as u8) << 4);
         self.output.push(flags);
 
         // Properties

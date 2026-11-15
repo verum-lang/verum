@@ -50,7 +50,12 @@ pub struct RegisterAllocator {
     /// `variables`, so nested-function compilation doesn't leak hints.
     type_hints: Vec<(u16, String)>,
     pub(super) value_uses: super::value_uses::ValueUseRecorder,
-    pub(super) callable_bound_results: HashMap<crate::types::TypeParamId, crate::types::TypeRef>,
+    /// Parameters whose declared by-value call boundary established an owner.
+    pub(super) parameter_owners: verum_common::Map<Reg, (verum_common::value_use::BindingId, crate::types::TypeRef)>,
+    pub(super) callable_bound_signatures: HashMap<crate::types::TypeParamId, crate::types::TypeRef>,
+    /// Outgoing handoffs match this body's completed parameter inventory.
+    /// This private emission state is not an executable descriptor certificate.
+    pub(super) emits_owned_parameter_calls: bool,
 }
 
 /// Information about a register binding.
@@ -154,7 +159,9 @@ impl RegisterAllocator {
             recycle_temps: true,
             type_hints: Vec::new(),
             value_uses: Default::default(),
-            callable_bound_results: HashMap::new(),
+            parameter_owners: Default::default(),
+            callable_bound_signatures: HashMap::new(),
+            emits_owned_parameter_calls: false,
         }
     }
 
@@ -390,7 +397,9 @@ impl RegisterAllocator {
             .chain(self.scope_stack.iter().flat_map(|scope| {
                 scope.shadowed_vars.iter().map(|(name, info, _)| (name, info))
             }))
-            .filter(|(_, info)| info.kind == RegisterKind::Local && seen.insert(info.binding_id))
+            .filter(|(_, info)| (info.kind == RegisterKind::Local
+                || (info.kind == RegisterKind::Parameter && self.parameter_owners.contains_key(&info.reg)))
+                && seen.insert(info.binding_id))
             .map(|(name, info)| (verum_common::Text::from(name.as_str()), info.clone()))
             .collect();
         bindings.sort_by_key(|(_, info)| {
@@ -516,7 +525,9 @@ impl RegisterAllocator {
             free_list: self.free_list.clone(),
             type_hints: self.type_hints.clone(),
             value_uses: self.value_uses.clone(),
-            callable_bound_results: self.callable_bound_results.clone(),
+            parameter_owners: self.parameter_owners.clone(),
+            callable_bound_signatures: self.callable_bound_signatures.clone(),
+            emits_owned_parameter_calls: self.emits_owned_parameter_calls,
         }
     }
 
@@ -533,7 +544,9 @@ impl RegisterAllocator {
         self.free_list = snapshot.free_list.clone();
         self.type_hints = snapshot.type_hints.clone();
         self.value_uses = snapshot.value_uses.clone();
-        self.callable_bound_results.clone_from(&snapshot.callable_bound_results);
+        self.parameter_owners.clone_from(&snapshot.parameter_owners);
+        self.callable_bound_signatures.clone_from(&snapshot.callable_bound_signatures);
+        self.emits_owned_parameter_calls = snapshot.emits_owned_parameter_calls;
     }
 
     /// Resets the allocator for a new function.
@@ -550,7 +563,9 @@ impl RegisterAllocator {
         self.free_list.clear();
         self.type_hints.clear();
         self.value_uses = Default::default();
-        self.callable_bound_results.clear();
+        self.parameter_owners.clear();
+        self.callable_bound_signatures.clear();
+        self.emits_owned_parameter_calls = false;
     }
 
     /// Records a register→owner-type hint for the current function
@@ -587,7 +602,12 @@ pub struct RegisterSnapshot {
     /// per-function-scoped across nested-function compilation.
     type_hints: Vec<(u16, String)>,
     pub(super) value_uses: super::value_uses::ValueUseRecorder,
-    pub(super) callable_bound_results: HashMap<crate::types::TypeParamId, crate::types::TypeRef>,
+    /// Parameters whose declared by-value call boundary established an owner.
+    pub(super) parameter_owners: verum_common::Map<Reg, (verum_common::value_use::BindingId, crate::types::TypeRef)>,
+    pub(super) callable_bound_signatures: HashMap<crate::types::TypeParamId, crate::types::TypeRef>,
+    /// Outgoing handoffs match this body's completed parameter inventory.
+    /// This private emission state is not an executable descriptor certificate.
+    pub(super) emits_owned_parameter_calls: bool,
 }
 
 #[cfg(test)]

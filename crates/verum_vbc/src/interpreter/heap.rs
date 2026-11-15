@@ -50,6 +50,7 @@ use crate::types::TypeId;
 use crate::value::Value;
 
 mod projections;
+mod callables;
 pub(crate) use projections::ProjectionEncoding;
 
 /// Size of object header in bytes.
@@ -1083,6 +1084,8 @@ pub struct Heap {
 
     /// Exact live allocation bases for constant-time provenance checks.
     object_addresses: Set<usize>,
+    /// Issued by the closure producer only; object tags cannot create evidence.
+    callables: verum_common::Map<usize, callables::CallableReceipt>,
     /// Active projection tickets. Their global uniqueness excludes address
     /// reuse across owner removal, rehash and interpreter replacement.
     projections: projections::ProjectionTable,
@@ -1146,6 +1149,7 @@ impl Heap {
             generation: 1,
             objects: Vec::with_capacity(1024),
             object_addresses: Set::with_capacity(1024),
+            callables: Default::default(),
             projections: Default::default(),
             allocated: 0,
             threshold,
@@ -1434,6 +1438,7 @@ impl Heap {
         // Remove from tracking (expensive, but correct)
         self.objects.retain(|p| *p != obj.ptr);
         self.object_addresses.remove(&(obj.ptr.as_ptr() as usize));
+        self.callables.remove(&(obj.ptr.as_ptr() as usize));
         self.revoke_projections(obj.as_ptr() as usize);
     }
 
@@ -1562,6 +1567,7 @@ impl Heap {
             }
         }
         self.object_addresses.clear();
+        self.callables.clear();
         self.projections = Default::default();
         self.allocated = 0;
         self.generation = 1;

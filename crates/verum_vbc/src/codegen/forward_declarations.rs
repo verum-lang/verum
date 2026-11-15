@@ -109,6 +109,7 @@ impl VbcCodegen {
         descriptor.bytecode_length = 0;
         descriptor.instructions = None;
         descriptor.value_uses = None;
+        descriptor.owned_value_parameters = false;
         Ok(descriptor)
     }
 
@@ -179,6 +180,7 @@ impl VbcCodegen {
         descriptor.bytecode_length = 0;
         descriptor.instructions = None;
         descriptor.value_uses = None;
+        descriptor.owned_value_parameters = false;
         descriptor.debug_variables.clear();
         descriptor.register_type_hints.clear();
         descriptor.func_id_base = 0;
@@ -263,7 +265,7 @@ impl<'a> From<&'a FunctionDescriptor> for CallableContract<'a> {
             // These identities and semantic values have their own comparison.
             id: _, name: _, origin_module: _, params: _, source_signature: _,
             // Body layout, diagnostics and optimization receipts are not declarations.
-            value_uses: _, bytecode_offset: _, bytecode_length: _, locals_count: _,
+            owned_value_parameters: _, value_uses: _, bytecode_offset: _, bytecode_length: _, locals_count: _,
             register_count: _, max_stack: _, is_inline_candidate: _, suspend_point_count: _,
             instructions: _, func_id_base: _, debug_variables: _, register_type_hints: _,
             parent_type, type_params, return_type, contexts, properties, is_generic,

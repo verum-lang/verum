@@ -33,6 +33,9 @@ pub struct CallFrame {
     /// Program counter (byte offset into bytecode).
     pub pc: u32,
 
+    /// The actual caller/callee ABI was checked before this frame executed.
+    pub(crate) parameter_convention_checked: bool,
+
     /// Exclusive operand limit while executing a length-prefixed instruction.
     pub(crate) operand_end: u32,
 
@@ -65,6 +68,7 @@ impl CallFrame {
         Self {
             function,
             pc: 0,
+            parameter_convention_checked: false,
             operand_end: u32::MAX,
             reg_base,
             reg_count,

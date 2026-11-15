@@ -13,6 +13,12 @@ use verum_common::{List, Text};
 pub enum DropPlan {
     /// Scalars and borrowed/raw carriers have no owned destructor.
     Ignore,
+    /// A callable handle whose actual producer and empty environment must be
+    /// proved before the binding can be retired. This is never a blanket no-op.
+    Callable {
+        /// Exact semantic signature of the received callable.
+        signature: TypeRef,
+    },
     /// A declared Drop method and its exact generic arguments.
     Glue {
         /// Exact nominal receiver.
@@ -125,6 +131,7 @@ fn build_inner(
     *budget -= 1;
     let (owner, args) = match ty {
         TypeRef::Reference { .. } => return Ok(DropPlan::Ignore),
+        TypeRef::Function { .. } => return Ok(DropPlan::Callable { signature: ty.clone() }),
         TypeRef::Concrete(id)
             if id.is_builtin() && *id != TypeId::RESERVED && id.well_known_name().is_some() =>
         {

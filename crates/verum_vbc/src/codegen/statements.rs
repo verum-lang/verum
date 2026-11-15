@@ -384,7 +384,8 @@ impl VbcCodegen {
                 };
                 Ok(self.copies_from_named_place(ident.name.as_str(), reg))
             }
-            ExprKind::Unary { op: UnOp::Deref, .. } => {
+            ExprKind::Field { .. } | ExprKind::Index { .. }
+                | ExprKind::Unary { op: UnOp::Deref, .. } => {
                 let Some(ty) = ty else { return Ok(false); };
                 if matches!(ty, crate::types::TypeRef::Reference { .. }) { return Ok(false); }
                 if self.ctx.is_raw_pointer(reg) { return Ok(false); }

@@ -265,6 +265,7 @@ fn test_roundtrip_function_descriptor() {
 
     let desc = FunctionDescriptor {
             has_source_body: false,
+            owned_value_parameters: false,
             explicit_type_param_ids: Vec::new(),
         id: FunctionId(0),
         name,
@@ -351,6 +352,7 @@ fn intrinsic_name_marker_survives_round_trip() {
     let iname = module.intern_string("__const_val_256");
     module.functions.push(FunctionDescriptor {
             has_source_body: false,
+            owned_value_parameters: false,
             explicit_type_param_ids: Vec::new(),
         id: FunctionId(0),
         name,

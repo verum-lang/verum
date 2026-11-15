@@ -212,6 +212,8 @@ pub struct FunctionContext<'a, 'ctx> {
     /// VBC module for FFI symbol table and metadata access.
     /// Required for zero-cost FFI lowering.
     vbc_module: Option<&'a VbcModule>,
+    /// Exact descriptor of this emitted body, independent of native symbol names.
+    vbc_function_id: Option<verum_vbc::module::FunctionId>,
 
     /// Pre-built function name index for O(1) lookups (shared across all functions).
     func_name_index: Option<Arc<FuncNameIndex>>,
@@ -882,6 +884,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             function,
             module,
             vbc_module: None,
+            vbc_function_id: None,
             func_name_index: None,
             type_name_index: None,
             func_id_map: None,
@@ -1006,6 +1009,7 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             function,
             module,
             vbc_module: Some(vbc_module),
+            vbc_function_id: None,
             func_name_index: None,
             type_name_index: None,
             func_id_map: None,
@@ -1225,6 +1229,22 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
             .and_then(|m| m.get(&func_id).copied())
     }
 
+    /// Bind the actual body identity before lowering any of its calls.
+    pub fn set_vbc_function_id(&mut self, id: verum_vbc::module::FunctionId) {
+        self.vbc_function_id = Some(id);
+    }
+
+    /// An erased native function pointer carries no parameter convention.
+    /// Refuse it when an owned-body target can occur in this module.
+    pub fn require_indirect_parameter_convention(&self) -> Result<()> {
+        if self.vbc_module.is_some_and(|module|
+            module.functions.iter().any(|function| function.owned_value_parameters)) {
+            return Err(LlvmLoweringError::unsupported(
+                "native indirect call requires a producer-issued parameter convention"));
+        }
+        Ok(())
+    }
+
     /// Resolve the declaration already selected by VBC identity.
     /// Physical symbols can differ from source names (entries, overloads and
     /// intrinsic wrappers); another same-named function is not a substitute.
@@ -1232,6 +1252,15 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
         &self,
         declaration: &FunctionDescriptor,
     ) -> Result<FunctionValue<'ctx>> {
+        if let Some(module) = self.vbc_module {
+            if let Some(caller) = self.vbc_function_id.and_then(|id| module.get_function(id)) {
+                verum_vbc::parameter_convention::validate_call(caller, declaration)
+                    .map_err(LlvmLoweringError::unsupported)?;
+            } else if declaration.owned_value_parameters {
+                return Err(LlvmLoweringError::unsupported(
+                    "native owned parameter call requires its caller body identity"));
+            }
+        }
         self.resolve_func_id(declaration.id.0).ok_or_else(|| {
             let name = self.vbc_module
                 .and_then(|module| module.get_string(declaration.name))

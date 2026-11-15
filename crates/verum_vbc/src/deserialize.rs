@@ -1622,6 +1622,13 @@ impl<'a> Deserializer<'a> {
  })?;
 
  let flags = decode_u8(self.data, &mut self.offset)?;
+ if flags & !0x1f != 0 {
+     return Err(VbcError::Deserialization("unknown function descriptor flags".into()));
+ }
+ let owned_value_parameters = flags & 0x10 != 0;
+ if owned_value_parameters && !self.header.as_ref().is_some_and(|h| h.version_minor >= 60) {
+     return Err(VbcError::Deserialization("owned parameter convention requires VBC minor 60".into()));
+ }
  let is_inline_candidate = flags & 0x01 != 0;
  let is_generic = flags & 0x02 != 0;
  let is_generator = flags & 0x04 != 0;
@@ -2022,11 +2029,12 @@ impl<'a> Deserializer<'a> {
          _ => return Err(VbcError::Deserialization("invalid source definition identity presence".into())),
      }
  } else { None };
- Ok(FunctionDescriptor {
+ let descriptor = FunctionDescriptor {
  source_receiver,
  source_definition,
  declaration_identity,
  has_source_body,
+ owned_value_parameters,
  semantic_params,
  semantic_return,
  source_signature,
@@ -2068,7 +2076,10 @@ impl<'a> Deserializer<'a> {
  register_type_hints,
  return_type_name,
  origin_module,
- })
+ };
+ crate::parameter_convention::validate_body(&descriptor)
+     .map_err(|message| VbcError::Deserialization(message.into_string()))?;
+ Ok(descriptor)
  }
 
  /// Parses a constant.

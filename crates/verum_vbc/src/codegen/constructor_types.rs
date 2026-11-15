@@ -260,6 +260,28 @@ impl VbcCodegen {
         let owner = self
             .semantic_type_in_current_scope(&owner_name)?
             .base_type_id()?;
+        self.instantiate_constructor_fields(owner, arguments.into(), expected, output, depth)
+    }
+
+    /// A selected constructor supplies its exact nominal owner and payload
+    /// declaration; its generic witnesses come from those declared fields.
+    pub(super) fn selected_variant_declaration(
+        &self, owner: TypeId, tag: u32, operands: &[Expr], expected: Option<&TypeRef>,
+    ) -> Option<TypeRef> {
+        let declaration = self.type_by_id(owner)?;
+        if declaration.kind != TypeKind::Sum { return None; }
+        let variant = declaration.variants.iter().find(|variant| variant.tag == tag)?;
+        if variant.fields.len() != operands.len() { return None; }
+        let arguments = variant.fields.iter().zip(operands)
+            .map(|(field, operand)| Some((field.declaration_type.as_ref()?, Cow::Borrowed(operand))))
+            .collect::<Option<verum_common::List<_>>>()?;
+        self.instantiate_constructor_fields(owner, arguments, expected, None, 0)
+    }
+
+    fn instantiate_constructor_fields(
+        &self, owner: TypeId, arguments: verum_common::List<(&TypeRef, Cow<'_, Expr>)>,
+        expected: Option<&TypeRef>, output: Option<&TypeRef>, depth: usize,
+    ) -> Option<TypeRef> {
         let declaration = self.type_by_id(owner)?;
         let template = if declaration.type_params.is_empty() {
             TypeRef::Concrete(owner)
@@ -622,7 +644,10 @@ impl VbcCodegen {
         self.ctx.lookup_var(name.as_str())?;
         let result = self.declared_expression_result(func, None, 0, 0).and_then(|ty| match ty {
             TypeRef::Function { return_type, .. } => Some(*return_type),
-            TypeRef::Generic(id) => self.ctx.registers.callable_bound_results.get(&id).cloned(),
+            TypeRef::Generic(id) => self.ctx.registers.callable_bound_signatures.get(&id).and_then(|signature| {
+                let TypeRef::Function { return_type, .. } = signature else { return None };
+                Some((**return_type).clone())
+            }),
             _ => None,
         });
         Some(result)

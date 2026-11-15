@@ -26,7 +26,7 @@ enum Receiver<'a> {
 pub(super) struct ProtocolMethod {
     pub owner: crate::types::TypeId,
     pub output: TypeRef,
-    inputs: Vec<TypeRef>,
+    pub inputs: Vec<TypeRef>,
     pub is_async: bool,
 }
 
