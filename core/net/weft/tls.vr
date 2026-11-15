@@ -104,14 +104,14 @@ implement WeftTransport for TlsTransport {
         // byte-typed TlsStream API with no marshalling.
         match self.inner.write(buf).await {
             Result.Ok(n)  => Result.Ok(n),
-            Result.Err(e) => Result.Err(IoError.Other { reason: f"tls write: {e}" }),
+            Result.Err(e) => Result.Err(IoError.Other(f"tls write: {e}")),
         }
     }
 
     async fn shutdown_write(&mut self) -> Result<(), IoError> {
         match self.inner.shutdown().await {
             Result.Ok(())  => Result.Ok(()),
-            Result.Err(e)  => Result.Err(IoError.Other { reason: f"tls shutdown: {e}" }),
+            Result.Err(e)  => Result.Err(IoError.Other(f"tls shutdown: {e}")),
         }
     }
 }
