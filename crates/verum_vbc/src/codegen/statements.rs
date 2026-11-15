@@ -378,12 +378,8 @@ impl VbcCodegen {
     ) -> CodegenResult<bool> {
         use verum_ast::{ExprKind, UnOp};
         match &Self::normalized_place(init).kind {
-            ExprKind::Path(path) => {
-                let [verum_ast::ty::PathSegment::Name(ident)] = path.segments.as_slice() else {
-                    return Ok(false);
-                };
-                Ok(self.copies_from_named_place(ident.name.as_str(), reg))
-            }
+            ExprKind::Path(_) => Ok(Self::named_place_binding(init)
+                .is_some_and(|name| self.copies_from_named_place(name, reg))),
             ExprKind::Field { .. } | ExprKind::Index { .. }
                 | ExprKind::Unary { op: UnOp::Deref, .. } => {
                 let Some(ty) = ty else { return Ok(false); };

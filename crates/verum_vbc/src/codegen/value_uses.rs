@@ -301,21 +301,13 @@ impl super::VbcCodegen {
     /// change program semantics. Captured cells and unknown/generic carriers
     /// need their own producer contract and are deliberately excluded.
     pub(super) fn consumes_named_place(&self, expr: &verum_ast::Expr, reg: Reg) -> bool {
-        let verum_ast::ExprKind::Path(path) = &Self::normalized_place(expr).kind else {
-            return false;
-        };
-        let [verum_ast::ty::PathSegment::Name(name)] = path.segments.as_slice() else {
-            return false;
-        };
-        self.consumes_named_binding(name.as_str(), reg)
+        Self::named_place_binding(expr).is_some_and(|name| self.consumes_named_binding(name, reg))
     }
 
     /// A generic source retains its exact declared parameter identity.
     /// The frame witness selects copy or transfer; missing witnesses grant neither.
     pub(super) fn generic_named_place(&self, expr: &verum_ast::Expr, reg: Reg) -> Maybe<TypeRef> {
-        let verum_ast::ExprKind::Path(path) = &Self::normalized_place(expr).kind else { return None; };
-        let [verum_ast::ty::PathSegment::Name(name)] = path.segments.as_slice() else { return None; };
-        self.generic_named_binding(name.as_str(), reg)
+        self.generic_named_binding(Self::named_place_binding(expr)?, reg)
     }
     pub(super) fn generic_named_binding(&self, name: &str, reg: Reg) -> Maybe<TypeRef> {
         let ty = self.named_binding_fact(name, reg)?.declaration_type.as_ref()?;
@@ -541,12 +533,15 @@ impl super::VbcCodegen {
     /// An erased heap header only identifies the declaration.
     pub(super) fn emit_local_drop(&mut self, src: Reg, declared: Option<&TypeRef>) {
         if let Some(ty) = declared
-            && (matches!(ty, TypeRef::Reference { .. })
+            && (matches!(ty, TypeRef::Reference { .. } | TypeRef::Tuple(_) | TypeRef::Generic(_))
                 || matches!(ty, TypeRef::Concrete(base) | TypeRef::Instantiated { base, .. }
-                    if !base.is_semantic_type()
-                    && self.type_by_id(*base).is_some_and(|descriptor| descriptor.drop_fn.is_some())))
+                    if !base.is_builtin() && !base.is_semantic_type()
+                    && self.type_by_id(*base).is_some()))
         {
-            // The typed reference plan retires the binding slot and leaves its referent live.
+            // Structural owners need their declaration even without explicit
+            // Drop glue: a sum's active payload and generic owned fields cannot
+            // be recovered from the erased record layout. References retire
+            // only their binding slot and leave the referent live.
             self.ctx.emit(Instruction::DropTyped { src, type_ref: ty.clone() });
         } else {
             self.ctx.emit(Instruction::DropRef { src });

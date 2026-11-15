@@ -9,7 +9,7 @@ boundary.
 
 1. **Owned components copy according to their declared types.** Records,
    variants, tuples and supported collections preserve nested ownership.
-2. **Places copy, temporaries transfer.** A named value or an explicit
+2. **Places copy, temporaries transfer.** A named value (including `self`) or an explicit
    dereference remains available after a supported copy. A fresh temporary
    needs no additional copy.
 3. **Shared ownership stays shared.** Copying a `Shared<T>` handle retains the
@@ -89,6 +89,12 @@ before its enclosing parameter is cleaned. Generic handoffs and cleanup use
 the selected declaration's concrete witnesses.
 Raw pointer aliases still require a complete source refinement target; the
 calling-convention marker cannot manufacture that missing admission witness.
+
+An owned receiver follows the same binding rules in local initializers, calls
+and aggregate fields. Borrowed receivers retain their reference declaration.
+Local nominal owners carry that declaration into `DropTyped` even without an
+explicit destructor, so structural cleanup visits the active sum payload and
+instantiated owned fields instead of relying on erased record fields.
 
 VBC minor 60 carries this calling convention in function flag bit 4. Only a
 completed body whose parameter inventory and cleanup were emitted receives the

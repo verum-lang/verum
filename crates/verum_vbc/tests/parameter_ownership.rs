@@ -148,6 +148,47 @@ fn consuming_method_receivers_are_cleaned_at_return() {
 }
 
 #[test]
+fn receiver_handoffs_preserve_the_exact_owner_until_the_destination_drops() {
+    for (declarations, projection) in [
+        ("type Envelope is { ticket: Ticket }; implement Ticket { fn forward(self) -> Envelope { Envelope { ticket: (self) } } }", "result.ticket.counter.value"),
+        ("type Envelope is Present { ticket: Ticket }; implement Ticket { fn forward(self) -> Envelope { Envelope.Present { ticket: self } } }", "match result { Envelope.Present { ticket } => ticket.counter.value }"),
+        ("type Envelope<T> is Present(T); implement Ticket { fn forward(self) -> Envelope<Ticket> { Envelope.Present(self) } }", "match result { Envelope.Present(ticket) => ticket.counter.value }"),
+        ("implement Ticket { fn forward(self) -> Ticket { let value = self; value } }", "result.counter.value"),
+        ("fn receive<T>(value: T) -> T { value } implement Ticket { fn forward(self) -> Ticket { receive(self) } }", "result.counter.value"),
+    ] {
+        run(&format!(r#"
+            {declarations}
+            fn probe() -> Int {{
+                let mut count = Count {{ value: 0 }};
+                {{
+                    let result = Ticket {{ counter: &mut count }}.forward();
+                    if count.value != 0 {{ return 11; }}
+                    if ({projection}) != 0 {{ return 12; }}
+                }}
+                if count.value == 1 {{ 73 }} else {{ 20 + count.value }}
+            }}
+        "#));
+    }
+}
+
+#[test]
+fn a_borrowed_receiver_stored_in_a_record_does_not_transfer_its_referent() {
+    run(r#"
+        type Borrowed is { ticket: &Ticket };
+        implement Ticket { fn borrow(&self) -> Borrowed { Borrowed { ticket: self } } }
+        fn probe() -> Int {
+            let mut count = Count { value: 0 };
+            {
+                let ticket = Ticket { counter: &mut count };
+                { let borrowed = ticket.borrow(); if borrowed.ticket.counter.value != 0 { return 11; } }
+                if count.value != 0 { return 12; }
+            }
+            if count.value == 1 { 73 } else { 20 + count.value }
+        }
+    "#);
+}
+
+#[test]
 fn dynamic_method_arguments_use_the_declared_parameter_contract() {
     run(r#"
         type Sink is protocol { fn accept(&self, value: Ticket); };

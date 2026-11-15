@@ -67,6 +67,17 @@ impl VbcCodegen {
         expr
     }
 
+    /// Receiver syntax names the same active binding as a regular local. Its
+    /// distinct AST segment must not turn an owned place into a temporary.
+    pub(super) fn named_place_binding(expr: &Expr) -> Maybe<&str> {
+        let ExprKind::Path(path) = &Self::normalized_place(expr).kind else { return None; };
+        match path.segments.as_slice() {
+            [verum_ast::PathSegment::Name(name)] => Some(name.name.as_str()),
+            [verum_ast::PathSegment::SelfValue] => Some("self"),
+            _ => None,
+        }
+    }
+
     /// `start..end` belongs to this expression evaluation, captured before any
     /// later operand or destination binding can replace its registers/names.
     pub(super) fn copy_source_type(
@@ -120,15 +131,11 @@ impl VbcCodegen {
                 else_branch.as_ref().map_or(Some(TypeRef::Concrete(crate::types::TypeId::UNIT)), |branch| nested(branch, None)),
             ),
             ExprKind::Closure { .. } => self.compiled_callable_signature(expr).cloned(),
-            ExprKind::Path(path) => {
+            ExprKind::Path(_) => {
                 if let Some(function) = self.selected_function_path(expr).ok()? {
                     return function.callable_signature.clone();
                 }
-                let name = match path.segments.as_slice() {
-                    [verum_ast::PathSegment::Name(name)] => name.name.as_str(),
-                    [verum_ast::PathSegment::SelfValue] => "self",
-                    _ => return None,
-                };
+                let name = Self::named_place_binding(expr)?;
                 let Some(binding) = self.ctx.lookup_var(name) else {
                     // Reading a const/meta parameter produces a value of its
                     // declared carrier. This also establishes index projections.

@@ -86,6 +86,24 @@ fn a_native_mutable_parameter_owns_its_nested_value() {
     "#);
 }
 
+#[test]
+fn a_generic_receiver_keeps_its_owned_value_inside_the_native_result() {
+    for implementation in [
+        "implement<T> Cell<T> { fn wrap(self) -> Envelope<Self> { Envelope { item: self } } }",
+        "type Base is protocol {}; type Wrap is protocol { fn wrap(self) -> Envelope<Self>; }; implement<T> Base for Cell<T> {} implement<T: Base> Wrap for T { fn wrap(self) -> Envelope<T> { Envelope { item: (self) } } }",
+    ] {
+        run_native(&format!(r#"
+            type Cell<T> is {{ value: T }};
+            type Envelope<T> is {{ item: T }};
+            {implementation}
+            fn main() -> Int {{
+                let result = Cell {{ value: 73 }}.wrap();
+                result.item.value
+            }}
+        "#));
+    }
+}
+
 fn run_native(source: &str) {
     run_native_module(module(source));
 }
