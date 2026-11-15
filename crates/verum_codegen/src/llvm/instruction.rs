@@ -23672,10 +23672,10 @@ fn lower_math_extended<'ctx>(
         MathSubOpcode::FmodF64 | MathSubOpcode::FmodF32 => {
             return lower_fmod_via_frem(ctx, operands);
         }
-        MathSubOpcode::IsNanF64 | MathSubOpcode::IsNanF32 => return lower_is_nan_f64(ctx, operands),
-        MathSubOpcode::IsInfF64 | MathSubOpcode::IsInfF32 => return lower_is_inf_f64(ctx, operands),
-        MathSubOpcode::IsFiniteF64 | MathSubOpcode::IsFiniteF32 => {
-            return lower_is_finite_f64(ctx, operands);
+        MathSubOpcode::IsNanF64 | MathSubOpcode::IsNanF32
+        | MathSubOpcode::IsInfF64 | MathSubOpcode::IsInfF32
+        | MathSubOpcode::IsFiniteF64 | MathSubOpcode::IsFiniteF32 => {
+            return lower_float_classification(ctx, op, operands);
         }
         MathSubOpcode::IsSubnormalF64 => return lower_is_subnormal_f64(ctx, operands),
         MathSubOpcode::IsSignNegativeF64 => {
@@ -24101,86 +24101,81 @@ fn lower_fdim_f64<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, operands: &[u8]) ->
     Ok(())
 }
 
-/// `is_nan(x)`: NaN ≠ NaN — emit an unordered-equal compare
-/// (`fcmp uno`) and z-extend the resulting i1 to i64.
-fn lower_is_nan_f64<'ctx>(
+/// Classify at the VBC operation's precision, not the register carrier's width.
+/// A Float32 can occupy an f64 value slot; conversion is an SSA temporary and
+/// never changes the source register. LLVM's classifier lowers directly to
+/// target instructions and covers NaNs, signed infinities and finite classes.
+fn lower_float_classification<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
+    op: MathSubOpcode,
     operands: &[u8],
 ) -> Result<()> {
-    if operands.len() < 2 {
-        return Ok(());
-    }
-    let dst = op_reg(operands, 0);
-    let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "isnan_src")?;
-    let is_nan = ctx
-        .builder()
-        .build_float_compare(FloatPredicate::UNO, a, a, "is_nan")
-        .or_llvm_err()?;
-    let result = ctx
-        .builder()
-        .build_int_z_extend(is_nan, ctx.types().i64_type(), "is_nan_i64")
-        .or_llvm_err()?;
-    ctx.set_register(dst, result.into());
-    Ok(())
-}
+    use verum_llvm::intrinsics::Intrinsic;
 
-/// `is_infinite(x)`: |x| == INF.  Uses `@llvm.fabs.f64` to take
-/// the magnitude, then ordered-equals against IEEE-754 +Inf.
-fn lower_is_inf_f64<'ctx>(
-    ctx: &mut FunctionContext<'_, 'ctx>,
-    operands: &[u8],
-) -> Result<()> {
-    if operands.len() < 2 {
-        return Ok(());
+    let mut cursor = 0;
+    let dst = read_reg_varlen(operands, &mut cursor)?;
+    let src = read_reg_varlen(operands, &mut cursor)?;
+    if cursor != operands.len() {
+        return Err(LlvmLoweringError::internal(
+            "float classification requires exactly two register operands",
+        ));
     }
-    let dst = op_reg(operands, 0);
-    let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "isinf_src")?;
-    let f64_ty = ctx.types().f64_type();
-    let abs_val = build_round_intrinsic(ctx, "llvm.fabs.f64", "fabs", a)?;
-    let inf = f64_ty.const_float(f64::INFINITY);
-    let is_inf = ctx
+    // LLVM FPClassTest: fcNan, fcInf and fcFinite respectively. These are
+    // intrinsic ABI masks, independent of host representation or target OS.
+    let (single_precision, mask) = match op {
+        MathSubOpcode::IsNanF32 => (true, 0x003),
+        MathSubOpcode::IsNanF64 => (false, 0x003),
+        MathSubOpcode::IsInfF32 => (true, 0x204),
+        MathSubOpcode::IsInfF64 => (false, 0x204),
+        MathSubOpcode::IsFiniteF32 => (true, 0x1f8),
+        MathSubOpcode::IsFiniteF64 => (false, 0x1f8),
+        _ => {
+            return Err(LlvmLoweringError::internal(
+                "not a float classification operation",
+            ));
+        }
+    };
+    let value =
+        match ctx.get_register(src)? {
+            BasicValueEnum::FloatValue(value) => value,
+            // Uniform register storage carries floating-point bits in i64 slots.
+            BasicValueEnum::IntValue(value) if value.get_type().get_bit_width() == 64 => ctx
+                .builder()
+                .build_bit_cast(value, ctx.types().f64_type(), "classify_bits")
+                .or_llvm_err()?
+                .into_float_value(),
+            _ => return Err(LlvmLoweringError::TypeLowering(
+                "float classification requires a floating-point value or its i64 register carrier"
+                    .into(),
+            )),
+        };
+    let operand_type = if single_precision {
+        ctx.types().f32_type()
+    } else {
+        ctx.types().f64_type()
+    };
+    let operand = ctx
         .builder()
-        .build_float_compare(FloatPredicate::OEQ, abs_val, inf, "is_inf")
+        .build_float_cast(value, operand_type, "classify_operand")
         .or_llvm_err()?;
+    let classifier = Intrinsic::find("llvm.is.fpclass")
+        .and_then(|intrinsic| intrinsic.get_declaration(ctx.get_module(), &[operand_type.into()]))
+        .ok_or_else(|| {
+            LlvmLoweringError::internal("LLVM float classification intrinsic unavailable")
+        })?;
+    let class_mask = ctx.types().i32_type().const_int(mask, false);
+    let predicate = ctx
+        .builder()
+        .build_call(classifier, &[operand.into(), class_mask.into()], "classify")
+        .or_llvm_err()?
+        .basic_value_or_else(|| "float classification must return a predicate".to_owned())?
+        .into_int_value();
     let result = ctx
         .builder()
-        .build_int_z_extend(is_inf, ctx.types().i64_type(), "is_inf_i64")
+        .build_int_z_extend(predicate, ctx.types().i64_type(), "classify_bool")
         .or_llvm_err()?;
     ctx.set_register(dst, result.into());
-    Ok(())
-}
-
-/// `is_finite(x)`: ¬NaN ∧ ¬Inf — combines an ordered self-compare
-/// (`fcmp ord`) with `|x| ≠ INF`.
-fn lower_is_finite_f64<'ctx>(
-    ctx: &mut FunctionContext<'_, 'ctx>,
-    operands: &[u8],
-) -> Result<()> {
-    if operands.len() < 2 {
-        return Ok(());
-    }
-    let dst = op_reg(operands, 0);
-    let a = as_f64(ctx, ctx.get_register(op_reg(operands, 1))?, "isfinite_src")?;
-    let f64_ty = ctx.types().f64_type();
-    let abs_val = build_round_intrinsic(ctx, "llvm.fabs.f64", "fabs_finite", a)?;
-    let inf = f64_ty.const_float(f64::INFINITY);
-    let is_not_inf = ctx
-        .builder()
-        .build_float_compare(FloatPredicate::ONE, abs_val, inf, "not_inf")
-        .or_llvm_err()?;
-    let is_ord = ctx
-        .builder()
-        .build_float_compare(FloatPredicate::ORD, a, a, "is_ord")
-        .or_llvm_err()?;
-    let is_finite = ctx
-        .builder()
-        .build_and(is_not_inf, is_ord, "is_finite")
-        .or_llvm_err()?;
-    let result = ctx
-        .builder()
-        .build_int_z_extend(is_finite, ctx.types().i64_type(), "is_finite_i64")
-        .or_llvm_err()?;
-    ctx.set_register(dst, result.into());
+    ctx.mark_bool_register(dst);
     Ok(())
 }
 
