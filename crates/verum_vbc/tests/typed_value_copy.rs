@@ -56,6 +56,22 @@ fn borrowed_fields_remain_references_to_the_original_scalar() {
 }
 
 #[test]
+fn immutable_text_survives_replacement_of_its_copied_sum_owner() {
+    assert_eq!(execute(r#"
+        type Choice is Empty | Full(Text);
+        fn main() -> Int {
+            let mut first = Choice.Full("retained");
+            let second = first;
+            first = Choice.Empty;
+            match second {
+                Full(text) => if text == "retained" {73} else {0},
+                Empty => 0,
+            }
+        }
+    "#), 73);
+}
+
+#[test]
 fn repeated_owned_children_are_copied_independently() {
     assert_eq!(execute(r#"
         type Leaf is { value: Int };

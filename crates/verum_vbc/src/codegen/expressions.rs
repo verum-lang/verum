@@ -12213,6 +12213,7 @@ impl VbcCodegen {
             None,
             context_type.as_deref(),
         );
+        self.retain_variant_result_declaration(result, args);
 
         // If there are arguments, set the variant data.
         //

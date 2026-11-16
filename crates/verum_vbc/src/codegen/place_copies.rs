@@ -97,6 +97,13 @@ impl VbcCodegen {
             && let Some(id) = crate::types::TypeId::from_well_known_scalar_name(&name) {
             return Some(TypeRef::Concrete(id.declared_scalar_identity(&name)));
         }
+        // Both call syntaxes retain the selected producer's declaration.
+        // A dotted sum constructor must not lose its owner merely because
+        // the parser represents it as a method call.
+        if matches!(expr.kind, ExprKind::Call { .. } | ExprKind::MethodCall { .. })
+            && let Some(result) = self.ctx.declared_result_types.get(&expr.span) {
+            return result.clone();
+        }
         let nested = |value, emitted| self.copy_source_type_inner(value, emitted, depth + 1);
         match &expr.kind {
             ExprKind::Literal(verum_ast::literal::Literal {
@@ -255,9 +262,6 @@ impl VbcCodegen {
                 self.declared_method_result_type(&owner, method.name.as_str(), type_args)
             }
             ExprKind::Call { type_args, args, .. } => {
-                if let Some(result) = self.ctx.declared_result_types.get(&expr.span) {
-                    return result.clone();
-                }
                 if let Some(result) = self.lexical_call_result(expr) {
                     return result;
                 }

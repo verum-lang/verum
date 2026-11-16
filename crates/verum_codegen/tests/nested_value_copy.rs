@@ -46,6 +46,22 @@ fn nested_value_copy_preserves_the_original_owned_branch_in_native_image() {
 }
 
 #[test]
+fn native_immutable_text_survives_replacement_of_its_copied_sum_owner() {
+    run_native(r#"
+        type Choice is Empty | Full(Text);
+        fn main() -> Int {
+            let mut first = Choice.Full("retained");
+            let second = first;
+            first = Choice.Empty;
+            match second {
+                Full(text) => if text == "retained" {73} else {0},
+                Empty => 0,
+            }
+        }
+    "#);
+}
+
+#[test]
 fn a_native_copy_through_a_borrow_owns_its_nested_child() {
     run_native(r#"
         type Leaf is { value: Int };
