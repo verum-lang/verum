@@ -316,6 +316,59 @@ fn immutable_text_cleanup_preserves_sibling_payloads() {
 }
 
 #[test]
+fn sum_reset_preserves_payloads_through_borrowed_receivers() {
+    for caller in [
+        "fn preserve(holder:&mut Holder) {holder.reset();let pointer=holder.cell.pointer;}",
+        "fn preserve<T>(holder:&mut Holder,value:T)->T {holder.reset();let pointer=holder.cell.pointer;value}",
+        "async fn preserve(holder:&mut Holder) {holder.reset();let pointer=holder.cell.pointer;}",
+    ] {
+        let found = errors(
+            "type Choice<T> is Empty | Full(T); type Holder is {public cell:Cell,public state:Choice<Text>}; implement Holder {fn reset(&mut self) {self.cell.value=0;self.state=Choice.Empty;}}",
+            caller,
+        );
+        assert!(found.is_empty(), "{caller}: {found:?}");
+    }
+}
+
+#[test]
+fn shared_method_reborrow_does_not_become_a_payload_write() {
+    let found = errors(
+        "implement Cell {fn inspect(&self)->Int {if self.value>0 {self.value} else {0}}}",
+        "fn preserve(cell:&mut Cell)->Int {let observed=cell.inspect();*cell.pointer+observed}",
+    );
+    assert!(found.is_empty(), "{found:?}");
+
+    for caller in [
+        "fn preserve(mut holder:Holder)->Holder {{let borrowed=&mut holder;borrowed.inspect();}holder}",
+        "fn preserve(holder:&mut Holder)->fn()->Int {holder.inspect();holder.action}",
+    ] {
+        let found = errors(
+            "type Holder is {public value:Int,public action:fn()->Int}; implement Holder {fn inspect(&self)->Bool {self.value>0}}",
+            caller,
+        );
+        assert!(found.is_empty(), "{caller}: {found:?}");
+    }
+}
+
+#[test]
+fn closed_write_can_read_through_a_shared_reborrow() {
+    let found = errors(
+        "fn update(destination:&mut Cell,source:&Cell) {destination.value=source.value;}",
+        "fn preserve(mut destination:Cell,source:&mut Cell)->Cell {update(&mut destination,source);destination}",
+    );
+    assert!(found.is_empty(), "{found:?}");
+}
+
+#[test]
+fn shared_reborrow_proof_cannot_grant_exclusive_permission() {
+    let found = errors(
+        "fn update(cell:&mut Cell) {cell.value=73;}",
+        "fn preserve(cell:&Cell) {update(cell);}",
+    );
+    assert!(!found.is_empty(), "shared input gained exclusive permission");
+}
+
+#[test]
 fn a_text_homonym_cannot_borrow_the_primitive_lifecycle() {
     // Bare `Text` is primitive grammar; qualify the user declaration to test
     // its actual nominal identity rather than the primitive spelling.

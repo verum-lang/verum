@@ -850,7 +850,12 @@ impl TypeChecker {
             let (mode, payload) = match &head {
                 Type::Reference { mutable, inner }
                 | Type::CheckedReference { mutable, inner }
-                | Type::UnsafeReference { mutable, inner } => (Some(*mutable), inner.as_ref()),
+                | Type::UnsafeReference { mutable, inner } => {
+                    // A selected &self method reborrows an exclusive receiver
+                    // as shared. The actual variable's stronger permission is
+                    // not permission exercised by this invocation.
+                    (receiver_mode.or(Some(*mutable)), inner.as_ref())
+                }
                 _ => (receiver_mode, &head),
             };
             if mode.is_none() && !self.carries_stored_loan(&head) { continue; }

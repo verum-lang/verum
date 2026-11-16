@@ -29,6 +29,21 @@ fn unparen(mut expression: &Expr) -> &Expr {
     expression
 }
 
+/// Weakening exclusivity preserves the referent, not the permission to write.
+/// Nominal identity and reference tier must remain exact; this is not a Deref
+/// conversion, a new borrow of the reference slot, or type unification.
+fn is_shared_reborrow(actual: &Type, selected: &Type) -> bool {
+    match (actual, selected) {
+        (Type::Reference { mutable: true, inner: actual },
+         Type::Reference { mutable: false, inner: selected })
+        | (Type::CheckedReference { mutable: true, inner: actual },
+           Type::CheckedReference { mutable: false, inner: selected })
+        | (Type::UnsafeReference { mutable: true, inner: actual },
+           Type::UnsafeReference { mutable: false, inner: selected }) => actual == selected,
+        _ => false,
+    }
+}
+
 /// A closed structural body: explicit values and direct field assignments.
 /// Branches, loops and selected calls need the same typed proof at their use;
 /// unknown control flow and hidden inputs keep the conservative caller rule.
@@ -626,11 +641,19 @@ impl TypeChecker {
             declared_receiver.as_ref(),
             Some(&return_type),
             span,
-        )?;
+        ).or_else(|| {
+            tracing::trace!(target: "verum_types::ownership", ?span,
+                receiver = ?declared_receiver, "selected body has no complete value derivation");
+            None
+        })?;
         // An assignment destroys the old value as well as constructing its
         // replacement. Nominal shape alone is not a lifecycle contract.
         for ty in &facts.writes {
-            if !self.write_value_has_structural_cleanup(ty, span) { return None; }
+            if !self.write_value_has_structural_cleanup(ty, span) {
+                tracing::trace!(target: "verum_types::ownership", ?span, ?ty,
+                    "replaced value has no proved structural cleanup");
+                return None;
+            }
         }
 
         // Only result dependencies carry origins out of this invocation.
@@ -1046,7 +1069,9 @@ impl TypeChecker {
                 | Type::UnsafeReference { inner, .. } => inner.as_ref() == &actual,
                 _ => false,
             };
-            if actual != declared && !autoref { return None; }
+            if actual != declared && !autoref && !is_shared_reborrow(&actual, &declared) {
+                return None;
+            }
         }
         Some(proof.result.clone())
     }
@@ -1119,7 +1144,9 @@ impl TypeChecker {
             | Type::UnsafeReference { inner, .. } => inner.as_ref() == &actual,
             _ => false,
         };
-        if actual != selected && !autoref {
+        if actual != selected && !autoref && !is_shared_reborrow(&actual, &selected) {
+            tracing::trace!(target: "verum_types::ownership", span = ?argument.span,
+                ?actual, ?selected, "call input has no declaration-preserving adaptation");
             return None;
         }
         let mut origins = List::new();
