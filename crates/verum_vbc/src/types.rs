@@ -367,6 +367,14 @@ impl TypeId {
         self.0 < Self::FIRST_USER
     }
 
+    /// Primitive carriers copy by identity and need no declared destructor.
+    /// This includes immutable text, but excludes opaque addresses, reserved
+    /// identities and source-declared containers. Explicit method calls still
+    /// follow their own selected implementation.
+    pub fn has_identity_value_lifecycle(self) -> bool {
+        self.is_builtin() && self.well_known_name().is_some()
+    }
+
     /// Checks if this is a primitive numeric type.
     /// 17 = I128, 18 = U128 (T0272).
     pub fn is_numeric(self) -> bool {

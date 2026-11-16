@@ -1051,7 +1051,7 @@ impl TypeChecker {
         Some(proof.result.clone())
     }
 
-    /// A scalar-only sum with no selected destructor has structural cleanup.
+    /// A sum of primitive carriers with no selected destructor has structural cleanup.
     /// This is deliberately narrower than "contains no loan": an owned record
     /// or an unknown lifecycle can run user code even when its result is Unit.
     fn write_value_has_structural_cleanup(&mut self, ty: &Type, span: verum_ast::Span) -> bool {
@@ -1062,9 +1062,16 @@ impl TypeChecker {
         while let Some(ty) = pending.pop() {
             let Some(next) = remaining.checked_sub(1) else { return false; };
             remaining = next;
-            if self.forwarding_scalar(&ty) { continue; }
+            let primitive = ty.primitive_name().or_else(|| {
+                if !self.has_registered_scalar_storage(&ty) { return None; }
+                match &ty {
+                    Type::Named { path, .. } => path.as_ident().map(|name| name.name.as_str()),
+                    Type::Generic { name, .. } => Some(name.as_str()),
+                    _ => None,
+                }
+            }).and_then(verum_vbc::TypeId::from_well_known_scalar_name);
+            if primitive.is_some_and(verum_vbc::TypeId::has_identity_value_lifecycle) { continue; }
             match ty {
-                Type::Unit | Type::Never | Type::Bool | Type::Int | Type::Float | Type::Char => (),
                 Type::Named { .. } | Type::Generic { .. } => {
                     let Some((name, _)) = self.conversion_nominal_head(&ty) else { return false; };
                     let is_sum = self.source_type_registration.completed_declaration(&name)

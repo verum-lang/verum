@@ -307,6 +307,26 @@ fn declared_sum_replacement_preserves_sibling_payloads() {
 }
 
 #[test]
+fn immutable_text_cleanup_preserves_sibling_payloads() {
+    let found = errors(
+        "type Choice<T> is Empty | Full(T); type Holder is {public cell:Cell, public state:Choice<Text>}; fn reset(holder:&mut Holder) {holder.state=Choice.Empty;}",
+        "fn preserve(mut holder:Holder)->Holder {reset(&mut holder);holder}",
+    );
+    assert!(found.is_empty(), "{found:?}");
+}
+
+#[test]
+fn a_text_homonym_cannot_borrow_the_primitive_lifecycle() {
+    // Bare `Text` is primitive grammar; qualify the user declaration to test
+    // its actual nominal identity rather than the primitive spelling.
+    let found = errors(
+        "type Text is {public action:fn()->Int}; type Choice<T> is Empty | Full(T); type Holder is {public cell:Cell,public state:Choice<write_probe.Text>}; fn reset(holder:&mut Holder) {holder.state=Choice.Empty;}",
+        "fn preserve(mut holder:Holder)->Holder {reset(&mut holder);holder}",
+    );
+    assert!(found.iter().any(|error| error.contains("cannot establish the lifetime")), "{found:?}");
+}
+
+#[test]
 fn declared_sum_payload_replacement_preserves_sibling_payloads() {
     let found = errors(
         "type Choice<T> is Empty | Full(T); type Holder is {public cell:Cell, public state:Choice<Int>}; fn update(holder:&mut Holder, value:Int) {holder.state=Choice.Full(value);}",

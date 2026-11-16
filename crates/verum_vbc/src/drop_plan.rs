@@ -132,8 +132,7 @@ fn build_inner(
     let (owner, args) = match ty {
         TypeRef::Reference { .. } => return Ok(DropPlan::Ignore),
         TypeRef::Function { .. } => return Ok(DropPlan::Callable { signature: ty.clone() }),
-        TypeRef::Concrete(id)
-            if id.is_builtin() && *id != TypeId::RESERVED && id.well_known_name().is_some() =>
+        TypeRef::Concrete(id) if id.has_identity_value_lifecycle() =>
         {
             return Ok(DropPlan::Ignore);
         }

@@ -155,11 +155,7 @@ impl Builder<'_> {
                 }
                 return Ok(CopyNode::Callable(ty.clone()));
             }
-            TypeRef::Concrete(id)
-                if id.is_builtin()
-                    && *id != TypeId::PTR
-                    && *id != TypeId::RESERVED
-                    && id.well_known_name().is_some() =>
+            TypeRef::Concrete(id) if id.has_identity_value_lifecycle() =>
             {
                 return Ok(CopyNode::Identity);
             }
