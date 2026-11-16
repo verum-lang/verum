@@ -34,7 +34,7 @@ pub fn query(path: &std::path::Path, json: bool) -> Result<()> {
     }
     match &report.pinned {
         Some(p) => {
-            println!("\npinned by @arch_module ({}):", p.len());
+            println!("\nrequires pinned by @arch_module ({}):", p.len());
             for a in p {
                 println!("  {a}");
             }
@@ -59,7 +59,13 @@ pub fn query(path: &std::path::Path, json: bool) -> Result<()> {
                 }
             }
         }
-        None => println!("\npinned: (no @arch_module — surface is derived only)"),
+        None => println!("\nrequires: (not pinned — inferred usage has no declared constraint)"),
+    }
+    if let Some(exposes) = &report.pinned_exposes {
+        println!("\nexposes declared by @arch_module ({}; export inference not available):", exposes.len());
+        for capability in exposes {
+            println!("  {capability}");
+        }
     }
     if !report.unresolved_calls.is_empty() {
         println!(

@@ -348,9 +348,11 @@ jobs:
 
       # T1774: this targeted kernel boundary is independent of the legacy
       # architectural-attestation tests excluded from the broad pure-tier job.
-      - name: Diagnostic evidence cannot authorize proofs
+      - name: Diagnostic evidence and authored architecture constraints
         timeout-minutes: 5
-        run: cargo test --locked -p verum_kernel --test diagnostic_proof_authority
+        run: |
+          cargo test --locked -p verum_kernel --test diagnostic_proof_authority --test arch_capability_constraints
+          cargo test --locked -p verum_kernel --test k_arch_v_alignment pin_shape_capability_field_presence
 
       - name: Incomplete verification cannot pass regression gates
         timeout-minutes: 5

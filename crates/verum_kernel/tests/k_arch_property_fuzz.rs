@@ -108,6 +108,7 @@ fn arb_shape() -> impl Strategy<Value = Shape> {
     )
         .prop_map(
             |(exposes, requires, at_tier, foundation, stratum, lifecycle, strict)| Shape {
+                capability_fields: CapabilityFieldPresence { requires: true, exposes: true },
                 exposes,
                 requires,
                 preserves: vec![],

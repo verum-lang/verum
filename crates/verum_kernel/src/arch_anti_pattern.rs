@@ -443,6 +443,9 @@ impl Severity {
 /// ATS-V-AP-001 — CapabilityEscalation.
 /// Cog uses a capability not declared in `requires`.
 ///
+/// An omitted `requires` is not an empty constraint. Other metadata and
+/// `exposes` neither create nor widen the author's requirement.
+///
 /// **Predicate**: `forall c ∈ used_capabilities. c ∈ requires`.
 /// (Used capabilities are inferred from the cog source by the
 /// ATS-V phase; this checker takes the inferred set as input.)
@@ -450,12 +453,13 @@ pub fn check_capability_escalation(
     shape: &Shape,
     inferred_used: &[Capability],
 ) -> Option<AntiPatternViolation> {
+    let constraint = shape.required_capability_constraint()?;
     // Performance: build a HashSet over shape.requires once (O(N)),
     // then test each inferred_used membership in O(1) hashed lookup.
     // Net: O(N + M) instead of the naive O(N * M) `.contains()` scan.
     // Capability derives Hash so HashSet works out of the box.
     use std::collections::HashSet;
-    let required: HashSet<&Capability> = shape.requires.iter().collect();
+    let required: HashSet<&Capability> = constraint.iter().collect();
     let undeclared: Vec<&Capability> = inferred_used
         .iter()
         .filter(|c| !required.contains(*c))
@@ -2645,6 +2649,7 @@ mod tests {
     #[test]
     fn capability_escalation_detects_undeclared() {
         let mut shape = Shape::default_for_unannotated();
+        shape.capability_fields.requires = true;
         shape.requires = vec![Capability::Read {
             resource: ResourceTag::Logger,
         }];
@@ -2665,6 +2670,7 @@ mod tests {
     #[test]
     fn capability_escalation_passes_when_all_declared() {
         let mut shape = Shape::default_for_unannotated();
+        shape.capability_fields.requires = true;
         shape.requires = vec![Capability::Read {
             resource: ResourceTag::Logger,
         }];
@@ -3562,6 +3568,7 @@ mod tests {
     fn check_all_routes_through_red_team_closures() {
         // Compose a Shape that triggers every red-team closure simultaneously.
         let shape = Shape {
+            capability_fields: CapabilityFieldPresence::default(),
             exposes: vec![Capability::Custom {
                 tag: "unregistered_cap".into(),
                 schema: CapabilitySchema {

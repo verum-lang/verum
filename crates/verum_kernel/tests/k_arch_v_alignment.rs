@@ -650,6 +650,16 @@ fn pin_shape_declarations_extension() {
 }
 
 #[test]
+fn pin_shape_capability_field_presence() {
+    let shape = Shape::default_for_unannotated();
+    assert_eq!(shape.capability_fields, CapabilityFieldPresence { requires: false, exposes: false });
+    let vr = read_vr("types.vr");
+    assert!(vr.contains("public type CapabilityFieldPresence is {\n    requires: Bool,\n    exposes: Bool,\n};"));
+    assert!(vr.contains("capability_fields: CapabilityFieldPresence,"));
+    assert!(vr.contains("capability_fields: CapabilityFieldPresence { requires: false, exposes: false }"));
+}
+
+#[test]
 fn pin_fixpoint_class_four_canonical() {
     use verum_kernel::arch::{
         EndomorphismClass, FixpointCategory, FixpointClass, FixpointTheorem,
@@ -2280,6 +2290,7 @@ fn pin_transitive_resolver_correctness() {
 
     let mut registry: BTreeMap<String, Shape> = BTreeMap::new();
     let theorem_shape = |composes_with: Vec<String>| Shape {
+        capability_fields: CapabilityFieldPresence::default(),
         exposes: vec![],
         requires: vec![],
         preserves: vec![],

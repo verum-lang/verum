@@ -1179,6 +1179,13 @@ public fn shape_declarations_empty() -> ShapeDeclarations {
 // ModuleShape — main carrier of @arch_module(...)
 // =============================================================================
 
+/// Authored presence of the capability fields. An omitted constraint differs
+/// from an explicitly empty list. Computing a list does not author a constraint.
+public type CapabilityFieldPresence is {
+    requires: Bool,
+    exposes: Bool,
+};
+
 /// Main carrier of `@arch_module(...)` — the typed architectural
 /// fingerprint of a cog.  The compiler builds a `ModuleShape` from each
 /// `@arch_module(...)` declaration; the ATS-V phase (Phase 6.5,
@@ -1209,6 +1216,8 @@ public fn shape_declarations_empty() -> ShapeDeclarations {
 public type ModuleShape is {
     exposes: List<Capability>,
     requires: List<Capability>,
+    /// Set from attribute field presence, not inferred from list contents.
+    capability_fields: CapabilityFieldPresence,
     preserves: List<BoundaryInvariant>,
     consumes: List<Text>,
     at_tier: Tier,
@@ -1511,6 +1520,7 @@ public fn shape_default_for_unannotated() -> ModuleShape {
     ModuleShape {
         exposes: [],
         requires: [],
+        capability_fields: CapabilityFieldPresence { requires: false, exposes: false },
         preserves: [],
         consumes: [],
         at_tier: Tier.MultiTier([Tier.Interp, Tier.Aot]),

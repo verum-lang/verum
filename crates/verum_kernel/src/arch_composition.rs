@@ -302,6 +302,8 @@ fn compose_shapes_unchecked(a: &Shape, b: &Shape) -> Shape {
     };
 
     Shape {
+        // Composition derives values; it does not author a new declaration.
+        capability_fields: CapabilityFieldPresence::default(),
         exposes,
         requires,
         preserves,

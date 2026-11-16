@@ -168,9 +168,11 @@ pub fn parse_arch_module(args: &[Expr]) -> Result<Shape, ArchParseError> {
         match name.as_str() {
             "exposes" => {
                 shape.exposes = parse_capability_list(value)?;
+                shape.capability_fields.exposes = true;
             }
             "requires" => {
                 shape.requires = parse_capability_list(value)?;
+                shape.capability_fields.requires = true;
             }
             "preserves" => {
                 shape.preserves = parse_invariant_list(value)?;

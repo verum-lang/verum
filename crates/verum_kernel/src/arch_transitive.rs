@@ -294,6 +294,7 @@ mod tests {
     fn shape_with(name_idx: u32, lifecycle: Lifecycle, foundation: Foundation, composes_with: Vec<String>) -> Shape {
         let _ = name_idx;
         Shape {
+            capability_fields: CapabilityFieldPresence::default(),
             exposes: vec![],
             requires: vec![],
             preserves: vec![],

@@ -62,6 +62,21 @@ The pin asks the question; the inference answers it; the judgment
 compares. (The house law: one carrier holds the QUESTION, not the
 answer.)
 
+Capability intent is **field-specific**. Omitted `requires` imposes no
+requirement constraint; explicit `requires: []` requires an empty usage
+surface. Omitted `exposes` and explicit `exposes: []` are likewise distinct.
+Foundation, stratum and lifecycle metadata do not establish either
+constraint. The parsed `Shape` retains each field's presence independently
+of its list value, including through serialization; a derived Shape does
+not acquire authored intent merely by computing a list.
+
+The current body-use inference is compared only against `requires`.
+An exposure declaration does not authorize usage or establish a verified
+export surface. `arch query` reports the requirement in `pinned` and the
+independent exposure declaration in `pinned_exposes`; `null` means omitted,
+`[]` means explicitly empty. Invalid declarations remain errors. A
+function's constraint is not promoted to a module-wide constraint.
+
 **The trust-boundary predicate is itself computed** — a pin is
 mandatory iff the module's surface crosses a TRUST-DOMAIN edge, or its
 inferred Shape carries any enforceable capability class. Three

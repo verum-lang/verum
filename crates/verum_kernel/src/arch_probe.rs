@@ -176,6 +176,7 @@ fn strict_shape() -> Shape {
 
 fn probe_capability_escalation() -> (Shape, DiagnosticContext) {
     let mut shape = Shape::default_for_unannotated();
+    shape.capability_fields.requires = true;
     shape.requires = vec![cap_read_logger()];
     let ctx = DiagnosticContext {
         // Writing to a resource the cog only declared a read for.

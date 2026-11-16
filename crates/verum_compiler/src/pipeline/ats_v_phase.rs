@@ -135,7 +135,8 @@ impl<'s> CompilationPipeline<'s> {
         // 2. Per-item @arch_module(...) — cog / module / function
         //    level annotations (per spec §17.4 the attribute can be
         //    attached to any module-shaped item).
-        for item in &module.items {
+        let file_header = module.file_header_index();
+        for (index, item) in module.items.iter().enumerate() {
             let item_name = item_display_name(item);
             // Outer item.attributes — checked first because they
             // generally carry the user-facing meta (e.g. @derive,
@@ -146,9 +147,18 @@ impl<'s> CompilationPipeline<'s> {
             // For items, foreign-foundation constructs and inferred
             // capabilities are scoped to the item's own body — the
             // module-wide aggregates apply only at the module level.
-            let item_foreign_constructs =
-                extract_foreign_foundation_constructs(&item.attributes);
-            let item_inferred_caps = infer_used_capabilities_in_item(item);
+            // A bodyless file header declares the enclosing module. Its
+            // annotation constrains that module's bodies, not an empty item.
+            let item_foreign_constructs = if Some(index) == file_header {
+                module_wide_foreign_constructs.clone()
+            } else {
+                extract_foreign_foundation_constructs(&item.attributes)
+            };
+            let item_inferred_caps = if Some(index) == file_header {
+                inferred_used_capabilities.clone()
+            } else {
+                infer_used_capabilities_in_item(item)
+            };
             if let Some(result) = self.run_arch_phase_for_attrs_registry_aware(
                 &item.attributes,
                 &item_name,
@@ -1299,16 +1309,15 @@ pub fn infer_summaries_for_query(module: &Module) -> ModuleSummaries {
     infer_module_summaries(module)
 }
 
-/// The module's PINNED capability row, when the module-level
-/// `@arch_module` declares one: `requires ∪ exposes`, provenance
-/// `Cited` (a pin is intent taken on the author's authority — the
-/// inference is what is `Computed`).
-pub fn pinned_capabilities_of_module(
+/// The module's authored Shape, preserving which capability fields were
+/// supplied. Parsing failures remain failures, not an absent declaration.
+/// Function annotations do not establish a constraint on the whole module.
+pub fn declared_arch_shape_of_module(
     module: &Module,
-) -> Option<verum_kernel::arch_rows::Row> {
+) -> Result<Maybe<verum_kernel::arch::Shape>, verum_kernel::arch_parse::ArchParseError> {
     let mut args: Option<&[verum_ast::expr::Expr]> = None;
     let attr_sources = std::iter::once(&module.attributes)
-        .chain(module.items.iter().map(|i| &i.attributes));
+        .chain(module.file_header_index().map(|index| &module.items[index].attributes));
     for attrs in attr_sources {
         for attr in attrs.iter() {
             if attr.name.as_str() == "arch_module" {
@@ -1322,16 +1331,5 @@ pub fn pinned_capabilities_of_module(
             break;
         }
     }
-    let shape = verum_kernel::arch_parse::parse_arch_module(args?).ok()?;
-    let row = verum_kernel::arch_rows::Row::cited(
-        shape
-            .requires
-            .iter()
-            .chain(shape.exposes.iter())
-            .cloned(),
-        "@arch_module pin",
-    );
-    // A pin with zero capabilities is still a pin (an explicitly
-    // empty surface is a claim worth judging against).
-    Some(row)
+    args.map(verum_kernel::arch_parse::parse_arch_module).transpose()
 }

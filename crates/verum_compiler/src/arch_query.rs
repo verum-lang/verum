@@ -13,10 +13,10 @@ use anyhow::{anyhow, Result};
 use serde::Serialize;
 
 use verum_ast::Module;
-use verum_common::FileId;
+use verum_common::{FileId, List, Maybe, Text};
 use verum_kernel::arch_rows::Row;
 
-use crate::pipeline::{infer_summaries_for_query, pinned_capabilities_of_module};
+use crate::pipeline::{declared_arch_shape_of_module, infer_summaries_for_query};
 
 /// One capability atom with its provenance, as reported.
 #[derive(Debug, Serialize)]
@@ -44,7 +44,7 @@ pub struct ReportedSummary {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PinComparison {
-    /// No declared pin.
+    /// No declared `requires` constraint; other metadata may be present.
     Unpinned,
     /// A callee or a capability-bearing parameter remains unresolved.
     Partial,
@@ -67,9 +67,12 @@ pub struct ArchQueryReport {
     pub module: Option<String>,
     /// The inferred module surface (transitive, row-solved).
     pub inferred: Vec<ReportedAtom>,
-    /// Capabilities the `@arch_module` pin declares (requires ∪
-    /// exposes), if the module carries a pin.
+    /// The authored `requires` constraint. `None` means omitted;
+    /// `Some([])` explicitly permits no required capabilities.
     pub pinned: Option<Vec<String>>,
+    /// The authored `exposes` constraint, independently present or absent.
+    /// It is preserved as intent; body-use inference does not verify exports.
+    pub pinned_exposes: Maybe<List<Text>>,
     /// Judgment, inferred vs pinned: atoms the code exercises beyond
     /// the pin. `None` when there is no pin to judge against.
     pub escalations: Option<Vec<ReportedAtom>>,
@@ -98,11 +101,20 @@ fn report_row_atoms(row: &Row) -> Vec<ReportedAtom> {
 }
 
 /// Answer the query for one parsed module.
-pub fn arch_query_module(module: &Module) -> ArchQueryReport {
+pub fn arch_query_module(module: &Module) -> Result<ArchQueryReport> {
     let solved = infer_summaries_for_query(module);
     let surface = solved.module_surface();
 
-    let pinned = pinned_capabilities_of_module(module);
+    let declared = declared_arch_shape_of_module(module)
+        .map_err(|error| anyhow!("@arch_module: {}", error.human_message()))?;
+    let pinned = declared
+        .as_ref()
+        .and_then(|shape| shape.required_capability_constraint())
+        .map(|caps| Row::cited(caps.iter().cloned(), "@arch_module requires"));
+    let pinned_exposes = declared
+        .as_ref()
+        .and_then(|shape| shape.exposed_capability_constraint())
+        .map(|caps| caps.iter().map(|cap| Text::from(cap.to_string())).collect());
     let partial = !surface.is_closed() || !solved.unresolved.is_empty();
     let (comparison, escalations, dead_rights) = match &pinned {
         Some(pin_row) => {
@@ -137,13 +149,14 @@ pub fn arch_query_module(module: &Module) -> ArchQueryReport {
         None => (PinComparison::Unpinned, None, None),
     };
 
-    ArchQueryReport {
+    Ok(ArchQueryReport {
         comparison,
         module: module_declared_path(module),
         inferred: report_row_atoms(&surface),
         pinned: pinned
             .as_ref()
             .map(|row| row.facts().map(|f| f.atom.to_string()).collect()),
+        pinned_exposes,
         escalations,
         dead_rights,
         functions: solved
@@ -164,7 +177,7 @@ pub fn arch_query_module(module: &Module) -> ArchQueryReport {
             .iter()
             .map(|e| format!("{} -> {}", e.caller, e.callee))
             .collect(),
-    }
+    })
 }
 
 fn module_declared_path(module: &Module) -> Option<String> {
@@ -183,5 +196,5 @@ pub fn arch_query_source(source: &str) -> Result<ArchQueryReport> {
     let module = parser
         .parse_module_str(source, FileId::new(0))
         .map_err(|e| anyhow!("parse failed: {e:?}"))?;
-    Ok(arch_query_module(&module))
+    arch_query_module(&module)
 }

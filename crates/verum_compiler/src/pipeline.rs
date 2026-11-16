@@ -77,7 +77,7 @@ use crate::staged_pipeline::{StagedConfig, StagedPipeline};
 // move out of this file, not access boundaries.
 mod aot_object_cache;
 mod ats_v_phase;
-pub use ats_v_phase::{infer_summaries_for_query, pinned_capabilities_of_module};
+pub use ats_v_phase::{declared_arch_shape_of_module, infer_summaries_for_query};
 mod audit;
 mod bounds_stats;
 mod cbgr;

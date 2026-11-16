@@ -40,6 +40,7 @@
 //! in [`super::arch_anti_pattern`].
 
 use serde::{Deserialize, Serialize};
+use verum_common::Maybe;
 
 // =============================================================================
 // Capability — first-class possibility tracked at architecture level
@@ -1569,6 +1570,19 @@ impl ShapeDeclarations {
 // Shape — main carrier per `@arch_module(...)`
 // =============================================================================
 
+/// Which capability fields were supplied by the declaration's author.
+///
+/// Presence is independent for each field: an omitted list imposes no
+/// constraint, whereas an explicitly empty list constrains the corresponding
+/// surface to be empty. Computed lists do not establish authored intent.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CapabilityFieldPresence {
+    /// The declaration supplied `requires`, including `requires: []`.
+    pub requires: bool,
+    /// The declaration supplied `exposes`, including `exposes: []`.
+    pub exposes: bool,
+}
+
 /// Main carrier of `@arch_module(...)`. Per spec §4.1.
 ///
 /// Built by the parser when it encounters `@arch_module(...)` on
@@ -1580,6 +1594,10 @@ pub struct Shape {
     pub exposes: Vec<Capability>,
  /// Capabilities the cog requires from the environment.
     pub requires: Vec<Capability>,
+    /// Authored constraints, separate from the structural capability lists.
+    /// Required in serialized Shapes: old lists alone cannot recover whether
+    /// an empty list was omitted or explicitly declared.
+    pub capability_fields: CapabilityFieldPresence,
  /// Boundary invariants preserved through the cog.
     pub preserves: Vec<BoundaryInvariant>,
  /// Linear / affine resources consumed.
@@ -1615,6 +1633,7 @@ impl Shape {
         Shape {
             exposes: Vec::new(),
             requires: Vec::new(),
+            capability_fields: CapabilityFieldPresence::default(),
             preserves: Vec::new(),
             consumes: Vec::new(),
             at_tier: Tier::MultiTier {
@@ -1634,6 +1653,16 @@ impl Shape {
             strict: false,
             declarations: None,
         }
+    }
+
+    /// The authored requirement, if present. `Some(&[])` is a real constraint.
+    pub fn required_capability_constraint(&self) -> Maybe<&[Capability]> {
+        self.capability_fields.requires.then_some(self.requires.as_slice())
+    }
+
+    /// The authored exposure constraint, if present; never grants body usage.
+    pub fn exposed_capability_constraint(&self) -> Maybe<&[Capability]> {
+        self.capability_fields.exposes.then_some(self.exposes.as_slice())
     }
 }
 
