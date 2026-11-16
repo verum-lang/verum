@@ -21,6 +21,69 @@ The current Studio transport uses Codex. An author and an independent reviewer c
 
 Architecture as Type should project these relationships from the compiler. Start from cog boundaries, resolved mounts, declarations, field dependencies, declared contexts and contracts. Overlay obligations and run results only where their subjects match. Give every edge a navigable origin and every query a coverage indicator. A lexical match may suggest a module to inspect. Only a resolved compiler binding establishes a source dependency. Several cogs can export a declaration with the same spelling.
 
+## Semantic boundaries of the integrated model
+
+The common model is a target contract. It is not yet one implemented platform service. The current project generation covers captured source, manifest configuration, configured roots and available library metadata. A Studio operation receipt binds its input source; it does not capture the entire compiler project environment. The evidence packet deliberately leaves the operation's `project_revision` absent. The current architecture composition checks operate on Shape metadata. They do not establish behavioral refinement, resource transfer or runtime enforcement.
+
+Use one identity and query discipline across services while retaining the distinct meanings of their results:
+
+| Relation | Authority | Required boundary |
+| --- | --- | --- |
+| An author requires a property | An authored contract and its owner | Editing the implementation does not silently weaken the obligation. Omitted, explicitly empty and invalid constraints differ. |
+| A compiler derives a fact | The checked declaration or resolved operation and analysis domain | State the domain, approximation and coverage. An unresolved target does not imply an empty capability or dependency set. |
+| A run exhibits behavior | Exact invocation, configuration and observed events | Bind inputs, outputs, termination and observation coverage. An example does not establish a universally quantified law. |
+| A checker accepts a proposition | Statement, assumptions, proof object and checker semantics | Retain the trust footprint and unsupported cases. A model theorem does not by itself establish implementation correspondence. |
+| An implementation refines another | An explicit relation and its checked obligations | Relate the actual selected operations and representations under stated environmental assumptions. Matching names, graph shapes or final outputs are insufficient. |
+
+These are typed relations between subjects, not successive values of one confidence score. A renderer or agent cannot promote one relation into another. A query must distinguish unsupported, incomplete, resource-exhausted, rejected and established results. Absence of a counterexample is useful only within the named analysis domain and coverage.
+
+An artifact-local declaration ID is not a durable identity across edits. Within an artifact, reuse compiler-owned declaration identity. Between revisions, resolve correspondence explicitly as matched, missing or ambiguous; insertion before an ordinal must not attach an old proof to another declaration. Content equality can permit reuse only when the query's semantic inputs and dependency observations also agree. Target ABI, configuration, dependency resolution, macro expansion, intrinsic registry and checker foundation are relevant inputs where the operation reads them. An incomplete read-set cannot establish independence from changes outside it.
+
+Context values supplied through `using` and `provide`, inferred computational properties, authority to access a resource, and logical assumptions remain distinct. Connect them through checked relations: a supplied database context can discharge a dependency, but its presence alone neither authorizes every database operation nor proves that operation safe. Verum does not introduce algebraic effects by renaming these existing mechanisms.
+
+For component composition and replacement, the target judgment must check the selected port and implementation identities, argument/result representation, provider guarantees against consumer assumptions, ownership and authority transfer, allowed lifecycle transitions and resource bounds. Sequential and concurrent composition require different resource and ordering rules. A replacement must not strengthen required preconditions or weaken promised guarantees. Progress claims require explicit scheduler and fairness assumptions. A finite observed trace does not discharge those obligations. The existing Shape composition result must retain its narrower metadata meaning until these judgments exist.
+
+The same requirement applies below the source language: value copying, destruction, returned references, asynchronous completion and atomics must retain their declared meaning through VBC serialization, specialization, interpretation and native lowering. Share semantic declarations and checked operation plans across tiers; keep representation-specific execution behind those plans. Permission to copy a value does not imply that duplicating its carrier preserves ownership. An interpreter optimization cannot establish native behavior. Self-hosting replaces implementations against these contracts and conformance cases, rather than inheriting Rust allocation layouts or host addresses as semantics.
+
+## Navigable projections and controlled change
+
+This section specifies the target interaction. Studio currently exposes mount relationships, coverage and source navigation, not the complete map or the lenses below. Their visual behavior and keyboard acceptance require implementation and in-app validation.
+
+Studio's map is a bounded projection of typed relations. The user selects a subject and a question: dependencies, contracts, ownership, lifecycle, execution, proof assumptions or change impact. Each view has a declared scope and opens a path to the source span, inferred fact, event or proof that supports a relation. A mount graph cannot supply an execution timeline, and visual proximity cannot establish a semantic relationship.
+
+Zoom preserves the selected subject, relation kind and direction, origin, revision and unknown frontier. Aggregates retain membership and separate outcome counts; they never average proof validity. Summarizing a path must preserve the relationship between its actual endpoints. An unknown or omitted edge stays visible as missing coverage. Position and grouping are presentation state; dragging a node does not change a contract. Any future visual contract editor must propose ordinary source changes through the same checked edit service.
+
+The map, searchable list, source editor and detail view share selection, filters and navigation history. The list supplies a deterministic semantic keyboard order, independent of node coordinates. Enter follows the selected relationship; Escape returns to the previous level and restores focus. Project-wide exploration expands requested neighborhoods with explicit frontier budgets and continuation. A useful map does not require materializing every declaration or rerunning every analysis on each frame.
+
+Spatial IDE research motivates working sets and stable orientation, while also exposing confusing layouts. Code Bubbles studies concurrent editable working sets; the CodeMap pilot found topic-based placement surprising to participants. These results motivate a design hypothesis for Verum, not a demonstrated productivity gain for Studio. Validate it with navigation and change tasks on real projects, including keyboard-only use, large graphs and incomplete analysis. [Code Bubbles](https://cs.brown.edu/people/spr/codebubbles/icsefinal.pdf) · [CodeMap](https://arxiv.org/abs/1007.4303).
+
+The target shared interaction is: choose a subject and its obligation, inspect supporting evidence, propose a candidate, inspect its semantic delta, run the required checks and admit the candidate against the original obligation. Manual edits and agent proposals must bind to the selected snapshot and conflict checks. Today's source-write guard compares saved-file hashes; it does not provide a transaction over disk, unsaved editor overlays and the whole project. Extending that boundary must preserve an unrelated unsaved draft and explicitly reconcile it with an accepted disk change. Review authority remains separate from authorship. Changing an acceptance rule is a separate reviewed operation; improving a score by weakening the rule cannot satisfy the old obligation. Cancellation, crash and duplicate delivery must preserve an honest operation outcome, including any external action that already committed.
+
+Reuse existing authorities before adding a new platform abstraction:
+
+| Concern | Existing implementation to extend |
+| --- | --- |
+| Source capture, resolved mounts and dependency observations | `verum_lsp::project_context`, backed by `verum_modules` |
+| Declaration projections and source-bound evidence | `verum_lsp::project`, `verum_workbench::language` and `verum_workbench::evidence` |
+| Authored capability constraints and inferred rows | `verum_compiler::arch_query` and its checked pipeline inputs |
+| Copy, cleanup and reference meaning | VBC declaration metadata, copy/drop plans and the published value-copy and returned-reference contracts |
+| UI actions, source changes and provider tools | Studio's command registry, `Workspace` revision checks and host-owned agent-tool routes |
+| Runs, cancellation and retained outcomes | `ExecutionPlan`, `Receipt` and `TurnIdentity` |
+
+Do not put project indexing, layout, provider orchestration or heuristic ranking in the proof checker. Producers can discover candidates; a checker establishes only its supported judgment. A new universal graph schema, workflow language or syntax form is justified only by a concrete case that existing typed declarations, contracts and commands cannot express without losing meaning.
+
+## Acceptance slices for the platform foundation
+
+Each slice must exercise the ordinary client or execution path and an adverse case with the same acceptance rule. Tests validate these cases; they do not constitute a proof of the complete platform.
+
+| Slice | Required successful behavior | Required refusal or preserved uncertainty |
+| --- | --- | --- |
+| One project generation across compiler services, Studio and agents | Resolve a Registry declaration and its dependency, navigate to the exact source and reuse unaffected analysis after an independent edit. | A dependency, library artifact or relevant configuration change invalidates affected results; an unresolved import remains visible; an ordinal change cannot reuse a declaration's proof. |
+| One value and operation contract across execution tiers | Preserve the declared copy, sharing and cleanup semantics after mutation and destruction; return the actual async result; execute an atomic operation with its selected width, storage and ordering. | Unjustified aliasing of uniquely owned storage, duplicated cleanup authority, a stale returned borrow, wrong atomic representation or unsupported ordering cannot produce an accepted result. Both VM and native behavior must satisfy the declared contract at its promised observable boundary. |
+| One reviewed change through source, map and agent tools | Replace a component under its original contract, inspect the affected obligations, run the selected checks and apply against the reviewed revision. | A concurrent edit conflicts; a reviewer cannot write; an author cannot weaken the acceptance rule; a source-only receipt cannot become a project or native-correspondence proof. |
+
+These slices determine implementation order: close semantic and representation defects that violate the second slice; complete shared identities, coverage and invalidation for the first; then expand visual and agent operations through the third. Build throughput and responsiveness are measured separately from correctness. Separate scheduling independent work from deciding whether a cached result is reusable; neither parallelism nor caching can skip a required judgment. This separation is also developed in [Build Systems à la Carte](https://www.microsoft.com/en-us/research/wp-content/uploads/2018/03/build-systems.pdf).
+
 ## Provider orchestration
 
 Give each configured provider instance an identity independent of model name. Its adapter negotiates account availability, model discovery, cancellation, reviewed tools and continuation. Bind the instance, workspace revision, role and policy to each conversation. Each turn belongs to one conversation. A participant hands off a task, selected artifacts and open objections. The recipient can inspect the original evidence and use a different model. The operator sets disclosure, time, token and concurrency budgets for each task.

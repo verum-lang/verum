@@ -2,15 +2,14 @@
 //!
 //! ## Architectural role
 //!
-//! Composition is a **typed operation**: `compose(A, B)` either
-//! yields a new [`crate::arch::Shape`] for the composed unit, or
-//! rejects with a structured anti-pattern violation.  The compiler
-//! refuses incompatible compositions at type-check time, never at
-//! runtime.
+//! `compose(A, B)` checks the supplied metadata and either yields a new
+//! [`crate::arch::Shape`] or rejects with structured violations. It does not
+//! inspect implementation bodies, prove behavioral refinement or establish
+//! runtime ownership and lifecycle correspondence.
 //!
 //! ## Composition rules (spec §5.3)
 //!
-//! `A ⊗ B` is well-formed iff:
+//! The checks performed here are:
 //!
 //!   1. **Capability flow valid**: `B.requires ⊆ A.exposes`.
 //!      (B's needs are met by A's exposed surface.)
@@ -19,13 +18,10 @@
 //!   3. **Tier compatible**: `A.at_tier.compatible_with(&B.at_tier)`.
 //!   4. **Stratum admissible**: neither stratum is `LAbs`, and the
 //!      meet stratum is admissible.
-//!   5. **No dependency cycle**: composition graph stays acyclic.
 //!
-//! ## Associativity (RT1.5 refinement)
-//!
-//! `(A ⊗ B) ⊗ C ≡ A ⊗ (B ⊗ C)` when all three are pairwise
-//! compatible.  Proven via property-based test below — every
-//! valid triple agrees on the result.
+//! This operation has no implementation graph on which to check dependency
+//! cycles. Property tests exercise the metadata algebra; they are not a
+//! proof of its laws or of the behavior of composed programs.
 //!
 //! ## Reuse over invention
 //!
@@ -108,10 +104,9 @@ impl CompositionResult {
 ///     LAbs preempted at any input.
 ///   * Resulting `composes_with` = `A.composes_with ∪ B.composes_with`.
 ///
-/// **Soundness**: if `compose(A, B)` returns `Composed(C)`, then
-/// running A and B in composition is well-formed under spec §9.2's
-/// soundness statement — every architectural invariant of A and
-/// B is preserved by C.
+/// `Composed(C)` reports compatibility under the metadata checks above.
+/// The merged `preserves` entries remain declarations. Their union does not
+/// prove preservation of either implementation's architectural invariants.
 pub fn compose(a: &Shape, b: &Shape) -> CompositionResult {
     let mut violations: Vec<AntiPatternViolation> = Vec::new();
 
