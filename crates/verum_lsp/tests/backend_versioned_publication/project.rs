@@ -293,6 +293,9 @@ async fn project_topology_resolves_consumers_in_closed_sources() {
     let _ = project.snapshot(&dep).await;
     let snapshot = project.service.inner().handle_project_snapshot(Value::Null).await.unwrap();
     let graph = &snapshot["import_topology"];
+    assert_eq!(graph["scope"], "indexed-source-mounts");
+    assert_eq!(graph["project_revision"], snapshot["project_revision"]);
+    assert_eq!(graph["uninspected_sources"], json!([]));
     assert_eq!(graph["inspected_modules"], 3, "{snapshot:#}");
     assert_eq!(graph["unresolved_mounts"], 1);
     let failures = graph["failures"].as_array().unwrap();
@@ -304,8 +307,72 @@ async fn project_topology_resolves_consumers_in_closed_sources() {
     assert_eq!(graph["edges"].as_array().unwrap().len(), 1);
     let edge = &graph["edges"][0];
     assert_eq!(edge["location"]["uri"], consumer.to_string());
+    assert_eq!(&edge["origin"], snapshot["sources"].as_array().unwrap().iter()
+        .find(|source| source["uri"] == consumer.as_str()).unwrap());
     assert_eq!(edge["names"], json!(["Token", "answer"]));
     assert_eq!(snapshot["documents"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn project_topology_preserves_unknown_sources_and_unsaved_origin_revisions() {
+    let project = Project::new();
+    project.file("dependency.vr", DEP);
+    project.open("main.vr", MAIN);
+    let invalid = "mount dependency.answer; fn incomplete(";
+    let broken = project.file("broken.vr", invalid);
+    let script = Url::from_file_path(project.root.path().join("entry.vr")).unwrap();
+    let backend = project.service.inner();
+    backend.documents.open_with_source_mode(
+        script.clone(), "let mut i = 0; while i < 3 { i = i + 1; }".into(), 1,
+        verum_common::source_mode::SourceMode::Script,
+    );
+    let before = backend.handle_project_snapshot(Value::Null).await.unwrap();
+    let graph = &before["import_topology"];
+    assert_eq!(graph["inspected_modules"], 2, "{before:#}");
+    assert_eq!(graph["unresolved_mounts"], 0);
+    assert_eq!(graph["edges"].as_array().unwrap().len(), 1,
+        "a lexical mount in an unparsed source must not become a dependency");
+    let gaps = graph["uninspected_sources"].as_array().unwrap();
+    assert_eq!(gaps.len(), 2, "{before:#}");
+    for (uri, reason, parsed) in [
+        (&broken, "parse_unavailable", false), (&script, "module_unavailable", true),
+    ] {
+        let gap = gaps.iter().find(|gap| gap["origin"]["uri"] == uri.as_str()).unwrap();
+        assert_eq!(gap["reason"], reason);
+        assert_eq!(gap["origin"]["parsed"], parsed);
+        assert_eq!(&gap["origin"], before["sources"].as_array().unwrap().iter()
+            .find(|source| source["uri"] == uri.as_str()).unwrap());
+    }
+
+    let repaired = "mount dependency.answer;";
+    backend.documents.open(broken.clone(), repaired.into(), 7);
+    let after = backend.handle_project_snapshot(Value::Null).await.unwrap();
+    assert_ne!(after["project_revision"], before["project_revision"]);
+    assert_eq!(after["import_topology"]["project_revision"], after["project_revision"]);
+    assert_eq!(after["import_topology"]["inspected_modules"], 3);
+    assert_eq!(after["import_topology"]["uninspected_sources"].as_array().unwrap().len(), 1);
+    let edge = after["import_topology"]["edges"].as_array().unwrap().iter()
+        .find(|edge| edge["origin"]["uri"] == broken.as_str()).unwrap();
+    assert_eq!(edge["origin"]["version"], 7);
+    assert_eq!(edge["source"], repaired);
+    assert_ne!(edge["origin"]["source_hash"], gaps.iter()
+        .find(|gap| gap["origin"]["uri"] == broken.as_str()).unwrap()["origin"]["source_hash"]);
+    assert_eq!(std::fs::read_to_string(broken.to_file_path().unwrap()).unwrap(), invalid);
+
+    // A cached semantic graph still needs the current editor source receipts.
+    backend.documents.try_update(&broken, repaired.into(), 8).unwrap();
+    let version_only = backend.handle_project_snapshot(Value::Null).await.unwrap();
+    assert_eq!(version_only["project_revision"], after["project_revision"]);
+    let edge = version_only["import_topology"]["edges"].as_array().unwrap().iter()
+        .find(|edge| edge["origin"]["uri"] == broken.as_str()).unwrap();
+    assert_eq!(edge["origin"]["version"], 8);
+    assert_eq!(&edge["origin"], version_only["sources"].as_array().unwrap().iter()
+        .find(|source| source["uri"] == broken.as_str()).unwrap());
+
+    backend.documents.close(&broken);
+    let closed = backend.handle_project_snapshot(Value::Null).await.unwrap();
+    assert_eq!(closed["project_revision"], before["project_revision"]);
+    assert_eq!(closed["import_topology"], before["import_topology"]);
 }
 
 #[tokio::test]

@@ -16,7 +16,8 @@ import { installPanels } from './panels';
 import { installExplorer } from './explorer';
 import { icon, installIcons, type IconName } from './icons';
 import { installTooltips } from './tooltips';
-import { moduleNeighborhood, importDependencyPath, type ProjectAnalysis, type ImportSite, type ImportFailure } from './topology';
+import { moduleNeighborhood, importDependencyPath, type ProjectAnalysis, type ImportSite } from './topology';
+import { topologyCoverage } from './topology-coverage';
 import { parentPath, type GitChange } from './project-tree';
 import type { Pane } from './layout';
 import { analysisScopeLabel, languageRequest, sameRevision, type DocumentRevision, type Analysis, type ArchitectureAnnotation, type SourceLocation, type Range } from './language';
@@ -399,7 +400,7 @@ function drawTopology() {
   function lane(label: Content, links: Map<string, ImportSite[]>) {
     const group = node('section', 'topology-lane');
     group.append(node('h4', '', label));
-    if (!links.size) group.append(node('p', 'muted', m('No observed links')));
+    if (!links.size) group.append(node('p', 'muted', m('No resolved imports in this snapshot.')));
     for (const [module, sites] of [...links].sort(([a], [b]) => a.localeCompare(b))) {
       const branch = node('details', 'topology-edge');
       const title = node('summary');
@@ -409,7 +410,7 @@ function drawTopology() {
         if (!branch.open || branch.childElementCount > 1) return;
         for (const site of sites) {
           const detail = node('div', 'topology-detail');
-          detail.append(button(site.source, () => navigateDefinition(site.location, analysis.project_revision), 'topology-site'));
+          detail.append(button(site.source, () => navigateDefinition(site.location, analysis.project_revision, site.origin.source_hash), 'topology-site'));
           for (const binding of site.names) {
             const target = binding.definition;
             const entry = target && workspaceFilePath(target.uri, root) !== null
@@ -427,11 +428,15 @@ function drawTopology() {
   const center = node('div', 'topology-subject');
   center.append(icon('structure'), node('span', 'muted', m('Selected module')), moduleName(graph.owner));
   lanes.append(lane(m('Imported by'), graph.incoming), lane(m('Imports from'), graph.outgoing));
-  const coverage = !graph.coverage
-    ? m('Import coverage: {analyzed} analyzed documents · {indexed} indexed sources', { analyzed: graph.analyzed, indexed: graph.indexed })
-    : m('Modules inspected: {inspected} / {indexed} · unresolved imports: {unresolved}',
-      { inspected: graph.coverage.inspected_modules, indexed: graph.indexed, unresolved: graph.coverage.unresolved_mounts });
-  view.append(center, lanes);
+  const boundary = topologyCoverage(graph.coverage, {
+    indexed: graph.indexed, analyzed: graph.analyzed, chevron: icon('chevronRight'),
+    sourcePath: origin => workspaceFilePath(origin.uri, root),
+    navigate: ({ origin, location }) => navigateDefinition(location ?? {
+      uri: origin.uri, range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
+    }, analysis.project_revision, origin.source_hash),
+    failure: fail,
+  });
+  view.append(center, boundary, lanes);
   if (graph.dependents) {
     const indirect = [...graph.dependents].filter(([, link]) => link.distance > 1)
       .sort(([a, x], [b, y]) => x.distance - y.distance || a.localeCompare(b));
@@ -457,7 +462,7 @@ function drawTopology() {
             const step = node('li');
             const from = node('div', 'topology-path-edge');
             from.append(moduleName(edge.importer), node('span', 'muted', '→'), moduleName(edge.provider));
-            step.append(from, button(edge.source, () => navigateDefinition(edge.location, analysis.project_revision), 'topology-site'));
+            step.append(from, button(edge.source, () => navigateDefinition(edge.location, analysis.project_revision, edge.origin.source_hash), 'topology-site'));
             path.append(step);
           }
           branch.append(path);
@@ -467,38 +472,14 @@ function drawTopology() {
     });
     view.append(section);
   }
-  function failureRow(site: { source: string; location: SourceLocation }, reason?: string) {
+  function failureRow(site: ImportSite, reason?: string) {
     const row = node('div', 'topology-detail');
     const entry = workspaceFilePath(site.location.uri, root) === null
       ? node('code', 'topology-site', site.source)
-      : button(site.source, () => navigateDefinition(site.location, analysis.project_revision), 'topology-site');
+      : button(site.source, () => navigateDefinition(site.location, analysis.project_revision, site.origin.source_hash), 'topology-site');
     row.append(entry, node('span', 'muted', reason || m('Resolution unavailable')));
     return row;
   }
-  const failures = graph.coverage?.failures;
-  if (failures?.length) {
-    const all = node('details', 'topology-project-failures');
-    all.append(node('summary', 'topology-coverage', coverage));
-    all.addEventListener('toggle', () => {
-      if (!all.open || all.childElementCount > 1) return;
-      const modules = new Map<string, ImportFailure[]>();
-      for (const failure of failures) {
-        const sites = modules.get(failure.importer);
-        if (sites) sites.push(failure); else modules.set(failure.importer, [failure]);
-      }
-      for (const [owner, sites] of modules) {
-        const group = node('details', 'topology-edge');
-        const title = node('summary');
-        title.append(icon('chevronRight'), moduleName(owner), node('span', 'topology-count', String(sites.length)));
-        group.append(title);
-        group.addEventListener('toggle', () => {
-          if (group.open && group.childElementCount === 1) group.append(...sites.map(s => failureRow(s, s.reason)));
-        });
-        all.append(group);
-      }
-    });
-    view.append(all);
-  } else view.append(node('p', 'topology-coverage', coverage));
   if (graph.gaps.length) {
     const gaps = node('details', 'topology-gaps');
     const summary = node('summary');

@@ -65,7 +65,12 @@ struct AnalysisReceipt {
 }
 #[derive(Default, Serialize)]
 pub struct ImportTopology {
+    /// This is a projection of resolved mounts in the captured sources, not
+    /// a call graph, behavioral impact analysis or architecture proof.
+    scope: &'static str,
+    project_revision: Text,
     inspected_modules: usize,
+    uninspected_sources: List<UninspectedSource>,
     unresolved_mounts: usize,
     failures: Vec<ImportFailure>,
     edges: Vec<ImportEdge>,
@@ -73,9 +78,26 @@ pub struct ImportTopology {
 
 #[derive(Clone, Serialize)]
 struct ImportSite {
+    /// Reuse the source receipt published in the project's identity table.
+    /// Together with the enclosing project revision, range and provider, it
+    /// identifies this relation without treating a module name as identity.
+    origin: SourceIdentity,
     importer: Text,
     location: Location,
     source: Text,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+enum UninspectedReason {
+    ParseUnavailable,
+    ModuleUnavailable,
+}
+
+#[derive(Serialize)]
+struct UninspectedSource {
+    origin: SourceIdentity,
+    reason: UninspectedReason,
 }
 
 #[derive(Serialize)]
@@ -159,12 +181,27 @@ impl ProjectContext {
     pub fn import_topology(&mut self) -> Result<&ImportTopology> {
         if self.topology.is_none() {
             let control = self.analysis_control();
-            let mut graph = ImportTopology::default();
-            for source in self.sources.values() {
+            let mut graph = ImportTopology {
+                scope: "indexed-source-mounts",
+                project_revision: self.revision.clone(),
+                ..ImportTopology::default()
+            };
+            for origin in &self.identities {
                 control.check()?;
-                let (Some(ast), Some(id)) = (&source.ast, source.module_id) else { continue };
-                if !self.module_paths.contains_key(&id) { continue; }
-                let uri = Url::from_file_path(&source.path).map_err(|_| anyhow::anyhow!("Source URI"))?;
+                let path = origin.uri.to_file_path().map_err(|_| anyhow::anyhow!("Source URI"))?;
+                let source = self.sources.get(&path).context("Captured source identity is unavailable")?;
+                let Some(ast) = &source.ast else {
+                    graph.uninspected_sources.push(UninspectedSource {
+                        origin: origin.clone(), reason: UninspectedReason::ParseUnavailable,
+                    });
+                    continue;
+                };
+                let Some(id) = source.module_id.filter(|id| self.module_paths.contains_key(id)) else {
+                    graph.uninspected_sources.push(UninspectedSource {
+                        origin: origin.clone(), reason: UninspectedReason::ModuleUnavailable,
+                    });
+                    continue;
+                };
                 graph.inspected_modules += 1;
                 let mut resolver = ImportResolver::new();
                 for item in &ast.items {
@@ -173,8 +210,9 @@ impl ProjectContext {
                     control.check()?;
                     let span = item.span.start as usize..item.span.end as usize;
                     let site = ImportSite {
-                        importer: source.owner.to_string().into(),
-                        location: Location::new(uri.clone(), ast_span_to_range(&item.span, &source.text)),
+                        origin: origin.clone(),
+                        importer: origin.module.clone(),
+                        location: Location::new(origin.uri.clone(), ast_span_to_range(&item.span, &source.text)),
                         source: source.text.get(span).context("Import span outside captured source")?.into(),
                     };
                     let import = match resolver.resolve_import(decl, id, &self.exports, &self.module_paths) {
@@ -366,9 +404,16 @@ impl ProjectContext {
         if revision == self.revision && !pending {
             // Open/close and version-only changes still update source receipts.
             for identity in &mut self.identities {
-                identity.version = identity.uri.to_file_path().ok().and_then(|path| {
+                let version = identity.uri.to_file_path().ok().and_then(|path| {
                     open.iter().find(|(p, ..)| p == &path).map(|(_, _, version, ..)| *version)
                 });
+                if identity.version != version {
+                    // Source receipts also carry editor incarnations. A cached
+                    // topology must not retain a closed or older version even
+                    // when the effective source and semantic revision agree.
+                    self.topology = None;
+                    identity.version = version;
+                }
             }
             return Ok(false);
         }

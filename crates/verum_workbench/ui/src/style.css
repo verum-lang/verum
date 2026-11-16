@@ -1558,8 +1558,21 @@ a {
 .topology-site { display: block; width: 100%; text-align: start; padding: var(--space-1) 0; color: var(--accent-text); font-family: var(--font-code); }
 .topology-detail > code, .topology-detail > .declaration-name { display: inline-block; margin-inline-end: var(--space-2); }
 .topology-coverage { margin-block: var(--space-3) var(--space-2); color: var(--muted); font-size: var(--font-size-caption); font-variant-numeric: tabular-nums; }
-.topology-project-failures > summary { cursor: pointer; }
-.topology-project-failures > .topology-edge { margin-inline-start: var(--space-2); }
+.topology-boundary { border-block-end: 1px solid var(--subtle-border); padding-block: var(--space-2); }
+.topology-boundary > summary { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; align-items: center; gap: var(--space-2); cursor: pointer; list-style: none; padding: var(--space-1) var(--space-2); border-radius: 4px; }
+.topology-boundary > summary::-webkit-details-marker { display: none; }
+.topology-boundary > summary:hover { background: var(--hover); }
+.topology-boundary > summary > .icon { width: 14px; height: 14px; color: var(--muted); }
+.topology-boundary[open] > summary > .icon { transform: rotate(90deg); }
+.topology-boundary-label { display: block; font-size: var(--font-size-caption); font-weight: 600; }
+.topology-boundary-counts { display: grid; text-align: end; font-size: var(--font-size-caption); font-variant-numeric: tabular-nums; }
+.topology-unknown { color: var(--warning); }
+.topology-boundary > p, .topology-boundary > .quiet-button { margin-inline: var(--space-2); }
+.topology-gap-filter { width: 100%; margin-block-start: var(--space-3); }
+.topology-gap { padding: var(--space-2); border-block-start: 1px solid var(--subtle-border); overflow-wrap: anywhere; }
+.topology-gap > p { margin-block: var(--space-1); }
+.topology-gap-state { color: var(--warning); font-size: var(--font-size-caption); }
+.topology-gap-path { color: var(--muted); overflow-wrap: anywhere; font-size: var(--font-size-caption); }
 .topology-gaps { border-block-start: 1px solid var(--subtle-border); margin-block-end: var(--space-3); }
 .topology-gaps > summary { color: var(--warning); }
 .topology-dependents { border-block-start: 1px solid var(--subtle-border); margin-block-start: var(--space-3); }
@@ -1575,8 +1588,10 @@ a {
 .project-inspector > summary .icon { width: 14px; height: 14px; }
 .project-inspector[open] > summary .icon { transform: rotate(90deg); }
 @media (pointer: coarse) {
-  .topology-edge > summary, .topology-gaps > summary, .topology-site, .declaration-heading > button { min-height: 44px; }
+  .topology-edge > summary, .topology-gaps > summary, .topology-boundary > summary, .topology-site, .declaration-heading > button { min-height: 44px; }
 }
 @container (max-width: 38rem) {
   .topology-lanes { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .topology-boundary > summary { grid-template-columns: 14px minmax(0, 1fr); }
+  .topology-boundary-counts { grid-column: 2; text-align: start; }
 }

@@ -329,6 +329,44 @@ async fn project_dependency_edits_reach_the_same_studio_and_agent_snapshot() {
 }
 
 #[tokio::test]
+async fn project_import_coverage_keeps_the_shared_language_source_receipts() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join("dependency.vr"), "public fn answer() -> Int { 42 }").unwrap();
+    let invalid = "mount dependency.answer; fn incomplete(";
+    std::fs::write(root.path().join("broken.vr"), invalid).unwrap();
+    let studio = studio(root.path());
+    studio.call("language.request", json!({
+        "path":"main.vr", "source":"mount dependency.answer; fn main() -> Int { answer() }",
+    })).await.unwrap();
+    let before = studio.call("project.inspect", json!({})).await.unwrap();
+    let graph = &before["analysis"]["import_topology"];
+    assert_eq!(graph["scope"], "indexed-source-mounts");
+    assert_eq!(graph["project_revision"], before["analysis"]["project_revision"]);
+    assert_eq!(graph["unresolved_mounts"], 0);
+    assert_eq!(graph["inspected_modules"], 2);
+    let gaps = graph["uninspected_sources"].as_array().unwrap();
+    assert_eq!(gaps.len(), 1);
+    assert_eq!(gaps[0]["origin"]["module"], "broken");
+    assert_eq!(gaps[0]["reason"], "parse_unavailable");
+
+    let overlay = studio.call("language.request", json!({
+        "path":"broken.vr", "source":"mount dependency.answer;",
+    })).await.unwrap();
+    let after = studio.call("project.inspect", json!({})).await.unwrap();
+    let graph = &after["analysis"]["import_topology"];
+    assert_eq!(graph["project_revision"], overlay["result"]["project_revision"]);
+    assert_ne!(graph["project_revision"], before["analysis"]["project_revision"]);
+    assert_eq!(graph["uninspected_sources"], json!([]));
+    let edge = graph["edges"].as_array().unwrap().iter()
+        .find(|edge| edge["importer"] == "broken").unwrap();
+    assert_eq!(edge["origin"]["source_hash"], overlay["source_hash"]);
+    assert_eq!(edge["origin"]["version"], overlay["version"]);
+    assert_eq!(&edge["origin"], after["analysis"]["sources"].as_array().unwrap().iter()
+        .find(|source| source["module"] == "broken").unwrap());
+    assert_eq!(std::fs::read_to_string(root.path().join("broken.vr")).unwrap(), invalid);
+}
+
+#[tokio::test]
 async fn project_analysis_keeps_private_types_in_their_declaring_module() {
     let root = tempfile::tempdir().unwrap();
     std::fs::write(root.path().join("Verum.toml"), "[cog]\nname='sample'\n").unwrap();
