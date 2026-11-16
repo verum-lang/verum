@@ -24,7 +24,7 @@ public type WindowRunner is {
 
 public fn fresh() -> WindowRunner {
     WindowRunner {
-        partition_key: [].clone() as List<Text>,
+        partition_key: List.new(),
         row_index_in_partition: 0 as Int64,
         partitions_seen: 0 as Int64,
         rows_total: 0 as Int64,

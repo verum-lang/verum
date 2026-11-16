@@ -27,7 +27,7 @@ public fn new(name: Text, select_sql: Text) -> ViewSpec {
         name: name,
         scope: VsMain,
         if_not_exists: false,
-        column_aliases: [].clone() as List<Text>,
+        column_aliases: List.new(),
         select_sql: select_sql,
     }
 }

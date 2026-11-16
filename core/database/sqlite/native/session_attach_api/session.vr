@@ -22,7 +22,7 @@ public type SessionAttach is {
 
 public fn new() -> SessionAttach {
     SessionAttach {
-        attached_tables: [].clone() as List<Text>,
+        attached_tables: List.new(),
         attach_all_mode: false,
         has_filter: false,
     }

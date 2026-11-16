@@ -55,7 +55,7 @@ public type CallStack is {
 };
 
 public fn empty_stack() -> CallStack {
-    CallStack { frames: [].clone() as List<VdbeFrame>, max_depth_seen: 0 }
+    CallStack { frames: List.new(), max_depth_seen: 0 }
 }
 
 public fn depth(cs: &CallStack) -> Int { cs.frames.len() }

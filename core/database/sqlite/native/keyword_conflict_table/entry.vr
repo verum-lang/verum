@@ -25,7 +25,7 @@ public fn entry(word: Text, class_: KeywordClass) -> KeywordEntry {
 // Representative subset used by tests — not exhaustive, but covers the three
 // classes used by the parser's keyword-conflict resolver.
 public fn registry() -> List<KeywordEntry> {
-    let mut out: List<KeywordEntry> = [].clone() as List<KeywordEntry>;
+    let mut out: List<KeywordEntry> = List.new();
     // Full-reserved: cannot be identifiers anywhere.
     out.push(entry("SELECT".clone(),    KcFullReserved));
     out.push(entry("FROM".clone(),      KcFullReserved));

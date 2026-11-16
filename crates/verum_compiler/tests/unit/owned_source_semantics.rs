@@ -16,6 +16,9 @@ mod numeric_capability_contract;
 #[path = "sqlite_scanner_boundary.rs"]
 mod sqlite_scanner_boundary;
 
+#[path = "stdlib_list_construction.rs"]
+mod stdlib_list_construction;
+
 #[path = "current_source_authority.rs"]
 mod current_source_authority;
 

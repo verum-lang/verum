@@ -69,7 +69,8 @@ public fn severity_rank(k: &FindingKind) -> Int {
 }
 
 public type Finding is {
-    kind: FindingKind,
+    // The walker classifies findings; detail storage remains owned by this module.
+    public(in core.database.sqlite.native.integrity_walker_api) kind: FindingKind,
     detail: Text,
 };
 

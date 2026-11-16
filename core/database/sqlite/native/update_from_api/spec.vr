@@ -25,7 +25,7 @@ public fn new(target_table: Text, where_sql: Text) -> UpdateFromSpec {
     UpdateFromSpec {
         target_table: target_table,
         target_alias: "".clone(),
-        sources: [].clone() as List<SourceKind>,
+        sources: List.new(),
         where_sql: where_sql,
     }
 }

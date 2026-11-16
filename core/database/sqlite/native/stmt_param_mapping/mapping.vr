@@ -24,7 +24,7 @@ public type Mapping is {
 public fn empty() -> Mapping {
     Mapping {
         slot_count: 0,
-        names: [].clone() as List<Text>,
+        names: List.new(),
         next_auto: 1,
     }
 }

@@ -30,7 +30,7 @@ public fn is_escape_char(b: u8) -> Bool {
 // Return longest literal prefix of `pattern` that contains no wildcards.
 public fn extract_prefix(op: &PatternOp, pattern: &Text) -> Text {
     let bs = pattern.as_bytes();
-    let mut out_bytes: List<u8> = [].clone() as List<u8>;
+    let mut out_bytes: List<u8> = List.new();
     let mut i: Int = 0;
     while i < bs.len() {
         let b = bs[i];

@@ -51,7 +51,7 @@ fn int_suffix(n: Int) -> Text {
 
 // Per §17.1: if two inferred names collide, append "_1", "_2", ...
 public fn disambiguate(names: &List<Text>) -> List<Text> {
-    let mut out: List<Text> = [].clone() as List<Text>;
+    let mut out: List<Text> = List.new();
     let mut i: Int = 0;
     while i < names.len() {
         let candidate = names[i].clone();

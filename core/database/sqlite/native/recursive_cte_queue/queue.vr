@@ -23,7 +23,7 @@ public type WorkQueue is {
 public fn new(mode: TraversalMode) -> WorkQueue {
     WorkQueue {
         mode: mode,
-        items: [].clone() as List<Int64>,
+        items: List.new(),
         total_enqueued: 0 as Int64,
         total_dequeued: 0 as Int64,
     }

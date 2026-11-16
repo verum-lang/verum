@@ -22,7 +22,7 @@ public fn new(table_name: Text, index_name: Text, total_rows: Int64) -> Stat1Sch
         table_name: table_name,
         index_name: index_name,
         total_rows: total_rows,
-        avg_per_prefix: [].clone() as List<Int64>,
+        avg_per_prefix: List.new(),
     }
 }
 

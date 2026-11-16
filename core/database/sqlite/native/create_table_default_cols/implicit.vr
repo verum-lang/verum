@@ -26,7 +26,7 @@ public fn col_name(c: &ImplicitCol) -> Text {
 
 // Implicit rowid aliases are always accessible: "rowid", "_rowid_", "oid".
 public fn rowid_alias_names() -> List<Text> {
-    let mut out: List<Text> = [].clone() as List<Text>;
+    let mut out: List<Text> = List.new();
     out.push("rowid".clone());
     out.push("_rowid_".clone());
     out.push("oid".clone());

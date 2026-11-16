@@ -18,7 +18,7 @@ public type ConflictTarget is {
 
 public fn new_any() -> ConflictTarget {
     ConflictTarget {
-        columns: [].clone() as List<Text>,
+        columns: List.new(),
         index_predicate: "".clone(),
         none_means_any_unique: true,
     }

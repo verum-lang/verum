@@ -42,7 +42,7 @@ public fn new(main_tables: List<Text>, temp_tables: List<Text>) -> SchemaRegistr
     SchemaRegistry {
         main: db("main".clone(), main_tables),
         temp: db("temp".clone(), temp_tables),
-        attached: [].clone() as List<AttachedDb>,
+        attached: List.new(),
     }
 }
 

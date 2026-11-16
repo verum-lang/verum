@@ -19,7 +19,7 @@ public type WhereClause is {
 };
 
 public fn new() -> WhereClause {
-    WhereClause { terms: [].clone() as List<WhereTerm> }
+    WhereClause { terms: List.new() }
 }
 
 public fn push(mut c: WhereClause, t: WhereTerm) -> WhereClause {

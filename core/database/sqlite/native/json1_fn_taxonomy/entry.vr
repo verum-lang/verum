@@ -35,7 +35,7 @@ public fn accepts_arity(e: &FnEntry, n: Int) -> Bool {
 }
 
 public fn registry() -> List<FnEntry> {
-    let mut out: List<FnEntry> = [].clone() as List<FnEntry>;
+    let mut out: List<FnEntry> = List.new();
     // constructors
     out.push(entry("json".clone(),        JfConstructor, 1, 1));
     out.push(entry("json_array".clone(),  JfConstructor, 0, -1));

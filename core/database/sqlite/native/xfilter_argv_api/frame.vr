@@ -24,7 +24,7 @@ public fn new(idx_num: Int, idx_str: Text) -> FilterFrame {
     FilterFrame {
         idx_num: idx_num,
         idx_str: idx_str,
-        slots: [].clone() as List<SlotSource>,
+        slots: List.new(),
     }
 }
 

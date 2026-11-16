@@ -16,7 +16,7 @@ public type RowShape is {
 };
 
 public fn new(arity: Int) -> RowShape {
-    RowShape { arity: arity, labels: [].clone() as List<Text> }
+    RowShape { arity: arity, labels: List.new() }
 }
 
 public fn with_labels(mut s: RowShape, labels: List<Text>) -> RowShape {

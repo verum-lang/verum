@@ -15,7 +15,7 @@ public type KeepSet is {
 };
 
 public fn empty() -> KeepSet {
-    KeepSet { keep: [].clone() as List<Text> }
+    KeepSet { keep: List.new() }
 }
 
 public fn from_list(names: List<Text>) -> KeepSet {
@@ -41,7 +41,7 @@ public fn contains(k: &KeepSet, name: &Text) -> Bool {
 
 // Given the set of currently-registered modules, compute the drop-plan.
 public fn compute_drop_plan(k: &KeepSet, registered: &List<Text>) -> List<Text> {
-    let mut out: List<Text> = [].clone() as List<Text>;
+    let mut out: List<Text> = List.new();
     let mut i: Int = 0;
     while i < registered.len() {
         if !contains(k, &registered[i]) {
@@ -57,7 +57,7 @@ public fn drops_all(k: &KeepSet) -> Bool { is_empty(k) }
 
 // Built-in module names always present when compiled in.
 public fn default_builtin_keepable() -> List<Text> {
-    let mut out: List<Text> = [].clone() as List<Text>;
+    let mut out: List<Text> = List.new();
     out.push("fts5".clone());
     out.push("fts4".clone());
     out.push("rtree".clone());

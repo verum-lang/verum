@@ -25,7 +25,7 @@ public type WalkerIntegrityReport is {
 
 public fn fresh() -> WalkerIntegrityReport {
     WalkerIntegrityReport {
-        findings: [].clone() as List<Finding>,
+        findings: List.new(),
         pages_scanned: 0 as Int64,
         highest_severity: 0,
     }

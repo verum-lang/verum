@@ -24,7 +24,7 @@ public fn entry(name: Text, kind: MathKind, arity: Int) -> MathEntry {
 }
 
 public fn registry() -> List<MathEntry> {
-    let mut out: List<MathEntry> = [].clone() as List<MathEntry>;
+    let mut out: List<MathEntry> = List.new();
     // trig
     out.push(entry("sin".clone(),   MkTrig, 1));
     out.push(entry("cos".clone(),   MkTrig, 1));

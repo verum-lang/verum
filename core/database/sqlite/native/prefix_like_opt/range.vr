@@ -24,7 +24,7 @@ public fn single_prefix(prefix: &Text) -> PrefixRange {
     // upper bound exists.
     let bs = prefix.as_bytes();
     let mut n = bs.len();
-    let mut hi_bytes: List<u8> = [].clone() as List<u8>;
+    let mut hi_bytes: List<u8> = List.new();
     let mut i: Int = 0;
     while i < n {
         hi_bytes.push(bs[i]);

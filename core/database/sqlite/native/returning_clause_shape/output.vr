@@ -38,7 +38,7 @@ public type ReturningClause is {
 };
 
 public fn empty_clause() -> ReturningClause {
-    ReturningClause { items: [].clone() as List<OutputItem> }
+    ReturningClause { items: List.new() }
 }
 
 public fn push(mut c: ReturningClause, i: OutputItem) -> ReturningClause {

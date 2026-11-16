@@ -51,7 +51,7 @@ public type CaseExpr is {
 public fn new(shape: CaseShape) -> CaseExpr {
     CaseExpr {
         shape: shape,
-        branches: [].clone() as List<WhenBranch>,
+        branches: List.new(),
         else_sql: "".clone(),
     }
 }

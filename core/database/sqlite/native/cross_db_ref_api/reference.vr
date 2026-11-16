@@ -10,8 +10,9 @@ module core.database.sqlite.native.cross_db_ref_api.reference;
 mount base.{Bool, Text};
 
 public type CrossDbTableRef is {
-    schema: Text,      // empty means unqualified
-    table: Text,
+    // The resolver shares these names; callers construct references through this module.
+    public(in core.database.sqlite.native.cross_db_ref_api) schema: Text, // empty means unqualified
+    public(in core.database.sqlite.native.cross_db_ref_api) table: Text,
 };
 
 public fn unqualified(table: Text) -> CrossDbTableRef {

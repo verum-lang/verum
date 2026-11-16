@@ -27,7 +27,7 @@ public type AutoincrementRegister is {
 };
 
 public fn new() -> AutoincrementRegister {
-    AutoincrementRegister { entries: [].clone() as List<AutoIncRow> }
+    AutoincrementRegister { entries: List.new() }
 }
 
 public fn size(r: &AutoincrementRegister) -> Int { r.entries.len() }

@@ -19,7 +19,7 @@ public type JsonPath is {
 };
 
 public fn root_only() -> JsonPath {
-    let mut segs: List<PathSegment> = [].clone() as List<PathSegment>;
+    let mut segs: List<PathSegment> = List.new();
     segs.push(PsRoot);
     JsonPath { segments: segs }
 }

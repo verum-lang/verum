@@ -63,7 +63,7 @@ public type EmittedStream is {
 };
 
 public fn stream(mode_flags: Int64) -> EmittedStream {
-    EmittedStream { tokens: [].clone() as List<EmittedToken>, mode_flags: mode_flags }
+    EmittedStream { tokens: List.new(), mode_flags: mode_flags }
 }
 
 public fn emit(mut s: EmittedStream, t: EmittedToken) -> EmittedStream {

@@ -32,7 +32,7 @@ public type DirtyList is {
 
 public fn new() -> DirtyList {
     DirtyList {
-        entries: [].clone() as List<PageEntry>,
+        entries: List.new(),
         tick: 0 as Int64,
         dirty_count: 0 as Int64,
     }

@@ -19,11 +19,11 @@ public type WithClause is {
 };
 
 public fn new() -> WithClause {
-    WithClause { recursive: false, defs: [].clone() as List<CteDefinition> }
+    WithClause { recursive: false, defs: List.new() }
 }
 
 public fn new_recursive() -> WithClause {
-    WithClause { recursive: true, defs: [].clone() as List<CteDefinition> }
+    WithClause { recursive: true, defs: List.new() }
 }
 
 public fn push(mut w: WithClause, d: CteDefinition) -> WithClause {

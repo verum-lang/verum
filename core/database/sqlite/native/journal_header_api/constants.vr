@@ -14,7 +14,7 @@ public fn header_size() -> Int { 28 }
 
 // Magic bytes: 0xD9,0xD5,0x05,0xF9,0x20,0xA1,0x63,0xD7.
 public fn magic_bytes() -> List<u8> {
-    let mut out: List<u8> = [].clone() as List<u8>;
+    let mut out: List<u8> = List.new();
     out.push(0xD9 as u8);
     out.push(0xD5 as u8);
     out.push(0x05 as u8);
