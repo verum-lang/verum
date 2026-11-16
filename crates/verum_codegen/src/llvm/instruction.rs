@@ -11108,7 +11108,9 @@ pub(super) fn prepare_field_reference_slots(
             } if operands.len() >= 3 => {
                 aliases.insert(op_reg(operands, 0));
             }
-            Instruction::Mov { dst, src } => {
+            Instruction::Mov { dst, src } | Instruction::CloneTyped { dst, src, .. } => {
+                // Reserve storage for identity-copy provenance. This is only
+                // reachability: an allocating copy leaves its sidecar empty.
                 moves.entry(src.0).or_default().push(dst.0);
             }
             Instruction::CbgrExtended { sub_op, operands }
@@ -42481,16 +42483,27 @@ fn lower_gpu_extended<'ctx>(
 // Extracted from lower_instruction match arms
 // ====================================================================
 
-fn lower_mov<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg) -> Result<()> {
+/// Preserve a value's representation without transferring cleanup ownership
+/// or issuing evidence about a callable's selected implementation.
+fn lower_value_identity<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg) -> Result<()> {
     let value = ctx.get_register(src.0)?;
-    let callable = ctx.selected_callable_target(src);
+    if dst == src {
+        return Ok(());
+    }
     let field_address = ctx.field_reference_address(src.0)?;
     ctx.set_register(dst.0, value);
-    if let Some(target) = callable {
-        ctx.record_selected_callable(dst, target);
-    }
     if let Some(address) = field_address {
         ctx.set_field_reference_address(dst.0, address)?;
+    }
+    propagate_value_type_facts(ctx, src, dst);
+    Ok(())
+}
+
+fn lower_mov<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg) -> Result<()> {
+    let callable = ctx.selected_callable_target(src);
+    lower_value_identity(ctx, dst, src)?;
+    if let Some(target) = callable {
+        ctx.record_selected_callable(dst, target);
     }
     // Ownership transfer for heap-owned text: MOV is a move, not a copy.
     // If src holds an owned Text buffer (from Concat/ToString/CharToStr),
@@ -42504,23 +42517,6 @@ fn lower_mov<'ctx>(ctx: &mut FunctionContext<'_, 'ctx>, dst: Reg, src: Reg) -> R
         ctx.mark_owned_text_register(dst.0);
         ctx.unmark_owned_text_register(src.0);
     }
-    propagate_value_type_facts(ctx, src, dst);
-    // Do NOT transfer text ownership through Mov. Ownership stays on
-    // the source register so that the *original* allocation site keeps
-    // the responsibility to free. The destination is an alias — it
-    // shares the pointer but is NOT the owner.
-    //
-
-    // Previous behaviour transferred ownership (unmark src, mark dst).
-    // That caused use-after-free when f-string interpolation did
-    //  Mov str_reg, user_var // ownership moved to temp
-    //  Concat dst, dst, str_reg // temp freed → user_var dangling
-    //
-
-    // With this change, Concat sees str_reg as non-owned and skips
-    // freeing. The original owner (e.g. the Concat/ToString that
-    // created the text) is freed either by a later Concat (if a==dst
-    // reuse) or at function return cleanup.
     Ok(())
 }
 

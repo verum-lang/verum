@@ -95,7 +95,26 @@ fn execute_with_runtime(
     use verum_llvm::{OptimizationLevel, memory_buffer::MemoryBuffer, values::AnyValue};
     Target::initialize_native(&InitializationConfig::default()).expect("native target");
     let ast = Parser::new(source).parse_module().expect("parse");
-    let vbc = VbcCodegen::new().compile_module(&ast).expect("VBC");
+    let mut vbc = VbcCodegen::new().compile_module(&ast).expect("VBC");
+    // Match native source execution: concrete calls select their declared
+    // specialization before lowering, including the callee's typed cleanup.
+    let mut graph = verum_vbc::mono::InstantiationGraph::new();
+    for function in &mut vbc.functions {
+        function.is_generic = !function.type_params.is_empty();
+        let start = function.bytecode_offset as usize;
+        let mut instructions = verum_vbc::bytecode::decode_instructions(
+            &vbc.bytecode[start..start + function.bytecode_length as usize],
+        ).expect("loaded source body");
+        verum_vbc::bytecode::jump_offsets_to_instr_indices(&mut instructions);
+        function.instructions = Some(instructions);
+    }
+    for function in &vbc.functions {
+        verum_vbc::mono::discover_call_instantiations(
+            &vbc, function.instructions.as_ref().unwrap(), function.func_id_base, &mut graph,
+        ).expect("declared call witnesses");
+    }
+    let vbc = verum_vbc::mono::monomorphize_minimal(vbc, &graph)
+        .expect("specialized source module").module;
     let context = Context::create();
     let mut lower = VbcToLlvmLowering::new(
         &context,
@@ -109,6 +128,10 @@ fn execute_with_runtime(
     let mut definitions = vbc
         .functions
         .iter()
+        // Generic templates are retained in VBC for further specialization;
+        // only their selected concrete bodies belong in this executable.
+        // Any call still reaching an omitted template fails IR validation.
+        .filter(|fd| !fd.is_generic)
         .map(|fd| {
             let name = vbc.get_string(fd.name).unwrap();
             let f = lower.module().get_function(name).expect(name);

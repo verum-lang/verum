@@ -1800,8 +1800,7 @@ pub(super) fn lower<'ctx>(
         match &plan.nodes[root.0] {
             CopyNode::Identity => {
                 ctx.clear_callable_producers();
-                ctx.set_register(dst.0, source);
-                return Ok(());
+                return super::lower_value_identity(ctx, dst, src);
             }
             CopyNode::Callable(signature) => {
                 ctx.require_callable_copy(src, signature)?;

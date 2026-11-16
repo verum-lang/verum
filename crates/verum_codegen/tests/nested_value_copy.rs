@@ -62,6 +62,92 @@ fn native_immutable_text_survives_replacement_of_its_copied_sum_owner() {
 }
 
 #[test]
+fn native_text_builder_vbc_copy_preserves_field_projection() {
+    native_text_builder_vbc_copy(false);
+}
+
+#[test]
+fn native_text_builder_vbc_self_copy_preserves_field_projection() {
+    native_text_builder_vbc_copy(true);
+}
+
+fn native_text_builder_vbc_copy(copy_in_place: bool) {
+    use verum_ast::ItemKind;
+    use verum_vbc::{Instruction, Reg, TypeId, TypeRef};
+    use verum_vbc::instruction::{BinaryIntOp, MemSubOpcode};
+
+    // Explicit VBC representation gate, not source admission. The real source
+    // owns the descriptor; the fixture initializes the {ptr,len,cap} state
+    // produced by Text.with_capacity + byte writes. Allocation, New(TEXT) and
+    // SetF all use production lowering, without a synthetic host-memory ABI.
+    let mut ast = Parser::new(include_str!("../../../core/text/text.vr"))
+        .parse_module().expect("canonical Text source");
+    ast.items.retain(|item| matches!(&item.kind, ItemKind::Module(_))
+        || matches!(&item.kind, ItemKind::Type(declaration)
+            if declaration.name.name.as_str() == "Text"));
+    assert_eq!(ast.items.len(), 2, "canonical module and record");
+    ast.items.extend(Parser::new("fn main() -> Int { 0 }")
+        .parse_module().expect("entry signature").items);
+    let mut compiled = VbcCodegen::with_config(
+        verum_vbc::codegen::CodegenConfig::new("core.text.text"),
+    ).compile_module(&ast).expect("actual source descriptor");
+    let descriptor = compiled.get_type(TypeId::TEXT).expect("canonical Text identity");
+    assert_eq!(descriptor.kind, verum_vbc::types::TypeKind::Record);
+    assert_eq!(descriptor.fields.len(), 3);
+    for (index, name) in ["ptr", "len", "cap"].into_iter().enumerate() {
+        assert_eq!(compiled.get_string(descriptor.fields[index].name), Some(name));
+        assert_eq!(descriptor.fields[index].offset, index as u32 * 8);
+        assert!(descriptor.fields[index].declaration_type.is_some());
+    }
+    assert_eq!(descriptor.fields[1].declaration_type, Some(TypeRef::Concrete(TypeId::INT)));
+    assert_eq!(descriptor.fields[2].declaration_type, Some(TypeRef::Concrete(TypeId::INT)));
+
+    let mut allocation_operands = verum_common::List::<u8>::new().into();
+    for register in [Reg(2), Reg(0), Reg(1)] {
+        verum_vbc::encoding::encode_reg(register, &mut allocation_operands);
+    }
+    let copied = if copy_in_place { Reg(3) } else { Reg(6) };
+    let instructions = [
+        Instruction::LoadI { dst: Reg(0), value: 17 },
+        Instruction::LoadI { dst: Reg(1), value: 1 },
+        // Nine NUL characters are valid UTF-8. Zeroing cap+1 initializes the
+        // byte prefix and terminating NUL expected by the source mutators.
+        Instruction::MemExtended {
+            sub_op: MemSubOpcode::AllocZeroed.to_byte(), operands: allocation_operands,
+        },
+        Instruction::New { dst: Reg(3), type_id: TypeId::TEXT.0, field_count: 3 },
+        Instruction::SetF { obj: Reg(3), field_idx: 0, value: Reg(2) },
+        Instruction::LoadI { dst: Reg(4), value: 9 },
+        Instruction::SetF { obj: Reg(3), field_idx: 1, value: Reg(4) },
+        Instruction::LoadI { dst: Reg(5), value: 16 },
+        Instruction::SetF { obj: Reg(3), field_idx: 2, value: Reg(5) },
+        Instruction::CloneTyped { dst: copied, src: Reg(3), type_ref: TypeRef::Concrete(TypeId::TEXT) },
+        // No mutation: isolate carrier preservation from storage ownership.
+        Instruction::GetF { dst: Reg(8), obj: copied, field_idx: 1 },
+        Instruction::LoadI { dst: Reg(9), value: 64 },
+        Instruction::BinaryI { op: BinaryIntOp::Add, dst: Reg(10), a: Reg(8), b: Reg(9) },
+        Instruction::Ret { value: Reg(10) },
+    ];
+    let mut bytecode = verum_common::List::<u8>::new().into();
+    for instruction in &instructions {
+        verum_vbc::bytecode::encode_instruction(instruction, &mut bytecode);
+    }
+    let offset = compiled.append_bytecode(&bytecode);
+    let entry = compiled.find_function_by_name("core.text.text.main").expect("entry");
+    let body = compiled.functions.iter_mut().find(|function| function.id == entry).unwrap();
+    body.bytecode_offset = offset;
+    body.bytecode_length = bytecode.len() as u32;
+    body.register_count = 11;
+    body.locals_count = 11;
+    body.instructions = None;
+    body.value_uses = None;
+    let wire = deserialize_module(&serialize_module(&compiled).expect("serialize"))
+        .expect("reload");
+    verum_vbc::validate::validate_module(&wire).expect("valid representation fixture");
+    run_native_module(wire);
+}
+
+#[test]
 fn a_native_copy_through_a_borrow_owns_its_nested_child() {
     run_native(r#"
         type Leaf is { value: Int };
@@ -73,6 +159,61 @@ fn a_native_copy_through_a_borrow_owns_its_nested_child() {
             copied.leaf.value
         }
     "#);
+}
+
+#[test]
+fn native_typed_reference_copy_keeps_the_source_field_address() {
+    use verum_vbc::{Instruction, TypeId, TypeRef, instruction::CbgrSubOpcode};
+    let mut wire = module(r#"
+        type Cell is { padding:Int, value:Int };
+        fn main()->Int {
+            let owner=Cell{padding:11,value:17};
+            let original=&owner.value;
+            let copied=original;
+            let expected=original as &unsafe Byte as Int;
+            let actual=copied as &unsafe Byte as Int;
+            if expected==actual {73}else{0}
+        }
+    "#);
+    let entry = wire.find_function_by_name("main").unwrap();
+    let descriptor = wire.get_function(entry).unwrap();
+    let start = descriptor.bytecode_offset as usize;
+    let mut instructions = verum_vbc::bytecode::decode_instructions(
+        &wire.bytecode[start..start + descriptor.bytecode_length as usize],
+    ).unwrap();
+    verum_vbc::bytecode::jump_offsets_to_instr_indices(&mut instructions);
+    assert!(instructions.iter().any(|instruction| matches!(instruction,
+        Instruction::CbgrExtended { sub_op, .. } if *sub_op == CbgrSubOpcode::RefField as u8)));
+    let conversions: verum_common::List<_> = instructions.iter().enumerate().filter_map(|(index, instruction)| {
+        let Instruction::CbgrExtended { sub_op, operands } = instruction else { return None; };
+        if *sub_op != CbgrSubOpcode::ToRawPtr as u8 { return None; }
+        let mut offset = 0;
+        verum_vbc::encoding::decode_reg(operands, &mut offset).unwrap();
+        Some((index, verum_vbc::encoding::decode_reg(operands, &mut offset).unwrap()))
+    }).collect();
+    assert_eq!(conversions.len(), 2, "two actual source field-address observations");
+    let (observe, copied) = conversions[1];
+    assert_ne!(conversions[0].1, copied, "the expected address keeps its original carrier");
+    let (index, source) = instructions[..observe].iter().enumerate().rev().find_map(|(index, instruction)| {
+        match instruction { Instruction::Mov { dst, src } if *dst == copied => Some((index, *src)), _ => None }
+    }).expect("source alias binding");
+    // Replace only the source alias operation. The real field producer and
+    // ordinary native sidecar prepass remain responsible for its address.
+    instructions[index] = Instruction::CloneTyped {
+        dst: copied, src: source,
+        type_ref: TypeRef::reference(TypeRef::Concrete(TypeId::INT), Default::default(), Default::default()),
+    };
+    let mut bytecode = verum_common::List::<u8>::new().into();
+    verum_vbc::bytecode::encode_instructions_with_fixup(&instructions, &mut bytecode);
+    let offset = wire.append_bytecode(&bytecode);
+    let descriptor = wire.functions.iter_mut().find(|function| function.id == entry).unwrap();
+    descriptor.bytecode_offset = offset;
+    descriptor.bytecode_length = bytecode.len() as u32;
+    descriptor.instructions = None;
+    descriptor.value_uses = None;
+    let wire = deserialize_module(&serialize_module(&wire).unwrap()).unwrap();
+    verum_vbc::validate::validate_module(&wire).expect("valid typed field-reference copy");
+    run_native_module(wire);
 }
 
 #[test]
