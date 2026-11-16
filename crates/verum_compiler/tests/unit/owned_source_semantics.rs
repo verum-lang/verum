@@ -13,6 +13,9 @@ mod typeid_clone_contract;
 #[path = "numeric_capability_contract.rs"]
 mod numeric_capability_contract;
 
+#[path = "sqlite_scanner_boundary.rs"]
+mod sqlite_scanner_boundary;
+
 #[path = "current_source_authority.rs"]
 mod current_source_authority;
 

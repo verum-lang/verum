@@ -47,20 +47,20 @@ public fn mode_name(m: &ScanMode) -> Text {
 }
 
 public type ScanState is {
-    mode: ScanMode,
+    public(in core.database.sqlite.native.complete) mode: ScanMode,
     /// Depth of unterminated `CREATE TRIGGER … BEGIN …` regions.
-    trigger_depth: Int,
+    public(in core.database.sqlite.native.complete) trigger_depth: Int,
     /// Token history long enough to catch CREATE TRIGGER boundaries
     /// and the trailing END / ;-after-END.
-    saw_create: Bool,
-    saw_trigger: Bool,
-    saw_begin: Bool,
-    saw_end: Bool,
+    public(in core.database.sqlite.native.complete) saw_create: Bool,
+    public(in core.database.sqlite.native.complete) saw_trigger: Bool,
+    public(in core.database.sqlite.native.complete) saw_begin: Bool,
+    public(in core.database.sqlite.native.complete) saw_end: Bool,
     /// True once any non-whitespace-non-comment byte has been seen.
-    has_content: Bool,
+    public(in core.database.sqlite.native.complete) has_content: Bool,
     /// True iff the last non-comment byte was `;` *outside* any
     /// quoted region and at trigger_depth 0 — the completeness flag.
-    last_was_semicolon: Bool,
+    public(in core.database.sqlite.native.complete) last_was_semicolon: Bool,
 }
 
 public fn new_state() -> ScanState {
