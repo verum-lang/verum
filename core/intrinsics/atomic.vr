@@ -40,6 +40,8 @@
 )
 module core.intrinsics.atomic;
 
+mount core.base.protocols.{Atomic, Integer};
+
 // =============================================================================
 // SECTION 1: Memory Ordering
 // =============================================================================
@@ -58,13 +60,13 @@ public type MemoryOrder is
 // =============================================================================
 
 /// Atomic load
-public fn atomic_load<T>(ptr: &T, order: MemoryOrder) -> T { @intrinsic("atomic_load", ptr, order) }
+public fn atomic_load<T: Atomic>(ptr: &T, order: MemoryOrder) -> T { @intrinsic("atomic_load", ptr, order) }
 
 /// Atomic store
-public fn atomic_store<T>(ptr: &mut T, val: T, order: MemoryOrder) { @intrinsic("atomic_store", ptr, val, order) }
+public fn atomic_store<T: Atomic>(ptr: &mut T, val: T, order: MemoryOrder) { @intrinsic("atomic_store", ptr, val, order) }
 
 /// Atomic exchange
-public fn atomic_xchg<T>(ptr: &mut T, val: T, order: MemoryOrder) -> T {
+public fn atomic_xchg<T: Atomic>(ptr: &mut T, val: T, order: MemoryOrder) -> T {
     @intrinsic("atomicrmw_xchg", ptr, val, order)
 }
 
@@ -73,7 +75,7 @@ public fn atomic_xchg<T>(ptr: &mut T, val: T, order: MemoryOrder) -> T {
 // =============================================================================
 
 /// Atomic compare-and-swap. Returns (old_value, success).
-public fn atomic_cmpxchg<T>(
+public fn atomic_cmpxchg<T: Atomic>(
     ptr: &mut T,
     expected: T,
     desired: T,
@@ -84,7 +86,7 @@ public fn atomic_cmpxchg<T>(
 }
 
 /// Atomic compare-and-swap (weak). May fail spuriously.
-public fn atomic_cmpxchg_weak<T>(
+public fn atomic_cmpxchg_weak<T: Atomic>(
     ptr: &mut T,
     expected: T,
     desired: T,
@@ -99,32 +101,32 @@ public fn atomic_cmpxchg_weak<T>(
 // =============================================================================
 
 /// Atomic add, returns old value
-public fn atomic_add<T>(ptr: &mut T, val: T, order: MemoryOrder) -> T {
+public fn atomic_add<T: Atomic + Integer>(ptr: &mut T, val: T, order: MemoryOrder) -> T {
     @intrinsic("atomicrmw_add", ptr, val, order)
 }
 
 /// Atomic subtract, returns old value
-public fn atomic_sub<T>(ptr: &mut T, val: T, order: MemoryOrder) -> T {
+public fn atomic_sub<T: Atomic + Integer>(ptr: &mut T, val: T, order: MemoryOrder) -> T {
     @intrinsic("atomicrmw_sub", ptr, val, order)
 }
 
 /// Atomic maximum (signed), returns old value
-public fn atomic_max<T>(ptr: &mut T, val: T, order: MemoryOrder) -> T {
+public fn atomic_max<T: Atomic + Integer>(ptr: &mut T, val: T, order: MemoryOrder) -> T {
     @intrinsic("atomicrmw_max", ptr, val, order)
 }
 
 /// Atomic minimum (signed), returns old value
-public fn atomic_min<T>(ptr: &mut T, val: T, order: MemoryOrder) -> T {
+public fn atomic_min<T: Atomic + Integer>(ptr: &mut T, val: T, order: MemoryOrder) -> T {
     @intrinsic("atomicrmw_min", ptr, val, order)
 }
 
 /// Atomic maximum (unsigned), returns old value
-public fn atomic_umax<T>(ptr: &mut T, val: T, order: MemoryOrder) -> T {
+public fn atomic_umax<T: Atomic + Integer>(ptr: &mut T, val: T, order: MemoryOrder) -> T {
     @intrinsic("atomicrmw_umax", ptr, val, order)
 }
 
 /// Atomic minimum (unsigned), returns old value
-public fn atomic_umin<T>(ptr: &mut T, val: T, order: MemoryOrder) -> T {
+public fn atomic_umin<T: Atomic + Integer>(ptr: &mut T, val: T, order: MemoryOrder) -> T {
     @intrinsic("atomicrmw_umin", ptr, val, order)
 }
 
@@ -133,22 +135,22 @@ public fn atomic_umin<T>(ptr: &mut T, val: T, order: MemoryOrder) -> T {
 // =============================================================================
 
 /// Atomic bitwise AND, returns old value
-public fn atomic_and<T>(ptr: &mut T, val: T, order: MemoryOrder) -> T {
+public fn atomic_and<T: Atomic + Integer>(ptr: &mut T, val: T, order: MemoryOrder) -> T {
     @intrinsic("atomicrmw_and", ptr, val, order)
 }
 
 /// Atomic bitwise NAND, returns old value
-public fn atomic_nand<T>(ptr: &mut T, val: T, order: MemoryOrder) -> T {
+public fn atomic_nand<T: Atomic + Integer>(ptr: &mut T, val: T, order: MemoryOrder) -> T {
     @intrinsic("atomicrmw_nand", ptr, val, order)
 }
 
 /// Atomic bitwise OR, returns old value
-public fn atomic_or<T>(ptr: &mut T, val: T, order: MemoryOrder) -> T {
+public fn atomic_or<T: Atomic + Integer>(ptr: &mut T, val: T, order: MemoryOrder) -> T {
     @intrinsic("atomicrmw_or", ptr, val, order)
 }
 
 /// Atomic bitwise XOR, returns old value
-public fn atomic_xor<T>(ptr: &mut T, val: T, order: MemoryOrder) -> T {
+public fn atomic_xor<T: Atomic + Integer>(ptr: &mut T, val: T, order: MemoryOrder) -> T {
     @intrinsic("atomicrmw_xor", ptr, val, order)
 }
 

@@ -10,6 +10,9 @@ mod source_protocol_registration;
 #[path = "typeid_clone_contract.rs"]
 mod typeid_clone_contract;
 
+#[path = "numeric_capability_contract.rs"]
+mod numeric_capability_contract;
+
 fn select_source_module(
     owner: &str,
     module: &Module,

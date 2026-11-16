@@ -19,9 +19,7 @@ fn actual_provider_and_collection_consumers_satisfy_clone_in_the_complete_graph(
     let session = crate::Session::new(crate::options::CompilerOptions::default());
     let (registry, phase) = release_stdlib_graph(&session);
     let owner = "core.base.protocols";
-    let module = typeid_provider(&registry.read().get_by_path(owner).unwrap().ast);
-    // Check the complete selected implementation under the original full
-    // registry. Unrelated Sized/Atomic owner failures are tracked by T2813.
+    let module = registry.read().get_by_path(owner).unwrap().ast.clone();
     check_source_types(&mut phase.configured_checker(), owner, &module, &registry,
         |error| error.to_diagnostic_with_span(Some(|span| session.convert_span(span))))
         .unwrap_or_else(|errors| panic!("{owner}: {errors:#?}"));

@@ -734,6 +734,7 @@ implement Clone for Int {
 }
 
 implement Copy for Int {}
+implement Sized for Int {}
 
 implement Default for Int {
     @inline(always)
@@ -1542,6 +1543,7 @@ implement Clone for Bool {
 }
 
 implement Copy for Bool {}
+implement Sized for Bool {}
 
 implement Default for Bool {
     @inline(always)
@@ -1907,6 +1909,7 @@ implement Clone for Char {
 }
 
 implement Copy for Char {}
+implement Sized for Char {}
 
 implement Default for Char {
     @inline(always)
@@ -1950,6 +1953,7 @@ implement Clone for () {
 }
 
 implement Copy for () {}
+implement Sized for () {}
 
 implement Default for () {
     public fn default() -> () { () }
@@ -4469,6 +4473,7 @@ implement Clone for Int8 {
     public fn clone(&self) -> Int8 { *self }
 }
 implement Copy for Int8 {}
+implement Sized for Int8 {}
 
 // --- Int16 ---
 implement PartialEq for Int16 {
@@ -4490,6 +4495,7 @@ implement Clone for Int16 {
     public fn clone(&self) -> Int16 { *self }
 }
 implement Copy for Int16 {}
+implement Sized for Int16 {}
 
 // --- Int32 ---
 implement PartialEq for Int32 {
@@ -4511,6 +4517,7 @@ implement Clone for Int32 {
     public fn clone(&self) -> Int32 { *self }
 }
 implement Copy for Int32 {}
+implement Sized for Int32 {}
 
 // --- Int128 ---
 implement PartialEq for Int128 {
@@ -4532,9 +4539,11 @@ implement Clone for Int128 {
     public fn clone(&self) -> Int128 { *self }
 }
 implement Copy for Int128 {}
+implement Sized for Int128 {}
 
 // --- UInt8 ---
 implement Copy for UInt8 {}
+implement Sized for UInt8 {}
 
 // --- UInt16 ---
 implement PartialEq for UInt16 {
@@ -4556,6 +4565,7 @@ implement Clone for UInt16 {
     public fn clone(&self) -> UInt16 { *self }
 }
 implement Copy for UInt16 {}
+implement Sized for UInt16 {}
 
 // --- UInt32 ---
 implement PartialEq for UInt32 {
@@ -4577,6 +4587,7 @@ implement Clone for UInt32 {
     public fn clone(&self) -> UInt32 { *self }
 }
 implement Copy for UInt32 {}
+implement Sized for UInt32 {}
 
 // --- UInt64 ---
 implement PartialEq for UInt64 {
@@ -4598,6 +4609,7 @@ implement Clone for UInt64 {
     public fn clone(&self) -> UInt64 { *self }
 }
 implement Copy for UInt64 {}
+implement Sized for UInt64 {}
 
 // --- UInt128 ---
 implement PartialEq for UInt128 {
@@ -4619,6 +4631,7 @@ implement Clone for UInt128 {
     public fn clone(&self) -> UInt128 { *self }
 }
 implement Copy for UInt128 {}
+implement Sized for UInt128 {}
 
 // --- Float32 ---
 // `PartialEq`, not `Eq`: `Eq` promises REFLEXIVITY — that `a == a`
@@ -4650,11 +4663,13 @@ implement Clone for Float32 {
     public fn clone(&self) -> Float32 { *self }
 }
 implement Copy for Float32 {}
+implement Sized for Float32 {}
 
 // =============================================================================
 // Float64
 // =============================================================================
 implement Copy for Float64 {}
+implement Sized for Float64 {}
 
 implement Float64 {
     /// `:.N` precision target (T0604); see `Float.to_precision`.

@@ -17,17 +17,20 @@
 //!                  (`B: Mul<Output=B> + One`).  Implemented in primitives.vr.
 //!   Numeric      — arithmetic marker for integer + float types; used as a bound
 //!                  in `math/tensor.vr` (`DynTensor<T: Numeric>`) and `math/linalg.vr`.
-//!   Integer      — integer atomic-fetch-modify marker; extends Atomic; used by
-//!                  generic atomic intrinsics `atomic_fetch_add<T: Integer>`.
+//!   Integer      — integer arithmetic classification; extends Numeric.
+//!                  Atomic operations additionally require Atomic.
 //!   SignedInteger — signed semantics; extends Integer; used by `wrapping_neg`
 //!                   and related operations that are only safe on signed types.
 //!
 //! This drift guard pins:
 //!   1. Each protocol is declared in `core/base/protocols.vr`.
 //!   2. Each has a known active use site (bound in a generic function or type).
-//!   3. Implementation counts in protocols.vr stay stable (Numeric: 16, Integer: 12,
-//!      SignedInteger: 7).
+//!   3. Numeric classification and atomic representation remain independent.
 //!   4. Zero and One have at least one implementation in primitives.vr (Int, Float).
+//!
+//! Concrete types and aliases are checked by the compiler's
+//! `numeric_capability_contract` tests against the actual stdlib graph.
+//! Counting declarations cannot establish which aliases satisfy a bound.
 
 const PROTOCOLS_VR: &str = include_str!("../../../core/base/protocols.vr");
 const PRIMITIVES_VR: &str = include_str!("../../../core/base/primitives.vr");
@@ -35,15 +38,7 @@ const ITERATOR_VR: &str   = include_str!("../../../core/base/iterator.vr");
 const TENSOR_VR: &str     = include_str!("../../../core/math/tensor.vr");
 const SIMD_MOD_VR: &str   = include_str!("../../../core/simd/mod.vr");
 
-fn count_occurrences(src: &str, pattern: &str) -> usize {
-    let mut count = 0;
-    let mut start = 0;
-    while let Some(pos) = src[start..].find(pattern) {
-        count += 1;
-        start += pos + pattern.len();
-    }
-    count
-}
+const ATOMIC_VR: &str = include_str!("../../../core/intrinsics/atomic.vr");
 
 // ── Zero ─────────────────────────────────────────────────────────────────────
 
@@ -161,17 +156,6 @@ fn tensor_stack_bounds_on_the_numeric_tower() {
     );
 }
 
-/// Numeric is implemented for 16 types in protocols.vr:
-///   8 unsigned ints + 5 signed ints + 3 floats = 16.
-#[test]
-fn numeric_implementation_count_in_protocols_vr_is_16() {
-    let count = count_occurrences(PROTOCOLS_VR, "implement Numeric for ");
-    assert_eq!(
-        count, 16,
-        "Expected 16 Numeric implementations in protocols.vr, got {count}"
-    );
-}
-
 // ── Integer ───────────────────────────────────────────────────────────────────
 
 #[test]
@@ -183,21 +167,10 @@ fn integer_protocol_declared_in_protocols_vr() {
 }
 
 #[test]
-fn integer_extends_atomic() {
+fn integer_extends_numeric_without_granting_atomic_representation() {
     assert!(
-        PROTOCOLS_VR.contains("public type Integer is protocol extends Atomic"),
-        "Integer must extend Atomic in protocols.vr"
-    );
-}
-
-/// Integer is implemented for 13 types in protocols.vr:
-///   6 unsigned (UInt8/16/32/64/128 + USize) + 7 signed (Int8/16/32/64/128 + Int + ISize) = 13.
-#[test]
-fn integer_implementation_count_in_protocols_vr_is_13() {
-    let count = count_occurrences(PROTOCOLS_VR, "implement Integer for ");
-    assert_eq!(
-        count, 13,
-        "Expected 13 Integer implementations in protocols.vr, got {count}"
+        PROTOCOLS_VR.contains("public type Integer is protocol extends Numeric {}"),
+        "Integer classifies arithmetic independently of atomic representation"
     );
 }
 
@@ -216,16 +189,6 @@ fn signed_integer_extends_integer() {
     assert!(
         PROTOCOLS_VR.contains("public type SignedInteger is protocol extends Integer"),
         "SignedInteger must extend Integer in protocols.vr"
-    );
-}
-
-/// SignedInteger is implemented for 7 types: Int8/16/32/64/128 + Int + ISize.
-#[test]
-fn signed_integer_implementation_count_in_protocols_vr_is_7() {
-    let count = count_occurrences(PROTOCOLS_VR, "implement SignedInteger for ");
-    assert_eq!(
-        count, 7,
-        "Expected 7 SignedInteger implementations in protocols.vr, got {count}"
     );
 }
 
@@ -249,6 +212,6 @@ fn all_five_protocols_are_non_vestigial() {
     // T0499: the tensor stack moved to RealField; Numeric's live bound
     // sites are the SIMD vectors (`T: SimdElement + Numeric`).
     assert!(SIMD_MOD_VR.contains("+ Numeric"),   "Numeric: must have use site in simd/mod.vr");
-    assert!(PROTOCOLS_VR.contains("extends Atomic"), "Integer: must extend Atomic in protocols.vr");
+    assert!(ATOMIC_VR.contains("T: Atomic + Integer"), "Integer: must have a use site in atomic.vr");
     assert!(PROTOCOLS_VR.contains("extends Integer"), "SignedInteger: must extend Integer in protocols.vr");
 }

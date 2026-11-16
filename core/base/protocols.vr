@@ -1101,7 +1101,8 @@ implement Formatter {
 // =============================================================================
 
 /// Marker protocol for types with known size at compile time.
-/// Almost all types implement Sized; only dynamically-sized types don't.
+/// Implementations declare a fixed value layout; generic callers must carry
+/// this bound explicitly. Primitive implementations live with their types.
 public type Sized is protocol {};
 
 // =============================================================================
@@ -1232,26 +1233,22 @@ public type One is protocol {
 // Atomic Protocol (for generic atomic operations)
 // =============================================================================
 
-/// Marker protocol for types that support atomic operations.
+/// Marker protocol for value representations admitted by atomic operations.
 ///
 
 /// Types implementing Atomic can be used with generic atomic intrinsics:
 /// - atomic_load<T>
 /// - atomic_store<T>
-/// - atomic_cas<T>
-/// - atomic_exchange<T>
-/// - atomic_fetch_add<T> (requires T: Integer)
-/// - atomic_fetch_sub<T> (requires T: Integer)
+/// - atomic_cmpxchg<T>
+/// - atomic_xchg<T>
+/// - atomic_add<T> (also requires T: Integer)
+/// - atomic_sub<T> (also requires T: Integer)
 ///
 
 /// ## Supported Sizes
-/// Atomic operations are supported for 1, 2, 4, and 8 byte types.
-/// The VBC runtime dispatches to appropriate hardware instructions
-/// based on the type's size.
-///
-
-/// Implementations may provide `meta fn ATOMIC_SIZE() -> Int` for
-/// compile-time size queries.
+/// The standard library admits scalar widths of 1, 2, 4, and 8 bytes.
+/// Target support is a separate requirement: target_has_atomic<T>() reports
+/// support for the selected target. This protocol alone does not prove it.
 public type Atomic is protocol extends Copy + Sized {};
 
 // Atomic implementations for primitive integer types
@@ -1268,24 +1265,19 @@ implement Atomic for Int    {}
 implement Atomic for Bool   {}
 
 // =============================================================================
-// Integer Protocol (for numeric atomic operations)
+// Integer Protocol
 // =============================================================================
 
-/// Marker protocol for integer types that support arithmetic atomic operations.
+/// Marker protocol for integer arithmetic, independently of atomic support.
 ///
 
-/// Types implementing Integer can use fetch-and-modify atomics:
-/// - atomic_fetch_add<T>
-/// - atomic_fetch_sub<T>
-/// - atomic_fetch_and<T>
-/// - atomic_fetch_or<T>
-/// - atomic_fetch_xor<T>
-///
-
-/// Implementations may provide:
-/// - `meta fn IS_SIGNED() -> Bool` - whether this is a signed integer type
-/// - `meta fn BIT_WIDTH() -> Int` - bit width of the integer type
-public type Integer is protocol extends Atomic {};
+/// Types implementing both Integer and Atomic can use fetch-and-modify atomics:
+/// - atomic_add<T>
+/// - atomic_sub<T>
+/// - atomic_and<T>
+/// - atomic_or<T>
+/// - atomic_xor<T>
+public type Integer is protocol extends Numeric {};
 
 // Integer implementations for unsigned types
 // The compiler uses T.size and T.is_signed type properties for dispatch.
