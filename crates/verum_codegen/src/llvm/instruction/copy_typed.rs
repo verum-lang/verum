@@ -382,6 +382,13 @@ impl<'a, 'ctx> Emitter<'a, 'ctx> {
             .or_llvm_err()?;
         Ok(pointer)
     }
+    fn flat(&self, bytes: IntValue<'ctx>) -> Result<PointerValue<'ctx>> {
+        self.charge(self.bytes, bytes, "copy_flat_budget")?;
+        self.journal_room()?;
+        let pointer = self.malloc(bytes)?;
+        self.record_allocation(0, pointer, bytes, self.integer(0))?;
+        Ok(pointer)
+    }
     fn raw(&self, bytes: IntValue<'ctx>) -> Result<PointerValue<'ctx>> {
         self.charge(self.bytes, bytes, "copy_backing_budget")?;
         self.journal_room()?;
@@ -1702,6 +1709,75 @@ impl<'a, 'ctx> Emitter<'a, 'ctx> {
         self.store(frame, 32, self.word(output)?)?;
         self.jump(self.finish)
     }
+    fn text(&self, frame: PointerValue<'ctx>) -> Result<()> {
+        use super::super::runtime::{TEXT_CAP_OFFSET, TEXT_LEN_OFFSET, TEXT_OBJECT_SIZE, TEXT_PTR_OFFSET};
+
+        let source_word = self.load(frame, 0)?;
+        let empty = self.block("copy_null_text");
+        let record = self.block("copy_text_record");
+        self.builder.build_conditional_branch(
+            self.equal(source_word, self.integer(0))?, empty, record,
+        ).or_llvm_err()?;
+        self.builder.position_at_end(empty);
+        self.store(frame, 32, self.integer(0))?;
+        self.jump(self.finish)?;
+        self.builder.position_at_end(record);
+
+        // The native Text producer establishes a live flat record. It does not
+        // establish a CBGR header before its byte pointer: static, OS and CBGR
+        // buffers all use this codec. Never infer a source allocator from cap.
+        let source = self.pointer(source_word)?;
+        let data = self.load(source, TEXT_PTR_OFFSET)?;
+        let len = self.load(source, TEXT_LEN_OFFSET)?;
+        let cap = self.load(source, TEXT_CAP_OFFSET)?;
+        self.bounded(len, u32::MAX as u64 - 1, "copy_text_length")?;
+        self.bounded(cap, u32::MAX as u64 - 1, "copy_text_capacity")?;
+        let borrowed = self.equal(cap, self.integer(0))?;
+        let fits = self.builder.build_int_compare(IntPredicate::ULE, len, cap, "copy_text_fits")
+            .or_llvm_err()?;
+        self.guard(self.builder.build_or(borrowed, fits, "copy_text_shape").or_llvm_err()?,
+            "copy_text_shape_valid")?;
+        // Text's value is its initialized bytes, not its spare reservation.
+        // The declared Clone likewise allocates capacity equal to byte length.
+        let capacity = len;
+        let no_backing = self.equal(capacity, self.integer(0))?;
+        let present = self.builder.build_int_compare(IntPredicate::NE, data, self.integer(0), "copy_text_bytes_present")
+            .or_llvm_err()?;
+        let unallocated = self.builder.build_and(no_backing, borrowed, "copy_text_unallocated").or_llvm_err()?;
+        self.guard(self.builder.build_or(unallocated, present, "copy_text_pointer_valid").or_llvm_err()?,
+            "copy_text_pointer_ready")?;
+        let last_start = self.builder.build_int_sub(self.integer(u64::MAX), len, "copy_text_last_start")
+            .or_llvm_err()?;
+        self.guard(self.builder.build_int_compare(IntPredicate::ULE, data, last_start, "copy_text_range").or_llvm_err()?,
+            "copy_text_range_valid")?;
+
+        let output = self.flat(self.integer(TEXT_OBJECT_SIZE))?;
+        self.store(output, TEXT_PTR_OFFSET, self.integer(0))?;
+        self.store(output, TEXT_LEN_OFFSET, len)?;
+        self.store(output, TEXT_CAP_OFFSET, capacity)?;
+        let allocate = self.block("copy_text_backing");
+        let ready = self.block("copy_text_ready");
+        self.builder.build_conditional_branch(no_backing, ready, allocate).or_llvm_err()?;
+        self.builder.position_at_end(allocate);
+        let extent = self.builder.build_int_add(capacity, self.integer(1), "copy_text_extent")
+            .or_llvm_err()?;
+        let target = self.raw(extent)?;
+        let copy = self.block("copy_text_prefix");
+        let filled = self.block("copy_text_terminated");
+        self.builder.build_conditional_branch(self.equal(len, self.integer(0))?, filled, copy)
+            .or_llvm_err()?;
+        self.builder.position_at_end(copy);
+        self.memcpy(target, self.pointer(data)?, len)?;
+        self.jump(filled)?;
+        self.builder.position_at_end(filled);
+        self.builder.build_store(self.address(target, len)?, self.context.i8_type().const_zero())
+            .or_llvm_err()?;
+        self.store(output, TEXT_PTR_OFFSET, self.word(target)?)?;
+        self.jump(ready)?;
+        self.builder.position_at_end(ready);
+        self.store(frame, 32, self.word(output)?)?;
+        self.jump(self.finish)
+    }
     fn enter(
         &self,
         frame: PointerValue<'ctx>,
@@ -1714,6 +1790,7 @@ impl<'a, 'ctx> Emitter<'a, 'ctx> {
                 self.store(frame, 32, self.load(frame, 0)?)?;
                 self.jump(self.finish)
             }
+            CopyNode::Text => self.text(frame),
             CopyNode::Callable(_) => Err(LlvmLoweringError::unsupported(
                 "native nested callable copy requires its producer-issued environment receipt")),
             CopyNode::Alias(next) => {
@@ -2131,6 +2208,11 @@ pub(super) fn lower<'ctx>(
     // its spelling would lose generic field layouts after the copied result.
     if matches!(ty, TypeRef::Concrete(_) | TypeRef::Instantiated { .. }) {
         mark_register_from_return_type(ctx, dst.0, ty);
+    }
+    // Transparent declarations keep their semantic identity, but the resolved
+    // copy operation owns the actual runtime codec after set_register clears it.
+    if matches!(plan.nodes[root.0], CopyNode::Text) {
+        ctx.mark_text_register(dst.0);
     }
     Ok(())
 }

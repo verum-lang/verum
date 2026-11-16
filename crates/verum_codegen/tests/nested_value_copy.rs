@@ -63,18 +63,30 @@ fn native_immutable_text_survives_replacement_of_its_copied_sum_owner() {
 
 #[test]
 fn native_text_builder_vbc_copy_preserves_field_projection() {
-    native_text_builder_vbc_copy(false);
+    native_text_builder_vbc_copy(false, false, false);
 }
 
 #[test]
 fn native_text_builder_vbc_self_copy_preserves_field_projection() {
-    native_text_builder_vbc_copy(true);
+    native_text_builder_vbc_copy(true, false, false);
 }
 
-fn native_text_builder_vbc_copy(copy_in_place: bool) {
+#[test]
+fn native_text_builder_vbc_representation_copy_preserves_the_original_length() {
+    native_text_builder_vbc_copy(false, true, false);
+}
+
+#[test]
+fn native_transparent_text_vbc_copy_keeps_its_resolved_codec() {
+    for copy_in_place in [false, true] {
+        native_text_builder_vbc_copy(copy_in_place, false, true);
+    }
+}
+
+fn native_text_builder_vbc_copy(copy_in_place: bool, mutate: bool, transparent: bool) {
     use verum_ast::ItemKind;
     use verum_vbc::{Instruction, Reg, TypeId, TypeRef};
-    use verum_vbc::instruction::{BinaryIntOp, MemSubOpcode};
+    use verum_vbc::instruction::{BinaryIntOp, MemSubOpcode, TextSubOpcode};
 
     // Explicit VBC representation gate, not source admission. The real source
     // owns the descriptor; the fixture initializes the {ptr,len,cap} state
@@ -86,7 +98,7 @@ fn native_text_builder_vbc_copy(copy_in_place: bool) {
         || matches!(&item.kind, ItemKind::Type(declaration)
             if declaration.name.name.as_str() == "Text"));
     assert_eq!(ast.items.len(), 2, "canonical module and record");
-    ast.items.extend(Parser::new("fn main() -> Int { 0 }")
+    ast.items.extend(Parser::new("type TextValue is (Text); fn main() -> Int { 0 }")
         .parse_module().expect("entry signature").items);
     let mut compiled = VbcCodegen::with_config(
         verum_vbc::codegen::CodegenConfig::new("core.text.text"),
@@ -101,13 +113,27 @@ fn native_text_builder_vbc_copy(copy_in_place: bool) {
     }
     assert_eq!(descriptor.fields[1].declaration_type, Some(TypeRef::Concrete(TypeId::INT)));
     assert_eq!(descriptor.fields[2].declaration_type, Some(TypeRef::Concrete(TypeId::INT)));
+    let copy_type = if transparent {
+        let wrapper = compiled.types.iter().find(|ty| compiled.get_string(ty.name)
+            .is_some_and(|name| name == "TextValue" || name.ends_with(".TextValue"))).unwrap();
+        assert!(wrapper.source_declaration.is_some());
+        let ty = TypeRef::Concrete(wrapper.id);
+        let plan = verum_vbc::copy_plan::build(&compiled, &ty).unwrap();
+        let verum_vbc::copy_plan::CopyNode::Alias(inner) = plan.nodes[0] else {
+            panic!("source newtype must erase to its Text payload");
+        };
+        assert!(matches!(plan.nodes[inner.0], verum_vbc::copy_plan::CopyNode::Text));
+        ty
+    } else {
+        TypeRef::Concrete(TypeId::TEXT)
+    };
 
     let mut allocation_operands = verum_common::List::<u8>::new().into();
     for register in [Reg(2), Reg(0), Reg(1)] {
         verum_vbc::encoding::encode_reg(register, &mut allocation_operands);
     }
     let copied = if copy_in_place { Reg(3) } else { Reg(6) };
-    let instructions = [
+    let mut instructions = verum_common::List::from_iter([
         Instruction::LoadI { dst: Reg(0), value: 17 },
         Instruction::LoadI { dst: Reg(1), value: 1 },
         // Nine NUL characters are valid UTF-8. Zeroing cap+1 initializes the
@@ -121,13 +147,27 @@ fn native_text_builder_vbc_copy(copy_in_place: bool) {
         Instruction::SetF { obj: Reg(3), field_idx: 1, value: Reg(4) },
         Instruction::LoadI { dst: Reg(5), value: 16 },
         Instruction::SetF { obj: Reg(3), field_idx: 2, value: Reg(5) },
-        Instruction::CloneTyped { dst: copied, src: Reg(3), type_ref: TypeRef::Concrete(TypeId::TEXT) },
-        // No mutation: isolate carrier preservation from storage ownership.
-        Instruction::GetF { dst: Reg(8), obj: copied, field_idx: 1 },
+        Instruction::CloneTyped { dst: copied, src: Reg(3), type_ref: copy_type },
+    ]);
+    if mutate {
+        instructions.push(Instruction::LoadI { dst: Reg(7), value: 3 });
+        instructions.push(Instruction::SetF { obj: Reg(3), field_idx: 1, value: Reg(7) });
+        let mut operands = verum_common::List::<u8>::new().into();
+        for register in [Reg(8), copied] {
+            verum_vbc::encoding::encode_reg(register, &mut operands);
+        }
+        instructions.push(Instruction::TextExtended {
+            sub_op: TextSubOpcode::ByteLen as u8, operands,
+        });
+    } else {
+        // Isolate carrier preservation from storage ownership.
+        instructions.push(Instruction::GetF { dst: Reg(8), obj: copied, field_idx: 1 });
+    }
+    instructions.extend([
         Instruction::LoadI { dst: Reg(9), value: 64 },
         Instruction::BinaryI { op: BinaryIntOp::Add, dst: Reg(10), a: Reg(8), b: Reg(9) },
         Instruction::Ret { value: Reg(10) },
-    ];
+    ]);
     let mut bytecode = verum_common::List::<u8>::new().into();
     for instruction in &instructions {
         verum_vbc::bytecode::encode_instruction(instruction, &mut bytecode);

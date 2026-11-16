@@ -1095,7 +1095,11 @@ impl TypeChecker {
                     _ => None,
                 }
             }).and_then(verum_vbc::TypeId::from_well_known_scalar_name);
-            if primitive.is_some_and(verum_vbc::TypeId::has_identity_value_lifecycle) { continue; }
+            // A cleanup footprint describes the operation actually executed,
+            // independently of whether copying needs fresh owned storage.
+            if primitive.and_then(verum_vbc::drop_plan::builtin_drop_plan)
+                .is_some_and(|plan| matches!(plan, verum_vbc::drop_plan::DropPlan::Ignore))
+            { continue; }
             match ty {
                 Type::Named { .. } | Type::Generic { .. } => {
                     let Some((name, _)) = self.conversion_nominal_head(&ty) else { return false; };

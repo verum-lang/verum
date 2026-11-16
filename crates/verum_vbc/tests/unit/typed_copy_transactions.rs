@@ -417,3 +417,120 @@ fn workspace_refusal_uses_the_shared_allocation_failure_category() {
         "{error}"
     );
 }
+
+#[test]
+fn text_copy_keeps_immediate_codecs_allocation_free() {
+    let mut vm = fixture();
+    let plan = copy_plan::build(&vm.state.module, &TypeRef::Concrete(TypeId::TEXT)).unwrap();
+    assert!(matches!(plan.nodes[0], CopyNode::Text));
+    for bytes in ["", "abc", "λ"] {
+        let source = Value::from_small_string(bytes).unwrap();
+        let before = vm.state.heap.stats().total_allocs;
+        let copied = execute(&mut vm.state, source, &plan, CopyLimits {
+            max_work: 1, max_allocation_bytes: 0,
+        }).unwrap();
+        assert_eq!(copied, source);
+        assert_eq!(vm.state.heap.stats().total_allocs, before);
+    }
+}
+
+#[test]
+fn text_copy_separates_managed_and_raw_byte_buffers() {
+    let mut vm = fixture();
+    let plan = copy_plan::build(&vm.state.module, &TypeRef::Concrete(TypeId::TEXT)).unwrap();
+    // Preserve bytes, including an incomplete UTF-8 sequence while building.
+    let bytes = b"retained\xf0";
+    for storage in 0..3 {
+        let (source, raw) = match storage {
+            0 => (Value::from_ptr(vm.state.heap.alloc_text(bytes).unwrap().as_ptr().cast::<u8>()), None),
+            1 => (Value::from_ptr(vm.state.heap.alloc_text_with_capacity(bytes, 16).unwrap().as_ptr().cast::<u8>()), None),
+            _ => {
+                let address = super::super::ffi_extended::cbgr_user_allocate(&mut vm.state, 17, 8);
+                assert_ne!(address, 0);
+                // SAFETY: the actual allocator returned 17 live writable bytes.
+                unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), address as *mut u8, bytes.len()); }
+                (record(&mut vm, TypeId::TEXT, &[
+                    Value::from_i64(address), Value::from_i64(bytes.len() as i64), Value::from_i64(16),
+                ]), Some(address))
+            }
+        };
+        let copied = execute(&mut vm.state, source, &plan, copy_plan::DEFAULT_COPY_LIMITS).unwrap();
+        assert_ne!(copied, source);
+        // SAFETY: both results remain live checked Text records; the initialized
+        // prefix has bytes.len() bytes, followed by the copy's own NUL slot.
+        unsafe {
+            let (original_bytes, _) = heap::text_record_payload(source.as_ptr()).unwrap();
+            let (copied_bytes, len) = heap::text_record_payload(copied.as_ptr()).unwrap();
+            assert_ne!(copied_bytes, original_bytes);
+            original_bytes.cast_mut().write(b'X');
+            source.as_ptr::<u8>().add(heap::OBJECT_HEADER_SIZE).cast::<Value>().add(1)
+                .write(Value::from_i64(3));
+            assert_eq!(len, bytes.len());
+            assert_eq!(std::slice::from_raw_parts(copied_bytes, len), bytes);
+            assert_eq!(*copied_bytes.add(len), 0);
+        }
+        if let Some(address) = raw {
+            super::super::ffi_extended::cbgr_user_deallocate(&mut vm.state, address);
+        }
+        free(&mut vm, source);
+        // The fixture cleans its receipts explicitly; automatic Text lifetime
+        // cleanup is a separate contract from this copy transaction.
+        super::super::ffi_extended::cbgr_user_deallocate(&mut vm.state, field(copied, 0).as_i64());
+        free(&mut vm, copied);
+    }
+}
+
+#[test]
+fn text_copy_rejects_invalid_extents_before_reading_bytes() {
+    let mut vm = fixture();
+    let plan = copy_plan::build(&vm.state.module, &TypeRef::Concrete(TypeId::TEXT)).unwrap();
+    for (address, len, cap) in [(0, -1, 0), (0, 0, -1), (0, 9, 8), (0, 1, 0), (4096, 1, 8)] {
+        let source = record(&mut vm, TypeId::TEXT, &[
+            Value::from_i64(address), Value::from_i64(len), Value::from_i64(cap),
+        ]);
+        let before = vm.state.heap.stats().total_allocs;
+        let error = execute(&mut vm.state, source, &plan, copy_plan::DEFAULT_COPY_LIMITS).unwrap_err();
+        assert!(error.to_string().contains(CopyFailure::InvalidStorage.message()), "{error}");
+        assert_eq!(vm.state.heap.stats().total_allocs, before);
+    }
+}
+
+#[test]
+fn text_backing_refusal_rolls_back_the_prepared_wrapper() {
+    let mut vm = fixture();
+    let plan = copy_plan::build(&vm.state.module, &TypeRef::Concrete(TypeId::TEXT)).unwrap();
+    let source = Value::from_ptr(vm.state.heap.alloc_text_with_capacity(b"retained!", 16)
+        .unwrap().as_ptr().cast::<u8>());
+    let before_allocs = vm.state.heap.stats().total_allocs;
+    let before_frees = vm.state.heap.stats().total_frees;
+    let error = execute(&mut vm.state, source, &plan, CopyLimits {
+        max_work: 1, max_allocation_bytes: 24,
+    }).unwrap_err();
+    assert!(error.to_string().contains(CopyFailure::AllocationLimit.message()), "{error}");
+    assert_eq!(vm.state.heap.stats().total_allocs, before_allocs);
+    let allocations = vm.state.cbgr_allocations.len();
+    vm.state.cbgr_generation_counter = u64::from(verum_common::cbgr::GEN_MAX);
+    let error = execute(&mut vm.state, source, &plan, copy_plan::DEFAULT_COPY_LIMITS).unwrap_err();
+    assert!(error.to_string().contains(CopyFailure::AllocationFailure.message()), "{error}");
+    let after = vm.state.heap.stats();
+    assert_eq!(after.total_allocs - before_allocs, 1);
+    assert_eq!(after.total_frees - before_frees, 1);
+    assert_eq!(vm.state.cbgr_allocations.len(), allocations);
+    assert_eq!(field(source, 1).as_i64(), 9);
+}
+
+#[test]
+fn text_copy_budget_counts_initialized_bytes_not_spare_reservation() {
+    let mut vm = fixture();
+    let plan = copy_plan::build(&vm.state.module, &TypeRef::Concrete(TypeId::TEXT)).unwrap();
+    let source = Value::from_ptr(vm.state.heap.alloc_text_with_capacity(b"retained!", 1 << 20)
+        .unwrap().as_ptr().cast::<u8>());
+    let copied = execute(&mut vm.state, source, &plan, CopyLimits {
+        max_work: 1, max_allocation_bytes: 24 + 9 + 1,
+    }).unwrap();
+    assert_eq!(field(copied, 1).as_i64(), 9);
+    assert_eq!(field(copied, 2).as_i64(), 9);
+    assert_eq!(field(source, 2).as_i64(), 1 << 20);
+    super::super::ffi_extended::cbgr_user_deallocate(&mut vm.state, field(copied, 0).as_i64());
+    free(&mut vm, copied);
+}

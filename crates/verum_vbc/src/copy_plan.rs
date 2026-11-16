@@ -3,7 +3,7 @@
 use crate::{
     module::{FunctionId, VbcModule},
     mono::TypeSubstitution,
-    types::{FieldDescriptor, MAX_TYPE_REF_NODES, TypeId, TypeKind, TypeRef, VariantKind},
+    types::{BuiltinValueStorage, FieldDescriptor, MAX_TYPE_REF_NODES, TypeId, TypeKind, TypeRef, VariantKind},
 };
 use verum_common::{List, Map, ResourceDiscipline, Text, well_known_types::WellKnownType};
 
@@ -65,8 +65,11 @@ pub struct NodeId(pub usize);
 /// The storage operation established by one exact source declaration.
 #[derive(Clone, Debug)]
 pub enum CopyNode {
-    /// Scalars, immutable text and explicit references retain their carrier.
+    /// Scalars and explicit references retain their carrier.
     Identity,
+    /// Immediate text retains its codec value; a record receives independent
+    /// mutable storage. This operation does not call a user Clone method.
+    Text,
     /// The signature is necessary, but not sufficient: execution must also
     /// establish an exact producer with no owned captured environment.
     Callable(TypeRef),
@@ -155,9 +158,12 @@ impl Builder<'_> {
                 }
                 return Ok(CopyNode::Callable(ty.clone()));
             }
-            TypeRef::Concrete(id) if id.has_identity_value_lifecycle() =>
-            {
-                return Ok(CopyNode::Identity);
+            TypeRef::Concrete(id) if id.builtin_value_storage().is_some() => {
+                return Ok(match id.builtin_value_storage() {
+                    Some(BuiltinValueStorage::Text) => CopyNode::Text,
+                    Some(BuiltinValueStorage::Immediate) => CopyNode::Identity,
+                    None => unreachable!("guard established built-in storage"),
+                });
             }
             TypeRef::Concrete(id) => (*id, &[][..]),
             TypeRef::Instantiated { base, args } => (*base, args.as_slice()),

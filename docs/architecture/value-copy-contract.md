@@ -137,7 +137,8 @@ case tracked by T2785 is not repaired by runtime cleanup.
 
 | Declared shape | Operation |
 |----------------|-----------|
-| Scalar and immutable text | Preserve the value. |
+| Scalar or immediate Text codec | Preserve the carrier without allocating owned storage. |
+| Text record | Allocate an independent record and byte backing for the initialized prefix; spare reservation is not copied. |
 | Reference | Preserve the reference and its qualifiers; do not traverse it. |
 | Callable | Check its actual empty-environment producer and signature before preserving the carrier. |
 | Record or tuple | Allocate independent storage and copy each owned field. |
@@ -150,6 +151,14 @@ case tracked by T2785 is not repaired by runtime cleanup.
 Repeated owned children are copied independently. A cycle through owned
 storage is refused; a cycle through a shared handle or reference is not
 traversed. Therefore this operation is not a universal graph snapshot.
+
+Text storage classification does not prove identity copying or trivial cleanup.
+The VM checks live managed or allocator-backed byte extents. Native Text copy
+requires a live flat record and live source byte range from its producer; its
+length, capacity, null and overflow checks do not validate an arbitrary forged
+pointer. Neither tier infers an allocator or exclusive ownership from capacity.
+Full automatic Text cleanup still needs a producer-issued lifetime receipt and
+is not completed by this copy transaction.
 
 ## Failure and resource limits
 

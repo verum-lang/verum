@@ -3,7 +3,7 @@
 use crate::{
     module::{FunctionId, VbcModule},
     mono::TypeSubstitution,
-    types::{TypeId, TypeKind, TypeRef},
+    types::{BuiltinValueStorage, TypeId, TypeKind, TypeRef},
 };
 use verum_common::{List, Text};
 
@@ -11,7 +11,8 @@ use verum_common::{List, Text};
 /// structural cleanup visits only components with carried declaration types.
 #[derive(Clone, Debug)]
 pub enum DropPlan {
-    /// Scalars and borrowed/raw carriers have no owned destructor.
+    /// No implicit cleanup operation. Built-in lifecycle limitations are
+    /// recorded by `builtin_drop_plan`; this is not identity-copy permission.
     Ignore,
     /// A callable handle whose actual producer and empty environment must be
     /// proved before the binding can be retired. This is never a blanket no-op.
@@ -107,6 +108,19 @@ impl DropPlan {
     }
 }
 
+/// The implicit cleanup actually executed for a canonical built-in carrier.
+/// Borrow-write analysis consumes this same plan instead of inferring cleanup
+/// behavior from value-copy semantics or storage spelling.
+pub fn builtin_drop_plan(owner: TypeId) -> Option<DropPlan> {
+    Some(match owner.builtin_value_storage()? {
+        BuiltinValueStorage::Immediate => DropPlan::Ignore,
+        // Text is not a uniform source-record layout. Automatic cleanup still
+        // lacks a producer-issued lifetime receipt; the current no-op does not
+        // establish a complete lifecycle or permission to copy by identity.
+        BuiltinValueStorage::Text => DropPlan::Ignore,
+    })
+}
+
 /// Refuse unresolved/legacy ownership instead of interpreting layout carriers.
 pub fn build(module: &VbcModule, ty: &TypeRef) -> Result<DropPlan, Text> {
     // The ownership of a reference is known even in an unspecialized function.
@@ -132,11 +146,12 @@ fn build_inner(
     let (owner, args) = match ty {
         TypeRef::Reference { .. } => return Ok(DropPlan::Ignore),
         TypeRef::Function { .. } => return Ok(DropPlan::Callable { signature: ty.clone() }),
-        TypeRef::Concrete(id) if id.has_identity_value_lifecycle() =>
-        {
-            return Ok(DropPlan::Ignore);
+        TypeRef::Concrete(id) => {
+            if let Some(plan) = builtin_drop_plan(*id) {
+                return Ok(plan);
+            }
+            (*id, &[][..])
         }
-        TypeRef::Concrete(id) => (*id, &[][..]),
         TypeRef::Instantiated { base, args } => (*base, args.as_slice()),
         TypeRef::Tuple(parts) => {
             active.push(ty.clone());

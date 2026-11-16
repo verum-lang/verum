@@ -99,6 +99,7 @@ fn fixture(selected: &str, additional: &str) -> VbcModule {
         type DequeOwner is {{ values:Deque<Leaf> }};
         type SharedAndList is {{ first:Shared<Int>, later:List<Int> }};
         type Bytes is {{ values:List<Byte> }};
+        type TextOwner is {{ value:Text }};
         type Empty is ();
         type Choice is Packed(Leaf) | Vacant;
         fn duplicate(value:{selected})->{selected} {{ value }}
@@ -613,6 +614,98 @@ fn native_actual_backing_refusal_after_prepared_shared_rolls_back() {
         },
     );
 }
+#[test]
+fn native_text_copy_owns_its_record_and_initialized_byte_prefix() {
+    with_native("TextOwner", |wire, copy, allocate, deallocate, release| {
+        for cap in [0, 16, 1 << 20] {
+            // SAFETY: fixtures follow the native flat Text codec. The backing
+            // is a real runtime allocation; source and copy cleanup are explicit.
+            unsafe {
+                let bytes = b"retained\xf0";
+                let storage = allocate(cap.max(16) + 1, 8);
+                assert!(!storage.is_null());
+                std::ptr::copy_nonoverlapping(bytes.as_ptr(), storage, bytes.len());
+                let mut text = [storage as u64, bytes.len() as u64, cap];
+                let source = object(owner(wire, "TextOwner"), &[text.as_ptr() as u64]);
+                let mut output = 0;
+                // Exactly two graph nodes, independent of byte count/capacity.
+                assert_eq!(copy(source.as_ptr() as u64, &mut output, 2, 8 + 24 + 9 + 1), 0);
+                let outer = output as *mut u64;
+                let result = *outer.add(3) as *mut u64;
+                let data = *result as *mut u8;
+                assert_ne!(result, text.as_mut_ptr());
+                assert_ne!(data, storage);
+                text[1] = 3;
+                storage.write(b'X');
+                deallocate(storage);
+                assert_eq!(*result.add(1), bytes.len() as u64);
+                assert_eq!(*result.add(2), bytes.len() as u64);
+                assert_eq!(std::slice::from_raw_parts(data, bytes.len()), bytes);
+                assert_eq!(*data.add(bytes.len()), 0);
+                assert_eq!(text[1], 3);
+                deallocate(data);
+                release(result.cast(), 24);
+                release(outer.cast(), 32);
+            }
+        }
+    });
+}
+
+#[test]
+fn native_text_copy_rejects_invalid_lengths_and_preserves_output_on_budget_refusal() {
+    with_native("TextOwner", |wire, copy, allocate, deallocate, _| {
+        // SAFETY: every record is live. Invalid metadata must be rejected before
+        // visiting its buffer, including null and overflowed range cases.
+        unsafe {
+            let storage = allocate(17, 8);
+            for text in [
+                [storage as u64, u64::MAX, 16],
+                [storage as u64, 1, u64::MAX],
+                [storage as u64, 17, 16],
+                [0, 1, 0],
+                [u64::MAX, 1, 0],
+            ] {
+                let source = object(owner(wire, "TextOwner"), &[text.as_ptr() as u64]);
+                let mut output = 919;
+                assert_eq!(copy(source.as_ptr() as u64, &mut output, 1000, 1000),
+                    CopyFailure::InvalidStorage as u32);
+                assert_eq!(output, 919);
+            }
+            let text = [storage as u64, 9, 16];
+            let source = object(owner(wire, "TextOwner"), &[text.as_ptr() as u64]);
+            let mut output = 919;
+            assert_eq!(copy(source.as_ptr() as u64, &mut output, 1000, 32),
+                CopyFailure::AllocationLimit as u32);
+            assert_eq!(output, 919);
+            assert_eq!(text, [storage as u64, 9, 16]);
+            deallocate(storage);
+        }
+    });
+}
+
+#[test]
+fn native_text_actual_backing_refusal_does_not_publish_prepared_records() {
+    with_native_options("TextOwner", Some(u64::from(verum_common::cbgr::GEN_MAX) - 1), "",
+        |wire, copy, allocate, deallocate, _, _| {
+            // SAFETY: the source consumes the final actual allocation identity.
+            // The copy prepares wrappers, then its fallible backing call refuses.
+            unsafe {
+                let storage = allocate(17, 8);
+                assert!(!storage.is_null());
+                storage.write(73);
+                let text = [storage as u64, 9, 16];
+                let source = object(owner(wire, "TextOwner"), &[text.as_ptr() as u64]);
+                let mut output = 919;
+                assert_eq!(copy(source.as_ptr() as u64, &mut output, 1000, 1000),
+                    CopyFailure::AllocationFailure as u32);
+                assert_eq!(output, 919);
+                assert_eq!(*storage, 73);
+                assert_eq!(text, [storage as u64, 9, 16]);
+                deallocate(storage);
+            }
+        });
+}
+
 #[test]
 fn native_scalar_backing_is_bulk_copied_with_bounded_work() {
     with_native("Bytes", |wire, copy, allocate, deallocate, release| {

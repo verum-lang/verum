@@ -32,6 +32,16 @@ impl StringId {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub struct TypeId(pub u32);
 
+/// Canonical built-in storage, independent of source spelling or discipline.
+/// Storage classification does not grant identity-copy or cleanup authority.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuiltinValueStorage {
+    /// A scalar has no independently mutable owned storage.
+    Immediate,
+    /// Text may be an immediate codec value or a mutable byte-buffer record.
+    Text,
+}
+
 impl TypeId {
     /// Reserved runtime identity of a record declared at its canonical source path.
     pub(crate) fn for_declared_record(name: &str, owner: Option<&str>) -> Option<Self> {
@@ -367,12 +377,18 @@ impl TypeId {
         self.0 < Self::FIRST_USER
     }
 
-    /// Primitive carriers copy by identity and need no declared destructor.
-    /// This includes immutable text, but excludes opaque addresses, reserved
-    /// identities and source-declared containers. Explicit method calls still
-    /// follow their own selected implementation.
-    pub fn has_identity_value_lifecycle(self) -> bool {
-        self.is_builtin() && self.well_known_name().is_some()
+    /// Built-in storage is established by the canonical identity, never by a
+    /// same-spelled user declaration. Text's runtime representation must be
+    /// inspected before copying; unrestricted values need not copy by identity.
+    pub fn builtin_value_storage(self) -> Option<BuiltinValueStorage> {
+        if !self.is_builtin() || self.well_known_name().is_none() {
+            return None;
+        }
+        Some(if self == Self::TEXT {
+            BuiltinValueStorage::Text
+        } else {
+            BuiltinValueStorage::Immediate
+        })
     }
 
     /// Checks if this is a primitive numeric type.

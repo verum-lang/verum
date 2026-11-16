@@ -209,6 +209,12 @@ enum Backing {
 }
 enum Operation {
     Identity(Value),
+    Text {
+        source: *const u8,
+        len: usize,
+        capacity: usize,
+        extent: usize,
+    },
     Object(ObjectCopy),
     List(list_storage::CopyElements),
     Backed {
@@ -267,6 +273,63 @@ fn object(state: &InterpreterState, value: Value, owner: TypeId) -> InterpreterR
         flags: header.flags,
         field_offset: 0,
     })
+}
+
+fn text(
+    state: &InterpreterState,
+    source: Value,
+    budget: &mut Budget,
+) -> InterpreterResult<(Operation, usize)> {
+    if source.is_small_string() {
+        return Ok((Operation::Identity(source), 0));
+    }
+    let record = object(state, source, TypeId::TEXT)?;
+    if record.bytes < heap::TEXT_RECORD_SIZE {
+        return Err(invalid("Text copy requires the complete record"));
+    }
+    // SAFETY: exact live membership and the complete record extent precede all
+    // field reads. Reject negative lengths before the codec's tolerant reader.
+    let (data, len, capacity) = unsafe {
+        let fields = record.source.add(heap::OBJECT_HEADER_SIZE).cast::<Value>();
+        let len = nonnegative(fields.add(1).read_unaligned())?;
+        let capacity = usize::try_from(heap::text_record_cap(record.source))
+            .map_err(|_| invalid("Text capacity is negative"))?;
+        let (data, _) = heap::text_record_payload(record.source)
+            .ok_or_else(|| invalid("Text copy requires its byte-buffer codec"))?;
+        (data, len, capacity)
+    };
+    if capacity != 0 && len > capacity {
+        return Err(invalid("Text length exceeds its capacity"));
+    }
+    let readable = if capacity == 0 {
+        len
+    } else {
+        capacity.checked_add(1).ok_or_else(|| invalid("Text extent overflow"))?
+    };
+    if readable != 0 {
+        let address = data as usize;
+        let inline_start = record.source as usize + heap::OBJECT_HEADER_SIZE + heap::TEXT_RECORD_SIZE;
+        let inline_end = record.source as usize + heap::OBJECT_HEADER_SIZE + record.bytes;
+        let inline = address >= inline_start
+            && address.checked_add(readable).is_some_and(|end| end <= inline_end);
+        let backing = state.heap.backing_view(data.cast_mut());
+        let managed = backing.data == data.cast_mut()
+            && backing.payload_size.is_some_and(|size| readable <= size);
+        let raw = super::cbgr::bridge_extent_room(state, address)
+            .is_some_and(|size| readable <= size);
+        if !inline && !managed && !raw {
+            return Err(invalid("Text byte buffer exceeds its live allocation"));
+        }
+    }
+    // Capacity is a reservation, not Text's value. Like its declared Clone,
+    // copy only the initialized bytes, without duplicating unused reservation.
+    let capacity = len;
+    let extent = if capacity == 0 { 0 } else {
+        capacity.checked_add(1).ok_or_else(|| invalid("Text extent overflow"))?
+    };
+    budget.allocation(heap::TEXT_RECORD_SIZE)?;
+    budget.allocation(extent)?;
+    Ok((Operation::Text { source: data, len, capacity, extent }, 1 + usize::from(extent != 0)))
 }
 fn fields<'a>(
     state: &InterpreterState,
@@ -400,6 +463,10 @@ fn inspect<'a>(
             }
             CopyNode::Identity => {
                 return Ok((Operation::Identity(source), Children::None, 0, false));
+            }
+            CopyNode::Text => {
+                let (operation, allocations) = text(state, source, budget)?;
+                return Ok((operation, Children::None, allocations, false));
             }
             CopyNode::Callable(signature) => {
                 state.heap.validate_empty_callable(&state.module, source, signature)?;
@@ -842,6 +909,30 @@ impl Transaction {
     ) -> InterpreterResult<Output> {
         match operation {
             Operation::Identity(value) => Ok(Output::scalar(*value)),
+            Operation::Text { source, len, capacity, extent } => {
+                let output = self.managed(state, TypeId::TEXT, heap::TEXT_RECORD_SIZE)?;
+                let pointer = if *extent == 0 {
+                    Value::nil()
+                } else {
+                    let (value, target) = self.raw(state, *extent)?;
+                    // SAFETY: preflight proved the initialized source prefix;
+                    // the journal owns capacity+1 bytes and len <= capacity.
+                    unsafe {
+                        if *len != 0 {
+                            std::ptr::copy_nonoverlapping(*source, target, *len);
+                        }
+                        target.add(*len).write(0);
+                    }
+                    value
+                };
+                // SAFETY: the unpublished wrapper has exactly three fields.
+                unsafe {
+                    output.fields.write(pointer);
+                    output.fields.add(1).write(Value::from_i64(*len as i64));
+                    output.fields.add(2).write(Value::from_i64(*capacity as i64));
+                }
+                Ok(output)
+            }
             Operation::Object(copy) => self.object(state, *copy),
             Operation::Retained {
                 source,
