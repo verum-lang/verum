@@ -200,8 +200,8 @@ pub(crate) fn check_source_types(
     checker.set_module_registry(registry.clone());
     checker.register_stdlib_types_for_module(module);
 
-    // A file header names this scope. It is not a nested module declaration.
-    // Spans and all body/declaration nodes remain those of the original source.
+    // Retain the file header: it also owns attributes such as the prelude
+    // opt-out. It names this scope and is not itself a nested module to check.
     let mut body = module.clone();
     // A minimal source graph may have no standard library. When it does,
     // use its actual prelude and the shared opt-out/idempotence policy.
@@ -211,19 +211,20 @@ pub(crate) fn check_source_types(
     {
         verum_ast::prelude::inject_implicit_prelude_mount(&mut body);
     }
-    if let Some(header) = body.file_header_index() {
-        body.items.remove(header);
-    }
+    let header = body.file_header_index();
     let mut errors: List<_> = checker.prepare_module_declarations(&body).iter().map(&render).collect();
     if errors.is_empty() {
-        for item in &body.items {
-            if let Err(error) = checker.check_item(item) {
-                errors.push(render(&error));
-                // A nested checker may return before restoring its local scope.
-                // Do not check another item under the failed item's authority.
-                break;
+        checker.with_module_declarations(&body, |checker| {
+            for (index, item) in body.items.iter().enumerate() {
+                if Some(index) == header { continue; }
+                if let Err(error) = checker.check_item(item) {
+                    errors.push(render(&error));
+                    // A nested checker may return before restoring its local scope.
+                    // Do not check another item under the failed item's authority.
+                    break;
+                }
             }
-        }
+        });
     }
     errors.extend(checker.take_deferred_errors().iter().map(&render));
     errors.extend(checker.diagnostic_sources().iter().map(render));

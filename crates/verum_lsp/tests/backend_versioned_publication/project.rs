@@ -69,6 +69,34 @@ const MAIN: &str =
     "mount dependency.{Token, answer};\nfn read(value: Token) -> Int { value.id + answer() }";
 
 #[tokio::test]
+async fn contextual_sum_policy_follows_the_current_unsaved_mount() {
+    let project = Project::new();
+    project.file("public_payload.vr", "public type Envelope<T> is Empty | Ready(T);");
+    project.file("private_payload.vr", "public type Envelope<T> is Empty | Ready { payload:T };");
+    let source = "mount public_payload.Envelope; fn forward<T>(value:T)->T {value}
+        fn make()->Envelope<Int> {forward(Envelope.Ready(73))}";
+    let main = project.open("main.vr", source);
+    let initial = project.snapshot(&main).await;
+    assert!(errors(&initial).is_empty(), "{initial:#}");
+    for (version, text, allowed) in [
+        (2, source.replace("public_payload", "private_payload"), false),
+        (3, source.to_owned(), true),
+        (4, source.replace("mount public_payload.Envelope;", ""), false),
+    ] {
+        project.service.inner().documents.try_update(&main, text, version).unwrap();
+        let snapshot = project.service.inner().handle_document_snapshot(SnapshotParams {
+            text_document: TextDocumentIdentifier { uri: main.clone() }, version,
+        }).await.unwrap();
+        let found = errors(&snapshot);
+        assert_eq!(found.is_empty(), allowed, "version {version}: {snapshot:#}");
+        if version == 2 {
+            assert!(found.iter().any(|error| error["code"] == "E202"), "{snapshot:#}");
+        }
+    }
+    assert_eq!(std::fs::read_to_string(main.to_file_path().unwrap()).unwrap(), source);
+}
+
+#[tokio::test]
 async fn dependency_diagnostics_keep_their_own_file_and_unicode_range() {
     let project = Project::new();
     let dependency_source = "// distinct dependency revision\npublic type Broken is { public value: /* Ω🙂 */ MissingType };";

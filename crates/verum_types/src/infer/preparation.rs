@@ -42,7 +42,9 @@ impl TypeChecker {
         module: &Module,
         inline_parent_path: &str,
     ) -> List<TypeError> {
-        for item in &module.items {
+        let header = module.file_header_index();
+        for (index, item) in module.items.iter().enumerate() {
+            if Some(index) == header { continue; }
             if let ItemKind::Module(decl) = &item.kind {
                 self.pre_register_module_public(decl, inline_parent_path);
             }
@@ -69,7 +71,10 @@ impl TypeChecker {
         self.with_module_declarations(module, |checker| checker.prepare_module_types_in_source_scope(module))
     }
 
-    fn with_module_declarations<T>(
+    /// Keep the exact source and its mounts authoritative while checking a
+    /// prepared module's bodies. This also supports unsaved or unregistered
+    /// files without publishing them into a shared project registry.
+    pub fn with_module_declarations<T>(
         &mut self, module: &Module, prepare: impl FnOnce(&mut Self) -> T,
     ) -> T {
         let mut selected = module.clone();

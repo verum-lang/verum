@@ -755,22 +755,22 @@ impl DocumentState {
             self.diagnostics
                 .push(error.to_diagnostic_with_span(Some(convert)));
         }
-        // Type check each item in the module
-        for item in module.items.iter() {
-            if type_checker.check_analysis_control().is_err() {
-                return;
-            }
-            match type_checker.check_item(item) {
-                Ok(()) => {
-                    // Type checking succeeded for this item
+        // Unsaved buffers retain their own imports while checking bodies.
+        let header = module.file_header_index();
+        let completed = type_checker.with_module_declarations(module, |type_checker| {
+            for (index, item) in module.items.iter().enumerate() {
+                if Some(index) == header { continue; }
+                if type_checker.check_analysis_control().is_err() {
+                    return false;
                 }
-                Err(type_error) => {
-                    // Convert to diagnostic and store
-                    let diagnostic = type_error.to_diagnostic_with_span(Some(convert));
-                    self.diagnostics.push(diagnostic);
+                if let Err(type_error) = type_checker.check_item(item) {
+                    self.diagnostics
+                        .push(type_error.to_diagnostic_with_span(Some(convert)));
                 }
             }
-        }
+            true
+        });
+        if !completed { return; }
 
         // Statement recovery, exhaustiveness and ambiguity checks report via
         // the checker's diagnostic channel even when check_item returns Ok.

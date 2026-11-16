@@ -517,14 +517,28 @@ impl TypeChecker {
         &self,
         name: &str,
     ) -> Option<(SourceTypeDeclaration, Text)> {
-        for (owner, module) in self.source_type_registration.local_declarations.iter().rev() {
-            if owner == &self.current_module_path {
-                if let Some(item) = self.local_source_type_declaration_index(module, name) {
-                    return Some((SourceTypeDeclaration::Lexical { module: module.clone(), item }, owner.clone()));
-                }
-            }
-        }
         let registry = self.module_registry.read();
+        if let Some((owner, module)) = self.source_type_registration.local_declarations.iter().rev()
+            .find(|(owner, _)| owner == &self.current_module_path)
+        {
+            if let Some(item) = self.local_source_type_declaration_index(module, name) {
+                return Some((SourceTypeDeclaration::Lexical { module: module.clone(), item }, owner.clone()));
+            }
+            if let Some(selected) = self.find_type_declaration_with_source_module_inner(
+                &module.items, name, owner, &registry, &mut Set::new(), true, true,
+            ) {
+                return Some(selected);
+            }
+            // The current buffer owns even an empty import set. A stale file
+            // with this module name cannot reintroduce a removed mount.
+            if self.source_items_bind_type_name(&module.items, name) { return None; }
+            let prelude = verum_ast::prelude::implicit_prelude_path(module)?;
+            let prelude = self.get_module_with_path_aliases(prelude, &registry)?;
+            return self.find_type_declaration_with_source_module_inner(
+                &prelude.ast.items, name, &Text::from(prelude.path.to_string()),
+                &registry, &mut Set::new(), true, false,
+            );
+        }
         let mut owner = self.current_module_path.clone();
         let consumer = ModulePath::from_str(&owner);
         let mut module = self.get_module_with_path_aliases(&owner, &registry);

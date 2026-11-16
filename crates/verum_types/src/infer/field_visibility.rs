@@ -88,7 +88,7 @@ impl TypeChecker {
 
     fn unknown_record_visibility(&self, key: &Text, member: &str, span: Span) -> TypeError {
         TypeError::VisibilityError {
-            name: member.into(),
+            name: format!("{key}.{member}").into(),
             visibility: "of unknown declaration visibility; rebuild the declaring cog".into(),
             module_path: key
                 .rsplit_once('.')
@@ -158,6 +158,19 @@ impl TypeChecker {
                 continue;
             }
             if !key.contains(".") {
+                // A contextual constructor can retain a lexical sum name
+                // while its field policy belongs to the imported declaration.
+                // Resolve the registered sum owner before consulting policy;
+                // the leaf spelling alone grants no construction authority.
+                if variant.is_some()
+                    && let Some(declared) = self.declared_sum_key(&key)
+                    && declared != key
+                {
+                    current = Type::Named {
+                        path: Self::text_to_path(&declared), args: args.clone(),
+                    };
+                    continue;
+                }
                 // A local declaration has exact stored authority even when a
                 // stand-alone checker has no ModuleRegistry. Imports have their
                 // declaring keys and cannot populate this local owner's entry.
