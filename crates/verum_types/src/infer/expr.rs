@@ -961,32 +961,40 @@ impl TypeChecker {
                 }
             }
         } else {
-            // Check if expected is a collection type with an element type
-            // (e.g., List<T>, Set<T>, or any single-arg generic collection)
-            let list_elem = match expected {
-                Type::Generic { args, .. } if args.len() == 1 => Some(&args[0]),
-                Type::Named { args, .. } if args.len() == 1 => Some(&args[0]),
-                _ => None,
-            };
-            if let Some(expected_elem) = list_elem {
-                // Expected is List<T>, check each element against T
+            // A nominal constructor needs a declared operation and an emitted
+            // carrier. Neither generic arity nor a marker spelling supplies it.
+            let normalized = self.unifier.normalize_aliases(expected);
+            let nominal = self.conversion_nominal_head(&normalized);
+            let element = nominal.as_ref().and_then(|(owner, arguments)| {
+                let carrier = self.declared_runtime_storage_carrier(owner)?;
+                arguments.get(carrier.array_construction_element_parameter()?).cloned()
+            });
+            if let Some(expected_elem) = element {
                 match arr_expr {
                     verum_ast::expr::ArrayExpr::List(exprs) => {
                         for elem in exprs {
-                            self.check_expr(elem, expected_elem)?;
+                            self.check_expr(elem, &expected_elem)?;
                         }
                         Ok(InferResult::new(expected.clone()))
                     }
                     verum_ast::expr::ArrayExpr::Repeat { value, count } => {
-                        self.check_expr(value, expected_elem)?;
+                        self.check_expr(value, &expected_elem)?;
                         let count_result = self.synth_expr(count)?;
                         self.unifier
                             .unify(&count_result.ty, &Type::int(), count.span)?;
                         Ok(InferResult::new(expected.clone()))
                     }
                 }
+            } else if nominal.is_some() {
+                // Do not fall through a marker-only unifier relation: no
+                // supported constructor exists for this nominal destination.
+                let actual = self.synth_expr(expr)?;
+                Err(TypeError::Mismatch {
+                    expected: expected.diagnostic_text(),
+                    actual: actual.ty.diagnostic_text(),
+                    span: expr.span,
+                })
             } else {
-                // Expected is not an array or List type, fall back to synthesis
                 self.synth_and_check(expr, expected)
             }
         }

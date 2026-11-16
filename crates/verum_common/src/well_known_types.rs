@@ -263,6 +263,17 @@ impl WellKnownType {
         }
     }
 
+    /// Element parameter of the supported array-to-owned-value construction.
+    /// Both source admission and VBC materialization use this operation contract.
+    /// Storage ownership or a same-named marker protocol alone does not provide
+    /// a constructor. This does not authorize borrowed-slice conversion.
+    pub const fn array_construction_element_parameter(self) -> Option<usize> {
+        match self {
+            Self::List => Some(0),
+            _ => None,
+        }
+    }
+
     /// Returns a non-zero type hint for the Len instruction if this type supports
     /// built-in length queries, or 0 if it does not.
     /// These hints correspond to the interpreter's Len opcode dispatch.
