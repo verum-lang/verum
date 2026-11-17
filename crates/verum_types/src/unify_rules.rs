@@ -2091,17 +2091,7 @@ impl Unifier {
             unreachable!("unification rule selected for different constructors")
         };
 
-        let mut skolemize = Substitution::new();
-        for v in vars.iter() {
-            let skolem_name = crate::ty::skolem::name(TypeVar::fresh().id());
-            skolemize.insert(
-                *v,
-                Type::Named {
-                    path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(skolem_name, span)),
-                    args: verum_common::List::new(),
-                },
-            );
-        }
+        let skolemize = crate::ty::skolem::substitution(vars, span);
         let body_sk = body
             .try_apply_subst(&skolemize)
             .map_err(|message| TypeError::UniverseBinding { message, span })?;

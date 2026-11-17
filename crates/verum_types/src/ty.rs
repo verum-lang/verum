@@ -359,6 +359,9 @@ impl PathConstructor {
 /// nothing in their program (T1038). A consumer matching the spelling
 /// by hand would also go stale the moment the spelling changed.
 pub mod skolem {
+    use super::{Substitution, Type, TypeVar};
+    use verum_ast::{Ident, Path, Span};
+
     /// Reserved prefix. Not writable in Verum source (`?` cannot start
     /// an identifier), so it cannot collide with a user type.
     const PREFIX: &str = "?forall-bound#";
@@ -366,6 +369,19 @@ pub mod skolem {
     /// The only producer of a skolem's name.
     pub fn name(var_id: usize) -> String {
         format!("{PREFIX}{var_id}")
+    }
+
+    /// Open each universal binder with a private rigid type for one check.
+    pub(crate) fn substitution(vars: &[TypeVar], span: Span) -> Substitution {
+        let mut subst = Substitution::new();
+        for var in vars {
+            let ident = Ident::new(name(TypeVar::fresh().id()), span);
+            subst.insert(
+                *var,
+                Type::Named { path: Path::single(ident), args: verum_common::List::new() },
+            );
+        }
+        subst
     }
 
     /// The only reader: is this RENDERED type a skolem constant?
@@ -2933,6 +2949,9 @@ impl fmt::Display for TypeDisplay<'_> {
                 write!(f, "{}[{}]", slot.owner, slot.ordinal)
             }
             Type::Named { path, args } => {
+                if self.diagnostic && path.as_ident().is_some_and(|id| skolem::is_rendered(&id.name)) {
+                    return write!(f, "a universally quantified type");
+                }
                 write!(f, "{}", format_path(path))?;
                 if !args.is_empty() {
                     write!(f, "<")?;

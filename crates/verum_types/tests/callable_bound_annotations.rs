@@ -81,6 +81,47 @@ fn matching_annotations_remain_valid_for_both_contract_forms() {
 }
 
 #[test]
+fn a_contextual_parameter_keeps_its_own_input_contract() {
+    for source in [
+        "fn accept(f: fn(Int) -> Int) -> Int { f(7) } fn bad() -> Int { accept(|v: Bool| v) }",
+        "fn accept<F: fn(Int) -> Int>(f: F) -> Int { f(7) } fn bad() -> Int { accept(|v: Bool| 7) }",
+        "fn bad() { let f: fn(Int) -> Int = |v: Bool| 7; }",
+    ] {
+        let (errors, _, _) = check(source);
+        assert!(errors.iter().any(|e| e.contains("expected 'Int', found 'Bool'")), "{source}: {errors:?}");
+    }
+    let (errors, registry, spans) = check(
+        "fn good() -> Int { let f: fn(Int) -> Int = |v: Int| v; f(7) }",
+    );
+    assert!(errors.is_empty(), "{errors:?}");
+    let Some(Type::Function { params, .. }) = registry.lookup_expr(spans[0]) else {
+        panic!("missing checked closure signature")
+    };
+    assert_eq!(params.as_slice(), [Type::Int]);
+}
+
+#[test]
+fn a_universal_callback_cannot_choose_a_concrete_input_or_result() {
+    let accept = "fn apply(f: fn<A>(A) -> A) -> Int { f(7) }";
+    for callback in ["|v: Int| v", "|v| 7", "|v| -> Int { 7 }"] {
+        let (errors, _, _) = check(&format!("{accept} fn bad() -> Int {{ apply({callback}) }}"));
+        assert!(!errors.is_empty(), "accepted {callback}");
+        assert!(errors.iter().all(|e| !e.contains("?forall-bound#")), "{errors:?}");
+    }
+    let (errors, _, _) = check(&format!("{accept} fn good() -> Int {{ apply(|v| v) }}"));
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn a_local_universal_binder_cannot_infer_the_callers_result() {
+    let choose = "fn choose<T>(f: fn<R>(R) -> T) -> T { f(7) }";
+    let (errors, _, _) = check(&format!("{choose} fn bad() {{ let out = choose(|v| v); }}"));
+    assert!(errors.iter().any(|e| e.contains("outer type")), "{errors:?}");
+    let (errors, _, _) = check(&format!("{choose} fn good() -> Bool {{ choose(|v| true) }}"));
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
 fn annotated_bindings_accept_stronger_callable_guarantees() {
     for source in [
         "fn good() -> Int {let base = 10; let f: fn(Int) -> Int = |x| x + base; f(5)}",

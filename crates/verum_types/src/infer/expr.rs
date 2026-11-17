@@ -1524,253 +1524,122 @@ impl TypeChecker {
         Self::callable_bound_with_marker(bound, is_async)
     }
 
-    /// Record the checked closure signature, including its actual result when
-    /// the context permits discarding it. Only its header is compared here:
-    /// parameter patterns and the body have already been checked in scope.
-    fn checked_closure_callable(
-        &mut self,
-        body: &Expr,
-        is_async: bool,
-        expected: &Type,
-        result: &Type,
-        span: Span,
-    ) -> Result<Type> {
-        let bound = self.closure_callable_properties(body, is_async);
-        let expected = self.unifier.try_apply(expected, span)?;
-        let mut actual = expected.clone();
-        let Type::Function {
-            property_requirement,
-            properties,
-            return_type,
-            ..
-        } = &mut actual else {
-            return Err(TypeError::Other(
-                "closure property check needs a callable contract".into(),
-            ));
+    fn check_closure_expr(&mut self, expr: &Expr, expected: &Type) -> Result<InferResult> {
+        let mut contract = self.normalize_type(expected);
+        if let Type::Var(variable) = &contract
+            && let Some(bound) = self.get_function_type_bound(variable)
+        {
+            contract = self.unifier.try_apply(&bound, expr.span)?;
+        }
+
+        let (contract, quantified) = if let Type::Forall { vars, body } = &contract {
+            let skolems = crate::ty::skolem::substitution(vars, expr.span);
+            let body = body.try_apply_subst(&skolems)
+                .map_err(|message| TypeError::UniverseBinding { message, span: expr.span })?;
+            let opened = self.normalize_type(&body);
+            (opened, Some((contract, skolems)))
+        } else {
+            (contract, None)
         };
-        **return_type = self.unifier.try_apply(result, span)?;
-        *properties = bound.finite_footprint().cloned();
-        *property_requirement = bound;
-        self.check_callable_header(&actual, &expected, span)?;
-        Ok(actual)
+        if !matches!(contract, Type::Function { .. }) {
+            return self.synth_and_check(expr, expected);
+        }
+        let actual = self.check_contextual_closure(expr, &contract)?;
+        let actual = if let Some((forall, skolems)) = quantified {
+            // Only variables visible outside the closure could carry a local
+            // binder out. Body-local inference variables may refer to it.
+            let mut outside = forall.free_vars();
+            outside.extend(self.ctx.env.free_vars());
+            for variable in outside {
+                if self.unifier.get_substitution().contains_key(&variable) {
+                    let ty = self.unifier.try_apply(&Type::Var(variable), expr.span)?;
+                    if ty.contains_type(|part| skolems.values().any(|skolem| skolem == part)) {
+                        return Err(TypeError::OtherWithCodeSpanned {
+                            code: "E400".into(),
+                            msg: "a universally quantified closure cannot bind an outer type to its local parameter".into(),
+                            span: expr.span,
+                        });
+                    }
+                }
+            }
+            self.unifier.try_apply(&forall, expr.span)?
+        } else {
+            if let Type::Var(variable) = self.unifier.try_apply(expected, expr.span)? {
+                self.unifier.unify(&Type::Var(variable), &actual, expr.span)?;
+            }
+            actual
+        };
+        self.type_registry.register_expr(expr.span, actual.clone());
+        Ok(InferResult::new(actual))
     }
 
-    fn check_closure_expr(&mut self, expr: &Expr, expected: &Type) -> Result<InferResult> {
-        use ExprKind::*;
-        let ExprKind::Closure {
-            params,
-            body: closure_body,
-            return_type,
-            async_,
-            move_,
-            ..
-        } = &expr.kind
-        else {
-            unreachable!()
+    /// Check the body with the parameter types it declares. A caller's input
+    /// must be admissible to the closure, and its output must satisfy the caller.
+    fn check_contextual_closure(&mut self, expr: &Expr, contract: &Type) -> Result<Type> {
+        let ExprKind::Closure { params, body, return_type, async_, .. } = &expr.kind else {
+            unreachable!("closure expression dispatched to contextual checking")
         };
-        // ============================================================
-        // Rank-2 Polymorphic Closure Checking
-        // Spec: grammar/verum.ebnf - rank2_function_type
-        // ============================================================
-        // When checking a closure against a Forall type (rank-2), we
-        // instantiate the quantified type variables and check against
-        // the instantiated function type. The closure itself becomes
-        // rank-2 polymorphic.
-        if let Type::Forall {
-            vars,
-            body: forall_body,
-        } = expected
-        {
-            // Instantiate the quantified type variables with fresh type vars
-            let mut subst: Map<TypeVar, Type> = Map::new();
-            for qvar in vars.iter() {
-                let fresh = TypeVar::fresh();
-                subst.insert(*qvar, Type::Var(fresh));
-            }
-
-            // Apply substitution to get the instantiated function type
-            let instantiated_body = self.substitute_type_vars(forall_body, &subst);
-
-            // Normalize the instantiated body to resolve type aliases
-            // This handles cases like `fn<R>(Reducer<N, R>) -> Reducer<N, R>` where
-            // `Reducer<N, R>` needs to be resolved to `fn(R, N) -> R`
-            let normalized_body = self.normalize_type(&instantiated_body);
-
-            // Check the closure against the instantiated function type
-            if let Type::Function {
-                params: expected_params,
-                return_type: expected_return,
-                ..
-            } = &normalized_body
-            {
-                if params.len() != expected_params.len() {
-                    return Err(TypeError::Mismatch {
-                        expected: expected.to_text(),
-                        actual: format!("function with {} parameters", params.len()).into(),
-                        span: expr.span,
-                    });
-                }
-
-                // An annotation chooses the body's checking type, but it
-                // must still satisfy the required callable result. Unit
-                // permits result discard without changing the annotation.
-                let ret_ty = if let Some(rt) = return_type {
-                    let annotated = self.ast_to_type(rt)?;
-                    let required = self.normalize_type(&self.unifier.apply(expected_return));
-                    if !matches!(required, Type::Unit) {
-                        self.check_call_type_bound(&annotated, &required, rt.span, 0)?;
-                    }
-                    annotated
-                } else {
-                    (**expected_return).clone()
-                };
-
-                // T0653: capture exclusivity is checked on THIS path
-                // too, not only when the closure's type is inferred.
-                self.with_closure_scope(expr, |checker| {
-                    // Bind parameters with the instantiated types.
-                    // Normalize each param type to resolve associated type projections
-                    // (e.g., ::Item[Range<Int>] → Int) before binding.
-                    for (param, param_ty) in params.iter().zip(expected_params.iter()) {
-                        let normalized_param_ty = checker.normalize_type(param_ty);
-                        checker.bind_parameter_pattern(&param.pattern, &normalized_param_ty)?;
-                    }
-
-                    // Check body against expected return type with bidirectional inference.
-                    // We do NOT synth first: synth would resolve variant constructors
-                    // (e.g., Continue(x)) using the ambient scope (e.g., ControlFlow.Continue
-                    // from the prelude) instead of the expected type (e.g., ReduceResult<Int>).
-                    // Bidirectional check_expr correctly propagates the expected type through
-                    // blocks, if/else expressions, and variant constructors.
-                    // Never-returning bodies (e.g., panic("...")) are handled correctly too:
-                    // unify(Never, T) succeeds for all T (unify.rs bottom-type rule).
-                    // CLOSURE-RETURN-SCOPE-1: `return` inside the body
-                    // returns from the CLOSURE, so the body is walked with
-                    // `current_function_return_type` set to the closure's
-                    // own return type. `infer_expr_return_expr` checks
-                    // against that field, and leaving the ENCLOSING
-                    // function's value in place made every `return` in a
-                    // closure answer to the wrong signature.
-                    checker.current_function_return_type =
-                        verum_common::Maybe::Some(ret_ty.clone());
-                    checker.infer_closure_result(closure_body, Some(&ret_ty))?;
-                    checker.checked_closure_callable(
-                        closure_body,
-                        *async_,
-                        &normalized_body,
-                        &ret_ty,
-                        expr.span,
-                    )?;
-
-                    Ok(())
-                })?;
-
-                // Register closure type in the type registry for codegen
-                let resolved_expected = self.unifier.apply(expected);
-                self.type_registry
-                    .register_expr(expr.span, resolved_expected);
-
-                // Return the original Forall type (the closure is rank-2 polymorphic)
-                Ok(InferResult::new(expected.clone()))
-            } else {
-                // Forall body is not a function type
-                self.synth_and_check(expr, expected)
-            }
-        } else {
-            // Normalize expected type to resolve type aliases to function types
-            // This handles cases like `Reducer<B, Maybe<B>>` which is an alias for `fn(Maybe<B>, B) -> Maybe<B>`
-            let mut normalized_expected = self.normalize_type(expected);
-
-            // If the expected type is a type variable, check for function type bounds.
-            // This enables proper closure inference for generics like `F: fn() -> T`.
-            // Generic function type bounds: "fn foo<T: Protocol>(...)" constrains T to types implementing Protocol
-            if let Type::Var(tvar) = &normalized_expected {
-                if let Maybe::Some(fn_bound) = self.get_function_type_bound(tvar) {
-                    // Apply the unifier to resolve any type variables in the bound
-                    // (e.g., fn(&T_fresh) -> Bool where T_fresh was already unified with Int)
-                    normalized_expected = self.unifier.apply(&fn_bound);
-                }
-            }
-
-            if let Type::Function {
-                params: expected_params,
-                return_type: expected_return,
-                ..
-            } = &normalized_expected
-            {
-                if params.len() != expected_params.len() {
-                    return Err(TypeError::Mismatch {
-                        expected: expected.to_text(),
-                        actual: format!("function with {} parameters", params.len()).into(),
-                        span: expr.span,
-                    });
-                }
-
-                // An annotation chooses the body's checking type, but it
-                // must still satisfy the required callable result. Unit
-                // permits result discard without changing the annotation.
-                let ret_ty = if let Some(rt) = return_type {
-                    let annotated = self.ast_to_type(rt)?;
-                    let required = self.normalize_type(&self.unifier.apply(expected_return));
-                    if !matches!(required, Type::Unit) {
-                        self.check_call_type_bound(&annotated, &required, rt.span, 0)?;
-                    }
-                    annotated
-                } else {
-                    (**expected_return).clone()
-                };
-
-                // T0653: capture exclusivity is checked on THIS path
-                // too — this is the branch most closures take
-                // (`.map(|x| …)`, typed argument, typed binding).
-                let actual = self.with_closure_scope(expr, |checker| {
-                    // Bind parameters.
-                    // Normalize each param type to resolve associated type projections
-                    // (e.g., ::Item[Range<Int>] → Int) before binding, so that the
-                    // closure body sees concrete types rather than un-resolved projections.
-                    for (param, param_ty) in params.iter().zip(expected_params.iter()) {
-                        let normalized_param_ty = checker.normalize_type(param_ty);
-                        checker.bind_parameter_pattern(&param.pattern, &normalized_param_ty)?;
-                    }
-
-                    // Check body against expected return type with bidirectional inference.
-                    // We do NOT synth first: synth would resolve variant constructors
-                    // (e.g., Continue(x)) using the ambient scope (e.g., ControlFlow.Continue
-                    // from the prelude) instead of the expected type (e.g., ReduceResult<Int>).
-                    // Bidirectional check_expr correctly propagates the expected type through
-                    // blocks, if/else expressions, and variant constructors.
-                    // Never-returning bodies (e.g., panic("...")) are handled correctly too:
-                    // unify(Never, T) succeeds for all T (unify.rs bottom-type rule).
-                    // CLOSURE-RETURN-SCOPE-1: `return` inside the body
-                    // returns from the CLOSURE, so the body is walked with
-                    // `current_function_return_type` set to the closure's
-                    // own return type. `infer_expr_return_expr` checks
-                    // against that field, and leaving the ENCLOSING
-                    // function's value in place made every `return` in a
-                    // closure answer to the wrong signature.
-                    checker.current_function_return_type =
-                        verum_common::Maybe::Some(ret_ty.clone());
-                    checker.infer_closure_result(closure_body, Some(&ret_ty))?;
-                    checker.checked_closure_callable(
-                        closure_body,
-                        *async_,
-                        &normalized_expected,
-                        &ret_ty,
-                        expr.span,
-                    )
-                })?;
-                if let Type::Var(var) = self.unifier.apply(expected) {
-                    self.unifier.unify(&Type::Var(var), &actual, expr.span)?;
-                }
-                let actual = self.unifier.apply(&actual);
-                self.type_registry.register_expr(expr.span, actual.clone());
-
-                Ok(InferResult::new(actual))
-            } else {
-                // Not a function type (even after normalization), fall back to synthesis + subsumption
-                self.synth_and_check(expr, expected)
-            }
+        let Type::Function { params: inputs, return_type: output, contexts, type_params, .. } = contract else {
+            unreachable!("contextual checking requires a callable contract")
+        };
+        if params.len() != inputs.len() {
+            return Err(TypeError::Mismatch {
+                expected: contract.diagnostic_text(),
+                actual: format!("function with {} parameters", params.len()).into(),
+                span: expr.span,
+            });
         }
+        let result = if let Some(annotation) = return_type {
+            let annotated = self.ast_to_type(annotation)?;
+            let required = self.normalize_type(&self.unifier.try_apply(output, annotation.span)?);
+            if !matches!(required, Type::Unit) {
+                self.check_call_type_bound(&annotated, &required, annotation.span, 0)?;
+            }
+            annotated
+        } else {
+            (**output).clone()
+        };
+        self.with_closure_scope(expr, |checker| {
+            let mut actual_inputs = List::with_capacity(params.len());
+            for (param, input) in params.iter().zip(inputs) {
+                let input = checker.normalize_type(input);
+                let actual = if let Some(annotation) = &param.ty {
+                    let annotated = checker.ast_to_type(annotation)?;
+                    // The obligation flows from caller to parameter. At the
+                    // annotation's location the source supplied the parameter.
+                    if let Err(error) = checker.check_call_type_bound(&input, &annotated, annotation.span, 0) {
+                        return Err(match error {
+                            TypeError::Mismatch { .. } => TypeError::Mismatch {
+                                expected: input.diagnostic_text(),
+                                actual: annotated.diagnostic_text(),
+                                span: annotation.span,
+                            },
+                            other => other,
+                        });
+                    }
+                    annotated
+                } else {
+                    input
+                };
+                checker.bind_parameter_pattern(&param.pattern, &actual)?;
+                actual_inputs.push(actual);
+            }
+            checker.current_function_return_type = Some(result.clone());
+            checker.infer_closure_result(body, Some(&result))?;
+            let bound = checker.closure_callable_properties(body, *async_);
+            let actual = Type::Function {
+                params: actual_inputs,
+                return_type: Box::new(result),
+                type_params: type_params.clone(),
+                contexts: contexts.clone(),
+                properties: bound.finite_footprint().cloned(),
+                property_requirement: bound,
+            };
+            let actual = checker.unifier.try_apply(&actual, expr.span)?;
+            let expected = checker.unifier.try_apply(contract, expr.span)?;
+            checker.check_callable_header(&actual, &expected, expr.span)?;
+            Ok(actual)
+        })
     }
 
     /// Bidirectional type-check an `if` expression.
