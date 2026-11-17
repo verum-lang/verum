@@ -44,8 +44,20 @@ pub fn declaration_origin<'a>(
     Ok(owner)
 }
 
+/// The declaration supplies its root. A promoted name can add a nested scope.
+pub(crate) fn nominal_declaration_scope<'a>(
+    descriptor: &TypeDescriptor, module: &'a str, string: impl Fn(StringId) -> Option<&'a str>,
+) -> Result<Text, Text> {
+    let name = string(descriptor.name).ok_or_else(|| Text::from("semantic type has no name"))?;
+    if name.split('.').any(str::is_empty) {
+        return Err("semantic type has malformed name".into());
+    }
+    let origin = declaration_origin(module, descriptor.origin_module, string)?;
+    let identity = qualify_module_name(origin, name);
+    Ok(identity.rsplit_once('.').map_or(origin, |(scope, _)| scope).into())
+}
+
 /// Collect the lexical owners of a nominal declaration and each attached implementation.
-/// A promoted descriptor name contributes its nested path to the nominal owner.
 pub fn declaration_type_scope_owners<'a>(
     descriptor: &TypeDescriptor, module: &'a str, string: impl Fn(StringId) -> Option<&'a str>,
 ) -> Result<std::collections::BTreeSet<Text>, Text> {
@@ -54,13 +66,7 @@ pub fn declaration_type_scope_owners<'a>(
         .map(|source| source.origin_module().into())
         .collect();
     if descriptor.source_declaration.is_some() {
-        let name = string(descriptor.name).ok_or_else(|| Text::from("semantic type has no name"))?;
-        if name.split('.').any(str::is_empty) {
-            return Err("semantic type has malformed name".into());
-        }
-        let origin = declaration_origin(module, descriptor.origin_module, string)?;
-        let key = qualify_module_name(origin, name);
-        owners.insert(key.rsplit_once('.').map_or(origin, |(scope, _)| scope).into());
+        owners.insert(nominal_declaration_scope(descriptor, module, string)?);
     }
     Ok(owners)
 }

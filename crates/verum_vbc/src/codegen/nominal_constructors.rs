@@ -165,13 +165,9 @@ impl VbcCodegen {
             ))
         };
         let descriptor = self.type_by_id(id).ok_or_else(invalid)?;
-        let owner = self
-            .type_declaration_identity(descriptor)
-            .ok_or_else(invalid)?;
-        let module = owner
-            .rsplit_once('.')
-            .map(|(module, _)| module.to_owned())
-            .ok_or_else(invalid)?;
+        let module = crate::module::nominal_declaration_scope(descriptor, &self.config.module_name, |id| {
+            self.ctx.strings.get(id.0 as usize).map(|name| name.as_str())
+        }).map_err(|message| CodegenError::new(CodegenErrorKind::InvalidSourceSignature(message.into_string())))?;
         let scope: Map<_, _> = descriptor
             .type_params
             .iter()
@@ -200,7 +196,7 @@ impl VbcCodegen {
                 .position(|id| *id == Some(slot));
         }
         let scope = scope.into();
-        self.with_protocol_source_scope(Some(module), Default::default(), None, |generator| {
+        self.with_protocol_source_scope(Some(module.into_string()), Default::default(), None, |generator| {
             for parameter in &mut roster {
                 if let Some(source) = parameter.value_parameter() {
                     let ty = match &source.kind {

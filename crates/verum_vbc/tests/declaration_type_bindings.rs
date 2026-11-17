@@ -154,8 +154,9 @@ mod codegen {
                 }
             }
         }
-        for origin in [None, Some(verum_vbc::types::StringId(u32::MAX))] {
-            let mut altered = original.clone();
+        let mut altered = original.clone();
+        let malformed = altered.strings.intern("outer..inner");
+        for origin in [None, Some(verum_vbc::types::StringId(u32::MAX)), Some(malformed)] {
             for ty in &mut altered.types {
                 ty.origin_module = origin;
             }
