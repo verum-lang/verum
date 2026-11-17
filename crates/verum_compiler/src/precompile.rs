@@ -136,7 +136,7 @@ pub fn precompile_stdlib(cfg: &PrecompileConfig) -> Result<StdlibCompilationResu
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or(Path::new("."));
     let stage = tempfile::tempdir_in(parent)?;
-    let source = stage.path().join("core");
+    let source = stage.path().canonicalize()?.join("core");
     let mut options = CompilerOptions::default();
     if let Some(threads) = cfg.threads {
         options.num_threads = threads.get();
@@ -158,8 +158,9 @@ pub fn precompile_stdlib(cfg: &PrecompileConfig) -> Result<StdlibCompilationResu
     // `CompilerOptions` defaults are sufficient.
     drop(phase);
     let mut pipeline = CompilationPipeline::new_core(&mut session, core_config);
+    let origin = std::path::absolute(&cfg.stdlib_path)?;
     let mut result = pipeline
-        .compile_core()
+        .compile_core_with_origin(Some(&origin))
         .context("CompilationPipeline::compile_core failed during stdlib precompile")?;
 
     if cfg.verbose {

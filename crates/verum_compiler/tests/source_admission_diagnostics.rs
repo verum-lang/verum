@@ -82,3 +82,34 @@ fn parallel_admission_preserves_lexical_owners_and_cross_module_calls() {
         assert_eq!(result.try_as_i64(), Some(73));
     }
 }
+
+#[test]
+fn failed_stdlib_bake_links_to_editable_sources_after_snapshot_cleanup() {
+    use verum_compiler::precompile::{PrecompileConfig, precompile_stdlib};
+    let project = tempfile::tempdir().unwrap();
+    let root = project.path().join("library");
+    for (group, function) in [("left", "one"), ("right", "two")] {
+        let directory = root.join(group);
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(directory.join("mod.vr"), format!("module core.{group}; public module leaf;")).unwrap();
+        std::fs::write(directory.join("leaf.vr"),
+            format!("module core.{group}.leaf;\npublic fn {function}() -> Int {{ true }}")).unwrap();
+    }
+    std::fs::write(root.join("mod.vr"), "module core; public module left; public module right;").unwrap();
+
+    let config = PrecompileConfig::for_source(root.clone(), project.path());
+    let message = format!("{:#}", precompile_stdlib(&config).expect_err("invalid source compiled"));
+    for group in ["left", "right"] {
+        let file = root.join(group).join("leaf.vr");
+        assert!(message.contains(&format!("{}:2:", file.display())), "{message}");
+        assert!(file.is_file());
+    }
+    assert!(!message.contains(&config.output_path.parent().unwrap().display().to_string()), "{message}");
+    assert!(!config.output_path.exists());
+
+    let file = root.join("left/leaf.vr");
+    std::fs::write(&file, "module core.left.leaf; public fn (").unwrap();
+    let syntax = format!("{:#}", precompile_stdlib(&config).expect_err("invalid syntax compiled"));
+    assert!(syntax.contains(&file.display().to_string()), "{syntax}");
+    assert!(!syntax.contains(&config.output_path.parent().unwrap().display().to_string()), "{syntax}");
+}

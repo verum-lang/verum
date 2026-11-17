@@ -19,7 +19,7 @@
 //! dependency constraints. User-code builds use per-file
 //! incremental registration with the bootstrapped stdlib.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -33,7 +33,8 @@ use verum_modules::{
 use verum_vbc::codegen::{ForeignInterfaces, VbcCodegen};
 
 use super::BuildMode;
-use crate::core_compiler::{CoreConfig, StdlibCompilationResult, StdlibModule};
+use crate::core_compiler::{CoreConfig, StdlibCompilationResult, StdlibModule, StdlibModuleResolver};
+use crate::Session;
 use crate::module_utils;
 
 use super::CompilationPipeline;
@@ -92,6 +93,10 @@ impl<'s> CompilationPipeline<'s> {
     ///  result.modules_compiled, result.functions_compiled);
     /// ```
     pub fn compile_core(&mut self) -> Result<StdlibCompilationResult> {
+        self.compile_core_with_origin(None)
+    }
+
+    pub(crate) fn compile_core_with_origin(&mut self, origin: Option<&Path>) -> Result<StdlibCompilationResult> {
         use verum_vbc::write_archive_to_file;
 
         // Extract config from build_mode (or fail if not in StdlibBootstrap mode)
@@ -124,7 +129,7 @@ impl<'s> CompilationPipeline<'s> {
             .ok_or_else(|| anyhow::anyhow!("StdlibModuleResolver not initialized"))?;
 
         resolver
-            .discover()
+            .discover_with_origin(origin)
             .map_err(|e| anyhow::anyhow!("Module discovery failed: {}", e))?;
 
         if config.verbose {
@@ -147,7 +152,7 @@ impl<'s> CompilationPipeline<'s> {
         let mut all_parsed_modules: Vec<(String, Vec<(PathBuf, verum_ast::Module)>)> = Vec::new();
 
         for module in &modules_to_compile {
-            let ast_modules = self.parse_stdlib_module_files(module)?;
+            let ast_modules = Self::parse_stdlib_module_files(self.session, resolver, module)?;
             all_parsed_modules.push((module.name.clone(), ast_modules));
         }
 
@@ -162,13 +167,18 @@ impl<'s> CompilationPipeline<'s> {
             &mut self.module_loader,
             seeds,
             |source| {
-                let lexer = verum_lexer::Lexer::new(source.source.as_str(), source.file_id);
+                let path = resolver.source_path(&source.file_path);
+                let file_id = self.session.load_source_string(&source.source, path.to_path_buf())
+                    .map_err(|error| verum_modules::error::ModuleError::Other {
+                        message: error.to_string().into(), span: None,
+                    })?;
+                let lexer = verum_lexer::Lexer::new(&source.source, file_id);
                 verum_fast_parser::VerumParser::new()
-                    .parse_module(lexer, source.file_id)
+                    .parse_module(lexer, file_id)
                     .map_err(|errors| verum_modules::error::ModuleError::Other {
                         message: Text::from(format!(
                             "parse error in file mount `{}`: {}",
-                            source.file_path.display(),
+                            path.display(),
                             errors.iter().map(ToString::to_string).collect::<Vec<_>>().join("; "),
                         )),
                         span: None,
@@ -200,7 +210,7 @@ impl<'s> CompilationPipeline<'s> {
         phase.next("Stdlib target selection");
         let target = self.session.cfg_evaluator().config().clone();
         let identities: Vec<_> = all_parsed_modules.iter().flat_map(|(_, files)| files)
-            .map(|file| (file.owner.as_str(), file.path.to_string_lossy().into_owned(), &file.ast)).collect();
+            .map(|file| (file.owner.as_str(), resolver.source_path(&file.path).to_string_lossy().into_owned(), &file.ast)).collect();
         let refs: Vec<_> = identities.iter().map(|(owner, path, ast)| (*owner, path.as_str(), *ast)).collect();
         let mut selected = crate::owned_source_semantics::select_source_roster(&refs, &target)?;
         phase.next("Stdlib source admission");
@@ -754,18 +764,20 @@ one module and therefore never seeded",
 
     /// Parse stdlib module source files to AST.
     fn parse_stdlib_module_files(
-        &self,
+        session: &Session,
+        resolver: &StdlibModuleResolver,
         module: &StdlibModule,
     ) -> Result<Vec<(PathBuf, verum_ast::Module)>> {
         use crate::api::SourceFile;
 
         module.source_files.iter().map(|path| {
+            let origin = resolver.source_path(path);
             let source = SourceFile::load(path)
-                .map_err(|e| anyhow::anyhow!("reading {}: {e}", path.display()))?;
-            let file_id = self.session.load_source_string(&source.content, path.clone())?;
+                .map_err(|e| anyhow::anyhow!("reading {}: {e}", origin.display()))?;
+            let file_id = session.load_source_string(&source.content, origin.to_path_buf())?;
             let ast = verum_fast_parser::VerumParser::new()
                 .parse_module_str(&source.content, file_id)
-                .map_err(|e| anyhow::anyhow!("parsing {}: {e:?}", path.display()))?;
+                .map_err(|e| anyhow::anyhow!("parsing {}: {e:?}", origin.display()))?;
             Ok((path.clone(), ast))
         }).collect()
     }

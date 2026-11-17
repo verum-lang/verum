@@ -640,6 +640,8 @@ fn reaches(
 pub struct StdlibModuleResolver {
     /// Root stdlib path
     stdlib_path: PathBuf,
+    /// Editable source tree corresponding to an immutable build snapshot.
+    source_origin: Option<PathBuf>,
     /// Discovered modules
     modules: HashMap<String, StdlibModule>,
     /// Compilation order (topologically sorted)
@@ -657,6 +659,7 @@ impl StdlibModuleResolver {
     pub fn with_target(stdlib_path: impl Into<PathBuf>, target: TargetConfig) -> Self {
         Self {
             stdlib_path: stdlib_path.into(),
+            source_origin: None,
             modules: HashMap::new(),
             compilation_order: Vec::new(),
             target,
@@ -665,10 +668,16 @@ impl StdlibModuleResolver {
 
     /// Discovers all modules in the stdlib directory
     pub fn discover(&mut self) -> Result<(), CompilationError> {
+        self.discover_with_origin(None)
+    }
+
+    pub(crate) fn discover_with_origin(&mut self, origin: Option<&Path>) -> Result<(), CompilationError> {
+        self.source_origin = origin.map(Path::to_path_buf);
         let stdlib_path = self.stdlib_path.clone();
         self.modules.clear();
         self.compilation_order.clear();
         let mut staged = Self::with_target(stdlib_path.clone(), self.target.clone());
+        staged.source_origin.clone_from(&self.source_origin);
         staged.discover_modules(&stdlib_path, "", module_utils::SourceModuleSelection::unrestricted())?;
         staged.resolve_dependencies()?;
         staged.compute_compilation_order()?;
@@ -677,12 +686,22 @@ impl StdlibModuleResolver {
         Ok(())
     }
 
+    /// Translate only paths inside this snapshot. File I/O always uses the physical path.
+    pub(crate) fn source_path<'a>(&self, path: &'a Path) -> std::borrow::Cow<'a, Path> {
+        if let Some(origin) = &self.source_origin
+            && let Ok(relative) = path.strip_prefix(&self.stdlib_path)
+        {
+            return origin.join(relative).into();
+        }
+        path.into()
+    }
+
     /// Recursively discovers modules
     fn discover_modules(&mut self, dir: &Path, prefix: &str, inherited: module_utils::SourceModuleSelection) -> Result<(), CompilationError> {
         if !dir.is_dir() {
             return Err(CompilationError::new(
                 CompilationErrorKind::IoError,
-                format!("Not a directory: {}", dir.display()),
+                format!("Not a directory: {}", self.source_path(dir).display()),
             ));
         }
 
@@ -697,7 +716,7 @@ impl StdlibModuleResolver {
         let entries = std::fs::read_dir(dir).map_err(|e| {
             CompilationError::new(
                 CompilationErrorKind::IoError,
-                format!("Failed to read directory {}: {}", dir.display(), e),
+                format!("Failed to read directory {}: {}", self.source_path(dir).display(), e),
             )
         })?;
 
@@ -794,10 +813,10 @@ impl StdlibModuleResolver {
 
     fn source_selection(&self, path: &Path, owner: &str) -> Result<module_utils::SourceModuleSelection, CompilationError> {
         let source = std::fs::read_to_string(path).map_err(|error| CompilationError::new(
-            CompilationErrorKind::IoError, format!("cannot read {}: {error}", path.display()),
+            CompilationErrorKind::IoError, format!("cannot read {}: {error}", self.source_path(path).display()),
         ))?;
         module_utils::source_module_selection(&source, owner, &self.target).map_err(|error|
-            CompilationError::new(CompilationErrorKind::ParseError, format!("{}: {error}", path.display())))
+            CompilationError::new(CompilationErrorKind::ParseError, format!("{}: {error}", self.source_path(path).display())))
     }
 
     /// Resolves dependencies between modules by analyzing imports.
