@@ -5687,6 +5687,11 @@ impl TypeChecker {
                     let resolved_protocol_args = checker.protocol_application_arguments(
                         protocol, ast_protocol_args, Some(&for_type_resolved),
                     )?;
+                    for (_, scheme) in &mut static_method_registrations {
+                        Self::attach_implementation_requirements(
+                            scheme, &where_clauses, &type_param_fn_bounds,
+                        );
+                    }
 
                     // Defaults inherit the selected application, including owner values.
                     let mut defaults = Vec::new();
@@ -5700,12 +5705,18 @@ impl TypeChecker {
                                     let existing = checker.inherent_methods.read().get(&method_owner).and_then(|methods| methods.get(&key)).cloned();
                                     if let Some(mut scheme) = existing {
                                         checker.attach_protocol_method_requirements(&mut scheme, method, &resolved_protocol_args, &for_type_resolved, impl_decl.span)?;
+                                        Self::attach_implementation_requirements(
+                                            &mut scheme, &where_clauses, &type_param_fn_bounds,
+                                        );
                                         checker.inherent_methods.write().entry(method_owner.clone()).or_default().insert(key, scheme);
                                     }
                                 }
                             }
                             if method.has_default && !methods.contains_key(name) {
-                                let scheme = checker.inherited_protocol_method_scheme(method, &resolved_protocol_args, &for_type_resolved, &impl_variables)?;
+                                let mut scheme = checker.inherited_protocol_method_scheme(method, &resolved_protocol_args, &for_type_resolved, &impl_variables)?;
+                                Self::attach_implementation_requirements(
+                                    &mut scheme, &where_clauses, &type_param_fn_bounds,
+                                );
                                 methods.insert(name.clone(), scheme.ty.clone());
                                 defaults.push((name.clone(), scheme));
                             }
@@ -19617,8 +19628,19 @@ impl TypeChecker {
 
         // Scope the read guard tightly to avoid borrow conflicts later
         {
+            let substitution = self.unifier.save_substitution();
+            let premises: List<_> = self.caller_protocol_premises().iter()
+                .map(|clause| clause.try_apply_subst(&substitution)
+                    .map_err(|message| TypeError::UniverseBinding { message, span }))
+                .collect::<Result<_>>()?;
+            let callables: Map<_, _> = self.unifier.rigid_callable_bounds()
+                .map(|(variable, contract)| contract.try_apply_subst(&substitution)
+                    .map(|contract| (variable, contract))
+                    .map_err(|message| TypeError::UniverseBinding { message, span }))
+                .collect::<Result<_>>()?;
+            let environment = self.source_type_registration.proof_environment(&premises, &callables);
             let protocol_checker_guard = self.protocol_checker.read();
-            let impls = protocol_checker_guard.get_implementations(&resolved_ty);
+            let impls = protocol_checker_guard.get_implementations_in_environment(&resolved_ty, environment);
 
             // ============================================================
             // Protocol-typed receiver fallback.

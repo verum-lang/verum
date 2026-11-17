@@ -113,12 +113,24 @@ impl ProtocolChecker {
         ty: &Type,
         args: Option<&[Type]>,
     ) -> Option<Substitution> {
+        self.instantiate_applicable_implementation_in_environment(
+            implementation, ty, args, ConstraintEnvironment::new(&[], &Default::default()),
+        )
+    }
+
+    pub(super) fn instantiate_applicable_implementation_in_environment(
+        &self,
+        implementation: &ProtocolImpl,
+        ty: &Type,
+        args: Option<&[Type]>,
+        environment: ConstraintEnvironment<'_>,
+    ) -> Option<Substitution> {
         let CandidateMatch::Matched(substitution) =
-            self.match_implementation_candidate(implementation, ty, args, true)
+            self.match_implementation_candidate_in_environment(implementation, ty, args, true, &environment)
         else {
             return None;
         };
-        self.check_implementation_callable_bounds(implementation, &substitution)
+        self.check_implementation_callable_bounds_in_environment(implementation, &substitution, &environment)
             .ok()?;
         for clause in &implementation.where_clauses {
             let subject = clause.ty.try_apply_subst(&substitution).ok()?;
@@ -128,7 +140,18 @@ impl ProtocolChecker {
                 .map(|bound| bound.try_apply_subst(&substitution))
                 .collect::<Result<verum_common::List<_>, _>>()
                 .ok()?;
-            self.check_bounds(&subject, &bounds).ok()?;
+            // A closed goal uses the concrete implementation registry, including
+            // its negative-bound rules. A caller parameter must instead satisfy
+            // every condition in its declared lexical proof environment.
+            let universal = !subject.free_vars().is_empty() || bounds.iter().any(|bound| {
+                bound.args.iter().chain(bound.associated_types.values())
+                    .any(|argument| !argument.free_vars().is_empty())
+            });
+            if universal {
+                self.check_universal_bounds_in(&subject, &bounds, environment).ok()?;
+            } else {
+                self.check_bounds(&subject, &bounds).ok()?;
+            }
         }
         Some(substitution)
     }

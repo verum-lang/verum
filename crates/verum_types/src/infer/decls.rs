@@ -4877,10 +4877,7 @@ impl TypeChecker {
         use verum_ast::decl::{FunctionParamKind, ImplItemKind, ImplKind};
         use verum_common::Text;
         let inherit_domain = |scheme: &mut crate::context::TypeScheme| {
-            scheme.where_clauses.extend(conditions.iter().cloned());
-            for (variable, bound) in callables {
-                scheme.var_type_bounds.entry(*variable).or_default().push(bound.clone());
-            }
+            Self::attach_implementation_requirements(scheme, conditions, callables);
         };
         self.check_no_duplicate_impl_items(impl_decl)?;
         let ImplKind::Inherent(for_type) = &impl_decl.kind
@@ -5303,6 +5300,26 @@ impl TypeChecker {
         Ok(())
     }
 
+    /// Every callable publication retains its implementation's conditions.
+    /// These are call obligations, never new premises of the caller.
+    pub(super) fn attach_implementation_requirements(
+        scheme: &mut crate::context::TypeScheme,
+        conditions: &[crate::protocol::WhereClause],
+        callables: &Map<TypeVar, Type>,
+    ) {
+        for condition in conditions {
+            if !scheme.where_clauses.contains(condition) {
+                scheme.where_clauses.push(condition.clone());
+            }
+        }
+        for (variable, bound) in callables {
+            let bounds = scheme.var_type_bounds.entry(*variable).or_default();
+            if !bounds.contains(bound) {
+                bounds.push(bound.clone());
+            }
+        }
+    }
+
     /// Register method signatures from a `implement Protocol for Type { ... }` block.
     /// Processes both instance and static methods, registers blanket impls,
     /// inherits default methods from the protocol, and commits the ProtocolImpl.
@@ -5566,6 +5583,9 @@ impl TypeChecker {
                                     method_scheme =
                                         method_scheme.with_type_bounds(method_type_var_bounds);
                                 }
+                                Self::attach_implementation_requirements(
+                                    &mut method_scheme, &impl_where_clauses, &type_param_fn_bounds,
+                                );
 
                                 // Clean up method-level generic type parameters
                                 for param_name in method_type_param_names {
@@ -5708,6 +5728,9 @@ impl TypeChecker {
                                     method_scheme =
                                         method_scheme.with_type_bounds(method_type_var_bounds);
                                 }
+                                Self::attach_implementation_requirements(
+                                    &mut method_scheme, &impl_where_clauses, &type_param_fn_bounds,
+                                );
 
                                 // Clean up method-level generic type parameters
                                 for param_name in method_type_param_names {
@@ -5784,9 +5807,12 @@ impl TypeChecker {
                                     })
                                     .collect();
 
-                                let method_scheme = self.inherited_protocol_method_scheme(
+                                let mut method_scheme = self.inherited_protocol_method_scheme(
                                     proto_method, &resolved_protocol_args, &impl_self_type, &impl_type_vars,
                                 )?;
+                                Self::attach_implementation_requirements(
+                                    &mut method_scheme, &impl_where_clauses, &type_param_fn_bounds,
+                                );
 
                                 defaults.push((method_name.clone(), method_scheme));
                             }

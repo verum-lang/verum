@@ -7931,6 +7931,16 @@ impl ProtocolChecker {
     ///
     /// Generic protocol implementations: "implement<T: Bound> Protocol for Container<T>" with blanket impls
     pub fn get_implementations(&self, ty: &Type) -> List<&ProtocolImpl> {
+        self.get_implementations_in_environment(
+            ty, ConstraintEnvironment::new(&[], &Default::default()),
+        )
+    }
+
+    /// Select methods in the caller's declaration environment. Candidate
+    /// requirements never become additional assumptions during this search.
+    pub(crate) fn get_implementations_in_environment(
+        &self, ty: &Type, environment: ConstraintEnvironment<'_>,
+    ) -> List<&ProtocolImpl> {
         // Fresh type-vars without specific bindings can't implement any
         // concrete protocol — every blanket impl would optimistically match
         // them via `try_match_type` on a Var, polluting downstream method
@@ -7959,7 +7969,7 @@ impl ProtocolChecker {
                     if let Some(impl_) = self.impls.get(idx)
                         && self.types_structurally_equal(&impl_.for_type, ty)
                         && self
-                            .instantiate_applicable_implementation(impl_, ty, None)
+                            .instantiate_applicable_implementation_in_environment(impl_, ty, None, environment)
                             .is_some()
                     {
                         exact.push((idx, impl_));
@@ -7977,7 +7987,7 @@ impl ProtocolChecker {
         // a rendered base-name key cannot decide whether a generic head matches.
         if impls.is_empty() {
             for implementation in &self.impls {
-                if self.instantiate_applicable_implementation(implementation, ty, None).is_some() {
+                if self.instantiate_applicable_implementation_in_environment(implementation, ty, None, environment).is_some() {
                     impls.push(implementation);
                 }
             }
@@ -8004,7 +8014,7 @@ impl ProtocolChecker {
             if matches!(&impl_.for_type, Type::Var(variable)
                 if impl_.parameters.contains(&crate::context::GenericBinder::Type(*variable)))
                 && self
-                    .instantiate_applicable_implementation(impl_, ty, None)
+                    .instantiate_applicable_implementation_in_environment(impl_, ty, None, environment)
                     .is_some()
             {
                 impls.push(impl_);
