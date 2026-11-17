@@ -81,8 +81,9 @@ pub struct CodegenContext {
     /// The semantic parameter itself remains the declared generic parameter.
     pub(super) source_callable_bounds: Map<(FunctionId, usize), TypeRef>,
 
-    /// Source identity of locally compiled closure bodies. Their semantic
-    /// signature lives in FunctionInfo, separately from ABI storage defaults.
+    /// Closure bodies compiled in the current function's declaration scope.
+    /// A retained default can reuse its source spans with a different receiver
+    /// telescope; only this materialization's FunctionId supplies its signature.
     pub compiled_closures: Map<verum_ast::Span, FunctionId>,
 
     /// **Resolution-time id→name carry** (T0277 leg B part 2).
@@ -982,6 +983,11 @@ pub struct ClosureCompilationContext {
         Map<verum_ast::Span, verum_common::Maybe<verum_common::Text>>,
     /// Semantic result declarations captured while branch-local bindings exist.
     pub(super) declared_result_types: Map<verum_ast::Span, Option<TypeRef>>,
+    /// Compiled closure identities belong to the enclosing declaration scope.
+    pub compiled_closures: Map<verum_ast::Span, FunctionId>,
+    /// Pending sibling callbacks retain the enclosing callable's declarations.
+    pub closure_param_type_hints: Map<verum_ast::Span, verum_common::List<Option<TypeRef>>>,
+    pub closure_return_type_hints: Map<verum_ast::Span, verum_common::Text>,
     /// Current source call boundary; only its selected producer may publish a
     /// semantic result here. Nested expressions save and restore this scope.
     pub(super) selected_call_result_span: Option<verum_ast::Span>,
@@ -2801,6 +2807,9 @@ impl CodegenContext {
         self.variable_type_names.clear();
         self.compiled_block_result_types.clear();
         self.declared_result_types.clear();
+        self.compiled_closures.clear();
+        self.closure_param_type_hints.clear();
+        self.closure_return_type_hints.clear();
         self.selected_call_result_span = None;
         self.array_result_facts.clear();
         self.reference_bound_vars.clear();
@@ -4823,6 +4832,9 @@ impl CodegenContext {
             variable_type_names: self.variable_type_names.clone(),
             compiled_block_result_types: self.compiled_block_result_types.clone(),
             declared_result_types: self.declared_result_types.clone(),
+            compiled_closures: self.compiled_closures.clone(),
+            closure_param_type_hints: self.closure_param_type_hints.clone(),
+            closure_return_type_hints: self.closure_return_type_hints.clone(),
             selected_call_result_span: self.selected_call_result_span,
             array_result_facts: self.array_result_facts.clone(),
             function_return_type_name: self.function_return_type_name.clone(),
@@ -4861,6 +4873,9 @@ impl CodegenContext {
         self.variable_type_names = saved.variable_type_names;
         self.compiled_block_result_types = saved.compiled_block_result_types;
         self.declared_result_types = saved.declared_result_types;
+        self.compiled_closures = saved.compiled_closures;
+        self.closure_param_type_hints = saved.closure_param_type_hints;
+        self.closure_return_type_hints = saved.closure_return_type_hints;
         self.selected_call_result_span = saved.selected_call_result_span;
         self.array_result_facts = saved.array_result_facts;
         self.reference_bindings = saved.reference_bindings;
@@ -4989,6 +5004,8 @@ impl CodegenContext {
         self.function_return_type_name = None;
         self.function_return_declaration = None;
         self.try_recover_depth = 0;
+        self.compiled_closures.clear();
+        self.closure_param_type_hints.clear();
         self.closure_return_type_hints.clear();
         self.constants.clear();
         self.strings.clear();
