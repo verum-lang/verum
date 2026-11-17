@@ -24,7 +24,7 @@ impl VbcCodegen {
             .ctx
             .current_source_module
             .as_deref()
-            .unwrap_or(&self.config.module_name);
+            .unwrap_or_else(|| self.source_module_root());
         let key = (owner.into(), function.name.name.clone(), scope);
         let mut candidates = self
             .declared_impl_definitions
@@ -109,7 +109,7 @@ impl VbcCodegen {
             .ctx
             .current_source_module
             .as_deref()
-            .unwrap_or(&self.config.module_name);
+            .unwrap_or_else(|| self.source_module_root());
         let scopes = self.definition_lexical_scopes(owner)?;
         let mut digest = blake3::Hasher::new();
         verum_ast::source_definition::encode_implementation(
@@ -161,7 +161,7 @@ impl VbcCodegen {
             .ctx
             .current_source_module
             .as_deref()
-            .unwrap_or(&self.config.module_name);
+            .unwrap_or_else(|| self.source_module_root());
         let mut scopes = self.definition_lexical_scopes(owner)?;
         if let Some(body_owner) = self
             .ctx.lexical_source_module

@@ -4,6 +4,10 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use verum_ast::{Item, ItemKind, MountTree, MountTreeKind};
 use verum_common::{Map, Set, Text};
 
+#[cfg(test)]
+#[path = "../../tests/codegen/source_lexical_scopes.rs"]
+mod lexical_scope_tests;
+
 pub(super) fn mount_path_parts(written: &str) -> Vec<String> {
     if let Some(tail) = written.strip_prefix("..") {
         std::iter::once(".".to_owned())

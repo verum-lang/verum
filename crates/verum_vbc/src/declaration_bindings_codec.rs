@@ -6,6 +6,47 @@ pub(crate) type Bindings = OrderedMap<Text, OrderedMap<Text, Option<Text>>>;
 pub(crate) const MAX_BYTES: usize = 4 * 1024 * 1024;
 type Wire = Vec<(Text, Vec<(Text, Option<Text>)>)>;
 
+/// An empty key denotes the anonymous root only when a retained declaration
+/// explicitly selects that owner. A missing origin remains a legacy module fallback.
+pub(crate) fn validate_module(module: &crate::module::VbcModule) -> Result<(), Text> {
+    for (owner, names) in &module.declaration_type_bindings {
+        if verum_common::qualified_name::has_empty_module_segment(owner) {
+            return Err("malformed declaration owner".into());
+        }
+        if names
+            .iter()
+            .any(|(name, target)| name.is_empty() || target.as_ref().is_some_and(Text::is_empty))
+        {
+            return Err("empty binding name or target".into());
+        }
+    }
+    if !module.declaration_type_bindings.contains_key(&Text::new()) {
+        return Ok(());
+    }
+    let mut has_source = false;
+    for ty in &module.types {
+        has_source |= crate::module::declaration_type_scope_owners(ty, &module.name, |id| {
+            module.strings.get(id)
+        })?
+        .contains(&Text::new());
+    }
+    for function in module
+        .functions
+        .iter()
+        .filter(|f| f.source_signature.is_some())
+    {
+        has_source |=
+            crate::module::declaration_origin(&module.name, function.origin_module, |id| {
+                module.strings.get(id)
+            })?
+            .is_empty();
+    }
+    if !has_source {
+        return Err("empty declaration owner has no explicit anonymous source declaration".into());
+    }
+    Ok(())
+}
+
 pub(crate) fn encode(bindings: &Bindings) -> VbcResult<Vec<u8>> {
     // Lists preserve duplicate evidence on decode, unlike serde's map visitor
     // which would silently replace an earlier owner or lexical binding.
@@ -28,8 +69,6 @@ pub(crate) fn encode(bindings: &Bindings) -> VbcResult<Vec<u8>> {
             "declaration type bindings exceed byte budget".into(),
         ));
     }
-    // Encoding and decoding accept the same language, including name validity.
-    decode(&bytes)?;
     Ok(bytes)
 }
 
@@ -44,14 +83,8 @@ pub(crate) fn decode(bytes: &[u8]) -> VbcResult<Bindings> {
     })?;
     let mut result = Bindings::new();
     for (owner, entries) in wire {
-        if owner.is_empty() {
-            return Err(invalid("empty declaration owner"));
-        }
         let mut names = OrderedMap::new();
         for (name, target) in entries {
-            if name.is_empty() || target.as_ref().is_some_and(Text::is_empty) {
-                return Err(invalid("empty binding name or target"));
-            }
             if names.insert(name, target).is_some() {
                 return Err(invalid("duplicate lexical binding"));
             }

@@ -1,6 +1,11 @@
 //! Canonical module qualification shared by archive producers and consumers.
 use crate::{List, Text};
 
+/// The anonymous root has no segments. Every segment in a named owner must be present.
+pub fn has_empty_module_segment(owner: &str) -> bool {
+    !owner.is_empty() && owner.split('.').any(str::is_empty)
+}
+
 /// Rank copies of one declaration by their source authority. A direct
 /// declaration in its owning compilation unit outranks imported carriers.
 pub fn declaration_priority(unit: &str, owner: &str, name: &str) -> u8 {

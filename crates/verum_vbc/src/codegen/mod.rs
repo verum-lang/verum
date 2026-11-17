@@ -1799,7 +1799,7 @@ impl VbcCodegen {
 
     fn lexical_type_scope(&self) -> &str {
         self.ctx.lexical_source_scope()
-            .unwrap_or(&self.config.module_name)
+            .unwrap_or_else(|| self.source_module_root())
     }
 
     /// Select a mount from the current source's retained declaration scope.
@@ -2853,8 +2853,7 @@ impl VbcCodegen {
                 {
                     let info = ProtocolInfo {
                         name: protocol_name.clone(),
-                        source_module: self.source_file_owner(module, &self.config.module_name)
-                            .unwrap_or_else(|| self.config.module_name.clone()),
+                        source_module: self.source_file_owner(module, &self.config.module_name),
                         generics: std::sync::Arc::new(type_decl.generics.clone()),
                         default_methods: std::sync::Arc::new(default_methods),
                         super_protocols: std::sync::Arc::new(super_protocols),
@@ -2873,8 +2872,7 @@ impl VbcCodegen {
             // Without this, context protocol impls can't populate TypeDescriptor.protocols.
             if let ItemKind::Context(ctx_decl) = &item.kind {
                 let ctx_name = ctx_decl.name.name.to_string();
-                let source_owner = self.source_file_owner(module, &self.config.module_name)
-                    .unwrap_or_else(|| self.config.module_name.clone());
+                let source_owner = self.source_file_owner(module, &self.config.module_name);
                 let owner_key = crate::module::qualify_module_name(&source_owner, &ctx_name);
                 if let Some(existing) = self.source_context_declarations.get(&owner_key) {
                     if existing != ctx_decl {
@@ -2952,11 +2950,7 @@ impl VbcCodegen {
         // loses the provenance needed to resolve cross-module paths like
         // `super.darwin.tls.ctx_get`.
         let prev = self.ctx.current_source_module.take();
-        if let Some(name) =
-            self.source_file_owner(module, &self.config.module_name)
-        {
-            self.ctx.current_source_module = Some(name);
-        }
+        self.ctx.current_source_module = Some(self.source_file_owner(module, &self.config.module_name));
         let module_name = self.ctx.current_source_module.clone().unwrap_or_default();
         let funcs_before = self.ctx.functions.len();
         let result = self.collect_all_declarations(module);
@@ -3004,8 +2998,8 @@ impl VbcCodegen {
     /// don't have one.
     /// v2.12 TYPE-ORIGIN-MODULE (T0555): intern the current FILE
     /// submodule's dotted path for a type descriptor being built.
-    /// `None` at an entry module's own top level (single-file modules,
-    /// user code) — consumers fall back to the entry name.
+    /// A selected anonymous source has an explicit empty-path owner. `None`
+    /// means no source scope has been selected, not an entry-module alias.
     fn current_origin_module_sid(&mut self) -> Option<crate::types::StringId> {
         self.ctx
             .current_source_module
@@ -3197,14 +3191,15 @@ impl VbcCodegen {
             .unwrap_or_else(|| Self::derive_submodule_path(parent, path))
     }
 
-    fn source_file_owner(&self, module: &Module, fallback: &str) -> Option<String> {
+    /// A selected source always has an owner. The empty path denotes the
+    /// anonymous root; it must never collapse into missing archive provenance
+    /// or the compilation unit's default display name.
+    fn source_file_owner(&self, module: &Module, fallback: &str) -> String {
         if let Some(owner) = self.mounted_file_owners.get(&module.file_id) {
-            return Some(owner.clone());
+            return owner.clone();
         }
-        Self::resolve_full_module_path(module, fallback).or_else(|| {
-            // An explicit source parent owns headerless files too. Only the
-            // anonymous default compilation unit has no namespace to publish.
-            (!fallback.is_empty() && fallback != "main").then(|| fallback.to_owned())
+        Self::resolve_full_module_path(module, fallback).unwrap_or_else(|| {
+            if fallback == "main" { String::new() } else { fallback.to_owned() }
         })
     }
 
@@ -5040,8 +5035,7 @@ impl VbcCodegen {
                 MountTreeKind::Glob(_) | MountTreeKind::File { .. } => {}
             }
         }
-        let source_module =
-            self.source_file_owner(module, parent).unwrap_or_else(|| parent.to_owned());
+        let source_module = self.source_file_owner(module, parent);
         let mut names = std::collections::HashMap::new();
         for item in &module.items {
             if let ItemKind::Mount(decl) = &item.kind {
@@ -5186,20 +5180,18 @@ impl VbcCodegen {
         let owner = self.source_file_owner(module, &self.config.module_name);
         let mut pending = verum_common::List::from_iter([(module.items.as_slice(), owner)]);
         while let Some((items, owner)) = pending.pop() {
-            let header_owner = owner.clone().unwrap_or_else(|| self.config.module_name.clone());
             for item in items {
                 if !self.should_compile_item(item) { continue; }
                 match &item.kind {
                     ItemKind::Impl(declaration) => {
-                        self.record_implementation_header(declaration, &header_owner)?;
-                        self.record_blanket_impl(declaration, owner.clone())?;
+                        self.record_implementation_header(declaration, &owner)?;
+                        self.record_blanket_impl(declaration, Some(owner.clone()))?;
                     }
                     ItemKind::Module(child) => {
                         if let Some(items) = &child.items {
-                            let child_owner = owner.as_ref().filter(|owner| !owner.is_empty())
-                                .map(|owner| format!("{owner}.{}", child.name.name))
-                                .unwrap_or_else(|| child.name.name.to_string());
-                            pending.push((items.as_slice(), Some(child_owner)));
+                            let child_owner = if owner.is_empty() { child.name.name.to_string() }
+                                else { format!("{owner}.{}", child.name.name) };
+                            pending.push((items.as_slice(), child_owner));
                         }
                     }
                     _ => {},
@@ -5797,11 +5789,7 @@ impl VbcCodegen {
     pub fn compile_module_items(&mut self, module: &Module) -> CodegenResult<()> {
         if !self.selected_source_module(module, &self.config.module_name)? { return Ok(()); }
         let prev = self.ctx.current_source_module.take();
-        if let Some(name) =
-            self.source_file_owner(module, &self.config.module_name)
-        {
-            self.ctx.current_source_module = Some(name);
-        }
+        self.ctx.current_source_module = Some(self.source_file_owner(module, &self.config.module_name));
         let mut result = Ok(());
         for item in module.items.iter() {
             if self.should_compile_item(item)
@@ -5826,11 +5814,7 @@ impl VbcCodegen {
     pub fn compile_module_items_lenient(&mut self, module: &Module) -> CodegenResult<()> {
         if !self.selected_source_module(module, &self.config.module_name)? { return Ok(()); }
         let prev = self.ctx.current_source_module.take();
-        if let Some(name) =
-            self.source_file_owner(module, &self.config.module_name)
-        {
-            self.ctx.current_source_module = Some(name);
-        }
+        self.ctx.current_source_module = Some(self.source_file_owner(module, &self.config.module_name));
         let mut first_strict_err: Option<CodegenError> = None;
         for item in module.items.iter() {
             if self.should_compile_item(item) {
@@ -7260,34 +7244,13 @@ impl VbcCodegen {
         Ok(())
     }
 
-    /// Every attached source declaration needs the scope of its own origin,
-    /// including implementation-only carriers with no nominal source AST.
-    fn type_declaration_scope_owners(
-        descriptor: &TypeDescriptor, name: Option<&str>, origin: &str,
-    ) -> CodegenResult<std::collections::BTreeSet<Text>> {
-        let mut owners: std::collections::BTreeSet<Text> = descriptor
-            .source_inherent_implementations.iter()
-            .chain(descriptor.protocols.iter().filter_map(|implementation|
-                implementation.source_implementation.as_ref()))
-            .map(|source| source.origin_module().into()).collect();
-        if descriptor.source_declaration.is_some() {
-            let name = name.ok_or_else(|| CodegenError::internal("semantic type has no name"))?;
-            let qualified = crate::module::qualify_module_name(origin, name);
-            let (owner, _) = qualified.rsplit_once('.').ok_or_else(||
-                CodegenError::internal("semantic type has no declaring module"))?;
-            owners.insert(owner.into());
-        }
-        Ok(owners)
-    }
-
     fn retain_type_declaration_scopes(
         &mut self, module: &crate::module::VbcModule, descriptor: &TypeDescriptor,
     ) -> CodegenResult<()> {
-        let origin = descriptor.origin_module.and_then(|id| module.strings.get(id))
-            .unwrap_or(&module.name);
-        for owner in Self::type_declaration_scope_owners(
-            descriptor, module.strings.get(descriptor.name), origin,
-        ).inspect_err(|error| self.record_source_declaration_error(error.clone()))? {
+        let owners = crate::module::declaration_type_scope_owners(descriptor, &module.name, |id| module.strings.get(id))
+            .map_err(|message| CodegenError::new(CodegenErrorKind::InvalidSourceSignature(message.into_string())))
+            .inspect_err(|error| self.record_source_declaration_error(error.clone()))?;
+        for owner in owners {
             self.retain_declaration_type_scope(module, &owner)?;
         }
         Ok(())
@@ -7296,13 +7259,17 @@ impl VbcCodegen {
     fn retain_module_declaration_type_scopes(
         &mut self, module: &crate::module::VbcModule,
     ) -> CodegenResult<()> {
+        if let Err(message) = crate::declaration_bindings_codec::validate_module(module) {
+            return self.reject_source_declaration(message);
+        }
         for descriptor in &module.types {
             self.retain_type_declaration_scopes(module, descriptor)?;
         }
         for descriptor in &module.functions {
             if descriptor.source_signature.is_some() {
-                let owner = descriptor.origin_module.and_then(|id| module.strings.get(id))
-                    .unwrap_or(&module.name);
+                let owner = crate::module::declaration_origin(&module.name, descriptor.origin_module, |id| module.strings.get(id))
+                    .map_err(|message| CodegenError::new(CodegenErrorKind::InvalidSourceSignature(message.into_string())))
+                    .inspect_err(|error| self.record_source_declaration_error(error.clone()))?;
                 self.retain_declaration_type_scope(module, owner)?;
             }
         }
@@ -7315,18 +7282,16 @@ impl VbcCodegen {
         // that protocol. Only a source-owned default body needs its lexical scope.
         owners.extend(self.protocol_registry.values().filter(|protocol| !protocol.default_methods.is_empty())
             .map(|protocol| Text::from(protocol.source_module.as_str())));
+        let string = |id: StringId| self.ctx.strings.get(id.0 as usize).map(String::as_str);
+        let invalid = |message: Text| CodegenError::new(CodegenErrorKind::InvalidSourceSignature(message.into_string()));
         for descriptor in &self.types {
-            let origin = descriptor.origin_module.and_then(|id| self.ctx.strings.get(id.0 as usize))
-                .map(String::as_str).unwrap_or(&self.config.module_name);
-            owners.extend(Self::type_declaration_scope_owners(
-                descriptor, self.ctx.strings.get(descriptor.name.0 as usize).map(String::as_str), origin,
-            )?);
+            owners.extend(crate::module::declaration_type_scope_owners(descriptor, &self.config.module_name, string).map_err(invalid)?);
         }
         for descriptor in &self.functions {
             let descriptor = &descriptor.descriptor;
             if descriptor.source_signature.is_some() {
-                owners.insert(descriptor.origin_module.and_then(|id| self.ctx.strings.get(id.0 as usize))
-                    .map(String::as_str).unwrap_or(&self.config.module_name).into());
+                owners.insert(crate::module::declaration_origin(&self.config.module_name, descriptor.origin_module, string)
+                    .map_err(invalid)?.into());
             }
         }
         let mut bindings = crate::declaration_bindings_codec::Bindings::new();
@@ -8289,9 +8254,7 @@ impl VbcCodegen {
     /// through mounted aliases and compile fine (T0743).
     fn scope_to_own_module(&mut self, module: &Module) -> Option<String> {
         let prev = self.ctx.current_source_module.clone();
-        if let Some(name) = self.source_file_owner(module, &self.config.module_name) {
-            self.ctx.current_source_module = Some(name);
-        }
+        self.ctx.current_source_module = Some(self.source_file_owner(module, &self.config.module_name));
         prev
     }
 
@@ -8487,9 +8450,7 @@ impl VbcCodegen {
             // they cannot name a separate owner that signatures and emitted
             // descriptors will never reference.
             let declared_owner = self.source_file_owner(module, &self.config.module_name);
-            if declared_owner.is_none()
-                && (self.config.module_name.is_empty() || self.config.module_name == "main")
-            {
+            if declared_owner.is_empty() {
                 // Only immediate children of an ownerless source have this
                 // exact root path. Nested/file-owned module names need their
                 // own qualified namespace authority, not a bare leaf export.
@@ -8502,9 +8463,7 @@ impl VbcCodegen {
                     }
                 }
             }
-            let module_key = declared_owner.clone()
-                .unwrap_or_else(|| self.config.module_name.clone());
-            self.claim_declared_type_items(&module.items, &module_key, declared_owner.as_deref());
+            self.claim_declared_type_items(&module.items, &declared_owner);
         }
         self.check_source_declaration_error()
     }
@@ -8552,7 +8511,7 @@ impl VbcCodegen {
     ) -> R {
         let previous_parent = std::mem::replace(&mut self.config.module_name, parent.to_owned());
         let previous_scope = self.ctx.current_source_module.take();
-        self.ctx.current_source_module = self.source_file_owner(module, parent);
+        self.ctx.current_source_module = Some(self.source_file_owner(module, parent));
         let outcome = operation(self);
         self.ctx.current_source_module = previous_scope;
         self.config.module_name = previous_parent;
@@ -8593,27 +8552,24 @@ impl VbcCodegen {
         &mut self,
         items: &[verum_ast::Item],
         owner: &str,
-        source_owner: Option<&str>,
     ) {
         self.source_type_mounts
-            .entry(source_owner.unwrap_or(&self.config.module_name).into()).or_default();
+            .entry(owner.into()).or_default();
         for item in items {
             if !self.should_compile_item(item) { continue; }
             match &item.kind {
-                ItemKind::Type(declaration) => self.claim_user_type_name(owner, source_owner, declaration),
+                ItemKind::Type(declaration) => self.claim_user_type_name(owner, Some(owner), declaration),
                 ItemKind::Mount(mount) => {
-                    let owner = source_owner.unwrap_or(&self.config.module_name).to_owned();
-                    self.publish_source_type_mount(&owner, mount);
+                    self.publish_source_type_mount(owner, mount);
                 }
                 ItemKind::Module(module) => {
                     if let Some(items) = &module.items {
                         // Match scope_to_inline_module: a file-owned child
                         // keeps its parent; an anonymous root remains bare.
-                        let child = source_owner.filter(|owner| !owner.is_empty())
-                            .map(|owner| format!("{owner}.{}", module.name.name))
-                            .unwrap_or_else(|| module.name.name.to_string());
+                        let child = if owner.is_empty() { module.name.name.to_string() }
+                            else { format!("{owner}.{}", module.name.name) };
                         self.record_inline_type_parent(&child, owner);
-                        self.claim_declared_type_items(items, &child, Some(&child));
+                        self.claim_declared_type_items(items, &child);
                     }
                 }
                 _ => {}
@@ -8635,8 +8591,7 @@ impl VbcCodegen {
         self.alias_scope = Some(verum_ast::decl::locally_visible_type_names(
             module.items.as_slice(),
         ));
-        let owner = self.source_file_owner(module, &self.config.module_name)
-            .unwrap_or_else(|| self.config.module_name.clone());
+        let owner = self.source_file_owner(module, &self.config.module_name);
         for item in module.items.iter() {
             if !self.should_compile_item(item) {
                 continue;
@@ -8716,11 +8671,7 @@ impl VbcCodegen {
             if !self.selected_source_module(module, &parent)? { continue; }
             let previous_parent = std::mem::replace(&mut self.config.module_name, (*parent).to_owned());
             let previous_scope = self.ctx.current_source_module.take();
-            if let Some(name) =
-                self.source_file_owner(module, &self.config.module_name)
-            {
-                self.ctx.current_source_module = Some(name);
-            }
+            self.ctx.current_source_module = Some(self.source_file_owner(module, &self.config.module_name));
             let outcome: CodegenResult<()> = (|| {
                 for item in module.items.iter() {
                     if !self.should_compile_item(item) {
@@ -8828,13 +8779,12 @@ impl VbcCodegen {
             self.config.module_name = (*parent).to_owned();
             let owner = self.source_file_owner(module, &self.config.module_name);
             self.source_type_mounts
-                .entry(owner.as_deref().unwrap_or(&self.config.module_name).into())
+                .entry(owner.as_str().into())
                 .or_default();
-            if let Some(path) = &owner {
-                self.unit_module_paths.insert(path.clone());
-                self.source_module_owners.declare(path);
+            if !owner.is_empty() {
+                self.unit_module_paths.insert(owner.clone());
+                self.source_module_owners.declare(&owner);
             }
-            let owner = owner.unwrap_or_else(|| self.source_module_root().to_owned());
             // The first named bodiless declaration is the file header selected
             // by extract_source_module_name, already published above. Later or
             // nested forward declarations still introduce child owners.
@@ -8848,8 +8798,7 @@ impl VbcCodegen {
         // declaration must shadow the same head regardless of file order.
         for (parent, module) in files {
             self.config.module_name = (*parent).to_owned();
-            let owner = self.source_file_owner(module, &self.config.module_name)
-                .unwrap_or_else(|| self.source_module_root().to_owned());
+            let owner = self.source_file_owner(module, &self.config.module_name);
             self.collect_module_exports(&owner, module);
         }
         // Protocols first: a blanket impl monomorphises onto a concrete
@@ -8884,11 +8833,7 @@ impl VbcCodegen {
             // and lose the provenance that cross-module paths like
             // `super.darwin.tls.ctx_get` resolve through.
             let previous_scope = self.ctx.current_source_module.take();
-            if let Some(name) =
-                self.source_file_owner(module, &self.config.module_name)
-            {
-                self.ctx.current_source_module = Some(name);
-            }
+            self.ctx.current_source_module = Some(self.source_file_owner(module, &self.config.module_name));
             let result = (|| -> CodegenResult<()> {
                 for item in module.items.iter() {
                     if self.should_compile_item(item) {
@@ -8900,8 +8845,7 @@ impl VbcCodegen {
             self.ctx.current_source_module = previous_scope;
             result?;
             let fields = self.declared_field_type_names(module, &self.config.module_name);
-            let source_module = self.source_file_owner(module, &self.config.module_name)
-                .unwrap_or_else(|| self.config.module_name.clone());
+            let source_module = self.source_file_owner(module, &self.config.module_name);
             let prefix = format!("{source_module}.");
             // Keep local bare field names in their declaring scope. Qualified
             // metadata is the boundary representation exported to other modules.
@@ -9083,8 +9027,7 @@ impl VbcCodegen {
         let source_owner = imported.owners.get(&module.file_id).cloned()
             .or_else(|| imported.parent_for(source_path).map(|parent|
                 Self::source_file_module_path(&parent, std::path::Path::new(source_path), module)))
-            .or_else(|| self.source_file_owner(module, &self.config.module_name))
-            .unwrap_or_else(|| self.config.module_name.clone());
+            .unwrap_or_else(|| self.source_file_owner(module, &self.config.module_name));
         let root_owner = imported.root.as_ref().map(|(_, owner)| owner.clone()).unwrap_or_default();
 
         // Collect all files to parse (avoid borrow issues with recursive calls)
@@ -21293,83 +21236,58 @@ impl VbcCodegen {
         Ok(hit.cloned())
     }
 
-    fn resolve_field_index_impl(&mut self, type_name: Option<&str>, field_name: &str) -> (u32, bool) {
-        // Field layout and method dispatch share declaration-owned alias
-        // expansion, including references, generic substitution and cycle checks.
-        // A field name in some other record cannot repair an unresolved alias.
-        let resolved_owner = match type_name {
-            Some(name) => match self.method_receiver_declaration_name(name) {
-                Some(owner) => Some(owner),
-                None => {
-                    self.record_source_declaration_error(CodegenError::new(
-                        CodegenErrorKind::InvalidSourceSignature(format!(
-                            "cannot resolve field owner '{name}' for '{field_name}'"
-                        ))
+    /// Follow lexical re-keying and allocating-wrapper dereferences to the descriptor
+    /// that owns this field. A selected anonymous-root declaration keeps its bare key.
+    fn field_layout_owner(&self, name: &str, field: &str) -> CodegenResult<Text> {
+        let mut candidate = Text::from(name);
+        let mut visited = Set::new();
+        for _ in 0..crate::types::MAX_TYPE_REF_NODES {
+            let owner = self.method_receiver_declaration_name(&candidate).ok_or_else(|| {
+                CodegenError::new(CodegenErrorKind::InvalidSourceSignature(format!(
+                    "cannot resolve field owner '{candidate}' for '{field}'"
+                )))
+            })?;
+            let next = if !owner.contains(".")
+                && let Some(key) = self.resolve_record_type_key(&owner)?
+                && key != owner.as_str()
+            {
+                Some(Text::from(key))
+            } else if let Some((wrapper, _)) = owner.split_once('<')
+                && self.is_allocating_wrapper(wrapper)
+            {
+                // Keep the wrapper's own fields, such as Heap.ptr, on its descriptor.
+                let owns_field = self.type_name_to_id.get(wrapper)
+                    .and_then(|&id| self.type_by_id(id))
+                    .is_some_and(|descriptor| descriptor.fields.iter().any(|slot|
+                        self.ctx.strings.get(slot.name.0 as usize).is_some_and(|name| name == field)
                     ));
-                    return (0, true);
-                }
-            },
-            None => None,
+                if owns_field { None } else { Self::extract_element_type(&owner).map(Text::from) }
+            } else {
+                None
+            };
+            let Some(next) = next else { return Ok(owner); };
+            if !visited.insert(owner) {
+                return Err(CodegenError::new(CodegenErrorKind::InvalidSourceSignature(format!(
+                    "cyclic field owner while resolving '{name}.{field}'"
+                ))));
+            }
+            candidate = next;
+        }
+        Err(CodegenError::new(CodegenErrorKind::InvalidSourceSignature(format!(
+            "field owner traversal exceeds the type resource limit for '{name}.{field}'"
+        ))))
+    }
+
+    fn resolve_field_index_impl(&mut self, type_name: Option<&str>, field_name: &str) -> (u32, bool) {
+        let resolved_owner = match type_name.map(|name| self.field_layout_owner(name, field_name)).transpose() {
+            Ok(owner) => owner,
+            Err(error) => {
+                self.record_source_declaration_error(error);
+                return (0, true);
+            }
         };
         let type_name = resolved_owner.as_deref();
         if let Some(tn) = type_name {
-            // META-GROUP-XMODULE-1: when the simple name is NOT an
-            // authoritative record key (lost the cross-module
-            // first-wins race — descriptor missing, wrong kind, or
-            // empty fields), re-key to the module-qualified
-            // registration BEFORE any fallback can mis-resolve via the
-            // global intern table. The recursion is bounded: the
-            // resolved key is authoritative, so the guard fails on
-            // re-entry.
-            if !tn.contains('.') {
-                match self.resolve_record_type_key(tn) {
-                    Ok(Some(q)) => return self.resolve_field_index_impl(Some(&q), field_name),
-                    Ok(None) => {},
-                    Err(error) => {
-                        self.record_source_declaration_error(error);
-                        return (0, true);
-                    }
-                }
-            }
-        }
-        if let Some(tn) = type_name {
-            // **Allocating-wrapper field auto-deref** (Heap<T> / Shared<T>).
-            //
-            // A binding produced by `Heap.new(x)` / `Shared.new(x)` is typed
-            // with the WRAPPER type (`Heap<T>`) so wrapper METHODS dispatch
-            // (`b.is_valid()` → `Heap.is_valid`).  Field access on such a
-            // binding (`b.field`), however, almost always targets the
-            // POINTEE `T` — the wrapper's own fields are just the CBGR triple
-            // (`ptr` / `generation` / `epoch`).  Resolve `field_name` against
-            // the inner `T` whenever it is NOT one of the wrapper's own
-            // fields, so `b.a0` reaches `MediumPayload.a0` while `self.ptr`
-            // inside a Heap method still resolves against Heap.  Without this
-            // the field would miss the wrapper descriptor and fall through to
-            // the global field-name interner (wrong offset).
-            if let Some(lt) = tn.find('<') {
-                let wrapper_base = &tn[..lt];
-                if self.is_allocating_wrapper(wrapper_base)
-                    && let Some(inner) = Self::extract_element_type(tn)
-                {
-                    // Is `field_name` one of the wrapper's OWN fields?
-                    let is_wrapper_field = self
-                        .type_name_to_id
-                        .get(wrapper_base)
-                        .and_then(|&tid| self.type_by_id(tid))
-                        .map(|td| {
-                            td.fields.iter().any(|fd| {
-                                self.ctx
-                                    .strings
-                                    .get(fd.name.0 as usize)
-                                    .is_some_and(|s| s == field_name)
-                            })
-                        })
-                        .unwrap_or(false);
-                    if !is_wrapper_field {
-                        return self.resolve_field_index_impl(Some(&inner), field_name);
-                    }
-                }
-            }
             // **Architectural rule** (closes task #16 consumer side):
             // resolve field index from the canonical TypeDescriptor's
             // own field list BEFORE consulting `type_field_layouts`.

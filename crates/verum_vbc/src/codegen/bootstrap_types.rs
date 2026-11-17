@@ -262,6 +262,9 @@ impl VbcCodegen {
             )
         };
         for (mi, module) in available.iter().enumerate() {
+            if let Err(message) = crate::declaration_bindings_codec::validate_module(module) {
+                self.reject_source_declaration(message)?;
+            }
             for (ti, ty) in module.types.iter().enumerate() {
                 let Some(key) = identity(module, ty) else {
                     return Err(CodegenError::internal("bootstrap type has no source name"));
@@ -315,8 +318,7 @@ impl VbcCodegen {
         }
         let mut names = BTreeSet::new();
         let mut scopes: Vec<_> = sources.iter().map(|(parent, source)| {
-            let owner = self.source_file_owner(source, parent)
-                .unwrap_or_else(|| (*parent).to_owned());
+            let owner = self.source_file_owner(source, parent);
             (owner, source.items.as_slice(), verum_ast::prelude::implicit_prelude_path(source))
         }).collect();
         while let Some((owner, items, prelude)) = scopes.pop() {

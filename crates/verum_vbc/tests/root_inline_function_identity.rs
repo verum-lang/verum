@@ -217,5 +217,34 @@ fn inline_main_is_a_child_declaration_scope_not_the_unnamed_root() {
         assert_ne!(choices[0], choices[1]);
         assert_eq!(run(&module, "probe"), 37);
         assert_eq!(run(&module, "inside"), 77);
+        let root_definition = module.get_function(choices[0]).unwrap().source_definition;
+        let child_definition = module.get_function(choices[1]).unwrap().source_definition;
+        assert!(root_definition.is_some() && child_definition.is_some());
+        assert_ne!(root_definition, child_definition);
+        let decoded = loaded(&module);
+        assert_eq!(run(&decoded, "probe"), 37);
+        assert_eq!(run(&decoded, "inside"), 77);
     }
+}
+
+#[test]
+fn anonymous_root_implementations_retain_explicit_ownership_on_recollection() {
+    let source = ast(r#"
+        type Token is { value: Int };
+        type Read is protocol { fn read(&self) -> Int; };
+        implement Read for Token { fn read(&self) -> Int { self.value } }
+        implement Token { fn twice(&self) -> Int { self.read() * 2 } }
+        fn probe() -> Int { let token = Token { value: 21 }; token.twice() }
+    "#);
+    let mut codegen = VbcCodegen::new();
+    codegen.collect_unit_declarations(&[&source]).unwrap();
+    let first = codegen.ctx_mut().lookup_function("Token.twice").unwrap().id;
+    codegen.collect_unit_declarations(&[&source]).unwrap();
+    assert_eq!(codegen.ctx_mut().lookup_function("Token.twice").unwrap().id, first);
+    let module = codegen.compile_function_bodies(&source).unwrap();
+    let function = module.get_function(first).unwrap();
+    assert_eq!(function.origin_module.and_then(|owner| module.get_string(owner)), Some(""));
+    assert!(function.source_definition.is_some());
+    assert_eq!(run(&module, "probe"), 42);
+    assert_eq!(run(&loaded(&module), "probe"), 42);
 }

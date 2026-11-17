@@ -8,8 +8,7 @@ use verum_ast::{
 impl VbcCodegen {
     /// File headers and top-level module metadata share one target-selection rule.
     pub(super) fn selected_source_module(&self, module: &verum_ast::Module, parent: &str) -> CodegenResult<bool> {
-        let owner = self.source_file_owner(module, parent)
-            .unwrap_or_else(|| parent.to_owned());
+        let owner = self.source_file_owner(module, parent);
         self.selected_source_owner(module, &owner)
     }
 

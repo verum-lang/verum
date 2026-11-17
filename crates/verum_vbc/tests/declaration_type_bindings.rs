@@ -70,6 +70,33 @@ fn oversized_and_empty_scope_names_cannot_be_published() {
     assert!(serialize_module(&module).is_err());
 }
 
+#[test]
+fn wire_refuses_an_unclaimed_root_and_repeated_owners() {
+    let mut module = VbcModule::new("api".into());
+    module
+        .declaration_type_bindings
+        .insert("a".into(), OrderedMap::new());
+    module
+        .declaration_type_bindings
+        .insert("b".into(), OrderedMap::new());
+    let bytes = serialize_module(&module).unwrap();
+    let tag = br#""b","#;
+    let start = bytes
+        .windows(tag.len())
+        .position(|chunk| chunk == tag)
+        .unwrap();
+    for (replacement, expected) in [
+        (br#""", "#, "empty declaration owner"),
+        (br#""a","#, "duplicate declaration owner"),
+        (br#"".","#, "malformed declaration owner"),
+    ] {
+        let mut altered = bytes.clone();
+        altered[start..start + tag.len()].copy_from_slice(replacement);
+        let error = deserialize_module(&altered).unwrap_err().to_string();
+        assert!(error.contains(expected), "{error}");
+    }
+}
+
 #[cfg(feature = "codegen")]
 mod codegen {
     use super::*;
@@ -81,6 +108,65 @@ mod codegen {
         VbcCodegen::with_config(CodegenConfig::new("api"))
             .collect_declaration_interface(&[&ast])
             .unwrap()
+    }
+
+    #[test]
+    fn anonymous_root_scope_requires_a_retained_owner_and_replays_without_rebinding() {
+        let ast = Parser::new("mount left.Token as Local; public type Carrier is { value: Type };")
+            .parse_module()
+            .unwrap();
+        let original = VbcCodegen::new()
+            .collect_declaration_interface(&[&ast])
+            .unwrap();
+        let root = Text::new();
+        let scope = original.declaration_type_bindings.get(&root).unwrap();
+        assert_eq!(
+            scope.get(&Text::from("Local")),
+            Some(&Some("left.Token".into()))
+        );
+        for bytes in [
+            serialize_module(&original).unwrap(),
+            serialize_archive_member(&original).unwrap(),
+        ] {
+            let decoded = deserialize_module(&bytes).unwrap();
+            assert_eq!(decoded.declaration_type_bindings.get(&root), Some(scope));
+            let mut absent = decoded.clone();
+            absent.declaration_type_bindings.remove(&root);
+            let mut changed = decoded.clone();
+            changed
+                .declaration_type_bindings
+                .get_mut(&root)
+                .unwrap()
+                .insert("Local".into(), Some("right.Token".into()));
+            for other in [&changed, &absent] {
+                for (first, second) in [(&decoded, other), (other, &decoded)] {
+                    let mut consumer = VbcCodegen::with_config(CodegenConfig::new("consumer"));
+                    consumer.import_archive_module_types(first);
+                    consumer.import_archive_module_types(second);
+                    let error = consumer
+                        .finalize_module_from_state()
+                        .unwrap_err()
+                        .to_string();
+                    assert!(
+                        error.contains("conflicting lexical type bindings"),
+                        "{error}"
+                    );
+                }
+            }
+        }
+        for origin in [None, Some(verum_vbc::types::StringId(u32::MAX))] {
+            let mut altered = original.clone();
+            for ty in &mut altered.types {
+                ty.origin_module = origin;
+            }
+            for function in &mut altered.functions {
+                function.origin_module = origin;
+            }
+            assert!(serialize_module(&altered).is_err());
+            let mut consumer = VbcCodegen::new();
+            consumer.import_archive_module_types(&altered);
+            assert!(consumer.finalize_module_from_state().is_err());
+        }
     }
 
     #[test]

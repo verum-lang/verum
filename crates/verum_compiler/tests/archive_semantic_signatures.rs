@@ -9,6 +9,21 @@ use verum_vbc::{
 };
 
 #[test]
+fn anonymous_root_type_retains_its_scope_in_published_metadata() {
+    let source = Parser::new("mount hidden.Token as Local; public type Carrier is { value: Type };")
+        .parse_module().unwrap();
+    let module = VbcCodegen::new().collect_declaration_interface(&[&source]).unwrap();
+    let mut builder = ArchiveBuilder::new();
+    builder.add_module(&module.name, &module, &[]).unwrap();
+    let metadata = archive_to_core_metadata(&builder.finish()).unwrap();
+    let metadata = verum_types::core_metadata::decode_metadata(
+        &verum_types::core_metadata::encode_metadata(&metadata).unwrap(),
+    ).unwrap();
+    assert_eq!(metadata.declaration_type_bindings.get(&Text::new()).unwrap()
+        .get(&Text::from("Local")), Some(&Some("hidden.Token".into())));
+}
+
+#[test]
 fn nominal_universe_declarations_survive_archive_and_sidecar() {
     for declaration_only in [false, true] {
         let mut archive = ArchiveBuilder::new();

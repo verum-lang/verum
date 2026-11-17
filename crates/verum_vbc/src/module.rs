@@ -28,6 +28,43 @@ pub fn qualify_module_name(module_name: &str, simple_name: &str) -> String {
     verum_common::qualified_name::qualify_module_name(module_name, simple_name).to_string()
 }
 
+/// Resolve a source declaration's owner. Legacy descriptors use their named module;
+/// a present string ID selects its exact owner, including the anonymous root.
+pub fn declaration_origin<'a>(
+    module: &'a str, origin: Option<StringId>, string: impl FnOnce(StringId) -> Option<&'a str>,
+) -> Result<&'a str, Text> {
+    let owner = match origin {
+        Some(id) => string(id).ok_or_else(|| Text::from("declaration has invalid source module"))?,
+        None if !module.is_empty() => module,
+        None => return Err("declaration has no source module".into()),
+    };
+    if verum_common::qualified_name::has_empty_module_segment(owner) {
+        return Err("declaration has malformed source module".into());
+    }
+    Ok(owner)
+}
+
+/// Collect the lexical owners of a nominal declaration and each attached implementation.
+/// A promoted descriptor name contributes its nested path to the nominal owner.
+pub fn declaration_type_scope_owners<'a>(
+    descriptor: &TypeDescriptor, module: &'a str, string: impl Fn(StringId) -> Option<&'a str>,
+) -> Result<std::collections::BTreeSet<Text>, Text> {
+    let mut owners: std::collections::BTreeSet<Text> = descriptor.source_inherent_implementations.iter()
+        .chain(descriptor.protocols.iter().filter_map(|implementation| implementation.source_implementation.as_ref()))
+        .map(|source| source.origin_module().into())
+        .collect();
+    if descriptor.source_declaration.is_some() {
+        let name = string(descriptor.name).ok_or_else(|| Text::from("semantic type has no name"))?;
+        if name.split('.').any(str::is_empty) {
+            return Err("semantic type has malformed name".into());
+        }
+        let origin = declaration_origin(module, descriptor.origin_module, string)?;
+        let key = qualify_module_name(origin, name);
+        owners.insert(key.rsplit_once('.').map_or(origin, |(scope, _)| scope).into());
+    }
+    Ok(owners)
+}
+
 // ============================================================================
 // Identifiers
 // ============================================================================

@@ -128,6 +128,8 @@ impl Serializer {
     fn serialize(&mut self, module: &VbcModule) -> VbcResult<()> {
         crate::callable_identity::validate_module(module)
             .map_err(|message| VbcError::Serialization(message.into_string()))?;
+        crate::declaration_bindings_codec::validate_module(module)
+            .map_err(|message| VbcError::Serialization(message.into_string()))?;
         // Reserve space for header
         self.output.resize(HEADER_SIZE, 0);
 

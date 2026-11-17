@@ -102,6 +102,8 @@ pub fn deserialize_module(data: &[u8]) -> VbcResult<VbcModule> {
  // stay band-encoded and surface through the existing loud paths.
  crate::callable_identity::validate_module(&module)
      .map_err(|message| VbcError::Deserialization(message.into_string()))?;
+ crate::declaration_bindings_codec::validate_module(&module)
+     .map_err(|message| VbcError::Deserialization(message.into_string()))?;
  let _unresolved = module.resolve_external_bands();
  Ok(module)
 }

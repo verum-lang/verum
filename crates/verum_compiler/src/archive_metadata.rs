@@ -320,28 +320,21 @@ pub fn archive_to_core_metadata(archive: &VbcArchive) -> Result<CoreMetadata, Te
         }
         // Absence is evidence too: a copy without a declaration environment
         // cannot borrow one from another archive entry during map merging.
-        let mut owners = Vec::new();
-        for ty in module.types.iter().filter(|ty| ty.source_declaration.is_some()) {
-            let owner = ty.origin_module.and_then(|id| module.strings.get(id)).unwrap_or(&module.name);
-            let name = module.strings.get(ty.name).ok_or_else(|| Text::from("semantic type has no name"))?;
-            let key = verum_vbc::module::qualify_module_name(owner, name);
-            let (owner, _) = key.rsplit_once('.').ok_or_else(|| Text::from("semantic type has no declaring module"))?;
-            owners.push(owner.to_owned());
+        let mut owners = std::collections::BTreeSet::new();
+        for ty in &module.types {
+            owners.extend(verum_vbc::module::declaration_type_scope_owners(ty, &module.name, |id| module.strings.get(id))?);
         }
-        owners.extend(module.functions.iter().filter(|function| function.source_signature.is_some())
-            .map(|function| function.origin_module.and_then(|id| module.strings.get(id)).unwrap_or(&module.name).to_owned()));
-        owners.extend(module.types.iter().flat_map(|ty| &ty.protocols)
-            .filter_map(|implementation| implementation.source_implementation.as_ref())
-            .map(|source| source.origin_module().to_owned()));
-        owners.extend(module.types.iter().flat_map(|ty| &ty.source_inherent_implementations).map(|source| source.origin_module().to_owned()));
+        for function in module.functions.iter().filter(|function| function.source_signature.is_some()) {
+            owners.insert(verum_vbc::module::declaration_origin(&module.name, function.origin_module, |id| module.strings.get(id))?.into());
+        }
         for owner in owners {
-            let scope = module.declaration_type_bindings.get(&Text::from(owner.as_str()));
-            if let Some(previous) = semantic_scopes.get(&owner) {
+            let scope = module.declaration_type_bindings.get(&owner);
+            if let Some(previous) = semantic_scopes.get(owner.as_str()) {
                 if previous.as_ref() != scope {
                     return Err(format!("conflicting declaration type bindings for {owner}").into());
                 }
             } else {
-                semantic_scopes.insert(owner, scope.cloned());
+                semantic_scopes.insert(owner.into_string(), scope.cloned());
             }
         }
         for ty in &module.types {

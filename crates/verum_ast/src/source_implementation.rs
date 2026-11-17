@@ -9,6 +9,8 @@ const MAX_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub struct AssociatedImplementationSource {
+    /// The empty path is the explicitly selected anonymous source root. This
+    /// required field is distinct from absent declaration ownership on the wire.
     origin_module: Text,
     declaration: Text,
 }
@@ -45,8 +47,11 @@ impl AssociatedImplementationSource {
     }
 
     fn from_retained(origin_module: Text, declaration: &ImplDecl) -> Result<Self, Text> {
-        if origin_module.is_empty() || origin_module.len() > MAX_BYTES {
-            return Err("associated implementation source requires its actual module owner".into());
+        if origin_module.len() > MAX_BYTES {
+            return Err("associated implementation source owner exceeds its byte budget".into());
+        }
+        if verum_common::qualified_name::has_empty_module_segment(&origin_module) {
+            return Err("associated implementation source has a malformed module owner".into());
         }
         let payload =
             serde_json::to_string(declaration).map_err(|error| Text::from(error.to_string()))?;
