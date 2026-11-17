@@ -1,28 +1,21 @@
 //! SMT certificate envelope — `SmtCertificate` + schema versioning.
 //! Split per #198 V7.
 //!
-//! The kernel consumes this via [`crate::replay_smt_cert`] and
-//! reconstructs a [`crate::CoreTerm`] witness. This is the primary
-//! mechanism that takes Z3 / CVC5 / E / Vampire / Alt-Ergo **out of
-//! the TCB**: a bug in a solver that produced a spurious "proof"
-//! will fail the replay there, not leak into accepted theorems.
+//! This is diagnostic solver evidence, not a kernel proof certificate.
+//! [`crate::replay_smt_cert`] rejects it until the opaque trace has an
+//! independently checked reconstruction; recognized tags and hashes do not
+//! remove a solver from the trusted computing base.
 
 use serde::{Deserialize, Serialize};
 use verum_common::{List, Text};
 
 use crate::KernelError;
 
-/// A proof certificate produced by an SMT backend.
+/// An untrusted SMT backend envelope.
 ///
-/// The kernel consumes this via [`crate::replay_smt_cert`] and
-/// reconstructs a [`crate::CoreTerm`] witness. This is the primary
-/// mechanism that takes Z3 / CVC5 / E / Vampire / Alt-Ergo **out of
-/// the TCB**: a bug in a solver that produced a spurious "proof"
-/// will fail the replay here, not leak into accepted theorems.
-///
-/// The certificate format is backend-neutral: each backend's native
-/// proof trace is normalized into the common shape by
-/// `verum_smt::proof_extraction` before landing here.
+/// This type records opaque trace bytes and provenance. Structural validation
+/// is not proof replay; the current kernel refuses all recognized envelopes
+/// because this format has no independently reconstructed judgment.
 ///
 /// # Envelope versioning
 ///

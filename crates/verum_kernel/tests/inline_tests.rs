@@ -187,7 +187,7 @@ fn smt_replay_with_obligation_rejects_mismatched_hash() {
 }
 
 #[test]
-fn smt_replay_with_obligation_accepts_matched_hash() {
+fn smt_replay_matched_hash_is_not_proof_authority() {
     use verum_kernel::replay_smt_cert_with_obligation;
     let mut trace = List::new();
     trace.push(0x03);
@@ -198,18 +198,15 @@ fn smt_replay_with_obligation_accepts_matched_hash() {
         Text::from("sha256:abc123"),
     );
     let ctx = Context::new();
-    let witness = replay_smt_cert_with_obligation(&ctx, &cert, "sha256:abc123")
-        .expect("matched hash must succeed");
-    // Witness shape unchanged from the non-comparison primitive.
-    assert!(matches!(witness, CoreTerm::Axiom { .. }));
+    assert!(matches!(
+        replay_smt_cert_with_obligation(&ctx, &cert, "sha256:abc123"),
+        Err(KernelError::UnsupportedSmtCertificate { .. })
+    ));
 }
 
-/// V8 — sanity: the original `replay_smt_cert` is still callable
-/// without an expected hash for kernel-internal consumers (e.g.,
-/// the `infer` arm for `SmtProof` doesn't yet have the goal at
-/// type-inference time).
+/// Omitting an expected hash cannot turn an envelope into proof authority.
 #[test]
-fn smt_replay_no_obligation_still_callable() {
+fn smt_replay_requires_reconstructed_evidence() {
     let mut trace = List::new();
     trace.push(0x03);
     let cert = SmtCertificate::new(
@@ -219,12 +216,14 @@ fn smt_replay_no_obligation_still_callable() {
         Text::from("sha256:foo"),
     );
     let ctx = Context::new();
-    let witness = replay_smt_cert(&ctx, &cert).expect("non-comparison path must work");
-    assert!(matches!(witness, CoreTerm::Axiom { .. }));
+    assert!(matches!(
+        replay_smt_cert(&ctx, &cert),
+        Err(KernelError::UnsupportedSmtCertificate { .. })
+    ));
 }
 
 #[test]
-fn smt_replay_refl_tag_produces_axiom_witness() {
+fn smt_replay_refl_tag_cannot_manufacture_axiom() {
     let mut trace = List::new();
     trace.push(0x01);
     let cert = SmtCertificate::new(
@@ -234,21 +233,14 @@ fn smt_replay_refl_tag_produces_axiom_witness() {
         Text::from("sha256:deadbeef"),
     );
     let ctx = Context::new();
-    let term = replay_smt_cert(&ctx, &cert).unwrap();
-    match term {
-        CoreTerm::Axiom {
-            name, framework, ..
-        } => {
-            assert!(name.as_str().starts_with("smt_cert:z3:refl:"));
-            assert_eq!(framework.framework.as_str(), "z3:refl");
-            assert_eq!(framework.citation.as_str(), "sha256:deadbeef");
-        }
-        other => panic!("expected Axiom, got {:?}", other),
-    }
+    assert!(matches!(
+        replay_smt_cert(&ctx, &cert),
+        Err(KernelError::UnsupportedSmtCertificate { .. })
+    ));
 }
 
 #[test]
-fn smt_replay_accepts_cvc5_smt_unsat_tag() {
+fn smt_replay_cvc5_unsat_tag_is_not_proof() {
     let mut trace = List::new();
     trace.push(0x03);
     let cert = SmtCertificate::new(
@@ -258,13 +250,10 @@ fn smt_replay_accepts_cvc5_smt_unsat_tag() {
         Text::from("sha256:feed"),
     );
     let ctx = Context::new();
-    let term = replay_smt_cert(&ctx, &cert).unwrap();
-    match term {
-        CoreTerm::Axiom { framework, .. } => {
-            assert_eq!(framework.framework.as_str(), "cvc5:smt_unsat");
-        }
-        other => panic!("expected Axiom, got {:?}", other),
-    }
+    assert!(matches!(
+        replay_smt_cert(&ctx, &cert),
+        Err(KernelError::UnsupportedSmtCertificate { .. })
+    ));
 }
 
 // -----------------------------------------------------------------
@@ -272,7 +261,7 @@ fn smt_replay_accepts_cvc5_smt_unsat_tag() {
 // -----------------------------------------------------------------
 
 #[test]
-fn smtproof_infer_replays_certificate_and_returns_bool_type() {
+fn smtproof_infer_refuses_fabricated_bool() {
     let mut trace = List::new();
     trace.push(0x03); // smt_unsat tag
     let cert = SmtCertificate::new(
@@ -284,14 +273,10 @@ fn smtproof_infer_replays_certificate_and_returns_bool_type() {
     let term = CoreTerm::SmtProof(cert);
     let ctx = Context::new();
     let reg = AxiomRegistry::new();
-    let ty = infer_fixture(&ctx, &term, &reg).unwrap();
-    assert_eq!(
-        ty,
-        CoreTerm::Inductive {
-            path: Text::from("Bool"),
-            args: List::new(),
-        }
-    );
+    assert!(matches!(
+        infer_fixture(&ctx, &term, &reg),
+        Err(KernelError::UnsupportedSmtCertificate { .. })
+    ));
 }
 
 #[test]
@@ -332,7 +317,7 @@ fn smtproof_infer_rejects_future_schema() {
 }
 
 #[test]
-fn smtproof_check_returns_bool_shape() {
+fn smtproof_check_refuses_unsupported_evidence() {
     let mut trace = List::new();
     trace.push(0x01);
     let cert = SmtCertificate::new(
@@ -344,8 +329,10 @@ fn smtproof_check_returns_bool_shape() {
     let term = CoreTerm::SmtProof(cert);
     let ctx = Context::new();
     let reg = AxiomRegistry::new();
-    let head = check_fixture(&ctx, &term, &reg).unwrap();
-    assert_eq!(head, CoreType::Inductive(Text::from("Bool")));
+    assert!(matches!(
+        check_fixture(&ctx, &term, &reg),
+        Err(KernelError::UnsupportedSmtCertificate { .. })
+    ));
 }
 
 // -----------------------------------------------------------------

@@ -1,47 +1,10 @@
-//! Phase 2 proof-tree replay foundation for Z3 `(proof …)` and
-//! CVC5 ALETHE format.
+//! SMT proof-tree syntax and diagnostic rule catalogues.
 //!
-//! The kernel's Phase 1 replay (`replay_smt_cert`) accepts
-//! single-byte trust-tag certificates — a minimal shape the SMT
-//! layer emits when a goal closes via the
-//! `Unsat`-means-valid protocol. Phase 2 upgrades that to the
-//! full proof-tree reconstruction: the backend's native proof
-//! trace parses into an inference-rule tree here, and each node
-//! is replayed into a `CoreTerm` witness so a forged
-//! certificate fails the structural check before producing a
-//! term the kernel admits.
-//!
-//! This module lands the parser + rule-catalogue foundation.
-//! Individual rule → `CoreTerm` mappings for each backend
-//! arrive in dedicated follow-up patches (Z3's ~35 rules +
-//! CVC5 ALETHE's ~70 rules are too many to review in one
-//! commit).
-//!
-//! # Supported formats
-//!
-//! * **Z3**: `(proof
-//!  (step-name premise_1 premise_2 …)
-//!  (step-name' …))`
-//!  — S-expression tree, rule names are Z3-specific
-//!  (`mp`, `asserted`, `refl`, `trans`, etc.).
-//!
-//! * **CVC5 ALETHE**: `(assume a0 …) (step t1 :rule <name>
-//!  :premises (a0) :args (…) :conclusion …)`
-//!  — linear sequence of steps with named premises.
-//!
-//! Both formats share the S-expression lexical shape — this
-//! module parses into a common `ProofNode` tree and dispatches
-//! to the backend-specific rule table by inspecting the trace's
-//! first atom.
-//!
-//! # Trust contract
-//!
-//! `replay_tree(backend, trace)` validates that every rule name
-//! in the tree is in the backend's allowlist. Unknown rules
-//! fail with `KernelError::UnknownRule` so a backend update
-//! that ships a new rule doesn't silently pass through without
-//! a kernel patch reviewing it. That is the entire point of
-//! Phase 2: the trust boundary is visible to the reviewer.
+//! Parsing and recognizing names does not reconstruct inference semantics.
+//! `replay_z3_tree` and `replay_aletha_tree` preserve bounded structural
+//! diagnostics and refuse recognized trees as unsupported evidence. They do
+//! not create axioms or Boolean witnesses. The typed proof graph below records
+//! Verum's own inference rules separately from untrusted solver syntax.
 
 use verum_common::{List, Maybe, Text};
 
@@ -356,290 +319,138 @@ fn walk(node: &ProofNode, names: &mut Vec<Text>) {
 // Phase 2 replay — rule → CoreTerm witness construction
 // =============================================================================
 
-use crate::{CoreTerm, FrameworkId, KernelError};
+use crate::{CoreTerm, KernelError};
 
-/// Replay a Z3 proof-tree node into a `CoreTerm` witness.
-///
-/// The node must be a `List` whose head atom is in
-/// `Z3_KNOWN_RULES`. This function walks the node's children,
-/// recursively replays each sub-proof, and constructs the
-/// witness `CoreTerm` that the rule justifies.
-///
-/// Trust contract: the whole tree is validated against the
-/// allowlist before any replay begins (via
-/// `collect_rule_names` + `is_known_rule`), so `replay_z3_tree`
-/// can assume the root is a known rule. Unknown rules that
-/// slip through (e.g. inside an expression argument) surface
-/// as `KernelError::UnknownRule`.
-///
-/// # Current coverage
-///
-/// This first batch implements the 6 most common Z3 rules
-/// that close obligations in Verum's SMT pipeline:
-///
-///  asserted — a hypothesis from the assertion list
-///  refl — `a = a`
-///  symm — `a = b` from `b = a`
-///  trans — `a = c` from `a = b` and `b = c`
-///  mp — modus ponens
-///  hypothesis — local-scope assumption
-///
-/// The remaining 22 rules in `Z3_KNOWN_RULES` surface as
-/// `KernelError::NotImplemented` with the rule name; a
-/// follow-up patch adds them in one commit per rule-family
-/// cluster (rewrite / monotonicity / quant / th-lemma).
-///
-/// Every rule produces an `Axiom` node tagged with the rule
-/// name so `verum audit --framework-axioms` enumerates the
-/// exact set of Z3 inference rules each proof used.
+#[derive(Clone, Copy)]
+enum TreeDialect {
+    Z3,
+    Alethe,
+}
+
+impl TreeDialect {
+    fn backend(self) -> &'static str {
+        match self {
+            Self::Z3 => "z3",
+            Self::Alethe => "aletha",
+        }
+    }
+}
+
+/// Inspect structural solver evidence, never infer a theorem from rule names.
+/// All nodes, including ALETHE expression payloads, consume shared verifier
+/// budgets. Lists in Z3's legacy diagnostic shape are treated as rule nodes;
+/// ALETHE expression/premise payloads are not semantic derivations.
+fn inspect_proof_tree(tree: &ProofNode, dialect: TreeDialect) -> Result<Text, KernelError> {
+    use verum_proof::limits::AdmissionLimits;
+    let limits = AdmissionLimits::DEFAULT;
+    let exhausted = |resource, limit| KernelError::SmtProofResourceLimit { resource, limit };
+    let mut pending = List::new();
+    pending.push((tree, 0usize, true));
+    let mut scheduled = 1usize;
+    let mut bytes = 0usize;
+    let mut root_rule = None;
+    while let Some((node, depth, is_rule)) = pending.pop() {
+        match node {
+            ProofNode::Atom(atom) => {
+                if is_rule {
+                    return Err(KernelError::SmtReplayFailed {
+                        reason: Text::from("proof tree must be a list, got a bare atom"),
+                    });
+                }
+                bytes = bytes
+                    .checked_add(atom.len())
+                    .filter(|n| *n <= limits.max_bytes)
+                    .ok_or_else(|| exhausted("bytes", limits.max_bytes))?;
+            }
+            ProofNode::List(children) => {
+                // Bound the list before scanning ALETHE keyword/value pairs.
+                scheduled = scheduled
+                    .checked_add(children.len())
+                    .filter(|n| *n <= limits.max_nodes)
+                    .ok_or_else(|| exhausted("nodes", limits.max_nodes))?;
+                if !children.is_empty() && depth >= limits.max_depth {
+                    return Err(exhausted("depth", limits.max_depth));
+                }
+                if is_rule {
+                    let Some(ProofNode::Atom(head)) = children.iter().next() else {
+                        return Err(KernelError::SmtReplayFailed {
+                            reason: Text::from("proof-tree list starts with a non-atom head"),
+                        });
+                    };
+                    let rule = match dialect {
+                        TreeDialect::Alethe if head.as_str() == "step" => {
+                            extract_aletha_rule_name(children).ok_or_else(|| {
+                                KernelError::SmtReplayFailed {
+                                    reason: Text::from("ALETHE step missing :rule keyword"),
+                                }
+                            })?
+                        }
+                        _ => head,
+                    };
+                    if !is_known_rule(dialect.backend(), rule.as_str()) {
+                        return Err(KernelError::UnknownRule {
+                            backend: Text::from(dialect.backend()),
+                            tag: 0,
+                        });
+                    }
+                    if root_rule.is_none() {
+                        root_rule = Some(rule.clone());
+                    }
+                }
+                for child in children.iter().rev() {
+                    let child_is_rule = is_rule
+                        && match child {
+                            ProofNode::Atom(_) => false,
+                            ProofNode::List(nested) => match dialect {
+                                TreeDialect::Z3 => true,
+                                TreeDialect::Alethe => {
+                                    matches!(nested.iter().next(), Some(ProofNode::Atom(head))
+                                if head.as_str() == "step" || is_known_rule(dialect.backend(), head.as_str()))
+                                }
+                            },
+                        };
+                    pending.push((child, depth + 1, child_is_rule));
+                }
+            }
+        }
+    }
+    root_rule.ok_or_else(|| KernelError::SmtReplayFailed {
+        reason: Text::from("proof tree has no rule"),
+    })
+}
+
+/// Opaque Z3 proof trees are diagnostic evidence. Recognized structure is
+/// refused until each rule has an independently checked reconstruction.
 pub fn replay_z3_tree(tree: &ProofNode) -> Result<CoreTerm, KernelError> {
-    match tree {
-        ProofNode::List(children) => {
-            let head = match children.iter().next() {
-                Some(ProofNode::Atom(t)) => t.as_str(),
-                _ => {
-                    return Err(KernelError::SmtReplayFailed {
-                        reason: Text::from("proof-tree list starts with a non-atom head"),
-                    });
-                }
-            };
-
-            if !is_known_rule("z3", head) {
-                return Err(KernelError::UnknownRule {
-                    backend: Text::from("z3"),
-                    // UnknownRule's tag is a u8 — we report 0
-                    // here and surface the rule name through
-                    // the error's Display impl.
-                    tag: 0,
-                });
-            }
-
-            construct_witness_for_rule(head, children)
-        }
-        ProofNode::Atom(_) => Err(KernelError::SmtReplayFailed {
-            reason: Text::from("proof tree must be a list, got a bare atom"),
-        }),
-    }
-}
-
-/// Construct the `CoreTerm` witness for a Z3 rule.
-///
-/// Witnesses are `Axiom` nodes whose `framework` field tags the
-/// specific Z3 rule. `Inductive("Bool")` is the carrier type
-/// — matches the type assigned to Phase 1 trust-tag
-/// certificates so downstream consumers see a consistent shape.
-///
-/// # Structural recursion on children
-///
-/// Children of the proof node that are themselves Lists (nested
-/// rule applications) are recursively replayed via
-/// `replay_z3_tree`, and the resulting witnesses are composed
-/// with the parent rule's axiom via `CoreTerm::App`. That gives
-/// the kernel a *hierarchical* term that mirrors the proof
-/// tree's shape — a forged leaf can't just be wrapped in a
-/// known rule name and pass the check; the kernel sees each
-/// level's witness structure.
-fn construct_witness_for_rule(
-    rule: &str,
-    children: &List<ProofNode>,
-) -> Result<CoreTerm, KernelError> {
-    // Implemented rule set — grows across Phase 2 clusters. Every
-    // rule in Z3_KNOWN_RULES that this match covers produces a
-    // Bool-typed axiom witness tagged with the rule name. The
-    // semantic difference between rules is *what they verify*
-    // (the child replays validate the rule's structural
-    // preconditions), not what the witness looks like.
-    //
-
-    // Cluster 1 (c6a0388f): core closure rules.
-    // Cluster 2 (this commit): rewrite family — definitional
-    //  manipulations that preserve equality.
-    // Cluster 3: monotonicity / quantifier — structural
-    //  congruence + binder manipulation.
-    // Cluster 4: boolean — propositional simplification rules.
-    // Cluster 5: theory + meta — th-lemma, unit-resolution,
-    //  lemma, goal, modus-ponens.
-    let implemented = matches!(
+    let rule = inspect_proof_tree(tree, TreeDialect::Z3)?;
+    Err(KernelError::UnsupportedSmtProofTree {
+        backend: Text::from("z3"),
         rule,
-        // Cluster 1 — core closure
-        "asserted" | "refl" | "symm" | "trans" | "mp" | "hypothesis"
-        // Cluster 2 — rewrite family
-        | "rewrite" | "commutativity" | "distributivity"
-        | "def-axiom" | "let-elim" | "der"
-        // Cluster 3 — monotonicity / quantifier
-        | "monotonicity" | "quant-intro" | "pull-quant"
-        | "push-quant" | "nnf-pos" | "nnf-neg"
-        // Cluster 4 — boolean
-        | "iff-true" | "iff-false" | "and-elim" | "not-or-elim"
-        // Cluster 5 — theory + meta
-        | "th-lemma" | "unit-resolution" | "lemma"
-        | "goal" | "modus-ponens"
-    );
-
-    if !implemented {
-        return Err(KernelError::SmtReplayFailed {
-            reason: Text::from(format!(
-                "Z3 rule `{}` recognised by allowlist but not yet \
-                 implemented in replay table; add it to \
-                 construct_witness_for_rule",
-                rule
-            )),
-        });
-    }
-
-    // The rule's axiom — the top-level tag that says "this
-    // rule produced the witness".
-    let rule_axiom = build_witness("z3", rule, "Z3 proof-tree replay (Phase 2)");
-
-    // Recurse into children. Sub-List children are nested
-    // rule applications that we replay recursively; Atom
-    // children are expression leaves that we don't replay
-    // (they're the rule's argument terms, not sub-proofs).
-    //
-
-    // The first child is the rule name atom (we already
-    // matched on it), so skip it.
-    let mut witness = rule_axiom;
-    for (idx, child) in children.iter().enumerate() {
-        if idx == 0 {
-            continue; // rule-name atom
-        }
-        if let ProofNode::List(_) = child {
-            // A nested proof node — recursively replay and
-            // compose into the witness via App. The App
-            // threads the child witness as an argument to
-            // the parent axiom.
-            let child_witness = replay_z3_tree(child)?;
-            witness = CoreTerm::App(Heap::new(witness), Heap::new(child_witness));
-        }
-        // Atom children: not replayed. They're expression
-        // arguments, not proof sub-terms.
-    }
-
-    Ok(witness)
+    })
 }
 
-/// Backend-agnostic witness constructor used by both
-/// `replay_z3_tree` and `replay_aletha_tree`. The witness shape
-/// is identical across backends at this phase — only the
-/// `framework.framework` tag differs (e.g. `"z3:mp"` vs
-/// `"aletha:resolution"`).
-fn build_witness(backend: &str, rule: &str, citation: &str) -> CoreTerm {
-    let framework = FrameworkId {
-        framework: Text::from(format!("{}:{}", backend, rule)),
-        citation: Text::from(citation.to_string()),
-    };
-    CoreTerm::Axiom {
-        name: Text::from(format!("{}_proof:{}", backend, rule)),
-        ty: Heap::new(CoreTerm::Inductive {
-            path: Text::from("Bool"),
-            args: List::new(),
-        }),
-        framework,
-    }
-}
-
-/// Replay a CVC5 ALETHE proof-tree node into a `CoreTerm`
-/// witness.
-///
-/// Parallel to `replay_z3_tree`: walks the tree's root (must be
-/// a List), validates the head against
-/// `CVC5_ALETHE_KNOWN_RULES`, constructs the witness.
-///
-/// The ALETHE format uses step-by-step linear reasoning
-/// (`step t1 :rule <name> :premises (…) :args (…) :conclusion
-/// …`), but the S-expr parser normalises every step into a
-/// common `ProofNode::List` where the head atom is `step` and
-/// the `:rule` keyword's value is the second element. This
-/// function's current (Phase 2) replay treats every node as
-/// "named rule producing a Bool witness" so the same witness
-/// shape carries across both backends.
-///
-/// Full ALETHE-specific step-structure parsing (:premises,
-/// :args, :conclusion keyword parsing) arrives with the
-/// witness-type-specialisation follow-up.
+/// ALETHE rule names and premise references do not establish an obligation.
+/// Preserve structural diagnostics, but never fabricate framework axioms.
 pub fn replay_aletha_tree(tree: &ProofNode) -> Result<CoreTerm, KernelError> {
-    match tree {
-        ProofNode::List(children) => {
-            let head = match children.iter().next() {
-                Some(ProofNode::Atom(t)) => t.as_str(),
-                _ => {
-                    return Err(KernelError::SmtReplayFailed {
-                        reason: Text::from("proof-tree list starts with a non-atom head"),
-                    });
-                }
-            };
-
-            // ALETHE's step nodes always lead with the atom
-            // `step`; the actual rule name follows `:rule`. For
-            // direct-named rule nodes (the common case in our
-            // test corpus + the form CVC5 emits for unsat
-            // traces), the head IS the rule name. Handle both.
-            let rule = if head == "step" {
-                // Find the `:rule` keyword and read the next
-                // atom. ALETHE conventions: `:rule` precedes
-                // the rule name.
-                extract_aletha_rule_name(children).ok_or_else(|| KernelError::SmtReplayFailed {
-                    reason: Text::from("ALETHE step missing :rule keyword"),
-                })?
-            } else {
-                head.to_string()
-            };
-
-            if !is_known_rule("aletha", &rule) {
-                return Err(KernelError::UnknownRule {
-                    backend: Text::from("aletha"),
-                    tag: 0,
-                });
-            }
-
-            let rule_axiom =
-                build_witness("aletha", &rule, "CVC5 ALETHE proof-tree replay (Phase 2)");
-
-            // Recurse into sub-proof children, same as the
-            // Z3 path. ALETHE's step-node has :premises /
-            // :args keywords whose sub-Lists may themselves
-            // be sub-proofs; we conservatively recurse into
-            // any List child that has a known rule head.
-            let mut witness = rule_axiom;
-            for (idx, child) in children.iter().enumerate() {
-                if idx == 0 {
-                    continue;
-                }
-                if let ProofNode::List(sub_children) = child
-                    && let Some(ProofNode::Atom(head_atom)) = sub_children.iter().next()
-                    && is_known_rule("aletha", head_atom.as_str())
-                {
-                    let child_witness = replay_aletha_tree(child)?;
-                    witness = CoreTerm::App(Heap::new(witness), Heap::new(child_witness));
-                }
-            }
-
-            Ok(witness)
-        }
-        ProofNode::Atom(_) => Err(KernelError::SmtReplayFailed {
-            reason: Text::from("proof tree must be a list, got a bare atom"),
-        }),
-    }
+    let rule = inspect_proof_tree(tree, TreeDialect::Alethe)?;
+    Err(KernelError::UnsupportedSmtProofTree {
+        backend: Text::from("aletha"),
+        rule,
+    })
 }
 
-/// Extract the rule name following the `:rule` keyword in an
-/// ALETHE step node. Returns `None` if the keyword is missing
-/// or not followed by an atom.
-fn extract_aletha_rule_name(children: &List<ProofNode>) -> Option<String> {
-    let mut iter = children.iter();
-    while let Some(node) = iter.next() {
-        if let ProofNode::Atom(t) = node
-            && t.as_str() == ":rule"
-            && let Some(ProofNode::Atom(rule)) = iter.next()
-        {
-            return Some(rule.as_str().to_string());
-        }
-    }
-    None
+/// Extract the diagnostic rule name after `:rule`, borrowing the input.
+fn extract_aletha_rule_name(children: &List<ProofNode>) -> Option<&Text> {
+    children
+        .iter()
+        .zip(children.iter().skip(1))
+        .find_map(|(key, value)| match (key, value) {
+            (ProofNode::Atom(key), ProofNode::Atom(value)) if key.as_str() == ":rule" => {
+                Some(value)
+            }
+            _ => None,
+        })
 }
-
-use verum_common::Heap;
 
 // =============================================================================
 // Kernel-rule typed proof-graph surface
@@ -1609,55 +1420,44 @@ mod tests {
     // -- Phase 2 replay ----------------------------------------------
 
     #[test]
-    fn replay_asserted_produces_axiom() {
-        let tree = parse_sexpr("(asserted premise)").unwrap();
-        let term = replay_z3_tree(&tree).unwrap();
-        match term {
-            crate::CoreTerm::Axiom {
-                name, framework, ..
-            } => {
-                assert_eq!(name.as_str(), "z3_proof:asserted");
-                assert_eq!(framework.framework.as_str(), "z3:asserted");
-            }
-            other => panic!("expected Axiom, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn replay_refl_symm_trans_mp_all_produce_axioms() {
-        for rule in &["refl", "symm", "trans", "mp", "hypothesis"] {
-            let tree = parse_sexpr(&format!("({} dummy)", rule)).unwrap();
-            let term = replay_z3_tree(&tree).unwrap();
-            match term {
-                crate::CoreTerm::Axiom { framework, .. } => {
-                    assert_eq!(framework.framework.as_str(), format!("z3:{}", rule));
-                }
-                other => panic!("expected Axiom for {}, got {:?}", rule, other),
-            }
-        }
-    }
-
-    #[test]
-    fn replay_covers_every_rule_in_allowlist() {
-        // Post-cluster-5: every rule in Z3_KNOWN_RULES must
-        // have a replay implementation. If a future kernel
-        // update adds a new rule to the allowlist without
-        // extending `construct_witness_for_rule`, this test
-        // fails immediately — keeps the two lists in sync.
-        for rule in Z3_KNOWN_RULES {
-            let tree = parse_sexpr(&format!("({} dummy)", rule)).unwrap();
-            let result = replay_z3_tree(&tree);
+    fn replay_asserted_requires_reconstruction() {
+        for rule in &["asserted"] {
+            let tree = parse_sexpr(&format!("({rule} dummy)")).unwrap();
             assert!(
-                result.is_ok(),
-                "rule `{}` is in allowlist but replay failed: {:?}",
-                rule,
-                result.err()
+                matches!(replay_z3_tree(&tree), Err(crate::KernelError::UnsupportedSmtProofTree { backend, rule: found })
+                if backend.as_str() == "z3" && found.as_str() == *rule)
             );
         }
     }
 
     #[test]
-    fn replay_cluster_2_rewrite_family_all_produce_axioms() {
+    fn replay_refl_symm_trans_mp_all_require_reconstruction() {
+        for rule in &["refl", "symm", "trans", "mp", "hypothesis"] {
+            let tree = parse_sexpr(&format!("({rule} dummy)")).unwrap();
+            assert!(
+                matches!(replay_z3_tree(&tree), Err(crate::KernelError::UnsupportedSmtProofTree { backend, rule: found })
+                if backend.as_str() == "z3" && found.as_str() == *rule)
+            );
+        }
+    }
+
+    #[test]
+    fn replay_recognizes_but_refuses_every_catalogued_rule() {
+        for rule in Z3_KNOWN_RULES {
+            let tree = parse_sexpr(&format!("({rule} dummy)")).unwrap();
+            assert_eq!(
+                inspect_proof_tree(&tree, TreeDialect::Z3).unwrap().as_str(),
+                *rule
+            );
+            assert!(
+                matches!(replay_z3_tree(&tree), Err(crate::KernelError::UnsupportedSmtProofTree { backend, rule: found })
+                if backend.as_str() == "z3" && found.as_str() == *rule)
+            );
+        }
+    }
+
+    #[test]
+    fn replay_cluster_2_rewrite_family_all_require_reconstruction() {
         for rule in &[
             "rewrite",
             "commutativity",
@@ -1666,14 +1466,16 @@ mod tests {
             "let-elim",
             "der",
         ] {
-            let tree = parse_sexpr(&format!("({} dummy)", rule)).unwrap();
-            let term = replay_z3_tree(&tree).unwrap();
-            assert!(matches!(term, crate::CoreTerm::Axiom { .. }));
+            let tree = parse_sexpr(&format!("({rule} dummy)")).unwrap();
+            assert!(
+                matches!(replay_z3_tree(&tree), Err(crate::KernelError::UnsupportedSmtProofTree { backend, rule: found })
+                if backend.as_str() == "z3" && found.as_str() == *rule)
+            );
         }
     }
 
     #[test]
-    fn replay_cluster_3_quantifier_family_all_produce_axioms() {
+    fn replay_cluster_3_quantifier_family_all_require_reconstruction() {
         for rule in &[
             "monotonicity",
             "quant-intro",
@@ -1682,23 +1484,27 @@ mod tests {
             "nnf-pos",
             "nnf-neg",
         ] {
-            let tree = parse_sexpr(&format!("({} dummy)", rule)).unwrap();
-            let term = replay_z3_tree(&tree).unwrap();
-            assert!(matches!(term, crate::CoreTerm::Axiom { .. }));
+            let tree = parse_sexpr(&format!("({rule} dummy)")).unwrap();
+            assert!(
+                matches!(replay_z3_tree(&tree), Err(crate::KernelError::UnsupportedSmtProofTree { backend, rule: found })
+                if backend.as_str() == "z3" && found.as_str() == *rule)
+            );
         }
     }
 
     #[test]
-    fn replay_cluster_4_boolean_family_all_produce_axioms() {
+    fn replay_cluster_4_boolean_family_all_require_reconstruction() {
         for rule in &["iff-true", "iff-false", "and-elim", "not-or-elim"] {
-            let tree = parse_sexpr(&format!("({} dummy)", rule)).unwrap();
-            let term = replay_z3_tree(&tree).unwrap();
-            assert!(matches!(term, crate::CoreTerm::Axiom { .. }));
+            let tree = parse_sexpr(&format!("({rule} dummy)")).unwrap();
+            assert!(
+                matches!(replay_z3_tree(&tree), Err(crate::KernelError::UnsupportedSmtProofTree { backend, rule: found })
+                if backend.as_str() == "z3" && found.as_str() == *rule)
+            );
         }
     }
 
     #[test]
-    fn replay_cluster_5_theory_family_all_produce_axioms() {
+    fn replay_cluster_5_theory_family_all_require_reconstruction() {
         for rule in &[
             "th-lemma",
             "unit-resolution",
@@ -1706,9 +1512,11 @@ mod tests {
             "goal",
             "modus-ponens",
         ] {
-            let tree = parse_sexpr(&format!("({} dummy)", rule)).unwrap();
-            let term = replay_z3_tree(&tree).unwrap();
-            assert!(matches!(term, crate::CoreTerm::Axiom { .. }));
+            let tree = parse_sexpr(&format!("({rule} dummy)")).unwrap();
+            assert!(
+                matches!(replay_z3_tree(&tree), Err(crate::KernelError::UnsupportedSmtProofTree { backend, rule: found })
+                if backend.as_str() == "z3" && found.as_str() == *rule)
+            );
         }
     }
 
@@ -1734,55 +1542,27 @@ mod tests {
     // -- Hierarchical composition ------------------------------------
 
     #[test]
-    fn nested_z3_proof_composes_child_witnesses_via_app() {
-        // (mp (refl x) (asserted y)) — mp has two nested
-        // sub-proofs. The resulting witness should be App(App
-        // (mp_axiom, refl_witness), asserted_witness) — the
-        // kernel's hierarchical term that mirrors the proof
-        // tree's shape.
+    fn nested_z3_proof_cannot_compose_unchecked_witnesses() {
         let tree = parse_sexpr("(mp (refl x) (asserted y))").unwrap();
-        let term = replay_z3_tree(&tree).unwrap();
-
-        // Outermost should be App.
-        match &term {
-            crate::CoreTerm::App(_, _) => {}
-            other => panic!("expected App at root, got {:?}", other),
-        }
-
-        // Structural peek: destructure the App chain and
-        // verify we see the axiom tags we expect.
-        let mut shape_str = format!("{:?}", term);
-        // The shape string contains Axiom tags for each
-        // participating rule.
-        assert!(
-            shape_str.contains("z3:mp"),
-            "expected z3:mp in witness: {}",
-            shape_str
+        assert_eq!(
+            inspect_proof_tree(&tree, TreeDialect::Z3).unwrap().as_str(),
+            "mp"
         );
-        assert!(
-            shape_str.contains("z3:refl"),
-            "expected z3:refl in witness: {}",
-            shape_str
-        );
-        assert!(
-            shape_str.contains("z3:asserted"),
-            "expected z3:asserted in witness: {}",
-            shape_str
-        );
-        // Silence unused-mut lint
-        let _ = &mut shape_str;
+        assert!(matches!(
+            replay_z3_tree(&tree),
+            Err(crate::KernelError::UnsupportedSmtProofTree { .. })
+        ));
     }
 
     #[test]
     fn atom_children_are_not_recursively_replayed() {
-        // (refl x) — `x` is an atom leaf, NOT a sub-proof.
-        // Witness should be just the refl axiom, no App wrap.
-        let tree = parse_sexpr("(refl x)").unwrap();
-        let term = replay_z3_tree(&tree).unwrap();
-        assert!(
-            matches!(term, crate::CoreTerm::Axiom { .. }),
-            "atom-only children should not create App wrappers"
-        );
+        for rule in &["refl"] {
+            let tree = parse_sexpr(&format!("({rule} dummy)")).unwrap();
+            assert!(
+                matches!(replay_z3_tree(&tree), Err(crate::KernelError::UnsupportedSmtProofTree { backend, rule: found })
+                if backend.as_str() == "z3" && found.as_str() == *rule)
+            );
+        }
     }
 
     #[test]
@@ -1798,33 +1578,33 @@ mod tests {
     // -- ALETHE replay ------------------------------------------------
 
     #[test]
-    fn replay_aletha_direct_rule_name_produces_axiom() {
+    fn replay_aletha_direct_rule_name_requires_reconstruction() {
         let tree = parse_sexpr("(resolution p1 p2)").unwrap();
-        let term = replay_aletha_tree(&tree).unwrap();
-        match term {
-            crate::CoreTerm::Axiom {
-                name, framework, ..
-            } => {
-                assert_eq!(name.as_str(), "aletha_proof:resolution");
-                assert_eq!(framework.framework.as_str(), "aletha:resolution");
-            }
-            other => panic!("expected Axiom, got {:?}", other),
-        }
+        assert_eq!(
+            inspect_proof_tree(&tree, TreeDialect::Alethe)
+                .unwrap()
+                .as_str(),
+            "resolution"
+        );
+        assert!(
+            matches!(replay_aletha_tree(&tree), Err(crate::KernelError::UnsupportedSmtProofTree { backend, rule })
+            if backend.as_str() == "aletha" && rule.as_str() == "resolution")
+        );
     }
 
     #[test]
     fn replay_aletha_step_node_extracts_rule_keyword() {
-        // ALETHE's canonical step shape:
-        // (step t1 :rule refl :premises () :conclusion (= x x))
-        let trace = "(step t1 :rule refl :premises ())";
-        let tree = parse_sexpr(trace).unwrap();
-        let term = replay_aletha_tree(&tree).unwrap();
-        match term {
-            crate::CoreTerm::Axiom { framework, .. } => {
-                assert_eq!(framework.framework.as_str(), "aletha:refl");
-            }
-            other => panic!("expected Axiom, got {:?}", other),
-        }
+        let tree = parse_sexpr("(step t1 :rule refl :premises ())").unwrap();
+        assert_eq!(
+            inspect_proof_tree(&tree, TreeDialect::Alethe)
+                .unwrap()
+                .as_str(),
+            "refl"
+        );
+        assert!(
+            matches!(replay_aletha_tree(&tree), Err(crate::KernelError::UnsupportedSmtProofTree { backend, rule })
+            if backend.as_str() == "aletha" && rule.as_str() == "refl")
+        );
     }
 
     #[test]
@@ -1848,9 +1628,8 @@ mod tests {
     }
 
     #[test]
-    fn replay_aletha_covers_every_allowlist_rule() {
-        // Same invariant as the Z3 version: every rule the
-        // allowlist admits must be replayable.
+    fn replay_aletha_recognizes_but_refuses_catalogued_rules() {
+        // Diagnostic recognition must never become proof authority.
         for rule in CVC5_ALETHE_KNOWN_RULES {
             // Skip `step` itself — it's a meta-node wrapper,
             // not a rule. Its body carries a `:rule` keyword
@@ -1859,12 +1638,15 @@ mod tests {
                 continue;
             }
             let tree = parse_sexpr(&format!("({} dummy)", rule)).unwrap();
-            let result = replay_aletha_tree(&tree);
+            assert_eq!(
+                inspect_proof_tree(&tree, TreeDialect::Alethe)
+                    .unwrap()
+                    .as_str(),
+                *rule
+            );
             assert!(
-                result.is_ok(),
-                "ALETHE rule `{}` is in allowlist but replay failed: {:?}",
-                rule,
-                result.err()
+                matches!(replay_aletha_tree(&tree), Err(crate::KernelError::UnsupportedSmtProofTree { backend, rule: found })
+                    if backend.as_str() == "aletha" && found.as_str() == *rule)
             );
         }
     }

@@ -7,7 +7,7 @@
 
 use verum_common::{Heap, List, Text};
 
-use crate::{Context, CoreTerm, CoreType, FrameworkId, KernelError, SmtCertificate};
+use crate::{Context, CoreTerm, CoreType, KernelError, SmtCertificate};
 
 /// Project the kernel's coarse shape head out of a full type term.
 /// Used by error messages and the legacy `check` / `verify` API.
@@ -1323,49 +1323,16 @@ fn free_vars_rec(
     }
 }
 
-/// Replay an [`SmtCertificate`] into a [`CoreTerm`] witness.
+/// Validate an SMT envelope and attempt independent proof reconstruction.
 ///
-/// This is the routine that puts Z3 / CVC5 / E / Vampire / Alt-Ergo
-/// **outside** the TCB: any SMT-produced proof must be independently
-/// reconstructed here before the kernel will admit it as a witness.
+/// The current envelope carries opaque solver bytes and an obligation hash;
+/// none of its recognized tags contains a kernel-checkable derivation. Such
+/// evidence is therefore refused with [`KernelError::UnsupportedSmtCertificate`].
+/// A matching hash, solver name or rule tag never manufactures an axiom or a
+/// Boolean value. Malformed envelopes retain their more specific diagnostics.
 ///
-/// # Supported certificate shapes
-///
-/// The first phase of the replay ships support for **trust-tag
-/// certificates** — a minimal shape the SMT layer emits when a goal
-/// closes via the standard `Unsat`-means-valid protocol. The
-/// certificate's `trace` is a single-byte tag identifying which of
-/// three rule families the backend used:
-///
-/// * `0x01` — **refl**: the obligation was discharged by
-///  syntactic reflexivity (`E == E`).
-/// * `0x02` — **asserted**: the obligation matched a hypothesis
-///  directly.
-/// * `0x03` — **smt_unsat**: the backend reported `Unsat` on the
-///  negated obligation using a generic theory combination.
-///
-/// For each recognised tag the replay constructs a `CoreTerm::Axiom`
-/// labelled with the backend's name and the rule family. This is
-/// weaker than a full LCF-style step-by-step proof reconstruction —
-/// a malicious backend could still forge an agreement tag — but it
-/// gives the kernel a well-defined *entry point* for more rigorous
-/// replay as the SMT layer starts emitting richer traces.
-///
-/// **Obligation-hash semantics (V8, doc/code reconciliation).**
-/// This function checks that `cert.obligation_hash` is non-empty
-/// (rejecting with [`KernelError::MissingObligationHash`] on
-/// failure) and embeds the hash into the witness's `Axiom` name.
-/// It does NOT compare the hash against any caller-supplied
-/// expected hash — the pre-V8 doc claim of such a comparison was
-/// false. Callers that have an expected hash (e.g., proving a
-/// specific goal whose obligation hash was just computed) MUST
-/// use [`replay_smt_cert_with_obligation`] instead, which
-/// threads the expected hash through and rejects on mismatch via
-/// [`KernelError::ObligationHashMismatch`].
-///
-/// Future phases (one per backend): parse Z3's `(proof …)` tree
-/// format, CVC5's `ALETHE` format, reconstruct each rule's witness
-/// term compositionally.
+/// Actual proof admission uses checked native judgments. Supporting an SMT
+/// trace here requires reconstructing its precise statement and witness first.
 pub fn replay_smt_cert(_ctx: &Context, cert: &SmtCertificate) -> Result<CoreTerm, KernelError> {
     // Envelope schema gate — reject future-version certificates
     // rather than silently accepting an unknown shape.
@@ -1383,67 +1350,26 @@ pub fn replay_smt_cert(_ctx: &Context, cert: &SmtCertificate) -> Result<CoreTerm
         None => return Err(KernelError::EmptyCertificate),
     };
 
-    let rule_name = match rule_tag {
-        0x01 => "refl",
-        0x02 => "asserted",
-        0x03 => "smt_unsat",
-        other => {
-            return Err(KernelError::UnknownRule {
-                backend: cert.backend.clone(),
-                tag: other,
-            });
-        }
-    };
-
-    // Sanity-check the obligation hash is present.
+    if !matches!(rule_tag, 0x01..=0x03) {
+        return Err(KernelError::UnknownRule {
+            backend: cert.backend.clone(),
+            tag: rule_tag,
+        });
+    }
     if cert.obligation_hash.as_str().is_empty() {
         return Err(KernelError::MissingObligationHash);
     }
-
-    // Construct the witness term. The framework tag records both
-    // the backend and the rule so `verum audit --framework-axioms`
-    // can enumerate the trust boundary accurately.
-    let framework = FrameworkId {
-        framework: Text::from(format!("{}:{}", backend, rule_name)),
-        citation: cert.obligation_hash.clone(),
-    };
-    // The axiom's type is Prop — it's a propositional witness. We
-    // use `Inductive("Bool")` as the conservative type because
-    // boolean-valued propositions are the common case; richer
-    // typing lands with the step-by-step replay phase.
-    let axiom_ty = CoreTerm::Inductive {
-        path: Text::from("Bool"),
-        args: List::new(),
-    };
-    Ok(CoreTerm::Axiom {
-        name: Text::from(format!(
-            "smt_cert:{}:{}:{}",
-            backend,
-            rule_name,
-            cert.obligation_hash.as_str()
-        )),
-        ty: Heap::new(axiom_ty),
-        framework,
+    Err(KernelError::UnsupportedSmtCertificate {
+        backend: cert.backend.clone(),
+        tag: rule_tag,
     })
 }
 
-/// V8 — replay an SMT certificate **and** verify its
-/// `obligation_hash` matches the supplied `expected_hash`.
+/// Check the caller's obligation binding before attempting independent replay.
 ///
-/// This is the soundness-correct path for any caller that has a
-/// concrete goal in hand (e.g., the gradual-verification driver
-/// computing the expected obligation hash from the goal AST and
-/// then matching certificates against it). It composes the
-/// non-comparison primitive [`replay_smt_cert`] with the explicit
-/// hash equality check the V0 doc *claimed* but didn't perform.
-///
-/// Behaviour:
-///  1. Hash equality is checked **before** replay so a mismatched
-///  certificate doesn't waste backend-table dispatch work.
-///  2. On success, the witness term returned by
-///  [`replay_smt_cert`] is unchanged — the comparison adds no
-///  new failure mode beyond the new
-///  [`KernelError::ObligationHashMismatch`] variant.
+/// Hash equality is necessary for this envelope boundary, but does not prove
+/// the obligation. Recognized envelopes still fail with
+/// [`KernelError::UnsupportedSmtCertificate`] until reconstruction is available.
 pub fn replay_smt_cert_with_obligation(
     ctx: &Context,
     cert: &SmtCertificate,

@@ -4,7 +4,7 @@
 //! kernel. Every proof term that reaches the kernel is either accepted
 //! with a concrete inferred type, or rejected with a [`KernelError`].
 
-use verum_common::{Heap, List, Maybe, Text};
+use verum_common::{Heap, Maybe, Text};
 
 use crate::axiom::AxiomRegistry;
 use crate::depth::m_depth;
@@ -55,12 +55,8 @@ use crate::{Context, CoreTerm, CoreType, KernelError, UniverseLevel};
 /// * `Elim` — checks a registered ordinary inductive and all dependent branches,
 ///   including recursive hypotheses; returns `motive(scrutinee)`.
 ///
-/// The **only** constructor that still returns
-/// [`KernelError::NotImplemented`] is `SmtProof` — its dedicated
-/// replay path lives in [`replay_smt_cert`] and lands per-backend
-/// in follow-up commits (Z3 proof format first, then CVC5, E,
-/// Vampire). That is the last piece needed to put every SMT backend
-/// **outside** the TCB.
+/// `SmtProof` refuses recognized envelopes without independently reconstructed
+/// evidence. An envelope hash or solver verdict is never a proof witness.
 /// type-inference variant that consults a supplied
 /// [`crate::InductiveRegistry`] when typing
 /// [`CoreTerm::Inductive`] heads. Returns the registered
@@ -743,27 +739,10 @@ impl Inference<'_> {
                 Ok(CoreTerm::App(motive.clone(), scrutinee.clone()))
             }
 
-            // An `SmtProof` node is replayed via `replay_smt_cert` at type
-            // lookup: the certificate is validated (schema + backend +
-            // rule-tag + obligation hash), a witness term is constructed,
-            // and the witness's conservative type is returned.
-            //
-
-            // Until the full step-by-step Z3 `(proof …)` / CVC5 ALETHE
-            // reconstruction lands (task #89), the witness type is
-            // `Inductive("Bool")` — the standing convention for
-            // propositional obligations that close via the
-            // `Unsat`-means-valid protocol. This matches the type set on
-            // the `Axiom` node `replay_smt_cert` produces, so upstream
-            // code that destructures the replayed term sees a consistent
-            // `CoreTerm::Inductive { "Bool", [] }` shape.
-            CoreTerm::SmtProof(cert) => {
-                let _witness = replay_smt_cert(ctx, cert)?;
-                Ok(CoreTerm::Inductive {
-                    path: Text::from("Bool"),
-                    args: List::new(),
-                })
-            }
+            // A future replay implementation must return an actual witness. Infer
+            // that witness through the same registry-aware kernel; never assign a
+            // type based only on an SMT envelope's tag or claimed conclusion.
+            CoreTerm::SmtProof(cert) => self.infer(ctx, &replay_smt_cert(ctx, cert)?),
 
             CoreTerm::Axiom { name, .. } => match axioms.get(name.as_str()) {
                 Maybe::Some(entry) => {

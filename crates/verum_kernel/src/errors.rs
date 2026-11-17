@@ -153,6 +153,40 @@ pub enum KernelError {
     #[error("kernel: SMT certificate missing obligation hash")]
     MissingObligationHash,
 
+    /// The envelope is structurally recognized, but contains no reconstructed
+    /// proof of its claimed obligation. Solver verdicts and hashes are not
+    /// kernel proof authority.
+    #[error(
+        "kernel: unsupported SMT evidence from '{backend}': rule tag {tag:#x} has no checked proof reconstruction"
+    )]
+    UnsupportedSmtCertificate {
+        /// Backend named by the untrusted envelope.
+        backend: Text,
+        /// Recognized diagnostic tag, not a proof rule admission.
+        tag: u8,
+    },
+
+    /// Structural recognition of a solver tree does not reconstruct its
+    /// inference rules, premises or conclusion.
+    #[error(
+        "kernel: unsupported SMT proof tree from '{backend}': rule '{rule}' has no checked reconstruction"
+    )]
+    UnsupportedSmtProofTree {
+        /// Solver tree dialect.
+        backend: Text,
+        /// Recognized root rule.
+        rule: Text,
+    },
+
+    /// Verifier-selected structural budget exhausted before replay.
+    #[error("kernel: SMT proof tree exceeds {resource} limit {limit}")]
+    SmtProofResourceLimit {
+        /// Bounded structural dimension.
+        resource: &'static str,
+        /// Applied verifier limit.
+        limit: usize,
+    },
+
     /// A certificate's envelope schema version is newer than the
     /// kernel understands. See [`crate::CERTIFICATE_SCHEMA_VERSION`]
     /// for what the kernel can replay; schema-version bumps go
