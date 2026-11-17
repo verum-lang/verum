@@ -815,8 +815,7 @@ impl Context {
     /// Crucially: the returned type is shifted up by `i + 1` so the
     /// caller sees it in the OUTER context's de Bruijn frame.
     pub fn lookup(&self, i: usize) -> Option<Term> {
-        let position = self.bindings.len().checked_sub(i.checked_add(1)?)?;
-        let binding = &self.bindings[position];
+        let binding = crate::binders::lookup_binding(&self.bindings, i)?;
         let raw = (*binding.ty).clone();
         Some(if binding.closed {
             raw
@@ -852,7 +851,7 @@ impl Context {
     }
 
     fn definition_under(&self, index: usize, binders: usize) -> Option<Term> {
-        let position = self.bindings.len().checked_sub(index.checked_add(1)?)?;
+        let position = crate::binders::binding_slot(self.bindings.len(), index)?;
         let shift = index.checked_add(1)?.checked_add(binders)?;
         self.bindings[position]
             .definition

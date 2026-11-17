@@ -2,6 +2,7 @@
 //! A successful replay establishes exactly the supplied kernel judgment.
 #![forbid(unsafe_code)]
 pub mod admission;
+mod binders;
 mod derivation;
 pub mod lean_export;
 pub mod limits;

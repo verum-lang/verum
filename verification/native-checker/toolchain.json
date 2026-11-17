@@ -1,0 +1,14 @@
+{
+  "aeneas": "nightly-2026.11.17-1dc8ad3",
+  "charon": "0.1.315 (454586e9b770231e66d2062993e632dfc06463e2)",
+  "rust": "nightly-2026-09-17",
+  "rust_commit": "923c95cdf5ba65cea505aa2ea829f578e1506ed8",
+  "lean": "4.36.0-rc2",
+  "lean_commit": "b35cb10cf2ced51a2fd1880cfdbf75c71ab7a35a",
+  "mathlib": "9d581dfff2e41de989072ea63abf3daf69311520",
+  "release_sha256": {
+    "aeneas-linux-aarch64.tar.gz": "f1fe17803bc8a98e32d565196520cfc57f43309a8ec677dac979c243f70489bb",
+    "aeneas-linux-x86_64.tar.gz": "5f61af68dc991782e3180046332a96c573cb613b5ce1f080a50297939e8b2f01",
+    "aeneas-macos-aarch64.tar.gz": "f8c7f266cad83ba5793f780b3cf1edd61ed4c6e2cf9c264544e526e3e40393e1"
+  }
+}

@@ -105,10 +105,7 @@ impl Encoder {
         self.out.push('(');
         match term {
             Term::Var(i) => {
-                let depth = self
-                    .bindings
-                    .len()
-                    .checked_sub(i.checked_add(1).ok_or("unbound term variable")?)
+                let depth = crate::binders::binding_slot(self.bindings.len(), *i)
                     .ok_or("unbound term variable")?;
                 self.unused_names[self.bindings[depth]] = None;
                 write!(self.out, "x{depth}").unwrap();

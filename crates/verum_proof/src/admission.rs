@@ -134,6 +134,7 @@ pub fn checker_identity() -> String {
         PROFILE,
         env!("CARGO_PKG_VERSION"),
         include_str!("admission.rs"),
+        include_str!("binders.rs"),
         include_str!("limits.rs"),
         include_str!("process.rs"),
         include_str!("main.rs"),

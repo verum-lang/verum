@@ -46,6 +46,7 @@
 //!     `BothAccept` / `BothReject` / `Disagreement` /
 //!     `NotYetSelfHosting` (the last unused once this lands).
 
+use crate::binders::binding_slot;
 use crate::derivation::{Children, Input, WorkStack, copy_child};
 use crate::proof_checker::{CheckError, DataConstructor, DataField, Foundation, Level, Term};
 use std::sync::Arc;
@@ -79,10 +80,7 @@ impl Closure {
     fn capture(body: &Term, env: &Env, local_binders: usize) -> Self {
         let positions = std::cell::RefCell::new(std::collections::BTreeSet::new());
         crate::proof_checker::contains_free_by(body, local_binders, &|index| {
-            if let Some(position) = index
-                .checked_add(1)
-                .and_then(|count| env.len().checked_sub(count))
-            {
+            if let Some(position) = binding_slot(env.len(), index) {
                 positions.borrow_mut().insert(position);
             }
             false // Visit every free occurrence, without short-circuiting.
@@ -95,15 +93,15 @@ impl Closure {
                 .map_variables(local_binders, &mut |index, depth| {
                     let Some(position) = index
                         .checked_sub(depth)
-                        .and_then(|i| i.checked_add(1))
-                        .and_then(|count| env.len().checked_sub(count))
+                        .and_then(|relative| binding_slot(env.len(), relative))
                     else {
                         return Term::var(index);
                     };
                     let retained = positions
                         .binary_search(&position)
                         .expect("collected free variable");
-                    Term::var(depth + positions.len() - 1 - retained)
+                    let index = binding_slot(positions.len(), retained).expect("retained environment slot");
+                    Term::var(depth + index)
                 })
         };
         Self {
@@ -389,23 +387,10 @@ pub fn eval(term: &Term, env: &Env) -> Value {
 
         Term::Universe(level) => Value::VUniverse(level.clone()),
 
-        Term::Var(i) => {
-            // env is outer-first; Var(i) means "i'th binder from
-            // the inside". So lookup index = env.len() - 1 - i.
-            let len = env.len();
-            if *i >= len {
-                // Free variable — produce a neutral. The level is
-                // stable: it's the binder's count from the outside,
-                // computed as i - len + (current binding-depth-out).
-                // We use `len` directly as the level here because
-                // free vars at the boundary of `env` correspond to
-                // levels equal to `env.len()` (the next free level).
-                // For a closed term this branch is unreachable; left
-                // for robustness on partial terms used in tests.
-                return Value::VNeutral(Neutral::NVar(*i));
-            }
-            env[len - 1 - *i].as_ref().clone()
-        }
+        Term::Var(i) => match binding_slot(env.len(), *i) {
+            Some(slot) => env[slot].as_ref().clone(),
+            None => Value::VNeutral(Neutral::NVar(*i)),
+        },
 
         Term::Pi(domain, body) => {
             let dom_val = eval(domain, env);
@@ -739,17 +724,7 @@ fn quote_neutral(neutral: &Neutral, level: usize) -> Term {
             cases: cases.iter().map(|t| quote(t, level)).collect(),
         },
 
-        Neutral::NVar(k) => {
-            // Level → index conversion: level k at depth `level`
-            // becomes index `level - 1 - k`.
-            if *k >= level {
-                // Free variable at boundary — emit as Var(k) directly.
-                // Sound for closed terms (this branch unreachable).
-                Term::Var(*k)
-            } else {
-                Term::Var(level - 1 - *k)
-            }
-        }
+        Neutral::NVar(k) => Term::Var(binding_slot(level, *k).unwrap_or(*k)),
         Neutral::NApp(n, x) => {
             let f_term = quote_neutral(n, level);
             let x_term = quote(x, level);
@@ -1132,17 +1107,14 @@ impl NbeContext {
 
     /// Look up the type of variable at de Bruijn index `i`.
     pub fn lookup(&self, i: usize) -> Option<&Value> {
-        let len = self.bindings.len();
-        if i >= len {
-            return None;
-        }
-        Some(self.bindings[len - 1 - i].ty.as_ref())
+        let binding = crate::binders::lookup_binding(&self.bindings, i)?;
+        Some(binding.ty.as_ref())
     }
 
     /// Unfold only a checked local definition. Its source predates its own
     /// binder and every subsequent binder, so weaken across exactly i + 1.
     fn definition(&self, i: usize) -> Option<Term> {
-        let position = self.bindings.len().checked_sub(i.checked_add(1)?)?;
+        let position = binding_slot(self.bindings.len(), i)?;
         let source = self.bindings[position].definition.as_ref()?;
         Some(crate::proof_checker::shift_up((**source).clone(), i + 1, 0))
     }
