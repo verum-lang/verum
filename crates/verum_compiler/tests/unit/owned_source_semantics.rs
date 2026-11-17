@@ -793,3 +793,6 @@ mod reference_method_authority;
 
 #[path = "configuration_owned_payloads.rs"]
 mod configuration_owned_payloads;
+
+#[path = "term_raw_visibility.rs"]
+mod term_raw_visibility;

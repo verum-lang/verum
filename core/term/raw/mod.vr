@@ -68,30 +68,28 @@ public mount .clipboard.{clipboard_set, clipboard_get};
 
 /// Terminal mode state. Stores original settings for RAII restoration.
 public type TerminalMode is {
-    original: TermiosState,
-    fd: FileDesc,
-    is_raw: Bool,
-    is_alternate: Bool,
+    public(in core.term.raw) original: TermiosState,
+    public(in core.term.raw) fd: FileDesc,
+    public(in core.term.raw) is_raw: Bool,
+    public(in core.term.raw) is_alternate: Bool,
 };
 
-/// Low-level termios state (platform-dependent).
-/// On POSIX: raw termios bytes (sizeof(struct termios) = 60 bytes).
-/// On Windows: saved console mode flags.
-type TermiosState is {
+/// Saved platform state shared by the raw terminal backends.
+public(in core.term.raw) type TermiosState is {
     @cfg(not(target_os = "windows"))
-    data: [Byte; 60],
+    public(in core.term.raw) data: [Byte; 60],
     @cfg(target_os = "windows")
-    input_mode: UInt32,
+    public(in core.term.raw) input_mode: UInt32,
     @cfg(target_os = "windows")
-    output_mode: UInt32,
+    public(in core.term.raw) output_mode: UInt32,
 };
 
 /// Terminal size in cells and (optionally) pixels.
 public type TerminalSize is {
-    columns: Int,
-    rows: Int,
-    pixel_width: Maybe<Int>,
-    pixel_height: Maybe<Int>,
+    public columns: Int,
+    public rows: Int,
+    public pixel_width: Maybe<Int>,
+    public pixel_height: Maybe<Int>,
 };
 
 /// Cursor shape (DECSCUSR values).

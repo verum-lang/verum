@@ -101,7 +101,7 @@ public module app;
 
 // Layer 0: Raw terminal
 public mount .raw.{
-    TerminalMode, TerminalSize, TermiosState, CursorShape,
+    TerminalMode, TerminalSize, CursorShape,
     RawTerminal, EscapeWriter, ClearMode,
     PosixTerminal, TermCapabilities,
 };
