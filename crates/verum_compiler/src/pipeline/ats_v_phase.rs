@@ -45,6 +45,18 @@ impl<'s> CompilationPipeline<'s> {
     pub(super) fn phase_ats_v(&self, module: &Module) -> Result<()> {
         let mut total_violations = 0usize;
 
+        // Validate the same file boundary used by architecture queries before
+        // registering either of its AST attribute locations into the session.
+        if let Err(error) = declared_arch_shape_of_module(module) {
+            self.emit_arch_phase_result(&ModuleArchResult {
+                module_name: "<module>".into(),
+                shape: None,
+                parse_errors: vec![error],
+                violations: Vec::new(),
+            }, module);
+            return Ok(());
+        }
+
         // ATS-V REACH ORACLE.  `VERUM_TRACE_ATSV=1` reports what this
         // phase can SEE — the count of module-level and per-item
         // attributes, by name.  Named for the question it answers:
@@ -200,16 +212,15 @@ impl<'s> CompilationPipeline<'s> {
         // to extract the Shape.  We need the Shape's composes_with /
         // foundation / lifecycle / at_tier BEFORE running the check
         // so we can both register it and resolve peers.
-        let mut arch_module_args: Option<&[verum_ast::expr::Expr]> = None;
-        for attr in attrs.iter() {
-            if attr.name.as_str() == "arch_module" {
-                arch_module_args = Some(match &attr.args {
-                    Maybe::Some(args) => args.as_slice(),
-                    Maybe::None => &[],
-                });
-            }
-        }
-        let args_slice = arch_module_args?;
+        let args_slice = match verum_kernel::arch_parse::arch_module_arguments(attrs) {
+            Ok(args) => args?,
+            Err(error) => return Some(ModuleArchResult {
+                module_name: module_name.into(),
+                shape: None,
+                parse_errors: vec![error],
+                violations: Vec::new(),
+            }),
+        };
 
         // Parse Shape upfront so we can resolve peers from
         // composes_with.  parse_arch_module is the same path the
@@ -284,8 +295,8 @@ impl<'s> CompilationPipeline<'s> {
         // since the Shape is unparseable.
         for parse_err in &result.parse_errors {
             let msg = format!(
-                "[ATS-V] @arch_module parse error in `{}`: {:?}",
-                result.module_name, parse_err,
+                "[ATS-V] @arch_module parse error in `{}`: {}",
+                result.module_name, parse_err.human_message(),
             );
             let mut builder = DiagnosticBuilder::new(Severity::Error).message(msg);
             let span = self.session.convert_span(module.span);
@@ -1315,21 +1326,5 @@ pub fn infer_summaries_for_query(module: &Module) -> ModuleSummaries {
 pub fn declared_arch_shape_of_module(
     module: &Module,
 ) -> Result<Maybe<verum_kernel::arch::Shape>, verum_kernel::arch_parse::ArchParseError> {
-    let mut args: Option<&[verum_ast::expr::Expr]> = None;
-    let attr_sources = std::iter::once(&module.attributes)
-        .chain(module.file_header_index().map(|index| &module.items[index].attributes));
-    for attrs in attr_sources {
-        for attr in attrs.iter() {
-            if attr.name.as_str() == "arch_module" {
-                args = Some(match &attr.args {
-                    Maybe::Some(a) => a.as_slice(),
-                    Maybe::None => &[],
-                });
-            }
-        }
-        if args.is_some() {
-            break;
-        }
-    }
-    args.map(verum_kernel::arch_parse::parse_arch_module).transpose()
+    verum_kernel::arch_parse::declared_arch_shape_of_module(module)
 }

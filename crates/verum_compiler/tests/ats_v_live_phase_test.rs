@@ -34,7 +34,9 @@ use verum_compiler::{CompilationPipeline, CompilerOptions, Session};
 fn check_source(source: &str) -> Result<(usize, String)> {
     let temp_dir = TempDir::new()?;
     let main_file = temp_dir.path().join("main.vr");
-    std::fs::write(&main_file, source)?;
+    // These architecture fixtures use only built-ins. Keep them independent of
+    // a precompiled stdlib archive or an installed core.prelude module.
+    std::fs::write(&main_file, format!("@no_implicit_prelude\n{source}"))?;
 
     let options = CompilerOptions {
         input: main_file,
@@ -187,6 +189,87 @@ fn main() { print("ok"); }
         "an honest @arch_module declaration (Definition lifecycle, admissible \
          stratum) must pass — the phase judges claims, it does not reject \
          annotation itself; diags: {text}"
+    );
+    Ok(())
+}
+
+/// Repeating a field must not silently select the last value, including a
+/// second `strict` value that would weaken the first declaration's policy.
+#[test]
+fn duplicate_architecture_fields_are_refused_by_check_and_query() -> Result<()> {
+    for (field, attribute) in [
+        ("strict", "@arch_module(strict = true, strict = false)"),
+        (
+            "lifecycle",
+            "@arch_module(lifecycle = Lifecycle.Definition, lifecycle = Lifecycle.Theorem(\"unproved\"))",
+        ),
+        (
+            "requires",
+            "@arch_module(requires = [], requires = [Capability.Read(ResourceTag.Logger)])",
+        ),
+    ] {
+        let source = format!("{attribute}\nmodule probe.duplicate_fields;\nfn main() {{}}\n");
+        let (errors, text) = check_source(&source)?;
+        assert!(errors > 0, "duplicate {field} passed check: {text}");
+        let expected = format!("Duplicate architectural declaration: `{field}`");
+        assert!(
+            text.contains(&expected),
+            "wrong refusal for duplicate {field}: {text}"
+        );
+        let error = verum_compiler::arch_query::arch_query_source(&source)
+            .expect_err("the query must refuse the same ambiguous declaration");
+        assert!(
+            error.to_string().contains(&expected),
+            "wrong query refusal: {error}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn repeated_module_architecture_attributes_are_refused_by_check_and_query() -> Result<()> {
+    let source = r#"
+@arch_module(lifecycle = Lifecycle.Definition)
+@arch_module(requires = [])
+module probe.duplicate_attributes;
+fn main() {}
+"#;
+    let (errors, text) = check_source(source)?;
+    let expected = "Duplicate architectural declaration: `arch_module`";
+    assert!(
+        errors > 0 && text.contains(expected),
+        "ambiguous attributes: {text}"
+    );
+    let error = verum_compiler::arch_query::arch_query_source(source)
+        .expect_err("separate attributes cannot override or merge module claims");
+    assert!(
+        error.to_string().contains(expected),
+        "wrong query refusal: {error}"
+    );
+    Ok(())
+}
+
+#[test]
+fn definition_only_module_passes_without_manufacturing_capability_constraints() -> Result<()> {
+    let source = r#"
+@arch_module(lifecycle = Lifecycle.Definition)
+module probe.definition_only;
+fn main() {}
+"#;
+    let (errors, text) = check_source(source)?;
+    assert_eq!(errors, 0, "Definition-only module should pass: {text}");
+    let report = verum_compiler::arch_query::arch_query_source(source)?;
+    assert_eq!(
+        report.comparison,
+        verum_compiler::arch_query::PinComparison::Unpinned
+    );
+    assert!(
+        report.pinned.is_none(),
+        "omission must not become an empty requirement"
+    );
+    assert!(
+        report.pinned_exposes.is_none(),
+        "omission must not become an empty offered surface"
     );
     Ok(())
 }

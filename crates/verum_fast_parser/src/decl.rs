@@ -7947,12 +7947,12 @@ impl<'a> RecursiveParser<'a> {
         //
         // The reserved keywords below can also serve as attribute-arg
         // NAMES — e.g. `@arch_module(requires: [...])` per ATS-V spec
-        // §17.4.  When followed by `:`, treat the keyword as the LHS
-        // of a `name: value` pair (lowered to `Binary { Assign, Path,
+        // §17.4. When followed by `:` or `=`, treat the keyword as the LHS
+        // of a named argument (lowered to `Binary { Assign, Path,
         // value }` for parity with the ident-based named-arg form
         // below).  Without this special-case, `requires: [...]` would
         // be eagerly consumed as a bare-keyword Path and the caller
-        // would then trip over the unconsumed `:`.
+        // would then trip over the unconsumed separator.
         if let Some(Token { kind, span }) = self.stream.peek() {
             match kind {
                 TokenKind::Static
@@ -7985,11 +7985,14 @@ impl<'a> RecursiveParser<'a> {
                         TokenKind::Mount => "mount",
                         _ => unreachable!(),
                     };
-                    // Named-arg path: `keyword: value`.
-                    if self.stream.peek_nth_kind(1) == Some(&TokenKind::Colon) {
+                    // Both separators have the same named-argument semantics.
+                    if matches!(
+                        self.stream.peek_nth_kind(1),
+                        Some(TokenKind::Colon | TokenKind::Eq)
+                    ) {
                         let start_pos = self.stream.position();
                         self.stream.advance(); // consume keyword
-                        self.stream.advance(); // consume ':'
+                        self.stream.advance(); // consume separator
                         let value = self.parse_expr()?;
                         let span = self.stream.make_span(start_pos);
                         return Ok(Expr::new(

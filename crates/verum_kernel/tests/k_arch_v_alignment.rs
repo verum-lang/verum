@@ -1819,19 +1819,14 @@ fn pin_universal_arch_module_coverage_in_core() {
 }
 
 fn walk_core_vr_files(dir: &std::path::Path, f: &mut impl FnMut(&std::path::Path)) {
-    if !dir.is_dir() {
-        return;
-    }
     // Skip target/ — build artifacts.
     if dir.file_name().and_then(|s| s.to_str()) == Some("target") {
         return;
     }
-    let entries = match std::fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return,
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
+    let entries = std::fs::read_dir(dir)
+        .unwrap_or_else(|error| panic!("cannot inspect {}: {error}", dir.display()));
+    for entry in entries {
+        let path = entry.expect("read every corpus entry").path();
         if path.is_dir() {
             walk_core_vr_files(&path, f);
         } else if path.extension().and_then(|s| s.to_str()) == Some("vr") {
