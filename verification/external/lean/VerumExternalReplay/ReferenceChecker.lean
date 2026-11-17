@@ -680,7 +680,7 @@ partial def infer (Γ : Ctx) (t : Term) : Except CheckError Term :=
     match lookupCtx Γ i with
     | some T => Except.ok T
     | none   => Except.error (.unbound_variable i)
-  | .universe l => .ok (.universe (Level.successor (Level.normalize l)))
+  | .universe l => .ok (.universe l.successor)
   | .pi a b => do
     let some n ← expectUniverse (← infer Γ a) Γ.conversion | throw (.not_a_type a)
     let some m ← expectUniverse (← infer (Γ.extend a) b) (Γ.conversion.under 1) | throw (.not_a_type b)

@@ -1685,8 +1685,10 @@ impl CheckError {
     }
 }
 
-/// Infer the type of `term` in `ctx`. Returns the unique type or
-/// a `CheckError` naming the rejecting kernel rule.
+/// Infer the type of `term` in `ctx`, up to definitional equality.
+/// On rejection, `CheckError` identifies the failing kernel rule.
+/// T-Universe returns the exact successor of the supplied level expression.
+/// Call `Level::normalize` when a canonical spelling of the returned level is needed.
 ///
 /// **The six rules at a glance.**
 ///
@@ -1963,7 +1965,7 @@ async fn infer_term<'a, 'source>(
         Term::Var(i) => ctx.lookup(*i).ok_or(CheckError::UnboundVariable(*i)),
 
         // T-Univ: universe levels have exact successors beyond the wire width.
-        Term::Universe(level) => Ok(Term::Universe(universe_successor(level.clone().normalize()))),
+        Term::Universe(level) => Ok(Term::Universe(universe_successor(level.clone()))),
 
         // T-Pi-Form.  Π(x : A). B : Universe(max(level(A), level(B)))
         // where `level(T)` is the universe carrier of T's own type.

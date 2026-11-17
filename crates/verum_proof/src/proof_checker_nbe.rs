@@ -1129,6 +1129,7 @@ impl NbeContext {
 
 /// Infer the type of `term` under `ctx`. NbE-based — uses semantic
 /// values internally, returns the inferred type as a Term (quoted).
+/// T-Universe retains each nonliteral level expression inside its exact successor.
 ///
 /// **Architectural twin** of `proof_checker::infer`: same input/
 /// output behavior, different evaluation strategy.
@@ -1480,7 +1481,7 @@ async fn infer_term<'a, 'source>(
 
         // The same exact level algebra; the wire width does not cap universes.
         Term::Universe(level) => Ok(Value::VUniverse(crate::proof_checker::universe_successor(
-            level.clone().normalize(),
+            level.clone(),
         ))),
 
         Term::Pi(a, b) => {

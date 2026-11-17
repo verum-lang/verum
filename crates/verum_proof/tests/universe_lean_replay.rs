@@ -151,14 +151,42 @@ fn comparisons() -> Vec<(&'static str, Level, Level, bool)> {
     ]
 }
 
-fn cases() -> Vec<(&'static str, Certificate, bool)> {
+fn universe_inputs() -> Vec<(&'static str, Level)> {
     let big = u32::MAX;
+    vec![
+        ("below-boundary", Level::Concrete(big - 1)),
+        ("boundary", Level::Concrete(big)),
+        ("above-boundary", offset(Level::Concrete(big), big)),
+        (
+            "closed-maximum",
+            maximum(Level::Concrete(1), Level::Concrete(2)),
+        ),
+        (
+            "symbolic-floor",
+            maximum(Level::var("u"), Level::Concrete(big)),
+        ),
+        ("zero-offset", offset(Level::var("u"), 0)),
+        (
+            "dominated-parameter",
+            maximum(Level::var("v"), successor(Level::var("v"))),
+        ),
+        (
+            "wide-maximum",
+            maximum(
+                offset(Level::var("u"), big),
+                offset(offset(Level::var("v"), big), 3),
+            ),
+        ),
+    ]
+}
+
+fn cases() -> Vec<(String, Certificate, bool)> {
     let mut cases: Vec<_> = comparisons()
         .into_iter()
         .map(|(id, left, right, accepted)| {
             let domain = Term::universe_at(right);
             (
-                id,
+                id.to_string(),
                 Certificate {
                     term: Term::lam(Term::universe_at(left), Term::var(0)),
                     claimed_type: Term::pi(domain.clone(), domain),
@@ -168,39 +196,53 @@ fn cases() -> Vec<(&'static str, Certificate, bool)> {
             )
         })
         .collect();
-    for (name, level) in [
-        ("exact-boundary-successor", Level::Concrete(big)),
-        ("exact-higher-successor", offset(Level::Concrete(big), big)),
-        (
-            "exact-symbolic-successor",
-            maximum(Level::var("u"), Level::Concrete(big)),
-        ),
-    ] {
+    for (name, level) in universe_inputs() {
         let term = Term::universe_at(level.clone());
-        cases.push((
-            name,
-            Certificate {
-                term: term.clone(),
-                claimed_type: Term::universe_at(successor(level)),
-                metadata: Default::default(),
-            },
-            true,
-        ));
-        cases.push((
-            match name {
-                "exact-boundary-successor" => "no-boundary-self-typing",
-                "exact-higher-successor" => "no-higher-self-typing",
-                _ => "no-symbolic-self-typing",
-            },
-            Certificate {
-                term: term.clone(),
-                claimed_type: term,
-                metadata: Default::default(),
-            },
-            false,
-        ));
+        let raised = successor(level.clone());
+        for (claim, expected, accepted) in [
+            ("raw-successor", raised.clone(), true),
+            ("canonical-successor", raised.clone().normalize(), true),
+            ("self", level, false),
+            ("two-above", successor(raised), false),
+        ] {
+            cases.push((
+                format!("{name}-{claim}"),
+                Certificate {
+                    term: term.clone(),
+                    claimed_type: Term::universe_at(expected),
+                    metadata: Default::default(),
+                },
+                accepted,
+            ));
+        }
     }
     cases
+}
+
+fn native_universe_types(level: &Level) -> [Level; 2] {
+    use verum_proof::{proof_checker as sub, proof_checker_nbe as nbe};
+    let term = Term::universe_at(level.clone());
+    [
+        sub::infer(&sub::Context::new(), &term),
+        nbe::infer(&nbe::NbeContext::new(), &term),
+    ]
+    .map(|inferred| match inferred {
+        Ok(Term::Universe(output)) => output,
+        other => panic!("expected a universe type for {level:?}, received {other:?}"),
+    })
+}
+
+#[test]
+fn public_inference_preserves_the_raw_universe_expression() {
+    for (name, level) in universe_inputs() {
+        let expected = match &level {
+            Level::Concrete(n) if *n < u32::MAX => Level::Concrete(n + 1),
+            _ => successor(level.clone()),
+        };
+        for output in native_universe_types(&level) {
+            assert_eq!(output, expected, "{name}");
+        }
+    }
 }
 
 #[test]
@@ -323,11 +365,19 @@ fn lean_checks_compiled_native_results_at_every_valuation() {
         "../../../verification/external/lean/VerumExternalReplay/UniverseLevelEquality.lean"
     )
     .to_string();
-    source.push_str("\nnamespace VerumKernel\n");
+    source.push_str(
+        "
+namespace VerumKernel
+private def infersRawUniverse (input expected : Level) : Bool :=
+  match infer {} (.universe input) with
+  | .ok (.universe actual) => decide (actual = expected)
+  | _ => false
+",
+    );
     for (id, left, right, expected) in comparisons() {
         let source_left = lean_level(&left);
         let source_right = lean_level(&right);
-        let raw = [
+        let mut raw = vec![
             (source_left.clone(), left.clone().normalize()),
             (source_right.clone(), right.clone().normalize()),
             (
@@ -341,6 +391,20 @@ fn lean_checks_compiled_native_results_at_every_valuation() {
             (format!("(.succ {source_right})"), right.successor()),
         ];
         writeln!(source, "-- {id}").unwrap();
+        for (input, expression) in [(&left, &source_left), (&right, &source_right)] {
+            let [substitution, nbe] = native_universe_types(input);
+            let result = lean_level(&substitution);
+            // Compare the independently compiled reference inference structurally
+            // with the native public result, before any level conversion.
+            writeln!(
+                source,
+                "/-- info: true -/\n#guard_msgs in\n#eval! infersRawUniverse {expression} {result}"
+            )
+            .unwrap();
+            assert_eq!(substitution, nbe, "{id}");
+            raw.push((format!("(.succ {expression})"), substitution));
+            raw.push((format!("(.succ {expression})"), nbe));
+        }
         for (spec, actual) in raw {
             let output = lean_level(&actual);
             writeln!(source, "example (ρ : String → Nat) : Level.denote ρ {spec} = Level.denote ρ {output} := (Level.eq_iff_denote _ _).mp (by decide) ρ").unwrap();

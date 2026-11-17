@@ -22,15 +22,21 @@ includes termination and successful bounds checks in the extracted model.
 
 ## Universe successor
 
-Both native T-Universe branches normalize the input level and pass the result
-to `universe_successor`. For every input level and every valuation of its
+Both native T-Universe branches pass the original level expression to
+`universe_successor`. For every input level and every valuation of its
 parameters in the natural numbers, the returned level denotes precisely the
 input value plus one. The underlying `level_with_offset` proof covers every
 `u128` shift. It proves that the chunk loop terminates, all checked machine
 operations succeed, and the result denotes the input value plus the shift.
 This includes concrete and symbolic levels above the `u32` wire maximum.
+Inference increments a literal when its successor fits the wire. On an input
+such as `Max(1, 2)` it returns `Succ(Max(1, 2))`. A caller that needs the
+canonical spelling can normalize this result to `3`. The independent Lean
+checker proves that conversion accepts a direct successor and a successor of
+the normalized input as equal for every valid wire level.
 [Rust implementation](../../crates/verum_proof/src/proof_checker/universe_offset.rs),
-[universe proofs](UniverseOffset.lean)
+[native universe proofs](UniverseOffset.lean),
+[conversion proof](../external/lean/VerumExternalReplay/UniverseLevelEquality.lean)
 
 ## Correspondence
 
@@ -41,8 +47,9 @@ The correspondence trusts the pinned Rust compiler, Charon, Aeneas and its
 models of machine words, borrowed slices and checked indexing. After binding
 lookup, the substitution checker clones or weakens the binding type, and the
 normalization-by-evaluation checker reads the referenced semantic type.
-The preceding native universe normalization, these binding operations,
-allocation limits and whole-certificate acceptance remain outside these proofs.
+Dispatch on the enclosing term, the Rust clone of its level, NbE readback,
+universe normalization in other rules, these binding operations, allocation
+limits and whole-certificate acceptance remain outside these proofs.
 Extracting the complete checkers currently stops at the Rust coroutine in
 each inference routine.
 

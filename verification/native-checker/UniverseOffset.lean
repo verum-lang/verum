@@ -154,6 +154,61 @@ theorem universe_successor_exact (base : Level) :
       ∀ ρ, out.denote ρ = base.denote ρ + 1 :=
   level_with_offset_exact base 1#u128
 
+private theorem append_one (base : Level) :
+    append_wire_chunks base 1#u128 = Result.ok (.Succ base) := by
+  have small : ¬ chunk < 1#u128 := by decide
+  unfold append_wire_chunks append_wire_chunks_loop
+  rw [loop.eq_def]
+  simp only [append_wire_chunks_loop.body, append_wire_chunks.CHUNK, bind_ok, ite_eq_right small, lift]
+  rfl
+
+/-- The extracted operation preserves every nonliteral input as the immediate
+    child of the returned successor. -/
+theorem universe_successor_nonliteral (base : Level) (nonliteral : ∀ n, base ≠ .Concrete n) :
+    universe_successor base = Result.ok (.Succ base) := by
+  cases base with
+  | Concrete n => exact False.elim (nonliteral n rfl)
+  | Var _ | Succ _ | Max _ _ | Offset _ _ => exact append_one _
+
+/-- A fitting successor is a literal. At the last wire literal the output
+    retains the literal as the child of an explicit successor. -/
+theorem universe_successor_literal (n : U32) :
+    if n.val < core.num.U32.MAX.val then
+      ∃ next : U32, universe_successor (.Concrete n) = Result.ok (.Concrete next) ∧
+        next.val = n.val + 1
+    else universe_successor (.Concrete n) = Result.ok (.Succ (.Concrete n)) := by
+  have bounded : n.val < 4294967296 := n.hBounds
+  by_cases below : n.val < core.num.U32.MAX.val
+  · rw [ite_eq_left below]
+    rw [max_val] at below
+    obtain ⟨room, roomRun, roomVal⟩ := sub_exact wireMax n (by rw [max_val]; omega)
+    rw [max_val] at roomVal
+    have fits : 1#u128 ≤ UScalar.cast .U128 room := by
+      apply (UScalar.le_equiv _ _).mpr
+      rw [U32.cast_U128_val_eq]
+      change 1 ≤ room.val
+      omega
+    have one : (UScalar.cast .U32 1#u128).val = 1 := by decide
+    obtain ⟨next, run, value⟩ := add_exact n (UScalar.cast .U32 1#u128) (by rw [one]; omega)
+    refine ⟨next, ?_, by rw [value, one]⟩
+    simp only [universe_successor, level_with_offset, roomRun, lift, bind_ok, ite_eq_left fits, run]
+  · rw [ite_eq_right below]
+    have eq : n = core.num.U32.MAX := UScalar.val_eq_imp _ _ (by rw [max_val] at below ⊢; omega)
+    subst n
+    obtain ⟨room, roomRun, roomVal⟩ := sub_exact wireMax wireMax (Nat.le_refl _)
+    have empty : (UScalar.cast .U128 room).val = 0 := by
+      rw [U32.cast_U128_val_eq, roomVal, Nat.sub_self]
+    have cannotFit : ¬ 1#u128 ≤ UScalar.cast .U128 room := by
+      intro fits
+      have h := (UScalar.le_equiv _ _).mp fits
+      rw [empty] at h
+      exact Nat.not_succ_le_zero _ h
+    obtain ⟨rem, remRun, remVal⟩ := sub_exact (1#u128) (UScalar.cast .U128 room) (by
+      rw [empty]; exact Nat.zero_le _)
+    have one : rem = 1#u128 := UScalar.val_eq_imp _ _ (by rw [remVal, empty, Nat.sub_zero])
+    simp only [universe_successor, level_with_offset, roomRun, lift, bind_ok, ite_eq_right cannotFit,
+      remRun, one, append_one]
+
 /-- The resulting universe can never classify itself at the original level. -/
 theorem universe_successor_ne_input (base out : Level) (run : universe_successor base = Result.ok out)
     (ρ : String → Nat) : out.denote ρ ≠ base.denote ρ := by
@@ -165,7 +220,8 @@ theorem universe_successor_ne_input (base out : Level) (run : universe_successor
 open Lean in
 run_cmd do
   let allowed := #[``propext, ``Classical.choice, ``Quot.sound]
-  for decl in #[``level_with_offset_exact, ``universe_successor_exact, ``universe_successor_ne_input] do
+  for decl in #[``level_with_offset_exact, ``universe_successor_exact, ``universe_successor_nonliteral,
+                ``universe_successor_literal, ``universe_successor_ne_input] do
     for ax in ← collectAxioms decl do
       unless allowed.contains ax do
         throwError "{decl} depends on unexpected axiom {ax}"

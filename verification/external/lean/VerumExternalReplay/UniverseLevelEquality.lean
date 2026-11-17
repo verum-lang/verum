@@ -183,6 +183,14 @@ theorem Level.shiftedBy_exact (ρ : String → Nat) (l : Level) (k : Nat) (valid
   · subst k; rfl
   · rw [Level.addOffset_exact _ _ _ (l.normalize_wireValid valid), l.normalize_exact ρ valid]
 
+/-- T-Universe may take the successor directly. Conversion accepts the same
+    universe under every valuation as it would after normalizing the input. -/
+theorem Level.successor_eq_normalized_successor (l : Level) (valid : l.WireValid) :
+    Level.eq l.successor l.normalize.successor = true := by
+  apply (Level.eq_iff_denote _ _).mpr
+  intro ρ
+  rw [Level.successor_exact, Level.successor_exact, Level.normalize_exact ρ l valid]
+
 -- A missing parameter can agree at zero and at a large value of another
 -- parameter. Raising that parameter alone separates the two expressions.
 private def wideV : Level := .succ (.offset (.var "v") Level.wireMax)
@@ -219,5 +227,9 @@ example : Level.eq wideFloor wideV = false := by decide
 /-- info: 'VerumKernel.Level.shiftedBy_exact' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in
 #print axioms Level.shiftedBy_exact
+
+/-- info: 'VerumKernel.Level.successor_eq_normalized_successor' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in
+#print axioms Level.successor_eq_normalized_successor
 
 end VerumKernel
