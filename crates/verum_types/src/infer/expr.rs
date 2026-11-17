@@ -11590,7 +11590,19 @@ impl TypeChecker {
                 }
             }
         }
-        // Inside try/recover: throw is always valid (caught by handler)
+        if self.try_recover_depth > 0 {
+            // Recovery and `?` share the same lexical error contract. A
+            // handler's uses must constrain the payload actually thrown,
+            // rather than an unrelated fresh variable inferred from its body.
+            let expected = self.extract_function_error_type().ok_or_else(|| {
+                TypeError::OtherWithCodeSpanned {
+                    code: "E411".into(),
+                    msg: "throw requires the active recovery error contract".into(),
+                    span: error_expr.span,
+                }
+            })?;
+            self.unifier.unify(&error_result.ty, &expected, error_expr.span)?;
+        }
 
         // Throw has Never type (diverging control flow)
         Ok(InferResult::new(Type::never()))
