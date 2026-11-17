@@ -1,0 +1,61 @@
+// Descriptor readiness shared by the network transports.
+@arch_module(
+    foundation: Foundation.ZfcTwoInacc,
+    stratum: MsfsStratum.LCls,
+    lifecycle: Lifecycle.Definition
+)
+module core.net.readiness;
+
+mount core.async.future.Future;
+mount core.async.poll.Poll;
+mount core.async.waker.Context;
+mount core.sys.common.FileDesc;
+mount core.sys.io_engine.IOInterest;
+mount core.intrinsics.runtime.os.{__io_wait_readable_raw, __io_wait_writable_raw};
+
+/// Checks native descriptor readiness without waiting in a poll call.
+/// Pending requests a cooperative retry; the eager async driver yields
+/// between polls. The transport retains ownership of the descriptor.
+public(in core.net) type AsyncIoReady is {
+    fd: FileDesc,
+    interest: IOInterest,
+};
+
+implement AsyncIoReady {
+    fn new(fd: FileDesc, interest: IOInterest) -> AsyncIoReady {
+        AsyncIoReady {
+            fd: fd,
+            interest: interest,
+        }
+    }
+
+    public(in core.net) fn readable(fd: FileDesc) -> AsyncIoReady {
+        AsyncIoReady.new(fd, IOInterest.Read)
+    }
+
+    public(in core.net) fn writable(fd: FileDesc) -> AsyncIoReady {
+        AsyncIoReady.new(fd, IOInterest.Write)
+    }
+}
+
+implement Future for AsyncIoReady {
+    type Output = ();
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<()> {
+        let fd = self.fd.as_raw();
+        let ready = match self.interest {
+            IOInterest.Read => __io_wait_readable_raw(fd, 0),
+            IOInterest.Write => __io_wait_writable_raw(fd, 0),
+            IOInterest.ReadWrite => {
+                let readable = __io_wait_readable_raw(fd, 0);
+                if readable == 1 { readable } else { __io_wait_writable_raw(fd, 0) }
+            },
+        };
+        if ready < 0 { panic("I/O readiness probe failed"); }
+        if ready == 1 { Poll.Ready(()) }
+        else {
+            cx.waker().wake_by_ref();
+            Poll.Pending
+        }
+    }
+}

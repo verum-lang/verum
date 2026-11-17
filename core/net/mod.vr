@@ -78,6 +78,7 @@ public module addr;
 // DNS. Separate from `addr` so the address TYPES stay free of the
 // resolver: layers below the network stack construct them.
 public module resolve;
+public(in core.net) module readiness;
 public module tcp;
 public module udp;
 public module unix;

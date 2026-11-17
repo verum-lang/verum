@@ -48,7 +48,7 @@ mount core.async.future.{Future};
 mount core.async.stream.{Stream, StreamNext};
 mount core.async.async_iterator.{AsyncIterator};
 mount core.async.cancellation.{CancellationToken, CancellationError};
-mount core.net.tcp.{AsyncIoReady};
+mount core.net.readiness.AsyncIoReady;
 mount core.sys.common.{FileDesc, OSError};
 
 @cfg(target_os = "linux")

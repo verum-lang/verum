@@ -69,6 +69,7 @@ mount core.async.async_iterator.{AsyncIterator};
 mount core.async.cancellation.{CancellationToken, CancellationError};
 mount core.net.addr.{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 mount core.net.resolve.ToSocketAddrs;
+mount core.net.readiness.AsyncIoReady;
 
 // =============================================================================
 // V-LLSI Native Socket Imports
@@ -193,8 +194,6 @@ mount sys.windows.winsock2.{
 @cfg(target_os = "windows")
 mount sys.common.{FileDesc, OSError};
 
-// Import I/O engine for async operations
-mount sys.io_engine.{IOInterest};
 mount core.io.{IoError, IoErrorKind};
 mount core.io.protocols.{io_error_kind_from_os_code};
 
@@ -206,63 +205,7 @@ mount core.io.protocols.{io_error_kind_from_os_code};
 // socket+setsockopt+bind+listen IR directly. Both paths produce a
 // real kernel fd, so the rest of `core.net.tcp` (`accept` / `close` /
 // `setsockopt` / `getsockname`) works uniformly across modes.
-mount core.intrinsics.runtime.os.{__tcp_listen_v2_raw, __tcp_local_port_raw, __io_wait_readable_raw, __io_wait_writable_raw};
-
-// =============================================================================
-// AsyncIoReady - Future for async I/O readiness
-// =============================================================================
-
-/// Future that completes when a file descriptor becomes ready for I/O.
-///
-
-/// Checks native descriptor readiness. Pending requests a cooperative retry;
-/// the current eager async driver yields between polls.
-type AsyncIoReady is {
-    fd: FileDesc,
-    interest: IOInterest,
-};
-
-implement AsyncIoReady {
-    /// Create a new async I/O readiness future.
-    fn new(fd: FileDesc, interest: IOInterest) -> AsyncIoReady {
-        AsyncIoReady {
-            fd: fd,
-            interest: interest,
-        }
-    }
-
-    /// Create for read readiness.
-    fn readable(fd: FileDesc) -> AsyncIoReady {
-        AsyncIoReady.new(fd, IOInterest.Read)
-    }
-
-    /// Create for write readiness.
-    fn writable(fd: FileDesc) -> AsyncIoReady {
-        AsyncIoReady.new(fd, IOInterest.Write)
-    }
-}
-
-implement Future for AsyncIoReady {
-    type Output = ();
-
-    fn poll(&mut self, cx: &mut Context) -> Poll<()> {
-        let fd = self.fd.as_raw();
-        let ready = match self.interest {
-            IOInterest.Read => __io_wait_readable_raw(fd, 0),
-            IOInterest.Write => __io_wait_writable_raw(fd, 0),
-            IOInterest.ReadWrite => {
-                let readable = __io_wait_readable_raw(fd, 0);
-                if readable == 1 { readable } else { __io_wait_writable_raw(fd, 0) }
-            },
-        };
-        if ready < 0 { panic("I/O readiness probe failed"); }
-        if ready == 1 { Poll.Ready(()) }
-        else {
-            cx.waker().wake_by_ref();
-            Poll.Pending
-        }
-    }
-}
+mount core.intrinsics.runtime.os.{__tcp_listen_v2_raw, __tcp_local_port_raw};
 
 // =============================================================================
 // TcpStream
