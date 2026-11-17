@@ -60,7 +60,10 @@ use verum_vbc::types::{TypeId, TypeRef};
 
 use super::context::{CaptureKind, FunctionContext};
 use super::error::{BuildExt, CallSiteExt, LlvmLoweringError, OptionExt, Result};
-use super::instruction::lower_instruction;
+use super::instruction::{integer_branch_condition, lower_instruction};
+#[path = "instruction_flow.rs"]
+mod instruction_flow;
+use instruction_flow::InstructionFlow;
 use super::types::{RefTier, TypeLowering};
 use super::well_known_types::WellKnownType as WKT;
 use verum_common::well_known_types::type_names as tn;
@@ -2868,92 +2871,11 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         // this offset converts them to the merged module's function table.
         ctx.set_func_id_base(vbc_func.descriptor.func_id_base);
 
-        // Compute basic block boundaries by scanning for jump targets.
-        // VBC uses relative instruction offsets in Jmp/JmpNot/JmpIf instructions.
-        // We create an LLVM basic block at each jump target instruction index.
-        let mut block_target_indices: std::collections::BTreeSet<usize> =
-            std::collections::BTreeSet::new();
-        block_target_indices.insert(0); // Entry block always exists
-
-        // Track whether instruction 0 is an explicit jump target from another instruction.
-        // If so, we need a separate LLVM entry block (LLVM requires entry blocks have no predecessors).
-        let mut entry_is_jump_target = false;
-
-        for (pc, instr) in vbc_func.instructions.iter().enumerate() {
-            match instr {
-                Instruction::Jmp { offset } => {
-                    // VBC offset semantics: target = pc + offset (instruction index based)
-                    let target = (pc as i64 + *offset as i64) as usize;
-                    block_target_indices.insert(target);
-                    if target == 0 {
-                        entry_is_jump_target = true;
-                    }
-                    // The instruction after the jump is also a block start (dead code or merge point)
-                    block_target_indices.insert(pc + 1);
-                }
-                Instruction::JmpNot { offset, .. } | Instruction::JmpIf { offset, .. } => {
-                    let target = (pc as i64 + *offset as i64) as usize;
-                    block_target_indices.insert(target);
-                    if target == 0 {
-                        entry_is_jump_target = true;
-                    }
-                    // Fallthrough is always the next instruction
-                    block_target_indices.insert(pc + 1);
-                }
-                Instruction::Switch {
-                    default_offset,
-                    cases,
-                    ..
-                } => {
-                    // Default case target
-                    let default_target = (pc as i64 + *default_offset as i64) as usize;
-                    block_target_indices.insert(default_target);
-                    if default_target == 0 {
-                        entry_is_jump_target = true;
-                    }
-                    // Each case target
-                    for (_case_val, case_offset) in cases.iter() {
-                        let target = (pc as i64 + *case_offset as i64) as usize;
-                        block_target_indices.insert(target);
-                        if target == 0 {
-                            entry_is_jump_target = true;
-                        }
-                    }
-                    // Instruction after switch is also a block start
-                    block_target_indices.insert(pc + 1);
-                }
-                Instruction::TryBegin { handler_offset } => {
-                    // Exception handler starts at pc + handler_offset
-                    let target = (pc as i64 + *handler_offset as i64) as usize;
-                    block_target_indices.insert(target);
-                    if target == 0 {
-                        entry_is_jump_target = true;
-                    }
-                    // TryBegin is a branch (setjmp returns 0 or non-zero), so
-                    // fallthrough (try body) needs its own block
-                    block_target_indices.insert(pc + 1);
-                }
-                Instruction::Ret { .. }
-                | Instruction::RetV
-                | Instruction::TailCall { .. }
-                | Instruction::Unreachable
-                | Instruction::Panic { .. }
-                | Instruction::PanicValue { .. }
-                | Instruction::Throw { .. } => {
-                    // Instructions after a return/unreachable/panic/throw need their own block
-                    // (may be dead code or merge point)
-                    if pc + 1 < vbc_func.instructions.len() {
-                        block_target_indices.insert(pc + 1);
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        // Build sorted list of block start indices and create blocks.
-        // If entry (instruction 0) is a jump target, we offset all block IDs by 1
-        // and reserve block_0 as a dedicated LLVM entry block with no predecessors.
-        let block_starts: Vec<usize> = block_target_indices.into_iter().collect();
+        // Block boundaries and executable reachability use one bounded graph of
+        // decoded instruction offsets, including recovery and comparison branches.
+        let flow = InstructionFlow::build(vbc_module, &vbc_func.instructions)?;
+        let entry_is_jump_target = flow.entry_is_target;
+        let block_starts = flow.starts;
         let block_id_offset: u32 = if entry_is_jump_target { 1 } else { 0 };
         // Map from instruction index to block ID for quick lookup
         let instr_to_block: std::collections::HashMap<usize, u32> = block_starts
@@ -4459,7 +4381,11 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             );
         }
 
+        let mut lowered_instructions = 0usize;
         for (instr_idx, instr) in vbc_func.instructions.iter().enumerate() {
+            if !flow.reachable[instr_idx] {
+                continue;
+            }
             // Check if this instruction starts a new block
             if instr_idx > 0 {
                 if let Some(&block_id) = instr_to_block.get(&instr_idx) {
@@ -4481,6 +4407,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                 continue;
             }
 
+            lowered_instructions += 1;
             // For Jmp/JmpNot/JmpIf, resolve the offset to a block
             match instr {
                 Instruction::Jmp { offset } => {
@@ -4491,6 +4418,20 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                             .build_unconditional_branch(target_block)
                             .or_llvm_err()?;
                     }
+                }
+                Instruction::JmpCmp { op, a, b, offset } => {
+                    let condition = integer_branch_condition(&ctx, *op, *a, *b)?;
+                    // InstructionFlow checked both targets before any body was lowered.
+                    let target_pc = (instr_idx as i64 + i64::from(*offset)) as usize;
+                    let target = instr_to_block.get(&target_pc).ok_or_else(|| {
+                        LlvmLoweringError::MissingBlock(format!("target_pc_{target_pc}").into())
+                    })?;
+                    let next = instr_to_block.get(&(instr_idx + 1)).ok_or_else(|| {
+                        LlvmLoweringError::MissingBlock(format!("fallthrough_pc_{}", instr_idx + 1).into())
+                    })?;
+                    ctx.builder()
+                        .build_conditional_branch(condition, ctx.get_block(*target)?, ctx.get_block(*next)?)
+                        .or_llvm_err()?;
                 }
                 Instruction::JmpNot { cond, offset } => {
                     let raw_cond = ctx.get_register(cond.0)?;
@@ -4772,16 +4713,6 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
 
                     lower_instruction(&mut ctx, instr)?;
 
-                    // Safety net: if lower_instruction emitted a terminator
-                    // (e.g., TailCall, Assert, Panic, Unreachable, Throw), create a
-                    // dead code block so subsequent instructions don't pollute
-                    // the terminated block.
-                    if ctx.current_block_has_terminator() {
-                        let dead_block = ctx
-                            .llvm_context()
-                            .append_basic_block(llvm_fn, &format!("dead_after_{}", instr_idx));
-                        ctx.position_at_end(dead_block);
-                    }
                 }
             }
         }
@@ -4811,7 +4742,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         }
 
         self.stats.functions_lowered += 1;
-        self.stats.instructions_lowered += vbc_func.instructions.len();
+        self.stats.instructions_lowered += lowered_instructions;
         self.stats.basic_blocks += num_blocks;
 
         // Collect CBGR stats from the CbgrLowering helper

@@ -2400,6 +2400,51 @@ fn build_fptosi_sat_i64<'ctx>(
     Ok(result)
 }
 
+/// Formation admission shared by emitted code and native control-flow analysis.
+/// A failure selects an unconditional executable refusal in this native body;
+/// no register value or unexecuted runtime condition is used as evidence.
+pub(super) fn native_capture_admission(
+    module: &verum_vbc::VbcModule,
+    captures: Option<&[Option<TypeRef>]>,
+    count: usize,
+    lexical_types: &[TypeRef],
+) -> std::result::Result<(), verum_common::Text> {
+    module.validate_closure_captures(captures, count, Clone::clone)
+        .map_err(verum_common::Text::from)?;
+    if lexical_types.is_empty() {
+        Ok(())
+    } else {
+        Err("native callable requires an exact lexical specialization".into())
+    }
+}
+
+/// Comparison for a fused native branch; target selection belongs to the
+/// function's checked instruction-index control-flow graph.
+pub(super) fn integer_branch_condition<'ctx>(
+    ctx: &FunctionContext<'_, 'ctx>,
+    op: CompareOp,
+    a: Reg,
+    b: Reg,
+) -> Result<IntValue<'ctx>> {
+    let lhs = as_i64(ctx, ctx.get_register(a.0)?, "lhs")?;
+    let rhs = as_i64(ctx, ctx.get_register(b.0)?, "rhs")?;
+
+    let pred = match op {
+        CompareOp::Eq => IntPredicate::EQ,
+        CompareOp::Ne => IntPredicate::NE,
+        CompareOp::Lt => IntPredicate::SLT,
+        CompareOp::Le => IntPredicate::SLE,
+        CompareOp::Gt => IntPredicate::SGT,
+        CompareOp::Ge => IntPredicate::SGE,
+    };
+
+    let cond = ctx
+        .builder()
+        .build_int_compare(pred, lhs, rhs, "jmpcmp")
+        .or_llvm_err()?;
+    Ok(cond)
+}
+
 pub fn lower_instruction<'ctx>(
     ctx: &mut FunctionContext<'_, 'ctx>,
     instr: &Instruction,
@@ -3362,34 +3407,9 @@ fn lower_instruction_impl<'ctx>(
             Ok(())
         }
 
-        Instruction::JmpCmp { op, a, b, offset } => {
-            let lhs = as_i64(ctx, ctx.get_register(a.0)?, "lhs")?;
-            let rhs = as_i64(ctx, ctx.get_register(b.0)?, "rhs")?;
-
-            let pred = match op {
-                CompareOp::Eq => IntPredicate::EQ,
-                CompareOp::Ne => IntPredicate::NE,
-                CompareOp::Lt => IntPredicate::SLT,
-                CompareOp::Le => IntPredicate::SLE,
-                CompareOp::Gt => IntPredicate::SGT,
-                CompareOp::Ge => IntPredicate::SGE,
-            };
-
-            let cond = ctx
-                .builder()
-                .build_int_compare(pred, lhs, rhs, "jmpcmp")
-                .or_llvm_err()?;
-
-            let target_idx = *offset as u32;
-            let target_block = ctx.get_block(target_idx)?;
-            let fallthrough =
-                ctx.create_block(target_idx + 1000, &format!("fallthrough_{}", target_idx));
-            ctx.builder()
-                .build_conditional_branch(cond, target_block, fallthrough)
-                .or_llvm_err()?;
-            ctx.position_at_end(fallthrough);
-            Ok(())
-        }
+        Instruction::JmpCmp { .. } => Err(LlvmLoweringError::unsupported(
+            "relative comparison branch requires the instruction-index control-flow graph",
+        )),
 
         Instruction::Ret { value } => {
             // Task #18 — escape-ref stabilisation parity contract.
@@ -3609,19 +3629,14 @@ fn lower_instruction_impl<'ctx>(
             lexical_types,
         } => {
             let vbc_mod = ctx.vbc_module().or_internal("NewClosure requires VBC module")?;
-            if let Err(message) = vbc_mod.validate_closure_captures(
-                capture_types.as_deref(), captures.len(), Clone::clone,
-            ).and_then(|()| if lexical_types.is_empty() { Ok(()) } else {
-                Err("native callable requires an exact lexical specialization".to_owned())
-            }) {
+            if let Err(message) = native_capture_admission(
+                vbc_mod, capture_types.as_deref(), captures.len(), lexical_types,
+            ) {
                 // Refuse on the executing path, including an erased generic
                 // body. A lowering error can be converted into a fallback
                 // body by the module driver; it must not erase this check.
                 emit_runtime_abort(ctx, &message, "capture_ownership")?;
                 ctx.builder().build_unreachable().or_llvm_err()?;
-                let dead = ctx.llvm_context().append_basic_block(ctx.function(), "capture_dead");
-                ctx.builder().position_at_end(dead);
-                ctx.set_register(dst.0, ctx.types().i64_type().get_undef().into());
                 return Ok(());
             }
             // `0x7FFFFFFF` (i32::MAX) is the codegen-emitted sentinel
@@ -3702,9 +3717,6 @@ fn lower_instruction_impl<'ctx>(
             if !func_desc.type_params.is_empty() {
                 emit_runtime_abort(ctx, "native callable has missing lexical witnesses", "closure_witness")?;
                 ctx.builder().build_unreachable().or_llvm_err()?;
-                let dead = ctx.llvm_context().append_basic_block(ctx.function(), "closure_witness_dead");
-                ctx.builder().position_at_end(dead);
-                ctx.set_register(dst.0, ctx.types().i64_type().get_undef().into());
                 return Ok(());
             }
             let llvm_fn = ctx.resolve_declared_function(func_desc)?;
