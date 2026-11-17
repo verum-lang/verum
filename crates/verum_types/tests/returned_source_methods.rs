@@ -890,7 +890,10 @@ fn a_sync_callback_can_call_an_imported_method_with_a_proven_sync_body() {
             &format!("{header} fn probe(item: Job, callback: async fn() -> Int) -> Int {{ require(item, |job| {call}) }}"),
             &modules,
         );
-        assert!(errors.iter().any(|error| error.contains("Mismatch") && error.contains("async fn")), "{call}: {errors:?}");
+        assert!(errors.iter().any(|error| error.contains("Mismatch")
+            && error.contains("expected: Text { inner: \"fn() -> Unit [bound: excludes {Async}; observed: unknown]\" }")
+            && error.contains("actual: Text { inner: \"fn() -> Unit [bound: unrestricted; observed: unknown]\" }")),
+            "{call}: {errors:?}");
     }
 }
 
@@ -1211,8 +1214,9 @@ fn imported_concrete_receivers_do_not_bind_a_same_leaf_type_from_the_consumer() 
         "mount demo.store.Shelf; mount demo.other.Key; fn read(x:Shelf<Key>)->Int { x.read() }",
         &modules,
     );
-    assert!(negative.iter().any(|error| error.contains("Mismatch")
-        && error.contains("demo.other.Key") && error.contains("demo.store.Key")), "{negative:?}");
+    assert!(negative.iter().any(|error| error.contains("MethodNotFound")
+        && error.contains("ty: Text { inner: \"demo.store.Shelf<demo.other.Key>\" }")
+        && error.contains("method: Text { inner: \"read\" }")), "{negative:?}");
 }
 
 #[test]
