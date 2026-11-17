@@ -14,6 +14,15 @@ fn compile(source: &str) -> VbcModule {
         .compile_module(&Parser::new(source).parse_module().unwrap())
         .unwrap()
 }
+fn declaration_interface(source: &str) -> VbcModule {
+    let ast = Parser::new(source).parse_module().unwrap();
+    VbcCodegen::new().collect_declaration_interface(&[&ast]).unwrap()
+}
+fn assert_incomplete_owned_body_refuses(source: &str) {
+    let ast = Parser::new(source).parse_module().unwrap();
+    let error = VbcCodegen::new().compile_module(&ast).unwrap_err().to_string();
+    assert!(error.contains("owned parameter requires a complete declaration and binding inventory"), "{error}");
+}
 fn roundtrip(m: &VbcModule) -> VbcModule {
     deserialize_module(&serialize_module(m).unwrap()).unwrap()
 }
@@ -73,26 +82,27 @@ fn source_managed_checked_and_unsafe_record_borrows_are_not_the_abi_carriers() {
 
 #[test]
 fn fixed_array_formals_keep_closed_extents_and_distinguish_zero_from_unknown() {
-    let module = compile(
-        "fn consume(a: [Int; 0], b: [Int; 1 + 2]) -> [Int; 3] { b }
-         fn unknown<N>(a: [Int; N]) -> [Int; N] { a }",
-    );
+    let module = compile("fn consume(a: [Int; 0], b: [Int; 1 + 2]) -> [Int; 3] { b }");
     for m in [&module, &roundtrip(&module)] {
         let fixed = function(m, "consume");
         let array = |length| T::Array { element: Box::new(T::Concrete(TypeId::INT)), length };
         assert_eq!(fixed.semantic_parameter_types().unwrap(), &[Some(array(0)), Some(array(3))]);
         assert_eq!(fixed.semantic_return, Some(array(3)));
+    }
+    let source = "fn unknown<N>(a: [Int; N]) -> [Int; N] { a }";
+    let declaration = declaration_interface(source);
+    for m in [&declaration, &roundtrip(&declaration)] {
         let unknown = function(m, "unknown");
         assert_eq!(unknown.semantic_parameter_types().unwrap(), &[None]);
         assert!(unknown.semantic_return.is_none());
     }
+    assert_incomplete_owned_body_refuses(source);
 }
 
 #[test]
 fn unsupported_positions_remain_unknown_without_shifting_following_formals() {
-    let m = compile(
-        "fn inspect<N>(a: fn<R>(R) -> R, b: [Int; N], c: *const Int, d: &Int) -> Int { 7 } fn empty() -> Int { 0 }",
-    );
+    let source = "fn inspect<N>(a: fn<R>(R) -> R, b: [Int; N], c: *const Int, d: &Int) -> Int { 7 } fn empty() -> Int { 0 }";
+    let m = declaration_interface(source);
     let expected = [
         Some(T::Rank2Function {
             is_async: false,
@@ -102,7 +112,7 @@ fn unsupported_positions_remain_unknown_without_shifting_following_formals() {
             contexts: Default::default(),
         }),
         None,
-        None,
+        Some(reference(T::Concrete(TypeId::INT), CbgrTier::Tier2, false)),
         Some(reference(T::Concrete(TypeId::INT), CbgrTier::Tier0, false)),
     ];
     for m in [m.clone(), roundtrip(&m)] {
@@ -114,6 +124,11 @@ fn unsupported_positions_remain_unknown_without_shifting_following_formals() {
             function(&m, "empty").semantic_parameter_types(),
             Some([].as_slice())
         );
+    }
+    assert_incomplete_owned_body_refuses(source);
+    let complete = compile("fn raw(c: *const Int, d: &Int) -> Int { 7 }");
+    for m in [&complete, &roundtrip(&complete)] {
+        assert_eq!(function(m, "raw").semantic_parameter_types(), Some(expected[2..].as_ref()));
     }
 }
 
