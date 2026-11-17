@@ -799,3 +799,6 @@ mod term_raw_visibility;
 
 #[path = "verify_attempt_source.rs"]
 mod verify_attempt_source;
+
+#[path = "io_facade_visibility.rs"]
+mod io_facade_visibility;

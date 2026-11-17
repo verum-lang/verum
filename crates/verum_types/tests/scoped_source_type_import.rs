@@ -194,3 +194,79 @@ fn glob_order_cannot_replace_a_named_bindings_access_check() {
         }
     }
 }
+
+#[test]
+fn public_named_routes_survive_private_lexical_duplicates_in_both_orders() {
+    for (private, public, name) in [
+        ("mount open.{Packet};", "public mount open.Packet;", "Packet"),
+        ("mount open.{Packet as Ticket};", "public mount open.Packet as Ticket;", "Ticket"),
+    ] {
+        for facade in [format!("{private} {public}"), format!("{public} {private}")] {
+            let providers = [
+                ("open", "public type Packet is { public value:Int };"),
+                ("realm.component.api", facade.as_str()),
+            ];
+            allowed("outside.client",
+                &format!("mount realm.component.api.{name}; {}", operations(name)), &providers);
+
+            let registry = registry("outside.client", "", &providers);
+            let checker = TypeChecker::with_minimal_context();
+            let (declaration, owner) = checker.resolve_public_source_type(
+                "realm.component.api", name, &registry).expect("exact public source declaration");
+            assert_eq!(owner.as_str(), "open");
+            assert_eq!(declaration.name.name.as_str(), "Packet");
+        }
+    }
+}
+
+#[test]
+fn public_named_route_retains_its_source_beside_a_private_homonym() {
+    let private = "mount unrelated.Packet as Ticket;";
+    let public = "public mount open.Packet as Ticket;";
+    for facade in [format!("{private} {public}"), format!("{public} {private}")] {
+        let providers = [
+            ("open", "public type Packet is { public value:Int };"),
+            ("unrelated", "public type Packet is { public value:Bool };"),
+            ("realm.component.api", facade.as_str()),
+        ];
+        let imports = "mount realm.component.api.Ticket;";
+        allowed("outside.client", &format!("{imports} {}", operations("Ticket")), &providers);
+        let errors = errors("outside.client",
+            &format!("{imports} fn make()->Ticket {{ Ticket {{ value:true }} }}"), &providers);
+        assert!(errors.iter().any(|error| error.contains("E400") && error.contains("Type mismatch")),
+            "public source field authority was replaced: {errors:#?}");
+    }
+}
+
+#[test]
+fn public_route_cannot_widen_a_hidden_canonical_source() {
+    for record in [RECORD, "type Packet is { public value:Int };"] {
+        let private = "mount unrelated.Packet as Ticket;";
+        let public = "public mount realm.component.model.Packet as Ticket;";
+        for facade in [format!("{private} {public}"), format!("{public} {private}")] {
+            let providers = [
+                (PROVIDER, record),
+                ("unrelated", "public type Packet is { public value:Bool };"),
+                ("realm.component.api", facade.as_str()),
+            ];
+            let errors = errors("outside.client", "mount realm.component.api.Ticket; fn probe() {}", &providers);
+            assert!(errors.iter().any(|error| error.contains("VisibilityError")
+                && error.contains("Packet") && error.contains(PROVIDER)),
+                "the actual canonical source must refuse access: {errors:#?}");
+        }
+    }
+}
+
+#[test]
+fn private_named_binding_still_precedes_an_unrelated_public_glob() {
+    let private = "mount realm.component.model.Packet;";
+    let glob = "public mount unrelated.*;";
+    for facade in [format!("{private} {glob}"), format!("{glob} {private}")] {
+        let providers = [
+            (PROVIDER, RECORD),
+            ("unrelated", "public type Packet is { public value:Bool };"),
+            ("realm.component.api", facade.as_str()),
+        ];
+        denied("outside.client", "mount realm.component.api.Packet; fn probe() {}", &providers, "Packet");
+    }
+}

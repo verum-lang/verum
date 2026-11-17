@@ -6596,6 +6596,7 @@ impl TypeChecker {
             Enter(Scope<'a>),
             Body(Scope<'a>),
             Mount { path: Text, name: Text, reject_inaccessible: bool },
+            DeniedMount { name: Text, visibility: Text, owner: Text, span: Span },
         }
 
         // A visible-surface glob probe cannot discharge an explicit import's
@@ -6699,6 +6700,7 @@ impl TypeChecker {
                     let owner = verum_modules::ModulePath::from_str(&scope.owner);
                     let mut targets = List::new();
                     let mut glob_targets = List::new();
+                    let mut denied_mount = None;
                     for item in items {
                         if !self.cfg_evaluator.should_include(&item.attributes) {
                             continue;
@@ -6731,20 +6733,30 @@ impl TypeChecker {
                                 }
                             },
                         );
-                        if denied_binding && scope.reject_inaccessible {
-                            return Err(TypeError::VisibilityError {
-                                name: scope.name, visibility: mount.visibility.as_str().into(),
-                                module_path: scope.owner, span: item.span,
-                            });
+                        if denied_binding && scope.reject_inaccessible && denied_mount.is_none() {
+                            denied_mount = Some((Text::from(mount.visibility.as_str()), item.span));
                         }
                     }
-                    // Named bindings own their spelling before any glob can
-                    // supply an alternative. Preserve source order within each
-                    // class, resolving only the targets actually reached.
-                    targets.extend(glob_targets);
+                    // A private lexical mount cannot cancel an accessible named
+                    // re-export. Resolve those routes first, retaining each exact
+                    // source declaration's access check. If none resolves, the
+                    // named refusal still precedes any unrelated glob candidate.
+                    for (path, name, reject_inaccessible) in glob_targets.into_iter().rev() {
+                        work.push(Work::Mount { path, name, reject_inaccessible });
+                    }
+                    if let Some((visibility, span)) = denied_mount {
+                        work.push(Work::DeniedMount {
+                            name: scope.name, visibility, owner: scope.owner, span,
+                        });
+                    }
                     for (path, name, reject_inaccessible) in targets.into_iter().rev() {
                         work.push(Work::Mount { path, name, reject_inaccessible });
                     }
+                }
+                Work::DeniedMount { name, visibility, owner, span } => {
+                    return Err(TypeError::VisibilityError {
+                        name, visibility, module_path: owner, span,
+                    });
                 }
                 Work::Mount { path, name, reject_inaccessible } => {
                     if let Some(module) = self.get_module_with_path_aliases(&path, registry) {
