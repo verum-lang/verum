@@ -25,6 +25,22 @@ fn compiler() -> (VbcCodegen, FunctionInfo) {
 }
 
 #[test]
+fn shadowed_names_do_not_remove_or_solve_the_enclosing_declaration_slots() {
+    let (mut compiler, function) = compiler();
+    compiler.ctx.current_function = Some("operand.identity".into());
+    compiler.ctx.current_generic_param_ids.insert("T".into(), 7);
+    let enclosing = TypeRef::Generic(function.type_param_ids[0]);
+    let shadow = TypeRef::Generic(TypeParamId(7));
+    assert!(compiler.declared_type_in_scope(&enclosing));
+    assert!(compiler.declared_type_in_scope(&shadow));
+    assert!(!compiler.declared_type_in_scope(&TypeRef::Generic(TypeParamId(9))));
+    let mut bindings = TypeSubstitution::empty();
+    bindings.bind(TypeParamId(0), enclosing.clone());
+    assert!(!compiler.bind_source_declaration(&TypeRef::Generic(TypeParamId(0)), &shadow, &mut bindings));
+    assert_eq!(bindings.get(TypeParamId(0)), Some(&enclosing));
+}
+
+#[test]
 fn outer_reference_adaptation_keeps_exact_pointee_witness() {
     let (mut compiler, function) = compiler();
     compiler

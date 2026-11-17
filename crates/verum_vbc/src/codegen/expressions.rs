@@ -32142,7 +32142,7 @@ impl VbcCodegen {
 
     /// Exact lexical witness IDs, including receiver slots hidden by a method
     /// parameter with the same name. Closure binders introduce no new IDs.
-    fn closure_lexical_param_ids(&self) -> CodegenResult<Vec<crate::types::TypeParamId>> {
+    pub(super) fn current_callable_param_ids(&self) -> CodegenResult<Vec<crate::types::TypeParamId>> {
         let mut ids = self.ctx.current_function.as_ref()
             .and_then(|name| self.ctx.functions.get(name))
             .map(|info| info.type_param_ids.clone()).unwrap_or_default();
@@ -32297,7 +32297,7 @@ impl VbcCodegen {
 
         // Step 4: Register and compile the closure body as a new function
         // The closure function has captures as first params, then user params
-        let lexical_param_ids = self.closure_lexical_param_ids()?;
+        let lexical_param_ids = self.current_callable_param_ids()?;
         let closure_func_id = self.compile_closure_body_with_patterns(
             &lexical_param_ids,
             &captures_with_mut,

@@ -132,13 +132,7 @@ impl VbcCodegen {
     }
 
     pub(super) fn declared_type_in_scope(&self, ty: &TypeRef) -> bool {
-        let ids: verum_common::List<_> = self
-            .ctx
-            .current_generic_param_ids
-            .values()
-            .copied()
-            .map(crate::types::TypeParamId)
-            .collect();
+        let Ok(ids) = self.current_callable_param_ids() else { return false; };
         super::formal_parameters::resolved(ty, &ids, 0)
     }
 
