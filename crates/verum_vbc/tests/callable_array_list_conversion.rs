@@ -2,6 +2,9 @@
 //! Actual parsed source, serialization and interpreter execution; no stdlib bake.
 #![cfg(feature = "codegen")]
 
+#[path = "fixtures/declared_list.rs"]
+mod declared_list;
+
 use std::sync::Arc;
 use verum_fast_parser::Parser;
 use verum_vbc::codegen::{CodegenConfig, VbcCodegen};
@@ -105,12 +108,41 @@ fn probe() -> Int { let mut xs = make(); xs.push(6 as Byte);
 
 #[test]
 fn list_input_forwarding_keeps_existing_storage() {
-    runs(r#"
-fn forward(xs: List<Byte>) -> List<Byte> { xs }
-fn probe() -> Int { let input: List<Byte> = [1, 2];
-    let mut xs = forward(input); xs.push(3 as Byte);
-    assert_eq(xs.len(), 3); assert_eq(xs[0], 1); assert_eq(xs[2], 3); 1 }
-"#);
+    let source = declared_list::compile_consumer(r#"
+        module consumer;
+        mount core.collections.list.List;
+        fn forward(xs: List<Byte>) -> List<Byte> { xs }
+        fn probe() -> Int {
+            let input: List<Byte> = [1, 2];
+            let mut xs = forward(input);
+            xs.push(3 as Byte);
+            assert_eq(xs.len(), 3);
+            assert_eq(xs[0], 1);
+            assert_eq(xs[1], 2);
+            assert_eq(xs[2], 3);
+            xs[0] = 9 as Byte;
+            assert_eq(xs[0], 9);
+            assert_eq(input[0], 1);
+            assert_eq(input.len(), 2);
+            1
+        }
+    "#);
+    for module in declared_list::source_and_wire(source) {
+        let forward = module.find_function_by_name("consumer.forward").expect("forward");
+        let verum_vbc::types::TypeRef::Instantiated { base, .. } =
+            module.get_function(forward).unwrap().return_type else { panic!("List<Byte>") };
+        let drop = module.get_type(base).unwrap().drop_fn.expect("standard List destructor");
+        let destructor = module.get_function(module.resolved_function_id(drop)).expect("linked Drop");
+        assert_eq!(module.get_string(destructor.name), Some("core.collections.list.List.drop"));
+        assert!(destructor.bytecode_length > 0);
+        for name in ["core.collections.list.List.push", "core.collections.list.List.len"] {
+            let id = module.find_function_by_name(name).expect("standard List operation");
+            assert!(module.get_function(id).unwrap().bytecode_length > 0, "{name}");
+        }
+        let entry = module.find_function_by_name("consumer.probe").expect("probe");
+        let result = Interpreter::new(Arc::new(module)).execute_function(entry).expect("copy, grow and drop");
+        assert_eq!(result.try_as_i64(), Some(1));
+    }
 }
 
 // A declared fixed array is not physical packed-storage proof. These callees
