@@ -17304,9 +17304,10 @@ impl TypeChecker {
                 Some(Type::Function { params, .. }) if params.len() == args.len() => Some(params.as_slice()),
                 _ => None,
             };
+            let precise_origins = tc.returned_call_value_origins(span, args, Some(receiver));
             let preserves_input_payloads = tc.type_registry.constructed_value(span).is_some()
-                || tc.returned_call_value_origins(span, args, Some(receiver)).is_some();
-            tc.check_call_loans(args, parameters, borrow, !preserves_input_payloads)?;
+                || precise_origins.is_some();
+            tc.check_call_loans(args, parameters, borrow)?;
             match kind {
                 Some(kind) if !kind.meta().allows_mutation => {}
                 Some(crate::core_metadata::ReceiverKind::SelfValue) => {
@@ -17340,6 +17341,13 @@ impl TypeChecker {
                 }
             }
             tc.type_registry.record_receiver_kind(span, kind);
+            tc.observe_call_result_origins(
+                span, &result.ty, args, parameters, None,
+                Some((receiver, kind.is_none_or(|kind| kind.meta().is_borrowed))), precise_origins,
+            )?;
+            if !preserves_input_payloads {
+                tc.retain_possible_call_writes(args, parameters, None, borrow)?;
+            }
             Ok(result)
         })
     }

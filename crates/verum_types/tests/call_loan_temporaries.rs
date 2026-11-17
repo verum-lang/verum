@@ -62,7 +62,8 @@ fn a_generic_self_result_does_not_establish_input_independence() {
     assert!(
         found
             .iter()
-            .any(|error| error.contains("borrow") || error.contains("lifetime")),
+            .any(|error| error.contains("value") && (error.contains("borrow")
+                || error.contains("lifetime") || error.contains("does not live long enough"))),
         "generic independence requires evidence: {found:?}"
     );
 }

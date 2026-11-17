@@ -693,7 +693,8 @@ impl TypeChecker {
             If { .. } => self.check_if_expr(expr, expected),
 
             // Block with expected type
-            Block(block) => self.check_block(block, expected),
+            Block(block) => self.with_block_scope(block, false, true,
+                |checker, block| checker.check_block_inner(block, expected)),
 
             // TryBlock with expected type - enables bidirectional inference for Result types
             // Error handling: Result<T, E> and Maybe<T> types, try (?) operator with automatic From conversion, error propagation — Section 6.3 - Try blocks
@@ -1655,7 +1656,7 @@ impl TypeChecker {
                     // closure answer to the wrong signature.
                     checker.current_function_return_type =
                         verum_common::Maybe::Some(ret_ty.clone());
-                    checker.check_expr(closure_body, &ret_ty)?;
+                    checker.infer_closure_result(closure_body, Some(&ret_ty))?;
                     checker.check_closure_properties(
                         closure_body,
                         *async_,
@@ -1751,7 +1752,7 @@ impl TypeChecker {
                     // closure answer to the wrong signature.
                     checker.current_function_return_type =
                         verum_common::Maybe::Some(ret_ty.clone());
-                    checker.check_expr(closure_body, &ret_ty)?;
+                    checker.infer_closure_result(closure_body, Some(&ret_ty))?;
                     let callable_properties = checker.check_closure_properties(
                         closure_body,
                         *async_,
@@ -2276,6 +2277,7 @@ impl TypeChecker {
                                 let var_ty = self.instantiate_value_scheme(&scheme, field_init.span)?;
                                 self.unifier
                                     .unify(&var_ty, expected_field_ty, field_init.span)?;
+                                self.observe_record_shorthand_origins(field_init, expected_field_ty);
                             } else {
                                 return Err(TypeError::UnboundVariable {
                                     name: field_name,
@@ -4805,7 +4807,7 @@ impl TypeChecker {
                 Range { .. } => self.infer_expr_range(current_expr, expr.span),
 
                 // Block expressions
-                Block(block) => self.infer_block(block),
+                Block(block) => self.with_block_scope(block, false, true, Self::infer_block_inner),
 
                 // If expressions - with flow-sensitive refinement narrowing
                 // If expressions: both branches must unify to same type; if-let patterns narrow types in the then-branch
@@ -6269,10 +6271,11 @@ impl TypeChecker {
     /// balanced.
     fn enter_closure_capture_tracking(
         &mut self,
+        span: Span,
         body: &Expr,
         params: &[verum_ast::expr::ClosureParam],
         is_move: bool,
-    ) -> Result<crate::aliasing::RefId> {
+    ) -> Result<(crate::aliasing::RefId, List<super::reference_origin::CopiedCapture>)> {
         // Determine which outer variables the closure references. Must run
         // BEFORE entering closure scope, or the lookup sees the closure's own
         // bindings instead of the enclosing ones.
@@ -6299,7 +6302,8 @@ impl TypeChecker {
             self.borrow_tracker.cancel_closure(closure_id);
             return Err(first_error);
         }
-        Ok(closure_id)
+        let copied = self.observe_closure_capture_origins(span, &captures);
+        Ok((closure_id, copied))
     }
 
     /// Closes capture tracking and enforces Send-safety for async closures.
@@ -6361,8 +6365,9 @@ impl TypeChecker {
         else {
             unreachable!()
         };
-        let closure_id = self.enter_closure_capture_tracking(body, params, *move_)?;
+        let (closure_id, copied) = self.enter_closure_capture_tracking(expression.span, body, params, *move_)?;
         let saved = (
+            self.closure_return_depth.replace(self.ctx.env.scope_depth() + 1),
             std::mem::replace(&mut self.in_call_arg_context, false),
             self.current_function_return_type.take(),
             self.current_function_name.take(),
@@ -6378,6 +6383,7 @@ impl TypeChecker {
                 checker.borrow_tracker.enter_async_scope();
             }
             let result = checker.with_lexical_scope(|checker| {
+                checker.bind_copied_capture_values(copied);
                 let value = check(checker)?;
                 checker.exit_closure_capture_tracking(closure_id, *async_)?;
                 Ok(value)
@@ -6391,6 +6397,7 @@ impl TypeChecker {
             self.borrow_tracker.cancel_closure(closure_id);
         }
         (
+            self.closure_return_depth,
             self.in_call_arg_context,
             self.current_function_return_type,
             self.current_function_name,
@@ -6399,6 +6406,29 @@ impl TypeChecker {
             self.generator_context,
         ) = saved;
         result
+    }
+
+    /// Closure results cross a callable boundary just like named results.
+    /// A reference into an owned capture cannot inherit an empty payload-origin
+    /// observation: no environment-borrow result contract was declared.
+    fn infer_closure_result(&mut self, body: &Expr, expected: Option<&Type>) -> Result<InferResult> {
+        let mut value = body;
+        while let ExprKind::Paren(inner) = &value.kind { value = inner; }
+        let result = if let ExprKind::Block(block) = &value.kind {
+            match expected {
+                Some(expected) => self.check_function_block(block, expected, true)?,
+                None => self.infer_function_block(block, true)?,
+            }
+        } else {
+            let result = match expected {
+                Some(expected) => self.check_expr(body, expected)?,
+                None => self.synth_expr(body)?,
+            };
+            self.check_return_value_loans(body, &result.ty, body.span)?;
+            result
+        };
+        self.observe_expression_type(body, &result.ty);
+        Ok(result)
     }
 
     fn infer_closure_expr(&mut self, expr: &Expr, outer_span: Span) -> Result<InferResult> {
@@ -6430,10 +6460,10 @@ impl TypeChecker {
             let ret_ty = if let Some(annotation) = return_type {
                 let expected = checker.ast_to_type(annotation)?;
                 checker.current_function_return_type = verum_common::Maybe::Some(expected.clone());
-                checker.check_expr(body, &expected)?;
+                checker.infer_closure_result(body, Some(&expected))?;
                 expected
             } else {
-                checker.synth_expr(body)?.ty
+                checker.infer_closure_result(body, None)?.ty
             };
             Ok((param_names, param_types, ret_ty))
         })?;
@@ -7968,7 +7998,7 @@ impl TypeChecker {
     }
 
     fn finish_function_call(&mut self, expr: &Expr, prepared: PreparedCall) -> Result<InferResult> {
-        let ExprKind::Call { args, .. } = &expr.kind else {
+        let ExprKind::Call { func, args, .. } = &expr.kind else {
             unreachable!()
         };
         let PreparedCall {
@@ -7986,9 +8016,10 @@ impl TypeChecker {
         else {
             unreachable!()
         };
+        let precise_origins = self.returned_value_origins(expr);
         let preserves_input_payloads = self.type_registry.constructed_value(expr.span).is_some()
-            || self.returned_value_origins(expr).is_some();
-        self.check_call_loans(args, Some(&params), None, !preserves_input_payloads)?;
+            || precise_origins.is_some();
+        self.check_call_loans(args, Some(&params), None)?;
 
         // Consume affine values passed by value
         self.consume_affine_call_args(args, &params)?;
@@ -8040,6 +8071,12 @@ impl TypeChecker {
                     });
                 }
             }
+        }
+        self.observe_call_result_origins(
+            expr.span, &resolved_return, args, Some(&params), Some(func), None, precise_origins,
+        )?;
+        if !preserves_input_payloads {
+            self.retain_possible_call_writes(args, Some(&params), Some(func), None)?;
         }
         Ok(InferResult::new(resolved_return))
     }
@@ -10209,6 +10246,7 @@ impl TypeChecker {
                                                 expected_field_ty,
                                                 field_init.span,
                                             )?;
+                                            self.observe_record_shorthand_origins(field_init, expected_field_ty);
                                             expected_field_ty.clone()
                                         }
                                         None => {
@@ -10359,6 +10397,7 @@ impl TypeChecker {
                                                     expected_field_ty,
                                                     field_init.span,
                                                 )?;
+                                                self.observe_record_shorthand_origins(field_init, expected_field_ty);
                                                 expected_field_ty.clone()
                                             }
                                             None => {
@@ -10583,6 +10622,7 @@ impl TypeChecker {
                                 expected_field_ty,
                                 field_init.span,
                             )?;
+                            self.observe_record_shorthand_origins(field_init, expected_field_ty);
                             expected_field_ty.clone()
                         }
                         None => {
@@ -13628,11 +13668,11 @@ impl TypeChecker {
     /// Infer type for a block.
     ///
     pub(super) fn infer_block(&mut self, block: &Block) -> Result<InferResult> {
-        self.with_block_scope(block, false, Self::infer_block_inner)
+        self.with_block_scope(block, false, false, Self::infer_block_inner)
     }
 
     pub(super) fn infer_function_block(&mut self, block: &Block, returning: bool) -> Result<InferResult> {
-        self.with_block_scope(block, returning, Self::infer_block_inner)
+        self.with_block_scope(block, returning, false, Self::infer_block_inner)
     }
 
     /// Resolve outgoing loans before dropping the bindings which establish
@@ -13641,11 +13681,13 @@ impl TypeChecker {
         &mut self,
         block: &Block,
         returning: bool,
+        origins_dominate_parent: bool,
         infer: impl FnOnce(&mut Self, &Block) -> Result<InferResult>,
     ) -> Result<InferResult> {
         let _depth_guard = self.inc_inference_depth("block")?;
         let constant_scope = self.const_eval.enter_source_scope(self.current_module_path.as_str());
         let result = self.with_lexical_result_scope(|checker| {
+            if origins_dominate_parent { checker.ctx.env.mark_origins_dominate_parent(); }
             let filtered = checker.cfg_filtered_block(block);
             let block = filtered.as_ref().unwrap_or(block);
             let result = infer(checker, block)?;
@@ -13851,7 +13893,7 @@ impl TypeChecker {
     }
 
     pub(super) fn check_function_block(&mut self, block: &Block, expected: &Type, returning: bool) -> Result<InferResult> {
-        self.with_block_scope(block, returning, |checker, block| checker.check_block_inner(block, expected))
+        self.with_block_scope(block, returning, false, |checker, block| checker.check_block_inner(block, expected))
     }
 
     fn check_block_inner(&mut self, block: &Block, expected: &Type) -> Result<InferResult> {

@@ -8283,7 +8283,7 @@ impl TypeChecker {
 
     /// Check that a returned reference doesn't refer to a local variable.
     /// Prevents dangling references when the function returns.
-    pub(super) fn check_return_lifetime(&self, expr: &Expr, return_span: Span) -> Result<()> {
+    pub(super) fn check_return_lifetime(&mut self, expr: &Expr, return_span: Span) -> Result<()> {
         use verum_ast::expr::ExprKind;
 
         match &expr.kind {
@@ -8321,6 +8321,22 @@ impl TypeChecker {
             ExprKind::Path(path) => {
                 if let Some(verum_ast::ty::PathSegment::Name(ident)) = path.segments.first() {
                     let var_name = verum_common::Text::from(ident.name.as_str());
+                    let origins = self.ctx.env.reference_candidates(&var_name);
+                    if !origins.is_empty() {
+                        // A copied reference keeps its referent's identity.
+                        // Its old name may now denote a distinct capture slot;
+                        // a name-based held-loan lookup would borrow that slot.
+                        for origin in origins {
+                            if let Some(var) = self.ctx.env.dropping_loan_storage(
+                                origin.binding, true, self.closure_return_depth,
+                            ) {
+                                return Err(TypeError::DanglingReference {
+                                    var, ref_span: return_span, drop_span: return_span,
+                                });
+                            }
+                        }
+                        return Ok(());
+                    }
                     // Check if returning a reference that was created from a local
                     for borrow in self.borrow_tracker.get_held_borrows(&var_name) {
                         if self.is_local_variable(&borrow.target) {
@@ -8376,6 +8392,10 @@ impl TypeChecker {
     /// Local variables are dropped when the function returns, so returning
     /// references to them creates dangling references.
     fn is_local_variable(&self, var_name: &Text) -> bool {
+        if let Some(minimum) = self.closure_return_depth {
+            return self.ctx.env.binding_scope_depth(var_name)
+                .is_none_or(|depth| depth >= minimum);
+        }
         // A variable is local if:
         // 1. It's defined in the current scope (not a parameter)
         // 2. It's not captured from an outer scope

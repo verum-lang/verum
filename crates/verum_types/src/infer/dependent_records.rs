@@ -410,6 +410,11 @@ impl TypeChecker {
             } else {
                 prefix.push(Some(self.carrier_value(value, &expected)?));
             }
+            if let Some(argument) = arguments[index]
+                && argument.value.is_none()
+            {
+                self.observe_record_shorthand_origins(argument, &expected);
+            }
         }
         Ok(true)
     }

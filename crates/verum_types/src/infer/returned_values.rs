@@ -1175,8 +1175,9 @@ impl TypeChecker {
             origins.push(self.reference_result_origin(argument)?);
         } else if transferred {
             // Transfer preserves payload loans; it does not prove that an
-            // owned value is independent of its input storage.
-            origins = self.aggregate_origins(argument, &actual);
+            // owned value is independent of its input storage. This operand
+            // was evaluated before subsequent arguments and callee writes.
+            self.collect_evaluated_operand_origins(argument, &mut origins);
         }
         Some(origins)
     }

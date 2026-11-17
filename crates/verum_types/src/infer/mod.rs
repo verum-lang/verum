@@ -612,9 +612,10 @@ pub struct FunctionContract {
 /// The main type checker.
 pub struct TypeChecker {
     analysis_control: Option<crate::AnalysisControl>,
-    /// Match arm loans are local to the current function's binding identities.
-    match_arm_origins: Map<Span, Maybe<List<crate::ty::RecordReceiver>>>,
-    place_operands: Vec<std::collections::HashMap<usize, Option<Type>>>,
+    /// Origins of evaluated values are local to the current function's binding identities.
+    evaluated_value_origins: Map<Span, Maybe<List<crate::ty::RecordReceiver>>>,
+    closure_return_depth: Maybe<usize>,
+    place_operands: List<Map<usize, Maybe<write_places::EvaluatedOperand>>>,
     /// Type context
     pub(crate) ctx: TypeContext,
     /// Unifier

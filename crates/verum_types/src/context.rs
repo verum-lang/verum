@@ -1277,6 +1277,9 @@ pub struct TypeEnv {
     meta_parameters: Map<Text, Type>,
     /// Parent environment (for nested scopes)
     parent: Option<Box<TypeEnv>>,
+    /// This expression block executes on the parent's current path. Branch,
+    /// loop and callable scopes are barriers to definite overwrite facts.
+    origins_dominate_parent: bool,
     /// Type parameters in scope with their bounds
     /// Generic bounds tracking: type parameters carry protocol constraints (e.g., T: Ord) that are checked at instantiation sites
     type_params: Map<Text, TypeParam>,
@@ -1300,6 +1303,7 @@ impl TypeEnv {
             meta_parameter_values: Set::new(),
             meta_parameters: Map::new(),
             parent: None,
+            origins_dominate_parent: false,
             type_params: Map::new(),
             current_module: Maybe::None,
             universe_ctx: UniverseContext::new(),
@@ -1320,6 +1324,7 @@ impl TypeEnv {
             meta_parameter_values: Set::new(),
             meta_parameters: Map::new(),
             parent: Some(Box::new(self.clone())),
+            origins_dominate_parent: false,
             type_params: Map::new(),
             current_module: self.current_module, // Inherit module context
             universe_ctx: self.universe_ctx.clone(), // Inherit universe context
@@ -1349,6 +1354,20 @@ impl TypeEnv {
             current = parent;
         }
         depth
+    }
+
+    pub(crate) fn binding_scope_depth(&self, name: &Text) -> Option<usize> {
+        let mut depth = self.scope_depth();
+        let mut scope = self;
+        loop {
+            if scope.bindings.contains_key(name) { return Some(depth); }
+            scope = scope.parent.as_deref()?;
+            depth = depth.checked_sub(1)?;
+        }
+    }
+
+    pub(crate) fn mark_origins_dominate_parent(&mut self) {
+        self.origins_dominate_parent = true;
     }
 
     /// Unwind an aborted body while keeping mutations to its outer/root scopes.
@@ -1580,6 +1599,10 @@ impl TypeEnv {
         self.record_places.entry(name.into()).or_default().mutable = true;
     }
 
+    pub(crate) fn binding_place_is_mutable(&mut self, name: &str) -> bool {
+        self.local_record_place(name).is_some_and(|place| place.mutable)
+    }
+
     pub(crate) fn set_reference_origin(&mut self, name: &str, source: ReferenceOrigin) {
         self.record_places.entry(name.into()).or_default().reference = Some(source);
     }
@@ -1601,6 +1624,17 @@ impl TypeEnv {
             scope = env.parent.as_deref();
         }
         None
+    }
+
+    pub(crate) fn is_incoming_referent(&self, id: u64) -> bool {
+        let mut scope = Some(self);
+        while let Some(env) = scope {
+            if let Some(place) = env.record_places.values().find(|place| place.id == Some(id)) {
+                return matches!(place.reference, Some(ReferenceOrigin::Parameter));
+            }
+            scope = env.parent.as_deref();
+        }
+        false
     }
 
     /// Assignments may run conditionally or zero times in a loop. Retain every
@@ -1688,11 +1722,18 @@ impl TypeEnv {
         name: &str,
         sources: &[crate::ty::RecordReceiver],
     ) -> bool {
-        if !self.bindings.contains_key(name) { return false; }
-        let place = self.record_places.entry(name.into()).or_default();
-        place.reference = Some(ReferenceOrigin::Candidates(sources.into()));
-        place.unverified_write = None;
-        true
+        let mut scope = self;
+        loop {
+            if scope.bindings.contains_key(name) {
+                let place = scope.record_places.entry(name.into()).or_default();
+                place.reference = Some(ReferenceOrigin::Candidates(sources.into()));
+                place.unverified_write = None;
+                return true;
+            }
+            if !scope.origins_dominate_parent { return false; }
+            let Some(parent) = scope.parent.as_deref_mut() else { return false; };
+            scope = parent;
+        }
     }
 
     pub(crate) fn invalidate_payload_origins(
@@ -1767,9 +1808,13 @@ impl TypeEnv {
 
     /// A stored loan can cross a block if its owner is outside that
     /// block, and a function if it comes from an incoming reference.
-    pub(crate) fn dropping_loan_storage(&self, id: u64, returning: bool) -> Option<Text> {
+    pub(crate) fn dropping_loan_storage(&self, id: u64, returning: bool, minimum_depth: Option<usize>) -> Option<Text> {
         let mut scope = self;
+        let mut depth = self.scope_depth();
         loop {
+            if returning && minimum_depth.is_some_and(|minimum| depth < minimum) {
+                return None;
+            }
             if let Some((name, place)) = scope
                 .record_places
                 .iter()
@@ -1783,6 +1828,7 @@ impl TypeEnv {
                 return None;
             }
             scope = scope.parent.as_deref()?;
+            depth = depth.checked_sub(1)?;
         }
     }
 

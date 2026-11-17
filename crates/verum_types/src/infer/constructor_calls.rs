@@ -169,7 +169,7 @@ impl TypeChecker {
         })?;
         // Construction does not execute a callee, but its payloads still
         // coexist and must obey the same argument-loan and move rules.
-        self.check_call_loans(args, Some(params), None, false)?;
+        self.check_call_loans(args, Some(params), None)?;
         self.consume_affine_call_args(args, params)?;
         let result = self.unifier.apply(result);
         let result = if Self::contains_type_app(&result) {
@@ -177,6 +177,7 @@ impl TypeChecker {
         } else {
             result
         };
+        self.observe_call_result_origins(span, &result, args, Some(params), None, None, None)?;
         // Only the selected data constructor owns this bound. Arguments retain
         // their own properties in ordinary expression traversal.
         let target = Type::function_with_requirement(

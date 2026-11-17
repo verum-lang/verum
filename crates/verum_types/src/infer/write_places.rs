@@ -2,10 +2,16 @@
 //! A place uses the types observed while evaluating its actual operands.
 //! Re-inferring a call here would consume its affine arguments a second time.
 use super::TypeChecker;
-use crate::{Result, TypeError, ty::Type};
-use std::collections::HashMap;
+use crate::{Result, TypeError, ty::{RecordReceiver, Type}};
 use verum_ast::{Expr, ExprKind, Span, UnOp};
-use verum_common::Text;
+use verum_common::{List, Map, Text};
+
+/// Evidence about one evaluated operand, not a later read of its source place.
+#[derive(Clone)]
+pub(super) struct EvaluatedOperand {
+    ty: Type,
+    origins: List<RecordReceiver>,
+}
 
 fn unparen(mut expr: &Expr) -> &Expr {
     while let ExprKind::Paren(inner) = &expr.kind {
@@ -73,17 +79,50 @@ impl TypeChecker {
         Ok(())
     }
 
-    pub(super) fn with_expression_places<T>(
-        &mut self, expr: &Expr, infer: impl FnOnce(&mut Self) -> Result<T>,
-    ) -> Result<T> {
+    pub(super) fn with_expression_places(
+        &mut self, expr: &Expr, infer: impl FnOnce(&mut Self) -> Result<super::InferResult>,
+    ) -> Result<super::InferResult> {
         let args = match &unparen(expr).kind {
             ExprKind::Call { args, .. } | ExprKind::MethodCall { args, .. } => args.as_slice(),
             _ => &[],
         };
-        self.with_call_place_types(expr, args, infer)
+        let evaluate = |checker: &mut Self| checker.with_call_place_types(expr, args, |checker| {
+            let result = infer(checker)?;
+            checker.observe_aggregate_result_origins(expr, &result.ty);
+            Ok(result)
+        });
+        // These operations can skip, repeat or defer evaluation of a child.
+        // One lexical merge boundary keeps their writes conservative even
+        // when a child contains otherwise unconditional expression blocks.
+        if matches!(unparen(expr).kind,
+            ExprKind::Binary { op: verum_ast::BinOp::And | verum_ast::BinOp::Or | verum_ast::BinOp::Imply, .. }
+            | ExprKind::NullCoalesce { .. } | ExprKind::OptionalChain { .. }
+            | ExprKind::If { .. } | ExprKind::Match { .. }
+            | ExprKind::Loop { .. } | ExprKind::While { .. } | ExprKind::For { .. } | ExprKind::ForAwait { .. }
+            | ExprKind::Closure { .. } | ExprKind::Async(_) | ExprKind::Spawn { .. }
+            | ExprKind::Select { .. } | ExprKind::Nursery { .. }
+            | ExprKind::TryBlock(_) | ExprKind::TryRecover { .. } | ExprKind::TryFinally { .. } | ExprKind::TryRecoverFinally { .. }
+            | ExprKind::Comprehension { .. } | ExprKind::StreamComprehension { .. }
+            | ExprKind::MapComprehension { .. } | ExprKind::SetComprehension { .. } | ExprKind::GeneratorComprehension { .. }
+            | ExprKind::Typeof(_) | ExprKind::Quote { .. })
+        {
+            self.with_origin_merge_scope(evaluate)
+        } else {
+            evaluate(self)
+        }
     }
 
-    /// Only computed operands need temporary storage. Keys are identities of
+    pub(super) fn with_origin_merge_scope<T>(
+        &mut self, evaluate: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> Result<T> {
+        let depth = self.ctx.env.scope_depth();
+        self.ctx.env.push_scope();
+        let result = evaluate(self);
+        self.ctx.env.restore_scope_depth(depth);
+        result
+    }
+
+    /// Operand observations need temporary storage. Keys are identities of
     /// live, borrowed AST nodes and are discarded when this operation returns.
     pub(super) fn with_place_types<T>(
         &mut self,
@@ -99,15 +138,35 @@ impl TypeChecker {
         args: &[Expr],
         infer: impl FnOnce(&mut Self) -> Result<T>,
     ) -> Result<T> {
-        let mut requested = HashMap::new();
+        let mut requested = Map::new();
         for arg in args {
             let arg = unparen(arg);
-            if !matches!(
-                arg.kind,
-                ExprKind::Literal(_) | ExprKind::Path(_) | ExprKind::Unary { .. }
-            ) {
-                requested.insert(std::ptr::from_ref(arg).addr(), None);
+            requested.insert(std::ptr::from_ref(arg).addr(), None);
+        }
+        match &unparen(place).kind {
+            ExprKind::Call { func, .. } => {
+                requested.insert(std::ptr::from_ref(unparen(func)).addr(), None);
             }
+            ExprKind::MethodCall { receiver, .. } => {
+                requested.insert(std::ptr::from_ref(unparen(receiver)).addr(), None);
+            }
+            ExprKind::Tuple(values) | ExprKind::Array(verum_ast::ArrayExpr::List(values)) => {
+                for value in values {
+                    requested.insert(std::ptr::from_ref(unparen(value)).addr(), None);
+                }
+            }
+            ExprKind::Array(verum_ast::ArrayExpr::Repeat { value, .. }) => {
+                requested.insert(std::ptr::from_ref(unparen(value)).addr(), None);
+            }
+            ExprKind::Record { fields, base, .. } => {
+                for value in fields.iter().filter_map(|field| field.value.as_ref()).chain(base.as_deref()) {
+                    requested.insert(std::ptr::from_ref(unparen(value)).addr(), None);
+                }
+            }
+            _ if !args.is_empty() => {
+                requested.insert(std::ptr::from_ref(unparen(place)).addr(), None);
+            }
+            _ => {}
         }
         for place in std::iter::once(place).chain(args.iter()) {
             let mut step = unparen(place);
@@ -136,9 +195,31 @@ impl TypeChecker {
             return;
         }
         let key = std::ptr::from_ref(unparen(expr)).addr();
+        if !self.place_operands.iter().any(|scope| scope.contains_key(&key)) {
+            return;
+        }
+        // Observe before another argument or the invocation can mutate a
+        // source place. Empty candidates are not a no-write/cleanup proof.
+        let previous_type = self.observed_operand_type(expr);
+        let previous_origins = self.observed_operand_origins(expr);
+        let mut origins = self.aggregate_origins(expr, ty);
+        if self.reference_mode(ty, expr.span).is_ok_and(|mode| mode.is_some()) {
+            if previous_type.as_ref().is_some_and(|previous|
+                self.reference_mode(previous, expr.span).is_ok_and(|mode| mode.is_none()))
+            {
+                // Contextual checking has formed an implicit borrow of the
+                // already evaluated place. Its loan is not its old payload.
+                self.collect_borrowed_place_candidates(expr, &mut origins);
+            } else if let Some(previous) = previous_origins {
+                for origin in previous {
+                    if !origins.contains(&origin) { origins.push(origin); }
+                }
+            }
+        }
+        let observed = EvaluatedOperand { ty: ty.clone(), origins };
         for scope in &mut self.place_operands {
             if let Some(slot) = scope.get_mut(&key) {
-                *slot = Some(ty.clone());
+                *slot = Some(observed.clone());
             }
         }
     }
@@ -415,6 +496,13 @@ impl TypeChecker {
             .iter()
             .rev()
             .find_map(|scope| scope.get(&key)?.as_ref())
-            .map(|ty| self.unifier.apply(ty))
+            .map(|operand| self.unifier.apply(&operand.ty))
+    }
+
+    pub(super) fn observed_operand_origins(&self, expr: &Expr) -> Option<List<RecordReceiver>> {
+        let key = std::ptr::from_ref(unparen(expr)).addr();
+        self.place_operands.iter().rev()
+            .find_map(|scope| scope.get(&key)?.as_ref())
+            .map(|operand| operand.origins.clone())
     }
 }

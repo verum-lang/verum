@@ -1094,8 +1094,9 @@ impl TypeChecker {
             metadata_inherent_loading: Set::new(),
             metadata_source_impl_loading: Set::new(),
             analysis_control: None,
-            place_operands: Vec::new(),
-            match_arm_origins: Map::new(),
+            place_operands: List::new(),
+            evaluated_value_origins: Map::new(),
+            closure_return_depth: None,
             stdlib_tail_registered: Set::new(),
             lazy_resolver: None,
             session_registry: None,
@@ -1256,8 +1257,9 @@ impl TypeChecker {
             metadata_inherent_loading: Set::new(),
             metadata_source_impl_loading: Set::new(),
             analysis_control: None,
-            place_operands: Vec::new(),
-            match_arm_origins: Map::new(),
+            place_operands: List::new(),
+            evaluated_value_origins: Map::new(),
+            closure_return_depth: None,
             stdlib_tail_registered: Set::new(),
             lazy_resolver: None,
             session_registry: None,
@@ -1419,8 +1421,9 @@ impl TypeChecker {
             metadata_inherent_loading: Set::new(),
             metadata_source_impl_loading: Set::new(),
             analysis_control: None,
-            place_operands: Vec::new(),
-            match_arm_origins: Map::new(),
+            place_operands: List::new(),
+            evaluated_value_origins: Map::new(),
+            closure_return_depth: None,
             stdlib_tail_registered: Set::new(),
             lazy_resolver: None,
             session_registry: None,
@@ -10123,14 +10126,14 @@ impl TypeChecker {
 
             // Defer statement - type checks the deferred expression
             StmtKind::Defer(expr) => {
-                self.synth_expr(expr)?;
+                self.with_origin_merge_scope(|checker| checker.synth_expr(expr))?;
                 Ok(false)
             }
 
             // Errdefer statement - type checks the deferred expression (error-path only)
             // Spec: grammar/verum.ebnf v2.8 - Section 2.13 defer_stmt
             StmtKind::Errdefer(expr) => {
-                self.synth_expr(expr)?;
+                self.with_origin_merge_scope(|checker| checker.synth_expr(expr))?;
                 Ok(false)
             }
 
@@ -12029,7 +12032,10 @@ with .to_float() or .to_int() (at {:?})",
                 // Loan retention follows the checked destination value. Copying
                 // a scalar through a reference stores no reference to its input.
                 let mut origins = self.aggregate_origins(right, &stored_type);
-                if !origins.is_empty() && let Some((holder, _)) = self.borrow_place(left) {
+                let mut whole_binding = left;
+                while let ExprKind::Paren(inner) = &whole_binding.kind { whole_binding = inner; }
+                if !matches!(whole_binding.kind, ExprKind::Path(_))
+                    && !origins.is_empty() && let Some((holder, _)) = self.borrow_place(left) {
                     for source in self.ctx.env.reference_candidates(&holder) {
                         if !origins.contains(&source) { origins.push(source); }
                     }
