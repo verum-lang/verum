@@ -22,6 +22,17 @@ def check(args):
     pin = json.loads((HERE / "toolchain.json").read_text())
     release = args.release.resolve()
     charon, aeneas, lean = release / "charon", release / "aeneas", args.lean.resolve()
+    # Charon may install an absent toolchain during discovery. rustup run
+    # without --install first checks the compiler already present on the host.
+    installed = subprocess.run(
+        ["rustup", "run", pin["rust"], "rustc", "--print", "sysroot"],
+        env={**os.environ, "RUSTUP_AUTO_INSTALL": "0"},
+        text=True, capture_output=True,
+    )
+    if installed.returncode != 0:
+        raise SystemExit(f"Install {pin['rust']} with rustc-dev, llvm-tools and rust-src before replay.")
+    sysroot = Path(installed.stdout.strip()).resolve(strict=True)
+    rustc = sysroot / "bin" / "rustc"
     expected = [
         ([charon, "version"], pin["charon"]),
         ([charon, "toolchain-version"], pin["rust"]),
@@ -32,7 +43,9 @@ def check(args):
         actual = version(command)
         if actual != wanted:
             raise SystemExit(f"{command[0].name} returned {actual!r}, expected {wanted!r}")
-    rustc = Path(version([charon, "toolchain-path"])) / "bin" / "rustc"
+    selected = version([charon, "toolchain-path"])
+    if "\n" in selected or Path(selected).resolve() != sysroot:
+        raise SystemExit("Charon and rustup selected different Rust compilers")
     if f"commit-hash: {pin['rust_commit']}" not in version([rustc, "-vV"]).splitlines():
         raise SystemExit("The selected Rust compiler has a different commit")
     lean_version = version([lean, "--version"])

@@ -1,0 +1,64 @@
+name: Native checker proofs
+
+on:
+  pull_request:
+    paths: ['Cargo.toml', 'Cargo.lock', 'crates/verum_proof/**', 'verification/native-checker/**', '.github/workflows/native-checker-proofs.yml']
+  push:
+    branches: [main]
+    paths: ['Cargo.toml', 'Cargo.lock', 'crates/verum_proof/**', 'verification/native-checker/**', '.github/workflows/native-checker-proofs.yml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-checker-proofs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  extract-and-prove:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pinned extraction tools
+        run: |
+          pin=verification/native-checker/toolchain.json
+          tag=$(jq -er .aeneas "$pin")
+          asset=aeneas-linux-x86_64.tar.gz
+          archive="$RUNNER_TEMP/$asset"
+          curl --fail --silent --show-error --location --retry 3 \
+            "https://github.com/AeneasVerif/aeneas/releases/download/$tag/$asset" -o "$archive"
+          digest=$(jq -er --arg asset "$asset" '.release_sha256[$asset]' "$pin")
+          echo "$digest  $archive" | sha256sum --check -
+          mkdir "$RUNNER_TEMP/aeneas"
+          tar -xzf "$archive" -C "$RUNNER_TEMP/aeneas"
+          rustup toolchain install "$(jq -er .rust "$pin")" --profile minimal \
+            --component rustc-dev --component llvm-tools --component rust-src
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends elan ripgrep
+          elan toolchain install "leanprover/lean4:v$(jq -er .lean "$pin")"
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/aeneas/backends/lean/.lake
+          key: native-checker-lean-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('verification/native-checker/toolchain.json') }}
+
+      - name: Build the pinned semantics of Rust operations
+        env:
+          MATHLIB_NO_CACHE_ON_UPDATE: "1"
+        run: |
+          cd "$RUNNER_TEMP/aeneas/backends/lean"
+          # Fetch the Mathlib dependency closure used by the backend.
+          mapfile -t imports < <(rg --no-filename -or '$1' \
+            '^(?:(?:public|meta)\s+)*import\s+(Mathlib\.[\w.]+)\b.*$' Aeneas AeneasMeta | sort -u)
+          test "${#imports[@]}" -gt 0
+          lake exe cache get "${imports[@]}"
+          lake build Aeneas
+
+      - name: Re-extract production Rust and check the theorems
+        run: |
+          release="$RUNNER_TEMP/aeneas"
+          lean=$(cd "$release/backends/lean" && elan which lean)
+          python3 verification/native-checker/check.py \
+            --release "$release" --lean "$lean" --scratch "$RUNNER_TEMP"
