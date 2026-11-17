@@ -1890,11 +1890,17 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             let effective_params: Vec<verum_vbc::module::ParamDescriptor> = func_desc
                 .params
                 .iter()
-                .map(|p| {
+                .enumerate()
+                .map(|(index, p)| {
+                    let declared_numeric = func_desc.semantic_parameter_types().and_then(|types| types.get(index))
+                        .and_then(|ty| ty.as_ref())
+                        .and_then(|ty| verum_vbc::type_layout::numeric_identity_with(
+                            ty, |id| vbc_module.get_type(id),
+                        )).map(TypeRef::Concrete);
                     let eff_type = if is_spawn_func {
                         TypeRef::Concrete(TypeId::INT)
                     } else {
-                        match numeric_type(&p.type_ref) {
+                        match declared_numeric.unwrap_or_else(|| numeric_type(&p.type_ref)) {
                             TypeRef::Concrete(tid) => {
                                 match tid {
                                     TypeId::INT

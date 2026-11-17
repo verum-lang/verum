@@ -355,7 +355,7 @@ fn run_native(source: &str) {
 fn run_native_module(mut wire: verum_vbc::VbcModule) {
     let mut graph = verum_vbc::mono::InstantiationGraph::new();
     for function in &mut wire.functions {
-        function.is_generic = !function.type_params.is_empty();
+        assert_eq!(function.is_generic, !function.type_params.is_empty(), "production generic telescope");
         let start = function.bytecode_offset as usize;
         let mut instructions = verum_vbc::bytecode::decode_instructions(
             &wire.bytecode[start..start + function.bytecode_length as usize],

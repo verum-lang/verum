@@ -17637,6 +17637,9 @@ impl VbcCodegen {
                 TypeKind::UnsafeReference { inner, mutable } => {
                     Some((inner, *mutable, crate::types::CbgrTier::Tier2))
                 }
+                TypeKind::Pointer { inner, mutable } => {
+                    Some((inner, *mutable, crate::types::CbgrTier::Tier2))
+                }
                 _ => None,
             };
             if let Some((inner, mutable, tier)) = reference {
@@ -19647,6 +19650,7 @@ impl VbcCodegen {
         descriptor.type_params = self.declared_callable_type_parameters(
             func, &method_generic_param_map, &method_shadow_band,
         )?;
+        descriptor.is_generic = !descriptor.type_params.is_empty();
 
         // Populate parameter descriptors for proper method dispatch matching.
         // This enables the interpreter to match methods by parameter count.

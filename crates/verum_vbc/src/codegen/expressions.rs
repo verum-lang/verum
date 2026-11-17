@@ -7864,43 +7864,6 @@ impl VbcCodegen {
         // This allows @intrinsic functions with fallback bodies (e.g., process_spawn)
         // to work when the intrinsic isn't wired yet.
 
-        // T0452 — pointer-arithmetic intrinsic WRAPPERS must be inlined with
-        // the CALL-SITE pointee, not called as a generic body.
-        //
-        // `core/intrinsics/memory.vr` declares
-        //   `fn ptr_offset<T>(ptr: *const T, count: ISize) -> *const T
-        //        { @intrinsic("ptr_offset", ptr, count) }`
-        // — an @intrinsic BODY meta-call, NOT an @intrinsic declaration
-        // attribute. So `func_info.intrinsic_name` is None, the block above
-        // does not fire, the name resolves to a concrete function, and the
-        // body is compiled ONCE with T erased. Inside that body the stride
-        // detector sees only `*const T`, fails the `&unsafe ` pointee test,
-        // and falls back to the 8-byte NaN-boxed-Value stride. The concrete
-        // pointee is knowable ONLY here, at the call site — which is why
-        // `ptr_offset(base, -HEADER_SIZE)` over a `&unsafe Byte` walked
-        // 8x too far (ptr-256 instead of ptr-32) on every header/base
-        // recovery path.
-        //
-        // Reroute to the inline emission EXACTLY when the call-site pointee
-        // is a genuine packed byte buffer (`ptr_intrinsic_byte_stride` == 1,
-        // which demands the literal `&unsafe <1-byte scalar>` spelling).
-        // Every other call — including every stride-8 call and every
-        // non-arithmetic intrinsic wrapper — keeps today's emission
-        // bit-identical, so no call site that is green today changes shape.
-        // That narrowness is deliberate: the rolled-back T0108 attempt
-        // failed precisely by rerouting call sites that already worked.
-        if !Self::ptr_arith_inline_disabled()
-            && Self::is_ptr_arith_intrinsic_wrapper(&func_name)
-            && self.ptr_intrinsic_byte_stride(
-                Self::call_leaf_name(&func_name),
-                args.first(),
-            ) == 1
-            && let Some(intrinsic_info) =
-                lookup_intrinsic(Self::call_leaf_name(&func_name))
-        {
-            return self.compile_imported_intrinsic_call(&intrinsic_info, args, None);
-        }
-
         // **FLAT-RECORD-RW-1 (T1160)** — `ptr_read` / `ptr_write` over a
         // MULTI-FIELD record must carry the payload size and the type to
         // rebuild, and only the CALL SITE knows them.
@@ -27735,6 +27698,11 @@ impl VbcCodegen {
             let mut source_type =
                 self.declared_expression_result(inner, Some(src_reg), source_start, source_end);
             while let Some(crate::types::TypeRef::Reference { inner, tier, .. }) = source_type {
+                // Tier-2 carries the raw address. A numeric cast observes that
+                // address; only a checked/reference value conversion reads its
+                // pointee. Source raw-pointer declarations retain Tier-2 through
+                // calls and casts instead of erasing to an untyped PTR carrier.
+                if tier == crate::types::CbgrTier::Tier2 { break; }
                 let value = self.ctx.alloc_temp();
                 self.emit_deref_instruction(value, src_reg, tier);
                 self.ctx.free_temp(src_reg);
@@ -35468,7 +35436,11 @@ impl VbcCodegen {
             .and_then(|name| self.ctx.lookup_function(name))
             .filter(|function| function.intrinsic_name.as_deref() == Some(intrinsic_info.intrinsic.name))
             .and_then(|function| function.return_type.clone());
-        self.emit_intrinsic_instructions(&intrinsic_info, &arg_regs, dest, ptr_elem_stride, declared_return.as_ref())?;
+        if !self.emit_pointer_arithmetic_intrinsic(
+            &intrinsic_info.intrinsic.strategy, args.get(1), &arg_regs, dest,
+        )? {
+            self.emit_intrinsic_instructions(&intrinsic_info, &arg_regs, dest, ptr_elem_stride, declared_return.as_ref())?;
+        }
 
         // Free argument registers
         for reg in arg_regs.iter().rev() {
@@ -35618,7 +35590,11 @@ impl VbcCodegen {
             .and_then(|name| self.ctx.lookup_function(name))
             .filter(|function| function.intrinsic_name.as_deref() == Some(intrinsic_info.intrinsic.name))
             .and_then(|function| function.return_type.clone());
-        self.emit_intrinsic_instructions(&intrinsic_info, &arg_regs, dest, ptr_elem_stride, declared_return.as_ref())?;
+        if !self.emit_pointer_arithmetic_intrinsic(
+            &intrinsic_info.intrinsic.strategy, args.get(1), &arg_regs, dest,
+        )? {
+            self.emit_intrinsic_instructions(&intrinsic_info, &arg_regs, dest, ptr_elem_stride, declared_return.as_ref())?;
+        }
 
         // Free argument registers
         for reg in arg_regs.iter().rev() {
@@ -35996,7 +35972,11 @@ impl VbcCodegen {
         // so it drives the ptr-arithmetic stride selection.
         let ptr_elem_stride =
             self.ptr_intrinsic_byte_stride(info.intrinsic.name, args.first());
-        self.emit_intrinsic_instructions(info, &arg_regs, dest, ptr_elem_stride, declared_return)?;
+        if !self.emit_pointer_arithmetic_intrinsic(
+            &info.intrinsic.strategy, args.first(), &arg_regs, dest,
+        )? {
+            self.emit_intrinsic_instructions(info, &arg_regs, dest, ptr_elem_stride, declared_return)?;
+        }
 
         // Free argument registers
         for reg in arg_regs.iter().rev() {
@@ -36004,20 +35984,6 @@ impl VbcCodegen {
         }
 
         Ok(Some(dest))
-    }
-
-    /// T0452 kill-switch. `VERUM_PTR_ARITH_LEGACY_STRIDE=1` restores the
-    /// pre-T0452 emission bit-for-bit: byte-pointee `ptr_offset`/`ptr_add`/
-    /// `ptr_sub` calls go back to Calling the generic-T body (and its 8-byte
-    /// stride) instead of inlining with the call-site stride. Read once and
-    /// cached; the call-site inline is the default.
-    fn ptr_arith_inline_disabled() -> bool {
-        static LEGACY: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-        *LEGACY.get_or_init(|| {
-            std::env::var("VERUM_PTR_ARITH_LEGACY_STRIDE")
-                .map(|v| v == "1")
-                .unwrap_or(false)
-        })
     }
 
     /// Leaf identifier of a possibly-qualified call name — both
@@ -36028,20 +35994,55 @@ impl VbcCodegen {
         after_colons.rsplit('.').next().unwrap_or(after_colons)
     }
 
-    /// The pointer-ARITHMETIC intrinsic wrappers whose correct stride is
-    /// knowable only from the call-site pointee (T0452).
-    ///
-    /// Deliberately narrower than [`Self::ptr_intrinsic_byte_stride`]'s own
-    /// name list: that one also covers the `slice_from_raw_parts` producers,
-    /// which are not address arithmetic and must keep their existing
-    /// emission. Widening this set is how a "green today" call site gets
-    /// silently re-shaped — the failure mode the rolled-back T0108 attempt
-    /// hit — so add to it only with a probe that proves the new member.
-    fn is_ptr_arith_intrinsic_wrapper(func_name: &str) -> bool {
-        matches!(
-            Self::call_leaf_name(func_name),
-            "ptr_offset" | "ptr_offset_mut" | "intrinsic_ptr_offset" | "ptr_add" | "ptr_sub"
-        )
+    /// The selected registry operation owns arithmetic; the source pointer
+    /// declaration owns element layout. Generic layouts remain VBC operands
+    /// until the ordinary monomorphization/frame substitution supplies T.
+    fn emit_pointer_arithmetic_intrinsic(
+        &mut self,
+        strategy: &crate::intrinsics::registry::CodegenStrategy,
+        pointer: Option<&Expr>,
+        args: &[Reg],
+        dest: Reg,
+    ) -> CodegenResult<bool> {
+        use crate::intrinsics::registry::{CodegenStrategy, InlineSequenceId};
+        let subtract = match strategy {
+            CodegenStrategy::InlineSequence(InlineSequenceId::PtrOffset) => false,
+            CodegenStrategy::InlineSequence(InlineSequenceId::PtrSubSeq) => true,
+            _ => return Ok(false),
+        };
+        let [address, count] = args else {
+            return Err(CodegenError::internal("pointer arithmetic requires two declared operands"));
+        };
+        let declaration = pointer.and_then(|pointer| self.projection_operand_declaration(pointer));
+        let Some(crate::types::TypeRef::Reference { inner, tier: crate::types::CbgrTier::Tier2, .. }) = declaration else {
+            return Err(CodegenError::internal("pointer arithmetic requires its source raw pointee declaration"));
+        };
+        self.emit_declared_pointer_offset(dest, *address, *count, *inner, subtract);
+        Ok(true)
+    }
+
+    fn emit_declared_pointer_offset(
+        &mut self, dest: Reg, address: Reg, count: Reg,
+        pointee: crate::types::TypeRef, subtract: bool,
+    ) {
+        let stride = self.ctx.alloc_temp();
+        self.ctx.emit(Instruction::TypeLayout {
+            dst: stride, type_ref: pointee, property: crate::instruction::LayoutProperty::Stride,
+        });
+        let bytes = self.ctx.alloc_temp();
+        self.ctx.emit(Instruction::BinaryI { op: BinaryIntOp::Mul, dst: bytes, a: count, b: stride });
+        let mut operands = Vec::new();
+        Self::write_reg(&mut operands, dest.0);
+        Self::write_reg(&mut operands, address.0);
+        Self::write_reg(&mut operands, bytes.0);
+        operands.push(1);
+        self.ctx.emit(Instruction::MemExtended {
+            sub_op: if subtract { crate::instruction::MemSubOpcode::PtrSubT } else { crate::instruction::MemSubOpcode::PtrAddT } as u8,
+            operands,
+        });
+        self.ctx.mark_raw_pointer(dest);
+        self.ctx.free_temp(bytes);
+        self.ctx.free_temp(stride);
     }
 
     /// Element stride (bytes) for a pointer-arithmetic intrinsic call.
@@ -36999,86 +37000,8 @@ impl VbcCodegen {
                 }
             }
 
-            // Pointer offset: byte-level addressing (ptr + count).
-            //
-
-            // All core/ stdlib uses `ptr_offset` for raw byte pointers, so
-            // the stride is 1 byte per `count`. Route through
-            // `FfiExtended::PtrAdd` (0x63) rather than a plain `BinaryI::Add`
-            // so the result keeps its `Value::from_ptr` tag — the integer
-            // path strips the pointer tag, which causes downstream
-            // `Value::as_ptr()` callers to see an Int and either panic in
-            // debug or silently read the payload bits as an address in
-            // release. The FFI op also wraps the raw-address arithmetic in
-            // `checked_add_signed`/`checked_sub`, trapping overflow.
-            InlineSequenceId::PtrOffset => {
-                if args.len() >= 2 {
-                    if byte_width == 1 {
-                        // Byte-buffer pointer (`&unsafe Byte` / `*mut U8`):
-                        // `count` is already a byte count, so the target
-                        // address is exactly `ptr + count`.  The default
-                        // 0x63 PtrAdd path scales by the 8-byte Value slot,
-                        // which over-advances a byte buffer 8× (Text append
-                        // landed off-buffer → content loss / SIGBUS under
-                        // AOT).  `BinaryI::Add` is tier-agnostic — interp and
-                        // AOT both compute the raw byte address identically —
-                        // and `&unsafe` pointers are Tier-2 (no CBGR bound
-                        // check to preserve), so bypassing 0x63 is sound.
-                        self.ctx.emit(Instruction::BinaryI {
-                            op: BinaryIntOp::Add,
-                            dst: dest,
-                            a: args[0],
-                            b: args[1],
-                        });
-                        self.ctx.mark_raw_pointer(dest);
-                    } else {
-                        let mut operands = Vec::<u8>::new();
-                        Self::write_reg(&mut operands, dest.0);
-                        Self::write_reg(&mut operands, args[0].0);
-                        Self::write_reg(&mut operands, args[1].0);
-                        self.ctx.emit(Instruction::MemExtended {
-                            sub_op: 0x13, // crate::instruction::MemSubOpcode::PtrAdd
-                            operands,
-                        });
-                    }
-                } else {
-                    self.ctx.emit(Instruction::Mov {
-                        dst: dest,
-                        src: args[0],
-                    });
-                }
-            }
-
-            // ptr_sub: same shape as PtrOffset but the count SUBTRACTS —
-            // crate::instruction::MemSubOpcode::PtrSub (0x64) does the checked negative walk.
-            InlineSequenceId::PtrSubSeq => {
-                if args.len() >= 2 {
-                    if byte_width == 1 {
-                        // Byte-buffer pointer: `ptr - count` bytes directly
-                        // (see the PtrOffset arm for the full rationale).
-                        self.ctx.emit(Instruction::BinaryI {
-                            op: BinaryIntOp::Sub,
-                            dst: dest,
-                            a: args[0],
-                            b: args[1],
-                        });
-                        self.ctx.mark_raw_pointer(dest);
-                    } else {
-                        let mut operands = Vec::<u8>::new();
-                        Self::write_reg(&mut operands, dest.0);
-                        Self::write_reg(&mut operands, args[0].0);
-                        Self::write_reg(&mut operands, args[1].0);
-                        self.ctx.emit(Instruction::MemExtended {
-                            sub_op: 0x14, // crate::instruction::MemSubOpcode::PtrSub
-                            operands,
-                        });
-                    }
-                } else {
-                    self.ctx.emit(Instruction::Mov {
-                        dst: dest,
-                        src: args[0],
-                    });
-                }
+            InlineSequenceId::PtrOffset | InlineSequenceId::PtrSubSeq => {
+                return Err(CodegenError::internal("pointer arithmetic requires its source raw pointee declaration"));
             }
 
             // Checked arithmetic - returns Maybe<T> via ArithExtended sub-opcodes

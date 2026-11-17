@@ -382,6 +382,7 @@ impl VbcCodegen {
                 TypeKind::Reference { inner, .. }
                 | TypeKind::CheckedReference { inner, .. }
                 | TypeKind::UnsafeReference { inner, .. }
+                | TypeKind::Pointer { inner, .. }
                 | TypeKind::Slice(inner) => supported(inner, depth + 1, budget, cg, scope, declared_ids, binders, retained),
                 TypeKind::Array { element, size } => {
                     size.is_some() && supported(element, depth + 1, budget, cg, scope, declared_ids, binders, retained)
@@ -435,8 +436,8 @@ impl VbcCodegen {
                 TypeKind::DynProtocol { .. } => cg.resolve_signature_type_ref(ty, scope)
                     .is_ok_and(|resolved| resolved_in_scope(&resolved,
                         &mut |id| declared_ids.contains(&id), depth + 1, binders, false)),
-                // Raw pointers and unsupported forms do not establish an
-                // exact declaration-owned semantic type.
+                // Other unsupported forms do not establish an exact
+                // declaration-owned semantic type.
                 _ => false,
             }
         }
