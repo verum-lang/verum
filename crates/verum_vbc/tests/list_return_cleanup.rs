@@ -244,20 +244,21 @@ fn converted_packed_source_keeps_its_own_scope_cleanup() {
             .iter()
             .position(|instruction| matches!(instruction, Instruction::NewList { .. }))
             .expect("actual List materialization");
-        let cleanup: List<_> = instructions
-            .iter()
-            .enumerate()
-            .filter_map(|(index, instruction)| {
-                matches!(instruction, Instruction::DropRef { .. }).then_some(index)
-            })
-            .collect();
-        // Exactly two named locals: the scalar read and the original packed
-        // allocation. Copying into a new List does not transfer the source slot.
-        assert_eq!(cleanup.len(), 2, "{route}: {instructions:?}");
-        assert!(
-            cleanup.iter().all(|index| *index > conversion),
-            "{route}: cleanup before conversion"
-        );
+        let packed = instructions.iter().skip(conversion).find_map(|instruction| {
+            let Instruction::MemExtended { sub_op, operands } = instruction else { return None; };
+            if *sub_op != MemSubOpcode::TypedArrayLoad.to_byte() { return None; }
+            let mut cursor = 0;
+            verum_vbc::encoding::decode_reg(operands, &mut cursor).unwrap();
+            Some(verum_vbc::encoding::decode_reg(operands, &mut cursor).unwrap())
+        }).expect("the source read by List materialization");
+        let cleanup: List<_> = instructions.iter().enumerate().filter(|(_, op)| matches!(
+            op, Instruction::DropRef { .. } | Instruction::DropTyped { .. }
+        )).collect();
+        assert!(matches!(cleanup.as_slice(),
+            [(first, Instruction::DropTyped { src: scalar, type_ref: verum_vbc::types::TypeRef::Concrete(id) }),
+             (_, Instruction::DropRef { src: owner })]
+                if *first > conversion && *id == verum_vbc::TypeId::I16 && scalar != owner && *owner == packed
+        ), "{route}: expected scalar cleanup followed by destruction of the converted source: {cleanup:?}");
     }
 }
 
