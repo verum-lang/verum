@@ -18,9 +18,8 @@
 //!
 //! ## Source location resolution
 //!
-//! If the module carries a `SourceMap`, we binary-search its entries for the
-//! largest `bytecode_offset` ≤ `frame.pc` to find the closest source location.
-//! Entries are stored in bytecode-offset order (the codegen emits them that way).
+//! Source locations use the same exact function-relative PC as CBGR and the debugger.
+//! A frame without an instruction mapping retains its function and reports unknown position.
 
 use super::super::super::error::InterpreterResult;
 use super::super::super::state::InterpreterState;
@@ -72,12 +71,13 @@ pub(in super::super) fn try_intercept_backtrace(
             .map(|s| s.to_string())
             .unwrap_or_else(|| format!("<fn:{}>", func_id.0));
 
-        let (file, line, col) = resolve_source_location(&state.module, *pc);
+        let (file, line, col) = state.module.instruction_source(*func_id, *pc)
+            .unwrap_or(("<unknown>", 0, 0));
         infos.push(FrameInfo {
             func: func_name_str,
-            file,
-            line,
-            col,
+            file: file.to_owned(),
+            line: i64::from(line),
+            col: i64::from(col),
         });
     }
 
@@ -95,36 +95,4 @@ pub(in super::super) fn try_intercept_backtrace(
     let frames_list = alloc_list_from_values(state, frame_values)?;
     let backtrace = alloc_record_n_fields(state, "Backtrace", &[frames_list])?;
     Ok(Some(backtrace))
-}
-
-/// Binary-search the module's SourceMap for the closest entry at or before `pc`.
-/// Returns `("<unknown>", 0, 0)` when no source map is present or no entry matches.
-fn resolve_source_location(
-    module: &crate::module::VbcModule,
-    pc: u32,
-) -> (String, i64, i64) {
-    let sm = match &module.source_map {
-        Some(sm) => sm,
-        None => return ("<unknown>".into(), 0, 0),
-    };
-    if sm.entries.is_empty() {
-        return ("<unknown>".into(), 0, 0);
-    }
-
-    // Binary search for largest bytecode_offset <= pc.
-    let idx = sm.entries.partition_point(|e| e.bytecode_offset <= pc);
-    let entry = if idx == 0 {
-        &sm.entries[0]
-    } else {
-        &sm.entries[idx - 1]
-    };
-
-    let file = sm
-        .files
-        .get(entry.file_idx as usize)
-        .and_then(|fid| module.get_string(*fid))
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| "<unknown>".into());
-
-    (file, entry.line as i64, entry.column as i64)
 }

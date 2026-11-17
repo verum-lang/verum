@@ -280,9 +280,8 @@ impl DebugAdapter {
         if let Some(state) = &self.interpreter {
             self.session.step_start_depth = state.call_stack.depth();
             // Record current source line for step-over detection.
-            let current_offset = self.current_bytecode_offset();
-            self.session.step_start_line = current_offset
-                .and_then(|off| self.session.lookup_source_location(off))
+            self.session.step_start_line = state.call_stack.current()
+                .and_then(|frame| self.session.lookup_source_location(frame.function, frame.pc))
                 .map(|(_, line, _)| line as u32);
         }
         self.session.step_mode = Some(mode);
@@ -336,8 +335,7 @@ impl DebugAdapter {
                 .unwrap_or("<unknown>")
                 .to_string();
 
-            let bytecode_offset = frame.pc;
-            let source_loc = self.session.lookup_source_location(bytecode_offset);
+            let source_loc = self.session.lookup_source_location(frame.function, frame.pc);
 
             let (source, line, column) = match source_loc {
                 Some((file, l, c)) => (
@@ -530,12 +528,6 @@ impl DebugAdapter {
                 self.session.thread_state = ThreadState::Terminated;
             }
         }
-    }
-
-    /// Returns the current bytecode offset (PC) of the topmost call frame.
-    fn current_bytecode_offset(&self) -> Option<u32> {
-        let state = self.interpreter.as_ref()?;
-        state.call_stack.current().map(|f| f.pc)
     }
 
     // ========================================================================

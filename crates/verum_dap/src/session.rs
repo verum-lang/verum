@@ -4,9 +4,10 @@
 //! for a single debug session.
 
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
 
-use verum_vbc::module::{FunctionId, SourceMapEntry, VbcModule};
+use verum_vbc::module::{FunctionId, VbcModule};
 
 use crate::types::Breakpoint;
 
@@ -205,72 +206,46 @@ impl DebugSession {
         let module = self.module.as_ref()?;
         let source_map = module.source_map.as_ref()?;
 
-        // Find the file index in the source map.
-        let file_idx = source_map.files.iter().position(|sid| {
-            module
-                .get_string(*sid)
-                .is_some_and(|name| file_path.ends_with(name) || name == file_path)
-        })? as u16;
+        let requested = Path::new(file_path);
+        let indices = || source_map.files.iter().enumerate().filter_map(|(index, sid)| {
+            let name = module.get_string(*sid)?;
+            (!name.is_empty()).then_some((index, Path::new(name)))
+        });
+        let mut exact = indices().filter(|(_, path)| *path == requested);
+        let index = if let Some((index, _)) = exact.next() {
+            if exact.next().is_some() { return None; }
+            index
+        } else {
+            let mut matching = indices().filter(|(_, path)| path.is_relative() && requested.ends_with(path));
+            let (index, _) = matching.next()?;
+            if matching.next().is_some() { return None; }
+            index
+        };
+        let file_idx = u16::try_from(index).ok()?;
+        let line_base = i64::from(!self.lines_start_at1);
+        let requested_line = u32::try_from(line.checked_add(line_base)?).ok()?;
+        if requested_line == 0 { return None; }
 
-        // Find the closest source map entry at or after the requested line.
-        let target_line = line as u32;
-        let mut best_entry: Option<&SourceMapEntry> = None;
-
-        for entry in &source_map.entries {
-            if entry.file_idx != file_idx {
-                continue;
-            }
-            if entry.line == target_line {
-                // Exact match — prefer the first one.
-                if best_entry.is_none_or(|b| entry.bytecode_offset < b.bytecode_offset) {
-                    best_entry = Some(entry);
-                }
-            } else if entry.line > target_line {
-                // No exact match; snap forward to the next available line.
-                if best_entry.is_none_or(|b| entry.line < b.line) {
-                    best_entry = Some(entry);
-                }
-            }
-        }
-
-        let entry = best_entry?;
-
-        // Find which function contains this bytecode offset.
-        let func = module.functions.iter().find(|f| {
-            entry.bytecode_offset >= f.bytecode_offset
-                && entry.bytecode_offset < f.bytecode_offset + f.bytecode_length
-        })?;
-
-        // The instruction index is relative to the function's start.
-        let instr_idx = entry.bytecode_offset - func.bytecode_offset;
-
-        Some((entry.line as i64, func.id, instr_idx))
+        let entry = source_map.entries.iter()
+            .filter(|entry| entry.file_idx == file_idx && entry.line >= requested_line)
+            .min_by_key(|entry| (entry.line, entry.bytecode_offset))?;
+        let mut owners = module.functions.iter().filter_map(|function| {
+            let pc = entry.bytecode_offset.checked_sub(function.bytecode_offset)?;
+            (pc < function.bytecode_length).then_some((function.id, pc))
+        });
+        let (id, pc) = owners.next()?;
+        if owners.next().is_some() { return None; }
+        let (_, line, _) = module.instruction_source(id, pc)?;
+        Some((i64::from(line) - line_base, id, pc))
     }
 
-    /// Looks up the source location for a given bytecode offset.
-    ///
-    /// Returns `(file_path, line, column)` if found.
-    pub fn lookup_source_location(&self, bytecode_offset: u32) -> Option<(String, i64, i64)> {
-        let module = self.module.as_ref()?;
-        let source_map = module.source_map.as_ref()?;
-
-        // Find the entry with the largest offset <= bytecode_offset.
-        let mut best: Option<&SourceMapEntry> = None;
-        for entry in &source_map.entries {
-            if entry.bytecode_offset <= bytecode_offset
-                && best.is_none_or(|b| entry.bytecode_offset > b.bytecode_offset)
-            {
-                best = Some(entry);
-            }
-        }
-
-        let entry = best?;
-        let file_name = module.get_string(source_map.files[entry.file_idx as usize])?;
-
+    /// Map a frame's function-relative PC into the client's coordinate system.
+    pub fn lookup_source_location(&self, function: FunctionId, pc: u32) -> Option<(String, i64, i64)> {
+        let (path, line, column) = self.module.as_ref()?.instruction_source(function, pc)?;
         Some((
-            file_name.to_string(),
-            entry.line as i64,
-            entry.column as i64,
+            path.to_owned(),
+            i64::from(line) - i64::from(!self.lines_start_at1),
+            i64::from(column) - i64::from(!self.columns_start_at1),
         ))
     }
 }

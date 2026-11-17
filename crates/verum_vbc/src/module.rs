@@ -1185,6 +1185,27 @@ impl VbcModule {
         self.functions.get(id.0 as usize)
     }
 
+    /// Resolve a function-relative bytecode PC to its exact recorded instruction.
+    /// Sparse, contradictory or invalid debug data carries no source attribution.
+    pub fn instruction_source(&self, id: FunctionId, pc: u32) -> Option<(&str, u32, u16)> {
+        let function = self.get_function(id)?;
+        if function.id != id || pc >= function.bytecode_length {
+            return None;
+        }
+        let offset = function.bytecode_offset.checked_add(pc)?;
+        let map = self.source_map.as_ref()?;
+        let mut matches = map.entries.iter().filter(|entry| entry.bytecode_offset == offset);
+        let entry = matches.next()?;
+        let position = (entry.file_idx, entry.line, entry.column);
+        if entry.line == 0 || entry.column == 0
+            || matches.any(|other| (other.file_idx, other.line, other.column) != position)
+        {
+            return None;
+        }
+        let file = self.get_string(*map.files.get(usize::from(entry.file_idx))?)?;
+        (!file.is_empty()).then_some((file, entry.line, entry.column))
+    }
+
     /// Gets a mutable function descriptor by ID.
     pub fn get_function_mut(&mut self, id: FunctionId) -> Option<&mut FunctionDescriptor> {
         self.receiver_method_families.take();

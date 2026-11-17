@@ -87,43 +87,12 @@ impl CbgrCapture {
                     let name = function
                         .and_then(|f| site.module.get_string(f.name))
                         .map(|name| name.chars().take(256).collect::<Text>());
-                    let source = (|| {
-                        let function = function?;
-                        if site.pc >= function.bytecode_length {
-                            return None;
-                        }
-                        let offset = function.bytecode_offset.checked_add(site.pc)?;
-                        let map = site.module.source_map.as_ref()?;
-                        // Never borrow a location from another function or guess
-                        // that the preceding source entry names this instruction.
-                        let mut matches = map
-                            .entries
-                            .iter()
-                            .filter(|entry| entry.bytecode_offset == offset);
-                        let entry = matches.next()?;
-                        if matches.any(|other| {
-                            other.file_idx != entry.file_idx
-                                || other.line != entry.line
-                                || other.column != entry.column
-                        }) {
-                            return None;
-                        }
-                        let path = site
-                            .module
-                            .get_string(*map.files.get(usize::from(entry.file_idx))?)?;
-                        if path.is_empty()
-                            || path.len() > 2048
-                            || entry.line == 0
-                            || entry.column == 0
-                        {
-                            return None;
-                        }
-                        Some(CbgrSourceLocation {
-                            path: path.into(),
-                            line: entry.line,
-                            column: entry.column,
-                        })
-                    })();
+                    let source = site.function
+                        .and_then(|id| site.module.instruction_source(id, site.pc))
+                        .filter(|(path, _, _)| path.len() <= 2048)
+                        .map(|(path, line, column)| CbgrSourceLocation {
+                            path: path.into(), line, column,
+                        });
                     let (target_kind, target) = match event.failure.target {
                         CbgrTarget::Register(index) => {
                             (CbgrTargetKind::Register, index.to_string())
