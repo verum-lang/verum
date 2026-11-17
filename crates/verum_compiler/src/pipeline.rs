@@ -1480,10 +1480,10 @@ impl<'s> CompilationPipeline<'s> {
             let verum_ast::ItemKind::Function(declaration) = &item.kind else {
                 anyhow::bail!("cached declaration {} is not a function declaration; rebuild from source", cached_func.path);
             };
-            if verum_ast::source_signature::signature_uses_universes(declaration)
-                .map_err(|error| anyhow::anyhow!("{error}"))?
+            if verum_ast::source_signature::source_signature(declaration, false)
+                .map_err(|error| anyhow::anyhow!("{error}"))?.is_some()
             {
-                anyhow::bail!("cached declaration {} lacks a semantic universe signature; rebuild from source", cached_func.path);
+                anyhow::bail!("cached declaration {} lacks its required source signature; rebuild from source", cached_func.path);
             }
             let func_desc = FunctionDescriptor {
                 source_signature: None,

@@ -32,11 +32,11 @@ pub(super) enum ConcreteImplType {
 }
 
 impl ConcreteImplType {
-    fn disjoint(&self, other: &Self) -> bool {
+    fn disjoint(&self, other: &Self, codegen: &VbcCodegen) -> bool {
         match (self, other) {
-            (Self::Resolved(ty), head) | (head, Self::Resolved(ty)) => head.contradicts(ty),
+            (Self::Resolved(ty), head) | (head, Self::Resolved(ty)) => head.contradicts(ty, codegen),
             (Self::Applied(a, xs), Self::Applied(b, ys)) =>
-                a != b || xs.iter().zip(ys).any(|(x, y)| x.disjoint(y)),
+                a != b || xs.iter().zip(ys).any(|(x, y)| x.disjoint(y, codegen)),
             (Self::PointerWidthInteger { signed: a }, Self::PointerWidthInteger { signed: b }) =>
                 a != b,
             // A pointer-width scalar cannot have a nominal type application.
@@ -45,11 +45,13 @@ impl ConcreteImplType {
         }
     }
 
-    fn contradicts(&self, expected: &TypeRef) -> bool {
+    fn contradicts(&self, expected: &TypeRef, codegen: &VbcCodegen) -> bool {
         match self {
-            Self::Resolved(actual) => VbcCodegen::disjoint_nominal_types(actual, expected),
+            Self::Resolved(actual) => codegen.declared_types_disjoint(actual, expected),
             // The source guarantees a scalar on every target. Its bit width is irrelevant.
-            Self::PointerWidthInteger { .. } => matches!(expected, TypeRef::Instantiated { .. }),
+            Self::PointerWidthInteger { .. } => matches!(expected,
+                TypeRef::Instantiated { .. } | TypeRef::Reference { .. } | TypeRef::Tuple(_)
+                    | TypeRef::Array { .. } | TypeRef::Slice(_) | TypeRef::Function { .. }),
             Self::Applied(base, args) => match expected {
                 TypeRef::Concrete(id) => base != id,
                 TypeRef::Instantiated {
@@ -60,7 +62,7 @@ impl ConcreteImplType {
                         || args
                             .iter()
                             .zip(required.iter())
-                            .any(|(a, b)| a.contradicts(b))
+                            .any(|(a, b)| a.contradicts(b, codegen))
                 }
                 _ => false,
             },
@@ -78,6 +80,20 @@ impl VbcCodegen {
         protocol: verum_common::well_known_types::WellKnownProtocol,
         member: &str,
     ) -> Option<TypeRef> {
+        let owner = self.type_by_id(actual.base_type_id()?)?;
+        let mut protocols = owner.protocols.iter().filter(|row|
+            self.declared_protocol_role(TypeId(row.protocol.0)) == Some(protocol))
+            .map(|row| TypeId(row.protocol.0));
+        let selected = protocols.next()?;
+        if protocols.any(|other| other != selected) { return None; }
+        self.selected_protocol_implementation_member(actual, selected, &[], member)
+    }
+
+    /// The same retained implementation proof also serves ordinary declared
+    /// protocol applications; a member spelling alone cannot select an owner.
+    pub(super) fn selected_protocol_implementation_member(
+        &self, actual: &TypeRef, protocol: TypeId, protocol_arguments: &[TypeRef], member: &str,
+    ) -> Option<TypeRef> {
         use super::{formal_parameters::DeclarationTypeScope, source_substitution::SourceTypeSubstitution};
         use crate::{mono::match_declared_types, types::TypeParamId};
         use verum_ast::{decl::{ImplItemKind, ImplKind}, ty::GenericParamKind};
@@ -94,8 +110,7 @@ impl VbcCodegen {
         let empty = SourceTypeSubstitution::default();
         let mut seen = Set::new();
         let mut selected = None;
-        for row in owner.protocols.iter().filter(|row|
-            self.declared_protocol_role(TypeId(row.protocol.0)) == Some(protocol))
+        for row in owner.protocols.iter().filter(|row| TypeId(row.protocol.0) == protocol)
         {
             let source = row.source_implementation.as_ref()?;
             let repeated_source = !seen.insert(source);
@@ -103,8 +118,7 @@ impl VbcCodegen {
             let ImplKind::Protocol { protocol: path, protocol_args, for_type } = &implementation.kind else {
                 return None;
             };
-            if !protocol_args.is_empty()
-                || self.nominal_type_id_in_scope(&Self::format_type_path(path), source.origin_module())
+            if self.nominal_type_id_in_scope(&Self::format_type_path(path), source.origin_module())
                     != Some(TypeId(row.protocol.0))
             { return None; }
             let mut parameters = Map::new();
@@ -133,6 +147,23 @@ impl VbcCodegen {
             if !match_declared_types(&head, actual, &mut bindings)
                 || bindings.apply(&head).ok()?.ne(actual)
             { continue; }
+            let receiver = super::ImplReceiverWitness { ty: head, semantic: true };
+            let lexical = DeclarationTypeScope { receiver: Some(&receiver), ..lexical };
+            let mut declared_arguments = List::new();
+            for argument in protocol_args {
+                let argument = argument.type_for_declared_slot()?;
+                let declared = self.semantic_formal_type_in_declaration(
+                    &argument, &parameters, &ids, &Default::default(), &lexical,
+                )?;
+                declared_arguments.push(bindings.apply(&declared).ok()?);
+            }
+            // The source may omit protocol arguments supplied by its declared
+            // defaults. Complete that same telescope with the actual receiver
+            // before comparing applications; spelling arity is not identity.
+            let declared_arguments = self.complete_nominal_arguments(
+                protocol, declared_arguments.into(), implementation.span, &[], Some(actual),
+            ).ok()?;
+            if declared_arguments != protocol_arguments { continue; }
             // A registered conditional row is not a checked applicability
             // judgment. Keep unsupported or unproved obligations unknown.
             if conditional || implementation.specialize_attr.is_some()
@@ -140,8 +171,6 @@ impl VbcCodegen {
                 || implementation.meta_where_clause.as_ref().is_some_and(|clause| !clause.predicates.is_empty())
                 || ids.iter().any(|id| bindings.get(*id).is_none())
             { return None; }
-            let receiver = super::ImplReceiverWitness { ty: head, semantic: true };
-            let lexical = DeclarationTypeScope { receiver: Some(&receiver), ..lexical };
             let mut assignments = implementation.items.iter().filter_map(|item| match &item.kind {
                 ImplItemKind::Type { name, ty, type_params } if name.name.as_str() == member =>
                     Some((ty, type_params)),
@@ -349,7 +378,7 @@ impl VbcCodegen {
                         Some(source.origin_module().to_owned()), Default::default(), None,
                         |cg| Ok(cg.concrete_impl_type(for_type, 0)),
                     )?;
-                    if head.as_ref().is_none_or(|head| !head.disjoint(instance)) {
+                    if head.as_ref().is_none_or(|head| !head.disjoint(instance, self)) {
                         disjoint = false;
                         break;
                     }
@@ -430,7 +459,7 @@ impl VbcCodegen {
                 }) {
                     return facts
                         .get(member.as_str())
-                        .is_some_and(|actual| actual.contradicts(&required));
+                        .is_some_and(|actual| actual.contradicts(&required, self));
                 }
                 let mut implementations = descriptor
                     .protocols
@@ -448,29 +477,100 @@ impl VbcCodegen {
                             })
                             .peekable();
                         bindings.peek().is_some()
-                            && bindings.all(|(_, ty)| Self::disjoint_nominal_types(ty, &required))
+                            && bindings.all(|(_, ty)| self.declared_types_disjoint(ty, &required))
                     })
             })
         })
     }
 
-    fn disjoint_nominal_types(left: &TypeRef, right: &TypeRef) -> bool {
-        match (left, right) {
-            (TypeRef::Concrete(a), TypeRef::Concrete(b))
-            | (TypeRef::Concrete(a), TypeRef::Instantiated { base: b, .. })
-            | (TypeRef::Instantiated { base: a, .. }, TypeRef::Concrete(b)) => a != b,
-            (
-                TypeRef::Instantiated { base: a, args: xs },
-                TypeRef::Instantiated { base: b, args: ys },
-            ) => {
-                a != b
-                    || xs
-                        .iter()
-                        .zip(ys.iter())
-                        .any(|(x, y)| Self::disjoint_nominal_types(x, y))
+    /// Prove impossibility from declared constructors. Open parameters and
+    /// projections remain unknown; a nominal alias first expands through its
+    /// own declaration. This is a negative applicability proof, not a choice
+    /// of witnesses for an otherwise unproved conditional method.
+    pub(super) fn declared_types_disjoint(&self, left: &TypeRef, right: &TypeRef) -> bool {
+        use crate::types::{MAX_TYPE_REF_DEPTH, MAX_TYPE_REF_NODES};
+        let mut pending = List::new();
+        pending.push((left.clone(), right.clone(), 0usize));
+        let mut remaining = MAX_TYPE_REF_NODES;
+        while let Some((left, right, depth)) = pending.pop() {
+            let Some(next) = remaining.checked_sub(1) else { return false; };
+            remaining = next;
+            if depth >= MAX_TYPE_REF_DEPTH { return false; }
+            let (Some(left), Some(right)) = (self.expand_declared_alias(left), self.expand_declared_alias(right))
+                else { return false; };
+            if left == right { continue; }
+            let mut components = |a: &[TypeRef], b: &[TypeRef]| {
+                pending.extend(a.iter().cloned().zip(b.iter().cloned()).map(|(a, b)| (a, b, depth + 1)));
+            };
+            match (&left, &right) {
+                (TypeRef::Generic(_) | TypeRef::AssociatedProjection { .. } | TypeRef::RecordFieldProjection { .. }, _)
+                | (_, TypeRef::Generic(_) | TypeRef::AssociatedProjection { .. } | TypeRef::RecordFieldProjection { .. }) => {},
+                // ABI placeholders cannot certify a source type constructor.
+                (TypeRef::Concrete(id), _) | (_, TypeRef::Concrete(id))
+                    if matches!(*id, TypeId::PTR | TypeId::RESERVED) => {},
+                (TypeRef::Concrete(a), TypeRef::Concrete(b))
+                | (TypeRef::Concrete(a), TypeRef::Instantiated { base: b, .. })
+                | (TypeRef::Instantiated { base: a, .. }, TypeRef::Concrete(b)) => {
+                    if a != b { return true; }
+                }
+                (TypeRef::Instantiated { base: a, args: aa }, TypeRef::Instantiated { base: b, args: ba }) => {
+                    if a != b || aa.len() != ba.len() { return true; }
+                    components(aa, ba);
+                }
+                (TypeRef::Reference { inner: a, mutability: am, tier: at },
+                 TypeRef::Reference { inner: b, mutability: bm, tier: bt }) => {
+                    if am != bm || at != bt { return true; }
+                    pending.push((a.as_ref().clone(), b.as_ref().clone(), depth + 1));
+                }
+                (TypeRef::Tuple(a), TypeRef::Tuple(b)) => {
+                    if a.len() != b.len() { return true; }
+                    components(a, b);
+                }
+                (TypeRef::Array { element: a, length: al }, TypeRef::Array { element: b, length: bl }) => {
+                    if al != bl { return true; }
+                    pending.push((a.as_ref().clone(), b.as_ref().clone(), depth + 1));
+                }
+                (TypeRef::Slice(a), TypeRef::Slice(b)) => pending.push((a.as_ref().clone(), b.as_ref().clone(), depth + 1)),
+                (TypeRef::Function { is_async: aa, params: ap, return_type: ar, contexts: ac },
+                 TypeRef::Function { is_async: ba, params: bp, return_type: br, contexts: bc }) => {
+                    if aa != ba || ac != bc || ap.len() != bp.len() { return true; }
+                    components(ap, bp);
+                    pending.push((ar.as_ref().clone(), br.as_ref().clone(), depth + 1));
+                }
+                (TypeRef::Dynamic(_) | TypeRef::Rank2Function { .. }, _)
+                | (_, TypeRef::Dynamic(_) | TypeRef::Rank2Function { .. }) => {},
+                // The remaining rigid constructors differ (for example an
+                // owned record and a reference), independently of their fields.
+                _ => return true,
             }
-            _ => false,
         }
+        false
+    }
+
+    /// Select one projection after its children have been normalized. The
+    /// descriptor owns both the parameter roster and all candidate equations;
+    /// incompatible same-named bindings cannot be selected by iteration order.
+    pub(super) fn declared_associated_projection_target(&self, ty: &TypeRef) -> Option<TypeRef> {
+        let TypeRef::AssociatedProjection { base, qualifier: None, assoc, args } = ty else { return None; };
+        if !args.is_empty() { return None; }
+        let (id, arguments) = match base.as_ref() {
+            TypeRef::Concrete(id) => (*id, &[][..]),
+            TypeRef::Instantiated { base, args } => (*base, args.as_slice()),
+            _ => return None,
+        };
+        let descriptor = self.type_by_id(id)?;
+        if descriptor.type_params.len() != arguments.len() { return None; }
+        let substitution = TypeSubstitution::new(&descriptor.type_params, arguments);
+        let mut binding = None;
+        for implementation in &descriptor.protocols {
+            for (name, target) in &implementation.associated_types {
+                if self.ctx.strings.get(name.0 as usize).map(String::as_str) != Some(assoc.as_str()) { continue; }
+                let target = substitution.apply(target).ok()?;
+                if binding.as_ref().is_some_and(|previous| previous != &target) { return None; }
+                binding = Some(target);
+            }
+        }
+        binding
     }
 
     /// Instantiate declaration-owned associated bindings. A projection does
@@ -498,32 +598,11 @@ impl VbcCodegen {
                     }
                     let result = (|| {
                         let base = nested(base, active)?;
-                        let (id, args) = match &base {
-                            TypeRef::Concrete(id) => (*id, &[][..]),
-                            TypeRef::Instantiated { base, args } => (*base, args.as_slice()),
-                            _ => return None,
+                        let projection = TypeRef::AssociatedProjection {
+                            base: Box::new(base), qualifier: None, assoc: assoc.clone(), args: args.clone(),
                         };
-                        let descriptor = codegen.type_by_id(id)?;
-                        if descriptor.type_params.len() != args.len() {
-                            return None;
-                        }
-                        let substitution = TypeSubstitution::new(&descriptor.type_params, args);
-                        let mut binding = None;
-                        for implementation in &descriptor.protocols {
-                            for (name, target) in &implementation.associated_types {
-                                if codegen.ctx.strings.get(name.0 as usize).map(String::as_str)
-                                    != Some(assoc.as_str())
-                                {
-                                    continue;
-                                }
-                                let target = substitution.apply(target).ok()?;
-                                if binding.as_ref().is_some_and(|previous| previous != &target) {
-                                    return None;
-                                }
-                                binding = Some(target);
-                            }
-                        }
-                        resolve(codegen, &binding?, active, depth + 1)
+                        let binding = codegen.declared_associated_projection_target(&projection)?;
+                        resolve(codegen, &binding, active, depth + 1)
                     })();
                     active.remove(ty);
                     result

@@ -1112,7 +1112,7 @@ impl<'a> Deserializer<'a> {
              let end = self.offset.checked_add(length as usize)
                  .filter(|end| *end <= self.data.len())
                  .ok_or_else(|| VbcError::Deserialization("truncated source type declaration".into()))?;
-             let declaration = crate::source_signature_codec::decode_type(&self.data[self.offset..end])?;
+             let declaration = crate::source_signature_codec::decode_type(&self.data[self.offset..end], self.header.as_ref().map_or(0, |header| header.version_minor))?;
              self.offset = end;
              Some(declaration)
          }
@@ -1164,7 +1164,7 @@ impl<'a> Deserializer<'a> {
      }
      let end = self.offset.checked_add(length as usize).filter(|end| *end <= self.data.len())
          .ok_or_else(|| VbcError::Deserialization("truncated source implementation".into()))?;
-     let source = crate::source_signature_codec::decode_implementation(&self.data[self.offset..end])?;
+     let source = crate::source_signature_codec::decode_implementation(&self.data[self.offset..end], self.header.as_ref().map_or(0, |header| header.version_minor))?;
      self.offset = end;
      Ok(source)
  }
@@ -1985,7 +1985,7 @@ impl<'a> Deserializer<'a> {
              let end = self.offset.checked_add(length)
                  .filter(|end| *end <= self.data.len())
                  .ok_or_else(|| VbcError::Deserialization("truncated source signature".into()))?;
-             let signature = crate::source_signature_codec::decode(&self.data[self.offset..end], parent_type.is_some())?;
+             let signature = crate::source_signature_codec::decode(&self.data[self.offset..end], parent_type.is_some(), self.header.as_ref().map_or(0, |header| header.version_minor))?;
              if signature.params.len() != params.len() {
                  return Err(VbcError::Deserialization("source signature parameter arity mismatch".into()));
              }

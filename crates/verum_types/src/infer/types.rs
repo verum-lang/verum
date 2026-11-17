@@ -4416,7 +4416,10 @@ fn substitute_refinement_binder(
         // Normalize both types and compare
         let norm1 = self.normalize_type(ty1);
         let norm2 = self.normalize_type(ty2);
-        norm1 == norm2
+        // Source and metadata use Named and Generic applications of the same
+        // full declaration path. Reuse the declaration-aware equality relation;
+        // enum representation and source spans are not nominal identity.
+        self.protocol_checker.read().types_structurally_equal(&norm1, &norm2)
     }
 
     /// Convert a type to a unique key for cycle detection.

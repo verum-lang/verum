@@ -75,12 +75,24 @@ impl TextConversion {
 #[derive(Default)]
 struct CallInstantiation {
     slots: Vec<Option<crate::types::TypeRef>>,
+    rejection: Option<CodegenError>,
 }
 
 impl CallInstantiation {
     fn known(arguments: impl IntoIterator<Item = crate::types::TypeRef>) -> Self {
         Self {
             slots: arguments.into_iter().map(Some).collect(),
+            rejection: None,
+        }
+    }
+
+    fn declared(function: &FunctionInfo, bindings: CodegenResult<Option<crate::mono::TypeSubstitution>>) -> Self {
+        match bindings {
+            Ok(Some(bindings)) => Self { slots: function.type_param_ids.iter()
+                .map(|id| bindings.get(*id).cloned()).collect(), rejection: None },
+            Ok(None) => Self { slots: Vec::new(), rejection: Some(CodegenError::new(
+                CodegenErrorKind::TypeInference("selected callable has unproved or conflicting source argument evidence".into()))) },
+            Err(error) => Self { slots: Vec::new(), rejection: Some(error) },
         }
     }
 
@@ -1315,10 +1327,25 @@ impl VbcCodegen {
         demand: ResultDemand,
     ) -> CodegenResult<Option<Reg>> {
         let outer = self.ctx.selected_call_result_span;
+        let start = self.ctx.instructions.len();
         self.ctx.selected_call_result_span = matches!(
             expr.kind, ExprKind::Call { .. } | ExprKind::MethodCall { .. },
         ).then_some(expr.span);
         let result = self.compile_expr_in_result_scope(expr, demand);
+        // A nullary variant read is also a constructor, despite having no call
+        // syntax. Retain its selected producer and contextual owner together;
+        // an expected type alone cannot establish the variant's declaration.
+        if matches!(expr.kind, ExprKind::Path(_) | ExprKind::Field { .. })
+            && let Ok(Some(reg)) = &result
+            && let Some((_, Instruction::MakeVariantTyped { type_id, tag, field_count: 0, .. })) =
+                self.copy_result_producer(*reg, start, self.ctx.instructions.len())
+        {
+            let (owner, tag) = (crate::types::TypeId(*type_id), *tag);
+            let expected = (self.ctx.expected_value_span == Some(expr.span))
+                .then_some(self.ctx.expected_value_type.as_ref()).flatten();
+            let declaration = self.selected_variant_declaration(owner, tag, &[], expected);
+            self.ctx.declared_result_types.insert(expr.span, declaration);
+        }
         self.ctx.selected_call_result_span = outer;
         result
     }
@@ -1337,7 +1364,7 @@ impl VbcCodegen {
 
             // === Variables and Paths ===
             ExprKind::Path(path) => {
-                if let Some(info) = self.selected_function_path(expr)?.cloned() {
+                if let Some(info) = self.selected_function_value(expr)?.cloned() {
                     let dest = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::NewClosure {
                         owns_captures: false,
@@ -2046,6 +2073,16 @@ impl VbcCodegen {
             .ok_or_else(|| CodegenError::with_span(
                 CodegenErrorKind::UndefinedFunction(qualified_name.to_string()), expr.span,
             ))
+    }
+
+    /// A bare function value has no argument list. Keep its source-family
+    /// selection separate from ordinary calls, whose declaration path owns
+    /// overload arity, defaults and argument adaptations.
+    pub(super) fn selected_function_value(&self, expr: &Expr) -> CodegenResult<Option<&FunctionInfo>> {
+        match self.selected_function_path(expr)? {
+            Some(function) => Ok(Some(function)),
+            None => self.declared_function_value(expr),
+        }
     }
 
     fn compile_path(&mut self, path: &Path) -> CodegenResult<Option<Reg>> {
@@ -3263,21 +3300,29 @@ impl VbcCodegen {
                     }
                 }
                 let qualified = chosen_key;
-                if self.ctx.lookup_function(&qualified).is_some() {
+                if let Some(callable) = self.ctx.lookup_function(&qualified).cloned() {
                     // Found operator method — emit CallM with qualified name
                     // (e.g., "Weight.add" not just "add") so the LLVM handler
                     // resolves the correct type's method when multiple types
                     // have the same operator method name.
+                    let receiver = self.emit_owned_call_argument(
+                        &callable, 0, left, left_reg, left_declaration.as_ref(),
+                    )?;
+                    let argument = self.emit_owned_call_argument(
+                        &callable, 1, right, right_reg, right_declaration.as_ref(),
+                    )?;
                     let method_id = self.intern_string(&qualified);
                     self.ctx.emit(Instruction::CallM {
                         dst: dest,
-                        receiver: left_reg,
+                        receiver,
                         method_id,
                         args: crate::instruction::RegRange {
-                            start: right_reg,
+                            start: argument,
                             count: 1,
                         },
                     });
+                    if receiver != left_reg { self.ctx.free_temp(receiver); }
+                    if argument != right_reg { self.ctx.free_temp(argument); }
                     self.ctx.free_temp(left_reg);
                     self.ctx.free_temp(right_reg);
                     // Track return type for chained operations — from the
@@ -3389,6 +3434,38 @@ impl VbcCodegen {
                     }
                 }
             }
+        }
+
+        // A protocol-bound operator is a source call, with the same owned
+        // argument boundary as its method spelling. Primitive instructions
+        // observe registers and cannot stand in for a consuming source body.
+        if !is_float && !is_text && !is_primitive
+            && let Some((protocol, method)) = op.standard_protocol_member()
+            && let (Some(left_type), Some(right_type)) = (&left_declaration, &right_declaration)
+            && let Some(selected) = self.bounded_binary_method(left_type, protocol, method, right_type)
+        {
+            let selected = selected?;
+            let identity = self.type_by_id(selected.owner)
+                .and_then(|declaration| self.type_declaration_identity(declaration))
+                .or_internal("operator protocol requires its declaration identity")?;
+            let receiver = if selected.receiver.meta().is_by_value {
+                self.emit_declared_call_argument(Some(left_type), left, left_reg, Some(left_type))?
+            } else { left_reg };
+            let argument = self.emit_declared_call_argument(
+                selected.inputs.first(), right, right_reg, Some(right_type),
+            )?;
+            let method_id = self.intern_string(&format!("dyn:{identity}.{method}"));
+            self.ctx.emit(Instruction::CallM {
+                dst: dest, receiver, method_id,
+                args: crate::instruction::RegRange { start: argument, count: 1 },
+            });
+            if receiver != left_reg { self.ctx.free_temp(receiver); }
+            if argument != right_reg { self.ctx.free_temp(argument); }
+            self.ctx.free_temp(left_reg);
+            self.ctx.free_temp(right_reg);
+            let result_name = self.type_ref_to_name(&selected.output);
+            self.ctx.variable_type_names.insert(format!("__r{}", dest.0), result_name);
+            return Ok(Some(dest));
         }
 
         // Tuple structural equality — compare ELEMENT-WISE rather than
@@ -8119,7 +8196,7 @@ impl VbcCodegen {
         // read whatever registers happened to follow Reg(0).
         // Capture semantic operand facts before ownership transfers consume their bindings.
         // The final selected FunctionId binds these facts; the snapshot guesses no callee.
-        let generic_operand_declarations = (!func_info.type_param_ids.is_empty()).then(||
+        let mut generic_operand_declarations = (!func_info.type_param_ids.is_empty()).then(||
             args.iter().map(|argument| self.declared_expression_result(argument, None, 0, 0)).collect::<Vec<_>>());
         let args_start = if !args.is_empty() || func_info.param_count > 0 {
             // Phase 1: Compile all argument expressions
@@ -8232,6 +8309,14 @@ impl VbcCodegen {
                     }
                     let arg_val = if is_ffi_call { arg_val } else {
                         let actual = self.copy_source_type(arg, arg_val, argument_start, self.ctx.instructions.len());
+                        // A contextual inactive constructor acquires its complete
+                        // nominal arguments while emitting its producer. Retain
+                        // that receipt before the ownership transfer consumes it.
+                        if let Some(slot) = generic_operand_declarations.as_mut().and_then(|arguments| arguments.get_mut(i))
+                            && slot.is_none()
+                        {
+                            *slot = actual.clone();
+                        }
                         self.emit_owned_call_argument(&func_info, i, arg, arg_val, actual.as_ref())?
                     };
                     arg_results.push(arg_val);
@@ -8259,11 +8344,22 @@ impl VbcCodegen {
                     let default_reg = self.ctx.alloc_temp();
                     let load = self.load_parameter_default(default_reg, &parameter)?;
                     self.ctx.emit(load);
+                    if let Some(declarations) = generic_operand_declarations.as_mut() {
+                        // load_parameter_default validated the actual constant
+                        // against this exact declaration's scalar carrier.
+                        declarations.push(Some(parameter.type_ref.clone()));
+                    }
                     arg_results.push(default_reg);
                 } else if let Some(dexpr) = declared_defaults.as_ref()
                     .and_then(|defaults| defaults.get(slot)).and_then(Option::as_ref)
                 {
-                    let r = self.compile_expr(dexpr)?.or_internal("default argument has no value")?;
+                    let default_start = self.ctx.instructions.len();
+                    let r = self.compile_call_operand(dexpr,
+                        contexts.as_ref().and_then(|types| types.get(slot)?.as_ref()))?
+                        .or_internal("default argument has no value")?;
+                    if let Some(declarations) = generic_operand_declarations.as_mut() {
+                        declarations.push(self.copy_source_type(dexpr, r, default_start, self.ctx.instructions.len()));
+                    }
                     arg_results.push(r);
                 } else {
                     return Err(CodegenError::new(CodegenErrorKind::WrongArgumentCount {
@@ -8497,7 +8593,7 @@ impl VbcCodegen {
                 count: call_arg_count as u8,
             };
             let type_args_inferred = if final_func_id != UNRESOLVED_FN_ID {
-                self.infer_call_instantiation_with_declarations(final_func_id, None, args, generic_operand_declarations.as_deref())
+                self.infer_call_instantiation_with_declarations(final_func_id, None, args, generic_operand_declarations.as_deref(), type_args)
             } else {
                 None
             };
@@ -8662,15 +8758,24 @@ impl VbcCodegen {
         func_id: u32,
         receiver: Option<&Expr>,
         args: &[Expr],
+        explicit: &[verum_ast::ty::GenericArg],
     ) -> Option<CallInstantiation> {
-        self.infer_call_instantiation_with_declarations(func_id, receiver, args, None)
+        self.infer_call_instantiation_with_declarations(func_id, receiver, args, None, explicit)
     }
 
     fn infer_call_instantiation_with_declarations(
         &self, func_id: u32, receiver: Option<&Expr>, args: &[Expr], captured: Option<&[Option<crate::types::TypeRef>]>,
+        explicit: &[verum_ast::ty::GenericArg],
     ) -> Option<CallInstantiation> {
         let operands = receiver.into_iter().chain(args.iter());
         let count = args.len() + usize::from(receiver.is_some());
+        if self.call_has_source_declaration(crate::module::FunctionId(func_id)) {
+            let function = self.ctx.lookup_function_by_id(crate::module::FunctionId(func_id))?;
+            let mut bindings = crate::mono::TypeSubstitution::empty();
+            let selected = self.bind_source_type_arguments(function, explicit, &mut bindings)
+                .map(|()| self.selected_argument_bindings_in(function, count, operands, captured, bindings));
+            return Some(CallInstantiation::declared(function, selected));
+        }
         if let Some(declared) = self.declared_argument_witnesses(func_id, count, operands.clone(), captured) {
             return Some(CallInstantiation::known(declared));
         }
@@ -9044,7 +9149,7 @@ impl VbcCodegen {
         } else {
             declared_ids.iter().map(|id| bindings.remove(&u32::from(id.0))).collect()
         };
-        Some(CallInstantiation { slots })
+        Some(CallInstantiation { slots, rejection: None })
     }
 
     fn missing_call_witness(&self, function: Option<u32>, index: usize) -> CodegenError {
@@ -9070,6 +9175,31 @@ impl VbcCodegen {
         CodegenError::new(CodegenErrorKind::TypeInference(message.into()))
     }
 
+    fn call_has_source_declaration(&self, id: crate::module::FunctionId) -> bool {
+        self.declared_callable_descriptors.get(&id)
+            .or_else(|| self.functions.iter().find(|body| body.descriptor.id == id)
+                .map(|body| &body.descriptor))
+            .is_some_and(|descriptor| descriptor.source_signature.is_some())
+    }
+
+    fn complete_source_call_witnesses(
+        &self, function: &FunctionInfo,
+        bindings: &mut std::collections::BTreeMap<u16, crate::types::TypeRef>,
+    ) -> CodegenResult<()> {
+        if !self.call_has_source_declaration(function.id) { return Ok(()); }
+        let mut substitution = crate::mono::TypeSubstitution::empty();
+        for (id, ty) in bindings.iter() {
+            substitution.bind(crate::types::TypeParamId(*id), ty.clone());
+        }
+        self.complete_declared_callable_arguments(function, &mut substitution)
+            .ok_or_else(|| CodegenError::new(CodegenErrorKind::TypeInference(
+                "selected callable has unproved or conflicting declaration premises".into())))?;
+        for id in &function.type_param_ids {
+            if let Some(witness) = substitution.get(*id) { bindings.insert(id.0, witness.clone()); }
+        }
+        Ok(())
+    }
+
     /// A wire vector can represent a prefix. An interior hole cannot be
     /// encoded by a reference to a same-numbered parameter of the caller.
     fn call_witnesses_for(
@@ -9077,6 +9207,9 @@ impl VbcCodegen {
         function: Option<u32>,
         mut call: CallInstantiation,
     ) -> CodegenResult<Option<Vec<crate::types::TypeRef>>> {
+        if let Some(error) = call.rejection.take() {
+            return Err(error);
+        }
         let Some(last) = call.slots.iter().rposition(Option::is_some) else {
             return Ok(None);
         };
@@ -9116,7 +9249,10 @@ impl VbcCodegen {
         }
         let result_span = self.ctx.selected_call_result_span;
         self.prepare_nominal_constructor(function)?;
-        let inferred = self.selected_argument_witnesses(function, args.len(), args.iter(), None).map(CallInstantiation::known);
+        let mut bindings = crate::mono::TypeSubstitution::empty();
+        let selected = self.bind_source_type_arguments(function, explicit, &mut bindings)
+            .map(|()| self.selected_argument_bindings_in(function, args.len(), args.iter(), None, bindings));
+        let inferred = Some(CallInstantiation::declared(function, selected));
         let witnesses = self.apply_explicit_generic_args(Some(function), explicit, inferred)?;
         let name = function.return_type_name.as_deref().ok_or_else(|| CodegenError::internal("constructor has no declared name"))?;
         let nominal = function.nominal_constructor_type().or_internal("constructor lost its nominal owner")?;
@@ -9149,7 +9285,10 @@ impl VbcCodegen {
         inferred: Option<CallInstantiation>,
     ) -> CodegenResult<Option<Vec<crate::types::TypeRef>>> {
         use crate::types::TypeRef;
-        let inferred = inferred.unwrap_or_default();
+        let mut inferred = inferred.unwrap_or_default();
+        if let Some(error) = inferred.rejection.take() {
+            return Err(error);
+        }
         use verum_ast::ty::GenericArg;
         let ambiguous_array = explicit.iter().any(|argument| {
             matches!(argument,
@@ -9169,7 +9308,12 @@ impl VbcCodegen {
             .filter_map(|(id, slot)| slot.as_ref().map(|ty| (id.0, ty.clone())))
             .collect();
         if explicit.is_empty() {
+            self.complete_source_call_witnesses(info, &mut bindings)?;
             self.validate_callable_value_bindings(&info, &bindings)?;
+            let inferred = if self.call_has_source_declaration(info.id) {
+                CallInstantiation { slots: info.type_param_ids.iter().map(|id|
+                    bindings.get(&id.0).cloned()).collect(), rejection: None }
+            } else { inferred };
             return self.call_witnesses_for(func_id, inferred);
         }
         if ambiguous_array
@@ -9218,6 +9362,7 @@ impl VbcCodegen {
                 .ok_or_else(|| CodegenError::new(CodegenErrorKind::TypeInference("runtime generic slot received erased argument".into())))?;
             bindings.insert(id.0, value);
         }
+        self.complete_source_call_witnesses(info, &mut bindings)?;
         self.validate_callable_value_bindings(&info, &bindings)?;
         let result: Vec<TypeRef> = info
             .type_param_ids
@@ -9229,9 +9374,8 @@ impl VbcCodegen {
         self.call_witnesses_for(func_id, CallInstantiation::known(result))
     }
 
-    /// An invalid fixed-array length may not fall back to an unresolved generic
-    /// when the array is wrapped by a reference, tuple or function type.
-    fn explicit_type_contains_array(ty: &verum_ast::Type) -> bool {
+    /// Source holes can wait for operand evidence; executable witnesses cannot.
+    pub(super) fn explicit_type_contains_hole(ty: &verum_ast::Type) -> bool {
         use verum_ast::TypeKind;
         let mut pending = verum_common::List::from_iter([ty]);
         let mut visited = 0;
@@ -9241,8 +9385,16 @@ impl VbcCodegen {
                 return true;
             }
             match &ty.kind {
-                TypeKind::Array { .. } => return true,
-                TypeKind::Slice(inner)
+                TypeKind::Inferred => return true,
+                TypeKind::Generic { base, args } => {
+                    pending.push(base);
+                    pending.extend(args.iter().filter_map(|arg| match arg {
+                        verum_ast::ty::GenericArg::Type(ty) => Some(ty),
+                        _ => None,
+                    }));
+                }
+                TypeKind::Array { element: inner, .. }
+                | TypeKind::Slice(inner)
                 | TypeKind::Reference { inner, .. }
                 | TypeKind::CheckedReference { inner, .. }
                 | TypeKind::UnsafeReference { inner, .. } => pending.push(inner),
@@ -11115,7 +11267,7 @@ impl VbcCodegen {
             signature => Some(signature),
         });
         let parameters = match signature {
-            Some(crate::types::TypeRef::Function { is_async: false, params, .. }) => Some(params),
+            Some(crate::types::TypeRef::Function { params, .. }) => Some(params),
             _ => None,
         };
 
@@ -13980,7 +14132,7 @@ impl VbcCodegen {
                 .map(|info| self.contextual_call_parameters(info, type_args, args)).transpose()?.flatten();
             let expected = contextual.as_ref().and_then(|params| params.first()?.as_ref());
             let inferred = selected.as_ref()
-                .and_then(|info| self.infer_call_instantiation(info.id.0, None, args));
+                .and_then(|info| self.infer_call_instantiation(info.id.0, None, args, type_args));
             let inner = self.compile_call_operand(&args[0], expected)?
                 .or_internal("allocation argument has no value")?;
             let inferred = inferred.or_else(|| {
@@ -16530,8 +16682,6 @@ impl VbcCodegen {
         } else { None };
         let (effective_method_name, receiver_result_declaration) = typed_receiver
             .map_or((effective_method_name, receiver_result_declaration), |(name, owner)| (name, Some(owner)));
-        let method_id = self.intern_string(&effective_method_name);
-
         // `lookup_function_with_arity` handles overload sets via the
         // `name#arity` suffix convention (`compile_static_method_call`
         // uses the same pathway).  +1 for the receiver `self` slot.
@@ -16544,11 +16694,26 @@ impl VbcCodegen {
             receiver_result_declaration.as_ref(), args.len() + 1)?.cloned();
         let exact_receiver_target = specialized.as_ref().filter(|info| info.has_source_body)
             .map(|info| info.id.0);
-        let resolved_method = specialized.or_else(|| self
+        let instance_method = specialized.or_else(|| self
             .ctx
             .lookup_function_with_arity(&effective_method_name, args.len() + 1)
-            .filter(|fi| fi.param_count == args.len() + 1)
+            .filter(|fi| fi.param_count == args.len() + 1
+                && fi.param_names.first().is_some_and(|name| name == "self"))
             .cloned());
+        let static_method = if instance_method.is_none() {
+            receiver_result_declaration.as_ref().map(|receiver|
+                self.declared_static_receiver_method(receiver, method.name.as_str(), args.len()))
+                .transpose()?.flatten().map(|(function, owner)| (function.clone(), owner))
+        } else { None };
+        let effective_method_name = if let Some((_, owner)) = &static_method {
+            owner.base_type_id().and_then(|id| self.type_by_id(id))
+                .and_then(|descriptor| self.type_declaration_identity(descriptor))
+                .and_then(|name| self.registered_receiver_method(&name, method.name.as_str()))
+                .or_internal("selected static member lost its declared owner")?
+        } else { effective_method_name };
+        let method_id = self.intern_string(&effective_method_name);
+        let receiver_slots = usize::from(static_method.is_none());
+        let resolved_method = instance_method.or_else(|| static_method.map(|(function, _)| function));
         let resolvable_fid = resolved_method.as_ref()
             .filter(|fi| {
                 fi.id.0 != u32::MAX
@@ -16572,7 +16737,11 @@ impl VbcCodegen {
             return Err(CodegenError::with_span(CodegenErrorKind::UndefinedFunction(effective_method_name), method.span));
         }
 
-        let devirt_func_id: Option<u32> = if exact_receiver_target.is_some() {
+        let devirt_func_id: Option<u32> = if receiver_slots == 0 {
+            // CallM retains the selected nominal owner; the static declaration
+            // authorizes arguments only, without a synthetic self parameter.
+            None
+        } else if exact_receiver_target.is_some() {
             exact_receiver_target
         } else if effective_method_name.starts_with("dyn:")
             || effective_method_name.starts_with("byte$")
@@ -16596,22 +16765,24 @@ impl VbcCodegen {
         };
 
         let generic_operand_declarations = resolvable_fid.and_then(|id| self.ctx.lookup_function_by_id(crate::module::FunctionId(id)))
-            .filter(|function| !function.type_param_ids.is_empty()).map(|_| std::iter::once(receiver_result_declaration.clone())
+            .filter(|function| !function.type_param_ids.is_empty()).map(|_| std::iter::once(receiver_result_declaration.clone()).take(receiver_slots)
                 .chain(args.iter().map(|argument| self.declared_expression_result(argument, None, 0, 0))).collect::<Vec<_>>());
         // A temporary's exact type can first become known while emitting its
         // receiver. Bind the selected declaration before lowering its callbacks.
-        if let (Some(info), Some(receiver_type)) = (resolved_method.as_ref(), receiver_result_declaration.as_ref())
-            && let Some(formal) = self.ctx.semantic_fn_params.get(&info.id)
-                .and_then(|params| params.first()).and_then(Option::as_ref)
-        {
-            use crate::types::TypeRef;
-            let formal = match formal { TypeRef::Reference { inner, .. } => inner.as_ref(), ty => ty };
-            let actual = match receiver_type { TypeRef::Reference { inner, .. } => inner.as_ref(), ty => ty };
+        if let (Some(info), Some(receiver_type)) = (resolved_method.as_ref(), receiver_result_declaration.as_ref()) {
             let mut bindings = crate::mono::TypeSubstitution::empty();
-            if self.bind_source_declaration(formal, actual, &mut bindings) {
+            let bound = if receiver_slots == 0 {
+                self.bind_static_receiver_declaration(info, receiver_type, &mut bindings).is_some()
+            } else {
+                self.ctx.semantic_fn_params.get(&info.id)
+                    .and_then(|params| params.first()).and_then(Option::as_ref)
+                    .is_some_and(|formal| self.bind_source_declaration(
+                        crate::receiver_methods::pointee(formal), crate::receiver_methods::pointee(receiver_type), &mut bindings))
+            };
+            if bound {
                 for (index, arg) in args.iter().enumerate() {
                     if matches!(arg.kind, ExprKind::Closure { .. }) && (arg.span.start != 0 || arg.span.end != 0)
-                        && let Some(hints) = self.selected_closure_param_hints(info, index, 1, bindings.clone(), type_args, args)
+                        && let Some(hints) = self.selected_closure_param_hints(info, index, receiver_slots, bindings.clone(), type_args, args)
                     {
                         self.ctx.closure_param_type_hints.insert(arg.span, hints);
                     }
@@ -16637,7 +16808,7 @@ impl VbcCodegen {
         // arg `i` — exactly the same mechanism as
         // `compile_static_method_call` / `compile_call` use for the
         // statically-resolved path.
-        let closure_disambig_lookup = self
+        let closure_disambig_lookup = resolved_method.clone().or_else(|| self
             .ctx
             .lookup_function_with_arity_in_scope(method.name.as_str(), args.len() + 1)
             .or_else(|| {
@@ -16655,7 +16826,7 @@ impl VbcCodegen {
                     .find_function_by_suffix(&suffix)
                     .filter(|fi| fi.param_count == args.len() + 1)
             })
-            .cloned();
+            .cloned());
 
         // **Empty-param_closure_return_type_names fallback** (fundamental
         // fix for the bare-variant cross-module dispatch defect class).
@@ -16678,7 +16849,7 @@ impl VbcCodegen {
         // arity + simple-name with a NON-empty
         // `param_closure_return_type_names` and prefer that.
         let closure_disambig_lookup = closure_disambig_lookup.or_else(|| None).map(|fi| {
-            if fi.param_closure_return_type_names.is_empty() {
+            if resolved_method.is_none() && fi.param_closure_return_type_names.is_empty() {
                 let target_arity = args.len() + 1;
                 let simple_name = method.name.as_str();
                 let dot_suffix = format!(".{}", simple_name);
@@ -16711,7 +16882,7 @@ impl VbcCodegen {
                 let saved_disambig = if matches!(arg.kind, ExprKind::Closure { .. })
                     && let Some(ref fi) = closure_disambig_lookup
                     && let Some(Some(ret_name)) =
-                        fi.param_closure_return_type_names.get(i + 1)
+                        fi.param_closure_return_type_names.get(i + receiver_slots)
                 {
                     self.set_closure_return_type_hint(arg, ret_name);
                     Some(self.ctx.push_disambig_context(Some(ret_name.clone())))
@@ -16720,17 +16891,17 @@ impl VbcCodegen {
                 };
                 let copy_start = self.ctx.instructions.len();
                 let arg_val = self
-                    .compile_call_operand(arg, contexts.as_ref().and_then(|types| types.get(i + 1)?.as_ref()))?
+                    .compile_call_operand(arg, contexts.as_ref().and_then(|types| types.get(i + receiver_slots)?.as_ref()))?
                     .or_internal("method arg has no value")?;
                 let copy_type = self.copy_source_type(arg, arg_val, copy_start, self.ctx.instructions.len());
                 // Builtin storage uses CallM for its native layout. The selected
                 // declaration still specifies which operands own their values.
-                let receives_value = devirt_func_id.is_some()
+                let receives_value = devirt_func_id.is_some() || (receiver_slots == 0 && resolved_method.as_ref().is_some_and(|method| method.has_source_body))
                     || (stores_arguments && type_prefix_intercepted_by_runtime(&effective_method_name));
                 let source = arg_val;
                 let arg_val = if let Some(callable) = resolved_method.as_ref().filter(|_| receives_value) {
-                    self.emit_owned_call_argument(callable, i + 1, arg, source, copy_type.as_ref())?
-                } else if let Some(member) = dynamic.as_ref().filter(|member| !member.is_async) {
+                    self.emit_owned_call_argument(callable, i + receiver_slots, arg, source, copy_type.as_ref())?
+                } else if let Some(member) = dynamic.as_ref() {
                     self.emit_declared_call_argument(member.inputs.get(i), arg, source, copy_type.as_ref())?
                 } else { source };
                 copy_arguments.push(source == arg_val && stores_arguments
@@ -16851,11 +17022,18 @@ impl VbcCodegen {
 
         // A by-value self parameter consumes the same declared owner as an
         // ordinary argument. Borrow adjustments preserve the caller's binding.
-        let actual_receiver = if actual_receiver == receiver_reg && !receiver_is_borrowed
+        let actual_receiver = if receiver_slots == 1 && actual_receiver == receiver_reg && !receiver_is_borrowed
             && let Some(callable) = resolved_method.as_ref()
             && (devirt_func_id.is_some() || type_prefix_intercepted_by_runtime(&effective_method_name))
         {
             self.emit_owned_call_argument(callable, 0, receiver, actual_receiver, receiver_result_declaration.as_ref())?
+        } else if actual_receiver == receiver_reg && !receiver_is_borrowed
+            && dynamic.as_ref().is_some_and(|member| member.receiver.meta().is_by_value)
+        {
+            self.emit_declared_call_argument(
+                receiver_result_declaration.as_ref(), receiver, actual_receiver,
+                receiver_result_declaration.as_ref(),
+            )?
         } else {
             actual_receiver
         };
@@ -16930,8 +17108,18 @@ impl VbcCodegen {
         let value_generic_target = resolvable_fid.and_then(|id| self.ctx.lookup_function_by_id(crate::module::FunctionId(id)))
             .is_some_and(|function| self.callable_has_value_parameters(function));
         let sidecar_args = resolvable_fid
-            .and_then(|fid| self.infer_call_instantiation_with_declarations(
-                fid, Some(receiver), args, generic_operand_declarations.as_deref()))
+            .and_then(|fid| if receiver_slots == 0 {
+                let function = self.ctx.lookup_function_by_id(crate::module::FunctionId(fid))?;
+                let mut bindings = crate::mono::TypeSubstitution::empty();
+                let selected = self.bind_source_type_arguments(function, type_args, &mut bindings)
+                    .map(|()| self.bind_static_receiver_declaration(function, receiver_result_declaration.as_ref()?, &mut bindings)
+                        .and_then(|()| self.selected_argument_bindings_in(function, args.len(), args.iter(),
+                            generic_operand_declarations.as_deref(), bindings)));
+                Some(CallInstantiation::declared(function, selected))
+            } else {
+                self.infer_call_instantiation_with_declarations(
+                    fid, Some(receiver), args, generic_operand_declarations.as_deref(), type_args)
+            })
             .or_else(|| (!value_generic_target).then(|| self.derive_receiver_witnesses(receiver))
                 .flatten().map(CallInstantiation::known));
 
@@ -17032,7 +17220,7 @@ impl VbcCodegen {
                     while let ExprKind::Paren(inner) = &unwrapped.kind { unwrapped = inner; }
                     if matches!(&unwrapped.kind, ExprKind::Closure { .. })
                         && self.compiled_callable_signature(unwrapped).is_none()
-                        && let Some(id) = self.parameter_generic_id(fid, index + 1)
+                        && let Some(id) = self.parameter_generic_id(fid, index + receiver_slots)
                     {
                         ret_bindings.remove(&u32::from(id.0));
                     }
@@ -18519,7 +18707,7 @@ impl VbcCodegen {
             start: args_start,
             count: args.len() as u8,
         };
-        let mut inferred_type_args = self.infer_call_instantiation(func_info.id.0, None, args);
+        let mut inferred_type_args = self.infer_call_instantiation(func_info.id.0, None, args, type_args);
         if let Some(staged) = staged_type_args {
             let inferred = inferred_type_args.get_or_insert_with(CallInstantiation::default);
             for (index, value) in staged.into_iter().enumerate() { inferred.fill(index, value); }
@@ -19551,7 +19739,7 @@ impl VbcCodegen {
         let mode = borrow.map_or(PatternBindingMode::Value, |(mutability, tier)| {
             PatternBindingMode::Borrowed(mutability, tier)
         });
-        self.compile_pattern_bind_mode(pattern, reg, &mode)?;
+        self.compile_pattern_bind_mode(pattern, reg, &mode, Some(pointee))?;
         self.bind_pattern_declaration(pattern, pointee, borrow);
         Ok(())
     }
@@ -19914,6 +20102,13 @@ impl VbcCodegen {
     /// Preserve the type of each tuple component, including nested literals.
     /// An unknown component leaves the declarations of its siblings intact.
     fn pattern_subject_type(&self, expr: &Expr) -> Option<String> {
+        // The value's retained declaration includes field substitutions and
+        // this body's equality premises. A display-only field hint may still
+        // name the original generic parameter and cannot erase that evidence.
+        if let Some(declared) = self.declared_expression_result(expr, None, 0, 0) {
+            return self.scoped_callable_type_name(&declared, Some(&self.ctx.current_generic_param_ids))
+                .map(|name| name.to_string());
+        }
         if let ExprKind::Tuple(elements) = &expr.kind {
             let types: Vec<_> = elements
                 .iter()
@@ -21576,8 +21771,10 @@ impl VbcCodegen {
         reg: Reg,
         mode: &PatternBindingMode,
         type_name: Option<&str>,
+        declaration: Option<&crate::types::TypeRef>,
     ) {
-        let Some(inner) = type_name.and_then(|name| self.semantic_type_in_current_scope(name))
+        let Some(inner) = declaration.cloned().or_else(||
+            type_name.and_then(|name| self.semantic_type_in_current_scope(name)))
         else { return; };
         let ty = match mode {
             PatternBindingMode::Borrowed(mutability, tier) => crate::types::TypeRef::Reference {
@@ -21598,7 +21795,12 @@ impl VbcCodegen {
         expression: &Expr,
     ) -> CodegenResult<()> {
         let mode = self.pattern_binding_mode(expression);
-        self.compile_pattern_bind_mode(pattern, scrutinee, &mode)
+        let declaration = self.declared_expression_result(expression, None, 0, 0);
+        let declaration = match (&mode, declaration.as_ref()) {
+            (PatternBindingMode::Borrowed(..), Some(crate::types::TypeRef::Reference { inner, .. })) => Some(inner.as_ref()),
+            (_, declaration) => declaration,
+        };
+        self.compile_pattern_bind_mode(pattern, scrutinee, &mode, declaration)
     }
 
     /// Binds an owned value. Refutable source bindings use the expression-aware entry.
@@ -21607,7 +21809,9 @@ impl VbcCodegen {
         pattern: &verum_ast::Pattern,
         scrutinee: Reg,
     ) -> CodegenResult<()> {
-        self.compile_pattern_bind_mode(pattern, scrutinee, &PatternBindingMode::Value)
+        let declaration = self.ctx.registers.value_uses.active.get(&scrutinee)
+            .and_then(|fact| fact.declaration_type.clone());
+        self.compile_pattern_bind_mode(pattern, scrutinee, &PatternBindingMode::Value, declaration.as_ref())
     }
 
     fn emit_reference_attenuation(&mut self, reference: Reg, allowed: crate::value::Capabilities) {
@@ -21637,6 +21841,7 @@ impl VbcCodegen {
         pattern: &verum_ast::Pattern,
         scrutinee: Reg,
         mode: &PatternBindingMode,
+        declaration: Option<&crate::types::TypeRef>,
     ) -> CodegenResult<()> {
         use verum_ast::PatternKind;
 
@@ -21665,7 +21870,7 @@ impl VbcCodegen {
                 );
                 let binding_mode = if *by_ref { &explicit_mode } else { mode };
                 let binding_type = self.ctx.match_scrutinee_type.clone();
-                self.record_pattern_type(var_reg, binding_mode, binding_type.as_deref());
+                self.record_pattern_type(var_reg, binding_mode, binding_type.as_deref(), declaration);
                 // A fresh declaration must not inherit a shadowed array's
                 // count. T1615 keys this by binding identity so the outer
                 // declaration's facts survive its temporary shadow.
@@ -21687,7 +21892,7 @@ impl VbcCodegen {
                 }
                 // Recursively bind subpattern variables (e.g., x @ Circle { radius } binds both x and radius)
                 if let verum_common::Maybe::Some(sub_pat) = subpattern {
-                    self.compile_pattern_bind_mode(sub_pat, scrutinee, mode)?;
+                    self.compile_pattern_bind_mode(sub_pat, scrutinee, mode, declaration)?;
                 }
             }
 
@@ -21729,7 +21934,19 @@ impl VbcCodegen {
                             PatternBindingMode::Tuple(modes) => modes.get(i).unwrap_or(&owned_mode),
                             _ => mode,
                         };
-                        self.compile_pattern_bind_mode(elem, elem_reg, element_mode)?;
+                        let element_type = match declaration {
+                            Some(crate::types::TypeRef::Tuple(parts)) => parts.get(i),
+                            _ => None,
+                        };
+                        // A tuple expression supplies each element's own
+                        // reference mode. An inherited tuple borrow instead
+                        // borrows the field itself, including a reference field.
+                        let element_type = match (mode, element_mode, element_type) {
+                            (PatternBindingMode::Tuple(_), PatternBindingMode::Borrowed(..),
+                                Some(crate::types::TypeRef::Reference { inner, .. })) => Some(inner.as_ref()),
+                            _ => element_type,
+                        };
+                        self.compile_pattern_bind_mode(elem, elem_reg, element_mode, element_type)?;
                         // Record a simple `let (a, b) = …` element's type so
                         // downstream method dispatch on the bound name resolves
                         // (RECORD-LET-REF-TYPE-LOSS). Only fires for a genuine
@@ -21757,7 +21974,7 @@ impl VbcCodegen {
             }
 
             PatternKind::Paren(inner) => {
-                self.compile_pattern_bind_mode(inner, scrutinee, mode)?;
+                self.compile_pattern_bind_mode(inner, scrutinee, mode, declaration)?;
             }
 
             PatternKind::Variant { path, data, .. } => {
@@ -21890,7 +22107,9 @@ impl VbcCodegen {
                                 if let Some(ref t) = inner_ty {
                                     self.ctx.match_scrutinee_type = Some(t.clone());
                                 }
-                                self.compile_pattern_bind_mode(inner_pat, scrutinee, mode)?;
+                                let inner_declaration = declaration.and_then(|ty|
+                                    self.projected_field_declaration(ty.clone(), "0"));
+                                self.compile_pattern_bind_mode(inner_pat, scrutinee, mode, inner_declaration.as_ref())?;
                                 self.ctx.match_scrutinee_type = prev_st;
                                 return Ok(());
                             }
@@ -21903,7 +22122,9 @@ impl VbcCodegen {
                                         dst: deref_reg,
                                         ref_reg: scrutinee,
                                     });
-                                    self.compile_pattern_bind_mode(inner_pat, deref_reg, mode)?;
+                                    let inner_declaration = declaration.and_then(|ty|
+                                        self.projected_field_declaration(ty.clone(), "0"));
+                                    self.compile_pattern_bind_mode(inner_pat, deref_reg, mode, inner_declaration.as_ref())?;
                                 }
                             } else {
                                 for (i, pat) in patterns.iter().enumerate() {
@@ -22087,8 +22308,10 @@ impl VbcCodegen {
                                         &mut self.ctx.match_scrutinee_type,
                                         field_type.clone(),
                                     );
-                                    let bind_result =
-                                        self.compile_pattern_bind_mode(pat, field_reg, mode);
+                                    let field_declaration = self.pattern_variant_payload_declaration(
+                                        declaration, &variant_name, i as u32)?;
+                                    let bind_result = self.compile_pattern_bind_mode(
+                                        pat, field_reg, mode, field_declaration.as_ref());
                                     self.ctx.match_scrutinee_type = previous_scrutinee_type;
                                     bind_result?;
 
@@ -22199,7 +22422,9 @@ impl VbcCodegen {
                                 // Bind the field value
                                 if let verum_common::Maybe::Some(ref inner_pattern) = field.pattern
                                 {
-                                    self.compile_pattern_bind_mode(inner_pattern, field_reg, mode)?;
+                                    let field_declaration = self.pattern_variant_payload_declaration(
+                                        declaration, &variant_name, field_idx)?;
+                                    self.compile_pattern_bind_mode(inner_pattern, field_reg, mode, field_declaration.as_ref())?;
                                     // Track type for inner pattern if it's an identifier
                                     if let Some(ref types) = payload_types
                                         && let Some(type_name) = types.get(field_idx as usize)
@@ -22215,7 +22440,9 @@ impl VbcCodegen {
                                 } else {
                                     // Shorthand: { field } means { field: field }
                                     let var_reg = self.ctx.define_var(&field_name, false);
-                                    self.record_pattern_type(var_reg, mode, field_type.as_deref());
+                                    let field_declaration = self.pattern_variant_payload_declaration(
+                                        declaration, &variant_name, field_idx)?;
+                                    self.record_pattern_type(var_reg, mode, field_type.as_deref(), field_declaration.as_ref());
                                     if let Some(binding) = self.ctx.lookup_var_mut(&field_name) {
                                         binding.is_pattern_alias = mode.is_borrowed();
                                     }
@@ -22254,7 +22481,7 @@ impl VbcCodegen {
                 // from any alternative (they all should bind the same variables)
                 // For correctness, we try each until one succeeds in matching
                 if let Some(first) = alternatives.first() {
-                    self.compile_pattern_bind_mode(first, scrutinee, mode)?;
+                    self.compile_pattern_bind_mode(first, scrutinee, mode, declaration)?;
                 }
             }
 
@@ -22410,8 +22637,14 @@ impl VbcCodegen {
                         &mut self.ctx.match_scrutinee_type,
                         field_type_name.clone(),
                     );
+                    let field_declaration = if is_variant {
+                        let field_idx = self.resolve_field_index(Some(&field_key), &field_name);
+                        self.pattern_variant_payload_declaration(declaration, &type_name, field_idx)?
+                    } else {
+                        declaration.and_then(|ty| self.projected_field_declaration(ty.clone(), &field_name))
+                    };
                     if let verum_common::Maybe::Some(ref inner_pattern) = field.pattern {
-                        self.compile_pattern_bind_mode(inner_pattern, field_reg, mode)?;
+                        self.compile_pattern_bind_mode(inner_pattern, field_reg, mode, field_declaration.as_ref())?;
                         // Track type for inner pattern if it's an identifier
                         if let Some(ref ft) = field_type_name
                             && let PatternKind::Ident { name, .. } = &inner_pattern.kind
@@ -22425,7 +22658,7 @@ impl VbcCodegen {
                     } else {
                         // Shorthand: { x } means bind x to the field value
                         let var_reg = self.ctx.define_var(&field_name, false);
-                        self.record_pattern_type(var_reg, mode, field_type_name.as_deref());
+                        self.record_pattern_type(var_reg, mode, field_type_name.as_deref(), field_declaration.as_ref());
                         if let Some(binding) = self.ctx.lookup_var_mut(&field_name) {
                             binding.is_pattern_alias = mode.is_borrowed();
                         }
@@ -27327,7 +27560,7 @@ impl VbcCodegen {
                     // expected type is the callable result, never a surrounding
                     // record field or let-binding hint.
                     let prior = std::mem::replace(&mut self.ctx.expected_value_type, outer_declared);
-                    let witnesses = self.infer_call_instantiation(fid, None, std::slice::from_ref(inner));
+                    let witnesses = self.infer_call_instantiation(fid, None, std::slice::from_ref(inner), &[]);
                     self.ctx.expected_value_type = prior;
                     let args = crate::instruction::RegRange::new(inner_reg, 1);
                     if let Some(type_args) = self.call_witnesses_for(Some(fid), witnesses.unwrap_or_default())? {
@@ -32055,11 +32288,14 @@ impl VbcCodegen {
                 }
             }
         }
+        self.complete_declared_callable_arguments(info, &mut substitution)?;
         let hints: verum_common::List<_> = params.iter().map(|ty| {
             if !super::constructor_types::fully_bound(ty, &substitution) { return None; }
-            let ty = self.resolve_declared_associated_types(&substitution.apply(ty).ok()?)?;
-            (self.declared_type_in_scope(&ty)
-                && self.scoped_callable_type_name(&ty, Some(&self.ctx.current_generic_param_ids)).is_some()).then_some(ty)
+            // These are caller witnesses after substitution. An associated
+            // member can remain symbolic in that scope; its declared type is
+            // sufficient even when no concrete implementation is selected yet.
+            let ty = self.body_declaration_type(&substitution.apply(ty).ok()?)?;
+            self.declared_type_in_scope(&ty).then_some(ty)
         }).collect();
         hints.iter().any(Option::is_some).then_some(hints)
     }
@@ -32630,8 +32866,8 @@ impl VbcCodegen {
                 let reg = binding.reg;
                 let discipline = self.value_resource_discipline(ty);
                 self.ctx.registers.value_uses.set_type(reg, ty.clone(), discipline);
-                if !is_async { self.establish_parameter_owner(reg, ty)?; }
-            } else if !is_async {
+                self.establish_parameter_owner(reg, ty)?;
+            } else {
                 return Err(CodegenError::unsupported_expr(
                     "owned closure parameter requires a complete declaration and binding inventory"));
             }
@@ -32640,7 +32876,7 @@ impl VbcCodegen {
             }
         }
 
-        self.ctx.registers.emits_owned_parameter_calls = !is_async;
+        self.ctx.registers.emits_owned_parameter_calls = true;
 
         // T1687: freeze the closure's own return boundary before compiling
         // nested field/argument/initializer expressions. Complete explicit or
@@ -32769,7 +33005,7 @@ impl VbcCodegen {
         let mut descriptor = crate::module::FunctionDescriptor::new(name_id);
         descriptor.id = crate::module::FunctionId(func_id);
         descriptor.has_source_body = true;
-        descriptor.owned_value_parameters = !is_async;
+        descriptor.owned_value_parameters = true;
         descriptor.is_generic = !lexical_param_ids.is_empty();
         if is_async { descriptor.properties |= crate::types::PropertySet::ASYNC; }
         for &id in lexical_param_ids {
@@ -44207,7 +44443,7 @@ impl VbcCodegen {
             // callees and unresolved receivers derive nothing and keep
             // the plain `Call` unchanged.
             let fmt_type_args = if type_name.contains('<') {
-                let call = self.infer_call_instantiation(fid, Some(expr), &[]).unwrap_or_default();
+                let call = self.infer_call_instantiation(fid, Some(expr), &[], &[]).unwrap_or_default();
                 self.call_witnesses_for(Some(fid), call)?
             } else {
                 None

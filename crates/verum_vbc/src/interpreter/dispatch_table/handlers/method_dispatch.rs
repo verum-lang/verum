@@ -58,6 +58,57 @@ fn fat_ref_single_referent(v: &Value) -> Option<Value> {
     }
 }
 
+/// A qualified protocol call selects that declaration's implementation table.
+/// A same-named method from another protocol is never a fallback. The walk is
+/// bounded by this receiver's implementation rows, not the module's functions.
+fn declared_protocol_method(
+    state: &InterpreterState,
+    receiver: TypeId,
+    qualifiers: &str,
+    method: &str,
+    operand: Option<TypeId>,
+) -> InterpreterResult<FunctionId> {
+    let invalid = |message| InterpreterError::InvalidBytecode {
+        pc: state.pc() as usize,
+        message,
+    };
+    let owner = state.module.get_type(receiver)
+        .ok_or_else(|| invalid(format!("protocol call has unknown receiver {receiver:?}")))?;
+    let mut selected = None;
+    for implementation in &owner.protocols {
+        let Some(protocol) = state.module.get_type(TypeId(implementation.protocol.0)) else {
+            return Err(invalid("protocol implementation has no declaration".into()));
+        };
+        let Some(name) = state.module.get_string(protocol.name) else {
+            return Err(invalid("protocol declaration has no name".into()));
+        };
+        let origin = protocol.origin_module
+            .and_then(|id| state.module.get_string(id))
+            .unwrap_or(&state.module.name);
+        let identity = crate::module::qualify_module_name(origin, name);
+        if !qualifiers.split('+').map(str::trim)
+            .any(|qualifier| qualifier == identity || (!qualifier.contains('.') && qualifier == name))
+        {
+            continue;
+        }
+        if !protocol.variants.iter().any(|member| state.module.get_string(member.name) == Some(method)) {
+            continue;
+        }
+        if selected.is_some_and(|previous| previous != implementation.protocol) {
+            return Err(invalid(format!(
+                "ambiguous declared protocol call `{qualifiers}.{method}` for {receiver:?}",
+            )));
+        }
+        selected = Some(implementation.protocol);
+    }
+    let missing = || invalid(format!(
+        "no implementation of declared protocol member `{qualifiers}.{method}` for {receiver:?}",
+    ));
+    let protocol = selected.ok_or_else(missing)?;
+    state.module.implementation_method(receiver, protocol, method, operand)
+        .map_err(invalid)?.ok_or_else(missing)
+}
+
 /// CTX-UNIT-RECEIVER-DISPATCH-1 (T0245) kill switch: restores the
 /// pre-fix fallthrough (unit receivers under dyn dispatch degrade to the
 /// bare-suffix scan).  Convention mirror of
@@ -2698,27 +2749,40 @@ fn execute_method_call(
                             | TypeId::BYTE_LIST
                             | TypeId::DEQUE
                     )
-                    && let Some(fid) = state
-                        .module
-                        .resolve_protocol_method_by_name(tid.0, &bare_method_name)
-                    && let Some(func) = state.module.get_function(fid)
-                    && (func.params.len() == args.count as usize + 1
-                        || func.params.len() == args.count as usize)
                 {
-                    if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceProtocolDispatch) {
-                        eprintln!(
-                            "[protocol-dispatch] hit tid={} method='{}' -> fid={} '{}'",
-                            tid.0,
-                            bare_method_name,
-                            fid.0,
-                            state
-                                .module
-                                .strings
-                                .get(func.name)
-                                .unwrap_or("?"),
-                        );
+                    let target = if let Some(protocol) = dyn_protocol.as_deref() {
+                        let operand = if args.count == 0 { None } else {
+                            let raw = state.registers.get(state.reg_base(), args.start);
+                            let value = resolve_arg_value(state, raw)?;
+                            Some(super::object_dispatch::runtime_type_for_dispatch(&value, state)
+                                .map(|(id, _)| TypeId(id))
+                                .unwrap_or_else(|| super::calls::get_builtin_type_id(value)))
+                        };
+                        Some(declared_protocol_method(state, tid, protocol, &bare_method_name, operand)?)
+                    } else {
+                        state.module.resolve_protocol_method_by_name(tid.0, &bare_method_name)
+                    };
+                    if let Some(fid) = target
+                        && let Some(func) = state.module.get_function(fid)
+                    {
+                        if func.params.len() == args.count as usize + 1
+                            || func.params.len() == args.count as usize
+                        {
+                            if crate::interpreter::env_flags::is_set(crate::interpreter::env_flags::Flag::TraceProtocolDispatch) {
+                                eprintln!(
+                                    "[protocol-dispatch] hit tid={} method='{}' -> fid={} '{}'",
+                                    tid.0, bare_method_name, fid.0,
+                                    state.module.strings.get(func.name).unwrap_or("?"),
+                                );
+                            }
+                            found_func_id = Some(fid);
+                        } else if dyn_protocol.is_some() {
+                            return Err(InterpreterError::InvalidBytecode {
+                                pc: state.pc() as usize,
+                                message: "declared protocol method argument count mismatch".into(),
+                            });
+                        }
                     }
-                    found_func_id = Some(fid);
                 }
             }
         }

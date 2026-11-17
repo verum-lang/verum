@@ -578,6 +578,7 @@ impl PrettyPrinter {
     fn format_type_bound(&mut self, bound: &TypeBound) {
         match &bound.kind {
             TypeBoundKind::Protocol(path) => self.format_path(path),
+            TypeBoundKind::Callable(ty) => self.format_type(ty),
             TypeBoundKind::Equality(ty) => {
                 self.write("= ");
                 self.format_type(ty);
@@ -639,7 +640,11 @@ impl PrettyPrinter {
         match &pred.kind {
             WherePredicateKind::Type { ty, bounds } => {
                 self.format_type(ty);
-                self.write(": ");
+                if matches!(bounds.as_slice(), [bound] if matches!(bound.kind, TypeBoundKind::Equality(_))) {
+                    self.write(" ");
+                } else {
+                    self.write(": ");
+                }
                 self.format_type_bounds(bounds);
             }
             WherePredicateKind::Meta { constraint } => {

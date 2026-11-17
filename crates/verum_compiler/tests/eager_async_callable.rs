@@ -331,16 +331,19 @@ fn callable_and_rank_two_metadata_preserve_async_and_exact_output() {
 
 #[test]
 fn ordinary_archive_metadata_does_not_invent_a_pure_body() {
+    let source = "module core.eager; public async fn pulse()->Int { 7 }";
+    let compiled = checked_module(source, "core.eager");
+    let ast = Parser::new(source).parse_module().unwrap();
+    let interface = VbcCodegen::with_config(CodegenConfig::new("core.eager"))
+        .collect_declaration_interface(&[&ast]).unwrap();
+    for module in [compiled, interface] {
+        assert_metadata_has_unknown_body(module);
+    }
+}
+
+fn assert_metadata_has_unknown_body(module: VbcModule) {
     use verum_types::computational_properties::{PropertyRequirement, PropertySet};
 
-    // Source compilation now always carries its declaration signature. Build
-    // the ABI-only input explicitly so this separate replay boundary remains
-    // covered without stripping evidence from a source-produced archive.
-    let mut module = VbcModule::new("core.eager".into());
-    let mut function = verum_vbc::module::FunctionDescriptor::new(module.intern_string("pulse"));
-    function.return_type = TypeRef::Concrete(TypeId::INT);
-    function.properties = verum_vbc::types::PropertySet::ASYNC;
-    module.add_function(function);
     let wire = serialize_module(&module).unwrap();
     let restored = deserialize_module(&wire).unwrap();
     let mut builder = ArchiveBuilder::new();
@@ -354,10 +357,9 @@ fn ordinary_archive_metadata_does_not_invent_a_pure_body() {
         .get(&Text::from("core.eager.pulse"))
         .expect("the actual exported declaration");
     assert!(declaration.is_async);
-    assert!(
-        declaration.source_signature.is_none(),
-        "this regression must exercise ordinary ABI metadata replay"
-    );
+    let source = declaration.source_signature.as_ref().expect("actual source signature");
+    assert!(source.is_async && source.body.is_none(),
+        "a retained signature does not retain body-inferred properties");
     let encoded = verum_types::core_metadata::encode_metadata(&metadata).unwrap();
     let decoded = verum_types::core_metadata::decode_metadata(&encoded).unwrap();
     let mut checker = TypeChecker::new_with_core_eager(Arc::new(decoded));
@@ -398,4 +400,18 @@ fn ordinary_archive_metadata_does_not_invent_a_pure_body() {
         "{:?}",
         checker.diagnostics()
     );
+}
+
+#[test]
+fn abi_only_async_declarations_require_source_before_metadata_publication() {
+    let mut module = VbcModule::new("core.eager".into());
+    let mut function = verum_vbc::module::FunctionDescriptor::new(module.intern_string("pulse"));
+    function.return_type = TypeRef::Concrete(TypeId::INT);
+    function.properties = verum_vbc::types::PropertySet::ASYNC;
+    module.add_function(function);
+    let restored = deserialize_module(&serialize_module(&module).unwrap()).unwrap();
+    let mut builder = ArchiveBuilder::new();
+    builder.add_module("core.eager", &restored, &[]).unwrap();
+    let error = archive_to_core_metadata(&builder.finish()).unwrap_err();
+    assert!(error.contains("declaration-owned source signature") && error.contains("rebuild"), "{error}");
 }

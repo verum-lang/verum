@@ -3025,7 +3025,7 @@ impl<'a> RecursiveParser<'a> {
                     }
                     if self.stream.check(&TokenKind::Bang)
                         || self.is_ident()
-                        || self.stream.check(&TokenKind::Fn)
+                        || matches!(self.stream.peek_kind(), Some(TokenKind::Fn | TokenKind::Async))
                     {
                         self.parse_type_bounds_or_type()?
                     } else {
@@ -3178,7 +3178,7 @@ impl<'a> RecursiveParser<'a> {
                 // Also supports function type bounds: F: Fn(T) -> U
                 let bounds = if self.stream.check(&TokenKind::Bang)
                     || self.is_ident()
-                    || self.stream.check(&TokenKind::Fn)
+                    || matches!(self.stream.peek_kind(), Some(TokenKind::Fn | TokenKind::Async))
                 {
                     self.parse_type_bounds_or_type()?
                 } else {
@@ -3377,7 +3377,7 @@ impl<'a> RecursiveParser<'a> {
     /// - Other complex type bounds
     ///
     /// If the bound is a simple path (protocol name), it creates a Protocol bound.
-    /// If it's a complex type (like a function type), it creates an Equality bound.
+    /// Function signatures create a callable capability, distinct from equality.
     pub fn parse_type_bounds_or_type(&mut self) -> ParseResult<List<TypeBound>> {
         let start_pos = self.stream.position();
 
@@ -3470,7 +3470,8 @@ impl<'a> RecursiveParser<'a> {
     /// Convert a Type to a TypeBound.
     /// - If it's a simple path, creates a Protocol bound
     /// - If it's a generic type (like Iterator<Item = T>), creates a GenericProtocol bound
-    /// - Otherwise, creates an Equality bound (for complex types like function types)
+    /// - Function signatures create callable bounds, independently of exact equations.
+    /// - Other existing type-formation constraints keep their structural carrier.
     fn type_to_type_bound(&self, ty: Type) -> ParseResult<TypeBound> {
         let span = ty.span;
 
@@ -3489,18 +3490,14 @@ impl<'a> RecursiveParser<'a> {
                         span,
                     })
                 } else {
-                    // Complex base type - use Equality bound
-                    Ok(TypeBound {
-                        kind: TypeBoundKind::Equality(ty),
-                        span,
-                    })
+                    Ok(TypeBound { kind: TypeBoundKind::Equality(ty), span })
                 }
             }
-            // For complex types (function types, etc.), use Equality bound
-            _ => Ok(TypeBound {
-                kind: TypeBoundKind::Equality(ty),
+            TypeKind::Function { .. } | TypeKind::Rank2Function { .. } => Ok(TypeBound {
+                kind: TypeBoundKind::Callable(ty),
                 span,
             }),
+            _ => Ok(TypeBound { kind: TypeBoundKind::Equality(ty), span }),
         }
     }
 
@@ -3793,46 +3790,30 @@ impl<'a> RecursiveParser<'a> {
         }
 
         // 6. Implicit type constraint: where T: Protocol (without "type" keyword)
-        //  Also handles associated type equality: where T.Item = Int
-        // Try to parse as type constraint if we have an identifier followed by colon or dot
-        if self.is_ident() || self.stream.check(&TokenKind::SelfType) {
+        //  Also handles type equality: where T = U or T.Item = Int.
+        // An equality belongs to the complete parsed type subject; a bare
+        // parameter must not fall through into a value assignment predicate.
+        {
             let checkpoint = self.stream.position();
             // Use parse_type_no_sigma to prevent `T: Eq` from being parsed as a sigma type.
             // In `where T: Eq`, `T` is a type identifier and `: Eq` is a type bound,
             // not a sigma type pattern.
             if let Ok(ty) = self.parse_type_no_sigma() {
-                // Check for associated type equality: T.Item = Type
-                // Note: parse_type() will have already consumed T.Item as a Qualified type if present
-                // So we check if the parsed type is a Qualified type followed by '='
-                if let TypeKind::Qualified {
-                    self_ty,
-                    trait_ref,
-                    assoc_name,
-                } = &ty.kind
-                {
-                    // Check if this is followed by '=' (associated type equality)
-                    if self.stream.check(&TokenKind::Eq) {
-                        self.stream.advance(); // consume '='
-
-                        // Parse the concrete type without refinement to avoid consuming
-                        // the function/impl body brace as a refinement predicate
-                        let concrete_ty = self.parse_type_no_refinement()?;
-
-                        // Create an equality bound: T.Item = Type
-                        let span = self.stream.make_span(start_pos);
-                        return Ok(WherePredicate {
-                            kind: WherePredicateKind::Type {
-                                ty: ty.clone(),
-                                bounds: vec![TypeBound {
-                                    kind: TypeBoundKind::Equality(concrete_ty),
-                                    span,
-                                }]
-                                .into_iter()
-                                .collect::<List<_>>(),
-                            },
-                            span,
-                        });
-                    }
+                if self.stream.check(&TokenKind::Eq) {
+                    self.stream.advance();
+                    // The following brace belongs to the callable body, not
+                    // to a refinement on the equality's right-hand type.
+                    let concrete_ty = self.parse_type_no_refinement()?;
+                    let span = self.stream.make_span(start_pos);
+                    return Ok(WherePredicate {
+                        kind: WherePredicateKind::Type {
+                            ty,
+                            bounds: std::iter::once(TypeBound {
+                                kind: TypeBoundKind::Equality(concrete_ty), span,
+                            }).collect::<List<_>>(),
+                        },
+                        span,
+                    });
                 }
 
                 // Regular type constraint: T: Protocol

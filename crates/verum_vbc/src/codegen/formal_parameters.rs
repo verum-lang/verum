@@ -105,11 +105,14 @@ impl VbcCodegen {
         name: Option<&String>,
     ) -> super::CodegenResult<()> {
         let names = self.ctx.generic_type_params_ordered.clone();
-        let (dense, _) = self.declared_impl_generic_param_maps(function, &implementation.kind, &names);
+        let dense = self.declared_impl_generic_scope(&implementation.kind, &names);
         let receiver = self.resolve_impl_receiver(implementation, &dense, &names)?;
+        let equations = self.implementation_associated_equalities(implementation, &receiver, &dense)?;
         let saved = self.current_impl_receiver.replace(receiver);
+        let saved_equations = std::mem::replace(&mut self.current_impl_associated_equalities, equations);
         let result = self.compile_function(function, name);
         self.current_impl_receiver = saved;
+        self.current_impl_associated_equalities = saved_equations;
         result
     }
 
@@ -155,11 +158,12 @@ impl VbcCodegen {
             .then_some(TypeRef::Concrete(TypeId::UNIT))
     }
 
-    /// An ordinary body's exits establish its result. A forward, external,
-    /// intrinsic or transformed callable needs its own producer's evidence.
+    /// An emitted eager body's exits establish its result, including async
+    /// bodies. A forward, external, intrinsic or generator callable needs its
+    /// own producer's evidence.
     pub(super) fn can_infer_source_result(&self, function: &FunctionDecl) -> bool {
         function.body.is_some() && function.return_type.is_none()
-            && !function.is_generator && !function.is_async && function.contexts.is_empty()
+            && !function.is_generator && function.contexts.is_empty()
             && function.throws_clause.is_none() && function.extern_abi.is_none()
             && self.extract_intrinsic_name(function).is_none()
     }
@@ -413,7 +417,7 @@ impl VbcCodegen {
             }
             Some(witness.semantic)
         }
-        fn generic_projection_base<'a>(
+        fn declared_projection_base<'a>(
             ty: &verum_ast::Type,
             scope: &std::collections::HashMap<String, u16>,
             depth: usize,
@@ -425,10 +429,11 @@ impl VbcCodegen {
         ) -> bool {
             if depth > 64 { return false; }
             match &ty.kind {
-                TypeKind::Path(_) => parameter_path(ty, scope, cg, declaration, declared_ids, binders, retained) == Some(true),
-                TypeKind::AssociatedType { base, .. } => generic_projection_base(base, scope, depth + 1, cg, declaration, declared_ids, binders, retained),
+                TypeKind::Path(_) => parameter_path(ty, scope, cg, declaration, declared_ids, binders, retained)
+                    .unwrap_or_else(|| cg.nominal_path_is_declared_in_scope(ty, declaration.owner)),
+                TypeKind::AssociatedType { base, .. } => declared_projection_base(base, scope, depth + 1, cg, declaration, declared_ids, binders, retained),
                 TypeKind::Qualified { self_ty, trait_ref, .. } => trait_ref.segments.is_empty()
-                    && generic_projection_base(self_ty, scope, depth + 1, cg, declaration, declared_ids, binders, retained),
+                    && declared_projection_base(self_ty, scope, depth + 1, cg, declaration, declared_ids, binders, retained),
                 _ => false,
             }
         }
@@ -457,9 +462,9 @@ impl VbcCodegen {
                 | TypeKind::Never => true,
                 TypeKind::Path(_) => parameter_path(ty, scope, cg, declaration, declared_ids, binders, retained)
                     .unwrap_or_else(|| cg.nominal_path_is_declared_in_scope(ty, declaration.owner)),
-                TypeKind::AssociatedType { base, .. } => generic_projection_base(base, scope, depth + 1, cg, declaration, declared_ids, binders, retained),
+                TypeKind::AssociatedType { base, .. } => declared_projection_base(base, scope, depth + 1, cg, declaration, declared_ids, binders, retained),
                 TypeKind::Qualified { self_ty, trait_ref, .. } => trait_ref.segments.is_empty()
-                    && generic_projection_base(self_ty, scope, depth + 1, cg, declaration, declared_ids, binders, retained),
+                    && declared_projection_base(self_ty, scope, depth + 1, cg, declaration, declared_ids, binders, retained),
                 TypeKind::Reference { inner, .. }
                 | TypeKind::CheckedReference { inner, .. }
                 | TypeKind::UnsafeReference { inner, .. }

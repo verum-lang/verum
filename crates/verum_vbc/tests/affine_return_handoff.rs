@@ -240,6 +240,44 @@ fn probe() -> Int {
 }
 
 #[test]
+fn borrowed_pattern_aliases_do_not_own_the_return_edges_cleanup() {
+    for (shape, make, pattern) in [
+        ("(T)", "(Watch { counter, digit: 1 })", "($REF first)"),
+        ("{ value: T }", "{ value: Watch { counter, digit: 1 } }", "{ value: $REF first }"),
+    ] {
+        for permission in ["ref", "ref mut"] {
+            let source = r#"
+type Slot<T> is None | Some$SHAPE;
+fn make(counter: &mut Count) -> Watch {
+    let mut slot = Slot.Some$MAKE;
+    if let Slot.Some$PATTERN = slot {
+        if first.digit != 1 { panic("wrong borrowed payload"); }
+        let returned = Watch { counter, digit: 2 };
+        return returned;
+    }
+    panic("missing payload")
+}
+
+fn probe() -> Int {
+    let mut counter = Count { value: 0 };
+    {
+        let received = make(&mut counter);
+        if counter.value != 1 { return 99; }
+        drop(received);
+    }
+    counter.value
+}
+"#
+                .replace("$SHAPE", shape).replace("$MAKE", make)
+                .replace("$PATTERN", pattern).replace("$REF", permission);
+            for bootstrap in [false, true] {
+                assert_eq!(run(&source, bootstrap), 12, "{shape}, {permission}, {bootstrap}");
+            }
+        }
+    }
+}
+
+#[test]
 fn unrestricted_owned_values_are_cleaned_on_early_and_normal_returns() {
     let source = r#"
 type Payload is { counter: &mut Count };

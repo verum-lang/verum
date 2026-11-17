@@ -68,6 +68,7 @@ mod associated_types;
 mod statements;
 mod value_uses;
 mod place_copies;
+mod pattern_declarations;
 mod formal_parameters;
 mod dynamic_protocol;
 mod source_substitution;
@@ -82,10 +83,12 @@ mod blanket_impls;
 mod implementation_obligations;
 mod cfg_selection;
 mod protocol_results;
+mod type_equalities;
 mod residuals;
 mod constructor_types;
 mod nominal_constructors;
 mod declaration_interface;
+mod function_values;
 mod forward_declarations;
 mod default_arguments;
 mod callable_generic_rosters;
@@ -372,6 +375,7 @@ struct DeferredImplDeclaration {
     ordered_generics: Vec<String>,
     ast_generics: verum_common::List<verum_ast::ty::GenericParam>,
     where_clause: Option<verum_ast::ty::WhereClause>,
+    associated_equalities: verum_common::List<(TypeRef, TypeRef)>,
 }
 
 #[derive(Debug, Clone)]
@@ -381,6 +385,10 @@ struct DeferredDefaultMethod {
     lexical_owner: Option<String>,
     implementation: DeferredImplScope,
     constraints: Option<DefaultConstraintScope>,
+    /// The protocol that declares this retained body, distinct from the
+    /// implementation whose superprotocol traversal discovered it.
+    protocol_owner: Option<crate::types::TypeId>,
+    directly_implemented: bool,
 }
 
 /// A blanket protocol implementation waiting to be monomorphized onto
@@ -1052,8 +1060,11 @@ pub struct VbcCodegen {
     current_impl_definition: Option<crate::module::SourceDefinitionIdentity>,
     /// The implementation's where predicates travel with its inline bounds.
     current_impl_where_clause: Option<verum_ast::ty::WhereClause>,
-    /// Protocol instantiations guaranteed by the current callable's binder IDs.
-    current_protocol_bounds: std::collections::HashMap<crate::types::TypeParamId, Vec<protocol_results::BoundProtocol>>,
+    /// Equations from this implementation, in its own declaration telescope.
+    current_impl_associated_equalities: verum_common::List<(TypeRef, TypeRef)>,
+    /// Protocol instantiations guaranteed for the callable's declared subjects.
+    current_protocol_bounds: Map<TypeRef, verum_common::List<protocol_results::BoundProtocol>>,
+    current_type_equalities: type_equalities::DeclarationEqualities,
     /// Exact resolved source impl target, shared by ABI and semantic lowering.
     current_impl_receiver: Option<ImplReceiverWitness>,
     current_source_substitution: source_substitution::SourceTypeSubstitution,
@@ -1236,6 +1247,8 @@ pub struct VbcCodegen {
     collecting_declaration_interface: bool,
     /// Callable contracts retained from actual source or imported declarations.
     declared_callable_descriptors: Map<FunctionId, FunctionDescriptor>,
+    /// Exact source families; only retain_declared_callable publishes their IDs.
+    declared_function_value_families: Map<function_values::FunctionValueFamily, verum_common::List<FunctionId>>,
     /// Lookup index only; retained descriptors own all definition evidence.
     declared_impl_definitions: Map<(Text, Text, [u8; 32]), verum_common::List<FunctionId>>,
     declared_callable_defaults: Map<FunctionId, verum_common::List<Option<verum_ast::Expr>>>,
@@ -2324,7 +2337,9 @@ impl VbcCodegen {
             current_impl_ast_generics: None,
             current_impl_definition: None,
             current_impl_where_clause: None,
+            current_impl_associated_equalities: Default::default(),
             current_protocol_bounds: Default::default(),
+            current_type_equalities: Default::default(),
             current_impl_receiver: None,
             current_source_substitution: Default::default(),
             current_deferred_impl: None,
@@ -2527,6 +2542,7 @@ impl VbcCodegen {
             pending_tls_inits: Vec::new(),
             collecting_declaration_interface: false,
             declared_callable_descriptors: Map::new(),
+            declared_function_value_families: Map::new(),
             declared_impl_definitions: Map::new(),
             declared_callable_defaults: Map::new(),
             propagate_test_attr: true,
@@ -3421,28 +3437,31 @@ impl VbcCodegen {
         implemented_methods: &std::collections::HashSet<String>,
     ) -> CodegenResult<ImplReceiverWitness> {
         let (type_generics, const_generics, ordered_generics) = self.resolve_impl_generics(implementation);
+        u16::try_from(ordered_generics.len()).map_err(|_| CodegenError::with_span(
+            CodegenErrorKind::InvalidSourceSignature("implementation binder roster exceeds VBC index space".into()), implementation.span))?;
+        let scope = self.declared_impl_generic_scope(&implementation.kind, &ordered_generics);
+        let receiver = self.resolve_impl_receiver(implementation, &scope, &ordered_generics)?;
+        let associated_equalities = self.implementation_associated_equalities(implementation, &receiver, &scope)?;
         let declaration = std::sync::Arc::new(DeferredImplDeclaration {
             definition: self.current_impl_definition,
             owner: self.ctx.current_source_module.clone(),
             type_generics, const_generics, ordered_generics,
             ast_generics: self.implementation_source_parameters(implementation)?,
             where_clause: implementation.generic_where_clause.clone(),
+            associated_equalities,
         });
         // Collect all protocols to check (this protocol + all superprotocols
         // + any blanket-impl derived protocol whose base is in the chain).
         let verum_ast::decl::ImplKind::Protocol { protocol, protocol_args, .. } = &implementation.kind else {
             return Err(CodegenError::internal("protocol method generation requires an implementation application"));
         };
-        u16::try_from(declaration.ordered_generics.len()).map_err(|_| CodegenError::with_span(
-                CodegenErrorKind::InvalidSourceSignature("implementation binder roster exceeds VBC index space".into()), implementation.span))?;
-        let scope = self.declared_impl_generic_scope(&implementation.kind, &declaration.ordered_generics);
-        let receiver = self.resolve_impl_receiver(implementation, &scope, &declaration.ordered_generics)?;
         let declared_ids = Self::ordered_generic_param_ids(&scope, &Default::default());
         let application = self.with_protocol_source_scope(
             declaration.owner.clone(), self.current_source_substitution.clone(), Some(receiver.clone()),
             |cg| cg.resolve_protocol_application(protocol, protocol_args, &scope, &declared_ids, &implementation.generics, &receiver),
         )?;
         let root_application = application.key.clone();
+        let root_protocol = application.protocol;
         let mut protocols_to_check = vec![application];
         // The receiver has implementation scope, never method scope. Resolve
         // it once using the same binder prefix as ordinary method lowering.
@@ -3647,6 +3666,9 @@ impl VbcCodegen {
                         default_func, type_name, &deferred_scope,
                         Some(protocol_info.source_module.clone()), constraints,
                     );
+                    method.protocol_owner = application.protocol;
+                    method.directly_implemented = application.protocol.is_some()
+                        && application.protocol == root_protocol;
                     method.implementation.source_substitution = application.substitution.for_function(default_func);
                     self.pending_default_registrations.push(method);
                 }
@@ -3668,6 +3690,8 @@ impl VbcCodegen {
             receiver_name: receiver_name.to_owned(),
             lexical_owner,
             constraints,
+            protocol_owner: None,
+            directly_implemented: false,
             implementation: DeferredImplScope {
                 dense,
                 shadow,
@@ -3695,6 +3719,7 @@ impl VbcCodegen {
         let previous_definition = std::mem::replace(&mut self.current_impl_definition, scope.declaration.definition);
         let previous_ast = self.current_impl_ast_generics.replace(scope.declaration.ast_generics.clone());
         let previous_where = std::mem::replace(&mut self.current_impl_where_clause, scope.declaration.where_clause.clone());
+        let previous_associated = std::mem::replace(&mut self.current_impl_associated_equalities, scope.declaration.associated_equalities.clone());
         let previous_types = std::mem::replace(&mut self.ctx.generic_type_params, scope.declaration.type_generics.iter().cloned().collect());
         let previous_consts = std::mem::replace(&mut self.ctx.const_generic_params, scope.declaration.const_generics.iter().cloned().collect());
         let previous_order = std::mem::replace(&mut self.ctx.generic_type_params_ordered, scope.declaration.ordered_generics.clone());
@@ -3709,6 +3734,7 @@ impl VbcCodegen {
         self.current_impl_definition = previous_definition;
         self.current_impl_ast_generics = previous_ast;
         self.current_impl_where_clause = previous_where;
+        self.current_impl_associated_equalities = previous_associated;
         self.ctx.generic_type_params = previous_types;
         self.ctx.const_generic_params = previous_consts;
         self.ctx.generic_type_params_ordered = previous_order;
@@ -3789,7 +3815,29 @@ impl VbcCodegen {
         // every explicit impl body already owns its unsuffixed slot
         // and a default only fills slots that are still empty.
         let deferred = std::mem::take(&mut self.pending_default_registrations);
-        for method in deferred {
+        let mut direct = HashMap::<_, Vec<usize>>::new();
+        let key = |method: &DeferredDefaultMethod| (
+            method.implementation.receiver.ty.base_type_id(), method.protocol_owner,
+            method.lexical_owner.clone(), method.function.name.name.clone(),
+        );
+        for (index, method) in deferred.iter().enumerate() {
+            if method.directly_implemented { direct.entry(key(method)).or_default().push(index); }
+        }
+        let superseded: Vec<_> = deferred.iter().map(|method| {
+            !method.directly_implemented && method.protocol_owner.is_some()
+                && direct.get(&key(method)).is_some_and(|candidates| candidates.iter().any(|&index| {
+                    let candidate = &deferred[index];
+                    candidate.function == method.function
+                        && Self::same_declared_receiver(
+                            &candidate.implementation.receiver, &method.implementation.receiver,
+                        )
+                }))
+        }).collect();
+        for (method, superseded) in deferred.into_iter().zip(superseded) {
+            // A superprotocol edge schedules a body; the implementation of
+            // its declaring protocol owns that body's associated equations
+            // and telescope. Selection is independent of source item order.
+            if superseded { continue; }
             let default_func = &method.function;
             let type_name = &method.receiver_name;
             let full_method_name = Self::impl_method_key(
@@ -3860,6 +3908,16 @@ impl VbcCodegen {
         }
 
         Ok(())
+    }
+
+    fn same_declared_receiver(left: &ImplReceiverWitness, right: &ImplReceiverWitness) -> bool {
+        if !left.semantic || !right.semantic { return false; }
+        let matches = |pattern: &TypeRef, actual: &TypeRef| {
+            let mut substitution = crate::mono::TypeSubstitution::empty();
+            crate::mono::match_declared_types(pattern, actual, &mut substitution)
+                && substitution.apply(pattern).as_ref().is_ok_and(|instantiated| instantiated == actual)
+        };
+        matches(&left.ty, &right.ty) && matches(&right.ty, &left.ty)
     }
 
     /// Registers well-known stdlib constants so user code can reference them.
@@ -10167,10 +10225,11 @@ impl VbcCodegen {
                                             ..
                                         } => {
                                             let fb = bounds.iter().find_map(|b| match &b.kind {
-                                                verum_ast::ty::TypeBoundKind::Equality(t)
+                                                verum_ast::ty::TypeBoundKind::Callable(t)
                                                     if matches!(
                                                         t.kind,
                                                         verum_ast::ty::TypeKind::Function { .. }
+                                                            | verum_ast::ty::TypeKind::Rank2Function { .. }
                                                     ) =>
                                                 {
                                                     Some(t)
@@ -17424,8 +17483,8 @@ impl VbcCodegen {
             });
         inline.chain(predicates).filter_map(|(name, bounds)| {
             bounds.iter().find_map(|bound| match &bound.kind {
-                TypeBoundKind::Equality(ty) | TypeBoundKind::GenericProtocol(ty)
-                    if matches!(ty.kind, TypeKind::Function { .. }) => Some((name.as_str(), ty)),
+                TypeBoundKind::Callable(ty)
+                    if matches!(ty.kind, TypeKind::Function { .. } | TypeKind::Rank2Function { .. }) => Some((name.as_str(), ty)),
                 _ => None,
             })
         })
@@ -18594,12 +18653,14 @@ impl VbcCodegen {
     ) -> CodegenResult<()> {
         let shadowed = self.callable_value_scope(func, impl_type_name.map(String::as_str), &self.ctx.generic_type_params_ordered)?;
         let outer_bounds = std::mem::take(&mut self.current_protocol_bounds);
+        let outer_equalities = std::mem::take(&mut self.current_type_equalities);
         let outer_substitution = std::mem::replace(&mut self.current_source_substitution, shadowed);
         let outer_callable = self.current_source_callable_parent;
         let result = self.compile_function_body(func, impl_type_name);
         self.current_source_callable_parent = outer_callable;
         self.current_source_substitution = outer_substitution;
         self.current_protocol_bounds = outer_bounds;
+        self.current_type_equalities = outer_equalities;
         result
     }
 
@@ -18996,7 +19057,18 @@ impl VbcCodegen {
         let declared_ids: verum_common::List<_> = caller_generics.values()
             .chain(caller_shadows.values()).copied().map(crate::types::TypeParamId).collect();
         caller_generics.extend(caller_shadows.clone());
-        let mut bounds = std::collections::HashMap::new();
+        let mut equalities = type_equalities::DeclarationEqualities::default();
+        if impl_type_name.is_some() {
+            self.collect_implementation_equalities(&mut equalities)?;
+            self.collect_declaration_equalities(
+                self.current_impl_where_clause.as_ref(), &receiver_generics, &declared_ids, &mut equalities,
+            )?;
+        }
+        self.collect_declaration_equalities(
+            func.generic_where_clause.as_ref(), &caller_generics, &declared_ids, &mut equalities,
+        )?;
+        self.current_type_equalities = equalities;
+        let mut bounds = Map::new();
         if impl_type_name.is_some() {
             self.collect_receiver_protocols(
                 self.current_impl_ast_generics.as_deref().unwrap_or_default(),
@@ -19054,10 +19126,27 @@ impl VbcCodegen {
                 )?;
                 matches!(signature, crate::types::TypeRef::Function { .. }).then_some((id, signature))
             }).collect();
+        // The retained interface also owns implementation-level callable
+        // bounds. Method-local binders use separate slots in this telescope.
+        if let Some(declaration) = self.declared_callable_descriptors.get(&func_info.id) {
+            for parameter in &declaration.type_params {
+                for bound in &parameter.type_bounds {
+                    if matches!(bound, TypeRef::Function { .. })
+                        && formal_parameters::resolved(bound, &declared_ids, 0)
+                    {
+                        self.ctx.registers.callable_bound_signatures.entry(parameter.id)
+                            .or_insert_with(|| bound.clone());
+                    }
+                }
+            }
+        }
         let parameter_types = self.source_semantic_parameters(
             func, &self.ctx.current_generic_param_ids, &receiver_generics, &declared_ids,
         );
-        let owns_parameters = func.body.is_some() && !func_info.is_async
+        // Async source bodies execute eagerly under the same call/return law.
+        // Only suspended generators and externally implemented operations have
+        // a different parameter lifecycle.
+        let owns_parameters = func.body.is_some()
             && !func_info.is_generator && func_info.intrinsic_name.is_none();
         for (param, ty) in func.params.iter().zip(parameter_types) {
             let binding = self.extract_param_name_and_mutable(param)
@@ -19171,8 +19260,8 @@ impl VbcCodegen {
             verum_common::Maybe::None => None,
         };
 
-        // The owned convention copies once at the caller. Async, generator
-        // and intrinsic bodies retain their existing mutable-parameter copy
+        // The owned convention copies once at the caller. Generator and
+        // intrinsic bodies retain their existing mutable-parameter copy
         // convention until their separate lifecycle is implemented.
         if !owns_parameters {
             for (i, ((param_name, is_mut), param)) in params_with_mutability
@@ -19832,12 +19921,7 @@ impl VbcCodegen {
         } else if let Some(result) = descriptor.semantic_return.clone() {
             // The completed source body supplies both the semantic contract and
             // its executable result carrier. ABI defaults cannot supply either.
-            descriptor.return_type = result.clone();
-            let signature = descriptor.semantic_callable_signature();
-            self.ctx.functions.update_by_id(descriptor.id, |info| {
-                info.return_type = Some(result.clone());
-                info.callable_signature = signature.clone();
-            });
+            descriptor.return_type = result;
         }
 
         // Extract optimization hints from AST attributes (@inline, @cold, @hot, etc.)
@@ -19928,6 +20012,15 @@ impl VbcCodegen {
             register_count,
         );
 
+        // Publish only the completed declaration: computational properties and
+        // context requirements are part of its callable contract too.
+        if func.return_type.is_none() && let Some(result) = descriptor.semantic_return.clone() {
+            let signature = descriptor.semantic_callable_signature();
+            self.ctx.functions.update_by_id(descriptor.id, |info| {
+                info.return_type = Some(result.clone());
+                info.callable_signature = signature.clone();
+            });
+        }
         descriptor.value_uses = crate::value_use::ValueUsePlan::new(&instructions, value_uses, &descriptor);
         let vbc_func = VbcFunction::new(descriptor, instructions);
 
@@ -22114,10 +22207,8 @@ impl VbcCodegen {
 
         // Generic-param bound case: `f: F` where `F: fn(...) -> X`.
         // The parser surfaces `F: fn(...)` as a TypeBound on the
-        // generic param F; the bound is encoded as either
-        // `GenericProtocol(Type)` or `Protocol(Path)` depending on
-        // shape (the former covers `fn(...)`-shaped bounds carried
-        // as a Type literal).  We probe both.
+        // Generic parameter F carries a distinct callable capability; an
+        // exact type equation must not be reinterpreted as that capability.
         if let TypeKind::Path(path) = &ty.kind
             && path.segments.len() == 1
             && let Some(PathSegment::Name(ident)) = path.segments.first()
@@ -22135,20 +22226,10 @@ impl VbcCodegen {
                     continue;
                 }
                 for b in bounds.iter() {
-                    // The parser encodes `F: fn(...) -> X` as an
-                    // `Equality` bound carrying the raw Function type
-                    // (see `verum_fast_parser::ty::type_to_type_bound`
-                    // — complex non-Path / non-Generic types fall
-                    // through to the Equality arm).
-                    // `Iterator<Item = ...>`-shaped bounds carrying a
-                    // Function type would land under `GenericProtocol`,
-                    // so we probe both for robustness.
-                    let bound_ty = match &b.kind {
-                        TypeBoundKind::Equality(ty) => ty,
-                        TypeBoundKind::GenericProtocol(ty) => ty,
-                        _ => continue,
-                    };
-                    if let TypeKind::Function { return_type, .. } = &bound_ty.kind {
+                    // Only the declared callable capability supplies this
+                    // invocation signature. Exact type equations are separate.
+                    let TypeBoundKind::Callable(bound_ty) = &b.kind else { continue };
+                    if let TypeKind::Function { return_type, .. } | TypeKind::Rank2Function { return_type, .. } = &bound_ty.kind {
                         return return_name_of_fn(return_type);
                     }
                 }

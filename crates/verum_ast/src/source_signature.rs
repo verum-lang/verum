@@ -27,6 +27,28 @@ pub fn signature_uses_universes(function: &FunctionDecl) -> Result<bool> {
     scan.finish().map(|_| scan.uses_universes)
 }
 
+/// Whether replay needs the source schema that classifies callable bounds,
+/// exact type equations, and value predicates without the old ambiguities.
+pub fn signature_requires_constraint_classification(function: &FunctionDecl) -> Result<bool> {
+    check_size(function)?;
+    let mut scan = SignatureScan::new(false);
+    scan.visit_function(function);
+    scan.finish()?;
+    Ok(scan.requires_constraint_classification)
+}
+
+pub fn type_declaration_requires_constraint_classification(declaration: &crate::TypeDecl) -> Result<bool> {
+    check_type_declaration_size(declaration)?;
+    let mut scan = SignatureScan::new(false);
+    scan.visit_type_decl(declaration);
+    scan.finish()?;
+    Ok(scan.requires_constraint_classification)
+}
+
+pub fn implementation_requires_constraint_classification(declaration: &crate::decl::ImplDecl) -> Result<bool> {
+    Ok(scan_source_associated_implementation(declaration)?.requires_constraint_classification)
+}
+
 /// Detect universe annotations in an independently declared type, such as a
 /// static or constant annotation, without interpreting rendered names.
 pub fn type_uses_universes(ty: &crate::Type) -> Result<bool> {
@@ -207,8 +229,13 @@ pub fn source_signature(function: &FunctionDecl, is_method: bool) -> Result<Opti
     let has_owned_parameter_header = function.generics.iter().any(|parameter| matches!(
         parameter.kind, GenericParamKind::Meta { .. } | GenericParamKind::Const { .. } | GenericParamKind::Lifetime { .. }
     ));
+    let has_type_equalities = function.generic_where_clause.as_ref().is_some_and(|clause|
+        clause.predicates.iter().any(|predicate| matches!(&predicate.kind,
+            crate::ty::WherePredicateKind::Type { bounds, .. }
+                if bounds.iter().any(|bound| matches!(bound.kind, crate::ty::TypeBoundKind::Equality(_))))));
     if !needs.uses_universes && !needs.uses_applied_projection && !needs.uses_rank_two
-        && !needs.uses_callable_contexts && !has_owned_parameter_header
+        && !needs.uses_callable_contexts && !needs.requires_constraint_classification
+        && !has_owned_parameter_header && !has_type_equalities
     {
         return Ok(None);
     }
@@ -290,6 +317,7 @@ struct SignatureScan {
     uses_applied_projection: bool,
     uses_rank_two: bool,
     uses_callable_contexts: bool,
+    requires_constraint_classification: bool,
     uses_refinements: bool,
     universe_in_rank_two: bool,
     rank_two_depth: usize,
@@ -308,6 +336,7 @@ impl SignatureScan {
             uses_applied_projection: false,
             uses_rank_two: false,
             uses_callable_contexts: false,
+            requires_constraint_classification: false,
             uses_refinements: false,
             universe_in_rank_two: false,
             rank_two_depth: 0,
@@ -391,15 +420,36 @@ impl SignatureScan {
             }
         }
     }
+    fn generic_where_clause(&mut self, clause: Option<&crate::ty::WhereClause>) {
+        if let Some(clause) = clause {
+            // Older parsers stored bare type equations as Value predicates.
+            // Without the original source this cannot be distinguished from
+            // an intentional value condition. Explicit meta clauses have a
+            // separate carrier and do not pass through this entry point.
+            self.requires_constraint_classification |= clause.predicates.iter()
+                .any(|predicate| matches!(predicate.kind, WherePredicateKind::Value { .. }));
+            self.visit_where_clause(clause);
+        }
+    }
     fn bounds(&mut self, bounds: &List<TypeBound>) {
         self.type_bound_depth += 1;
         for bound in bounds {
             match &bound.kind {
+                TypeBoundKind::Callable(ty) => {
+                    self.requires_constraint_classification = true;
+                    if self.validate && !matches!(ty.kind, TypeKind::Function { .. } | TypeKind::Rank2Function { .. }) {
+                        self.fail("callable bound requires a function signature");
+                    }
+                    let saved = std::mem::take(&mut self.type_bound_depth);
+                    self.visit_type(ty);
+                    self.type_bound_depth = saved;
+                }
                 TypeBoundKind::Equality(ty) | TypeBoundKind::GenericProtocol(ty) => {
-                    // F: fn(A) -> Type(u) constrains a callable's result;
-                    // A: Type(u) instead asserts a formation judgment.
-                    // Callable equality bounds are checked by the existing
-                    // source checker and retain their levels in the scheme.
+                    self.requires_constraint_classification |= matches!(&bound.kind, TypeBoundKind::Equality(_))
+                        && matches!(ty.kind, TypeKind::Function { .. } | TypeKind::Rank2Function { .. });
+                    // An exact function type can contain result universes;
+                    // the legacy A: Type(u) carrier instead requests unsupported
+                    // formation checking and remains an honest refusal.
                     if matches!(ty.kind, TypeKind::Function { .. }) {
                         let saved = std::mem::take(&mut self.type_bound_depth);
                         self.visit_type(ty);
@@ -511,10 +561,8 @@ impl Visitor for SignatureScan {
             self.visit_type(ty);
         }
         self.visit_expr(&axiom.proposition);
-        for clause in [&axiom.generic_where_clause, &axiom.meta_where_clause]
-            .into_iter()
-            .flatten()
-        {
+        self.generic_where_clause(axiom.generic_where_clause.as_ref());
+        if let Some(clause) = &axiom.meta_where_clause {
             self.visit_where_clause(clause);
         }
         self.scopes.pop();
@@ -546,20 +594,13 @@ impl Visitor for SignatureScan {
             self.attributes(&parameter.attributes);
             self.visit_function_param(parameter);
         }
-        for clause in [
-            &declaration.generic_where_clause,
-            &declaration.meta_where_clause,
-        ]
-        .into_iter()
-        .flatten()
-        {
+        self.generic_where_clause(declaration.generic_where_clause.as_ref());
+        if let Some(clause) = &declaration.meta_where_clause {
             self.visit_where_clause(clause);
         }
         match &declaration.body {
             TypeDeclBody::Protocol(body) | TypeDeclBody::Coinductive(body) => {
-                if let Some(clause) = &body.generic_where_clause {
-                    self.visit_where_clause(clause);
-                }
+                self.generic_where_clause(body.generic_where_clause.as_ref());
                 for ty in &body.extends {
                     self.visit_type(ty);
                 }
@@ -578,9 +619,7 @@ impl Visitor for SignatureScan {
                         } => {
                             self.push_generics(type_params);
                             self.bounds(bounds);
-                            if let Some(clause) = where_clause {
-                                self.visit_where_clause(clause);
-                            }
+                            self.generic_where_clause(where_clause.as_ref());
                             if let Some(ty) = default_type {
                                 self.visit_type(ty);
                             }
@@ -646,10 +685,8 @@ impl Visitor for SignatureScan {
         for context in &function.contexts {
             self.context(context);
         }
-        for clause in [&function.generic_where_clause, &function.meta_where_clause]
-            .into_iter()
-            .flatten()
-        {
+        self.generic_where_clause(function.generic_where_clause.as_ref());
+        if let Some(clause) = &function.meta_where_clause {
             self.visit_where_clause(clause);
         }
         for expression in function
@@ -1144,6 +1181,12 @@ pub fn source_associated_implementation_items(
 pub fn validate_source_associated_implementation(
     declaration: &crate::decl::ImplDecl,
 ) -> Result<()> {
+    scan_source_associated_implementation(declaration).map(|_| ())
+}
+
+fn scan_source_associated_implementation(
+    declaration: &crate::decl::ImplDecl,
+) -> Result<SignatureScan> {
     use crate::decl::{ImplItemKind, ImplKind};
     use crate::ty::GenericArg;
     Budget::new()
@@ -1170,13 +1213,8 @@ pub fn validate_source_associated_implementation(
             GenericArg::Lifetime(_) => {}
         }
     }
-    for clause in [
-        &declaration.generic_where_clause,
-        &declaration.meta_where_clause,
-    ]
-    .into_iter()
-    .flatten()
-    {
+    scan.generic_where_clause(declaration.generic_where_clause.as_ref());
+    if let Some(clause) = &declaration.meta_where_clause {
         scan.visit_where_clause(clause);
     }
     if let Some(clause) = declaration
@@ -1184,7 +1222,7 @@ pub fn validate_source_associated_implementation(
         .as_ref()
         .and_then(|attribute| attribute.when_clause.as_ref())
     {
-        scan.visit_where_clause(clause);
+        scan.generic_where_clause(Some(clause));
     }
     let mut names = verum_common::Set::new();
     for item in &declaration.items {
@@ -1225,5 +1263,6 @@ pub fn validate_source_associated_implementation(
         }
     }
     scan.scopes.pop();
-    scan.finish()
+    scan.finish()?;
+    Ok(scan)
 }

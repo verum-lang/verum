@@ -29,9 +29,11 @@ impl TypeChecker {
     ) -> Result<R> {
         let protocols = std::mem::take(&mut self.source_type_registration.projection_assumptions);
         let callables = std::mem::take(&mut self.source_type_registration.callable_assumptions);
+        let equalities = std::mem::take(&mut self.source_type_registration.type_equalities);
         let result = check(self);
         self.source_type_registration.projection_assumptions = protocols;
         self.source_type_registration.callable_assumptions = callables;
+        self.source_type_registration.type_equalities = equalities;
         result
     }
 
@@ -115,7 +117,7 @@ impl TypeChecker {
         let mut protocols = List::new();
         for bound in bounds {
             match &bound.kind {
-                TypeBoundKind::Equality(ty) | TypeBoundKind::GenericProtocol(ty)
+                TypeBoundKind::Callable(ty)
                     if matches!(ty.kind, TypeKind::Function { .. }) =>
                 {
                     let Type::Var(parameter) = subject else {
@@ -341,6 +343,25 @@ impl TypeChecker {
                         "implementation method strengthens its declared protocol bounds",
                     ));
                 }
+            }
+        }
+        for equality in &actual_scope.type_equalities {
+            let equality = equality.try_apply_subst(&alpha).map_err(|e| invalid(span, e))?;
+            let same = |left: &Type, right: &Type| self.source_method_carriers_equal(
+                left, right, implementation, owner, self_markers, &assumptions, 0,
+            ).map_err(|e| invalid(span, e));
+            let mut available = same(&equality.subject, &equality.expected)?;
+            for declared in &expected_scope.type_equalities {
+                if (same(&equality.subject, &declared.subject)?
+                    && same(&equality.expected, &declared.expected)?)
+                    || (same(&equality.subject, &declared.expected)?
+                    && same(&equality.expected, &declared.subject)?) {
+                    available = true;
+                    break;
+                }
+            }
+            if !available {
+                return Err(invalid(span, "implementation method strengthens its declared type equalities"));
             }
         }
         for (expected_name, actual_name) in expected

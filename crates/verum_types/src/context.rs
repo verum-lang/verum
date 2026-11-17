@@ -245,6 +245,8 @@ pub struct TypeScheme {
     pub var_protocol_bounds: Map<TypeVar, List<ProtocolBound>>,
     /// Conditional obligations on arbitrary declared subjects, including Self.Item.
     pub where_clauses: List<crate::protocol::WhereClause>,
+    /// Exact declaration equations, separate from directional callable bounds.
+    pub type_equalities: List<TypeEquality>,
     /// Constructor applications retain the selected nominal and its argument
     /// telescope; bounds are discharged after the caller has inferred arguments.
     pub(crate) nominal_applications: List<NominalApplication>,
@@ -284,9 +286,27 @@ pub struct InstantiatedScheme {
     pub type_bounds: Map<TypeVar, List<Type>>,
     pub protocol_bounds: Map<TypeVar, List<ProtocolBound>>,
     pub where_clauses: List<crate::protocol::WhereClause>,
+    pub type_equalities: List<TypeEquality>,
     pub(crate) nominal_applications: List<NominalApplication>,
     pub impl_self_type: Option<Type>,
     pub explicit_method_vars: Option<List<Option<GenericBinder>>>,
+}
+
+/// Both sides belong to the same declaration telescope. An equation is a
+/// premise inside that declaration and an obligation at each instantiation.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TypeEquality {
+    pub subject: Type,
+    pub expected: Type,
+}
+
+impl TypeEquality {
+    pub(crate) fn try_apply_subst(&self, substitution: &Substitution) -> Result<Self, Text> {
+        Ok(Self {
+            subject: self.subject.try_apply_subst(substitution)?,
+            expected: self.expected.try_apply_subst(substitution)?,
+        })
+    }
 }
 
 impl InstantiatedScheme {
@@ -405,6 +425,9 @@ impl TypeScheme {
                 .iter()
                 .map(|clause| clause.try_apply_subst(&subst))
                 .collect::<Result<_, _>>()?,
+            type_equalities: self.type_equalities.iter()
+                .map(|equality| equality.try_apply_subst(&subst))
+                .collect::<Result<_, _>>()?,
             nominal_applications: self.nominal_applications.iter().map(|application| {
                 Ok(NominalApplication {
                     owner: application.owner.clone(),
@@ -433,6 +456,7 @@ impl TypeScheme {
             var_type_bounds: Map::new(),
             var_protocol_bounds: Map::new(),
             where_clauses: List::new(),
+            type_equalities: List::new(),
             nominal_applications: List::new(),
             impl_var_count: 0,
             impl_self_type: None,
@@ -455,6 +479,7 @@ impl TypeScheme {
             var_type_bounds: Map::new(),
             var_protocol_bounds: Map::new(),
             where_clauses: List::new(),
+            type_equalities: List::new(),
             nominal_applications: List::new(),
             impl_var_count: 0,
             impl_self_type: None,
@@ -478,6 +503,7 @@ impl TypeScheme {
             var_type_bounds: Map::new(),
             var_protocol_bounds: Map::new(),
             where_clauses: List::new(),
+            type_equalities: List::new(),
             nominal_applications: List::new(),
             impl_var_count: 0,
             impl_self_type: None,
@@ -506,6 +532,7 @@ impl TypeScheme {
             var_type_bounds,
             var_protocol_bounds: Map::new(),
             where_clauses: List::new(),
+            type_equalities: List::new(),
             nominal_applications: List::new(),
             impl_var_count: 0,
             impl_self_type: None,

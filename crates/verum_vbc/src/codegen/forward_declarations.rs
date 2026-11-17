@@ -40,6 +40,22 @@ impl VbcCodegen {
             let ids = self.declared_impl_definitions.entry((owner.as_str().into(), name.as_str().into(), scope)).or_default();
             if !ids.contains(&descriptor.id) { ids.push(descriptor.id); }
         }
+        // Both source capture and remapped archive declarations enter here.
+        // The family stores identities only; live declarations still own the
+        // callable contract, and synthetic constructors acquire no family.
+        let family = self.function_value_family_key(&descriptor);
+        let previous_family = self.declared_callable_descriptors.get(&descriptor.id)
+            .and_then(|previous| self.function_value_family_key(previous));
+        if previous_family != family && let Some(previous) = previous_family {
+            if let Some(ids) = self.declared_function_value_families.get_mut(&previous) {
+                ids.retain(|id| *id != descriptor.id);
+                if ids.is_empty() { self.declared_function_value_families.remove(&previous); }
+            }
+        }
+        if let Some(family) = family {
+            let ids = self.declared_function_value_families.entry(family).or_default();
+            if !ids.contains(&descriptor.id) { ids.push(descriptor.id); }
+        }
         self.declared_callable_descriptors.insert(descriptor.id, descriptor);
         Ok(())
     }

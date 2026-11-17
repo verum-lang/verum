@@ -4950,6 +4950,7 @@ impl TypeChecker {
                             }).collect();
                             let assumption_depth = self.source_type_registration.projection_assumptions.len();
                             let callable_depth = self.source_type_registration.callable_assumptions.len();
+                            let equality_depth = self.source_type_registration.type_equalities.len();
                             let method_result: Result<()> = self.with_declared_callable_scope(func, |checker| {
                                 // Check if this is a static method (no self parameter)
                                 // `is_self` is the authority on what counts as a
@@ -5015,13 +5016,15 @@ impl TypeChecker {
                                         type_bounds.insert(variable, types);
                                     }
                                 }
-                                let method_clauses = checker.collect_where_clause_bounds(func, &mut protocol_bounds, &mut type_bounds)?;
+                                let (method_clauses, method_equalities) = checker.collect_where_clause_bounds(func, &mut protocol_bounds, &mut type_bounds)?;
                                 checker.extend_source_parameter_premises(&protocol_bounds, &type_bounds);
                                 checker.source_type_registration.projection_assumptions.extend(method_clauses.iter().cloned());
+                                checker.source_type_registration.type_equalities.extend(method_equalities.iter().cloned());
                                 let publish_domain = |scheme: &mut crate::context::TypeScheme| {
                                     scheme.var_protocol_bounds = protocol_bounds;
                                     scheme.var_type_bounds = type_bounds;
                                     scheme.where_clauses.extend(method_clauses);
+                                    scheme.type_equalities.extend(method_equalities);
                                     inherit_domain(scheme);
                                 };
 
@@ -5244,6 +5247,7 @@ impl TypeChecker {
                             });
                             self.source_type_registration.projection_assumptions.truncate(assumption_depth);
                             self.source_type_registration.callable_assumptions.truncate(callable_depth);
+                            self.source_type_registration.type_equalities.truncate(equality_depth);
                             for (name, previous) in previous_method_types {
                                 if let Some(ty) = previous {
                                     self.ctx.define_type(name, ty);
@@ -5980,16 +5984,18 @@ impl TypeChecker {
         func: &verum_ast::FunctionDecl,
         protocol_bounds_out: &mut Map<TypeVar, List<crate::protocol::ProtocolBound>>,
         type_bounds_out: &mut Map<TypeVar, List<Type>>,
-    ) -> Result<List<crate::protocol::WhereClause>> {
+    ) -> Result<(List<crate::protocol::WhereClause>, List<crate::context::TypeEquality>)> {
         let mut structural = List::new();
+        let mut equalities = List::new();
         let Some(ref where_clause) = func.generic_where_clause else {
-            return Ok(structural);
+            return Ok((structural, equalities));
         };
         for predicate in &where_clause.predicates {
             use verum_ast::ty::WherePredicateKind;
             let WherePredicateKind::Type { ty, bounds } = &predicate.kind else {
                 continue;
             };
+            equalities.extend(self.declared_where_equalities(ty, bounds)?);
             let binder = match &ty.kind {
                 verum_ast::ty::TypeKind::Path(path) => match path.segments.as_slice() {
                     [verum_ast::ty::PathSegment::SelfValue] => self.current_self_type.as_ref(),
@@ -6020,12 +6026,15 @@ impl TypeChecker {
                     .or_default()
                     .extend(protocol_bounds);
             }
-            let type_bounds = self.extract_type_bounds_from_ast(bounds);
+            let callable_bounds: List<_> = bounds.iter().filter(|bound| matches!(&bound.kind,
+                verum_ast::ty::TypeBoundKind::Callable(_)))
+                .cloned().collect();
+            let type_bounds = self.extract_type_bounds_from_ast(&callable_bounds);
             if !type_bounds.is_empty() {
                 type_bounds_out.entry(tvar).or_default().extend(type_bounds);
             }
         }
-        Ok(structural)
+        Ok((structural, equalities))
     }
 
     pub fn register_function_signature(&mut self, func: &verum_ast::FunctionDecl) -> Result<()> {
@@ -6193,12 +6202,14 @@ impl TypeChecker {
         self.push_decl_param_frame(frame);
         let assumption_depth = self.source_type_registration.projection_assumptions.len();
         let callable_depth = self.source_type_registration.callable_assumptions.len();
+        let equality_depth = self.source_type_registration.type_equalities.len();
         let result = self.with_declared_universe_scope("function", owner, &func.generics, |checker| {
             checker.validate_function_universes(func)?;
             checker.function_scheme_in_universe_scope(func)
         });
         self.source_type_registration.projection_assumptions.truncate(assumption_depth);
         self.source_type_registration.callable_assumptions.truncate(callable_depth);
+        self.source_type_registration.type_equalities.truncate(equality_depth);
         self.pop_decl_param_frame();
         result
     }
@@ -6344,7 +6355,7 @@ impl TypeChecker {
         // same place: the scheme this pass publishes, which is what a call
         // site checks its argument against. One collector, called from both
         // passes that build a scheme — see `collect_where_clause_bounds`.
-        let structural_conditions = self.collect_where_clause_bounds(
+        let (structural_conditions, type_equalities) = self.collect_where_clause_bounds(
             func,
             &mut param_protocol_bounds,
             &mut param_type_bounds,
@@ -6352,6 +6363,7 @@ impl TypeChecker {
 
         self.extend_source_parameter_premises(&param_protocol_bounds, &param_type_bounds);
         self.source_type_registration.projection_assumptions.extend(structural_conditions.iter().cloned());
+        self.source_type_registration.type_equalities.extend(type_equalities.iter().cloned());
 
         // Build parameter types
         let param_types: Result<List<_>> = func
@@ -6432,6 +6444,7 @@ impl TypeChecker {
         let mut scheme = scheme.with_universe_parameters(self.current_universe_parameters())
             .map_err(|message| TypeError::UniverseBinding { message, span: func.span })?;
         scheme.where_clauses = structural_conditions;
+        scheme.type_equalities = type_equalities;
         self.record_callable_declaration(&mut scheme, func);
         if func.return_type.is_none()
             && let Some(body) = &scheme.returned_value

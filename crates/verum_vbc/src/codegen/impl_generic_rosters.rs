@@ -360,8 +360,8 @@ impl VbcCodegen {
                         })?;
                         descriptor.bounds.push(ProtocolId(id.0));
                     }
-                    verum_ast::ty::TypeBoundKind::Equality(ty)
-                        if matches!(ty.kind, TypeKind::Function { .. }) =>
+                    verum_ast::ty::TypeBoundKind::Callable(ty)
+                        if matches!(ty.kind, TypeKind::Function { .. } | TypeKind::Rank2Function { .. }) =>
                     {
                         descriptor
                             .type_bounds

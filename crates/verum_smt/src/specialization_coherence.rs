@@ -738,7 +738,7 @@ impl SpecializationVerifier {
             TypeKind::DynProtocol { .. } => false,
             // Existential types - check bounds for genericity
             TypeKind::Existential { bounds, .. } => bounds.iter().any(|bound| {
-                if let verum_ast::ty::TypeBoundKind::Equality(ty) = &bound.kind {
+                if let verum_ast::ty::TypeBoundKind::Equality(ty) | verum_ast::ty::TypeBoundKind::Callable(ty) = &bound.kind {
                     self.is_generic_with_context(ty, impl_idx)
                 } else {
                     false

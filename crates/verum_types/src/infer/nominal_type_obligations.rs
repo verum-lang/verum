@@ -35,6 +35,7 @@ fn refusal(span: Span, message: impl Into<Text>) -> TypeError {
 pub(super) struct NominalPremises {
     protocols: List<WhereClause>,
     callables: List<(Type, Type)>,
+    equalities: List<crate::context::TypeEquality>,
 }
 
 impl TypeChecker {
@@ -71,6 +72,7 @@ impl TypeChecker {
                 .into_iter()
                 .collect(),
             callables: std::mem::take(&mut self.source_type_registration.callable_assumptions),
+            equalities: std::mem::take(&mut self.source_type_registration.type_equalities),
         };
         let result = if matches!(
             declaration.body,
@@ -87,6 +89,7 @@ impl TypeChecker {
         self.source_type_registration.projection_assumptions =
             previous.protocols.into_iter().collect();
         self.source_type_registration.callable_assumptions = previous.callables;
+        self.source_type_registration.type_equalities = previous.equalities;
     }
 
     fn elaborate_nominal_bounds(
@@ -144,7 +147,7 @@ impl TypeChecker {
         let mut protocols = List::new();
         for bound in bounds {
             match &bound.kind {
-                TypeBoundKind::Equality(ty) | TypeBoundKind::GenericProtocol(ty)
+                TypeBoundKind::Callable(ty)
                     if matches!(
                         ty.kind,
                         TypeKind::Function { .. } | TypeKind::Rank2Function { .. }
@@ -413,6 +416,7 @@ impl TypeChecker {
             let premises =
                 std::mem::take(&mut self.source_type_registration.projection_assumptions);
             let callables = std::mem::take(&mut self.source_type_registration.callable_assumptions);
+            let equalities = std::mem::take(&mut self.source_type_registration.type_equalities);
             let previous_owner = std::mem::replace(&mut self.current_module_path, owner.clone());
             let result: Result<()> = (|| {
                 // Blanket candidates have no nominal receiver owner. Their
@@ -452,6 +456,7 @@ impl TypeChecker {
             })();
             self.current_module_path = previous_owner;
             self.source_type_registration.callable_assumptions = callables;
+            self.source_type_registration.type_equalities = equalities;
             self.source_type_registration.projection_assumptions = premises;
             self.decl_param_frames = frames;
             result?;

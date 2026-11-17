@@ -147,3 +147,68 @@ fn nested_reference_qualifiers_and_existing_bindings_remain_exact() {
         Some(&TypeRef::Concrete(TypeId::BOOL))
     );
 }
+
+fn member(base: TypeRef) -> TypeRef {
+    TypeRef::AssociatedProjection {
+        base: Box::new(base), qualifier: None, assoc: "Item".into(), args: Default::default(),
+    }
+}
+
+#[test]
+fn associated_operand_comparison_uses_the_bound_callers_scope() {
+    let (mut compiler, _) = compiler();
+    for (name, id) in [("First", 0), ("Second", 7)] {
+        compiler.ctx.current_generic_param_ids.insert(name.into(), id);
+    }
+    let formal = member(TypeRef::Generic(TypeParamId(0)));
+    let actual = member(TypeRef::Generic(TypeParamId(7)));
+    let mut bindings = TypeSubstitution::empty();
+    bindings.bind(TypeParamId(0), TypeRef::Generic(TypeParamId(7)));
+    assert!(compiler.bind_source_declaration(&formal, &actual, &mut bindings));
+    // Equal numeric IDs are not equal declarations across the call boundary.
+    assert!(!compiler.bind_source_declaration(&formal, &formal, &mut bindings));
+    assert_eq!(bindings.get(TypeParamId(0)), Some(&TypeRef::Generic(TypeParamId(7))));
+
+    let mut missing = TypeSubstitution::empty();
+    assert!(!compiler.bind_source_declaration(&formal, &formal, &mut missing));
+    assert!(missing.is_empty(), "an Item equality cannot infer its receiver");
+}
+
+#[test]
+fn bound_operand_normalization_preserves_array_compatibility_and_rigid_callers() {
+    let (mut compiler, _) = compiler();
+    for (name, id) in [("First", 0), ("Second", 7)] {
+        compiler.ctx.current_generic_param_ids.insert(name.into(), id);
+    }
+    let formal = TypeRef::instantiated(TypeId::ARRAY, [TypeRef::Generic(TypeParamId(0))]);
+    let mut bindings = TypeSubstitution::empty();
+    bindings.bind(TypeParamId(0), TypeRef::Generic(TypeParamId(7)));
+    for (id, accepted) in [(7, true), (0, false)] {
+        let actual = TypeRef::Array { element: Box::new(TypeRef::Generic(TypeParamId(id))), length: 3 };
+        assert_eq!(compiler.bind_source_declaration(&formal, &actual, &mut bindings), accepted);
+    }
+    assert_eq!(bindings.get(TypeParamId(0)), Some(&TypeRef::Generic(TypeParamId(7))));
+}
+
+#[test]
+fn callable_allowance_keeps_the_selected_producer_witness_and_direction() {
+    let (compiler, function) = compiler();
+    let callable = |is_async, argument| TypeRef::Function {
+        is_async, params: [argument].into_iter().collect(),
+        return_type: Box::new(TypeRef::Concrete(TypeId::INT)), contexts: Default::default(),
+    };
+    for expected_async in [false, true] {
+        for actual_async in [false, true] {
+            let formal = callable(expected_async, TypeRef::Generic(TypeParamId(0)));
+            let actual = callable(actual_async, TypeRef::Concrete(TypeId::INT));
+            let mut bindings = TypeSubstitution::empty();
+            let accepted = compiler.bind_declared_operand(&function, 0, &formal, &actual, &mut bindings);
+            assert_eq!(accepted.is_some(), expected_async || !actual_async);
+            if accepted.is_some() {
+                assert_eq!(bindings.get(TypeParamId(0)), Some(&TypeRef::Concrete(TypeId::INT)));
+            } else {
+                assert!(bindings.is_empty(), "rejection cannot publish a partial witness");
+            }
+        }
+    }
+}

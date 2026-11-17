@@ -900,11 +900,7 @@ impl EventBasedParser {
             builder.token(SyntaxKind::COLON);
             pos += 1;
 
-            // Parse bound (simplified - just identifier)
-            if pos < tokens.len() && matches!(tokens[pos].token.kind, TokenKind::Ident(_)) {
-                let (new_pos, _) = self.parse_type_events(source, tokens, pos, builder);
-                pos = new_pos;
-            }
+            pos = self.parse_type_bounds_events(source, tokens, pos, builder);
         }
 
         // Optional default: = DefaultType
@@ -918,6 +914,39 @@ impl EventBasedParser {
 
         param_marker.complete(builder, SyntaxKind::GENERIC_PARAM);
         (pos, true)
+    }
+
+    /// Preserve each declared bound as a type node. Callable bounds use the
+    /// same function-type parser as annotations, including async and rank-2.
+    fn parse_type_bounds_events(
+        &self,
+        source: &str,
+        tokens: &[&RichToken],
+        start_pos: usize,
+        builder: &mut EventBuilder,
+    ) -> usize {
+        let mut pos = start_pos;
+        let bounds_marker = builder.start();
+        loop {
+            let bound_marker = builder.start();
+            if pos < tokens.len() && matches!(tokens[pos].token.kind, TokenKind::Bang) {
+                builder.token(SyntaxKind::BANG);
+                pos += 1;
+            }
+            let (new_pos, parsed) = self.parse_type_events(source, tokens, pos, builder);
+            pos = new_pos;
+            if !parsed {
+                builder.error("expected a type bound");
+            }
+            bound_marker.complete(builder, SyntaxKind::TYPE_BOUND);
+            if !parsed || pos >= tokens.len() || !matches!(tokens[pos].token.kind, TokenKind::Plus) {
+                break;
+            }
+            builder.token(SyntaxKind::PLUS);
+            pos += 1;
+        }
+        bounds_marker.complete(builder, SyntaxKind::BOUND_LIST);
+        pos
     }
 
     /// Parse a where clause: where T: Bound, U: OtherBound
@@ -987,11 +1016,14 @@ impl EventBasedParser {
         if matches!(tokens[pos].token.kind, TokenKind::Meta) {
             builder.token(SyntaxKind::META_KW);
             pos += 1;
+        } else if matches!(tokens[pos].token.kind, TokenKind::Type) {
+            builder.token(SyntaxKind::TYPE_KW);
+            pos += 1;
         }
 
         // Type or name
-        if pos < tokens.len() && matches!(tokens[pos].token.kind, TokenKind::Ident(_)) {
-            let (new_pos, _) = self.parse_type_events(source, tokens, pos, builder);
+        let (new_pos, parsed) = self.parse_type_events(source, tokens, pos, builder);
+        if parsed {
             pos = new_pos;
         } else {
             pred_marker.abandon(builder);
@@ -1003,28 +1035,14 @@ impl EventBasedParser {
             builder.token(SyntaxKind::COLON);
             pos += 1;
 
-            // Parse bounds (simplified)
-            while pos < tokens.len()
-                && !matches!(
-                    tokens[pos].token.kind,
-                    TokenKind::Comma | TokenKind::LBrace | TokenKind::Semicolon
-                )
-            {
-                // Parse bound
-                if matches!(tokens[pos].token.kind, TokenKind::Ident(_)) {
-                    let (new_pos, _) = self.parse_type_events(source, tokens, pos, builder);
-                    pos = new_pos;
-                } else {
-                    break;
-                }
-
-                // Handle + for multiple bounds
-                if pos < tokens.len() && matches!(tokens[pos].token.kind, TokenKind::Plus) {
-                    builder.token(SyntaxKind::PLUS);
-                    pos += 1;
-                } else {
-                    break;
-                }
+            pos = self.parse_type_bounds_events(source, tokens, pos, builder);
+        } else if pos < tokens.len() && matches!(tokens[pos].token.kind, TokenKind::Eq) {
+            builder.token(SyntaxKind::EQ);
+            pos += 1;
+            let (new_pos, parsed) = self.parse_type_events(source, tokens, pos, builder);
+            pos = new_pos;
+            if !parsed {
+                builder.error("expected a type after `=`");
             }
         }
 
@@ -1835,7 +1853,9 @@ impl EventBasedParser {
         let input = &self.tokens.as_slice()[start_pos..];
         debug_assert_eq!(input[0].span, tokens[start_pos].token.span);
         let mut parser = RecursiveParser::new(input, input[0].span.file_id);
-        let result = parser.parse_type();
+        // A callable bound can be the final type before a function body.
+        // Keep the canonical parser's refinement/body boundary judgment.
+        let result = parser.parse_type_with_lookahead();
         let consumed = parser.stream.position().max(1).min(input.len());
         let marker = builder.start();
         for token in &input[..consumed] {

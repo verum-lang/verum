@@ -183,6 +183,7 @@ impl TypeChecker {
         let rigid = self.unifier.rigid_snapshot();
         let projection_assumptions =
             std::mem::take(&mut self.source_type_registration.projection_assumptions);
+        let equalities = std::mem::take(&mut self.source_type_registration.type_equalities);
         let frames = std::mem::take(&mut self.decl_param_frames);
         let context = self
             .context_checker
@@ -266,6 +267,7 @@ impl TypeChecker {
         self.unifier.exit_rigid_scope(rigid);
         self.decl_param_frames = frames;
         self.source_type_registration.projection_assumptions = projection_assumptions;
+        self.source_type_registration.type_equalities = equalities;
         self.context_checker
             .restore_body_scope(&function.name.name, context);
         self.stage_checker

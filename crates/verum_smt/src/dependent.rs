@@ -153,7 +153,7 @@ impl PiType {
             TypeKind::DynProtocol { bounds, bindings } => {
                 // Check type bounds for name references
                 for bound in bounds {
-                    if let verum_ast::ty::TypeBoundKind::Equality(ty) = &bound.kind
+                    if let verum_ast::ty::TypeBoundKind::Equality(ty) | verum_ast::ty::TypeBoundKind::Callable(ty) = &bound.kind
                         && self.type_references_name(ty, name)
                     {
                         return true;
@@ -172,7 +172,7 @@ impl PiType {
             // Existential type: check bounds for name references
             TypeKind::Existential { bounds, .. } => {
                 for bound in bounds {
-                    if let verum_ast::ty::TypeBoundKind::Equality(ty) = &bound.kind
+                    if let verum_ast::ty::TypeBoundKind::Equality(ty) | verum_ast::ty::TypeBoundKind::Callable(ty) = &bound.kind
                         && self.type_references_name(ty, name)
                     {
                         return true;
@@ -1138,7 +1138,7 @@ impl DependentTypeBackend {
             TypeKind::Existential { bounds, .. } => bounds
                 .iter()
                 .filter_map(|bound| {
-                    if let verum_ast::ty::TypeBoundKind::Equality(ty) = &bound.kind {
+                    if let verum_ast::ty::TypeBoundKind::Equality(ty) | verum_ast::ty::TypeBoundKind::Callable(ty) = &bound.kind {
                         Some(self.compute_quantifier_depth(ty))
                     } else {
                         None
@@ -1426,7 +1426,7 @@ impl DependentTypeBackend {
             // Existential types - extract from bounds' equality types
             TypeKind::Existential { bounds, .. } => {
                 for bound in bounds {
-                    if let verum_ast::ty::TypeBoundKind::Equality(ty) = &bound.kind {
+                    if let verum_ast::ty::TypeBoundKind::Equality(ty) | verum_ast::ty::TypeBoundKind::Callable(ty) = &bound.kind {
                         Self::extract_type_names_recursive(ty, names);
                     }
                 }
@@ -1684,7 +1684,7 @@ impl TypeDependencyGraph {
             // Existential types - collect from bounds' equality types
             TypeKind::Existential { bounds, .. } => {
                 for bound in bounds {
-                    if let verum_ast::ty::TypeBoundKind::Equality(ty) = &bound.kind {
+                    if let verum_ast::ty::TypeBoundKind::Equality(ty) | verum_ast::ty::TypeBoundKind::Callable(ty) = &bound.kind {
                         self.collect_dependencies_recursive(ty, parent);
                     }
                 }
@@ -3370,7 +3370,7 @@ impl InductiveType {
             // Existential types - check bounds' equality types for positivity
             TypeKind::Existential { bounds, .. } => {
                 for bound in bounds {
-                    if let verum_ast::ty::TypeBoundKind::Equality(ty) = &bound.kind {
+                    if let verum_ast::ty::TypeBoundKind::Equality(ty) | verum_ast::ty::TypeBoundKind::Callable(ty) = &bound.kind {
                         self.check_positivity_in_type(ty, positive)?;
                     }
                 }

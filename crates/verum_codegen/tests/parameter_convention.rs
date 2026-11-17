@@ -44,6 +44,25 @@ fn native_mixed_parameter_convention_is_refused_before_emission_of_the_call() {
         "{error}"
     );
 }
+
+#[test]
+fn native_eager_async_calls_share_the_emitted_parameter_convention() {
+    for source in [
+        "async fn answer(value:Int)->Int {value} fn main()->Int {answer(73)}",
+        "fn answer(value:Int)->Int {value} async fn main()->Int {answer(73)}",
+        "async fn answer()->Int {73} fn main()->Int {async {answer().await}}",
+        "type Cell is {value:Int}; async fn alter(mut value:Cell) {value.value=0;} fn main()->Int {let original=Cell{value:73}; alter(original); original.value}",
+    ] {
+        let module = compile(source);
+        let context = Context::create();
+        let mut lowering = VbcToLlvmLowering::new(
+            &context, LoweringConfig::debug("eager_convention").with_debug_info(false),
+        );
+        lowering.lower_module(&module).unwrap();
+        lowering.module().verify().unwrap();
+    }
+}
+
 #[test]
 fn native_callable_cleanup_has_an_explicit_executable_refusal() {
     let module = compile(
@@ -155,7 +174,7 @@ fn an_erased_callable_signature_cannot_authorize_a_native_copy() {
         &context, LoweringConfig::debug("erased_callable_copy").with_debug_info(false),
     );
     let error = lowering.lower_module(&module).unwrap_err();
-    assert!(error.to_string().contains("native callable copy requires its exact empty-environment producer"), "{error}");
+    assert!(error.to_string().contains("native callable copy requires its exact environment producer"), "{error}");
 }
 
 #[test]

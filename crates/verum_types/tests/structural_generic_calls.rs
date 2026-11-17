@@ -161,6 +161,16 @@ fn inline_module_calls_bind_selected_declaration_slots() {
         assert!(errors(&good).is_empty(), "{good}: {:?}", errors(&good));
         let bad = good.replace(", Bool>", ", [Byte; 3]>");
         assert!(!errors(&bad).is_empty(), "wrong argument accepted: {bad}");
+        let bad = good.replace("<[2; 3], Bool>", "<[true; 3], Bool>");
+        assert!(!errors(&bad).is_empty(), "wrong value domain accepted: {bad}");
+        let bad = good.replace("<[2; 3], Bool>", "<[2; 3], Bool, Int>");
+        assert!(!errors(&bad).is_empty(), "extra generic slot accepted: {bad}");
+        let independent = format!(r#"{declaration}
+            fn probe()->Bool {{
+                let first = {module}.choose<[2; 3], Int>(7);
+                {module}.choose<[5; 1], Bool>(true)
+            }}"#);
+        assert!(errors(&independent).is_empty(), "{independent}: {:?}", errors(&independent));
     }
 }
 

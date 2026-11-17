@@ -374,6 +374,7 @@ impl VarianceTracker {
                 // e.g., `Self::Item = T` makes T invariant
                 self.analyze_type(ty, VariancePosition::Invariant);
             }
+            TypeBoundKind::Callable(ty) => self.analyze_type(ty, position),
             TypeBoundKind::AssociatedTypeBound {
                 type_path,
                 assoc_name,

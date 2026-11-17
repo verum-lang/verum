@@ -23,7 +23,11 @@ pub use callable::validate_archive_callable_spelling;
 mod source_signature_wire;
 
 /// Current sidecar schema; bincode archives must be rebuilt when this changes.
-pub const CORE_METADATA_VERSION: u32 = 10;
+// Source callable equations must survive signature publication. Older sidecars
+// may have erased them and cannot establish that a missing constraint is empty.
+// Schema 11 also separates directional Callable bounds from exact Equality;
+// the old Equality(Function) payload cannot establish which was authored.
+pub const CORE_METADATA_VERSION: u32 = 11;
 
 /// Framed sidecars reject stale schemas before decoding their AST payloads.
 pub const CORE_METADATA_MAGIC: &[u8; 8] = b"VRMETA\0\0";

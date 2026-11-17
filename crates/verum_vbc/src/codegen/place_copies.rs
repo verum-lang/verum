@@ -89,6 +89,13 @@ impl VbcCodegen {
     fn copy_source_type_inner(
         &self, expr: &Expr, emitted: Maybe<(Reg, usize, usize)>, depth: usize,
     ) -> Maybe<TypeRef> {
+        let declared = self.copy_source_type_unrefined(expr, emitted, depth)?;
+        self.body_declaration_type(&declared)
+    }
+
+    fn copy_source_type_unrefined(
+        &self, expr: &Expr, emitted: Maybe<(Reg, usize, usize)>, depth: usize,
+    ) -> Maybe<TypeRef> {
         use crate::types::{CbgrTier, Mutability};
         if depth >= 64 { return None; }
         let expr = Self::normalized_place(expr);
@@ -107,8 +114,10 @@ impl VbcCodegen {
                 return Some(result);
             }
             if let Instruction::MakeVariantTyped { type_id, tag, field_count: 0, .. } = producer {
+                let expected = self.ctx.declared_result_types.get(&expr.span)
+                    .and_then(Option::as_ref);
                 return self.selected_variant_declaration(
-                    crate::types::TypeId(*type_id), *tag, &[], None);
+                    crate::types::TypeId(*type_id), *tag, &[], expected);
             }
         }
         // Both call syntaxes retain the selected producer's declaration.
@@ -161,8 +170,8 @@ impl VbcCodegen {
             ),
             ExprKind::Closure { .. } => self.compiled_callable_signature(expr).cloned(),
             ExprKind::Path(_) => {
-                if let Some(function) = self.selected_function_path(expr).ok()? {
-                    return function.callable_signature.clone();
+                if let Some(function) = self.selected_function_value(expr).ok()? {
+                    return self.function_value_signature(function, self.ctx.expected_value_type.as_ref());
                 }
                 let name = Self::named_place_binding(expr)?;
                 let Some(binding) = self.ctx.lookup_var(name) else {
@@ -276,9 +285,11 @@ impl VbcCodegen {
                     return Some(pointer);
                 }
                 if let Some(witness) = self.type_parameter_static_receiver(receiver).ok()? {
-                    if let TypeRef::Generic(id) = witness {
-                        return type_args.is_empty().then(|| self.bounded_static_output(id, method.name.as_str(), args.len())).flatten();
+                    if type_args.is_empty()
+                        && let Some(result) = self.bounded_static_output(&witness, method.name.as_str(), args.len()) {
+                        return Some(result);
                     }
+                    if matches!(witness, TypeRef::Generic(_)) { return None; }
                     let owner = self.resolve_declared_associated_types(&witness)?;
                     let name = self.declaration_type_name(&owner, depth + 1)?;
                     return self.declared_method_result_type(&name, method.name.as_str(), type_args);
@@ -314,7 +325,7 @@ impl VbcCodegen {
     /// Recognize only an uninterrupted result flow within the captured interval.
     /// Retiring a different operand preserves this register. Branches and
     /// unknown writes still end the proof instead of guessing a prior producer.
-    fn copy_result_producer(&self, mut reg: Reg, start: usize, end: usize) -> Maybe<(usize, &Instruction)> {
+    pub(super) fn copy_result_producer(&self, mut reg: Reg, start: usize, end: usize) -> Maybe<(usize, &Instruction)> {
         let instructions = self.ctx.instructions.get(start..end)?;
         if self.ctx.has_label_in_instruction_range(start, end) { return None; }
         for (offset, instruction) in instructions.iter().enumerate().rev().take(128) {
@@ -375,7 +386,7 @@ impl VbcCodegen {
         let TypeRef::Function { params, return_type, .. } = info.callable_signature.as_ref()? else { return None; };
         if params.len() != usize::from(args.count) { return None; }
         let mut substitution = crate::mono::TypeSubstitution::empty();
-        self.bind_source_type_arguments(info, type_args, &mut substitution)?;
+        self.bind_source_type_arguments(info, type_args, &mut substitution).ok()?;
         for (offset, formal) in params.iter().enumerate() {
             let argument = Reg(args.start.0.checked_add(u16::try_from(offset).ok()?)?);
             let Some(actual) = self.copy_argument_declaration(argument, start, index) else { continue; };

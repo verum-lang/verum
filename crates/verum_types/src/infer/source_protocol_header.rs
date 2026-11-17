@@ -61,6 +61,7 @@ impl TypeChecker {
         // obligations must not inherit the caller's equally-spelled receiver.
         let previous = std::mem::take(&mut self.source_type_registration.projection_assumptions);
         let callables = std::mem::take(&mut self.source_type_registration.callable_assumptions);
+        let equalities = std::mem::take(&mut self.source_type_registration.type_equalities);
         let result = self.elaborate_protocol_members_in_scope(
             identity,
             parameters,
@@ -71,6 +72,7 @@ impl TypeChecker {
         );
         self.source_type_registration.projection_assumptions = previous;
         self.source_type_registration.callable_assumptions = callables;
+        self.source_type_registration.type_equalities = equalities;
         result
     }
 

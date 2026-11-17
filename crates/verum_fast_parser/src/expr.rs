@@ -3702,7 +3702,8 @@ impl<'a> RecursiveParser<'a> {
                 },
                 _ if token.is_literal() => {},
                 TokenKind::Ident(_) | TokenKind::Comma | TokenKind::Colon
-                | TokenKind::Dot | TokenKind::Eq | TokenKind::Fn | TokenKind::RArrow
+                | TokenKind::Dot | TokenKind::Eq | TokenKind::Fn | TokenKind::Async
+                | TokenKind::Using | TokenKind::RArrow
                 | TokenKind::LParen | TokenKind::RParen | TokenKind::Ampersand
                 | TokenKind::Mut | TokenKind::Checked | TokenKind::Unsafe
                 | TokenKind::Lifetime(_) | TokenKind::Star | TokenKind::SelfType

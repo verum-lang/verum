@@ -585,6 +585,7 @@ pub struct ProtocolMethodScope {
     pub binders: DeclarationBinders,
     pub protocol_bounds: Map<crate::ty::TypeVar, List<ProtocolBound>>,
     pub where_clauses: List<WhereClause>,
+    pub type_equalities: List<crate::context::TypeEquality>,
 }
 
 impl ProtocolMethod {
@@ -631,6 +632,10 @@ impl ProtocolMethod {
             })
             .collect::<std::result::Result<_, Text>>()?;
         if let Some(scope) = &mut applied.scope {
+            for equality in &mut scope.type_equalities {
+                equality.subject = apply(&equality.subject)?;
+                equality.expected = apply(&equality.expected)?;
+            }
             for clause in &mut scope.where_clauses {
                 clause.ty = apply(&clause.ty)?;
                 for bound in &mut clause.bounds {
@@ -6633,6 +6638,18 @@ impl ProtocolChecker {
                         .iter()
                         .zip(a2.iter())
                         .all(|(t1, t2)| self.types_structurally_equal(t1, t2))
+            }
+            (
+                Type::Function { params: lp, return_type: lr, contexts: lc,
+                    type_params: lt, property_requirement: lq, .. },
+                Type::Function { params: rp, return_type: rr, contexts: rc,
+                    type_params: rt, property_requirement: rq, .. },
+            ) => {
+                // Inferred body properties are observations, not a change to
+                // the declared callable contract. Requirements remain exact.
+                lc == rc && lt == rt && lq == rq && lp.len() == rp.len()
+                    && lp.iter().zip(rp).all(|(a, b)| self.types_structurally_equal(a, b))
+                    && self.types_structurally_equal(lr, rr)
             }
             (Type::Tuple(e1), Type::Tuple(e2)) => {
                 e1.len() == e2.len()

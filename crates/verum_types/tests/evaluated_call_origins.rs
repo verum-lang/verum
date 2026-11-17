@@ -34,6 +34,21 @@ fn lifetime_rejected(source: &str) {
 }
 
 #[test]
+fn generic_callback_forwards_the_evaluated_value_but_cannot_reread_its_source() {
+    accepted("fn apply<T,F>(value:T,callback:F)->T where F=fn(T)->T {callback(value)}");
+    lifetime_rejected("fn apply<T,F>(value:T,callback:F)->T where F=fn(T)->T {callback(value); value}");
+}
+
+#[test]
+fn a_callback_result_keeps_reference_payloads_captured_before_its_body_scope() {
+    let prefix = "fn invoke<F>(callback:F)->&Int where F=fn()->&Int {callback()}";
+    accepted(&format!("{prefix} fn receive(input:&Int)->&Int {{let selected=|| input; invoke(selected)}}"));
+    accepted(&format!("{prefix} fn receive()->Int {{let local=4; let loan=&local; let selected=|| loan; *invoke(selected)}}"));
+    lifetime_rejected(&format!("{prefix} fn escape()->&Int {{let local=4; let loan=&local; let selected=|| loan; invoke(selected)}}"));
+    lifetime_rejected(&format!("{prefix} fn escape()->&Int {{let local=4; let loan=&local; invoke(|| loan)}}"));
+}
+
+#[test]
 fn immutable_scalar_capture_does_not_borrow_its_old_binding_slot() {
     accepted("fn make()->fn()->Int {let local=42; || local} fn run()->Int {let selected=make(); selected()}");
 }

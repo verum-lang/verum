@@ -31,6 +31,7 @@ mod source_dyn_protocol;
 mod universe_parameters;
 mod atomic_access;
 mod call_obligations;
+mod type_equalities;
 mod context_methods;
 mod callable_properties;
 mod constructor_calls;

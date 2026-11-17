@@ -31,6 +31,25 @@ struct IndexProjection {
 }
 
 impl VbcCodegen {
+    /// A receiver expression can name a receiverless associated function. Its
+    /// nominal owner selects the declaration, but supplies no runtime argument.
+    pub(in crate::codegen) fn declared_static_receiver_method(
+        &self, receiver: &crate::types::TypeRef, method: &str, arity: usize,
+    ) -> CodegenResult<verum_common::Maybe<(&FunctionInfo, crate::types::TypeRef)>> {
+        let Some(owner) = self.body_declaration_type(receiver)
+            .and_then(|ty| self.expand_declared_alias(ty)) else { return Ok(None); };
+        let owner = crate::receiver_methods::pointee(&owner);
+        let Some(descriptor) = owner.base_type_id().and_then(|id| self.type_by_id(id)) else { return Ok(None); };
+        let Some(name) = self.type_declaration_identity(descriptor) else { return Ok(None); };
+        let Some(key) = self.registered_receiver_method(&name, method) else { return Ok(None); };
+        let selected = self.static_receiver_specialization(&key, owner, arity)?;
+        let Some(function) = selected.or_else(|| self.ctx.lookup_function_with_arity(&key, arity)) else { return Ok(None); };
+        if function.param_count != arity || self.has_declared_method_receiver(function)? { return Ok(None); }
+        let mut bindings = crate::mono::TypeSubstitution::empty();
+        if self.bind_static_receiver_declaration(function, owner, &mut bindings).is_none() { return Ok(None); }
+        Ok(Some((function, owner.clone())))
+    }
+
     /// Select the method using the declared receiver, retaining every argument
     /// through alias expansion and Deref. Rendered names identify declarations;
     /// they never carry the receiver's generic evidence.
@@ -40,13 +59,28 @@ impl VbcCodegen {
         method: &str,
         arity: usize,
     ) -> CodegenResult<verum_common::Maybe<DeclaredReceiverMethod<'_>>> {
-        let mut owner = receiver.clone();
+        let mut owner = self.body_declaration_type(receiver).ok_or_else(|| CodegenError::new(
+            CodegenErrorKind::InvalidSourceSignature("receiver has no consistent declaration under the callable's equalities".into()),
+        ))?;
         let mut seen = verum_common::List::new();
         for _ in 0..64 {
-            owner = crate::receiver_methods::pointee(&owner).clone();
+            if let Some(member) = self.declared_bound_method(&owner, method, arity.saturating_sub(1)) {
+                return member.map(|member| Some(DeclaredReceiverMethod::Protocol(member)));
+            }
+            let pointee = crate::receiver_methods::pointee(&owner);
+            if pointee != &owner {
+                owner = pointee.clone();
+                continue;
+            }
             if let crate::types::TypeRef::Dynamic(object) = &owner {
                 return self.declared_dynamic_method(object, method, arity.saturating_sub(1))
                     .map(|member| member.map(DeclaredReceiverMethod::Protocol));
+            }
+            if matches!(owner, crate::types::TypeRef::Generic(_)
+                | crate::types::TypeRef::AssociatedProjection { .. }) {
+                return Err(CodegenError::new(CodegenErrorKind::InvalidSourceSignature(format!(
+                    "no declared protocol method `{method}` for parametric receiver {owner:?}"
+                ))));
             }
             if let Some(key) = self.structural_receiver_method_key(&owner, method, arity)? {
                 let function = self.receiver_specialization(&key, Some(&owner), arity)?

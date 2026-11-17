@@ -438,7 +438,7 @@ impl super::VbcCodegen {
         source: Reg,
         actual: Option<&TypeRef>,
     ) -> super::CodegenResult<Reg> {
-        if callable.is_async || callable.is_generator || callable.intrinsic_name.is_some()
+        if callable.is_generator || callable.intrinsic_name.is_some()
             || callable.foreign_declaration.is_some() {
             return Ok(source);
         }
@@ -455,7 +455,7 @@ impl super::VbcCodegen {
                 _ => None,
             });
         if !self.ctx.registers.emits_owned_parameter_calls {
-            // Async and synthetic bodies keep their existing handoff. A new
+            // Synthetic and generator bodies keep their existing handoff. A new
             // argument copy would silently change an unflagged caller's ABI.
             let owns = (callable.has_source_body || self.functions.iter().any(|function|
                 function.descriptor.id == callable.id && function.descriptor.has_source_body))
@@ -692,6 +692,15 @@ impl super::VbcCodegen {
             ResourceDiscipline::Affine | ResourceDiscipline::Linear))
     }
 
+    /// A pattern alias has no owned cleanup only when the current binding's
+    /// declaration is a reference. Names and recycled registers grant no such
+    /// permission; an unresolved alias remains an outstanding obligation.
+    fn binding_is_declared_reference(&self, binding: &super::RegisterInfo) -> bool {
+        self.ctx.registers.value_uses.active.get(&binding.reg).is_some_and(|fact|
+            fact.id == binding.binding_id
+                && matches!(fact.declaration_type, Some(TypeRef::Reference { .. })))
+    }
+
     /// Duplication discipline does not describe storage lifetime: an ordinary
     /// copyable value may own Text or invoke Drop. Only the shared primitive
     /// storage plan and an explicit reference establish trivial cleanup here.
@@ -795,16 +804,24 @@ impl super::VbcCodegen {
         // still leaves the remaining lexical locals to clean up on this edge.
         let supported_temporary = capture.transferred && !capture.unhandled && fact.is_none()
             && (!capture.call_transferred || declared_discipline == Some(ResourceDiscipline::Unrestricted));
-        if (!direct_local && !supported_temporary)
-            || self.ctx.has_pending_defers()
-            || bindings.iter().any(|(name, binding)| {
-                binding.is_cell
-                    || binding.is_pattern_alias
-                    || self.ctx.current_fn_escaping_vars.contains(name.as_str())
+        let unsupported = if !direct_local && !supported_temporary {
+            Some(verum_common::Text::from("the selected result has no proved ownership handoff"))
+        } else if self.ctx.has_pending_defers() {
+            Some(verum_common::Text::from("deferred cleanup has no result-preservation contract"))
+        } else {
+            bindings.iter().find_map(|(name, binding)| {
+                if binding.is_cell {
+                    Some(format!("captured cell `{name}` has no owned exit contract").into())
+                } else if binding.is_pattern_alias && !self.binding_is_declared_reference(binding) {
+                    Some(format!("pattern alias `{name}` has no current reference declaration").into())
+                } else if self.ctx.current_fn_escaping_vars.contains(name.as_str()) {
+                    Some(format!("escaping binding `{name}` has no proved exit contract").into())
+                } else { None }
             })
-        {
+        };
+        if let Some(reason) = unsupported {
             return Err(super::CodegenError::with_span(super::CodegenErrorKind::UnsupportedExpr(
-                "affine return requires a direct local value with no deferred, aliased or escaping cleanup; parameter and selected-result handoffs are not yet implemented".into(),
+                format!("affine return requires a direct local value or a proved producer handoff: {reason}").into(),
             ), expr.span));
         }
 
@@ -824,16 +841,7 @@ impl super::VbcCodegen {
             if self.ctx.is_raw_pointer(binding.reg) {
                 continue;
             }
-            let borrowed_or_raw = self
-                .ctx
-                .registers
-                .value_uses
-                .active
-                .get(&binding.reg)
-                .filter(|fact| fact.id == binding.binding_id)
-                .and_then(|fact| fact.declaration_type.as_ref())
-                .is_some_and(|ty| matches!(ty, TypeRef::Reference { .. }));
-            if borrowed_or_raw {
+            if self.binding_is_declared_reference(&binding) {
                 continue;
             }
             let declared = self.ctx.registers.value_uses.active.get(&binding.reg)

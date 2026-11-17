@@ -2387,6 +2387,7 @@ impl ToTokens for verum_ast::ty::TypeBound {
                 stream.push(Token::new(TokenKind::Eq, self.span));
                 ty.to_tokens(stream);
             }
+            TypeBoundKind::Callable(ty) => ty.to_tokens(stream),
             TypeBoundKind::NegativeProtocol(path) => {
                 // Negative protocol bound: T: !Trait
                 stream.push(Token::new(TokenKind::Bang, self.span));

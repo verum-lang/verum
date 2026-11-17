@@ -1721,7 +1721,7 @@ fn convert_type_bound_to_protocol_bound(bound: &verum_ast::ty::TypeBound) -> Opt
             })
         }
 
-        TypeBoundKind::Equality(_ty) => {
+        TypeBoundKind::Equality(_ty) | TypeBoundKind::Callable(_ty) => {
             // Equality bounds are handled differently in the type system
             // They create type equality constraints rather than protocol bounds
             None

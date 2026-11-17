@@ -130,6 +130,7 @@ impl TypeChecker {
         self.set_current_self_type(Some(receiver));
         let assumption_base = self.source_type_registration.projection_assumptions.len();
         let callable_base = self.source_type_registration.callable_assumptions.len();
+        let equality_depth = self.source_type_registration.type_equalities.len();
         let result = (|| -> Result<_> {
             let mut type_bounds: Map<Text, List<Type>> = Map::new();
             for (parameter, variable) in method.generics.iter().zip(&scope.binders.local) {
@@ -142,7 +143,7 @@ impl TypeChecker {
                 let mut protocol_bounds = List::new();
                 for bound in bounds {
                     match &bound.kind {
-                        TypeBoundKind::Equality(ty) | TypeBoundKind::GenericProtocol(ty)
+                        TypeBoundKind::Callable(ty)
                             if matches!(
                                 ty.kind,
                                 verum_ast::TypeKind::Function { .. }
@@ -185,6 +186,18 @@ impl TypeChecker {
                             "method value predicates need a checked dependent call obligation",
                         ));
                     };
+                    let equalities = self.declared_where_equalities(ty, bounds)?;
+                    if !equalities.is_empty() {
+                        // A projected equation retains the protocol header
+                        // that selected its member before Self is substituted.
+                        for premise in &self.source_type_registration.projection_assumptions {
+                            if !scope.where_clauses.contains(premise) {
+                                scope.where_clauses.push(premise.clone());
+                            }
+                        }
+                    }
+                    self.source_type_registration.type_equalities.extend(equalities.iter().cloned());
+                    scope.type_equalities.extend(equalities);
                     let subject = self.ast_to_type(ty)?;
                     let bounds = self.convert_type_bounds_for_receiver(bounds, Some(&subject))?;
                     let clause = crate::protocol::WhereClause { ty: subject, bounds };
@@ -248,6 +261,7 @@ impl TypeChecker {
         })();
         self.source_type_registration.projection_assumptions.truncate(assumption_base);
         self.source_type_registration.callable_assumptions.truncate(callable_base);
+        self.source_type_registration.type_equalities.truncate(equality_depth);
         self.set_current_self_type(saved_self);
         self.resolving_source_signature = saved_source_scope;
         self.pop_decl_param_frame();
@@ -295,6 +309,7 @@ impl TypeChecker {
         if let Some(scope) = applied.scope {
             scheme.var_protocol_bounds = scope.protocol_bounds;
             scheme.where_clauses = scope.where_clauses;
+            scheme.type_equalities = scope.type_equalities;
         }
         Ok(scheme)
     }
@@ -342,6 +357,10 @@ impl TypeChecker {
                     .try_apply_subst(&substitution)
                     .map_err(|message| invalid(span, message))?,
             );
+        }
+        for equality in &scope.type_equalities {
+            scheme.type_equalities.push(equality.try_apply_subst(&substitution)
+                .map_err(|message| invalid(span, message))?);
         }
         for (original, bounds) in &scope.protocol_bounds {
             let Some(Type::Var(variable)) = substitution.get(original) else {

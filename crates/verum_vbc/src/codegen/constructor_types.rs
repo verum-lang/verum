@@ -143,8 +143,30 @@ impl VbcCodegen {
         actual: &TypeRef,
         bindings: &mut TypeSubstitution,
     ) -> bool {
-        self.declared_type_in_scope(actual)
-            && crate::mono::match_declared_types(pattern, actual, bindings)
+        if !self.declared_type_in_scope(actual) { return false; }
+        if fully_bound(pattern, bindings) {
+            // Only a complete callee substitution moves this pattern into
+            // the caller's scope. There its projections and body premises can
+            // be normalized without interpreting a caller ID as a callee slot.
+            let Some(expected) = bindings.apply(pattern).ok()
+                .and_then(|ty| self.body_declaration_type(&ty)) else { return false; };
+            let Some(actual) = self.body_declaration_type(actual) else { return false; };
+            if !self.declared_type_in_scope(&expected) { return false; }
+            let mut rigid = TypeSubstitution::empty();
+            let Ok(ids) = self.current_callable_param_ids() else { return false; };
+            for id in ids {
+                rigid.bind(id, TypeRef::Generic(id));
+            }
+            // Reuse structural compatibility (including the two declared
+            // array carriers), with every caller parameter fixed to itself.
+            return crate::mono::match_declared_types(&expected, &actual, &mut rigid);
+        }
+        let mut selected = bindings.clone();
+        if !crate::mono::match_declared_types(pattern, actual, &mut selected)
+            || !fully_bound(pattern, &selected)
+        { return false; }
+        *bindings = selected;
+        true
     }
 
     pub(super) fn constructor_declaration(
@@ -332,7 +354,12 @@ impl VbcCodegen {
                 &value,
                 known.then_some(&contextual),
                 depth + 1,
-            )?;
+            );
+            if std::env::var_os("VERUM_TRACE_MONO").is_some() {
+                let bound: verum_common::List<_> = owner_ids.iter().map(|id| (id, bindings.get(*id))).collect();
+                eprintln!("[constructor-field] owner={owner:?} formal={field:?} actual={actual:?} bindings={bound:?}");
+            }
+            let actual = actual?;
             if !self.bind_source_declaration(field, &actual, &mut bindings) {
                 return None;
             }
@@ -410,6 +437,9 @@ impl VbcCodegen {
             return None;
         }
         let expr = Self::normalized_place(expr);
+        if let Some(function) = self.selected_function_value(expr).ok()? {
+            return self.function_value_signature(function, expected);
+        }
         if let Some(expected) = expected
             && let Some(literal) = self.contextual_numeric_literal(expr, expected) {
             return literal;
@@ -457,7 +487,8 @@ impl VbcCodegen {
 
     pub(super) fn admits_constructor_context(expr: &Expr) -> bool {
         matches!(Self::normalized_place(expr).kind,
-            ExprKind::Call { .. } | ExprKind::MethodCall { .. } | ExprKind::Record { .. })
+            ExprKind::Call { .. } | ExprKind::MethodCall { .. } | ExprKind::Record { .. }
+                | ExprKind::Path(_) | ExprKind::Field { .. })
     }
 
     /// A call's expected result can bind its own parameters. Fully bound
@@ -469,7 +500,7 @@ impl VbcCodegen {
             return Ok(None);
         };
         let mut bindings = TypeSubstitution::empty();
-        if self.bind_source_type_arguments(info, explicit, &mut bindings).is_none() { return Ok(None); }
+        self.bind_source_type_arguments(info, explicit, &mut bindings)?;
         if let Some(expected) = self.ctx.expected_value_type.as_ref() {
             let mut result_bindings = bindings.clone();
             if self.bind_source_declaration(return_type, expected, &mut result_bindings) {
@@ -512,9 +543,33 @@ impl VbcCodegen {
         &self, info: &FunctionInfo, count: usize, args: impl Iterator<Item = &'a Expr>,
         captured: Option<&[Option<TypeRef>]>,
     ) -> Option<Vec<TypeRef>> {
-        if info.type_param_ids.is_empty() {
-            return None;
+        self.selected_argument_witnesses_in(info, count, args, captured, TypeSubstitution::empty())
+    }
+
+    pub(super) fn selected_argument_witnesses_in<'a>(
+        &self, info: &FunctionInfo, count: usize, args: impl Iterator<Item = &'a Expr>,
+        captured: Option<&[Option<TypeRef>]>, bindings: TypeSubstitution,
+    ) -> Option<Vec<TypeRef>> {
+        let bindings = self.selected_argument_bindings_in(info, count, args, captured, bindings)?;
+        info.type_param_ids.iter().map(|id| bindings.get(*id).cloned()).collect()
+    }
+
+    /// Inference may leave a declaration-owned slot open for explicit arguments.
+    /// Failed evidence is distinct from a successful, incomplete substitution.
+    pub(super) fn selected_argument_bindings_in<'a>(
+        &self, info: &FunctionInfo, count: usize, args: impl Iterator<Item = &'a Expr>,
+        captured: Option<&[Option<TypeRef>]>, mut bindings: TypeSubstitution,
+    ) -> Option<TypeSubstitution> {
+        if count > info.param_count { return None; }
+        for index in count..info.param_count {
+            let constant = self.declared_callable_descriptors.get(&info.id)
+                .and_then(|declaration| declaration.params.get(index))
+                .is_some_and(|parameter| parameter.default.is_some());
+            let expression = self.declared_callable_defaults.get(&info.id)
+                .and_then(|defaults| defaults.get(index)).is_some_and(Option::is_some);
+            if !constant && !expression { return None; }
         }
+        if info.type_param_ids.is_empty() { return Some(bindings); }
         // Async, generator and contextual functions do not have an ordinary
         // synchronous function result. Their source parameter declarations
         // still bind generic witnesses, independently of the result carrier.
@@ -525,12 +580,10 @@ impl VbcCodegen {
         let declared = self.ctx.semantic_fn_params.get(&info.id);
         let parameter = |index| signature.and_then(|(params, _)| params.get(index))
             .or_else(|| declared?.get(index).and_then(Option::as_ref));
-        if info.param_count as usize != count { return None; }
-        let mut bindings = TypeSubstitution::empty();
         if let (Some((_, return_type)), Some(expected)) = (signature, self.ctx.expected_value_type.as_ref()) {
             // A surrounding call can have a different result than this operand.
             // A failed structural match contributes no partial substitutions.
-            let mut result_bindings = TypeSubstitution::empty();
+            let mut result_bindings = bindings.clone();
             if self.bind_source_declaration(return_type, expected, &mut result_bindings) {
                 bindings = result_bindings;
             }
@@ -538,13 +591,20 @@ impl VbcCodegen {
         for (index, arg) in args.enumerate() {
             let formal = parameter(index)?;
             if !formal.is_generic() { continue; }
-            let actual = if let Some(actual) = captured.and_then(|arguments| arguments.get(index)).and_then(Option::as_ref) {
-                actual.clone()
+            let expected = fully_bound(formal, &bindings).then(|| bindings.apply(formal).ok()).flatten();
+            // An unsuffixed literal has the selected scalar carrier only when
+            // its value fits that declaration. Other operands keep their
+            // evaluated receipts even after a move consumes their source place.
+            let contextual_literal = expected.as_ref()
+                .and_then(|expected| self.contextual_numeric_literal(arg, expected));
+            let actual = if let Some(literal) = contextual_literal {
+                literal
+            } else if let Some(actual) = captured.and_then(|arguments| arguments.get(index)).and_then(Option::as_ref) {
+                Some(actual.clone())
             } else if matches!(
                 Self::normalized_place(arg).kind, ExprKind::Call { .. } | ExprKind::MethodCall { .. }
             ) {
-                let expected = fully_bound(formal, &bindings).then(|| bindings.apply(formal).ok()).flatten();
-                self.source_expression_declaration(arg, expected.as_ref(), 0)?
+                self.source_expression_declaration(arg, expected.as_ref(), 0)
             } else {
                 self.compiled_callable_signature(arg).cloned().or_else(||
                     self.declared_expression_result(arg, None, 0, 0)).or_else(|| {
@@ -552,8 +612,12 @@ impl VbcCodegen {
                     // literal type. No register or rendered variable hint is evidence.
                     Self::literal_default_type_name(arg)
                         .and_then(|name| self.semantic_type_in_current_scope(&name))
-                })?
+                })
             };
+            if std::env::var_os("VERUM_TRACE_MONO").is_some() {
+                eprintln!("[declared-operand] function={:?} slot={index} formal={formal:?} actual={actual:?}", info.id);
+            }
+            let actual = actual?;
             let (mut formal, mut actual) = (formal, &actual);
             if index == 0 && info.param_names.first().is_some_and(|name| name == "self") {
                 // A method's receiver can borrow implicitly. Its nested
@@ -563,9 +627,74 @@ impl VbcCodegen {
                     if let TypeRef::Reference { inner, .. } = actual { actual = inner; }
                 }
             }
-            self.bind_declared_operand(info, index, formal, actual, &mut bindings)?;
+            let accepted = self.bind_declared_operand(info, index, formal, actual, &mut bindings);
+            if std::env::var_os("VERUM_TRACE_MONO").is_some() {
+                let bound: verum_common::List<_> = info.type_param_ids.iter().map(|id| (id, bindings.get(*id))).collect();
+                eprintln!("[declared-call] function={:?} slot={index} formal={formal:?} actual={actual:?} accepted={} bindings={bound:?}", info.id, accepted.is_some());
+            }
+            accepted?;
+            self.complete_declared_callable_arguments(info, &mut bindings)?;
         }
-        info.type_param_ids.iter().map(|id| bindings.get(*id).cloned()).collect()
+        // Omitted arguments are real producers emitted from this declaration's
+        // defaults. Their receipts can bind an otherwise unconstrained slot;
+        // neither the omitted syntax nor the formal type supplies that evidence.
+        for index in count..info.param_count {
+            let formal = parameter(index)?;
+            if !formal.is_generic() { continue; }
+            let expected = fully_bound(formal, &bindings).then(|| bindings.apply(formal).ok()).flatten();
+            let contextual_literal = expected.as_ref().and_then(|expected|
+                self.declared_callable_defaults.get(&info.id)?.get(index)?.as_ref()
+                    .and_then(|expression| self.contextual_numeric_literal(expression, expected)));
+            let actual = match contextual_literal {
+                Some(literal) => literal?,
+                None => captured?.get(index)?.as_ref()?.clone(),
+            };
+            self.bind_declared_operand(info, index, formal, &actual, &mut bindings)?;
+            self.complete_declared_callable_arguments(info, &mut bindings)?;
+        }
+        self.complete_declared_callable_arguments(info, &mut bindings)?;
+        Some(bindings)
+    }
+
+    pub(super) fn bind_static_receiver_declaration(
+        &self, function: &FunctionInfo, owner: &TypeRef, bindings: &mut TypeSubstitution,
+    ) -> Option<()> {
+        let descriptor = self.declared_callable_descriptors.get(&function.id)?;
+        if descriptor.source_signature.as_ref()?.is_method() { return None; }
+        let declared_owner = descriptor.source_receiver.as_ref()?;
+        self.bind_source_declaration(declared_owner, crate::receiver_methods::pointee(owner), bindings)
+            .then_some(())
+    }
+
+    /// A receiver can determine F without mentioning the result parameter in
+    /// its own nominal arguments. Only F's declared callable bound can then
+    /// determine that residual slot; caller and callee IDs remain separate.
+    pub(super) fn complete_declared_callable_arguments(
+        &self, function: &FunctionInfo, bindings: &mut TypeSubstitution,
+    ) -> Option<()> {
+        let declaration = self.declared_callable_descriptors.get(&function.id)
+            .or_else(|| self.functions.iter().find(|body| body.descriptor.id == function.id)
+                .map(|body| &body.descriptor));
+        let Some(declaration) = declaration else { return Some(()); };
+        loop {
+            let before = bindings.len();
+            self.complete_declared_associated_arguments(function, declaration, bindings)?;
+            for parameter in &declaration.type_params {
+                let actual = match bindings.get(parameter.id) {
+                    Some(signature @ TypeRef::Function { .. }) => Some(signature),
+                    Some(TypeRef::Generic(id)) => self.ctx.registers.callable_bound_signatures.get(id),
+                    _ => None,
+                };
+                let Some(actual) = actual.cloned() else { continue; };
+                for bound in &parameter.type_bounds {
+                    if matches!(bound, TypeRef::Function { .. }) {
+                        let bound = self.callable_declaration_type(function, bound)?;
+                        self.bind_callable_operand(&bound, &actual, bindings).then_some(())?;
+                    }
+                }
+            }
+            if bindings.len() == before { return Some(()); }
+        }
     }
 
     pub(super) fn bind_declared_operand(&self, function: &FunctionInfo, index: usize, formal: &TypeRef,
@@ -605,7 +734,7 @@ impl VbcCodegen {
         if matches!(formal, TypeRef::Generic(_)) && matches!(actual, TypeRef::Function { .. })
             && let Some(bound) = self.callable_parameter_bound(function, index)
         {
-            let bound = self.resolve_declared_associated_types(bound).unwrap_or_else(|| bound.clone());
+            let bound = self.callable_declaration_type(function, bound)?;
             self.bind_callable_operand(&bound, actual, bindings).then_some(())?;
         }
         Some(())
@@ -620,7 +749,10 @@ impl VbcCodegen {
                 return_type: expected_result, contexts: expected_contexts },
             TypeRef::Function { is_async, params, return_type, contexts }) = (formal, actual)
         {
-            if expected_async != is_async || expected_contexts != contexts || expected_params.len() != params.len() {
+            // This boundary checks a callable allowance, not type equality.
+            // A synchronous producer also satisfies an async-capable bound;
+            // the opposite direction would admit an undeclared computation.
+            if (*is_async && !*expected_async) || expected_contexts != contexts || expected_params.len() != params.len() {
                 return false;
             }
             let mut selected = bindings.clone();
@@ -644,18 +776,38 @@ impl VbcCodegen {
         function: &FunctionInfo,
         arguments: &[verum_ast::ty::GenericArg],
         bindings: &mut TypeSubstitution,
-    ) -> Option<()> {
+    ) -> CodegenResult<()> {
         let slots = &function.explicit_type_param_ids;
+        let invalid = |message: &str| CodegenError::new(CodegenErrorKind::TypeInference(message.into()));
         if arguments.len() > slots.len() {
-            return None;
+            return Err(invalid("explicit generic argument exceeds the selected declaration's roster"));
         }
-        for (index, (slot, argument)) in slots.iter().zip(arguments).enumerate() {
-            let Some(actual) = self.callable_argument_witness(function, index, argument, None).ok()? else { continue; };
-            if !self.bind_source_declaration(&TypeRef::Generic((*slot)?), &actual, bindings) {
-                return None;
+        let mut expected_bindings = TypeSubstitution::empty();
+        let result = match function.callable_signature.as_ref() {
+            Some(TypeRef::Function { return_type, .. }) => Some(return_type.as_ref()),
+            _ => function.return_type.as_ref(),
+        };
+        if let (Some(result), Some(expected)) = (result, self.ctx.expected_value_type.as_ref()) {
+            if !self.bind_source_declaration(result, expected, &mut expected_bindings) {
+                expected_bindings = TypeSubstitution::empty();
             }
         }
-        Some(())
+        for (index, (slot, argument)) in slots.iter().zip(arguments).enumerate() {
+            let expected = slot.and_then(|id| expected_bindings.get(id).or_else(|| bindings.get(id)));
+            // A source hole is an obligation for the completed call. Without
+            // context it contributes no binding yet; final witness encoding
+            // still resolves and checks the entire explicit argument.
+            if expected.is_none() && argument.type_for_declared_slot()
+                .is_some_and(|ty| Self::explicit_type_contains_hole(&ty)) {
+                continue;
+            }
+            let Some(actual) = self.callable_argument_witness(function, index, argument, expected)? else { continue; };
+            let id = slot.ok_or_else(|| invalid("generic argument has no declared slot"))?;
+            if !self.bind_source_declaration(&TypeRef::Generic(id), &actual, bindings) {
+                return Err(invalid("explicit generic argument conflicts with its declared witness"));
+            }
+        }
+        Ok(())
     }
 
     /// An in-scope callee shadows every module declaration, even when its
@@ -733,6 +885,9 @@ impl VbcCodegen {
                     return self.source_call_result(callable, None, type_args, args, expected, depth);
                 }
                 if let Some(receiver) = self.source_expression_declaration(receiver, None, depth + 1) {
+                    if let Some((function, owner)) = self.declared_static_receiver_method(&receiver, method.as_str(), args.len()).ok()? {
+                        return self.source_call_result(function, Some(&owner), type_args, args, expected, depth);
+                    }
                     let selected = self.declared_receiver_method(
                         &receiver, method.name.as_str(), args.len() + 1,
                     ).ok()??;
@@ -772,15 +927,20 @@ impl VbcCodegen {
         else {
             return None;
         };
-        let receiver_slots = usize::from(receiver.is_some());
+        let receiver_slots = usize::from(receiver.is_some() && self.has_declared_method_receiver(function).ok()?);
         if params.len() != args.len() + receiver_slots {
             return None;
         }
         let mut bindings = TypeSubstitution::empty();
-        self.bind_source_type_arguments(function, type_args, &mut bindings)?;
+        self.bind_source_type_arguments(function, type_args, &mut bindings).ok()?;
         if let Some(receiver) = receiver {
-            let formal = crate::receiver_methods::pointee(params.first()?);
-            self.bind_declared_operand(function, 0, formal, receiver, &mut bindings)?;
+            if receiver_slots == 0 {
+                self.bind_static_receiver_declaration(function, receiver, &mut bindings)?;
+            } else {
+                let formal = crate::receiver_methods::pointee(params.first()?);
+                self.bind_declared_operand(function, 0, formal, receiver, &mut bindings)?;
+            }
+            self.complete_declared_callable_arguments(function, &mut bindings)?;
         }
         if let Some(expected) = expected {
             if !self.bind_source_declaration(return_type, expected, &mut bindings) {
@@ -800,6 +960,7 @@ impl VbcCodegen {
             })?;
             self.bind_declared_operand(function, index + receiver_slots, formal, &actual, &mut bindings)?;
         }
+        self.complete_declared_callable_arguments(function, &mut bindings)?;
         fully_bound(return_type, &bindings).then(|| bindings.apply(return_type).ok()).flatten()
     }
 

@@ -158,8 +158,13 @@ pub const VERSION_MAJOR: u16 = 2;
 // Ambiguous pre-release string tables require regeneration, not guessed remaps.
 /// VBC 2.63 carries an explicit owned immutable closure-environment producer.
 /// Older capture declarations alone do not establish environment ownership.
-pub const VERSION_MINOR: u16 = 63;
+// v2.64: source declarations distinguish directional Callable bounds (':')
+// from exact Equality predicates ('='), including nominal and impl headers.
+// Generic-where Value payloads from older parsers cannot prove whether their
+// source was a value predicate or an incorrectly classified type equation.
+pub const VERSION_MINOR: u16 = 64;
 pub const OWNED_CLOSURE_ENVIRONMENT_VERSION: u16 = 63;
+pub const SOURCE_CONSTRAINT_CLASSIFICATION_VERSION: u16 = 64;
 
 /// Minor-version floors for sections whose presence readers gate on.  The
 /// register-type-hints section has been written unconditionally since minor 2,

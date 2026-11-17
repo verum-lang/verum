@@ -1795,6 +1795,7 @@ fn type_bound_to_string(bound: &verum_ast::ty::TypeBound) -> String {
     match &bound.kind {
         TypeBoundKind::Protocol(path) => path_to_string(path).to_string(),
         TypeBoundKind::Equality(ty) => format!("= {:?}", ty),
+        TypeBoundKind::Callable(ty) => type_to_string(ty).to_string(),
         TypeBoundKind::NegativeProtocol(path) => format!("!{}", path_to_string(path)),
         TypeBoundKind::AssociatedTypeBound {
             type_path,

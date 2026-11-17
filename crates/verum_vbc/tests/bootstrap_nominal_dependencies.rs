@@ -1,7 +1,7 @@
 #![cfg(feature = "codegen")]
 
 use verum_fast_parser::Parser;
-use verum_vbc::codegen::{CodegenConfig, VbcCodegen};
+use verum_vbc::codegen::{CodegenConfig, CodegenErrorKind, CodegenResult, VbcCodegen};
 use verum_vbc::module::VbcModule;
 use verum_vbc::types::{TypeId, TypeRef};
 
@@ -17,6 +17,9 @@ fn import(text: &str, available: &[&VbcModule]) -> VbcModule {
     compile_boundary(text, available, true)
 }
 fn compile_boundary(text: &str, available: &[&VbcModule], carry_nominals: bool) -> VbcModule {
+    try_compile_boundary(text, available, carry_nominals).expect("compile consumer")
+}
+fn try_compile_boundary(text: &str, available: &[&VbcModule], carry_nominals: bool) -> CodegenResult<VbcModule> {
     let ast = source(text);
     let mut codegen = VbcCodegen::with_config(CodegenConfig::new("consumer"));
     for i in 0..400 {
@@ -26,15 +29,11 @@ fn compile_boundary(text: &str, available: &[&VbcModule], carry_nominals: bool) 
     }
     if carry_nominals {
         codegen
-            .import_bootstrap_nominal_dependencies(&[&ast], available)
-            .expect("import dependencies");
+            .import_bootstrap_nominal_dependencies(&[&ast], available)?;
     }
     codegen
-        .collect_unit_declarations(&[&ast])
-        .expect("collect source");
-    codegen
-        .compile_function_bodies(&ast)
-        .expect("compile consumer")
+        .collect_unit_declarations(&[&ast])?;
+    codegen.compile_function_bodies(&ast)
 }
 fn descriptor<'a>(module: &'a VbcModule, name: &str) -> &'a verum_vbc::types::TypeDescriptor {
     module
@@ -59,18 +58,20 @@ fn implicit_prelude_uses_the_selected_export_and_respects_explicit_mounts() {
                 (path == "core.prelude.Parcel").then(|| "sample.source.Parcel".into())
             },
         ).unwrap();
+        if !visible {
+            let error = compiler.collect_unit_declarations(&[&ast]).unwrap_err();
+            assert!(matches!(&error.kind, CodegenErrorKind::InvalidSourceSignature(message)
+                if message.contains("unresolved nominal type 'Parcel'")), "{error}");
+            continue;
+        }
         compiler.collect_unit_declarations(&[&ast]).unwrap();
         let module = compiler.compile_function_bodies(&ast).unwrap();
         let keep = module.get_function(module.find_function_by_name("consumer.keep").unwrap()).unwrap();
         let declared = &keep.semantic_parameter_types().unwrap()[0];
-        if visible {
-            let Some(TypeRef::Instantiated { base, args }) = declared else { panic!("{declared:?}") };
-            assert_eq!(args.as_slice(), &[TypeRef::Generic(keep.type_params[0].id)]);
-            let owner = module.get_type(*base).unwrap().origin_module.unwrap();
-            assert_eq!(module.get_string(owner), Some("sample.source"));
-        } else {
-            assert!(declared.is_none());
-        }
+        let Some(TypeRef::Instantiated { base, args }) = declared else { panic!("{declared:?}") };
+        assert_eq!(args.as_slice(), &[TypeRef::Generic(keep.type_params[0].id)]);
+        let owner = module.get_type(*base).unwrap().origin_module.unwrap();
+        assert_eq!(module.get_string(owner), Some("sample.source"));
     }
 }
 
@@ -118,9 +119,10 @@ fn wildcard_ambiguity_and_private_names_never_become_ownership_evidence() {
     let left = producer("left", "module left; public type Handle is { raw: Int }; type Hidden is { raw: Int };");
     let right = producer("right", "module right; public type Handle is { raw: Bool };");
     for (mount, ty) in [("mount left.*; mount right.*;", "Handle"), ("mount left.*;", "Hidden")] {
-        let module = import(&format!("module consumer; {mount} fn accept(x: {ty}) -> Int {{ 7 }}"), &[&left, &right]);
-        let function = module.functions.iter().find(|f| module.strings.get(f.name).is_some_and(|n| n.ends_with(".accept"))).unwrap();
-        assert!(function.semantic_parameter_types().unwrap()[0].is_none(), "{mount} {ty}");
+        let error = try_compile_boundary(&format!("module consumer; {mount} fn accept(x: {ty}) -> Int {{ 7 }}"), &[&left, &right], true)
+            .err().expect("ambiguous or private source type must refuse before publication");
+        assert!(matches!(&error.kind, CodegenErrorKind::InvalidSourceSignature(message)
+            if message.contains(&format!("unresolved nominal type '{ty}'"))), "{mount}: {error}");
     }
 }
 
@@ -141,25 +143,15 @@ fn explicit_mount_and_local_declaration_override_wildcard_ambiguity() {
 fn nested_nominal_function_signature_survives_bootstrap_import() {
     let dependency = producer(
         "alpha",
-        "module alpha; type Handle<T> is { item: T }; type Batch<T> is { head: T }; type Unused is { x: Int };",
+        "module alpha; public type Handle<T> is { item: T }; public type Batch<T> is { head: T }; type Unused is { x: Int };",
     );
     let text = "module consumer; mount alpha.{Handle, Batch}; type Local is { value: Int }; fn accept(x: Batch<Handle<Local>>) -> Int { 7 }";
-    // The previous bootstrap boundary carried layouts and names only. The
-    // exact same public source then records PTR in both nominal positions.
-    let before = compile_boundary(text, &[&dependency], false);
-    let before_function = before
-        .functions
-        .iter()
-        .find(|f| {
-            before
-                .strings
-                .get(f.name)
-                .is_some_and(|n| n.ends_with("accept"))
-        })
-        .unwrap();
-    assert!(matches!(&before_function.params[0].type_ref,
-        TypeRef::Instantiated { base, args } if *base == TypeId::PTR
-            && matches!(&args[0], TypeRef::Instantiated { base, .. } if *base == TypeId::PTR)));
+    // Omitting the dependency's declaration must refuse; an opaque pointer
+    // cannot stand in for either of these nominal signature positions.
+    let missing = try_compile_boundary(text, &[&dependency], false)
+        .err().expect("missing nominal declarations must refuse");
+    assert!(matches!(&missing.kind, CodegenErrorKind::InvalidSourceSignature(message)
+        if message.contains("unresolved nominal type 'Batch'")), "{missing}");
     let result = import(text, &[&dependency]);
     let function = result
         .functions
@@ -199,7 +191,7 @@ fn nested_nominal_function_signature_survives_bootstrap_import() {
 fn structural_dependency_closure_uses_source_ids_and_string_pool() {
     let dependency = producer(
         "alpha",
-        "module alpha; type Leaf is { value: Int }; type Wrapper is { nested: Leaf }; type Other is { x: Int, y: Int };",
+        "module alpha; type Leaf is { value: Int }; public type Wrapper is { nested: Leaf }; type Other is { x: Int, y: Int };",
     );
     let result = import(
         "module consumer; mount alpha.Wrapper; fn accept(x: Wrapper) -> Int { 7 }",
@@ -225,14 +217,14 @@ fn structural_dependency_closure_uses_source_ids_and_string_pool() {
 
 #[test]
 fn distinct_qualified_dependencies_remain_distinct_in_both_orders() {
-    let alpha = producer("alpha", "module alpha; type Envelope is { left: Int };");
+    let alpha = producer("alpha", "module alpha; public type Envelope is { left: Int };");
     let beta = producer(
         "beta",
-        "module beta; type Envelope is { right: Text, extra: Int };",
+        "module beta; public type Envelope is { right: Text, extra: Int };",
     );
     for available in [&[&alpha, &beta][..], &[&beta, &alpha][..]] {
         let result = import(
-            "module consumer; fn accept(a: alpha.Envelope, b: beta.Envelope) -> Int { 7 }",
+            "module consumer; mount alpha; mount beta; fn accept(a: alpha.Envelope, b: beta.Envelope) -> Int { 7 }",
             available,
         );
         let function = result
@@ -264,7 +256,7 @@ fn distinct_qualified_dependencies_remain_distinct_in_both_orders() {
 fn declared_generic_shadows_a_foreign_nominal_with_the_same_name() {
     let dependency = producer(
         "alpha",
-        "module alpha; type Handle<T> is { item: T }; type T is { value: Int };",
+        "module alpha; public type Handle<T> is { item: T }; type T is { value: Int };",
     );
     let result = import(
         "module consumer; mount alpha.Handle; fn accept<T>(x: Handle<T>) -> T { x.item }",
@@ -291,7 +283,7 @@ fn declared_generic_shadows_a_foreign_nominal_with_the_same_name() {
 
 #[test]
 fn missing_user_id_is_rejected_instead_of_reused_in_consumer_pool() {
-    let mut dependency = producer("alpha", "module alpha; type Wrapper is { value: Int };");
+    let mut dependency = producer("alpha", "module alpha; public type Wrapper is { value: Int };");
     let ty = dependency
         .types
         .iter_mut()
@@ -314,7 +306,7 @@ fn missing_user_id_is_rejected_instead_of_reused_in_consumer_pool() {
 fn source_function_ids_are_never_copied_as_consumer_function_ids() {
     let mut dependency = producer(
         "alpha",
-        "module alpha; type Wrapper is { value: Int }; fn foreign() -> Int { 1 }",
+        "module alpha; public type Wrapper is { value: Int }; fn foreign() -> Int { 1 }",
     );
     let foreign = dependency
         .functions
@@ -359,7 +351,7 @@ fn source_function_ids_are_never_copied_as_consumer_function_ids() {
 fn dependency_closure_keeps_methods_from_duplicate_declaration_carriers() {
     let mut dependency = producer("alpha", r#"
         module alpha;
-        type Owner is { value: Int };
+        public type Owner is { value: Int };
         type First is { value: Int };
         type Second is { value: Int };
         type Stranger is { value: Int };
@@ -402,7 +394,7 @@ fn dependency_closure_keeps_methods_from_duplicate_declaration_carriers() {
 fn method_signature_closure_and_registry_return_use_consumer_type_ids() {
     let dependency = producer(
         "alpha",
-        "module alpha; type Hidden is { value: Int }; type Wrapper is { value: Int }; implement Wrapper { fn reveal(&self) -> Hidden { Hidden { value: self.value } } }",
+        "module alpha; type Hidden is { value: Int }; public type Wrapper is { value: Int }; implement Wrapper { fn reveal(&self) -> Hidden { Hidden { value: self.value } } }",
     );
     let ast = source("module consumer; mount alpha.Wrapper; fn accept(x: Wrapper) -> Int { 7 }");
     let mut codegen = VbcCodegen::with_config(CodegenConfig::new("consumer"));
@@ -439,23 +431,20 @@ fn method_signature_closure_and_registry_return_use_consumer_type_ids() {
 
 #[test]
 fn missing_explicit_mount_does_not_import_a_same_leaf_ancestor() {
-    let dependency = producer("alpha", "module alpha; type Wrapper is { value: Int };");
-    let result = import(
-        "module consumer; mount alpha.child.Wrapper; fn accept(x: Wrapper) -> Int { 7 }",
-        &[&dependency],
-    );
-    assert!(
-        !result
-            .types
-            .iter()
-            .any(|ty| result.strings.get(ty.name) == Some("Wrapper"))
-    );
+    let dependency = producer("alpha", "module alpha; public type Wrapper is { value: Int };");
+    let ast = source("module consumer; mount alpha.child.Wrapper; fn accept(x: Wrapper) -> Int { 7 }");
+    let mut compiler = VbcCodegen::with_config(CodegenConfig::new("consumer"));
+    assert_eq!(compiler.import_bootstrap_nominal_dependencies(&[&ast], &[&dependency]).unwrap(), 0,
+        "the missing child cannot import its ancestor's same-leaf declaration");
+    let error = compiler.collect_unit_declarations(&[&ast]).unwrap_err();
+    assert!(matches!(&error.kind, CodegenErrorKind::InvalidSourceSignature(message)
+        if message.contains("unresolved nominal type 'Wrapper'")), "{error}");
 }
 
 #[test]
 fn mount_aliases_preserve_both_qualified_nominal_owners() {
-    let alpha = producer("alpha", "module alpha; type Envelope is { left: Int };");
-    let beta = producer("beta", "module beta; type Envelope is { right: Text };");
+    let alpha = producer("alpha", "module alpha; public type Envelope is { left: Int };");
+    let beta = producer("beta", "module beta; public type Envelope is { right: Text };");
     let result = import(
         "module consumer; mount alpha.Envelope as A; mount beta.Envelope as B; fn accept(a: A, b: B) -> Int { 7 }",
         &[&alpha, &beta],
@@ -483,7 +472,7 @@ fn mount_aliases_preserve_both_qualified_nominal_owners() {
 
 #[test]
 fn promoted_names_and_originless_descriptors_keep_identity_on_reimport() {
-    let mut dependency = producer("alpha", "module alpha; type Wrapper is { value: Int };");
+    let mut dependency = producer("alpha", "module alpha; public type Wrapper is { value: Int };");
     let promoted = dependency.strings.intern("alpha.Wrapper");
     let ty = dependency
         .types
@@ -518,7 +507,7 @@ fn explicit_nested_hole_binds_the_imported_nominal_in_the_call_witness() {
     use verum_vbc::{bytecode::decode_instruction, instruction::Instruction};
     let dependency = producer(
         "alpha",
-        "module alpha; type Handle<T> is { item: T }; type Batch<T> is { head: T };",
+        "module alpha; public type Handle<T> is { item: T }; public type Batch<T> is { head: T };",
     );
     let text = r#"
 module consumer;
@@ -685,7 +674,7 @@ fn awaited_protocol_result_rejects_an_absent_variant() {
 fn awaited_protocol_result_refuses_ambiguous_or_uninstantiated_bounds() {
     for (declaration, bounds, reason) in [
         ("type Unrelated is Good(Int) | None;", "Endpoint + Other<Int>", "ambiguous protocol method"),
-        ("type Child is protocol extends Other<Int> {};", "Child", "no declared tag"),
+        ("type Child is protocol extends Other {};", "Child", "no declared protocol method `invoke`"),
     ] {
         let err = awaited_bound_pattern(&format!(
             "{declaration}
@@ -694,6 +683,32 @@ fn awaited_protocol_result_refuses_ambiguous_or_uninstantiated_bounds() {
              }}"
         )).unwrap_err().to_string();
         assert!(err.contains(reason), "{bounds}: {err}");
+    }
+}
+
+#[test]
+fn inherited_async_result_keeps_its_declared_parent_argument_through_wire() {
+    use verum_vbc::{Instruction, bytecode::decode_instructions};
+    let module = awaited_bound_pattern("
+        type Child is protocol extends Other<Int> {};
+        async fn handle<R: Child>(item: R) -> Int {
+            match item.invoke().await { Good(n) => n, _ => 0 }
+        }
+    ").unwrap();
+    let wire = verum_vbc::deserialize::deserialize_module(
+        &verum_vbc::serialize::serialize_module(&module).unwrap(),
+    ).unwrap();
+    for module in [module, wire] {
+        let function = module.find_function_by_name("service.adapter.handle").unwrap();
+        let function = module.get_function(function).unwrap();
+        let start = function.bytecode_offset as usize;
+        let ops = decode_instructions(&module.bytecode[start..start + function.bytecode_length as usize]).unwrap();
+        assert!(ops.iter().any(|op| matches!(op, Instruction::CallM { method_id, .. }
+            if module.get_string(verum_vbc::types::StringId(*method_id)) == Some("dyn:service.adapter.Other.invoke"))));
+        let tags: verum_common::List<_> = ops.iter().filter_map(|op| match op {
+            Instruction::IsVar { tag, .. } => Some(*tag), _ => None,
+        }).collect();
+        assert_eq!(tags.as_slice(), [0], "the selected Other<Int> returns Second<Int>, not First<Int>");
     }
 }
 
@@ -740,14 +755,12 @@ fn database_error_retry_policy_executes_against_the_declared_timeout_phase() {
         }
     ");
     let errors = source(&error_source);
-    let maybe = source(include_str!("../../../core/base/maybe.vr"));
-    let result = source(include_str!("../../../core/base/result.vr"));
-    let text = source(include_str!("../../../core/text/text.vr"));
+    let core = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../core");
+    let path = core.join("database/common/error.vr");
     let mut codegen = VbcCodegen::with_config(CodegenConfig::new("core.database.common"));
-    codegen.collect_unit_declarations(&[&maybe, &result, &text, &errors]).unwrap();
-    codegen.resolve_pending_imports();
-    codegen.compile_unit_items(&[&errors], verum_vbc::codegen::ItemFailurePolicy::Strict).unwrap();
-    let module = codegen.finalize_module_from_state().unwrap();
+    let module = codegen.compile_module_with_mounts(
+        &errors, path.to_str().unwrap(), core.to_str().unwrap(),
+    ).unwrap();
     let entry = module.find_function_by_name("core.database.common.error.check_retry_policy").unwrap();
     let value = verum_vbc::interpreter::Interpreter::new(std::sync::Arc::new(module))
         .execute_function(entry).unwrap();

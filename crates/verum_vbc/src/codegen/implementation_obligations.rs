@@ -354,8 +354,8 @@ impl VbcCodegen {
                     scope,
                     &declaration.generics,
                 )?),
-                TypeBoundKind::Equality(ty) | TypeBoundKind::GenericProtocol(ty)
-                    if matches!(ty.kind, TypeKind::Function { .. }) =>
+                TypeBoundKind::Callable(ty)
+                    if matches!(ty.kind, TypeKind::Function { .. } | TypeKind::Rank2Function { .. }) =>
                 {
                     // A callable bound is a structural contract, not a nominal protocol.
                     let ids: List<_> = scope.values().copied().map(TypeParamId).collect();

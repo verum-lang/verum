@@ -321,6 +321,27 @@ impl VbcCodegen {
         .map(Cow::Owned)
     }
 
+    /// An implementation's parameters precede the method's independently
+    /// declared locals. Exact witness slots retain that distinction even when
+    /// their source names coincide.
+    pub(super) fn callable_owner_generic_scope(
+        &self, function: &FunctionInfo, descriptor: &FunctionDescriptor,
+    ) -> Option<std::collections::HashMap<String, u16>> {
+        let roster = self.callable_generic_roster(function)?;
+        let method = descriptor.source_receiver.is_some() || descriptor.parent_type.is_some();
+        let locals = Self::descriptor_generic_roster(descriptor, |id|
+            self.ctx.strings.get(id.0 as usize).map(String::as_str))?;
+        let local_ids: verum_common::List<_> = locals.iter()
+            .filter_map(|parameter| parameter.witness_slot).collect();
+        let mut scope = std::collections::HashMap::new();
+        for parameter in roster.iter() {
+            let Some(id) = parameter.witness_slot else { continue; };
+            if method && local_ids.contains(&id) { continue; }
+            if scope.insert(parameter.name.clone(), id.0).is_some() { return None; }
+        }
+        Some(scope)
+    }
+
     /// Both executable CallG and declaration inference consume this conversion.
     pub(super) fn callable_argument_witness(
         &self,

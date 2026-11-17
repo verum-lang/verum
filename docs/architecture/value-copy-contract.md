@@ -53,7 +53,7 @@ The following emitters carry declaration authority into `CloneTyped`:
 | Assignment | `b = a` | `compile_assignment` |
 | Record field and shorthand | `Holder { value }` | `compile_record` |
 | Sum payload and named variant field | `Choice.Value(value)` | variant emitters |
-| Synchronous by-value parameter | `fn f(value: Holder)` | selected call argument boundary |
+| Eager by-value parameter | `fn f(value: Holder)` and `async fn` | selected call argument boundary |
 | Projected parameter result | `fn f(value: Holder) -> Item { value.item }` | callable result boundary |
 | Generic owned handoff | a place with a declared type parameter | value-use emitter |
 | Checked implicit clone | a selected structural `value.clone()` | resolved-call emitter |
@@ -78,7 +78,7 @@ affine payloads, mutable references, unknown captures and opaque storage do
 not gain permission from the availability of the runtime copy operation.
 Registered scalar storage is recognized through the exact builtin declaration,
 never by a short type name.
-Synchronous source functions with complete parameter declarations receive an
+Eager source functions, including `async fn`, with complete parameter declarations receive an
 owned value at the selected call boundary. A copyable named or projected place
 is copied through `CloneTyped`; an affine named place transfers its obligation;
 a fresh temporary is received directly. References and raw addresses never
@@ -87,6 +87,11 @@ parameters alike, cleans them on normal and explicit returns, and preserves a
 parameter transferred as its result. A returned field or element is copied
 before its enclosing parameter is cleaned. Generic handoffs and cleanup use
 the selected declaration's concrete witnesses.
+The async callable allowance does not change this lifecycle. A synchronous
+producer may satisfy an async-permitting callback contract; nested callable
+parameters are contravariant and results covariant. Context requirements and
+non-callable component identities remain exact. Both execution tiers use this
+same compatibility check independently of environment ownership evidence.
 Raw pointer aliases still require a complete source refinement target; the
 calling-convention marker cannot manufacture that missing admission witness.
 

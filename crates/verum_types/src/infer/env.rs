@@ -12871,7 +12871,7 @@ with .to_float() or .to_int() (at {:?})",
                         is_negative: false,
                     });
                 }
-                TypeBoundKind::Equality(_ty) => {
+                TypeBoundKind::Equality(_ty) | TypeBoundKind::Callable(_ty) => {
                     // Equality bounds (T = SomeType) are handled differently
                     // For now, we skip them in protocol bounds
                 }
@@ -12947,7 +12947,7 @@ with .to_float() or .to_int() (at {:?})",
 
     /// Extract direct type bounds from AST bounds.
     ///
-    /// Converts Equality bounds (like `F: fn() -> T`) to Type values.
+    /// Converts callable bounds (like `F: fn() -> T`) to Type values.
     /// These are bounds that represent actual types, not protocol references.
     /// Used alongside `convert_type_bounds_to_protocol_bounds` to fully capture
     /// all bound information for type variables.
@@ -12966,10 +12966,13 @@ with .to_float() or .to_int() (at {:?})",
             // eprintln!("[DEBUG extract_type_bounds_from_ast] Processing bound kind: {:?}", std::mem::discriminant(&bound.kind));
 
             match &bound.kind {
-                TypeBoundKind::Equality(ty) => {
+                TypeBoundKind::Callable(ty) | TypeBoundKind::Equality(ty)
+                    if matches!(&bound.kind, TypeBoundKind::Callable(_))
+                        || !matches!(ty.kind, verum_ast::ty::TypeKind::Function { .. }
+                            | verum_ast::ty::TypeKind::Rank2Function { .. }) => {
                     // #[cfg(debug_assertions)]
                     // eprintln!("[DEBUG extract_type_bounds_from_ast] Found Equality bound with type kind: {:?}", std::mem::discriminant(&ty.kind));
-                    // Equality bound: F: fn() -> T or T = SomeType
+                    // Directional callable bound: F: fn() -> T.
                     // Convert the AST type to our internal Type representation
                     if let Ok(converted) = self.ast_to_type(ty) {
                         // #[cfg(debug_assertions)]

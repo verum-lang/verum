@@ -17,14 +17,54 @@ fn interface(source: &Module) -> (VbcModule, VbcCodegen) {
     (module, codegen)
 }
 fn consumer(source: &Module, interface: &VbcModule, declarations: &VbcCodegen, typed: bool) -> Result<VbcModule, CodegenError> {
+    consumer_with_sources(source, interface, declarations, typed, &[])
+}
+fn consumer_with_sources(source: &Module, interface: &VbcModule, declarations: &VbcCodegen, typed: bool,
+    dependencies: &[Module]) -> Result<VbcModule, CodegenError> {
     let mut codegen = VbcCodegen::with_config(CodegenConfig::new("fixture").with_validation());
     codegen.initialize();
     codegen.import_functions(&declarations.export_functions());
-    if typed { codegen.import_bootstrap_nominal_dependencies(&[source], &[interface])?; }
-    codegen.collect_owned_unit_declarations(&[("fixture", source)])?;
+    let files: verum_common::List<_> = std::iter::once(source).chain(dependencies).collect();
+    let owned: verum_common::List<_> = files.iter().map(|source| ("fixture", *source)).collect();
+    if typed { codegen.import_bootstrap_nominal_dependencies(&files, &[interface])?; }
+    codegen.collect_owned_unit_declarations(&owned)?;
     codegen.resolve_pending_imports();
-    codegen.compile_owned_unit_items(&[("fixture", source)], ItemFailurePolicy::Strict)?;
+    codegen.compile_owned_unit_items(&owned, ItemFailurePolicy::Strict)?;
     codegen.finalize_module()
+}
+
+fn actual_text_bytes_sources() -> [Module; 2] {
+    use verum_ast::{ItemKind, TypeKind, decl::{ImplItemKind, ImplKind}};
+    let mut text = parse(include_str!("../../../core/text/text.vr"));
+    let mut original = None;
+    text.items.retain_mut(|item| match &mut item.kind {
+        ItemKind::Module(declaration) => declaration.items.is_none(),
+        ItemKind::Type(declaration) => declaration.name.as_str() == "Text",
+        ItemKind::Impl(declaration) if matches!(&declaration.kind,
+            ImplKind::Inherent(ty) if matches!(ty.kind, TypeKind::Text)) => {
+            declaration.items.retain(|item| match &item.kind {
+                ImplItemKind::Function(function) if function.name.as_str() == "as_bytes" => {
+                    assert!(original.replace(function.clone()).is_none()); true
+                }
+                _ => false,
+            });
+            !declaration.items.is_empty()
+        }
+        _ => false,
+    });
+    let original = original.expect("actual Text.as_bytes body");
+    assert!(text.items.iter().any(|item| matches!(&item.kind, ItemKind::Impl(declaration)
+        if declaration.items.iter().any(|item| matches!(&item.kind,
+            ImplItemKind::Function(function) if function == &original)))));
+    text.items.extend(parse("mount core.intrinsics.runtime.text.text_as_bytes;").items);
+    let mut intrinsic = parse(include_str!("../../../core/intrinsics/runtime/text.vr"));
+    intrinsic.items.retain(|item| match &item.kind {
+        ItemKind::Module(declaration) => declaration.items.is_none(),
+        ItemKind::Function(function) => function.name.as_str() == "text_as_bytes",
+        _ => false,
+    });
+    assert_eq!(intrinsic.items.iter().filter(|item| matches!(item.kind, ItemKind::Function(_))).count(), 1);
+    [text, intrinsic]
 }
 fn function<'a>(module: &'a VbcModule, owner: &str) -> &'a FunctionDescriptor {
     module.functions.iter().find(|function| {
@@ -48,8 +88,9 @@ const CALLER: &str = "module fixture.consumer; mount fixture.provider.transfer; 
 fn referenced_forward_retains_source_generic_reference_and_slice_carriers() {
     let provider = parse(DECLARATION);
     let (declaration, registered) = interface(&provider);
+    let dependencies = actual_text_bytes_sources();
     for supplied in [&declaration, &through_wire(&declaration)] {
-        let result = consumer(&parse(CALLER), supplied, &registered, true).unwrap();
+        let result = consumer_with_sources(&parse(CALLER), supplied, &registered, true, &dependencies).unwrap();
         for module in [&result, &through_wire(&result)] {
             let descriptor = function(module, "fixture.provider.transfer");
             assert_eq!(descriptor.params.len(), 2);
@@ -68,7 +109,8 @@ fn referenced_forward_retains_source_generic_reference_and_slice_carriers() {
 fn function_info_without_declaration_descriptor_cannot_fabricate_an_abi() {
     let (declaration, registered) = interface(&parse(DECLARATION));
     let error = consumer(&parse(CALLER), &declaration, &registered, false).unwrap_err();
-    assert!(error.to_string().contains("no declaration-owned forward contract"), "{error}");
+    assert!(matches!(&error.kind, verum_vbc::codegen::CodegenErrorKind::UndefinedFunction(name)
+        if name == "transfer"), "{error}");
 }
 
 #[test]

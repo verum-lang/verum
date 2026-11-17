@@ -203,7 +203,7 @@ fn callable_result_universes_keep_their_lexical_binders() {
             panic!("type")
         };
         bounds.push(TypeBound {
-            kind: TypeBoundKind::Equality(Type::new(
+            kind: TypeBoundKind::Callable(Type::new(
                 TypeKind::Function {
                     is_async: false,
                     params: List::new(),
@@ -449,7 +449,7 @@ fn data_shapes_and_callable_bounds_preserve_full_declarations() {
         kind: GenericParamKind::Type {
             name: ident("F"),
             bounds: List::from_iter([TypeBound {
-                kind: TypeBoundKind::Equality(callable_universe()),
+                kind: TypeBoundKind::Callable(callable_universe()),
                 span: Span::dummy(),
             }]),
             default: Some(callable_universe()),
@@ -705,7 +705,7 @@ fn nominal_detection_and_validation_include_record_defaults_and_variant_constrai
         panic!("type")
     };
     bounds.push(TypeBound {
-        kind: TypeBoundKind::Equality(Type::new(
+        kind: TypeBoundKind::Callable(Type::new(
             TypeKind::Function {
                 is_async: false,
                 params: List::new(),
@@ -896,4 +896,25 @@ fn refined_alias_keeps_its_predicate_in_the_declaration_carrier() {
 
     let ordinary = type_declaration(TypeDeclBody::Alias(Type::new(TypeKind::Int, Span::dummy())));
     assert!(source_type_declaration(&ordinary).unwrap().is_none());
+}
+
+#[test]
+fn callable_bound_payloads_are_validated_and_distinct_from_exact_equations() {
+    let callable = Type::new(TypeKind::Function {
+        is_async: false, params: List::from_iter([Type::int(Span::dummy())]),
+        return_type: Heap::new(Type::int(Span::dummy())), contexts: Default::default(), calling_convention: None,
+    }, Span::dummy());
+    for kind in [TypeBoundKind::Callable(callable.clone()), TypeBoundKind::Equality(callable)] {
+        let bound = TypeBound { kind, span: Span::dummy() };
+        let wire = serde_json::to_vec(&bound).unwrap();
+        let recovered: TypeBound = serde_json::from_slice(&wire).unwrap();
+        assert_eq!(bound, recovered);
+    }
+    let mut declaration = function();
+    let mut parameter = ordinary("F");
+    let GenericParamKind::Type { bounds, .. } = &mut parameter.kind else { panic!("type parameter") };
+    bounds.push(TypeBound { kind: TypeBoundKind::Callable(Type::int(Span::dummy())), span: Span::dummy() });
+    declaration.generics.push(parameter);
+    assert!(validate_source_signature(&declaration, false).unwrap_err().to_string()
+        .contains("callable bound requires a function signature"));
 }

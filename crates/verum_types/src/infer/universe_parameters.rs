@@ -221,7 +221,7 @@ impl TypeChecker {
         let result = (|| {
             for bound in bounds {
                 match &bound.kind {
-                    TypeBoundKind::Equality(ty) | TypeBoundKind::GenericProtocol(ty) => {
+                    TypeBoundKind::Equality(ty) | TypeBoundKind::Callable(ty) | TypeBoundKind::GenericProtocol(ty) => {
                         self.validate_universe_annotations(ty)?;
                         if !matches!(ty.kind, TypeKind::Function { .. })
                             && verum_ast::source_signature::type_uses_universes(ty).map_err(error)? {

@@ -1006,6 +1006,10 @@ pub enum TypeBoundKind {
         /// The type that the associated type must equal
         eq_type: Type,
     },
+    /// Callable capability: F: fn(A) -> B or F: fn<T>(T) -> T.
+    /// This constrains invocation without equating F's value carrier with the
+    /// function signature. Exact `F = fn(...)` remains `Equality`.
+    Callable(Type),
 }
 
 /// A type binding for associated types in dyn protocol objects.

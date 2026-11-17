@@ -48,10 +48,29 @@ pub(crate) fn encode(signature: &FunctionDecl, is_method: bool) -> VbcResult<Vec
     })
 }
 
-pub(crate) fn decode(bytes: &[u8], is_method: bool) -> VbcResult<FunctionDecl> {
-    decode_payload(bytes, |signature| {
+fn check_constraint_version(
+    minor: u16,
+    requires_distinction: impl FnOnce() -> Result<bool, Text>,
+) -> VbcResult<()> {
+    if minor < crate::format::SOURCE_CONSTRAINT_CLASSIFICATION_VERSION
+        && requires_distinction().map_err(|error| VbcError::Deserialization(error.to_string()))?
+    {
+        return Err(VbcError::Deserialization(
+            "source constraint classification are ambiguous before VBC 2.64; rebuild from source"
+                .into(),
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn decode(bytes: &[u8], is_method: bool, minor: u16) -> VbcResult<FunctionDecl> {
+    let signature = decode_payload(bytes, |signature| {
         verum_ast::source_signature::validate_source_signature(signature, is_method)
-    })
+    })?;
+    check_constraint_version(minor, || {
+        verum_ast::source_signature::signature_requires_constraint_classification(&signature)
+    })?;
+    Ok(signature)
 }
 
 pub(crate) fn encode_type(declaration: &TypeDecl) -> VbcResult<Vec<u8>> {
@@ -61,17 +80,39 @@ pub(crate) fn encode_type(declaration: &TypeDecl) -> VbcResult<Vec<u8>> {
     )
 }
 
-pub(crate) fn decode_type(bytes: &[u8]) -> VbcResult<TypeDecl> {
-    decode_payload(
+pub(crate) fn decode_type(bytes: &[u8], minor: u16) -> VbcResult<TypeDecl> {
+    let declaration = decode_payload(
         bytes,
         verum_ast::source_signature::validate_source_type_declaration,
-    )
+    )?;
+    check_constraint_version(minor, || {
+        verum_ast::source_signature::type_declaration_requires_constraint_classification(
+            &declaration,
+        )
+    })?;
+    Ok(declaration)
 }
 
 /// The shared source carrier validates both syntax and bounded decoding.
-pub(crate) fn encode_implementation(source: &verum_ast::source_implementation::AssociatedImplementationSource) -> VbcResult<Vec<u8>> {
+pub(crate) fn encode_implementation(
+    source: &verum_ast::source_implementation::AssociatedImplementationSource,
+) -> VbcResult<Vec<u8>> {
     encode_payload(source, |source| source.declaration().map(|_| ()))
 }
-pub(crate) fn decode_implementation(bytes: &[u8]) -> VbcResult<verum_ast::source_implementation::AssociatedImplementationSource> {
-    decode_payload(bytes, |source: &verum_ast::source_implementation::AssociatedImplementationSource| source.declaration().map(|_| ()))
+pub(crate) fn decode_implementation(
+    bytes: &[u8],
+    minor: u16,
+) -> VbcResult<verum_ast::source_implementation::AssociatedImplementationSource> {
+    let source = decode_payload(
+        bytes,
+        |source: &verum_ast::source_implementation::AssociatedImplementationSource| {
+            source.declaration().map(|_| ())
+        },
+    )?;
+    check_constraint_version(minor, || {
+        verum_ast::source_signature::implementation_requires_constraint_classification(
+            &source.declaration()?,
+        )
+    })?;
+    Ok(source)
 }

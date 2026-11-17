@@ -99,6 +99,36 @@ fn validate_implementation_method_ids(module: &VbcModule) -> Result<(), Text> {
     Ok(())
 }
 
+/// Executable ABI entries are not all module-level source declarations. These
+/// roles are explicit producer carriers; linkage names and format versions
+/// cannot establish that a missing source header had no call obligations.
+fn validate_callable_publication_authority(module: &VbcModule) -> Result<(), Text> {
+    for function in &module.functions {
+        let has_source = function.source_signature.is_some();
+        let has_identity = function.declaration_identity.is_some();
+        let is_closure = function.closure_capture_count.is_some();
+        let valid = if function.is_const {
+            // Value initializers are registered as values, never callable
+            // schemes. Generic value domains still need a source carrier.
+            !has_source && !has_identity && !is_closure
+                && function.params.is_empty() && function.type_params.is_empty()
+        } else if is_closure {
+            // The generated closure ABI has an environment parameter. Its
+            // body stays executable but is not a module source export.
+            !has_source && !has_identity && !function.params.is_empty()
+        } else {
+            has_source && has_identity
+        };
+        if !valid {
+            let name = module.get_string(function.name).unwrap_or("<unnamed>");
+            return Err(format!(
+                "callable {name} lacks consistent declaration-owned source signature and identity or an explicit non-declaration role; rebuild the archive"
+            ).into());
+        }
+    }
+    Ok(())
+}
+
 fn validate_projection_metadata_carriers(module: &VbcModule) -> Result<(), Text> {
     fn contains(ty: &TypeRef, depth: usize, qualified_only: bool) -> bool {
         if depth > 128 { return true; }
@@ -335,6 +365,7 @@ pub fn archive_to_core_metadata(archive: &VbcArchive) -> Result<CoreMetadata, Te
             }
         }
         verum_vbc::callable_identity::validate_module(&module)?;
+        validate_callable_publication_authority(&module)?;
         validate_implementation_method_ids(&module)?;
         for function in &module.functions {
             if let Some(signature) = &function.source_signature {
@@ -1428,6 +1459,11 @@ fn register_module_metadata(
         }
     }
     for fn_desc in &module.functions {
+        if fn_desc.closure_capture_count.is_some() {
+            // Generated closure bodies have no module-level declaration. The
+            // validated role does not remove them from the executable archive.
+            continue;
+        }
         if fn_desc.declaration_identity.as_ref().is_some_and(|identity| identity.lexical_parent.is_some()) {
             continue;
         }

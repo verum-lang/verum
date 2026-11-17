@@ -75,6 +75,34 @@ fn cyclic_output_projection_stays_unknown() {
 }
 
 #[test]
+fn nominal_projection_keeps_the_declared_base_without_assuming_its_output() {
+    let declarations = r#"
+        type Source is ();
+        implement Future for Source { type Output = Int; }
+        type Outer is ();
+        implement Future for Outer { type Output = Source.Output; }
+        type Ordinary is ();
+        type Unproved is ();
+        implement Future for Unproved { type Output = Ordinary.Output; }
+    "#;
+    assert_eq!(output_type(declarations, "Outer"), Maybe::Some(Text::from("Int")));
+    assert_eq!(output_type(declarations, "Unproved"), Maybe::None);
+}
+
+#[test]
+fn an_undeclared_nominal_projection_does_not_acquire_an_ambient_owner() {
+    let module = Parser::new(r#"
+        module future_output;
+        type Future is protocol { type Output; };
+        type Outer is ();
+        implement Future for Outer { type Output = Undeclared.Output; }
+    "#).parse_module().unwrap();
+    let mut codegen = VbcCodegen::with_config(CodegenConfig::new("future_output"));
+    let error = codegen.compile_module(&module).err().expect("undeclared projection base must refuse").to_string();
+    assert!(error.contains("no declared target"), "{error}");
+}
+
+#[test]
 fn growing_projection_cycle_has_a_recursion_bound() {
     use crate::types::{TypeParamId, TypeRef};
     let mut codegen = codegen_for(

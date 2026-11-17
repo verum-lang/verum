@@ -1,7 +1,7 @@
 //! Instantiation and discharge of declaration-owned call obligations.
 
 use super::TypeChecker;
-use crate::context::{InstantiatedScheme, TypeScheme};
+use crate::context::{InstantiatedScheme, TypeEquality, TypeScheme};
 use crate::protocol::{ProtocolBound, WhereClause};
 use crate::ty::{Substitution, Type, TypeVar};
 use crate::{Result, TypeError};
@@ -9,10 +9,13 @@ use verum_ast::Span;
 use verum_common::{List, Map, Text, ToText};
 
 pub(super) struct PendingValueObligation {
+    /// Exact fresh slots of this selected declaration instantiation.
+    inference_variables: List<TypeVar>,
     value_parameters: List<Type>,
     type_bounds: Map<TypeVar, List<Type>>,
     protocol_bounds: Map<TypeVar, List<ProtocolBound>>,
     where_clauses: List<WhereClause>,
+    type_equalities: List<TypeEquality>,
     nominal_applications: List<crate::context::NominalApplication>,
     span: Span,
 }
@@ -26,7 +29,7 @@ pub(super) struct CallProjectionScope<'a> {
     pub span: Span,
 }
 
-fn declaration_premises(
+pub(super) fn declaration_premises(
     bounds: &Map<TypeVar, List<ProtocolBound>>,
     clauses: &[WhereClause],
 ) -> List<WhereClause> {
@@ -106,8 +109,9 @@ impl TypeChecker {
             return Err(TypeError::UniverseBinding { message: "value instantiation requires an inference obligation scope".into(), span });
         }
         self.pending_value_obligations.push(PendingValueObligation {
+            inference_variables: List::new(),
             value_parameters: parameters, type_bounds: Map::new(), protocol_bounds: Map::new(),
-            where_clauses: List::new(), nominal_applications: List::new(), span,
+            where_clauses: List::new(), type_equalities: List::new(), nominal_applications: List::new(), span,
         });
         Ok(())
     }
@@ -187,6 +191,7 @@ impl TypeChecker {
         if !instance.type_bounds.is_empty()
             || !instance.protocol_bounds.is_empty()
             || !instance.where_clauses.is_empty()
+            || !instance.type_equalities.is_empty()
             || !instance.nominal_applications.is_empty()
             || !instance.value_parameters.is_empty()
         {
@@ -203,13 +208,30 @@ impl TypeChecker {
                 }
             }
             self.pending_value_obligations.push(PendingValueObligation {
+                inference_variables: instance.fresh_vars.clone(),
                 value_parameters: instance.value_parameters.clone(),
                 type_bounds: instance.type_bounds.clone(),
                 protocol_bounds: instance.protocol_bounds.clone(),
                 where_clauses: instance.where_clauses.clone(),
+                type_equalities: instance.type_equalities.clone(),
                 nominal_applications: instance.nominal_applications.clone(),
                 span,
             });
+        }
+        Ok(())
+    }
+
+    /// Use only the selected callable's fresh slots. A same-named binder or
+    /// another pending value cannot supply this call's expected argument type.
+    pub(super) fn seed_pending_call_equalities(&mut self, callable: &Type, span: Span) -> Result<()> {
+        let variables = callable.free_vars();
+        let selected: List<_> = self.pending_value_obligations.iter()
+            .filter(|pending| !pending.type_equalities.is_empty()
+                && pending.inference_variables.iter().any(|variable| variables.contains(variable)))
+            .map(|pending| (pending.type_equalities.clone(), pending.inference_variables.clone()))
+            .collect();
+        for (equalities, variables) in selected {
+            self.seed_call_type_equalities(&equalities, &variables, span)?;
         }
         Ok(())
     }
@@ -231,14 +253,25 @@ impl TypeChecker {
                     if matches!(value, crate::ty::ValueTerm::Inference(_))
                         || !self.types_equivalent(expected_sort.base(), actual_sort.base())
                         || !self.meta_argument_satisfies_domain(parameter, &argument) {
+                        let reason = if matches!(value, crate::ty::ValueTerm::Inference(_)) {
+                            "the value remains unresolved"
+                        } else if !self.types_equivalent(expected_sort.base(), actual_sort.base()) {
+                            "the carrier types differ"
+                        } else {
+                            "the value does not establish the required domain"
+                        };
                         return Err(TypeError::OtherWithCodeSpanned {
-                            code: "E405".into(), msg: "call value argument does not establish its declared scalar domain".into(), span: obligation.span,
+                            code: "E405".into(),
+                            msg: format!("call value argument does not establish its declared scalar domain: expected {parameter}, found {argument}; {reason}").into(),
+                            span: obligation.span,
                         });
                     }
                 }
                 self.enforce_call_type_bounds(&obligation.type_bounds, obligation.span)?;
                 self.enforce_call_protocol_bounds(&obligation.protocol_bounds, obligation.span)?;
                 self.enforce_call_where_clauses(&obligation.where_clauses, &obligation.protocol_bounds, obligation.span)?;
+                self.enforce_call_type_equalities(&obligation.type_equalities,
+                    &obligation.protocol_bounds, &obligation.where_clauses, obligation.span)?;
                 for application in &obligation.nominal_applications {
                     let arguments: List<_> = application.arguments.iter()
                         .map(|argument| self.unifier.apply(argument)).collect();
@@ -259,6 +292,7 @@ impl TypeChecker {
             .try_instantiate()
             .map_err(|message| TypeError::UniverseBinding { message, span })?;
         if !instance.where_clauses.is_empty() || !instance.value_parameters.is_empty()
+            || !instance.type_equalities.is_empty()
             || !instance.nominal_applications.is_empty() {
             if self.value_obligation_scope_depth == 0 {
                 return Err(TypeError::UniverseBinding {
@@ -267,10 +301,12 @@ impl TypeChecker {
                 });
             }
             self.pending_value_obligations.push(PendingValueObligation {
+                inference_variables: instance.fresh_vars.clone(),
                 value_parameters: instance.value_parameters.clone(),
                 type_bounds: Map::new(),
                 protocol_bounds: instance.protocol_bounds.clone(),
                 where_clauses: instance.where_clauses.clone(),
+                type_equalities: instance.type_equalities.clone(),
                 nominal_applications: instance.nominal_applications.clone(),
                 span,
             });

@@ -2192,7 +2192,7 @@ fn walk_type_bounds<V: Visitor>(visitor: &mut V, bounds: &[TypeBound]) {
             TypeBoundKind::Protocol(path) | TypeBoundKind::NegativeProtocol(path) => {
                 visitor.visit_path(path);
             }
-            TypeBoundKind::Equality(ty) | TypeBoundKind::GenericProtocol(ty) => {
+            TypeBoundKind::Equality(ty) | TypeBoundKind::GenericProtocol(ty) | TypeBoundKind::Callable(ty) => {
                 visit_child!(visitor, ty, Type);
             }
             TypeBoundKind::AssociatedTypeBound { type_path, assoc_name, bounds } => {

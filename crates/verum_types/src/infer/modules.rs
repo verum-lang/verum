@@ -4925,7 +4925,7 @@ impl TypeChecker {
                                     TypeBoundKind::Protocol(path) | TypeBoundKind::NegativeProtocol(path) => {
                                         if let Some(name) = path.as_ident() { deps.insert(name.name.clone()); }
                                     }
-                                    TypeBoundKind::Equality(ty) | TypeBoundKind::GenericProtocol(ty) => extract_from_type(ty, &mut deps),
+                                    TypeBoundKind::Equality(ty) | TypeBoundKind::Callable(ty) | TypeBoundKind::GenericProtocol(ty) => extract_from_type(ty, &mut deps),
                                     TypeBoundKind::AssociatedTypeBound { bounds, .. } => pending.extend(bounds.iter()),
                                     TypeBoundKind::AssociatedTypeEquality { eq_type, .. } => extract_from_type(eq_type, &mut deps),
                                 }
@@ -9587,6 +9587,7 @@ impl TypeChecker {
         let previous_catch = self.source_type_registration.catch_unwind_body.take();
         let assumption_depth = self.source_type_registration.projection_assumptions.len();
         let callable_depth = self.source_type_registration.callable_assumptions.len();
+        let equality_depth = self.source_type_registration.type_equalities.len();
         let result = self.with_function_parameter_scope(func, |checker| {
             checker.with_value_obligation_scope(true, |checker| {
                 checker.with_declared_universe_scope("function", &func.name.name, &func.generics, |checker| {
@@ -9598,6 +9599,7 @@ impl TypeChecker {
         self.source_type_registration.catch_unwind_body = previous_catch;
         self.source_type_registration.projection_assumptions.truncate(assumption_depth);
         self.source_type_registration.callable_assumptions.truncate(callable_depth);
+        self.source_type_registration.type_equalities.truncate(equality_depth);
         self.unifier.exit_rigid_scope(saved_rigid);
         result.map(Some)
     }
@@ -9759,19 +9761,11 @@ impl TypeChecker {
                         !bounds.is_empty(),
                         Maybe::None,
                     ));
-                    // A bound written as a FUNCTION TYPE is the one bound
-                    // shape that answers "what does calling this parameter
-                    // produce". The parser files it under `Equality` (see
-                    // `parse_type_bounds_or_type`: a bound that is a complex
-                    // type rather than a protocol path becomes an equality
-                    // bound), and `convert_type_bounds_to_protocol_bounds`
-                    // below keeps only the protocol ones — so without this
-                    // the declared signature is dropped on the floor and a
-                    // call through the parameter has to invent one.
+                    // Callable bounds retain their declared invocation contract;
+                    // exact equality predicates are checked independently.
                     for bound in bounds.iter() {
                         let bound_ty = match &bound.kind {
-                            verum_ast::ty::TypeBoundKind::Equality(t)
-                            | verum_ast::ty::TypeBoundKind::GenericProtocol(t) => t,
+                            verum_ast::ty::TypeBoundKind::Callable(t) => t,
                             _ => continue,
                         };
                         if matches!(bound_ty.kind, verum_ast::ty::TypeKind::Function { .. }) {
@@ -9857,13 +9851,14 @@ impl TypeChecker {
                 .with_bounds(protocol_bounds));
         }
 
-        let structural_conditions = self.collect_where_clause_bounds(
+        let (structural_conditions, type_equalities) = self.collect_where_clause_bounds(
             func,
             &mut func_param_protocol_bounds,
             &mut func_param_type_bounds,
         )?;
         self.extend_source_parameter_premises(&func_param_protocol_bounds, &func_param_type_bounds);
         self.source_type_registration.projection_assumptions.extend(structural_conditions.iter().cloned());
+        self.source_type_registration.type_equalities.extend(type_equalities.iter().cloned());
 
         // Build function type from signature
         // Generic parameters will be processed in the function scope
@@ -10055,6 +10050,7 @@ impl TypeChecker {
         let mut scheme = scheme.with_universe_parameters(self.current_universe_parameters())
             .map_err(|message| TypeError::UniverseBinding { message, span: func.span })?;
         scheme.where_clauses = structural_conditions.clone();
+        scheme.type_equalities = type_equalities.clone();
         self.record_callable_declaration(&mut scheme, func);
         let source_returned_value = scheme.returned_value.clone();
         let source_callable_declaration = scheme.callable_source.clone();
@@ -11926,6 +11922,7 @@ impl TypeChecker {
         let mut final_scheme = final_scheme.with_universe_parameters(self.current_universe_parameters())
             .map_err(|message| TypeError::UniverseBinding { message, span: func.span })?;
         final_scheme.where_clauses = structural_conditions;
+        final_scheme.type_equalities = type_equalities;
         final_scheme.explicit_method_vars = source_explicit_slots;
         final_scheme.value_parameters = source_value_parameters;
         final_scheme.returned_value = source_returned_value;
@@ -18407,7 +18404,7 @@ impl TypeChecker {
                         }
                         self.retain_call_value_domains(instance.value_parameters, span)?;
                         let explicit_vars = instance.explicit_method_vars;
-                        Ok(Some(((ty, fresh_vars, impl_vc, explicit_vars), type_bounds, scheme.receiver_kind, instance.impl_self_type, instance.protocol_bounds, instance.where_clauses, scheme)))
+                        Ok(Some(((ty, fresh_vars, impl_vc, explicit_vars), type_bounds, scheme.receiver_kind, instance.impl_self_type, instance.protocol_bounds, instance.where_clauses, instance.type_equalities, scheme)))
                     }).transpose()?.flatten()
                 };
                 if crate::ctor_trace_enabled() && early_method_info.is_none() {
@@ -18417,7 +18414,7 @@ impl TypeChecker {
                     );
                 }
 
-                if let Some(((method_ty, ordered_fresh_vars, impl_var_count, explicit_vars), type_bounds, receiver_kind, impl_self_type, protocol_bounds, where_clauses, source_scheme)) =
+                if let Some(((method_ty, ordered_fresh_vars, impl_var_count, explicit_vars), type_bounds, receiver_kind, impl_self_type, protocol_bounds, where_clauses, type_equalities, source_scheme)) =
                     early_method_info
                 {
                     self.type_registry.register_declared_method_target(span, method_ty.clone(), recv_ty.clone(), &source_scheme);
@@ -18546,6 +18543,7 @@ impl TypeChecker {
                                 explicit_vars.as_ref(), type_args, method, span,
                             )?).map_err(|message| TypeError::UniverseBinding { message, span })?;
                             self.apply_fn_bound_extraction(&type_bounds, span);
+                            self.seed_call_type_equalities(&type_equalities, &ordered_fresh_vars, span)?;
 
                             // OVERLOAD GUARD: If a closure argument doesn't match the parameter
                             // type (e.g., List.position(value: &T) called with closure), skip this
@@ -18595,6 +18593,7 @@ impl TypeChecker {
                                 self.enforce_call_type_bounds(&type_bounds, span)?;
                                 self.enforce_call_protocol_bounds(&protocol_bounds, span)?;
                                 self.enforce_call_where_clauses(&where_clauses, &protocol_bounds, span)?;
+                                self.enforce_call_type_equalities(&type_equalities, &protocol_bounds, &where_clauses, span)?;
 
                                 // Apply substitution and unifier to get concrete return type
                                 let subst_return_type = self.resolve_call_output(
@@ -23058,6 +23057,9 @@ impl TypeChecker {
             };
             // Publish only this qualified callable, never the namespace's bare
             // items. Ordinary call inference then retains its generic bounds.
+            self.ctx.env.insert(qualified, scheme);
+        } else if self.inline_namespace_prefix(&path).is_some() {
+            let scheme = self.resolve_inline_module_scheme(&path, span)?;
             self.ctx.env.insert(qualified, scheme);
         } else {
             let _ = self.lookup_static_or_load_from_metadata(qualified.as_str());

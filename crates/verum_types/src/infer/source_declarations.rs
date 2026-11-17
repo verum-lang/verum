@@ -863,6 +863,7 @@ impl TypeChecker {
             &mut self.source_type_registration.projection_assumptions,
         );
         let callables = std::mem::take(&mut self.source_type_registration.callable_assumptions);
+        let equalities = std::mem::take(&mut self.source_type_registration.type_equalities);
         let result = owners.iter().try_for_each(|module| {
             let owner = module.path.to_string();
             names.iter().try_for_each(|name| {
@@ -874,6 +875,7 @@ impl TypeChecker {
         self.decl_param_frames = frames;
         self.source_type_registration.projection_assumptions = assumptions;
         self.source_type_registration.callable_assumptions = callables;
+        self.source_type_registration.type_equalities = equalities;
         self.source_type_registration.active_impl_bounds.remove(&key);
         result
     }

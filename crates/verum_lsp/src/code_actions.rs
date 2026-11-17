@@ -965,7 +965,8 @@ fn format_type_bound(bound: &verum_ast::ty::TypeBound) -> String {
     use verum_ast::ty::TypeBoundKind;
     match &bound.kind {
         TypeBoundKind::Protocol(path) => format_path_for_type(path),
-        TypeBoundKind::Equality(ty) => format_type_simple(ty),
+        TypeBoundKind::Equality(ty) => format!("= {}", format_type_simple(ty)),
+        TypeBoundKind::Callable(ty) => format_type_simple(ty),
         TypeBoundKind::NegativeProtocol(path) => format!("!{}", format_path_for_type(path)),
         TypeBoundKind::AssociatedTypeBound {
             type_path,

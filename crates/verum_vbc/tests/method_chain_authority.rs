@@ -47,7 +47,9 @@ fn an_unconstrained_callback_cannot_invent_the_chains_missing_witness() {
         Ok(_) => panic!("the callback parameter has no declared type"),
         Err(error) => error,
     };
-    assert!(error.to_string().contains("cannot infer generic argument"), "{error}");
+    assert!(matches!(&error.kind, verum_vbc::codegen::CodegenErrorKind::UnsupportedExpr(message)
+        if message == "owned closure parameter requires a complete declaration and binding inventory"),
+        "{error}");
 }
 
 fn function<'a>(module: &'a VbcModule, name: &str) -> &'a FunctionDescriptor {

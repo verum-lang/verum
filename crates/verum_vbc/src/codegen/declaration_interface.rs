@@ -217,12 +217,8 @@ impl VbcCodegen {
                             continue;
                         }
                         for b in bounds.iter() {
-                            let bound_ty = match &b.kind {
-                                TypeBoundKind::Equality(ty) => ty,
-                                TypeBoundKind::GenericProtocol(ty) => ty,
-                                _ => continue,
-                            };
-                            if matches!(&bound_ty.kind, TypeKind::Function { .. }) {
+                            let TypeBoundKind::Callable(bound_ty) = &b.kind else { continue };
+                            if matches!(&bound_ty.kind, TypeKind::Function { .. } | TypeKind::Rank2Function { .. }) {
                                 return Some(bound_ty.clone());
                             }
                         }

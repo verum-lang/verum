@@ -2195,6 +2195,7 @@ impl CodeGenerator {
                     .iter()
                     .map(|b| match &b.kind {
                         verum_ast::ty::TypeBoundKind::Protocol(path) => self.format_path(path),
+                        verum_ast::ty::TypeBoundKind::Callable(ty) => self.format_type(ty),
                         verum_ast::ty::TypeBoundKind::Equality(ty) => {
                             format!("= {}", self.format_type(ty))
                         }
@@ -2405,6 +2406,7 @@ impl CodeGenerator {
     fn format_type_bound(&self, bound: &verum_ast::ty::TypeBound) -> String {
         match &bound.kind {
             verum_ast::ty::TypeBoundKind::Protocol(path) => self.format_path(path),
+            verum_ast::ty::TypeBoundKind::Callable(ty) => self.format_type(ty),
             verum_ast::ty::TypeBoundKind::Equality(ty) => {
                 format!("= {}", self.format_type(ty))
             }

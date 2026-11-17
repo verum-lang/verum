@@ -195,18 +195,23 @@ impl VbcCodegen {
                 };
                 continue;
             }
-            if let Some(owner) = types.callable.as_ref()
-                && let Ok(Some(selected)) =
-                    self.declared_receiver_method(owner, method.name.as_str(), args.len() + 1)
-            {
-                let dynamic = matches!(&selected, index_projection::DeclaredReceiverMethod::Protocol(_));
+            if let Some(owner) = types.callable.as_ref() {
+                let selected = self.declared_receiver_method(owner, method.name.as_str(), args.len() + 1);
+                // A parametric receiver has no ambient method family. Its
+                // bounds are the complete evidence, including an absent or
+                // ambiguous result. Do not recover a foreign same-leaf result.
+                let authoritative = matches!(crate::receiver_methods::pointee(owner),
+                    TypeRef::Generic(_) | TypeRef::AssociatedProjection { .. } | TypeRef::Dynamic(_))
+                    || selected.is_err()
+                    || matches!(&selected, Ok(Some(index_projection::DeclaredReceiverMethod::Protocol(_))));
                 let result = match selected {
-                    index_projection::DeclaredReceiverMethod::Function(function, owner) =>
+                    Ok(Some(index_projection::DeclaredReceiverMethod::Function(function, owner))) =>
                         self.source_call_result(function, Some(&owner), type_args, args, None, 0),
-                    index_projection::DeclaredReceiverMethod::Protocol(member) =>
+                    Ok(Some(index_projection::DeclaredReceiverMethod::Protocol(member))) =>
                         (type_args.is_empty() && !member.is_async).then_some(member.output),
-                };
-                if dynamic || result.is_some() {
+                    _ => None,
+                }.and_then(|ty| self.body_declaration_type(&ty));
+                if authoritative || result.is_some() {
                     let name = result.as_ref().and_then(|ty| self.callable_result_name(ty));
                     types = ExpressionTypes {
                         callable: result, name: name.clone(), chain: name.clone(), declared: name,

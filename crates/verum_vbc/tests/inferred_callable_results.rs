@@ -188,3 +188,37 @@ fn deferred_return_instructions_cannot_borrow_another_exits_evidence() {
         }
     }
 }
+
+#[test]
+fn eager_async_exits_preserve_the_declared_computation_and_result() {
+    for (body, result) in [("", TypeId::UNIT), ("let value = 1;", TypeId::UNIT),
+        ("if flag { return 21; } 73", TypeId::INT)] {
+        let result_name = if result == TypeId::UNIT { "()" } else { "Int" };
+        let source = callback_source(body, result_name)
+            .replace("fn candidate", "async fn candidate")
+            .replace("callback: fn(", "callback: async fn(");
+        for module in modules(&source) {
+            signature(&module, "candidate", Some(result));
+            let candidate = module.get_function(module.find_function_by_name("candidate").unwrap()).unwrap();
+            assert!(matches!(candidate.semantic_callable_signature(), Some(TypeRef::Function { is_async: true, .. })));
+            assert_eq!(run(module.clone(), false).unwrap(), 73);
+            assert_eq!(run(module, true).unwrap(), 73);
+        }
+    }
+}
+
+#[test]
+fn eager_async_inference_cannot_hide_disagreement_or_a_sync_only_contract() {
+    let source = callback_source("73", "Int").replace("fn candidate", "async fn candidate");
+    for module in modules(&source) {
+        signature(&module, "candidate", Some(TypeId::INT));
+        assert!(run(module, false).unwrap_err().to_string().contains("does not match the parameter signature"));
+    }
+    let source = callback_source("if flag { return 31; } true", "Int")
+        .replace("fn candidate", "async fn candidate")
+        .replace("callback: fn(", "callback: async fn(");
+    for module in modules(&source) {
+        signature(&module, "candidate", None);
+        assert!(run(module, false).unwrap_err().to_string().contains("lacks its semantic signature"));
+    }
+}

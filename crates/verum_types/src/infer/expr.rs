@@ -394,7 +394,8 @@ impl TypeChecker {
         // protocol registry recognises as associated types and returns
         // everything else unchanged, so a genuine generic (`List`,
         // `Maybe`) passes through untouched.
-        let expected = &self.resolve_assoc_projections_deep(expected);
+        let expected = self.type_under_caller_equalities(expected, expr.span)?;
+        let expected = &self.resolve_assoc_projections_deep(&expected);
 
         let result = self.with_expression_value_context(expr, |checker| {
             checker.with_expression_places(expr, |checker| {
@@ -2524,7 +2525,10 @@ impl TypeChecker {
         self.check_synthesized_value(expr, expected, result)
     }
 
-    pub(super) fn check_synthesized_value(&mut self, expr: &Expr, expected: &Type, result: InferResult) -> Result<InferResult> {
+    pub(super) fn check_synthesized_value(&mut self, expr: &Expr, expected: &Type, mut result: InferResult) -> Result<InferResult> {
+        let expected = self.type_under_caller_equalities(expected, expr.span)?;
+        let expected = &expected;
+        result.ty = self.type_under_caller_equalities(&result.ty, expr.span)?;
         // Initialization and subsequent writes share the same value boundary.
         // Check literal range before equality can accept an integer coercion.
         self.check_integer_literal_fits(expr, expected)?;
@@ -7543,7 +7547,12 @@ impl TypeChecker {
                 self.synth_expr(func)?
             }
         };
-        let func_ty_raw = func_result.ty;
+        // The caller's exact equations determine its parameter's callable
+        // shape before the inferred-call path may create a fresh signature.
+        let func_ty_raw = self.type_under_caller_equalities(&func_result.ty, func.span)?;
+        // Explicit type arguments have already fixed their slots. Remaining
+        // declaration equations provide expected types for ordinary arguments.
+        self.seed_pending_call_equalities(&func_ty_raw, expr.span)?;
 
         // CRITICAL: Expand type aliases for function types
         // When a function call target is typed with a type alias like

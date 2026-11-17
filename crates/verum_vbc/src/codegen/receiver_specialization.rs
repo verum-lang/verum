@@ -4,7 +4,7 @@ use crate::types::TypeRef;
 
 impl VbcCodegen {
     /// A receiver is a source parameter role, not a display name in FunctionInfo.
-    fn has_declared_method_receiver(&self, function: &FunctionInfo) -> CodegenResult<bool> {
+    pub(super) fn has_declared_method_receiver(&self, function: &FunctionInfo) -> CodegenResult<bool> {
         self.declared_callable_descriptors
             .get(&function.id)
             .and_then(|descriptor| descriptor.source_signature.as_ref())
@@ -92,12 +92,25 @@ impl VbcCodegen {
         receiver: Option<&TypeRef>,
         arity: usize,
     ) -> CodegenResult<Option<&FunctionInfo>> {
+        self.receiver_role_specialization(family, receiver, arity, true)
+    }
+
+    pub(super) fn static_receiver_specialization(
+        &self, family: &str, receiver: &TypeRef, arity: usize,
+    ) -> CodegenResult<Option<&FunctionInfo>> {
+        self.receiver_role_specialization(family, Some(receiver), arity, false)
+    }
+
+    fn receiver_role_specialization(
+        &self, family: &str, receiver: Option<&TypeRef>, arity: usize, takes_receiver: bool,
+    ) -> CodegenResult<Option<&FunctionInfo>> {
         let Some(
-            actual @ (TypeRef::Instantiated { .. } | TypeRef::Array { .. } | TypeRef::Slice(_)),
+            actual @ (TypeRef::Concrete(_) | TypeRef::Instantiated { .. } | TypeRef::Array { .. } | TypeRef::Slice(_)),
         ) = receiver.map(pointee)
         else {
             return Ok(None);
         };
+        if takes_receiver && matches!(actual, TypeRef::Concrete(_)) { return Ok(None); }
         let functions = &self.ctx.functions;
         let Some(second) = functions.get(&format!("{family}#impl2")) else {
             return Ok(None);
@@ -110,14 +123,16 @@ impl VbcCodegen {
             .chain(rest);
         let mut candidates = verum_common::List::new();
         for candidate in siblings.filter(|candidate| candidate.param_count == arity) {
-            if !self.has_declared_method_receiver(candidate)? {
+            if self.has_declared_method_receiver(candidate)? != takes_receiver {
                 continue;
             }
-            let pattern = self
+            let pattern = if takes_receiver { self
                 .ctx
                 .semantic_fn_params
                 .get(&candidate.id)
-                .and_then(|params| params.first()?.as_ref());
+                .and_then(|params| params.first()?.as_ref())
+            } else { self.declared_callable_descriptors.get(&candidate.id)
+                .and_then(|descriptor| descriptor.source_receiver.as_ref()) };
             candidates.push((candidate.id, candidate, pattern));
         }
         select(family, actual, candidates.into_iter())

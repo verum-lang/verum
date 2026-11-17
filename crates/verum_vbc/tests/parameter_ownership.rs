@@ -233,6 +233,79 @@ fn a_returned_parameter_retains_its_obligation_until_the_caller_scope_ends() {
 }
 
 #[test]
+fn eager_async_calls_clean_temporary_and_preserve_named_owners() {
+    run(r#"
+        async fn consume(value: Ticket) {}
+        async fn inspect(mut value: Copyable) { value.value = 0; }
+        fn probe() -> Int {
+            let mut count = Count { value: 0 };
+            consume(Ticket { counter: &mut count });
+            if count.value != 1 { return 10 + count.value; }
+            {
+                let value = Copyable { counter: &mut count, value: 73 };
+                inspect(value);
+                if value.value != 73 { return 21; }
+                if count.value != 2 { return 30 + count.value; }
+            }
+            if count.value == 3 { 73 } else { 40 + count.value }
+        }
+    "#);
+}
+
+#[test]
+fn eager_async_generic_result_transfers_its_cleanup_to_the_caller() {
+    run(r#"
+        async fn identity<T>(value: T) -> T { value }
+        async fn probe() -> Int {
+            let mut count = Count { value: 0 };
+            {
+                let value = identity(Ticket { counter: &mut count });
+                if count.value != 0 { return 10 + count.value; }
+            }
+            if count.value == 1 { 73 } else { 20 + count.value }
+        }
+    "#);
+}
+
+#[test]
+fn async_callable_bounds_share_the_selected_parameters_lifecycle() {
+    for callback in [
+        "consume",
+        "consume_async",
+        "async |value: Ticket| -> () { () }",
+    ] {
+        run(&format!(r#"
+            fn consume(value: Ticket) {{}}
+            async fn consume_async(value: Ticket) {{}}
+            async fn invoke<F: async fn(Ticket)>(callback: F, value: Ticket) {{
+                callback(value);
+            }}
+            fn probe() -> Int {{
+                let mut count = Count {{ value: 0 }};
+                invoke({callback}, Ticket {{ counter: &mut count }});
+                if count.value == 1 {{ 73 }} else {{ 10 + count.value }}
+            }}
+        "#));
+    }
+}
+
+#[test]
+fn eager_async_borrows_never_receive_the_referents_cleanup() {
+    run(r#"
+        async fn observe(value: &Ticket) -> Int { value.counter.value }
+        fn probe() -> Int {
+            let mut count = Count { value: 0 };
+            {
+                let value = Ticket { counter: &mut count };
+                if observe(&value) != 0 { return 11; }
+                if count.value != 0 { return 21; }
+            }
+            if count.value == 1 { 73 } else { 30 + count.value }
+        }
+    "#);
+}
+
+#[test]
 fn borrowed_and_raw_parameters_never_receive_the_referent_obligation() {
     run(r#"
         fn borrow(value: &Ticket) -> Int { value.counter.value }

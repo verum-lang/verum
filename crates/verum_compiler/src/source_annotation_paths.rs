@@ -145,7 +145,7 @@ impl Paths {
                 TypeBoundKind::Protocol(path) | TypeBoundKind::NegativeProtocol(path) => {
                     self.type_path(path)
                 }
-                TypeBoundKind::GenericProtocol(ty) | TypeBoundKind::Equality(ty) => {
+                TypeBoundKind::GenericProtocol(ty) | TypeBoundKind::Equality(ty) | TypeBoundKind::Callable(ty) => {
                     self.visit_type(ty)
                 }
                 TypeBoundKind::AssociatedTypeBound {

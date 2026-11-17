@@ -294,3 +294,24 @@ fn local_cleanup_expands_only_transparent_aliases() {
     assert!(crate::drop_plan::build(&module, &original).unwrap_err()
         .contains("no resolved declaration target"));
 }
+
+#[test]
+fn a_borrowed_alias_cleanup_fact_requires_the_current_binding_identity() {
+    use crate::codegen::{CodegenConfig, VbcCodegen};
+    let mut codegen = VbcCodegen::with_config(CodegenConfig::new("borrowed_alias"));
+    let reg = codegen.ctx.define_var("alias", false);
+    codegen.ctx.lookup_var_mut("alias").unwrap().is_pattern_alias = true;
+    let binding = codegen.ctx.lookup_var("alias").unwrap().clone();
+    assert!(!codegen.binding_is_declared_reference(&binding));
+    codegen.ctx.registers.value_uses.set_type(reg, TypeRef::reference(
+        TypeRef::Concrete(crate::TypeId::TEXT), crate::types::Mutability::Immutable,
+        crate::types::CbgrTier::Tier0,
+    ), ResourceDiscipline::Unrestricted);
+    assert!(codegen.binding_is_declared_reference(&binding));
+    codegen.ctx.registers.value_uses.allocate(reg);
+    codegen.ctx.registers.value_uses.set_type(reg, TypeRef::reference(
+        TypeRef::Concrete(crate::TypeId::TEXT), crate::types::Mutability::Immutable,
+        crate::types::CbgrTier::Tier0,
+    ), ResourceDiscipline::Unrestricted);
+    assert!(!codegen.binding_is_declared_reference(&binding), "a reused register is not the old borrow");
+}

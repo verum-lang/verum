@@ -999,6 +999,17 @@ impl AstSink {
 
     // ==================== Type Conversion ====================
 
+    /// `can_start_type` classifies lexer tokens, not completed CST nodes.
+    fn is_type_node(kind: SyntaxKind) -> bool {
+        matches!(kind,
+            SyntaxKind::PATH_TYPE | SyntaxKind::REFERENCE_TYPE | SyntaxKind::POINTER_TYPE
+            | SyntaxKind::FUNCTION_TYPE | SyntaxKind::TUPLE_TYPE | SyntaxKind::ARRAY_TYPE
+            | SyntaxKind::SLICE_TYPE | SyntaxKind::REFINED_TYPE | SyntaxKind::GENERIC_TYPE
+            | SyntaxKind::INFER_TYPE | SyntaxKind::NEVER_TYPE | SyntaxKind::GENREF_TYPE
+            | SyntaxKind::PAREN_TYPE | SyntaxKind::TYPE_PROPERTY | SyntaxKind::DYNAMIC_TYPE
+            | SyntaxKind::UNION_TYPE | SyntaxKind::INTERSECTION_TYPE)
+    }
+
     /// Convert a type node to Type.
     fn convert_type(&mut self, node: &SyntaxNode) -> Option<Type> {
         let span = self.range_to_span(node.text_range());
@@ -1533,16 +1544,16 @@ impl AstSink {
                     }
                     SyntaxKind::BOUND_LIST => {
                         for bound in child_node.child_nodes() {
-                            bounds.push(self.convert_associated_type_bound(&bound)?);
+                            bounds.push(self.convert_type_bound(&bound)?);
                         }
                     }
                     SyntaxKind::TYPE_BOUND => {
-                        bounds.push(self.convert_associated_type_bound(&child_node)?);
+                        bounds.push(self.convert_type_bound(&child_node)?);
                     }
                     SyntaxKind::WHERE_CLAUSE => {
                         where_clause = self.convert_where_clause(&child_node);
                     }
-                    kind if kind.can_start_type() && default_type.is_none() => {
+                    kind if Self::is_type_node(kind) && default_type.is_none() => {
                         if let Some(ty) = self.convert_type(&child_node) {
                             default_type = Maybe::Some(ty);
                         }
@@ -1565,14 +1576,20 @@ impl AstSink {
         })
     }
 
-    fn convert_associated_type_bound(&mut self, node: &SyntaxNode) -> Option<verum_ast::ty::TypeBound> {
+    fn convert_type_bound(&mut self, node: &SyntaxNode) -> Option<verum_ast::ty::TypeBound> {
         use verum_ast::ty::{TypeBound, TypeBoundKind};
         let span = self.range_to_span(node.text_range());
-        let child = node.child_nodes().find(|child| child.kind().can_start_type());
+        let child = if node.kind() == SyntaxKind::TYPE_BOUND {
+            let Some(child) = node.child_nodes().find(|child| Self::is_type_node(child.kind())) else {
+                self.error_at(node.text_range(), "type bound has no declared type");
+                return None;
+            };
+            Some(child)
+        } else { None };
         let ty = self.convert_type(child.as_ref().unwrap_or(node))?;
         let kind = if self.has_token(node, SyntaxKind::BANG) {
             let TypeKind::Path(path) = ty.kind else {
-                self.error_at(node.text_range(), "negative associated bounds require a protocol path");
+                self.error_at(node.text_range(), "negative bounds require a protocol path");
                 return None;
             };
             TypeBoundKind::NegativeProtocol(path)
@@ -1580,6 +1597,7 @@ impl AstSink {
             match ty.kind {
                 TypeKind::Path(path) => TypeBoundKind::Protocol(path),
                 TypeKind::Generic { .. } => TypeBoundKind::GenericProtocol(ty),
+                TypeKind::Function { .. } | TypeKind::Rank2Function { .. } => TypeBoundKind::Callable(ty),
                 _ => TypeBoundKind::Equality(ty),
             }
         };
@@ -2371,7 +2389,7 @@ impl AstSink {
 
     /// Convert a GENERIC_PARAMS node to a list of GenericParam.
     fn convert_generic_params(&mut self, node: &SyntaxNode) -> List<GenericParam> {
-        use verum_ast::ty::{GenericParamKind, TypeBound, TypeBoundKind};
+        use verum_ast::ty::GenericParamKind;
         let mut params = List::new();
         for child in node.child_nodes() {
             if !matches!(
@@ -2401,25 +2419,19 @@ impl AstSink {
                         _ => {}
                     },
                     SyntaxElement::Node(child_node) => match child_node.kind() {
-                        SyntaxKind::BOUND_LIST | SyntaxKind::TYPE_BOUND => {
+                        SyntaxKind::BOUND_LIST => {
                             for bound_child in child_node.child_nodes() {
-                                if let Some(path) = self.convert_path(&bound_child) {
-                                    bounds.push(TypeBound {
-                                        kind: TypeBoundKind::Protocol(path),
-                                        span: self.range_to_span(bound_child.text_range()),
-                                    });
-                                }
-                            }
-                            if child_node.kind() == SyntaxKind::TYPE_BOUND {
-                                if let Some(path) = self.convert_path(&child_node) {
-                                    bounds.push(TypeBound {
-                                        kind: TypeBoundKind::Protocol(path),
-                                        span: self.range_to_span(child_node.text_range()),
-                                    });
+                                if let Some(bound) = self.convert_type_bound(&bound_child) {
+                                    bounds.push(bound);
                                 }
                             }
                         }
-                        kind if kind.can_start_type() => {
+                        SyntaxKind::TYPE_BOUND => {
+                            if let Some(bound) = self.convert_type_bound(&child_node) {
+                                bounds.push(bound);
+                            }
+                        }
+                        kind if Self::is_type_node(kind) => {
                             if is_meta && meta_ty.is_none() {
                                 meta_ty = self.convert_type(&child_node);
                             } else if !is_meta && default_type.is_none() {
@@ -2598,6 +2610,7 @@ impl AstSink {
             }
             let pred_span = self.range_to_span(child.text_range());
             let mut is_meta_pred = false;
+            let is_equality = self.has_token(&child, SyntaxKind::EQ);
             let mut pred_ty = None;
             let mut bounds = List::new();
             let mut constraint_expr = None;
@@ -2625,35 +2638,30 @@ impl AstSink {
                             // Additional types after colon are bounds (e.g., Debug)
                             if pred_ty.is_none() {
                                 pred_ty = self.convert_type(&child_node);
-                            } else {
-                                // Additional types are bounds
-                                if let Some(path) = self.convert_path(&child_node) {
+                            } else if is_equality {
+                                if let Some(ty) = self.convert_type(&child_node) {
                                     bounds.push(TypeBound {
-                                        kind: TypeBoundKind::Protocol(path),
-                                        span: self.range_to_span(child_node.text_range()),
+                                        span: ty.span,
+                                        kind: TypeBoundKind::Equality(ty),
                                     });
                                 }
+                            } else if let Some(bound) = self.convert_type_bound(&child_node) {
+                                bounds.push(bound);
                             }
                         }
                         kind if kind.can_start_type() && pred_ty.is_none() && !is_meta_pred => {
                             pred_ty = self.convert_type(&child_node);
                         }
-                        SyntaxKind::BOUND_LIST | SyntaxKind::TYPE_BOUND => {
+                        SyntaxKind::BOUND_LIST => {
                             for bound_child in child_node.child_nodes() {
-                                if let Some(path) = self.convert_path(&bound_child) {
-                                    bounds.push(TypeBound {
-                                        kind: TypeBoundKind::Protocol(path),
-                                        span: self.range_to_span(bound_child.text_range()),
-                                    });
+                                if let Some(bound) = self.convert_type_bound(&bound_child) {
+                                    bounds.push(bound);
                                 }
                             }
-                            if child_node.kind() == SyntaxKind::TYPE_BOUND {
-                                if let Some(path) = self.convert_path(&child_node) {
-                                    bounds.push(TypeBound {
-                                        kind: TypeBoundKind::Protocol(path),
-                                        span: self.range_to_span(child_node.text_range()),
-                                    });
-                                }
+                        }
+                        SyntaxKind::TYPE_BOUND => {
+                            if let Some(bound) = self.convert_type_bound(&child_node) {
+                                bounds.push(bound);
                             }
                         }
                         kind if kind.can_start_expr() && is_meta_pred => {

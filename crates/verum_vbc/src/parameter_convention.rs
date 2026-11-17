@@ -1,5 +1,5 @@
 //! Executable calling-convention compatibility, independent of source typing.
-use crate::{module::FunctionDescriptor, types::{PropertySet, TypeRef}};
+use crate::{module::FunctionDescriptor, types::TypeRef};
 use verum_common::{List, Text};
 
 /// Check a producer against the callable contract it is stored under. Async
@@ -35,7 +35,6 @@ pub fn validate_callable_contract(provided: &TypeRef, expected: &TypeRef) -> Res
     Ok(())
 }
 
-
 /// A declaration flag cannot manufacture an executable parameter lifecycle.
 pub fn validate_body(function: &FunctionDescriptor) -> Result<(), Text> {
     if let Some(captures) = function.closure_capture_count {
@@ -50,7 +49,6 @@ pub fn validate_body(function: &FunctionDescriptor) -> Result<(), Text> {
     if function.owned_value_parameters
         && (!function.has_source_body
             || function.is_generator
-            || function.properties.contains(PropertySet::ASYNC)
             || function.requires_intrinsic_implementation()
             || (function.bytecode_length == 0
                 && function
@@ -59,7 +57,7 @@ pub fn validate_body(function: &FunctionDescriptor) -> Result<(), Text> {
                     .is_none_or(|body| body.is_empty())))
     {
         return Err(
-            "owned parameter convention requires its emitted synchronous source body".into(),
+            "owned parameter convention requires its emitted eager source body".into(),
         );
     }
     Ok(())

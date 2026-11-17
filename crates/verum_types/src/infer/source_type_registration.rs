@@ -21,6 +21,7 @@ pub(crate) struct SourceTypeRegistration {
     pub headers: Vec<super::source_protocol_header::SourceProtocolHeader>,
     pub projection_assumptions: Vec<crate::protocol::WhereClause>,
     pub callable_assumptions: List<(Type, Type)>,
+    pub type_equalities: List<crate::context::TypeEquality>,
     /// Qualified constructor values staged with the declaration transaction.
     pub constructor_values: Map<Text, crate::context::TypeScheme>,
     completed: Map<Text, AcceptedSourceType>,

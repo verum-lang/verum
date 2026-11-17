@@ -74,6 +74,15 @@ enum DeclarationCategory { Type, Callable, Value, Context, ContextProtocol, Name
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 enum DeclarationNamespace { Type, Value, Module }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum SourceValueKind { Callable, Value, Constructor }
+
+pub(super) struct SourceValueSelection<'a> {
+    pub(super) key: String,
+    pub(super) function: &'a FunctionInfo,
+    pub(super) kind: SourceValueKind,
+}
+
 impl DeclarationCategory {
     fn namespace(self) -> DeclarationNamespace {
         match self {
@@ -963,14 +972,14 @@ impl VbcCodegen {
         &self, path: &str, consumer: &str,
     ) -> Result<Option<(String, FunctionInfo)>, String> {
         self.resolve_source_value_export_ref(path, consumer)
-            .map(|selected| selected.map(|(key, info)| (key, info.clone())))
+            .map(|selected| selected.map(|selected| (selected.key, selected.function.clone())))
     }
 
     /// Use the live declaration for call-site queries; registration callers
     /// explicitly take their own snapshot through resolve_source_value_export.
     fn resolve_source_value_export_ref(
         &self, path: &str, consumer: &str,
-    ) -> Result<Option<(String, &FunctionInfo)>, String> {
+    ) -> Result<Option<SourceValueSelection<'_>>, String> {
         let mut scope = consumer;
         let candidates = loop {
             let candidates = self.source_export_candidates_in(path, Some(scope), Some(DeclarationNamespace::Value));
@@ -992,7 +1001,11 @@ impl VbcCodegen {
                 && (kinds.contains(&DeclarationCategory::Callable)
                     || kinds.contains(&DeclarationCategory::Value) && info.is_const)
             {
-                return Ok(Some((key.clone(), info)));
+                return Ok(Some(SourceValueSelection {
+                    key: key.clone(), function: info,
+                    kind: if kinds.contains(&DeclarationCategory::Callable) { SourceValueKind::Callable }
+                        else { SourceValueKind::Value },
+                }));
             }
             if !kinds.contains(&DeclarationCategory::Callable) { return Ok(None); }
         } else {
@@ -1002,7 +1015,9 @@ impl VbcCodegen {
             let nominal = self.source_export_candidates_in(path, Some(scope), Some(DeclarationNamespace::Type));
             if nominal.inaccessible { return Err(format!("type mount `{path}` is inaccessible from `{consumer}`")); }
             if let Some(key) = nominal.nominal() {
-                return Ok(self.ctx.lookup_function(key).map(|info| (key.clone(), info)));
+                return Ok(self.ctx.lookup_function(key).map(|info| SourceValueSelection {
+                    key: key.clone(), function: info, kind: SourceValueKind::Constructor,
+                }));
             }
             if !nominal.declarations.is_empty() { return Ok(None); }
             let namespace = self.source_export_candidates_in(path, Some(scope), Some(DeclarationNamespace::Module));
@@ -1018,6 +1033,15 @@ impl VbcCodegen {
     pub(super) fn source_mounted_function(
         &self, name: &str, arity: usize,
     ) -> Option<super::CodegenResult<&FunctionInfo>> {
+        self.source_mounted_value(name).map(|selected| selected.map(|selected|
+            self.ctx.lookup_function_with_arity(&selected.key, arity).unwrap_or(selected.function)))
+    }
+
+    /// A function used as a value has no call-site arity. Retain the selected
+    /// source binding before a callable context can choose an overload.
+    pub(super) fn source_mounted_value(
+        &self, name: &str,
+    ) -> Option<super::CodegenResult<SourceValueSelection<'_>>> {
         let owner = self.lexical_type_scope();
         let binding = self.source_type_mounts.get(&Text::from(owner))?.get(&Text::from(name))?;
         let invalid = |message: String| super::CodegenError::new(
@@ -1025,19 +1049,18 @@ impl VbcCodegen {
         let SourceMountBinding::Targets(targets) = binding else {
             return Some(Err(invalid(format!("conflicting callable binding `{name}` in `{owner}`"))));
         };
-        let mut selected: Option<(String, &FunctionInfo)> = None;
+        let mut selected: Option<SourceValueSelection<'_>> = None;
         for path in targets {
             let candidate = match self.resolve_source_value_export_ref(path, owner) {
                 Ok(Some(candidate)) => candidate,
                 Ok(None) => continue,
                 Err(message) => return Some(Err(invalid(message))),
             };
-            if selected.as_ref().is_some_and(|(key, _)| key != &candidate.0) {
+            if selected.as_ref().is_some_and(|selected| selected.key != candidate.key || selected.kind != candidate.kind) {
                 return Some(Err(invalid(format!("ambiguous callable binding `{name}` in `{owner}`"))));
             }
             selected = Some(candidate);
         }
-        selected.map(|(key, primary)| Ok(
-            self.ctx.lookup_function_with_arity(&key, arity).unwrap_or(primary)))
+        selected.map(Ok)
     }
 }

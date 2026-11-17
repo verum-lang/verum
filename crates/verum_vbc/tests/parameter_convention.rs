@@ -173,7 +173,7 @@ fn bodyless_declarations_cannot_certify_cleanup_and_old_versions_cannot_carry_th
         serialize_module(&module)
             .unwrap_err()
             .to_string()
-            .contains("emitted synchronous source body")
+            .contains("emitted eager source body")
     );
     module.functions[0].owned_value_parameters = false;
     let mut bytes = serialize_module(&module).unwrap();
@@ -187,7 +187,7 @@ fn bodyless_declarations_cannot_certify_cleanup_and_old_versions_cannot_carry_th
         deserialize_module(&bytes)
             .unwrap_err()
             .to_string()
-            .contains("emitted synchronous source body")
+            .contains("emitted eager source body")
     );
     let module = compile("fn probe(value: Int) -> Int { value }");
     let mut bytes = serialize_module(&module).unwrap();
@@ -248,46 +248,33 @@ fn incomplete_parameter_inventory_is_refused_instead_of_certified() {
 }
 
 #[test]
-fn an_async_mutable_parameter_retains_its_existing_copy_boundary() {
-    let module = wire(&compile(
-        "type Cell is { value: Int }; async fn alter(mut value: Cell) { value.value = 0; }",
-    ));
-    let alter = id(&module, "alter");
-    assert!(!module.get_function(alter).unwrap().owned_value_parameters);
-    let cell = module
-        .types
-        .iter()
-        .find(|ty| {
-            module
-                .get_string(ty.name)
-                .is_some_and(|name| name.ends_with("Cell"))
-        })
-        .unwrap()
-        .id;
-    let mut vm = Interpreter::new(module.into());
-    let object = vm.state.heap.alloc_array(cell, 1).unwrap();
-    // SAFETY: this live allocation owns exactly one Value slot.
-    unsafe {
-        object.data_ptr().cast::<Value>().write(Value::from_i64(73));
+fn eager_async_parameters_preserve_named_caller_values() {
+    for caller_prefix in ["", "async "] {
+        let module = compile(&format!(
+            "type Cell is {{ value: Int }};
+             async fn alter(mut value: Cell) {{ value.value = 0; }}
+             {caller_prefix}fn probe() -> Int {{
+                 let value = Cell {{ value: 73 }}; alter(value); value.value
+             }}"
+        ));
+        for module in [module.clone(), wire(&module)] {
+            assert!(module.get_function(id(&module, "alter")).unwrap().owned_value_parameters);
+            assert!(module.get_function(id(&module, "probe")).unwrap().owned_value_parameters);
+            let probe = id(&module, "probe");
+            assert_eq!(Interpreter::new(module.into()).execute_function(probe)
+                .unwrap().try_as_i64(), Some(73));
+        }
     }
-    vm.execute_function_with_args(alter, &[Value::from_ptr(object.as_ptr().cast::<u8>())])
-        .unwrap();
-    assert!(vm.state.heap.contains(object.as_ptr()));
-    // SAFETY: exact live heap membership was checked after execution.
-    assert_eq!(
-        unsafe { object.data_ptr().cast::<Value>().read() }.try_as_i64(),
-        Some(73)
-    );
 }
 
 #[test]
-fn an_async_caller_keeps_the_legacy_outgoing_value_boundary() {
+fn an_eager_async_caller_refuses_an_incompatible_legacy_callee() {
     let mut module = compile(
         "type Cell is { value: Int }; fn old(mut value: Cell) { value.value = 41; } async fn probe(value: Cell) -> Int { old(value); value.value }",
     );
     let old = id(&module, "old");
     let probe = id(&module, "probe");
-    assert!(!module.get_function(probe).unwrap().owned_value_parameters);
+    assert!(module.get_function(probe).unwrap().owned_value_parameters);
     legacy_body(
         &mut module,
         old,
@@ -321,19 +308,15 @@ fn an_async_caller_keeps_the_legacy_outgoing_value_boundary() {
     unsafe {
         object.data_ptr().cast::<Value>().write(Value::from_i64(73));
     }
-    let result = vm
+    let error = vm
         .execute_function_with_args(probe, &[Value::from_ptr(object.as_ptr().cast::<u8>())])
-        .unwrap();
-    assert_eq!(
-        result.try_as_i64(),
-        Some(41),
-        "an unflagged caller changed its outgoing convention"
-    );
+        .unwrap_err();
+    assert!(error.to_string().contains("incompatible owned parameter"), "{error}");
     assert!(vm.state.heap.contains(object.as_ptr()));
     // SAFETY: exact live heap membership was checked after execution.
     assert_eq!(
         unsafe { object.data_ptr().cast::<Value>().read() }.try_as_i64(),
-        Some(41)
+        Some(73)
     );
 }
 

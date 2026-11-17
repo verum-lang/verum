@@ -4,7 +4,7 @@
 //! for resolving type names, qualified paths, multi-segment paths, crate-rooted
 //! paths, super paths, self paths, variable field access, and inline module paths.
 
-use crate::context::ModuleId;
+use crate::context::{ModuleId, TypeScheme};
 use crate::infer::{InferResult, TypeChecker};
 use crate::ty::Type;
 use crate::{Result, TypeError};
@@ -922,7 +922,7 @@ impl TypeChecker {
 
     /// Identify the first actual inline declaration in a lexical or absolute
     /// path. Canonical module keys may occupy several syntax segments.
-    fn inline_namespace_prefix(&self, path: &Path) -> Option<(Text, usize)> {
+    pub(super) fn inline_namespace_prefix(&self, path: &Path) -> Option<(Text, usize)> {
         use verum_ast::ty::PathSegment;
         let PathSegment::Name(first) = path.segments.first()? else { return None; };
         if self.ctx.env.is_locally_bound(first.name.as_str()) { return None; }
@@ -964,6 +964,25 @@ impl TypeChecker {
         span: Span,
         arguments: Option<&List<verum_ast::ty::GenericArg>>,
     ) -> Result<InferResult> {
+        let scheme = self.resolve_inline_module_scheme(path, span)?;
+        let instance = self.instantiate_value_instance(&scheme, span)?;
+        if let Some(arguments) = arguments.filter(|arguments| !arguments.is_empty()) {
+            self.bind_explicit_method_arguments(
+                instance.explicit_method_vars.as_ref(), arguments,
+                &verum_ast::Ident::new(self.path_to_string(path), span), span,
+            )?;
+        }
+        Ok(InferResult::new(instance.ty))
+    }
+
+    /// Resolve the declaration before instantiating it. Namespace calls need
+    /// the same quantified scheme as value lookup, so explicit arguments and
+    /// retained obligations constrain one instance of that declaration.
+    pub(super) fn resolve_inline_module_scheme(
+        &mut self,
+        path: &Path,
+        span: Span,
+    ) -> Result<TypeScheme> {
         use verum_ast::ItemKind;
         use verum_ast::ty::PathSegment;
 
@@ -1001,8 +1020,6 @@ impl TypeChecker {
         // Each nested declaration is relative to the module actually selected
         // by the mount, even if its spelling in the caller was an alias.
         for (i, &segment_name) in segments.iter().enumerate().skip(consumed) {
-            let segment_text = verum_common::Text::from(segment_name);
-
             // Check if this is the last segment (item to resolve)
             let is_last = i == segments.len() - 1;
 
@@ -1037,14 +1054,7 @@ impl TypeChecker {
                                 self.check_declared_member_visibility(
                                     &owner, &func.name.name, &Some(func.visibility.clone()), span,
                                 )?;
-                                let scheme = self.scheme_from_source_function(func, &owner)?;
-                                let instance = self.instantiate_value_instance(&scheme, span)?;
-                                if let Some(arguments) = arguments.filter(|args| !args.is_empty()) {
-                                    self.bind_explicit_method_arguments(
-                                        instance.explicit_method_vars.as_ref(), arguments, &func.name, span,
-                                    )?;
-                                }
-                                return Ok(InferResult::new(instance.ty));
+                                return self.scheme_from_source_function(func, &owner);
                             } else {
                                 return Err(TypeError::Other(verum_common::Text::from(format!(
                                     "'{}' is a function, not a module",
@@ -1081,7 +1091,7 @@ impl TypeChecker {
                                         .into(),
                                     span,
                                 };
-                                return Ok(InferResult::new(Type::Named {
+                                return Ok(TypeScheme::mono(Type::Named {
                                     path: type_path,
                                     args: List::new(),
                                 }));
@@ -1116,7 +1126,7 @@ impl TypeChecker {
                                     });
                                 }
                                 let const_ty = self.ast_to_type(&const_decl.ty)?;
-                                return Ok(InferResult::new(const_ty));
+                                return Ok(TypeScheme::mono(const_ty));
                             } else {
                                 return Err(TypeError::Other(verum_common::Text::from(format!(
                                     "'{}' is a constant, not a module",
@@ -1152,13 +1162,7 @@ impl TypeChecker {
                     // exactly Strategy 3's discipline.
                     let qualified = segments.join(".");
                     if let Some(scheme) = self.ctx.env.lookup(qualified.as_str()).cloned() {
-                        let instance = self.instantiate_value_instance(&scheme, span)?;
-                        if let Some(arguments) = arguments.filter(|arguments| !arguments.is_empty()) {
-                            let slots = &instance.explicit_method_vars;
-                            self.bind_explicit_method_arguments(slots.as_ref(), arguments,
-                                &verum_ast::Ident::new(segment_text.clone(), span), span)?;
-                        }
-                        return Ok(InferResult::new(instance.ty));
+                        return Ok(scheme);
                     }
                     return Err(TypeError::UnboundVariable {
                         name: verum_common::Text::from(segment_name),
