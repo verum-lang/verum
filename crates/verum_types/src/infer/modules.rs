@@ -3110,13 +3110,13 @@ impl TypeChecker {
                                     source_module.as_str(),
                                 );
                             }
-                            let _ = self.import_item_from_module_inner(
+                            self.import_item_from_module_inner(
                                 &source_module,
                                 true_name.as_str(),
                                 Some(register_name),
                                 registry,
                                 import_span,
-                            );
+                            )?;
                         }
                     }
                     ExportKind::Const | ExportKind::Static => {
@@ -4229,13 +4229,11 @@ impl TypeChecker {
                         // record types get their field information, etc.
                         // Try to find the type declaration, following re-export chains if needed
                         let mut registered_successfully = false;
-                        let source_declaration = self
-                            .find_type_declaration_with_source_module(
-                                &module_info.ast,
-                                item_name,
-                                &resolved_module_path,
-                                registry,
-                            );
+                        let source_declaration = self.find_type_declaration_for_access(
+                            &module_info.ast.items, item_name, resolved_module_path,
+                            registry, &mut Set::new(), false, false,
+                            Some(self.current_module_path.as_str()),
+                        )?;
                         let has_source_declaration = source_declaration.is_some();
                         if let Some((type_decl, source_module_path)) = source_declaration {
                             // The declaration-owned loader resolves dependencies in the
@@ -6478,10 +6476,10 @@ impl TypeChecker {
     ) -> Option<(verum_ast::decl::TypeDecl, Text)> {
         let module = self.get_module_with_path_aliases(module_path, registry)?;
         let mut visited = Set::new();
-        self.find_type_declaration_with_source_module_inner(
+        self.find_type_declaration_for_access(
             &module.ast.items, type_name, &Text::from(module.path.to_string()), registry,
-            &mut visited, true, false,
-        ).map(|(declaration, owner)| ((*declaration).clone(), owner))
+            &mut visited, true, false, None,
+        ).ok().flatten().map(|(declaration, owner)| ((*declaration).clone(), owner))
     }
 
     /// Find a type declaration and its source module, following re-export chains if needed.
@@ -6531,9 +6529,36 @@ impl TypeChecker {
         require_exported_source: bool,
         allow_local_mounts: bool,
     ) -> Option<(super::source_declarations::SourceTypeDeclaration, Text)> {
+        self.find_type_declaration_for_access(
+            items, type_name, current_module_path, registry, visited,
+            require_exported_source, allow_local_mounts,
+            Some(self.current_module_path.as_str()),
+        ).ok().flatten()
+    }
+
+    /// One source walk serves lexical imports and the public archive view.
+    /// Imports retain the actual caller at every hop; the archive view has no
+    /// caller privileges and admits only unconditionally public declarations.
+    fn find_type_declaration_for_access(
+        &self,
+        items: &[verum_ast::Item],
+        type_name: &str,
+        current_module_path: &Text,
+        registry: &verum_modules::ModuleRegistry,
+        visited: &mut Set<(Text, Text)>,
+        require_exported_source: bool,
+        allow_local_mounts: bool,
+        consumer: Option<&str>,
+    ) -> Result<Option<(super::source_declarations::SourceTypeDeclaration, Text)>> {
         use verum_ast::ItemKind;
         use verum_ast::decl::Visibility as AstVisibility;
         use super::source_declarations::SourceTypeDeclaration;
+
+        let visible = |visibility: &AstVisibility, owner: &str| match consumer {
+            Some(consumer) => visibility.resolve_declared_scope(owner).is_ok_and(|scope|
+                scope.visible_from(owner.split('.'), consumer.split('.'))),
+            None => *visibility == AstVisibility::Public,
+        };
 
         // The entry AST can be a lexical source scope rather than the registry
         // module's AST. Later scopes retain immutable owners, never AST copies.
@@ -6565,19 +6590,24 @@ impl TypeChecker {
             owner: Text,
             name: Text,
             allow_local_mounts: bool,
+            reject_inaccessible: bool,
         }
         enum Work<'a> {
             Enter(Scope<'a>),
             Body(Scope<'a>),
-            Mount { path: Text, name: Text },
+            Mount { path: Text, name: Text, reject_inaccessible: bool },
         }
 
+        // A visible-surface glob probe cannot discharge an explicit import's
+        // access check. Each mode visits a module/name at most once.
+        let mut visited_globs = Set::new();
         let mut work = List::new();
         work.push(Work::Enter(Scope {
             source: Source::Borrowed(items),
             owner: current_module_path.clone(),
             name: type_name.into(),
             allow_local_mounts,
+            reject_inaccessible: consumer.is_some(),
         }));
         while let Some(next) = work.pop() {
             match next {
@@ -6593,9 +6623,13 @@ impl TypeChecker {
                             scope.source = Source::Registered(module);
                         }
                     }
-                    if !visited.insert((scope.owner.clone(), scope.name.clone())) {
-                        continue;
-                    }
+                    let key = (scope.owner.clone(), scope.name.clone());
+                    let entered = if consumer.is_some() && !scope.reject_inaccessible {
+                        visited_globs.insert(key)
+                    } else {
+                        visited.insert(key)
+                    };
+                    if !entered { continue; }
 
                     let mut origin = None;
                     if require_exported_source && !scope.allow_local_mounts {
@@ -6608,9 +6642,16 @@ impl TypeChecker {
                         };
                         // A context protocol is a nominal declaration too. The declaration
                         // lookup below only accepts actual TypeDecls from the selected owner.
-                        if !matches!(export.kind, verum_modules::ExportKind::Type | verum_modules::ExportKind::Context)
-                            || export.visibility != verum_ast::Visibility::Public
-                        {
+                        if !matches!(export.kind, verum_modules::ExportKind::Type | verum_modules::ExportKind::Context) {
+                            continue;
+                        }
+                        if !visible(&export.visibility, scope.owner.as_str()) {
+                            if scope.reject_inaccessible {
+                                return Err(TypeError::VisibilityError {
+                                    name: scope.name, visibility: export.visibility.as_str().into(),
+                                    module_path: scope.owner, span: export.span,
+                                });
+                            }
                             continue;
                         }
                         // Resolved exports can originate in a public inline
@@ -6623,6 +6664,7 @@ impl TypeChecker {
                                 name: export.original_name.as_ref().unwrap_or(&scope.name).clone(),
                                 source: Source::Registered(module),
                                 allow_local_mounts: false,
+                                reject_inaccessible: scope.reject_inaccessible,
                             });
                         }
                     }
@@ -6635,13 +6677,28 @@ impl TypeChecker {
                 }
                 Work::Body(scope) => {
                     let items = scope.source.items();
-                    let item = self.source_type_item_index(items, &scope.name, scope.allow_local_mounts);
+                    let item = self.source_type_item_index(items, &scope.name, true);
                     if let Some(item) = item {
-                        return Some((scope.source.select(item), scope.owner));
+                        let declaration = scope.source.select(item);
+                        if scope.allow_local_mounts || visible(&declaration.visibility, scope.owner.as_str()) {
+                            return Ok(Some((declaration, scope.owner)));
+                        }
+                        // An explicit binding owns its spelling even when access
+                        // fails. Report that refusal instead of publishing a bare
+                        // placeholder or selecting another same-named declaration.
+                        if scope.reject_inaccessible {
+                            return Err(TypeError::VisibilityError {
+                                name: declaration.name.name.clone(),
+                                visibility: declaration.visibility.as_str().into(),
+                                module_path: scope.owner, span: declaration.span,
+                            });
+                        }
+                        continue;
                     }
 
                     let owner = verum_modules::ModulePath::from_str(&scope.owner);
                     let mut targets = List::new();
+                    let mut glob_targets = List::new();
                     for item in items {
                         if !self.cfg_evaluator.should_include(&item.attributes) {
                             continue;
@@ -6649,9 +6706,9 @@ impl TypeChecker {
                         let ItemKind::Mount(mount) = &item.kind else {
                             continue;
                         };
-                        if !scope.allow_local_mounts && mount.visibility != AstVisibility::Public {
-                            continue;
-                        }
+                        let accessible = scope.allow_local_mounts
+                            || visible(&mount.visibility, scope.owner.as_str());
+                        let mut denied_binding = false;
                         super::source_declarations::source_mount_targets(
                             mount, &owner, &scope.name,
                             |path, kind| {
@@ -6659,31 +6716,44 @@ impl TypeChecker {
                                 let full = path.to_string();
                                 match kind {
                                     MountTargetKind::Named => {
-                                        if let Some((owner, name)) = full.rsplit_once('.') {
-                                            targets.push((Text::from(owner), Text::from(name)));
+                                        if !accessible {
+                                            denied_binding = true;
+                                        } else if let Some((owner, name)) = full.rsplit_once('.') {
+                                            targets.push((Text::from(owner), Text::from(name), scope.reject_inaccessible));
                                         }
                                     }
-                                    MountTargetKind::Glob => {
-                                        targets.push((Text::from(full), scope.name.clone()));
+                                    MountTargetKind::Glob if accessible => {
+                                        // A glob contributes only its visible surface;
+                                        // a hidden candidate does not own this spelling.
+                                        glob_targets.push((Text::from(full), scope.name.clone(), false));
                                     }
+                                    MountTargetKind::Glob => {}
                                 }
                             },
                         );
+                        if denied_binding && scope.reject_inaccessible {
+                            return Err(TypeError::VisibilityError {
+                                name: scope.name, visibility: mount.visibility.as_str().into(),
+                                module_path: scope.owner, span: item.span,
+                            });
+                        }
                     }
-                    // Reverse insertion preserves depth-first source order. A
-                    // target is resolved only when reached, so an unvisited
-                    // alternative contributes no speculative registry reads.
-                    for (path, name) in targets.into_iter().rev() {
-                        work.push(Work::Mount { path, name });
+                    // Named bindings own their spelling before any glob can
+                    // supply an alternative. Preserve source order within each
+                    // class, resolving only the targets actually reached.
+                    targets.extend(glob_targets);
+                    for (path, name, reject_inaccessible) in targets.into_iter().rev() {
+                        work.push(Work::Mount { path, name, reject_inaccessible });
                     }
                 }
-                Work::Mount { path, name } => {
+                Work::Mount { path, name, reject_inaccessible } => {
                     if let Some(module) = self.get_module_with_path_aliases(&path, registry) {
                         work.push(Work::Enter(Scope {
                             source: Source::Registered(module),
                             owner: path,
                             name,
                             allow_local_mounts: false,
+                            reject_inaccessible,
                         }));
                     } else if !require_exported_source {
                         // A combined source owner may contain a sibling file's
@@ -6692,18 +6762,27 @@ impl TypeChecker {
                         // source checker; public archive lookup requires each hop.
                         if let Some((parent, _)) = path.rsplit_once('.')
                             && let Some(module) = self.get_module_with_path_aliases(parent, registry)
-                            && let Some(item) =
-                                self.find_public_source_type_declaration_index(&module.ast, &name)
+                            && let Some(item) = self.local_source_type_declaration_index(&module.ast, &name)
                         {
                             let owner = Text::from(module.path.to_string());
-                            return Some((SourceTypeDeclaration::Registered { module, item }, owner));
+                            let declaration = SourceTypeDeclaration::Registered { module, item };
+                            if visible(&declaration.visibility, owner.as_str()) {
+                                return Ok(Some((declaration, owner)));
+                            }
+                            if reject_inaccessible {
+                                return Err(TypeError::VisibilityError {
+                                    name: declaration.name.name.clone(),
+                                    visibility: declaration.visibility.as_str().into(),
+                                    module_path: owner, span: declaration.span,
+                                });
+                            }
                         }
                     }
                 }
             }
         }
 
-        None
+        Ok(None)
     }
 
     /// Find a type declaration, following re-export chains if needed.

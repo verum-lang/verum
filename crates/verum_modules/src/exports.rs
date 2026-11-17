@@ -711,10 +711,14 @@ pub fn extract_exports_with_policy(
     let exports_it = |vis: &AstVisibility| -> bool {
         policy == ExportVisibilityPolicy::WholeSurface || *vis != AstVisibility::Private
     };
-    let effective = |vis: &AstVisibility| -> Visibility {
+    let effective = |vis: &AstVisibility| -> ModuleResult<Visibility> {
         match policy {
-            ExportVisibilityPolicy::WholeSurface => Visibility::Public,
-            ExportVisibilityPolicy::AsDeclared => convert_visibility(vis),
+            ExportVisibilityPolicy::WholeSurface => Ok(Visibility::Public),
+            ExportVisibilityPolicy::AsDeclared => vis
+                .resolve_declared_scope(&module_path.to_string())
+                .map_err(|reason| ModuleError::InvalidPath {
+                    path: module_path.to_string().into(), reason, span: None,
+                }),
         }
     };
 
@@ -734,7 +738,7 @@ pub fn extract_exports_with_policy(
                     let exported = ExportedItem::new(
                         func.name.name.as_str(),
                         kind,
-                        effective(&func.visibility),
+                        effective(&func.visibility)?,
                         module_id,
                         item.span,
                     );
@@ -748,7 +752,7 @@ pub fn extract_exports_with_policy(
                     let exported = ExportedItem::new(
                         type_decl.name.name.as_str(),
                         ExportKind::for_type_body(&type_decl.body),
-                        effective(&type_decl.visibility),
+                        effective(&type_decl.visibility)?,
                         module_id,
                         item.span,
                     );
@@ -797,7 +801,7 @@ pub fn extract_exports_with_policy(
                             let variant_exported = ExportedItem::new(
                                 variant.name.name.as_str(),
                                 ExportKind::Function, // Constructors are functions
-                                effective(&type_decl.visibility),
+                                effective(&type_decl.visibility)?,
                                 module_id,
                                 variant.span,
                             );
@@ -827,7 +831,7 @@ pub fn extract_exports_with_policy(
                     let exported = ExportedItem::new(
                         proto.name.name.as_str(),
                         kind,
-                        effective(&proto.visibility),
+                        effective(&proto.visibility)?,
                         module_id,
                         item.span,
                     );
@@ -840,7 +844,7 @@ pub fn extract_exports_with_policy(
                     let exported = ExportedItem::new(
                         const_decl.name.name.as_str(),
                         ExportKind::Const,
-                        effective(&const_decl.visibility),
+                        effective(&const_decl.visibility)?,
                         module_id,
                         item.span,
                     );
@@ -853,7 +857,7 @@ pub fn extract_exports_with_policy(
                     let exported = ExportedItem::new(
                         static_decl.name.name.as_str(),
                         ExportKind::Static,
-                        effective(&static_decl.visibility),
+                        effective(&static_decl.visibility)?,
                         module_id,
                         item.span,
                     );
@@ -866,7 +870,7 @@ pub fn extract_exports_with_policy(
                     let exported = ExportedItem::new(
                         mod_decl.name.name.as_str(),
                         ExportKind::Module,
-                        effective(&mod_decl.visibility),
+                        effective(&mod_decl.visibility)?,
                         module_id,
                         item.span,
                     );
@@ -909,7 +913,7 @@ pub fn extract_exports_with_policy(
                     let exported = ExportedItem::new(
                         ctx_decl.name.name.as_str(),
                         ExportKind::Context,
-                        effective(&ctx_decl.visibility),
+                        effective(&ctx_decl.visibility)?,
                         module_id,
                         item.span,
                     );
@@ -922,7 +926,7 @@ pub fn extract_exports_with_policy(
                     let exported = ExportedItem::new(
                         group_decl.name.name.as_str(),
                         ExportKind::ContextGroup,
-                        effective(&group_decl.visibility),
+                        effective(&group_decl.visibility)?,
                         module_id,
                         item.span,
                     );
@@ -936,7 +940,7 @@ pub fn extract_exports_with_policy(
                     let exported = ExportedItem::new(
                         meta_decl.name.name.as_str(),
                         ExportKind::Meta,
-                        effective(&meta_decl.visibility),
+                        effective(&meta_decl.visibility)?,
                         module_id,
                         item.span,
                     );
@@ -950,7 +954,7 @@ pub fn extract_exports_with_policy(
                     let exported = ExportedItem::new(
                         pred_decl.name.name.as_str(),
                         ExportKind::Predicate,
-                        effective(&pred_decl.visibility),
+                        effective(&pred_decl.visibility)?,
                         module_id,
                         item.span,
                     );
@@ -961,11 +965,13 @@ pub fn extract_exports_with_policy(
             // Public links (re-exports) - add linked items to export table
             // Re-export: make internal items public through different path
             ItemKind::Mount(mount_decl) => {
-                if mount_decl.visibility == AstVisibility::Public {
-                    // Extract item names from the mount tree and add to exports
+                if mount_decl.visibility != AstVisibility::Private {
+                    // Preserve the re-export's own access boundary. Its source
+                    // declaration must still authorize the importing module.
                     add_reexports_from_link(
                         &mount_decl.tree,
                         module_id,
+                        effective(&mount_decl.visibility)?,
                         &mut export_table,
                     )?;
                 }
@@ -981,7 +987,7 @@ pub fn extract_exports_with_policy(
                     let exported = ExportedItem::new(
                         axiom_decl.name.name.as_str(),
                         ExportKind::Function,
-                        effective(&axiom_decl.visibility),
+                        effective(&axiom_decl.visibility)?,
                         module_id,
                         item.span,
                     );
@@ -1009,7 +1015,7 @@ pub fn extract_exports_with_policy(
                     let exported = ExportedItem::new(
                         theorem_decl.name.name.as_str(),
                         ExportKind::Function,
-                        effective(&theorem_decl.visibility),
+                        effective(&theorem_decl.visibility)?,
                         module_id,
                         item.span,
                     );
@@ -1061,6 +1067,7 @@ pub fn extract_exports_with_policy(
 fn add_reexports_from_link(
     tree: &verum_ast::decl::MountTree,
     module_id: ModuleId,
+    visibility: Visibility,
     export_table: &mut ExportTable,
 ) -> ModuleResult<()> {
     use crate::mount_paths::{mount_paths, MountPathKind};
@@ -1077,7 +1084,7 @@ fn add_reexports_from_link(
         // This records a declaration pending source resolution. The ordinary
         // import pass still validates its existence, visibility and actual kind.
         let mut exported = ExportedItem::new(
-            binding.name.clone(), ExportKind::Type, Visibility::Public,
+            binding.name.clone(), ExportKind::Type, visibility.clone(),
             module_id, leaf.span,
         );
         exported.original_name = leaf.alias.map(|_| original.name.clone());
@@ -1133,6 +1140,7 @@ fn propagate_submodule_reexports(
                     add_reexports_from_link(
                         &mount_decl.tree,
                         module_id,
+                        Visibility::Public,
                         export_table,
                     )?;
                 }
@@ -1407,7 +1415,7 @@ pub fn resolve_specific_reexport_kinds(
 
         for item in &module_info.ast.items {
             if let ItemKind::Mount(mount_decl) = &item.kind {
-                if mount_decl.visibility != AstVisibility::Public {
+                if mount_decl.visibility == AstVisibility::Private {
                     continue;
                 }
 
@@ -1525,19 +1533,6 @@ fn resolve_link_path(
         return None;
     }
     Some(crate::imports::path_to_module_path_resolved(path, current_module).to_string().into())
-}
-
-/// Convert AST visibility to module visibility
-fn convert_visibility(ast_vis: &verum_ast::decl::Visibility) -> Visibility {
-    match ast_vis {
-        verum_ast::decl::Visibility::Public => Visibility::Public,
-        verum_ast::decl::Visibility::Private => Visibility::Private,
-        verum_ast::decl::Visibility::PublicCrate => Visibility::PublicCrate,
-        verum_ast::decl::Visibility::PublicSuper => Visibility::PublicSuper,
-        verum_ast::decl::Visibility::PublicIn(path) => Visibility::PublicIn(path.clone()),
-        verum_ast::decl::Visibility::Internal => Visibility::Internal,
-        verum_ast::decl::Visibility::Protected => Visibility::Protected,
-    }
 }
 
 /// Information about an exported context type.
