@@ -501,7 +501,12 @@ fn definition_version_and_body_presence_are_checked_by_the_wire_writer() {
         if wrong_version { function.source_definition.as_mut().unwrap().version += 1; }
         else { function.has_source_body = false; }
         let error = serialize_module(&invalid).unwrap_err();
-        assert!(error.to_string().contains("source definition identity"), "{error}");
+        let expected = if wrong_version {
+            "source definition identity"
+        } else {
+            "owned parameter convention requires its emitted eager source body"
+        };
+        assert!(error.to_string().contains(expected), "{error}");
     }
 }
 
