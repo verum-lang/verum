@@ -275,8 +275,6 @@ fn json_metadata() -> CoreMetadata {
 }
 
 fn source_errors(value: &str, eager: bool) -> List<Text> {
-    let mut checker = checker(json_metadata(), eager);
-    checker.set_current_module_path("consumer");
     let source = format!(
         r#"
         fn consume(fields: &Map<Text, {value}>) -> Bool {{ true }}
@@ -288,7 +286,13 @@ fn source_errors(value: &str, eager: bool) -> List<Text> {
         }}
     "#
     );
-    let ast = Parser::new(&source).parse_module().expect("source grammar");
+    source_errors_with_metadata(json_metadata(), &source, eager)
+}
+
+fn source_errors_with_metadata(metadata: CoreMetadata, source: &str, eager: bool) -> List<Text> {
+    let mut checker = checker(metadata, eager);
+    checker.set_current_module_path("consumer");
+    let ast = Parser::new(source).parse_module().expect("source grammar");
     checker.register_stdlib_types_for_module(&ast);
     for item in &ast.items {
         if let verum_ast::ItemKind::Function(decl) = &item.kind {
@@ -319,6 +323,13 @@ fn source_errors(value: &str, eager: bool) -> List<Text> {
             .iter()
             .map(|e| Text::from(format!("{e:?}"))),
     );
+    errors.extend(
+        checker
+            .diagnostics()
+            .iter()
+            .filter(|error| error.is_error())
+            .map(|error| Text::from(format!("{error:?}"))),
+    );
     errors
 }
 
@@ -340,5 +351,119 @@ fn borrowed_json_object_cannot_be_forwarded_as_integer_values() {
                 .any(|error| error.contains("Mismatch") || error.contains("Type mismatch")),
             "eager={eager}: {errors:#?}"
         );
+    }
+}
+
+#[test]
+fn metadata_sum_identity_requires_its_actual_declaring_key() {
+    for eager in [false, true] {
+        let mut metadata = json_metadata();
+        let descriptor = metadata
+            .types
+            .get(&Text::from("JsonValue"))
+            .unwrap()
+            .clone();
+        metadata
+            .types
+            .insert("foreign.JsonValue".into(), descriptor);
+        let checker = checker(metadata, eager);
+        let owner = Text::from("core.encoding.json.JsonValue");
+        assert_eq!(
+            checker.declared_sum_key(&"JsonValue".into()),
+            Some(owner.clone())
+        );
+        assert_eq!(checker.declared_sum_key(&owner), Some(owner));
+        assert_eq!(checker.declared_sum_key(&"foreign.JsonValue".into()), None);
+        assert_eq!(
+            checker.declared_sum_key(&"core.collections.map.Map".into()),
+            None
+        );
+    }
+}
+
+#[test]
+fn source_declaration_outranks_legacy_variant_shape() {
+    let ast = Parser::new("public type JsonValue is { public value: Int };")
+        .parse_module()
+        .unwrap();
+    let verum_ast::ItemKind::Type(declaration) = &ast.items[0].kind else {
+        panic!("record declaration");
+    };
+    for eager in [false, true] {
+        let mut metadata = json_metadata();
+        for descriptor in metadata.types.values_mut() {
+            if TypeChecker::metadata_declaring_key(descriptor).as_str()
+                == "core.encoding.json.JsonValue"
+            {
+                descriptor.source_declaration = Some(declaration.clone());
+            }
+        }
+        let checker = checker(metadata, eager);
+        assert_eq!(checker.declared_sum_key(&"JsonValue".into()), None);
+        assert_eq!(
+            checker.declared_sum_key(&"core.encoding.json.JsonValue".into()),
+            None
+        );
+    }
+}
+
+#[test]
+fn same_named_sums_with_the_same_cases_keep_their_method_owners() {
+    for eager in [false, true] {
+        for reverse in [false, true] {
+            let mut metadata = json_metadata();
+            let mut foreign = metadata
+                .types
+                .get(&Text::from("JsonValue"))
+                .unwrap()
+                .clone();
+            foreign.origin_module_path = Some("foreign.json".into());
+            let owner = TypeChecker::metadata_declaring_key(&foreign);
+            metadata.types.insert(owner.clone(), foreign);
+            metadata.type_declaration_order.push(owner.clone());
+            if reverse {
+                metadata.type_declaration_order.reverse();
+            }
+            let source =
+                "fn probe(document: &foreign.json.JsonValue) -> Int { document.as_object() }";
+
+            // A matching case roster and an available bare-name method do not
+            // declare that method on the foreign receiver.
+            let missing = source_errors_with_metadata(metadata.clone(), source, eager);
+            assert!(
+                !missing.is_empty() && missing.iter().all(|error| error.starts_with(
+                    "Mismatch { expected: Text { inner: \"foreign.json.JsonValue\" }, actual: Text { inner: \"core.encoding.json.JsonValue\" },"
+                )),
+                "eager={eager} reverse={reverse}: foreign method was invented: {missing:?}"
+            );
+
+            let mut method = metadata
+                .functions
+                .get(&Text::from("JsonValue.as_object"))
+                .unwrap()
+                .clone();
+            method.module_path = "foreign.json".into();
+            method.return_type = "Int".into();
+            metadata
+                .functions
+                .insert(format!("{owner}.as_object").into(), method);
+            let accepted = source_errors_with_metadata(metadata.clone(), source, eager);
+            assert!(
+                accepted.is_empty(),
+                "eager={eager} reverse={reverse}: {accepted:?}"
+            );
+
+            let wrong_result = source_errors_with_metadata(
+                metadata,
+                "fn probe(document: &foreign.json.JsonValue) -> Bool { document.as_object() }",
+                eager,
+            );
+            assert!(
+                wrong_result
+                    .iter()
+                    .any(|error| error.contains("Mismatch") || error.contains("Type mismatch")),
+                "eager={eager} reverse={reverse}: wrong owner result accepted: {wrong_result:?}"
+            );
+        }
     }
 }

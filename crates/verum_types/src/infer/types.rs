@@ -1055,19 +1055,29 @@ fn substitute_refinement_binder(
     }
 
     fn declared_variant(&self, name: &Text) -> bool {
+        let descriptor = self.core_metadata.as_ref()
+            .and_then(|metadata| Self::metadata_type_with_declaring_key(metadata, name));
         let declaration = self.source_type_registration.declaration(name)
-            .or_else(|| self.core_metadata.as_ref()?.types.get(name)?.source_declaration.as_ref());
+            .or_else(|| descriptor?.source_declaration.as_ref());
         if let Some(declaration) = declaration {
             return declaration.body.is_variant();
         }
-        let Some((owner, leaf)) = name.as_str().rsplit_once('.') else {
-            return false;
-        };
-        self.module_registry.read().get_by_path(owner).is_some_and(|module| {
-            module.ast.items.iter().any(|item| matches!(&item.kind,
-                verum_ast::ItemKind::Type(decl) if decl.name.name.as_str() == leaf && decl.body.is_variant()
-            ))
-        })
+        if let Some((owner, leaf)) = name.as_str().rsplit_once('.')
+            && let Some(is_sum) = self.module_registry.read().get_by_path(owner).and_then(|module| {
+                module.ast.items.iter().find_map(|item| match &item.kind {
+                    verum_ast::ItemKind::Type(decl) if decl.name.name.as_str() == leaf =>
+                        Some(decl.body.is_variant()),
+                    _ => None,
+                })
+            })
+        {
+            return is_sum;
+        }
+        // Legacy metadata still declares a nominal owner and its sum cases.
+        // Keep that owner in annotations; the structural payload is a view
+        // used by matching, never authority to select a method by case names.
+        descriptor.is_some_and(|descriptor|
+            matches!(descriptor.kind, crate::core_metadata::TypeDescriptorKind::Variant { .. }))
     }
 
     /// Parameter slots may be cached by a short name. The lexical declaration
