@@ -50,6 +50,7 @@ pub struct RegisterAllocator {
     /// `variables`, so nested-function compilation doesn't leak hints.
     type_hints: Vec<(u16, String)>,
     pub(super) value_uses: super::value_uses::ValueUseRecorder,
+    pub(super) source_returns: super::formal_parameters::SourceReturnTypes,
     /// Parameters whose declared by-value call boundary established an owner.
     pub(super) parameter_owners: verum_common::Map<Reg, (verum_common::value_use::BindingId, crate::types::TypeRef)>,
     pub(super) callable_bound_signatures: HashMap<crate::types::TypeParamId, crate::types::TypeRef>,
@@ -159,6 +160,7 @@ impl RegisterAllocator {
             recycle_temps: true,
             type_hints: Vec::new(),
             value_uses: Default::default(),
+            source_returns: Default::default(),
             parameter_owners: Default::default(),
             callable_bound_signatures: HashMap::new(),
             emits_owned_parameter_calls: false,
@@ -525,6 +527,7 @@ impl RegisterAllocator {
             free_list: self.free_list.clone(),
             type_hints: self.type_hints.clone(),
             value_uses: self.value_uses.clone(),
+            source_returns: self.source_returns.clone(),
             parameter_owners: self.parameter_owners.clone(),
             callable_bound_signatures: self.callable_bound_signatures.clone(),
             emits_owned_parameter_calls: self.emits_owned_parameter_calls,
@@ -544,6 +547,7 @@ impl RegisterAllocator {
         self.free_list = snapshot.free_list.clone();
         self.type_hints = snapshot.type_hints.clone();
         self.value_uses = snapshot.value_uses.clone();
+        self.source_returns = snapshot.source_returns.clone();
         self.parameter_owners.clone_from(&snapshot.parameter_owners);
         self.callable_bound_signatures.clone_from(&snapshot.callable_bound_signatures);
         self.emits_owned_parameter_calls = snapshot.emits_owned_parameter_calls;
@@ -563,6 +567,7 @@ impl RegisterAllocator {
         self.free_list.clear();
         self.type_hints.clear();
         self.value_uses = Default::default();
+        self.source_returns = Default::default();
         self.parameter_owners.clear();
         self.callable_bound_signatures.clear();
         self.emits_owned_parameter_calls = false;
@@ -602,6 +607,7 @@ pub struct RegisterSnapshot {
     /// per-function-scoped across nested-function compilation.
     type_hints: Vec<(u16, String)>,
     pub(super) value_uses: super::value_uses::ValueUseRecorder,
+    pub(super) source_returns: super::formal_parameters::SourceReturnTypes,
     /// Parameters whose declared by-value call boundary established an owner.
     pub(super) parameter_owners: verum_common::Map<Reg, (verum_common::value_use::BindingId, crate::types::TypeRef)>,
     pub(super) callable_bound_signatures: HashMap<crate::types::TypeParamId, crate::types::TypeRef>,

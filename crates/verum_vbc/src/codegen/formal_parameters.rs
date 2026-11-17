@@ -6,6 +6,37 @@ use crate::types::{CbgrTier, Mutability, TypeId, TypeParamId, TypeRef};
 use verum_ast::{FunctionDecl, FunctionParamKind};
 use verum_common::List;
 
+/// Result facts come from source expressions while their bindings are live.
+/// Missing or disagreeing exits invalidate the result; an emitted return with
+/// no source fact (for example a residual edge) cannot acquire a unit default.
+#[derive(Debug, Clone, Default)]
+pub(super) struct SourceReturnTypes {
+    exits: List<(usize, Option<TypeRef>)>,
+}
+
+impl SourceReturnTypes {
+    pub(super) fn record(&mut self, instruction: usize, result: Option<TypeRef>) {
+        self.exits.push((instruction, result));
+    }
+
+    pub(super) fn completed(&self, instructions: &[crate::Instruction]) -> Option<TypeRef> {
+        let mut facts = self.exits.iter();
+        let mut result = None;
+        let mut seen = false;
+        for (offset, instruction) in instructions.iter().enumerate() {
+            if !matches!(instruction, crate::Instruction::Ret { .. } | crate::Instruction::RetV) {
+                continue;
+            }
+            let (source_offset, source_type) = facts.next()?;
+            if *source_offset != offset { return None; }
+            result = if seen { super::place_copies::join_result_types(result, source_type.clone()) }
+                else { source_type.clone() };
+            seen = true;
+        }
+        (seen && facts.next().is_none()).then_some(result).flatten()
+    }
+}
+
 /// A retained declaration is resolved in its own lexical and binder context,
 /// independently of the function currently being emitted.
 pub(super) struct DeclarationTypeScope<'a> {
@@ -120,9 +151,17 @@ impl VbcCodegen {
         // a forward declaration or a body with a value still needs evidence.
         let verum_ast::FunctionBody::Block(block) = function.body.as_ref()? else { return None };
         (block.stmts.is_empty() && block.expr.is_none()
-            && !function.is_async && function.throws_clause.is_none()
-            && function.extern_abi.is_none() && self.extract_intrinsic_name(function).is_none())
+            && self.can_infer_source_result(function))
             .then_some(TypeRef::Concrete(TypeId::UNIT))
+    }
+
+    /// An ordinary body's exits establish its result. A forward, external,
+    /// intrinsic or transformed callable needs its own producer's evidence.
+    pub(super) fn can_infer_source_result(&self, function: &FunctionDecl) -> bool {
+        function.body.is_some() && function.return_type.is_none()
+            && !function.is_generator && !function.is_async && function.contexts.is_empty()
+            && function.throws_clause.is_none() && function.extern_abi.is_none()
+            && self.extract_intrinsic_name(function).is_none()
     }
 
     pub(super) fn register_declared_impl_function(

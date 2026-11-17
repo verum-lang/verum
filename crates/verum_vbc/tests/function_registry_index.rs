@@ -14,6 +14,115 @@ fn info(id: u32, arity: usize) -> FunctionInfo {
     }
 }
 
+fn assert_identity_updates(registry: &mut FunctionRegistry, ids: &[u32]) {
+    for &id in ids {
+        let before: List<_> = registry
+            .iter()
+            .map(|(name, info)| (name.clone(), info.id, info.param_count))
+            .collect();
+        let mut changed = 0;
+        registry.update_by_id(FunctionId(id), |info| {
+            assert_eq!(info.id, FunctionId(id));
+            info.param_count += 1;
+            changed += 1;
+        });
+        assert_eq!(
+            changed,
+            before
+                .iter()
+                .filter(|(_, actual, _)| actual.0 == id)
+                .count()
+        );
+        for (name, actual, arity) in before {
+            assert_eq!(
+                registry[&name].param_count,
+                arity + usize::from(actual.0 == id),
+                "{name}"
+            );
+        }
+        assert_index(registry);
+    }
+}
+
+#[test]
+fn identity_index_tracks_replacements_removals_and_point_mutations() {
+    let mut registry: FunctionRegistry = [
+        ("alpha.call".into(), info(7, 0)),
+        ("alias".into(), info(7, 1)),
+        ("beta.call".into(), info(9, 2)),
+    ]
+    .into_iter()
+    .collect();
+    let ids = [0, 7, 9, 11, 13];
+    assert_identity_updates(&mut registry, &ids);
+    registry.get_mut("alias").unwrap().id = FunctionId(11);
+    registry.get_mut("alias").unwrap().id = FunctionId(13);
+    assert_identity_updates(&mut registry, &ids);
+    registry.get_mut("alpha.call").unwrap().id = FunctionId(11);
+    registry.insert("alpha.call".into(), info(13, 8));
+    registry.get_mut("beta.call").unwrap().id = FunctionId(11);
+    registry.remove("beta.call");
+    assert_identity_updates(&mut registry, &ids);
+    registry
+        .entry("alias".into())
+        .and_modify(|info| info.id = FunctionId(9))
+        .or_default();
+    registry.entry("new".into()).or_insert(info(7, 3)).id = FunctionId(11);
+    drop(registry.entry("never_inserted".into()));
+    assert_identity_updates(&mut registry, &ids);
+    let mut cloned = registry.clone();
+    cloned.clear();
+    cloned.insert("fresh".into(), info(7, 0));
+    assert_identity_updates(&mut cloned, &ids);
+    assert_identity_updates(&mut registry, &ids);
+}
+
+#[test]
+fn identity_index_rebuilds_after_bulk_changes_and_updates_changed_ids() {
+    let mut registry: FunctionRegistry = (0..64)
+        .map(|index| (format!("module{index}.call"), info(index % 4, 0)))
+        .collect();
+    assert_identity_updates(&mut registry, &[0, 1, 2, 3, 4]);
+    for info in registry.values_mut() {
+        info.id = FunctionId(info.id.0 + 10);
+    }
+    assert_identity_updates(&mut registry, &[0, 1, 2, 3, 10, 11, 12, 13]);
+    registry.retain(|name, info| {
+        info.id = FunctionId(info.id.0 + 10);
+        name.len() % 2 == 0
+    });
+    assert_identity_updates(&mut registry, &[10, 11, 12, 13, 20, 21, 22, 23]);
+    registry.update_by_id(FunctionId(20), |info| info.id = FunctionId(23));
+    assert_identity_updates(&mut registry, &[20, 21, 22, 23]);
+}
+
+#[test]
+fn identity_index_repairs_partial_mutations_after_a_callback_panics() {
+    let mut registry: FunctionRegistry = [("one".into(), info(1, 0)), ("two".into(), info(1, 0))]
+        .into_iter()
+        .collect();
+    assert_identity_updates(&mut registry, &[1, 2]);
+    assert!(
+        catch_unwind(AssertUnwindSafe(|| {
+            registry.update_by_id(FunctionId(1), |info| {
+                info.id = FunctionId(2);
+                panic!("test mutation");
+            });
+        }))
+        .is_err()
+    );
+    assert_identity_updates(&mut registry, &[1, 2]);
+    assert!(
+        catch_unwind(AssertUnwindSafe(|| {
+            registry
+                .entry("broken".into())
+                .or_insert_with(|| panic!("test factory"));
+        }))
+        .is_err()
+    );
+    assert_identity_updates(&mut registry, &[1, 2]);
+}
+
 fn assert_forms(registry: &FunctionRegistry, dotted: &str, colon: &str) {
     // This is the exact pre-index predicate, deliberately independent of the
     // index's data structure and tokenization of qualified names.
@@ -402,5 +511,10 @@ fn lookup_by_id_uses_the_resolved_name_only_while_it_matches() {
     assert_eq!(ctx.lookup_function_by_id(original).unwrap().id, original);
     ctx.functions.remove("alias");
     assert!(ctx.lookup_function_by_id(original).is_none());
-    assert_eq!(ctx.lookup_function_by_id(FunctionId(72)).unwrap().param_count, 3);
+    assert_eq!(
+        ctx.lookup_function_by_id(FunctionId(72))
+            .unwrap()
+            .param_count,
+        3
+    );
 }

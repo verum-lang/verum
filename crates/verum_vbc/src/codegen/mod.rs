@@ -19416,6 +19416,7 @@ impl VbcCodegen {
                         .map_err(|e| e.with_context(format!("in function {}", lookup_name)))?;
                     // Return the block result if present (implicit return)
                     if let Some(reg) = result {
+                        let semantic_result = self.ctx.declared_result_types.get(&block.span).cloned().flatten();
                         let reg = self.materialize_list_return(reg)?;
                         self.emit_return_refinement_assert(
                             reg,
@@ -19423,14 +19424,20 @@ impl VbcCodegen {
                             &lookup_name,
                         )?;
                         self.emit_parameter_return(Some(reg));
+                        self.ctx.registers.source_returns.record(self.ctx.instructions.len() - 1, semantic_result);
                     } else if !matches!(self.ctx.instructions.last(), Some(Instruction::Ret { .. } | Instruction::RetV)) {
+                        let semantic_result = self.ctx.declared_result_types.get(&block.span).cloned().flatten();
                         self.emit_parameter_return(None);
+                        self.ctx.registers.source_returns.record(self.ctx.instructions.len() - 1, semantic_result);
                     }
                 }
                 verum_ast::FunctionBody::Expr(expr) => {
+                    let result_start = self.ctx.instructions.len();
                     let result = self
                         .compile_expr_with_demand(expr, ResultDemand::CallableReturn)
                         .map_err(|e| e.with_context(format!("in function {}", lookup_name)))?;
+                    let semantic_result = self.declared_expression_result(
+                        expr, result, result_start, self.ctx.instructions.len());
                     // Return the expression result
                     if let Some(reg) = result {
                         let reg = self.materialize_list_return(reg)?;
@@ -19443,6 +19450,7 @@ impl VbcCodegen {
                     } else {
                         self.emit_parameter_return(None);
                     }
+                    self.ctx.registers.source_returns.record(self.ctx.instructions.len() - 1, semantic_result);
                 }
             }
         } else if !is_runtime_intrinsic_forward_decl {
@@ -19475,6 +19483,7 @@ impl VbcCodegen {
         // debug info).
         let type_hints = self.ctx.collect_register_type_hints();
         let value_uses = self.ctx.registers.value_uses.uses.clone();
+        let inferred_result = self.ctx.registers.source_returns.completed(&self.ctx.instructions);
 
         // End function compilation
         let (instructions, register_count) = self.ctx.end_function();
@@ -19696,7 +19705,7 @@ impl VbcCodegen {
         descriptor.semantic_return = self.source_semantic_result(
             func, &render_generic_param_map,
             &descriptor.type_params.iter().map(|p| p.id).collect::<verum_common::List<_>>(),
-        );
+        ).or_else(|| self.can_infer_source_result(func).then_some(inferred_result).flatten());
         for ((param_name, is_mut), param) in params_with_mutability.iter().zip(func.params.iter()) {
             use verum_ast::FunctionParamKind;
             use crate::types::{CbgrTier, Mutability};
@@ -19820,6 +19829,15 @@ impl VbcCodegen {
         if let verum_common::Maybe::Some(ref ret_ty_ast) = func.return_type {
             let resolved_return = self.resolve_field_type_ref(ret_ty_ast, &render_generic_param_map)?;
             descriptor.return_type = resolved_return;
+        } else if let Some(result) = descriptor.semantic_return.clone() {
+            // The completed source body supplies both the semantic contract and
+            // its executable result carrier. ABI defaults cannot supply either.
+            descriptor.return_type = result.clone();
+            let signature = descriptor.semantic_callable_signature();
+            self.ctx.functions.update_by_id(descriptor.id, |info| {
+                info.return_type = Some(result.clone());
+                info.callable_signature = signature.clone();
+            });
         }
 
         // Extract optimization hints from AST attributes (@inline, @cold, @hot, etc.)

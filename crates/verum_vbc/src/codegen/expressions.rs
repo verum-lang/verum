@@ -18851,9 +18851,12 @@ impl VbcCodegen {
                     "nested return-use observation exceeds its depth bound".into(),
                 ), expr.span));
             }
+            let result_start = self.ctx.instructions.len();
             let compiled = self.compile_expr_with_demand(expr, ResultDemand::CallableReturn);
             let return_uses = self.ctx.registers.value_uses.finish_return_use_capture();
             let reg = compiled?.or_internal("return value has no value")?;
+            let semantic_result = self.declared_expression_result(
+                expr, Some(reg), result_start, self.ctx.instructions.len());
             let reg = self.materialize_list_return(reg)?;
 
             // If the enclosing function's declared return type carries
@@ -18871,8 +18874,11 @@ impl VbcCodegen {
             if !self.emit_direct_affine_return(expr, reg, return_uses)? {
                 self.emit_lexical_return(Some(reg), Some(reg), false, !return_uses.unhandled);
             }
+            self.ctx.registers.source_returns.record(self.ctx.instructions.len() - 1, semantic_result);
         } else {
             self.emit_lexical_return(None, None, false, true);
+            self.ctx.registers.source_returns.record(self.ctx.instructions.len() - 1,
+                Some(crate::types::TypeRef::Concrete(crate::types::TypeId::UNIT)));
         }
 
         Ok(None)
@@ -32709,7 +32715,6 @@ impl VbcCodegen {
                     .or_else(|| Self::literal_default_type_name(body))
                     .and_then(|name| self.type_name_to_type_ref_mono(&name))
             });
-        let closure_return_type_ref = closure_return_type_ref.or(inferred_return_type);
         if let Some(saved) = saved_closure_rtn_wp {
             self.ctx.pop_disambig_context(saved);
         }
@@ -32721,6 +32726,10 @@ impl VbcCodegen {
         } else {
             self.emit_parameter_return(None);
         }
+        self.ctx.registers.source_returns.record(self.ctx.instructions.len() - 1, inferred_return_type);
+
+        let inferred_return_type = self.ctx.registers.source_returns.completed(&self.ctx.instructions);
+        let closure_return_type_ref = closure_return_type_ref.or(inferred_return_type);
 
         // End function compilation
         let (closure_instructions, register_count) = self.ctx.end_function();
@@ -32741,10 +32750,10 @@ impl VbcCodegen {
             });
         // Registration may expose several names for this body. Update all
         // aliases by exact FunctionId so lookup order cannot change its facts.
-        for info in self.ctx.functions.values_mut().filter(|info| info.id.0 == func_id) {
+        self.ctx.functions.update_by_id(crate::module::FunctionId(func_id), |info| {
             info.return_type = closure_return_type_ref.clone();
             info.callable_signature = callable_signature.clone();
-        }
+        });
 
         // Create VBC function descriptor
         let name_id = crate::types::StringId(self.intern_string(&closure_name));

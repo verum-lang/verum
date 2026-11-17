@@ -2065,6 +2065,7 @@ impl VbcCodegen {
 
         // For now, compile to a temp buffer
         let saved_instrs = std::mem::take(&mut self.ctx.instructions);
+        let saved_returns = std::mem::take(&mut self.ctx.registers.source_returns);
         // A deferred body is a separate future instruction stream. Neither its
         // producers nor the caller's current facts are valid across that gap.
         let saved_array_facts = std::mem::take(&mut self.ctx.array_result_facts);
@@ -2074,6 +2075,7 @@ impl VbcCodegen {
 
         // Restore the actual stream even if the deferred body failed to compile.
         let defer_instrs = std::mem::replace(&mut self.ctx.instructions, saved_instrs);
+        self.ctx.registers.source_returns = saved_returns;
         self.ctx.array_result_facts = saved_array_facts;
         deferred_result?;
 

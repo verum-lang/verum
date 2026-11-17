@@ -1,13 +1,15 @@
-//! A function registry with a mutation-safe index of qualified name suffixes.
+//! A function registry with mutation-safe indexes of names and function IDs.
 //!
 //! Only names are indexed. Function identities, overloads, and arities are read
 //! from the live registry by the existing resolution rules.
 
 use super::FunctionInfo;
+use crate::module::FunctionId;
 use std::borrow::Borrow;
 use std::collections::{BTreeSet, HashMap, hash_map};
 use std::hash::Hash;
 use std::ops::Deref;
+use verum_common::{Map, Set};
 
 #[derive(Clone, Debug, Default)]
 pub struct FunctionRegistry {
@@ -16,6 +18,21 @@ pub struct FunctionRegistry {
     // for every dot/colon component. Keys remain private: there is no mutable
     // HashMap escape that could bypass index maintenance.
     reversed_names: BTreeSet<String>,
+    // This index stores alias keys only; the entries remain the authority for
+    // signatures and IDs. Point mutations refresh their affected names. Bulk
+    // mutable access invalidates the index until the next identity query.
+    identity_names: Map<FunctionId, Set<String>>,
+    dirty_identity_names: Map<String, Option<FunctionId>>,
+    identity_index_ready: bool,
+}
+
+fn remove_identity_name(index: &mut Map<FunctionId, Set<String>>, id: FunctionId, name: &String) {
+    if let Some(names) = index.get_mut(&id) {
+        names.remove(name);
+        if names.is_empty() {
+            index.remove(&id);
+        }
+    }
 }
 
 fn reversed(name: &str) -> String {
@@ -67,6 +84,19 @@ impl FunctionRegistry {
     }
 
     pub fn insert(&mut self, name: String, info: FunctionInfo) -> Option<FunctionInfo> {
+        if self.identity_index_ready {
+            let old = self
+                .dirty_identity_names
+                .remove(&name)
+                .unwrap_or_else(|| self.entries.get(&name).map(|info| info.id));
+            if let Some(id) = old {
+                remove_identity_name(&mut self.identity_names, id, &name);
+            }
+            self.identity_names
+                .entry(info.id)
+                .or_default()
+                .insert(name.clone());
+        }
         match self.entries.entry(name) {
             hash_map::Entry::Occupied(mut entry) => Some(entry.insert(info)),
             hash_map::Entry::Vacant(entry) => {
@@ -84,6 +114,13 @@ impl FunctionRegistry {
     {
         self.entries.remove_entry(name).map(|(name, info)| {
             self.reversed_names.remove::<str>(&reversed(&name));
+            let indexed = self
+                .dirty_identity_names
+                .remove(&name)
+                .unwrap_or(Some(info.id));
+            if let Some(id) = indexed {
+                remove_identity_name(&mut self.identity_names, id, &name);
+            }
             info
         })
     }
@@ -91,9 +128,13 @@ impl FunctionRegistry {
     pub fn clear(&mut self) {
         self.entries.clear();
         self.reversed_names.clear();
+        self.identity_names.clear();
+        self.dirty_identity_names.clear();
+        self.identity_index_ready = true;
     }
 
     pub fn entry(&mut self, name: String) -> FunctionRegistryEntry<'_> {
+        self.note_identity_mutation(&name);
         FunctionRegistryEntry {
             entry: self.entries.entry(name),
             reversed_names: &mut self.reversed_names,
@@ -107,14 +148,23 @@ impl FunctionRegistry {
         String: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
+        if self.identity_index_ready
+            && let Some((key, info)) = self.entries.get_key_value(name)
+        {
+            self.dirty_identity_names
+                .entry(key.clone())
+                .or_insert(Some(info.id));
+        }
         self.entries.get_mut(name)
     }
 
     pub fn values_mut(&mut self) -> hash_map::ValuesMut<'_, String, FunctionInfo> {
+        self.invalidate_identity_index();
         self.entries.values_mut()
     }
 
     pub fn retain(&mut self, mut keep: impl FnMut(&String, &mut FunctionInfo) -> bool) {
+        self.invalidate_identity_index();
         let names = &mut self.reversed_names;
         self.entries.retain(|name, info| {
             if keep(name, info) {
@@ -128,6 +178,64 @@ impl FunctionRegistry {
 
     pub fn as_map(&self) -> &HashMap<String, FunctionInfo> {
         &self.entries
+    }
+
+    fn note_identity_mutation(&mut self, name: &str) {
+        if self.identity_index_ready {
+            self.dirty_identity_names
+                .entry(name.to_owned())
+                .or_insert_with(|| self.entries.get(name).map(|info| info.id));
+        }
+    }
+
+    fn invalidate_identity_index(&mut self) {
+        self.identity_index_ready = false;
+        self.identity_names.clear();
+        self.dirty_identity_names.clear();
+    }
+
+    fn refresh_identity_index(&mut self) {
+        if !self.identity_index_ready {
+            for (name, info) in &self.entries {
+                self.identity_names
+                    .entry(info.id)
+                    .or_default()
+                    .insert(name.clone());
+            }
+            self.identity_index_ready = true;
+        }
+        for (name, old) in self.dirty_identity_names.drain() {
+            let current = self.entries.get(&name).map(|info| info.id);
+            if old == current {
+                continue;
+            }
+            if let Some(id) = old {
+                remove_identity_name(&mut self.identity_names, id, &name);
+            }
+            if let Some(id) = current {
+                self.identity_names.entry(id).or_default().insert(name);
+            }
+        }
+    }
+
+    /// Update exactly the live aliases of an identity, without scanning the
+    /// whole registry for every completed body. An update may itself change
+    /// the ID; point and bulk mutation APIs preserve the same index contract.
+    pub fn update_by_id(&mut self, id: FunctionId, mut update: impl FnMut(&mut FunctionInfo)) {
+        self.refresh_identity_index();
+        let Some(names) = self.identity_names.get(&id).cloned() else {
+            return;
+        };
+        for name in names {
+            self.note_identity_mutation(&name);
+            let info = self
+                .entries
+                .get_mut(&name)
+                .expect("indexed alias has a live declaration");
+            debug_assert_eq!(info.id, id);
+            update(info);
+        }
+        self.refresh_identity_index();
     }
 }
 
@@ -171,6 +279,7 @@ impl From<HashMap<String, FunctionInfo>> for FunctionRegistry {
         Self {
             entries,
             reversed_names,
+            ..Self::default()
         }
     }
 }
