@@ -13,6 +13,10 @@ use verum_common::value_use::{
 };
 use verum_common::{List, Map, Maybe, ResourceDiscipline};
 
+#[cfg(test)]
+#[path = "../../tests/codegen/parameter_aliases.rs"]
+mod parameter_aliases;
+
 /// Parameter obligations come from the selected declaration, never its ABI ID.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum ParameterOwnership {
@@ -365,10 +369,12 @@ impl super::VbcCodegen {
         written: Option<&verum_ast::Type>,
     ) -> super::CodegenResult<ParameterOwnership> {
         use verum_ast::ty::TypeKind;
-        let raw_syntax = |ty: &verum_ast::Type|
-            matches!(ty.kind, TypeKind::Pointer { .. } | TypeKind::VolatilePointer { .. });
+        let raw_mutability = |ty: &verum_ast::Type| match ty.kind {
+            TypeKind::Pointer { mutable, .. } | TypeKind::VolatilePointer { mutable, .. } => Some(mutable),
+            _ => None,
+        };
         let Some(mut witness) = semantic.cloned() else {
-            return if written.is_some_and(raw_syntax) { Ok(ParameterOwnership::RawAddress) }
+            return if written.and_then(raw_mutability).is_some() { Ok(ParameterOwnership::RawAddress) }
                 else { Err(super::CodegenError::unsupported_expr(
                     "owned parameter requires a complete declaration and binding inventory")) };
         };
@@ -390,15 +396,25 @@ impl super::VbcCodegen {
                     "parameter ownership requires a complete acyclic alias declaration"));
             }
             let raw = match declaration.source_declaration.as_ref() {
-                Some(source) => matches!(&source.body,
-                    verum_ast::TypeDeclBody::Alias(target) if raw_syntax(target)),
+                Some(source) => match &source.body {
+                    verum_ast::TypeDeclBody::Alias(target) => raw_mutability(target),
+                    _ => None,
+                },
                 None => declaration.alias_target_name
                     .and_then(|id| self.ctx.strings.get(id.0 as usize))
                     .and_then(|source| verum_fast_parser::Parser::new(source).parse_type().ok())
-                    .is_some_and(|target| raw_syntax(&target)),
+                    .and_then(|target| raw_mutability(&target)),
             };
-            if raw {
-                if declaration.alias_target.is_some() {
+            if let Some(mutable) = raw {
+                // Raw pointers retain their pointee and permission in the
+                // shared Tier2 reference representation. A present target is
+                // required evidence, not a contradiction or an owning value.
+                let permission = if mutable { crate::types::Mutability::Mutable }
+                    else { crate::types::Mutability::Immutable };
+                if !matches!(declaration.alias_target.as_ref(),
+                    Some(TypeRef::Reference { tier: crate::types::CbgrTier::Tier2, mutability, .. })
+                        if *mutability == permission)
+                {
                     return Err(super::CodegenError::unsupported_expr(
                         "raw address alias contradicts its semantic target"));
                 }

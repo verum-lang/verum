@@ -338,7 +338,7 @@ fn an_async_caller_keeps_the_legacy_outgoing_value_boundary() {
 }
 
 #[test]
-fn raw_pointer_declarations_do_not_fabricate_alias_witnesses() {
+fn raw_pointer_declarations_and_aliases_preserve_nonowning_parameters() {
     for (declarations, parameter) in [
         ("", "*const Int"),
         ("type Address is *const Int;", "Address"),
@@ -346,25 +346,19 @@ fn raw_pointer_declarations_do_not_fabricate_alias_witnesses() {
             "type Address is *const Int; type Alias is Address;",
             "Alias",
         ),
+        ("type Address<T> is *const T;", "Address<Int>"),
     ] {
         let source = format!(
-            "{declarations} unsafe fn raw(value: {parameter}) -> Int {{ 73 }} fn probe() -> Int {{ let value = 11; unsafe {{ raw(&value as *const Int) }} }}"
+            "{declarations}
+             unsafe fn raw(value: {parameter}) -> Int {{ 73 }}
+             unsafe fn read_address(value: {parameter}) -> Int {{ *value }}
+             fn probe() -> Int {{
+                 let value = 73;
+                 let observed = unsafe {{ read_address(&value as *const Int) }};
+                 if observed != value {{ return 11; }}
+                 unsafe {{ raw(&value as *const Int) }}
+             }}"
         );
-        if !declarations.is_empty() {
-            // Pointer aliases still lack a complete refinement target in the
-            // source producer. An ownership exclusion must not fabricate it.
-            let ast = Parser::new(&source).parse_module().unwrap();
-            let error = VbcCodegen::with_config(CodegenConfig::new("convention"))
-                .compile_module(&ast)
-                .unwrap_err();
-            assert!(
-                error
-                    .to_string()
-                    .contains("refinement alias has no declared target"),
-                "{parameter}: {error}"
-            );
-            continue;
-        }
         let module = wire(&compile(&source));
         let raw = id(&module, "raw");
         let probe = id(&module, "probe");
