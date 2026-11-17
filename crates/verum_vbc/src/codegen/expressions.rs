@@ -25935,12 +25935,11 @@ impl VbcCodegen {
         // use the module-qualified registration instead. `record_key`
         // stays == `variant_name` whenever the simple name is already
         // authoritative, so non-colliding literals compile unchanged.
-        let record_key: String = if path_is_qualified {
-            variant_name.clone()
-        } else {
-            self.resolve_record_type_key(&variant_name)?
-                .unwrap_or_else(|| variant_name.clone())
-        };
+        // Qualified syntax may start with a mounted namespace alias. The
+        // selected declaration owns allocation, fields and generic application
+        // just as it does for an unqualified imported record.
+        let record_key = self.resolve_record_type_key(&dot_name)?
+            .unwrap_or_else(|| dot_name.clone());
         let literal_field_names: std::collections::HashSet<&str> = fields
             .iter()
             .map(|f| f.name.name.as_str())

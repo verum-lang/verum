@@ -21088,7 +21088,7 @@ impl VbcCodegen {
     ///     legacy behaviour (returns `None`) — deterministic, and the
     ///     caller's existing fallback chain still applies.
     fn resolve_record_type_key(&self, name: &str) -> CodegenResult<Option<String>> {
-        if name.is_empty() || name.contains('.') || name.contains('<') {
+        if name.is_empty() || name.contains('<') {
             return Ok(None);
         }
         // Source lookup is authoritative for inherited bodies as well as
@@ -21099,7 +21099,15 @@ impl VbcCodegen {
                 "source binding '{name}' does not resolve to a record in declaration scope '{}'",
                 self.lexical_type_scope(),
             )));
-            let declaration = selected.and_then(|id| self.type_by_id(id)).ok_or_else(invalid)?;
+            let declaration = match selected.and_then(|id| self.type_by_id(id)) {
+                Some(declaration) => declaration,
+                // A qualified path can name a record-style sum variant. It
+                // has no separate nominal declaration; the constructor caller
+                // resolves that variant against its sum. Never search unrelated
+                // bare layouts on behalf of a missing qualified declaration.
+                None if name.contains('.') => return Ok(None),
+                None => return Err(invalid()),
+            };
             let target = if declaration.kind == crate::types::TypeKind::Alias {
                 // The stored alias target already carries its own binders.
                 // Select its nominal head without inventing caller arguments.
@@ -21111,6 +21119,7 @@ impl VbcCodegen {
             // descriptor to distinguish named variants from plain records.
             return self.type_declaration_identity(target).map(|key| Some(key.to_string())).ok_or_else(invalid);
         }
+        if name.contains('.') { return Ok(None); }
         if self.record_key_is_authoritative(name) {
             return Ok(None);
         }
