@@ -1079,11 +1079,9 @@ pub struct Heap {
     /// Current generation counter.
     generation: u32,
 
-    /// All allocated objects (for GC tracing).
-    objects: Vec<NonNull<ObjectHeader>>,
-
-    /// Exact live allocation bases for constant-time provenance checks.
-    object_addresses: Set<usize>,
+    /// Exact live allocations. One set retains pointer provenance, supplies
+    /// membership checks and retires an owner without scanning other objects.
+    objects: Set<NonNull<ObjectHeader>>,
     /// Issued by the closure producer only; object tags cannot create evidence.
     callables: verum_common::Map<usize, callables::CallableReceipt>,
     /// Active projection tickets. Their global uniqueness excludes address
@@ -1147,8 +1145,7 @@ impl Heap {
     pub fn with_threshold(threshold: usize) -> Self {
         Self {
             generation: 1,
-            objects: Vec::with_capacity(1024),
-            object_addresses: Set::with_capacity(1024),
+            objects: Set::with_capacity(1024),
             callables: Default::default(),
             projections: Default::default(),
             allocated: 0,
@@ -1233,8 +1230,7 @@ impl Heap {
             requested: total_size,
             available: 0,
         })?;
-        self.objects.push(nn_ptr);
-        self.object_addresses.insert(header_ptr as usize);
+        self.objects.insert(nn_ptr);
 
         // Update stats
         self.allocated += total_size;
@@ -1416,6 +1412,8 @@ impl Heap {
     /// The object must have been allocated by this heap and must not be
     /// accessed after freeing.
     pub unsafe fn free(&mut self, obj: Object) {
+        let address = obj.ptr.as_ptr() as usize;
+        assert!(self.objects.remove(&obj.ptr), "free requires a live object from this heap");
         let header = obj.header();
         let total_size = OBJECT_HEADER_SIZE + header.size as usize;
 
@@ -1435,11 +1433,8 @@ impl Heap {
         self.allocated = self.allocated.saturating_sub(total_size);
         self.stats.total_frees += 1;
 
-        // Remove from tracking (expensive, but correct)
-        self.objects.retain(|p| *p != obj.ptr);
-        self.object_addresses.remove(&(obj.ptr.as_ptr() as usize));
-        self.callables.remove(&(obj.ptr.as_ptr() as usize));
-        self.revoke_projections(obj.as_ptr() as usize);
+        self.callables.remove(&address);
+        self.revoke_projections(address);
     }
 
     /// Returns the next generation number.
@@ -1492,10 +1487,7 @@ impl Heap {
     /// inspect headers safely — most importantly `handle_clone` — must
     /// consult this method first.
     pub fn contains(&self, ptr: *const ObjectHeader) -> bool {
-        if ptr.is_null() {
-            return false;
-        }
-        self.object_addresses.contains(&(ptr as usize))
+        NonNull::new(ptr.cast_mut()).is_some_and(|pointer| self.objects.contains(&pointer))
     }
 
     /// Validates a CBGR reference against an object.
@@ -1543,7 +1535,7 @@ impl Heap {
     ///
     /// All references to heap objects become invalid.
     pub unsafe fn clear(&mut self) {
-        for obj_ptr in self.objects.drain(..) {
+        for obj_ptr in self.objects.drain() {
             // SAFETY: All objects were allocated by this heap with MIN_ALIGNMENT.
             unsafe {
                 let header = obj_ptr.as_ref();
@@ -1566,7 +1558,6 @@ impl Heap {
                 dealloc(obj_ptr.as_ptr() as *mut u8, layout);
             }
         }
-        self.object_addresses.clear();
         self.callables.clear();
         self.projections = Default::default();
         self.allocated = 0;
