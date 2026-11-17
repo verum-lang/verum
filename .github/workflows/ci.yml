@@ -332,10 +332,9 @@ jobs:
         # loudly instead of eating the 6h job limit.
         timeout-minutes: 45
         # Measured locally 2026-08-02 (T0709 journal): the 9-crate light
-        # tier = 4,363 tests green; verum_fast_parser adds 4,158 (measured same day). verum_kernel is EXCLUDED for now — its
-        # k_arch_v_alignment pin is honest-red (160/2480 cogs missing
-        # @arch_module attestation, tracked as its own task); a gate that
-        # starts red gets silenced wholesale. Heavier pure crates
+        # tier = 4,363 tests green; verum_fast_parser adds 4,158 (measured same day).
+        # Kernel architecture and proof boundaries run in targeted steps below.
+        # Heavier pure crates
         # (types/smt/fast_parser/vbc/verification) join after their own
         # timed local run.
         run: >
@@ -346,13 +345,11 @@ jobs:
           -p verum_fast_parser
           -p verum_workbench
 
-      # T1774: this targeted kernel boundary is independent of the legacy
-      # architectural-attestation tests excluded from the broad pure-tier job.
       - name: Diagnostic evidence and authored architecture constraints
         timeout-minutes: 5
         run: |
           cargo test --locked -p verum_kernel --test diagnostic_proof_authority --test arch_capability_constraints
-          cargo test --locked -p verum_kernel --test k_arch_v_alignment pin_shape_capability_field_presence
+          cargo test --locked -p verum_kernel --test arch_module_declaration --test k_arch_v_alignment
 
       - name: Incomplete verification cannot pass regression gates
         timeout-minutes: 5

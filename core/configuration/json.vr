@@ -1,4 +1,5 @@
 // Shared diagnostics for the JSON configuration format.
+@arch_module(lifecycle = Lifecycle.Definition)
 module core.configuration.json;
 
 mount core.configuration.error.{ConfigError, ConfigErrorKind, config_err, format_id_json};

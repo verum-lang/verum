@@ -67,6 +67,11 @@ pub enum ArchParseError {
     },
     /// Generic AST mismatch (caller didn't pass a Call expression).
     NotAnArchModuleAttribute,
+    /// Repeated declarations or fields have no implicit override precedence.
+    DuplicateDeclaration {
+        /// Repeated field or attribute name.
+        name: String,
+    },
 }
 
 impl ArchParseError {
@@ -95,8 +100,43 @@ impl ArchParseError {
             ArchParseError::NotAnArchModuleAttribute => {
                 "Expected @arch_module(...) call expression.".to_string()
             }
+            ArchParseError::DuplicateDeclaration { name } => {
+                format!("Duplicate architectural declaration: `{name}`.")
+            }
         }
     }
+}
+
+/// Read the file's authored architecture from its parsed module boundary.
+/// An attribute on a function or an inline child is not a file declaration.
+/// Successful parsing establishes metadata validity, never a proof of its claims.
+pub fn declared_arch_shape_of_module(
+    module: &verum_ast::Module,
+) -> Result<Option<Shape>, ArchParseError> {
+    let attributes = module.attributes.iter().chain(
+        module.file_header_index().into_iter()
+            .flat_map(|index| module.items[index].attributes.iter()),
+    );
+    arch_module_arguments(attributes)?
+        .map(parse_arch_module)
+        .transpose()
+}
+
+/// Select one architecture declaration, rejecting ambiguous repeated attributes.
+/// Both the compiler phase and module queries use this boundary.
+pub fn arch_module_arguments<'a>(
+    attributes: impl IntoIterator<Item = &'a verum_ast::attr::Attribute>,
+) -> Result<Option<&'a [Expr]>, ArchParseError> {
+    let mut declaration = None;
+    for attribute in attributes.into_iter().filter(|attribute| attribute.name.as_str() == "arch_module") {
+        if declaration.is_some() {
+            return Err(ArchParseError::DuplicateDeclaration {
+                name: "arch_module".into(),
+            });
+        }
+        declaration = Some(attribute.args.as_deref().unwrap_or(&[]));
+    }
+    Ok(declaration)
 }
 
 // =============================================================================
@@ -112,6 +152,7 @@ impl ArchParseError {
 /// positional args are rejected.
 pub fn parse_arch_module(args: &[Expr]) -> Result<Shape, ArchParseError> {
     let mut shape = Shape::default_for_unannotated();
+    let mut fields = verum_common::Set::new();
 
     for arg in args {
         let (name, value) = match &arg.kind {
@@ -165,6 +206,9 @@ pub fn parse_arch_module(args: &[Expr]) -> Result<Shape, ArchParseError> {
             }
         };
 
+        if !fields.insert(verum_common::Text::from(name.as_str())) {
+            return Err(ArchParseError::DuplicateDeclaration { name });
+        }
         match name.as_str() {
             "exposes" => {
                 shape.exposes = parse_capability_list(value)?;

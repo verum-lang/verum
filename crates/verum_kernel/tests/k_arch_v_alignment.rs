@@ -1322,7 +1322,7 @@ fn pin_math_cogs_have_arch_module() {
     }
     assert!(
         missing.is_empty(),
-        "{} of {} core/math/*.vr files missing @arch_module attestation: {}",
+        "{} of {} core/math/*.vr files without valid parsed @arch_module metadata: {}",
         missing.len(),
         total,
         missing.join(", "),
@@ -1767,21 +1767,8 @@ fn pin_compiler_phase_wires_foreign_foundation_constructs() {
 // 22. Universal @arch_module discipline across the entire core/ stdlib
 // =============================================================================
 
-/// **Universal pin** — every `.vr` file under `core/` (recursive)
-/// must carry the `@arch_module(...)` self-attestation declaration.
-/// This is the architectural promise that ATS-V annotation
-/// discipline applies UNIFORMLY across the stdlib, not just the
-/// math / verify / proof / architecture sub-trees.
-///
-/// Files exempt from the pin (very narrow exception list):
-///   * Files with no `module core.X.Y;` declaration are not cogs
-///     in the Verum sense — they are auxiliary helper files (test
-///     fixtures, generated stubs).  None currently exist in core/
-///     but the pin allows the future case.
-///
-/// Adding a new `.vr` cog requires either annotating it with
-/// `@arch_module(...)` OR adding an explicit exemption with a
-/// rationale comment.
+/// Every parsed named core module must carry valid architectural metadata.
+/// This is declaration coverage, not proof coverage or module conformance.
 #[test]
 fn pin_universal_arch_module_coverage_in_core() {
     let workspace_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -1795,30 +1782,29 @@ fn pin_universal_arch_module_coverage_in_core() {
     let mut missing: Vec<String> = Vec::new();
     walk_core_vr_files(&core, &mut |path| {
         let text = std::fs::read_to_string(path).expect("read .vr");
-        // A file qualifies as a cog iff it contains `^module core.X.Y;`.
-        // Files without that declaration are auxiliary (none currently).
-        let mut module_lines = 0;
-        for line in text.lines() {
-            if line.starts_with("module core") {
-                module_lines += 1;
+        let parsed = verum_fast_parser::FastParser::new()
+            .parse_module_str(&text, verum_common::FileId::new(0));
+        let module = match parsed {
+            Ok(module) => module,
+            Err(errors) => {
+                missing.push(format!("{}: parse failed: {errors:?}", path.display()));
+                return;
             }
-        }
-        if module_lines == 0 {
-            return;
-        }
+        };
+        let Some(index) = module.file_header_index() else { return; };
+        let verum_ast::ItemKind::Module(header) = &module.items[index].kind else { unreachable!() };
+        if header.name.name.as_str() != "core" && !header.name.name.starts_with("core.") { return; }
         total_cogs += 1;
-        if !text.contains("@arch_module") {
-            missing.push(
-                path.strip_prefix(&core)
-                    .map(|p| p.to_string_lossy().into_owned())
-                    .unwrap_or_else(|_| path.display().to_string()),
-            );
+        match verum_kernel::arch_parse::declared_arch_shape_of_module(&module) {
+            Ok(Some(_)) => {},
+            result => missing.push(format!("{}: {result:?}", path.strip_prefix(&core).unwrap_or(path).display())),
         }
+
     });
 
     assert!(
         missing.is_empty(),
-        "{} of {} cogs under core/ missing @arch_module attestation: {}",
+        "{} of {} cogs under core/ without valid module-boundary @arch_module metadata: {}",
         missing.len(),
         total_cogs,
         missing.join(", "),

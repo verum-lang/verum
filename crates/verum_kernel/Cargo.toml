@@ -31,5 +31,6 @@ dashmap = { workspace = true }
 blake3 = { workspace = true }
 
 [dev-dependencies]
+verum_fast_parser = { workspace = true }
 proptest = { workspace = true }
 serde_json = { workspace = true }

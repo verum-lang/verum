@@ -22,6 +22,7 @@
 // canonical-primitive ν-invariant lives in (cf. MSFS Thm 4.4).
 // =============================================================================
 
+@arch_module(lifecycle = Lifecycle.Definition)
 module core.theory_interop.coord;
 
 mount core.action.articulation.{Articulation};

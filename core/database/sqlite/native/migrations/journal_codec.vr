@@ -1,3 +1,4 @@
+@arch_module(lifecycle = Lifecycle.Definition)
 module core.database.sqlite.native.migrations.journal_codec;
 
 mount core.base.maybe.Maybe;

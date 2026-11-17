@@ -1,5 +1,6 @@
 // Content binding for canonical Rekor v1 DSSE and in-toto entries.
 // Callers must authenticate the entry body, signer and checkpoint separately.
+@arch_module(lifecycle = Lifecycle.Definition)
 module core.security.sigstore.attestation;
 
 mount core.encoding.json.JsonValue;

@@ -1,4 +1,5 @@
 // HTTP/3 ↔ Weft value conversion, independent of the server transport.
+@arch_module(lifecycle = Lifecycle.Definition)
 module core.net.weft.h3_conversion;
 
 mount core.net.h3.request.{H3Request, H3Method, H3Response};

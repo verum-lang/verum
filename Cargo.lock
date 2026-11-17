@@ -4616,6 +4616,7 @@ dependencies = [
  "thiserror",
  "verum_ast",
  "verum_common",
+ "verum_fast_parser",
  "verum_proof",
 ]
 

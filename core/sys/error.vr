@@ -1,3 +1,4 @@
+@arch_module(lifecycle = Lifecycle.Definition)
 module core.sys.error;
 
 // Codes are interpreted in the target OS ABI, never in a union of numerical

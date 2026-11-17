@@ -108,6 +108,7 @@
 // * `kernel_arch_self_reference_check`               — AP-040.
 // =============================================================================
 
+@arch_module(lifecycle = Lifecycle.Definition)
 module core.architecture.anti_patterns;
 
 mount core.prelude.{Maybe, List, Text};
