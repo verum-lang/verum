@@ -76,8 +76,8 @@ implement RenderViewport {
             },
             RenderViewport.Fixed { area } => {
                 // Clip to terminal bounds
-                let w = if area.x + area.width > cols { (cols - area.x).max(0) } else { area.width };
-                let h = if area.y + area.height > rows { (rows - area.y).max(0) } else { area.height };
+                let w = if area.x + area.width() > cols { (cols - area.x).max(0) } else { area.width() };
+                let h = if area.y + area.height() > rows { (rows - area.y).max(0) } else { area.height() };
                 Rect.new(area.x, area.y, w, h)
             },
         }

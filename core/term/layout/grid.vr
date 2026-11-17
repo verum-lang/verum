@@ -94,8 +94,8 @@ implement GridLayout {
     /// Compute the grid layout, returning a 2D list of Rects.
     /// Result is indexed as result[row_index][col_index].
     public fn compute(&self, area: &Rect) -> List<List<Rect>> {
-        let col_sizes = resolve_tracks(&self.columns, area.width, self.column_gap);
-        let row_sizes = resolve_tracks(&self.rows, area.height, self.row_gap);
+        let col_sizes = resolve_tracks(&self.columns, area.width(), self.column_gap);
+        let row_sizes = resolve_tracks(&self.rows, area.height(), self.row_gap);
 
         let mut result = List.new();
         let mut y = area.y;

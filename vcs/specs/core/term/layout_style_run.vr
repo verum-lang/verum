@@ -62,9 +62,9 @@ fn main() {
     let area = Rect.new(0, 0, 40, 20);
     let (l, r) = area.split_horizontal(10);
     let (t, b) = area.split_vertical(5);
-    print(f"rect split h={l.width},{r.width} v={t.height},{b.height}");
+    print(f"rect split h={l.width()},{r.width()} v={t.height()},{b.height()}");
     let c = centered(area, 10, 4);
-    print(f"centered x={c.x} y={c.y} w={c.width} h={c.height}");
+    print(f"centered x={c.x} y={c.y} w={c.width()} h={c.height()}");
 
     // Buffer — from_rect takes its size from the Rect; in_bounds is the check.
     let buf = Buffer.from_rect(Rect.new(0, 0, 8, 3));

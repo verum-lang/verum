@@ -92,12 +92,12 @@ implement Widget for TermGauge {
             Maybe.None => area,
         };
 
-        if gauge_area.width < 1 || gauge_area.height < 1 { return; }
+        if gauge_area.width() < 1 || gauge_area.height() < 1 { return; }
 
         buf.set_style(gauge_area, self.style);
 
         // Calculate filled width
-        let filled_width_f = gauge_area.width as Float * self.ratio;
+        let filled_width_f = gauge_area.width() as Float * self.ratio;
         let filled_width = filled_width_f as Int;
         let remainder = filled_width_f - filled_width as Float;
 
@@ -136,8 +136,8 @@ implement Widget for TermGauge {
 
         // Center label over the gauge
         let label_len = label_text.len();
-        if label_len <= gauge_area.width {
-            let label_x = gauge_area.x + (gauge_area.width - label_len) / 2;
+        if label_len <= gauge_area.width() {
+            let label_x = gauge_area.x + (gauge_area.width() - label_len) / 2;
             let mut i = 0;
             let mut x = label_x;
             while i < label_len && x < gauge_area.right() {

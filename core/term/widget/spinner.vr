@@ -180,7 +180,7 @@ implement StatefulWidget for Spinner {
     type State = SpinnerState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut SpinnerState) {
-        if area.width < 1 || area.height < 1 { return; }
+        if area.width() < 1 || area.height() < 1 { return; }
         if self.frames.frames.len() == 0 { return; }
 
         // Auto-advance frame based on monotonic time

@@ -16,10 +16,10 @@
 )
 module core.term.layout.rect;
 
-/// Rectangular area in the terminal (cell coordinates).
+/// Half-open area in terminal cells. Origins are signed; construction clamps negative extents to zero.
 public type Rect is {
-    x: Int,
-    y: Int,
+    public x: Int,
+    public y: Int,
     width: Int,
     height: Int,
 };
@@ -29,6 +29,8 @@ implement Rect {
         Rect { x: x, y: y, width: width.max(0), height: height.max(0) }
     }
 
+    public fn width(&self) -> Int { self.width }
+    public fn height(&self) -> Int { self.height }
     public fn area(&self) -> Int { self.width * self.height }
     public fn left(&self) -> Int { self.x }
     public fn right(&self) -> Int { self.x + self.width }
@@ -102,8 +104,8 @@ implement Rect {
 
     /// Create a rect centered within this rect with given dimensions.
     public fn centered(&self, width: Int, height: Int) -> Rect {
-        let w = width.min(self.width);
-        let h = height.min(self.height);
+        let w = width.clamp(0, self.width);
+        let h = height.clamp(0, self.height);
         let cx = self.x + (self.width - w) / 2;
         let cy = self.y + (self.height - h) / 2;
         Rect.new(cx, cy, w, h)
@@ -112,10 +114,10 @@ implement Rect {
 
 /// Margin around a rectangle (top, right, bottom, left).
 public type Margin is {
-    top: Int,
-    right: Int,
-    bottom: Int,
-    left: Int,
+    public top: Int,
+    public right: Int,
+    public bottom: Int,
+    public left: Int,
 };
 
 implement Margin {
@@ -150,8 +152,8 @@ implement Margin {
 
 /// A point position in cell coordinates.
 public type Position is {
-    x: Int,
-    y: Int,
+    public x: Int,
+    public y: Int,
 };
 
 implement Position {

@@ -166,7 +166,7 @@ implement Widget for Paragraph {
             Maybe.None => area,
         };
 
-        if text_area.width < 1 || text_area.height < 1 { return; }
+        if text_area.width() < 1 || text_area.height() < 1 { return; }
 
         // Apply background style
         buf.set_style(text_area, self.style);
@@ -188,8 +188,8 @@ implement Widget for Paragraph {
             let line_width = line.width();
             let start_x = match self.alignment {
                 Left => text_area.x,
-                Center => text_area.x + (text_area.width - line_width).max(0) / 2,
-                Right => text_area.x + (text_area.width - line_width).max(0),
+                Center => text_area.x + (text_area.width() - line_width).max(0) / 2,
+                Right => text_area.x + (text_area.width() - line_width).max(0),
             };
 
             let mut x = start_x - h_offset;

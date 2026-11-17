@@ -28,19 +28,19 @@ fn test_layout_shortcuts() {
 
     // Header-body-footer pattern
     let (header, body, footer) = header_body_footer(area, 3, 1);
-    assert_eq(header.height, 3);
-    assert_eq(footer.height, 1);
-    assert(body.height > 0);
+    assert_eq(header.height(), 3);
+    assert_eq(footer.height(), 1);
+    assert(body.height() > 0);
 
     // Sidebar-main pattern
     let (sidebar, main) = sidebar_main(area, 20);
-    assert_eq(sidebar.width, 20);
-    assert(main.width > 0);
+    assert_eq(sidebar.width(), 20);
+    assert(main.width() > 0);
 
     // Centered box
     let dialog = centered(area, 40, 10);
-    assert_eq(dialog.width, 40);
-    assert_eq(dialog.height, 10);
+    assert_eq(dialog.width(), 40);
+    assert_eq(dialog.height(), 10);
 
     // Equal columns
     let cols = equal_columns(area, 3);

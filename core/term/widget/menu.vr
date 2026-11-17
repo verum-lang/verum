@@ -200,7 +200,7 @@ implement StatefulWidget for Menu {
             Maybe.None => area,
         };
 
-        if menu_area.width < 1 || menu_area.height < 1 { return; }
+        if menu_area.width() < 1 || menu_area.height() < 1 { return; }
 
         buf.set_style(menu_area, self.style);
 

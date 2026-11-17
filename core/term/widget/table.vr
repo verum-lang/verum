@@ -240,7 +240,7 @@ implement StatefulWidget for Table {
             Maybe.None => area,
         };
 
-        if table_area.width < 1 || table_area.height < 1 { return; }
+        if table_area.width() < 1 || table_area.height() < 1 { return; }
 
         buf.set_style(table_area, self.style);
 
@@ -248,14 +248,14 @@ implement StatefulWidget for Table {
         let col_widths = Layout.horizontal()
             .constraints(self.widths.clone())
             .spacing(self.column_spacing)
-            .split(Rect.new(table_area.x, table_area.y, table_area.width, 1));
+            .split(Rect.new(table_area.x, table_area.y, table_area.width(), 1));
 
         // 3. Draw header
         let mut y = table_area.y;
         match self.header {
             Maybe.Some(header) => {
                 if y < table_area.bottom() {
-                    render_row(buf, &header, &col_widths, y, table_area.width);
+                    render_row(buf, &header, &col_widths, y, table_area.width());
                     y = y + header.height + header.bottom_margin;
                 }
             }
@@ -306,7 +306,7 @@ implement StatefulWidget for Table {
                 }
             }
 
-            render_row(buf, row, &col_widths, y, table_area.width);
+            render_row(buf, row, &col_widths, y, table_area.width());
 
             // Apply highlight style to entire row
             if is_selected {
@@ -324,7 +324,7 @@ implement StatefulWidget for Table {
             Maybe.Some(ref footer) => {
                 let footer_y = table_area.bottom() - footer.height;
                 if footer_y >= y {
-                    render_row(buf, footer, &col_widths, footer_y, table_area.width);
+                    render_row(buf, footer, &col_widths, footer_y, table_area.width());
                 }
             }
             Maybe.None => {}
@@ -336,7 +336,7 @@ implement StatefulWidget for Table {
 fn render_row(buf: &mut Buffer, row: &TableRow, col_areas: &List<Rect>, y: Int, total_width: Int) {
     let num_cols = row.cells.len().min(col_areas.len());
     for col in 0..num_cols {
-        let cell_area = Rect.new(col_areas[col].x, y, col_areas[col].width, row.height);
+        let cell_area = Rect.new(col_areas[col].x, y, col_areas[col].width(), row.height);
         let cell = &row.cells[col];
         let line = &cell.content;
         let mut x = cell_area.x;

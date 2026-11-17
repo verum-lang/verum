@@ -464,7 +464,7 @@ implement StatefulWidget for TextArea {
             }
             Maybe.None => area,
         };
-        if text_area.width < 1 || text_area.height < 1 { return; }
+        if text_area.width() < 1 || text_area.height() < 1 { return; }
 
         buf.set_style(text_area, self.style);
 
@@ -474,18 +474,18 @@ implement StatefulWidget for TextArea {
             int_width(n) + 1
         } else { 0 };
         let content_x = text_area.x + gutter;
-        let content_w = (text_area.width - gutter).max(0);
+        let content_w = (text_area.width() - gutter).max(0);
         if content_w < 1 { return; }
 
         // Scroll: keep cursor row in viewport.
         if state.cursor.line < state.scroll_row { state.scroll_row = state.cursor.line; }
-        if state.cursor.line >= state.scroll_row + text_area.height {
-            state.scroll_row = state.cursor.line - text_area.height + 1;
+        if state.cursor.line >= state.scroll_row + text_area.height() {
+            state.scroll_row = state.cursor.line - text_area.height() + 1;
         }
 
         let (sel_s, sel_e) = state.selection_range();
 
-        for row in 0..text_area.height {
+        for row in 0..text_area.height() {
             let line_idx = state.scroll_row + row;
             if line_idx >= state.lines.len() { break; }
             let y = text_area.y + row;
@@ -539,7 +539,7 @@ implement StatefulWidget for TextArea {
 
         // Cursor overlay.
         let cr = state.cursor.line - state.scroll_row;
-        if cr >= 0 && cr < text_area.height {
+        if cr >= 0 && cr < text_area.height() {
             let line = &state.lines[state.cursor.line];
             let col = column_in_line(line, state.cursor.col, self.tab_width) - state.scroll_col;
             let x = content_x + col;

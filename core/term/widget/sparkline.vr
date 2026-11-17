@@ -125,7 +125,7 @@ implement Widget for Sparkline {
             Maybe.None => area,
         };
 
-        if spark_area.width < 1 || spark_area.height < 1 { return; }
+        if spark_area.width() < 1 || spark_area.height() < 1 { return; }
         if self.data.len() == 0 { return; }
 
         buf.set_style(spark_area, self.style);
@@ -145,8 +145,8 @@ implement Widget for Sparkline {
         // If all values are zero, nothing to draw
         if data_max <= 0.0 { return; }
 
-        let height = spark_area.height;
-        let width = spark_area.width;
+        let height = spark_area.height();
+        let width = spark_area.width();
         let visible_count = width.min(self.data.len());
 
         // Render each column

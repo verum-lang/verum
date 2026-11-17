@@ -24,8 +24,8 @@ fn test_rect_inner() {
     let inner = r.inner(m);
     assert_eq(inner.x, 2);
     assert_eq(inner.y, 2);
-    assert_eq(inner.width, 76);
-    assert_eq(inner.height, 20);
+    assert_eq(inner.width(), 76);
+    assert_eq(inner.height(), 20);
 }
 
 fn test_rect_intersection() {
@@ -34,8 +34,8 @@ fn test_rect_intersection() {
     let inter = a.intersection(&b);
     assert_eq(inter.x, 5);
     assert_eq(inter.y, 5);
-    assert_eq(inter.width, 5);
-    assert_eq(inter.height, 5);
+    assert_eq(inter.width(), 5);
+    assert_eq(inter.height(), 5);
 }
 
 fn test_rect_contains() {

@@ -180,8 +180,8 @@ implement FlexLayout {
             _ => false,
         };
 
-        let main_size = if is_row { container.width } else { container.height };
-        let cross_size = if is_row { container.height } else { container.width };
+        let main_size = if is_row { container.width() } else { container.height() };
+        let cross_size = if is_row { container.height() } else { container.width() };
 
         // =====================================================================
         // Phase 1: Determine hypothetical main sizes (flex base sizes)

@@ -268,7 +268,7 @@ implement<T> StatefulWidget for Tree<T> {
             Maybe.None => area,
         };
 
-        if tree_area.width < 1 || tree_area.height < 1 { return; }
+        if tree_area.width() < 1 || tree_area.height() < 1 { return; }
 
         buf.set_style(tree_area, self.style);
 
@@ -288,8 +288,8 @@ implement<T> StatefulWidget for Tree<T> {
                 if sel_idx < state.offset {
                     state.offset = sel_idx;
                 }
-                if sel_idx >= state.offset + tree_area.height {
-                    state.offset = sel_idx - tree_area.height + 1;
+                if sel_idx >= state.offset + tree_area.height() {
+                    state.offset = sel_idx - tree_area.height() + 1;
                 }
             }
             Maybe.None => {}
@@ -298,7 +298,7 @@ implement<T> StatefulWidget for Tree<T> {
         let symbol_width = self.highlight_symbol.len();
 
         // Render visible rows
-        for row_i in 0..tree_area.height {
+        for row_i in 0..tree_area.height() {
             let vis_idx = state.offset + row_i;
             if vis_idx >= visible.len() { break; }
 

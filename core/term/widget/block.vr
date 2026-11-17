@@ -113,8 +113,8 @@ implement Block {
     public fn inner(&self, area: Rect) -> Rect {
         let mut x = area.x;
         let mut y = area.y;
-        let mut w = area.width;
-        let mut h = area.height;
+        let mut w = area.width();
+        let mut h = area.height();
 
         if self.borders.has_top() { y = y + 1; h = h - 1; }
         if self.borders.has_bottom() { h = h - 1; }
@@ -134,7 +134,7 @@ implement Styled for Block {
 
 implement Widget for Block {
     fn render(&self, area: Rect, buf: &mut Buffer) {
-        if area.width < 1 || area.height < 1 { return; }
+        if area.width() < 1 || area.height() < 1 { return; }
 
         // Fill background
         buf.set_style(area, self.style);
@@ -148,7 +148,7 @@ implement Widget for Block {
                 buf.get_mut(x, area.top()).set_char(&chars.top, self.border_style);
             }
         }
-        if self.borders.has_bottom() && area.height > 1 {
+        if self.borders.has_bottom() && area.height() > 1 {
             for x in area.left()..area.right() {
                 buf.get_mut(x, area.bottom() - 1).set_char(&chars.bottom, self.border_style);
             }
@@ -160,7 +160,7 @@ implement Widget for Block {
                 buf.get_mut(area.left(), y).set_char(&chars.left, self.border_style);
             }
         }
-        if self.borders.has_right() && area.width > 1 {
+        if self.borders.has_right() && area.width() > 1 {
             for y in area.top()..area.bottom() {
                 buf.get_mut(area.right() - 1, y).set_char(&chars.right, self.border_style);
             }
@@ -170,21 +170,21 @@ implement Widget for Block {
         if self.borders.has_top() && self.borders.has_left() {
             buf.get_mut(area.left(), area.top()).set_char(&chars.top_left, self.border_style);
         }
-        if self.borders.has_top() && self.borders.has_right() && area.width > 1 {
+        if self.borders.has_top() && self.borders.has_right() && area.width() > 1 {
             buf.get_mut(area.right() - 1, area.top()).set_char(&chars.top_right, self.border_style);
         }
-        if self.borders.has_bottom() && self.borders.has_left() && area.height > 1 {
+        if self.borders.has_bottom() && self.borders.has_left() && area.height() > 1 {
             buf.get_mut(area.left(), area.bottom() - 1).set_char(&chars.bottom_left, self.border_style);
         }
-        if self.borders.has_bottom() && self.borders.has_right() && area.width > 1 && area.height > 1 {
+        if self.borders.has_bottom() && self.borders.has_right() && area.width() > 1 && area.height() > 1 {
             buf.get_mut(area.right() - 1, area.bottom() - 1).set_char(&chars.bottom_right, self.border_style);
         }
 
         // Draw title
         match self.title {
             Some(title) => {
-                if self.borders.has_top() && area.width > 2 {
-                    let max_width = area.width - 2;
+                if self.borders.has_top() && area.width() > 2 {
+                    let max_width = area.width() - 2;
                     let display = if title.len() > max_width {
                         title.slice(0, max_width)
                     } else {
@@ -193,7 +193,7 @@ implement Widget for Block {
 
                     let title_x = match self.title_alignment {
                         Left => area.left() + 1,
-                        Center => area.left() + (area.width - display.len()) / 2,
+                        Center => area.left() + (area.width() - display.len()) / 2,
                         Right => area.right() - 1 - display.len(),
                     };
 

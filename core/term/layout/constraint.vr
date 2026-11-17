@@ -96,8 +96,8 @@ implement TermLayout {
     public fn split(&self, area: Rect) -> List<Rect> {
         let inner = area.inner(self.margin);
         let total = match self.direction {
-            Horizontal => inner.width,
-            Vertical => inner.height,
+            Horizontal => inner.width(),
+            Vertical => inner.height(),
         };
 
         // Subtract spacing between elements
@@ -125,8 +125,8 @@ implement TermLayout {
         for i in 0..n {
             let size = adjusted_sizes[i];
             let rect = match self.direction {
-                Horizontal => Rect.new(pos, inner.y, size, inner.height),
-                Vertical => Rect.new(inner.x, pos, inner.width, size),
+                Horizontal => Rect.new(pos, inner.y, size, inner.height()),
+                Vertical => Rect.new(inner.x, pos, inner.width(), size),
             };
             result.push(rect);
             pos = pos + size + self.spacing;

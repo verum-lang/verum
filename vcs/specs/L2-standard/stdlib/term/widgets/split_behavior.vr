@@ -26,11 +26,11 @@ fn test_horizontal_layout_ratio_50_50() {
     let area = Rect.new(0, 0, 40, 10);
     let (left, div, right) = split.layout(area, &state);
     assert_eq(left.x, 0);
-    assert_eq(left.width, 19);      // 39/2 = 19 rounded
+    assert_eq(left.width(), 19);      // 39/2 = 19 rounded
     assert_eq(div.x, 19);
-    assert_eq(div.width, 1);
+    assert_eq(div.width(), 1);
     assert_eq(right.x, 20);
-    assert_eq(right.width, 20);
+    assert_eq(right.width(), 20);
 }
 
 fn test_horizontal_layout_fixed() {
@@ -38,8 +38,8 @@ fn test_horizontal_layout_fixed() {
     let state = SplitState.fixed(12);
     let area = Rect.new(0, 0, 40, 10);
     let (left, _div, right) = split.layout(area, &state);
-    assert_eq(left.width, 12);
-    assert_eq(right.width, 27);     // 40 - 12 - 1(div)
+    assert_eq(left.width(), 12);
+    assert_eq(right.width(), 27);     // 40 - 12 - 1(div)
 }
 
 fn test_vertical_layout() {
@@ -48,8 +48,8 @@ fn test_vertical_layout() {
     let area = Rect.new(0, 0, 20, 30);
     let (top, div, bot) = split.layout(area, &state);
     assert_eq(top.y, 0);
-    assert_eq(div.height, 1);
-    assert(top.height + div.height + bot.height == area.height);
+    assert_eq(div.height(), 1);
+    assert(top.height() + div.height() + bot.height() == area.height());
 }
 
 // ---------------------------------------------------------------------------
@@ -61,7 +61,7 @@ fn test_min_first_clamps_up() {
     let state = SplitState.fixed(3);
     let area = Rect.new(0, 0, 40, 10);
     let (left, _, _) = split.layout(area, &state);
-    assert_eq(left.width, 15);
+    assert_eq(left.width(), 15);
 }
 
 fn test_min_second_clamps_first_down() {
@@ -70,8 +70,8 @@ fn test_min_second_clamps_first_down() {
     let area = Rect.new(0, 0, 40, 10);     // div=1 → available=39
     let (left, _, right) = split.layout(area, &state);
     // available=39, first must leave min_second=10, so first <= 29
-    assert(left.width <= 29);
-    assert(right.width >= 10);
+    assert(left.width() <= 29);
+    assert(right.width() >= 10);
 }
 
 // ---------------------------------------------------------------------------
@@ -85,7 +85,7 @@ fn test_ctrl_right_grows_first() {
     let handled = state.handle_resize_key(&split, area, key(KeyCode.Right, Modifiers.CTRL), 3);
     assert(handled);
     let (left, _, _) = split.layout(area, &state);
-    assert_eq(left.width, 13);
+    assert_eq(left.width(), 13);
 }
 
 fn test_ctrl_left_shrinks_first() {
@@ -94,7 +94,7 @@ fn test_ctrl_left_shrinks_first() {
     let area = Rect.new(0, 0, 40, 10);
     state.handle_resize_key(&split, area, key(KeyCode.Left, Modifiers.CTRL), 4);
     let (left, _, _) = split.layout(area, &state);
-    assert_eq(left.width, 6);
+    assert_eq(left.width(), 6);
 }
 
 fn test_plain_arrow_not_handled() {
@@ -147,7 +147,7 @@ fn test_mouse_drag_updates_size() {
     state.handle_mouse(&split, area, mouse(MouseEventKind.Down(MouseButton.Left), div.x, 5));
     state.handle_mouse(&split, area, mouse(MouseEventKind.Drag(MouseButton.Left), 20, 5));
     let (left_after, _, _) = split.layout(area, &state);
-    assert_eq(left_after.width, 20);
+    assert_eq(left_after.width(), 20);
 }
 
 fn test_mouse_up_ends_drag() {

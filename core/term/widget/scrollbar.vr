@@ -150,11 +150,11 @@ implement StatefulWidget for Scrollbar {
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut ScrollbarState) {
         // Hide scrollbar when content fits in viewport
         if state.content_length <= state.viewport_length { return; }
-        if area.width < 1 || area.height < 1 { return; }
+        if area.width() < 1 || area.height() < 1 { return; }
 
         let track_len = match self.orientation {
-            Vertical => area.height,
-            Horizontal => area.width,
+            Vertical => area.height(),
+            Horizontal => area.width(),
         };
 
         if track_len < 1 { return; }

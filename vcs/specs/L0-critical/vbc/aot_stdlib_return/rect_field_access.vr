@@ -18,6 +18,6 @@ fn main() {
     let r = Rect.new(5, 10, 80, 24);
     assert_eq(r.x, 5);
     assert_eq(r.y, 10);
-    assert_eq(r.width, 80);
-    assert_eq(r.height, 24);
+    assert_eq(r.width(), 80);
+    assert_eq(r.height(), 24);
 }

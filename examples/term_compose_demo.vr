@@ -99,7 +99,7 @@ fn main() {
     let area = Rect.new(0, 0, 80, 24);
     assert_eq(area.right(),  80);
     assert_eq(area.bottom(), 24);
-    print(f"rect {area.width}x{area.height}  right={area.right()}  bottom={area.bottom()}");
+    print(f"rect {area.width()}x{area.height()}  right={area.right()}  bottom={area.bottom()}");
 
     // Flex solver: 80-col row, gap = 1.
     let layout = FlexLayout.row().justify(JustifyContent.FlexStart).gap(1);
@@ -112,9 +112,9 @@ fn main() {
     for i in 0..rects.len() {
         let r = rects[i];
         let p = panes[i];
-        print(f"  {p.name}  x={r.x}  w={r.width}  h={r.height}");
-        assert(r.width >= p.min_cols);
-        covered = covered + r.width;
+        print(f"  {p.name}  x={r.x}  w={r.width()}  h={r.height()}");
+        assert(r.width() >= p.min_cols);
+        covered = covered + r.width();
     }
     // With grow on the middle pane the solver fills precisely:
     //   10 (fixed) + 1 (gap) + G (grow) + 1 (gap) + 15 (fixed) = 80

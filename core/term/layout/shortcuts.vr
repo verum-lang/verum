@@ -39,18 +39,7 @@ public fn sidebar_main(area: Rect, sidebar_width: Int) -> (Rect, Rect) {
 
 /// Center a fixed-size box within an area.
 public fn centered(area: Rect, width: Int, height: Int) -> Rect {
-    let mut v_constraints = List.new();
-    v_constraints.push(Constraint.Fill(1));
-    v_constraints.push(Constraint.Length(height));
-    v_constraints.push(Constraint.Fill(1));
-    let vert = TermLayout.vertical().constraints(v_constraints).split(area);
-
-    let mut h_constraints = List.new();
-    h_constraints.push(Constraint.Fill(1));
-    h_constraints.push(Constraint.Length(width));
-    h_constraints.push(Constraint.Fill(1));
-    let horiz = TermLayout.horizontal().constraints(h_constraints).split(vert[1]);
-    horiz[1]
+    area.centered(width, height)
 }
 
 /// Create N equal-width columns.

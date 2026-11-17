@@ -188,17 +188,17 @@ implement StatefulWidget for Dialog {
     type State = DialogState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut DialogState) {
-        if area.width < 6 || area.height < 5 { return; }
+        if area.width() < 6 || area.height() < 5 { return; }
 
         // Calculate dialog width from percentage
-        let dialog_width = ((area.width * self.width_percent) / 100).max(6).min(area.width);
+        let dialog_width = ((area.width() * self.width_percent) / 100).max(6).min(area.width());
 
         // Dialog height = body lines + 4 (border top + border bottom + button row + padding)
-        let dialog_height = (self.body.len() + 4).min(area.height);
+        let dialog_height = (self.body.len() + 4).min(area.height());
 
         // Center the dialog in the area
-        let dialog_x = area.x + (area.width - dialog_width) / 2;
-        let dialog_y = area.y + (area.height - dialog_height) / 2;
+        let dialog_x = area.x + (area.width() - dialog_width) / 2;
+        let dialog_y = area.y + (area.height() - dialog_height) / 2;
         let dialog_rect = Rect.new(dialog_x, dialog_y, dialog_width, dialog_height);
 
         // Clear the dialog area with background style
@@ -225,10 +225,10 @@ implement StatefulWidget for Dialog {
         let inner = border_block.inner(dialog_rect);
         border_block.render(dialog_rect, buf);
 
-        if inner.width < 1 || inner.height < 1 { return; }
+        if inner.width() < 1 || inner.height() < 1 { return; }
 
         // Render body text (leave 1 row at bottom for buttons)
-        let body_max_lines = (inner.height - 1).max(0);
+        let body_max_lines = (inner.height() - 1).max(0);
         let mut y = inner.y;
         let mut line_idx = 0;
 
@@ -238,7 +238,7 @@ implement StatefulWidget for Dialog {
 
             // Center each line horizontally
             let line_width = line.width();
-            let line_x = inner.x + (inner.width - line_width).max(0) / 2;
+            let line_x = inner.x + (inner.width() - line_width).max(0) / 2;
             let mut x = line_x;
 
             for span in &line.spans {
@@ -256,7 +256,7 @@ implement StatefulWidget for Dialog {
 
             // Calculate total button row width
             let total_button_width = compute_button_row_width(&self.buttons, self.button_spacing);
-            let mut bx = inner.x + (inner.width - total_button_width).max(0) / 2;
+            let mut bx = inner.x + (inner.width() - total_button_width).max(0) / 2;
 
             for i in 0..self.buttons.len() {
                 let button = &self.buttons[i];

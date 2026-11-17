@@ -218,19 +218,19 @@ implement<T> StatefulWidget for Dropdown<T> {
     type State = DropdownState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut DropdownState) {
-        if area.width < 2 || area.height < 1 { return; }
+        if area.width() < 2 || area.height() < 1 { return; }
 
         // ---- closed header --------------------------------------------------
         let header_area = match self.closed_block {
             Maybe.Some(ref b) => {
                 let inner = b.inner(area);
                 b.clone().render(
-                    Rect.new(area.x, area.y, area.width, if state.open { area.height.min(3) } else { area.height }),
+                    Rect.new(area.x, area.y, area.width(), if state.open { area.height().min(3) } else { area.height() }),
                     buf,
                 );
                 inner
             }
-            Maybe.None => Rect.new(area.x, area.y, area.width, 1),
+            Maybe.None => Rect.new(area.x, area.y, area.width(), 1),
         };
 
         buf.set_style(header_area, self.style);
@@ -240,7 +240,7 @@ implement<T> StatefulWidget for Dropdown<T> {
             Maybe.None => self.placeholder.clone(),
         };
         let label_style = if state.selected.is_some() { self.style } else { self.placeholder_style };
-        let label_max = header_area.width - 2;
+        let label_max = header_area.width() - 2;
         let shown = truncate_to_width(&label_text, label_max);
         buf.set_string(header_area.x, header_area.y, &shown, label_style);
         buf.set_string(header_area.right() - 1, header_area.y, chevron, self.chevron_style);
@@ -252,8 +252,8 @@ implement<T> StatefulWidget for Dropdown<T> {
         let visible = filtered.len().min(self.max_visible);
         let search_rows = if self.searchable { 1 } else { 0 };
         let popup_height = visible + 2 + search_rows;       // borders + search row
-        let popup_y = header_area.y + header_area.height;
-        let popup_area = Rect.new(area.x, popup_y, area.width, popup_height);
+        let popup_y = header_area.y + header_area.height();
+        let popup_area = Rect.new(area.x, popup_y, area.width(), popup_height);
 
         let inner = match self.open_block {
             Maybe.Some(ref b) => {
@@ -269,14 +269,14 @@ implement<T> StatefulWidget for Dropdown<T> {
         if self.searchable {
             let prefix = "? ";
             buf.set_string(inner.x, list_y, prefix, self.search_style);
-            let max_search = (inner.width - prefix.len()).max(0);
+            let max_search = (inner.width() - prefix.len()).max(0);
             let shown_search = truncate_to_width(&state.search, max_search);
             buf.set_string(inner.x + prefix.len(), list_y, &shown_search, self.search_style);
             list_y = list_y + 1;
         }
 
         // List rows.
-        let list_h = (inner.y + inner.height - list_y).max(0);
+        let list_h = (inner.y + inner.height() - list_y).max(0);
         let rows_to_show = list_h.min(visible);
         for row in 0..rows_to_show {
             let vi = state.scroll + row;
@@ -285,10 +285,10 @@ implement<T> StatefulWidget for Dropdown<T> {
             let is_hl = vi == state.highlight;
             let row_style = if is_hl { self.highlight_style } else { self.style };
             let text = (self.label_fn)(&self.items[item_idx]);
-            let shown_row = truncate_to_width(&text, inner.width);
+            let shown_row = truncate_to_width(&text, inner.width());
             // Fill row background
             if is_hl {
-                for x in inner.x..(inner.x + inner.width) {
+                for x in inner.x..(inner.x + inner.width()) {
                     buf.get_mut(x, list_y + row).style = self.highlight_style;
                 }
             }

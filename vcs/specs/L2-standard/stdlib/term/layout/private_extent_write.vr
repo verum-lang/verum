@@ -1,0 +1,10 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L2
+// @expected-error: E202
+// @description: Mutation outside the geometry module cannot bypass extent normalization.
+mount core.term.layout.rect.Rect;
+fn main() {
+    let mut bounds = Rect.new(0, 0, 1, 1);
+    bounds.width = -1;
+}

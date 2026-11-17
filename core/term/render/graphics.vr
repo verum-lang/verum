@@ -76,7 +76,7 @@ implement GraphicsRenderer for KittyGraphics {
         };
         let encoded = base64_encode_graphics(data);
         // Transmit: a=T (transmit and display), columns/rows from area
-        let header = f"\x1b_Ga=T,{fmt_char},c={area.width},r={area.height};";
+        let header = f"\x1b_Ga=T,{fmt_char},c={area.width()},r={area.height()};";
         self.writer.write_all(header.as_bytes())?;
         self.writer.write_all(encoded.as_bytes())?;
         self.writer.write_all("\x1b\\".as_bytes())
@@ -112,8 +112,8 @@ implement GraphicsRenderer for SixelGraphics {
         // Only supports Rgb24 input; other formats passed through as Kitty fallback
         match format {
             Rgb24 => {
-                let pixel_width = area.width;
-                let pixel_height = area.height * 6;  // 6 pixels per sixel row
+                let pixel_width = area.width();
+                let pixel_height = area.height() * 6;  // 6 pixels per sixel row
                 let stride = pixel_width * 3;
 
                 // Begin DCS sixel sequence
@@ -240,7 +240,7 @@ implement GraphicsRenderer for ItermGraphics {
     fn render_image(&mut self, data: &[Byte], format: ImageFormat, area: Rect) -> IoResult<()> {
         // OSC 1337 ; File=inline=1;width=Xpx;height=Ypx:<base64> ST
         let encoded = base64_encode_graphics(data);
-        let header = f"\x1b]1337;File=inline=1;width={area.width};height={area.height}:";
+        let header = f"\x1b]1337;File=inline=1;width={area.width()};height={area.height()}:";
         self.writer.write_all(header.as_bytes())?;
         self.writer.write_all(encoded.as_bytes())?;
         self.writer.write_all("\x07".as_bytes())  // BEL as ST
@@ -278,17 +278,17 @@ implement GraphicsRenderer for BrailleGraphics {
         //  bit 2 bit 5
         //  bit 6 bit 7
         // Only supports Rgb24 input; threshold luminance to determine dot on/off
-        let pixel_width = area.width * 2;
-        let pixel_height = area.height * 4;
+        let pixel_width = area.width() * 2;
+        let pixel_height = area.height() * 4;
 
         // Move cursor to area start
         self.writer.move_to(area.x, area.y)?;
 
-        for cy in 0..area.height {
+        for cy in 0..area.height() {
             if cy > 0 {
                 self.writer.move_to(area.x, area.y + cy)?;
             }
-            for cx in 0..area.width {
+            for cx in 0..area.width() {
                 let mut dots: Int = 0;
                 let px = cx * 2;
                 let py = cy * 4;
@@ -356,7 +356,7 @@ implement GraphicsRenderer for BrailleGraphics {
         // Overwrite with spaces
         for y in area.y..area.bottom() {
             self.writer.move_to(area.x, y)?;
-            for _ in 0..area.width {
+            for _ in 0..area.width() {
                 self.writer.write_all(" ".as_bytes())?;
             }
         }

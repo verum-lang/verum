@@ -35,7 +35,7 @@ implement Buffer {
 
     /// Create a buffer for a specific Rect area.
     public fn from_rect(area: Rect) -> Buffer {
-        Buffer.new(area.width, area.height)
+        Buffer.new(area.width(), area.height())
     }
 
     /// Access a cell by coordinates.
@@ -116,8 +116,8 @@ implement Buffer {
 
     /// Merge another buffer on top of this one at the given area.
     public fn merge(&mut self, other: &Buffer, area: Rect) {
-        for y in 0..other.height.min(area.height) {
-            for x in 0..other.width.min(area.width) {
+        for y in 0..other.height.min(area.height()) {
+            for x in 0..other.width.min(area.width()) {
                 let src = other.get(x, y);
                 if !src.skip && src.grapheme != " " {
                     let dx = area.x + x;

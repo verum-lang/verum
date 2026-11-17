@@ -21,7 +21,7 @@ fn test_row_sum_equals_container_width() {
     items.push(FlexItem.new().fixed(5));
     let rects = layout.compute(Rect.new(0, 0, 40, 1), &items);
     let mut total = 0;
-    for r in &rects { total = total + r.width; }
+    for r in &rects { total = total + r.width(); }
     assert_eq(total, 30);                  // 10+15+5
 }
 
@@ -33,7 +33,7 @@ fn test_grow_distributes_free_space() {
     items.push(FlexItem.new().fixed(5));
     let rects = layout.compute(Rect.new(0, 0, 40, 1), &items);
     // middle gets 40 - 10 - 5 = 25
-    assert_eq(rects[1].width, 25);
+    assert_eq(rects[1].width(), 25);
 }
 
 fn test_shrink_reduces_overflow() {
@@ -43,7 +43,7 @@ fn test_shrink_reduces_overflow() {
     items.push(FlexItem.new().fixed(30));
     let rects = layout.compute(Rect.new(0, 0, 40, 1), &items);
     // Total wanted = 60; container = 40; items shrink
-    let sum = rects[0].width + rects[1].width;
+    let sum = rects[0].width() + rects[1].width();
     assert(sum <= 40);
 }
 
@@ -53,7 +53,7 @@ fn test_min_size_clamps_shrink() {
     items.push(FlexItem.new().fixed(30).min(25));
     items.push(FlexItem.new().fixed(30));
     let rects = layout.compute(Rect.new(0, 0, 40, 1), &items);
-    assert(rects[0].width >= 25);
+    assert(rects[0].width() >= 25);
 }
 
 fn test_max_size_caps_grow() {
@@ -62,8 +62,8 @@ fn test_max_size_caps_grow() {
     items.push(FlexItem.new().grow(1.0).max(10));
     items.push(FlexItem.new().grow(1.0));
     let rects = layout.compute(Rect.new(0, 0, 40, 1), &items);
-    assert_eq(rects[0].width, 10);
-    assert_eq(rects[1].width, 30);
+    assert_eq(rects[0].width(), 10);
+    assert_eq(rects[1].width(), 30);
 }
 
 fn test_row_gap_between_items() {
@@ -74,8 +74,8 @@ fn test_row_gap_between_items() {
     items.push(FlexItem.new().fixed(5));
     let rects = layout.compute(Rect.new(0, 0, 20, 1), &items);
     // Items should be non-overlapping with 2-cell gaps.
-    assert_eq(rects[0].x + rects[0].width + 2, rects[1].x);
-    assert_eq(rects[1].x + rects[1].width + 2, rects[2].x);
+    assert_eq(rects[0].x + rects[0].width() + 2, rects[1].x);
+    assert_eq(rects[1].x + rects[1].width() + 2, rects[2].x);
 }
 
 fn test_column_direction() {
@@ -85,9 +85,9 @@ fn test_column_direction() {
     items.push(FlexItem.new().grow(1.0));
     items.push(FlexItem.new().fixed(1));
     let rects = layout.compute(Rect.new(0, 0, 10, 20), &items);
-    assert_eq(rects[0].height, 3);
-    assert_eq(rects[2].height, 1);
-    assert_eq(rects[1].height, 16);
+    assert_eq(rects[0].height(), 3);
+    assert_eq(rects[2].height(), 1);
+    assert_eq(rects[1].height(), 16);
 }
 
 fn test_wrap_moves_overflow_to_next_line() {

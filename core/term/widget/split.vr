@@ -95,8 +95,8 @@ implement TermSplit {
     /// Compute the first-pane, divider, and second-pane rectangles.
     public fn layout(&self, area: Rect, state: &SplitState) -> (Rect, Rect, Rect) {
         let total = match self.orientation {
-            Horizontal => area.width,
-            Vertical   => area.height,
+            Horizontal => area.width(),
+            Vertical   => area.height(),
         };
         let div_w = if self.show_divider { self.divider_width } else { 0 };
         let available = (total - div_w).max(0);
@@ -112,14 +112,14 @@ implement TermSplit {
 
         match self.orientation {
             Horizontal => (
-                Rect.new(area.x, area.y, first_size, area.height),
-                Rect.new(area.x + first_size, area.y, div_w, area.height),
-                Rect.new(area.x + first_size + div_w, area.y, second_size, area.height),
+                Rect.new(area.x, area.y, first_size, area.height()),
+                Rect.new(area.x + first_size, area.y, div_w, area.height()),
+                Rect.new(area.x + first_size + div_w, area.y, second_size, area.height()),
             ),
             Vertical => (
-                Rect.new(area.x, area.y, area.width, first_size),
-                Rect.new(area.x, area.y + first_size, area.width, div_w),
-                Rect.new(area.x, area.y + first_size + div_w, area.width, second_size),
+                Rect.new(area.x, area.y, area.width(), first_size),
+                Rect.new(area.x, area.y + first_size, area.width(), div_w),
+                Rect.new(area.x, area.y + first_size + div_w, area.width(), second_size),
             ),
         }
     }
@@ -208,8 +208,8 @@ implement SplitState {
         let ctrl = ke.modifiers.contains(Modifiers.CTRL);
         if !ctrl { return false; }
         let total = match split.orientation {
-            Horizontal => area.width,
-            Vertical   => area.height,
+            Horizontal => area.width(),
+            Vertical   => area.height(),
         };
         let available = (total - if split.show_divider { split.divider_width } else { 0 }).max(0);
         match split.orientation {
@@ -254,8 +254,8 @@ implement SplitState {
             Drag(MouseButton.Left) => {
                 if !self.dragging { return false; }
                 let total = match split.orientation {
-                    Horizontal => area.width,
-                    Vertical   => area.height,
+                    Horizontal => area.width(),
+                    Vertical   => area.height(),
                 };
                 let div_w = if split.show_divider { split.divider_width } else { 0 };
                 let available = (total - div_w).max(0);

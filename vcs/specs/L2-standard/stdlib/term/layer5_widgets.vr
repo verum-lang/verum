@@ -27,8 +27,8 @@ fn test_block_builder() {
     let area = Rect.new(0, 0, 40, 10);
     let inner = block.inner(area);
     // Inner should be smaller due to borders + padding
-    assert(inner.width < area.width);
-    assert(inner.height < area.height);
+    assert(inner.width() < area.width());
+    assert(inner.height() < area.height());
 }
 
 fn test_paragraph() {

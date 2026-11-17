@@ -108,7 +108,7 @@ implement Widget for Tabs {
             Maybe.None => area,
         };
 
-        if tab_area.width < 1 || tab_area.height < 1 { return; }
+        if tab_area.width() < 1 || tab_area.height() < 1 { return; }
 
         buf.set_style(tab_area, self.style);
 

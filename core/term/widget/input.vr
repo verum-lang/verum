@@ -476,7 +476,7 @@ implement StatefulWidget for TextInput {
             Maybe.None => area,
         };
 
-        if text_area.width < 1 || text_area.height < 1 { return; }
+        if text_area.width() < 1 || text_area.height() < 1 { return; }
 
         buf.set_style(text_area, self.style);
 
@@ -501,9 +501,9 @@ implement StatefulWidget for TextInput {
 
         if cursor_col < scroll_col {
             state.scroll_offset = state.cursor;
-        } else if cursor_col >= scroll_col + text_area.width {
+        } else if cursor_col >= scroll_col + text_area.width() {
             // Walk scroll forward until cursor fits.
-            let target = cursor_col - text_area.width + 1;
+            let target = cursor_col - text_area.width() + 1;
             state.scroll_offset = byte_at_column(&display, target);
         }
 
@@ -521,7 +521,7 @@ implement StatefulWidget for TextInput {
             let mut byte = start;
             let mut col = 0;
             let (sel_s, sel_e) = state.selection_range();
-            while byte < display.len() && col < text_area.width {
+            while byte < display.len() && col < text_area.width() {
                 let end = grapheme_next(&display, byte);
                 let g = display.slice(byte, end);
                 let w = grapheme_width(&g);
@@ -529,7 +529,7 @@ implement StatefulWidget for TextInput {
                 let st = if in_sel { self.selection_style } else { self.style };
                 let cell = buf.get_mut(text_area.x + col, text_area.y);
                 cell.set_char(&g, st);
-                if w == 2 && col + 1 < text_area.width {
+                if w == 2 && col + 1 < text_area.width() {
                     let next = buf.get_mut(text_area.x + col + 1, text_area.y);
                     next.set_char(" ", st);
                     next.skip = true;

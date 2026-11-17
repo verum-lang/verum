@@ -189,7 +189,7 @@ implement Widget for BarChart {
             Maybe.None => area,
         };
 
-        if chart_area.width < 1 || chart_area.height < 1 { return; }
+        if chart_area.width() < 1 || chart_area.height() < 1 { return; }
 
         // Collect all bars and compute max
         let mut all_bars = List.new();
@@ -247,7 +247,7 @@ fn format_value(chart: &BarChart, bar: &Bar) -> Text {
 /// Render bars vertically (growing upward).
 /// Layout: value row (1) + bar body (height - 2) + label row (1)
 fn render_vertical(chart: &BarChart, area: Rect, buf: &mut Buffer, data_max: Float) {
-    let bar_area_height = (area.height - 2).max(1);
+    let bar_area_height = (area.height() - 2).max(1);
     let label_y = area.bottom() - 1;
     let value_y = area.y;
     let bar_top = area.y + 1;
@@ -360,7 +360,7 @@ fn render_horizontal(chart: &BarChart, area: Rect, buf: &mut Buffer, data_max: F
 
     let label_col_width = max_label_width + 1;
     let value_col_width = 6;
-    let bar_max_width = (area.width - label_col_width - value_col_width).max(1);
+    let bar_max_width = (area.width() - label_col_width - value_col_width).max(1);
 
     let bar_stride = chart.bar_width + chart.bar_gap;
     let mut y = area.y;

@@ -25,7 +25,7 @@ fn main() {
     let mut covered = 0;
     for i in 0..rects.len() {
         let r = rects[i];
-        covered = covered + r.width;
+        covered = covered + r.width();
     }
     // 10 + gap(1) + 53(grow) + gap(1) + 15 = 80 → covered = 78
     assert_eq(covered, 78);

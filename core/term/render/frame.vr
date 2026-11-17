@@ -43,10 +43,10 @@ implement Frame {
     }
 
     /// Return buffer width.
-    public fn width(&self) -> Int { self.area.width }
+    public fn width(&self) -> Int { self.area.width() }
 
     /// Return buffer height.
-    public fn height(&self) -> Int { self.area.height }
+    public fn height(&self) -> Int { self.area.height() }
 }
 
 /// Viewport mode for the terminal.

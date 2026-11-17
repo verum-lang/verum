@@ -169,11 +169,11 @@ implement Widget for Notification {
         if !self.visible { return; }
 
         // Position at top-right corner of the area
-        let w = self.width.min(area.width);
+        let w = self.width.min(area.width());
         let h = 3 + if self.title is Some(_) { 1 } else { 0 };
-        let x = area.x + area.width - w;
+        let x = area.x + area.width() - w;
         let y = area.y;
-        let toast_area = Rect.new(x, y, w, h.min(area.height));
+        let toast_area = Rect.new(x, y, w, h.min(area.height()));
 
         if toast_area.is_empty() { return; }
 

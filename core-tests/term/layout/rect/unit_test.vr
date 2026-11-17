@@ -24,31 +24,33 @@ fn test_rect_new_canonical() {
     let r: Rect = Rect.new(0, 0, 80, 24);
     assert_eq(r.x, 0);
     assert_eq(r.y, 0);
-    assert_eq(r.width, 80);
-    assert_eq(r.height, 24);
+    assert_eq(r.width(), 80);
+    assert_eq(r.height(), 24);
 }
 
 @test
 fn test_rect_new_clamps_negative_width_to_zero() {
     let r: Rect = Rect.new(0, 0, -5, 10);
-    assert_eq(r.width, 0);
-    assert_eq(r.height, 10);
+    assert_eq(r.width(), 0);
+    assert_eq(r.height(), 10);
 }
 
 @test
 fn test_rect_new_clamps_negative_height_to_zero() {
     let r: Rect = Rect.new(0, 0, 20, -3);
-    assert_eq(r.width, 20);
-    assert_eq(r.height, 0);
+    assert_eq(r.width(), 20);
+    assert_eq(r.height(), 0);
 }
 
 @test
-fn test_rect_direct_record_construction() {
-    let r: Rect = Rect { x: 5, y: 10, width: 30, height: 15 };
+fn test_rect_translation_keeps_extents() {
+    let mut r = Rect.new(-1, -2, 30, 15);
+    r.x = 5;
+    r.y = 10;
     assert_eq(r.x, 5);
     assert_eq(r.y, 10);
-    assert_eq(r.width, 30);
-    assert_eq(r.height, 15);
+    assert_eq(r.width(), 30);
+    assert_eq(r.height(), 15);
 }
 
 // =============================================================================
@@ -212,8 +214,8 @@ fn test_position_distance_self_zero() {
 fn test_centered_gives_the_requested_size() {
     let area = Rect.new(0, 0, 100, 40);
     let c = centered(area, 20, 10);
-    assert_eq(c.width, 20);
-    assert_eq(c.height, 10);
+    assert_eq(c.width(), 20);
+    assert_eq(c.height(), 10);
 }
 
 @test
@@ -237,3 +239,13 @@ fn test_centered_respects_a_non_zero_origin() {
 }
 
 fn main() {}
+
+@test
+fn test_centered_clamps_each_extent_before_positioning() {
+    let area = Rect.new(-7, 5, 9, 7);
+    let c = centered(area, -30, 90);
+    assert_eq(c.x, -3);
+    assert_eq(c.y, 5);
+    assert_eq(c.width(), 0);
+    assert_eq(c.height(), 7);
+}

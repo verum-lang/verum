@@ -116,7 +116,7 @@ implement StatefulWidget for SelectableList {
             Maybe.None => area,
         };
 
-        if list_area.width < 1 || list_area.height < 1 { return; }
+        if list_area.width() < 1 || list_area.height() < 1 { return; }
 
         buf.set_style(list_area, self.style);
 
@@ -129,8 +129,8 @@ implement StatefulWidget for SelectableList {
                 if selected < state.offset {
                     state.offset = selected;
                 }
-                if selected >= state.offset + list_area.height {
-                    state.offset = selected - list_area.height + 1;
+                if selected >= state.offset + list_area.height() {
+                    state.offset = selected - list_area.height() + 1;
                 }
             }
             Maybe.None => {}
@@ -138,7 +138,7 @@ implement StatefulWidget for SelectableList {
 
         // Render visible items
         let symbol_width = self.highlight_symbol.len();
-        for i in 0..list_area.height {
+        for i in 0..list_area.height() {
             let item_idx = state.offset + i;
             if item_idx >= total { break; }
 

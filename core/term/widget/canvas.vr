@@ -486,7 +486,7 @@ implement Widget for Canvas {
             Maybe.None => area,
         };
 
-        if canvas_area.width < 1 || canvas_area.height < 1 { return; }
+        if canvas_area.width() < 1 || canvas_area.height() < 1 { return; }
 
         buf.set_style(canvas_area, self.style);
 
@@ -497,8 +497,8 @@ implement Widget for Canvas {
             Block     => (1, 1),
         };
 
-        let pixel_w = canvas_area.width * px_per_col;
-        let pixel_h = canvas_area.height * px_per_row;
+        let pixel_w = canvas_area.width() * px_per_col;
+        let pixel_h = canvas_area.height() * px_per_row;
 
         // Create pixel canvas and painter
         let mut pixel_canvas = PixelCanvas.new(pixel_w, pixel_h);
@@ -538,8 +538,8 @@ implement Widget for Canvas {
 /// Render pixel canvas as braille characters.
 /// Each terminal cell = 2 columns x 4 rows of pixels.
 fn render_braille(canvas: &PixelCanvas, area: Rect, buf: &mut Buffer) {
-    for cy in 0..area.height {
-        for cx in 0..area.width {
+    for cy in 0..area.height() {
+        for cx in 0..area.width() {
             let mut pattern = 0;
             let mut cell_color = Color.Reset;
 
@@ -574,8 +574,8 @@ fn render_braille(canvas: &PixelCanvas, area: Rect, buf: &mut Buffer) {
 /// Uses ▀ (upper half) when only top is set, ▄ (lower half) when only bottom,
 /// █ (full block) when both, space when neither.
 fn render_half_block(canvas: &PixelCanvas, area: Rect, buf: &mut Buffer) {
-    for cy in 0..area.height {
-        for cx in 0..area.width {
+    for cy in 0..area.height() {
+        for cx in 0..area.width() {
             let top_on = canvas.get(cx, cy * 2);
             let bot_on = canvas.get(cx, cy * 2 + 1);
             let top_color = canvas.get_color(cx, cy * 2);
@@ -602,8 +602,8 @@ fn render_half_block(canvas: &PixelCanvas, area: Rect, buf: &mut Buffer) {
 /// Render pixel canvas as full block characters.
 /// Each terminal cell = 1x1 pixel.
 fn render_block(canvas: &PixelCanvas, area: Rect, buf: &mut Buffer) {
-    for cy in 0..area.height {
-        for cx in 0..area.width {
+    for cy in 0..area.height() {
+        for cx in 0..area.width() {
             if canvas.get(cx, cy) {
                 let color = canvas.get_color(cx, cy);
                 let s = Style.new().fg(color);

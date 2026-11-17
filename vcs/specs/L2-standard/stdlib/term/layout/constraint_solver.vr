@@ -13,9 +13,9 @@ fn test_length_exact_sum() {
     cs.push(Constraint.Length(20));
     let parts = Layout.new().direction(Direction.Horizontal).constraints(cs).split(area);
     assert_eq(parts.len(), 2);
-    assert_eq(parts[0].width, 10);
-    assert_eq(parts[1].width, 20);
-    assert_eq(parts[0].x + parts[0].width, parts[1].x);
+    assert_eq(parts[0].width(), 10);
+    assert_eq(parts[1].width(), 20);
+    assert_eq(parts[0].x + parts[0].width(), parts[1].x);
 }
 
 fn test_percentage_distribution() {
@@ -25,8 +25,8 @@ fn test_percentage_distribution() {
     cs.push(Constraint.Percentage(70));
     let parts = Layout.new().direction(Direction.Horizontal).constraints(cs).split(area);
     assert_eq(parts.len(), 2);
-    assert_eq(parts[0].width, 30);
-    assert_eq(parts[1].width, 70);
+    assert_eq(parts[0].width(), 30);
+    assert_eq(parts[1].width(), 70);
 }
 
 fn test_ratio_sum_equals_area() {
@@ -36,9 +36,9 @@ fn test_ratio_sum_equals_area() {
     cs.push(Constraint.Ratio(3, 4));
     let parts = Layout.new().direction(Direction.Horizontal).constraints(cs).split(area);
     assert_eq(parts.len(), 2);
-    assert_eq(parts[0].width + parts[1].width, 60);
-    assert_eq(parts[0].width, 15);
-    assert_eq(parts[1].width, 45);
+    assert_eq(parts[0].width() + parts[1].width(), 60);
+    assert_eq(parts[0].width(), 15);
+    assert_eq(parts[1].width(), 45);
 }
 
 fn test_fill_absorbs_remainder() {
@@ -49,9 +49,9 @@ fn test_fill_absorbs_remainder() {
     cs.push(Constraint.Length(5));
     let parts = Layout.new().direction(Direction.Horizontal).constraints(cs).split(area);
     assert_eq(parts.len(), 3);
-    assert_eq(parts[0].width, 10);
-    assert_eq(parts[2].width, 5);
-    assert_eq(parts[1].width, 35);
+    assert_eq(parts[0].width(), 10);
+    assert_eq(parts[2].width(), 5);
+    assert_eq(parts[1].width(), 35);
 }
 
 fn test_min_floor_respected() {
@@ -60,9 +60,9 @@ fn test_min_floor_respected() {
     cs.push(Constraint.Min(5));
     cs.push(Constraint.Min(5));
     let parts = Layout.new().direction(Direction.Horizontal).constraints(cs).split(area);
-    assert(parts[0].width >= 5);
-    assert(parts[1].width >= 5);
-    assert_eq(parts[0].width + parts[1].width, 10);
+    assert(parts[0].width() >= 5);
+    assert(parts[1].width() >= 5);
+    assert_eq(parts[0].width() + parts[1].width(), 10);
 }
 
 fn test_vertical_direction() {
@@ -72,12 +72,12 @@ fn test_vertical_direction() {
     cs.push(Constraint.Fill(1));
     cs.push(Constraint.Length(1));
     let parts = Layout.new().direction(Direction.Vertical).constraints(cs).split(area);
-    assert_eq(parts[0].height, 5);
-    assert_eq(parts[2].height, 1);
-    assert_eq(parts[1].height, 14);
+    assert_eq(parts[0].height(), 5);
+    assert_eq(parts[2].height(), 1);
+    assert_eq(parts[1].height(), 14);
     // x/width match container in vertical split
     assert_eq(parts[0].x, 0);
-    assert_eq(parts[0].width, 10);
+    assert_eq(parts[0].width(), 10);
 }
 
 fn test_rect_helpers() {
