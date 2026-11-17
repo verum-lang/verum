@@ -51,7 +51,9 @@ use crate::value::Value;
 
 mod projections;
 mod callables;
+mod owned_packets;
 pub(crate) use callables::CallableOwner;
+pub(crate) use owned_packets::OwnedPayload;
 pub(crate) use projections::ProjectionEncoding;
 
 /// Size of object header in bytes.
@@ -1096,6 +1098,8 @@ pub struct Heap {
     objects: Set<NonNull<ObjectHeader>>,
     /// Issued by the closure producer only; object tags cannot create evidence.
     callables: verum_common::Map<usize, callables::CallableReceipt>,
+    /// Opaque runtime owners keep the exact declaration issued by formation.
+    owned_packets: verum_common::Map<usize, owned_packets::PacketReceipt>,
     /// Active projection tickets. Their global uniqueness excludes address
     /// reuse across owner removal, rehash and interpreter replacement.
     projections: projections::ProjectionTable,
@@ -1159,6 +1163,7 @@ impl Heap {
             generation: 1,
             objects: Set::with_capacity(1024),
             callables: Default::default(),
+            owned_packets: Default::default(),
             projections: Default::default(),
             allocated: 0,
             threshold,
@@ -1448,6 +1453,7 @@ impl Heap {
         self.stats.total_frees += 1;
 
         self.callables.remove(&address);
+        self.owned_packets.remove(&address);
         self.revoke_projections(address);
     }
 
@@ -1573,6 +1579,7 @@ impl Heap {
             }
         }
         self.callables.clear();
+        self.owned_packets.clear();
         self.projections = Default::default();
         self.allocated = 0;
         self.generation = 1;

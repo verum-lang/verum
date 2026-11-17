@@ -1,10 +1,68 @@
 //! Exception handling instruction handlers for VBC interpreter.
 
 use super::super::super::error::{InterpreterError, InterpreterResult};
-use super::super::super::state::InterpreterState;
+use super::super::super::state::{InterpreterState, PendingException};
 use super::super::DispatchResult;
 use super::super::format_value_for_print;
 use super::bytecode_io::*;
+use crate::{TypeRef, Value, interpreter::heap::OwnedPayload};
+
+/// Form an opaque owner only after the ordinary declared destruction plan
+/// accepts the actual payload. A raw Throw value cannot issue this evidence.
+pub(super) fn own_payload(state: &mut InterpreterState, payload: OwnedPayload)
+    -> InterpreterResult<Value>
+{
+    let plan = payload_plan(state, &payload.declaration)?;
+    super::cbgr::validate_typed_drop(state, payload.value, &plan)?;
+    let packet = state.heap.alloc_owned_packet(payload)?;
+    state.record_allocation();
+    Ok(packet)
+}
+
+fn payload_plan(state: &InterpreterState, declared: &TypeRef)
+    -> InterpreterResult<crate::drop_plan::DropPlan>
+{
+    crate::drop_plan::build(&state.module, declared).map_err(|message| InterpreterError::InvalidOperand {
+        message: message.into_string(),
+    })
+}
+
+/// Preflight the whole declared plan before consuming the owner. Afterwards
+/// the ticket is revoked before the first destructor can reenter a handler.
+pub(super) fn discard_payload(state: &mut InterpreterState, packet: Value)
+    -> InterpreterResult<()>
+{
+    let (value, declared) = state.heap.borrow_owned_packet(packet)?;
+    if *declared == TypeRef::Concrete(crate::TypeId::TEXT) {
+        // A private panic message has one fixed-size cleanup operation. Once
+        // issued it can always be retired, even if a later operation exhausted
+        // the interpreter's configurable recursive-work budget.
+        let text = if value.is_small_string() {
+            None
+        } else {
+            let text = super::text_storage::TextStorage::checked(state, value)?;
+            text.validate_release(state)?;
+            Some(text)
+        };
+        state.heap.take_owned_packet(packet)?;
+        if let Some(text) = text {
+            text.destroy(state)?;
+        }
+        return Ok(());
+    }
+    let plan = payload_plan(state, declared)?;
+    super::cbgr::validate_typed_drop(state, value, &plan)?;
+    let payload = state.heap.take_owned_packet(packet)?;
+    super::cbgr::execute_typed_drop(state, payload.value, &plan)
+}
+
+pub(in super::super) fn discard_unread_panic(state: &mut InterpreterState) -> InterpreterResult<()> {
+    if let Some(PendingException::RuntimePanic(owner)) = &state.current_exception {
+        discard_payload(state, owner.ticket)?;
+        state.current_exception = None;
+    }
+    Ok(())
+}
 
 // ============================================================================
 // Exception Handling Operations
@@ -22,7 +80,8 @@ pub(in super::super) fn handle_throw(
     let error_value = state.get_reg(error_reg);
 
     // Store the exception value
-    state.current_exception = Some(error_value);
+    discard_unread_panic(state)?;
+    state.current_exception = Some(PendingException::Thrown(error_value));
 
     let debug = std::env::var("VBC_EXC_TRACE").is_ok();
     if debug {
@@ -141,7 +200,12 @@ pub(in super::super) fn handle_get_exception(
     let dst = read_reg(state)?;
 
     // Get the current exception value (or unit if none)
-    let exception = state.current_exception.take().unwrap_or_default();
+    let exception = match &state.current_exception {
+        Some(PendingException::Thrown(value)) => *value,
+        Some(PendingException::RuntimePanic(owner)) => state.heap.publish_panic_record(owner.ticket)?,
+        None => Value::unit(),
+    };
+    state.current_exception = None;
     if std::env::var("VBC_EXC_TRACE").is_ok() {
         eprintln!(
             "[GET_EXC] pc={} dst={:?} value=0x{:x}",
@@ -154,3 +218,7 @@ pub(in super::super) fn handle_get_exception(
 
     Ok(DispatchResult::Continue)
 }
+
+#[cfg(test)]
+#[path = "../../../../tests/interpreter/owned_exception_payloads.rs"]
+mod owned_payload_tests;

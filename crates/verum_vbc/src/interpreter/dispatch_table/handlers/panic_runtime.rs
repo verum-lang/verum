@@ -88,23 +88,26 @@ pub(in super::super) fn panic_class_message(err: &InterpreterError) -> Option<St
     }
 }
 
-/// T1536: the exception carrier is private. Catch lowering copies its
-/// message into the public error record from the declaration's TypeRef.
+/// The v64 exception carrier owns one Text. GetException can hand the
+/// same allocation to bytecode with its original one-field layout.
 pub(in super::super) fn panic_packet(
     state: &mut InterpreterState,
     message: &str,
 ) -> InterpreterResult<Value> {
     let message = alloc_string_value(state, message)?;
-    let object = state.heap.alloc(
-        crate::types::TypeId(verum_common::layout::SYNTHETIC_RECORD_TYPE_ID),
-        std::mem::size_of::<Value>(),
-    )?;
-    state.record_allocation();
-    // SAFETY: one Value payload slot was allocated after the heap header.
-    unsafe {
-        *((object.as_ptr() as *mut u8).add(crate::interpreter::heap::OBJECT_HEADER_SIZE) as *mut Value) = message;
+    let payload = crate::interpreter::heap::OwnedPayload {
+        value: message,
+        declaration: crate::TypeRef::Concrete(crate::TypeId::TEXT),
+    };
+    match super::exceptions::own_payload(state, payload) {
+        Ok(ticket) => Ok(ticket),
+        Err(error) => {
+            if !message.is_small_string() {
+                super::text_storage::TextStorage::checked(state, message)?.destroy(state)?;
+            }
+            Err(error)
+        }
     }
-    Ok(Value::from_ptr(object.as_ptr() as *mut u8))
 }
 
 /// Try to intercept a `catch_unwind(f)` call.

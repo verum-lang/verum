@@ -584,6 +584,11 @@ pub(crate) fn do_return(
     state: &mut InterpreterState,
     mut value: Value,
 ) -> InterpreterResult<DispatchResult> {
+    if let Some(super::state::PendingException::RuntimePanic(owner)) = &state.current_exception
+        && owner.handler_depth >= state.call_stack.depth()
+    {
+        handlers::exceptions::discard_unread_panic(state)?;
+    }
     // If returning from a generator function, mark it as Completed
     if let Some(gen_id) = state.current_generator.take() {
         state.generators.complete(gen_id, Some(value));
@@ -821,6 +826,9 @@ fn run_sync_frame(
         }
         state.context_stack.end_scope(depth + 1);
     }
+    // This host call replaces the inner exception slot even on an early
+    // dispatch exit. Retire any remaining private packet before restoring it.
+    let cleanup = handlers::exceptions::discard_unread_panic(state);
     state.exception_handlers = handlers;
     state.current_exception = exception;
     state.pending_call_witness = pending_witness;
@@ -829,6 +837,7 @@ fn run_sync_frame(
         // directly and must preserve the caller's actual r0 on either path.
         state.registers.set(caller_base, Reg(0), saved_r0);
     }
+    cleanup?;
     result
 }
 
@@ -1223,6 +1232,23 @@ pub fn dispatch_loop_table_with_entry_depth(
     state: &mut InterpreterState,
     entry_depth: usize,
 ) -> InterpreterResult<Value> {
+    let result = dispatch_until_return(state, entry_depth);
+    // A fault can leave a handler's frame without executing a Return.
+    // Release its unread packet before the host or synchronous caller restores
+    // its own exception. A suspended frame still owns its pending message.
+    if result.is_err()
+        && let Some(super::state::PendingException::RuntimePanic(owner)) = &state.current_exception
+        && owner.handler_depth > entry_depth
+    {
+        handlers::exceptions::discard_unread_panic(state)?;
+    }
+    result
+}
+
+fn dispatch_until_return(
+    state: &mut InterpreterState,
+    entry_depth: usize,
+) -> InterpreterResult<Value> {
     // Capture wall-clock start when `timeout_ms` is configured.
     // Sampled every 256 instructions to bound the cost of
     // `Instant::now()` (~50ns) — matches the existing
@@ -1422,9 +1448,12 @@ pub fn dispatch_loop_table_with_entry_depth(
             && state.exception_handlers.peek().is_some_and(|h| h.stack_depth > entry_depth)
             && let Some(message) = handlers::panic_runtime::panic_class_message(error)
         {
+            handlers::exceptions::discard_unread_panic(state)?;
             let packet = handlers::panic_runtime::panic_packet(state, &message)?;
             let handler = state.exception_handlers.pop().expect("handler checked above");
-            state.current_exception = Some(packet);
+            state.current_exception = Some(super::state::PendingException::RuntimePanic(
+                super::state::PendingPanic { ticket: packet, handler_depth: handler.stack_depth },
+            ));
             handlers::exceptions::unwind_to_handler(state, handler)?;
             continue;
         }
@@ -2253,7 +2282,7 @@ mod script_sync_boundary_tests {
             state.exception_handlers.push(ExceptionHandler {
                 handler_pc: 999, stack_depth: 1, reg_base: 0, func_id: FunctionId(0),
             });
-            state.current_exception = Some(Value::from_i64(9));
+            state.current_exception = Some(super::super::state::PendingException::Thrown(Value::from_i64(9)));
             state.pending_call_witness = Some(vec![TypeRef::Concrete(TypeId::TEXT)].into_boxed_slice());
             let result = if closure {
                 let mut data = vec![0; 8];
@@ -2274,7 +2303,7 @@ mod script_sync_boundary_tests {
             assert_eq!(state.context_stack.get(55).unwrap().as_i64(), 5);
             assert_eq!(state.exception_handlers.len(), 1);
             assert_eq!(state.exception_handlers.peek().unwrap().handler_pc, 999);
-            assert_eq!(state.current_exception.unwrap().as_i64(), 9);
+            assert!(matches!(state.current_exception, Some(super::super::state::PendingException::Thrown(value)) if value.as_i64() == 9));
             assert_eq!(state.call_stack.current_generic_witnesses().unwrap(), [TypeRef::Concrete(TypeId::INT)]);
             assert_eq!(state.pending_call_witness.as_deref().unwrap(), [TypeRef::Concrete(TypeId::TEXT)]);
             assert_eq!(call_function_sync(&mut state, FunctionId(2), &[]).unwrap().as_i64(), 42);

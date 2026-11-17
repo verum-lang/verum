@@ -661,8 +661,8 @@ pub struct InterpreterState {
     /// when the try block was entered.
     pub exception_handlers: ExceptionHandlerStack,
 
-    /// Current exception value (set by Throw, read by GetException).
-    pub current_exception: Option<Value>,
+    /// Pending handoff to the active exception handler.
+    pub current_exception: Option<PendingException>,
 
     /// Argument stack for variadic function calls (Push/Pop).
     pub arg_stack: Vec<Value>,
@@ -956,6 +956,23 @@ impl Drop for FfiArrayBuffer {
 // ============================================================================
 // Exception Handling
 // ============================================================================
+
+/// The v64 Throw operand carries a raw value. The runtime panic producer
+/// owns its private message carrier until GetException transfers the record.
+#[derive(Debug)]
+pub enum PendingException {
+    /// A bytecode Throw supplied this value without a destruction declaration.
+    Thrown(Value),
+    /// A runtime panic is waiting for its selected handler.
+    RuntimePanic(PendingPanic),
+}
+
+/// Only the runtime panic producer can publish this handle.
+#[derive(Debug)]
+pub struct PendingPanic {
+    pub(super) ticket: Value,
+    pub(super) handler_depth: usize,
+}
 
 /// An exception handler entry for try-catch blocks.
 #[derive(Debug, Clone)]
