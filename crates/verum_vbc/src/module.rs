@@ -1206,6 +1206,28 @@ impl VbcModule {
         (!file.is_empty()).then_some((file, entry.line, entry.column))
     }
 
+    /// A suspended caller has consumed the call and holds its continuation PC.
+    /// Decode only on a trace request. Variable-length operands make subtracting
+    /// a byte or choosing the nearest mapped instruction ambiguous.
+    pub fn source_before_resume(&self, id: FunctionId, resume: u32) -> Option<(&str, u32, u16)> {
+        self.source_map.as_ref()?;
+        let function = self.get_function(id)?;
+        if function.id != id || resume == 0 || resume > function.bytecode_length {
+            return None;
+        }
+        let start = function.bytecode_offset as usize;
+        let prefix = self.bytecode.get(start..start.checked_add(resume as usize)?)?;
+        let mut next = 0;
+        while next < prefix.len() {
+            let instruction = next;
+            crate::bytecode::decode_instruction(prefix, &mut next).ok()?;
+            if next == prefix.len() {
+                return self.instruction_source(id, instruction as u32);
+            }
+        }
+        None
+    }
+
     /// Gets a mutable function descriptor by ID.
     pub fn get_function_mut(&mut self, id: FunctionId) -> Option<&mut FunctionDescriptor> {
         self.receiver_method_families.take();

@@ -335,7 +335,11 @@ impl DebugAdapter {
                 .unwrap_or("<unknown>")
                 .to_string();
 
-            let source_loc = self.session.lookup_source_location(frame.function, frame.pc);
+            let source_loc = if idx == 0 {
+                module.instruction_source(frame.function, frame.pc)
+            } else {
+                module.source_before_resume(frame.function, frame.pc)
+            }.map(|location| self.session.client_source_location(location));
 
             let (source, line, column) = match source_loc {
                 Some((file, l, c)) => (

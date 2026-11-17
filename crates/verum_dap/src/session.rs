@@ -241,12 +241,16 @@ impl DebugSession {
 
     /// Map a frame's function-relative PC into the client's coordinate system.
     pub fn lookup_source_location(&self, function: FunctionId, pc: u32) -> Option<(String, i64, i64)> {
-        let (path, line, column) = self.module.as_ref()?.instruction_source(function, pc)?;
-        Some((
+        self.module.as_ref()?.instruction_source(function, pc)
+            .map(|location| self.client_source_location(location))
+    }
+
+    pub(super) fn client_source_location(&self, (path, line, column): (&str, u32, u16)) -> (String, i64, i64) {
+        (
             path.to_owned(),
             i64::from(line) - i64::from(!self.lines_start_at1),
             i64::from(column) - i64::from(!self.columns_start_at1),
-        ))
+        )
     }
 }
 

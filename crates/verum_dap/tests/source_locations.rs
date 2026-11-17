@@ -103,3 +103,75 @@ fn unmapped_pcs_and_conflicting_or_invalid_entries_have_no_source() {
     assert!(module.instruction_source(second, 0).is_none());
     assert!(module.instruction_source(second, 2).is_none());
 }
+
+#[test]
+fn suspended_callers_report_the_call_even_when_the_continuation_has_its_own_line() {
+    use verum_vbc::bytecode::encode_instruction;
+    use verum_vbc::instruction::{Instruction, Reg, RegRange};
+    use verum_vbc::interpreter::InterpreterState;
+
+    let mut module = VbcModule::new("stack".into());
+    let path = module.intern_string("app.vr");
+    let mut caller = FunctionDescriptor::new(module.intern_string("caller"));
+    let mut callee = FunctionDescriptor::new(module.intern_string("callee"));
+    caller.id = FunctionId(0);
+    callee.id = FunctionId(1);
+    encode_instruction(&Instruction::Nop, &mut module.bytecode);
+    let call = module.bytecode.len() as u32;
+    encode_instruction(
+        &Instruction::Call {
+            dst: Reg(0),
+            func_id: 1,
+            args: RegRange::new(Reg(0), 0),
+        },
+        &mut module.bytecode,
+    );
+    let resume = module.bytecode.len() as u32;
+    encode_instruction(&Instruction::RetV, &mut module.bytecode);
+    caller.bytecode_length = module.bytecode.len() as u32;
+    callee.bytecode_offset = caller.bytecode_length;
+    callee.bytecode_length = encode_instruction(&Instruction::RetV, &mut module.bytecode) as u32;
+    let entries =
+        [(call, 3), (resume, 4), (callee.bytecode_offset, 9)].map(|(bytecode_offset, line)| {
+            SourceMapEntry {
+                bytecode_offset,
+                file_idx: 0,
+                line,
+                column: 1,
+            }
+        });
+    module.functions = vec![caller, callee];
+    module.source_map = Some(SourceMap {
+        files: vec![path],
+        entries: entries.to_vec(),
+    });
+    assert!(
+        module
+            .source_before_resume(FunctionId(0), call + 1)
+            .is_none()
+    );
+    let module = Arc::new(module);
+    let mut state = InterpreterState::new(module.clone());
+    state
+        .call_stack
+        .push_frame(FunctionId(0), 1, 0, Reg(0))
+        .unwrap();
+    state.set_pc(resume);
+    state
+        .call_stack
+        .push_frame(FunctionId(1), 1, resume, Reg(0))
+        .unwrap();
+
+    let mut adapter = DebugAdapter::new();
+    adapter.session.module = Some(module);
+    adapter.interpreter = Some(state);
+    let (response, _) = adapter.handle_request(&Request {
+        seq: 1,
+        command: "stackTrace".into(),
+        arguments: Some(json!({ "threadId": 1 })),
+    });
+    assert!(response.success);
+    let frames = &response.body.unwrap()["stackFrames"];
+    assert_eq!(frames[0]["line"], 9);
+    assert_eq!(frames[1]["line"], 3);
+}

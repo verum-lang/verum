@@ -71,7 +71,7 @@ pub(in super::super) fn try_intercept_backtrace(
             .map(|s| s.to_string())
             .unwrap_or_else(|| format!("<fn:{}>", func_id.0));
 
-        let (file, line, col) = state.module.instruction_source(*func_id, *pc)
+        let (file, line, col) = state.module.source_before_resume(*func_id, *pc)
             .unwrap_or(("<unknown>", 0, 0));
         infos.push(FrameInfo {
             func: func_name_str,
