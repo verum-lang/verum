@@ -131,6 +131,7 @@ pub(super) fn prepare_wrapper<'ctx>(
     builder
         .build_store(size_slot, i32_type.const_int(bytes, false))
         .or_llvm_err()?;
+    super::super::object_storage::stamp_os(context, builder, output, size)?;
     builder
         .build_call(
             runtime.get_or_declare_memcpy(module),
