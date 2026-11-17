@@ -26640,12 +26640,13 @@ impl VbcCodegen {
             // (already-remapped) codegen type table.
             let mut new_desc = archive_desc.clone();
             new_desc.id = codegen_fid;
-            // The forward importer already relocated declaration identity using
-            // this archive's exact function and string maps.
+            // Keep the body's lexical owner and callable identity in the same
+            // destination pools as its validated forward declaration.
             let Some(declared) = self.declared_callable_descriptors.get(&codegen_fid) else {
                 self.record_source_declaration_error(CodegenError::internal("archive body has no imported declaration"));
                 continue;
             };
+            new_desc.origin_module = declared.origin_module;
             new_desc.declaration_identity = declared.declaration_identity.clone();
             // Re-intern the function name into the codegen string
             // table so the finalize-time `string_id_map` can resolve
